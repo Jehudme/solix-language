@@ -104,6 +104,24 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         }
     }
 
+    // Pre-load and deserialize any provided binary containers (*.slxb)
+    let mut loaded_binary_programs = Vec::with_capacity(binary_paths.len());
+    for binary_path in &binary_paths {
+        let bytes = fs::read(binary_path).with_context(|| {
+            format!(
+                "Failed to read binary container '{}'",
+                binary_path.display()
+            )
+        })?;
+        let program = BinaryProgram::from_bytes(&bytes).with_context(|| {
+            format!(
+                "Failed to deserialize binary container from '{}'",
+                binary_path.display()
+            )
+        })?;
+        loaded_binary_programs.push(program);
+    }
+
     // If source files are provided, compile them on-the-fly in memory
     if !source_paths.is_empty() {
         let first_stem = source_paths
@@ -124,23 +142,11 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 compilation_options.with_source(source_path.display().to_string(), source_code);
         }
 
-        // Auto-extract and mount dependency API headers from any `-l, --lib` binaries
-        for lib_path in &args.libs {
-            let lib_bytes = fs::read(lib_path).with_context(|| {
-                format!("Failed to read dependency binary '{}'", lib_path.display())
-            })?;
-            let lib_bin = BinaryProgram::from_bytes(&lib_bytes).with_context(|| {
-                format!(
-                    "Failed to decode binary container from '{}'",
-                    lib_path.display()
-                )
-            })?;
-            let manifest_json = extract_api_manifest(&lib_bin).with_context(|| {
-                format!(
-                    "Failed to extract export manifest from '{}'",
-                    lib_path.display()
-                )
-            })?;
+        // Auto-extract and mount dependency API headers from any positional library binaries (*.slxb)
+        for binary_program in &loaded_binary_programs {
+            let manifest_json = extract_api_manifest(binary_program).with_context(
+                || "Failed to extract export manifest from dependency binary container",
+            )?;
             let (api_filename, api_source) =
                 manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
 
@@ -169,35 +175,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         runtime_options = runtime_options.with_binary(artifacts.program);
     }
 
-    // Load any explicit library binary containers (*.slxb) into the VM
-    for lib_path in &args.libs {
-        let bytes = fs::read(lib_path).with_context(|| {
-            format!("Failed to read dependency library '{}'", lib_path.display())
-        })?;
-        let program = BinaryProgram::from_bytes(&bytes).with_context(|| {
-            format!(
-                "Failed to deserialize dependency binary from '{}'",
-                lib_path.display()
-            )
-        })?;
-        runtime_options = runtime_options.with_binary(program);
-    }
-
-    // Load precompiled binary containers
-    for binary_path in &binary_paths {
-        let bytes = fs::read(binary_path).with_context(|| {
-            format!(
-                "Failed to read binary container '{}'",
-                binary_path.display()
-            )
-        })?;
-        let program = BinaryProgram::from_bytes(&bytes).with_context(|| {
-            format!(
-                "Failed to deserialize binary container from '{}'",
-                binary_path.display()
-            )
-        })?;
-        runtime_options = runtime_options.with_binary(program);
+    // Mount all precompiled binary containers (*.slxb) into the VM runtime
+    for binary_program in loaded_binary_programs {
+        runtime_options = runtime_options.with_binary(binary_program);
     }
 
     // Initialize RuntimeContext and VirtualMachine

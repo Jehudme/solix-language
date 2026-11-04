@@ -55,12 +55,15 @@ solix run main.slx
 # Compile multi-source project on-the-fly and execute
 solix run helper.slx main.slx
 
-# Compile source with dependency library
-solix run app.slx --lib library.slxb
+# Run multiple sources and dependency libraries directly as positional arguments
+solix run source1.slx source2.slx lib1.slxb lib2.slxb
 
 # Safe mode execution of source
 solix run main.slx --safe --verbose
 ```
+
+> [!NOTE]
+> **Positional Arguments Invariant:** `solix run` accepts any arbitrary mixture of `.slx` source files and `.slxb` binary containers directly as positional arguments. Flags `--lib` / `-l` are reserved for native platform shared libraries (`.so`, `.dll`, `.dylib`) rather than Solix bytecode containers.
 
 ### 2.2 Compilation Pipeline & Error Handling
 1. If `.slx` files are supplied, `execute_run` initializes a `CompilationContext` with the specified source files and builtins enabled (unless `--no-builtins` is specified).
@@ -348,7 +351,7 @@ In accordance with `GL-0008`, Milestone 016 is executed across four disciplined 
 │                   Milestone 016 Delivery Phases                        │
 ├────────────────────────────────────────────────────────────────────────┤
 │ Phase 1: CLI Direct Source Execution (solix run <files.slx>)           │
-│          • In-memory compilation, miette diagnostics, --lib & tests    │
+│          • In-memory compilation, positional sources & libs, tests     │
 ├────────────────────────────────────────────────────────────────────────┤
 │ Phase 2: Core Telemetry Subsystems in Runtime & Compiler               │
 │          • HeapTelemetry, VmTelemetry, ProcessTelemetry, --metrics-json│
@@ -362,9 +365,9 @@ In accordance with `GL-0008`, Milestone 016 is executed across four disciplined 
 ```
 
 ### Phase 1: CLI Direct Source Execution (`solix run <files.slx>`)
-* **Task 1.1 (`P0`):** Enhance `RunArgs` in [`crates/solix-client/src/cli.rs`](file:///home/jehud/Projects/solix-language/crates/solix-client/src/cli.rs) to accept `.slx` source files as well as `.slxb` binaries, adding `--lib` (`-l`) and `--no-builtins` options.
+* **Task 1.1 (`P0`):** Enhance `RunArgs` in [`crates/solix-client/src/cli.rs`](file:///home/jehud/Projects/solix-language/crates/solix-client/src/cli.rs) to accept an arbitrary positional mixture of `.slx` source files and `.slxb` binaries (with `--no-builtins` option, deliberately omitting `--lib` to reserve it for native shared libraries).
 * **Task 1.2 (`P0`):** Implement automatic on-the-fly compilation in [`crates/solix-client/src/commands/run.rs`](file:///home/jehud/Projects/solix-language/crates/solix-client/src/commands/run.rs) using `CompilationPipeline::standard()`, rendering compiler errors with `render_diagnostics`, and mounting the resulting `BinaryProgram` directly into `RuntimeOptions`.
-* **Task 1.3 (`P1`):** Add exhaustive CLI test coverage in [`crates/solix-client/tests/cli_tests.rs`](file:///home/jehud/Projects/solix-language/crates/solix-client/tests/cli_tests.rs) verifying single-source execution, multi-source execution, compilation error diagnostics, `--no-builtins`, and mixed source/binary executions.
+* **Task 1.3 (`P1`):** Add exhaustive CLI test coverage in [`crates/solix-client/tests/cli_tests.rs`](file:///home/jehud/Projects/solix-language/crates/solix-client/tests/cli_tests.rs) verifying single-source execution, multi-source execution, compilation error diagnostics, `--no-builtins`, and mixed positional source/binary executions.
 
 ### Phase 2: Core Telemetry Subsystems in Runtime & Compiler
 * **Task 2.1 (`P0`):** Implement `HeapTelemetry` in [`crates/solix-runtime/src/memory/heap.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/heap.rs) tracking live objects, peak allocated bytes, and allocation/deallocation counters.

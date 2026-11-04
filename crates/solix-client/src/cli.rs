@@ -79,17 +79,13 @@ pub struct CompileArgs {
 /// Arguments for `solix run`.
 #[derive(Debug, Args, Clone)]
 pub struct RunArgs {
-    /// Executable binary containers (*.slxb) or source files (*.slx) to compile and run
+    /// Executable binary containers (*.slxb) and/or source files (*.slx) to execute
     #[arg(required = true)]
     pub binaries: Vec<PathBuf>,
 
     /// Override default entry point symbol (e.g. "Main::main")
     #[arg(short, long)]
     pub entry: Option<String>,
-
-    /// Paths to library binary containers (*.slxb) to link dynamically
-    #[arg(short = 'l', long = "lib", alias = "dep")]
-    pub libs: Vec<PathBuf>,
 
     /// Do not automatically include built-in standard library definitions (blt.io)
     #[arg(long)]

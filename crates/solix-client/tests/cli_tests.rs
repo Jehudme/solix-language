@@ -923,10 +923,9 @@ class ConsumerApp {
         "solix",
         "run",
         app_source_path.to_str().unwrap(),
-        "--lib",
         lib_binary_path.to_str().unwrap(),
     ])
-    .expect("Failed to parse run CLI arguments with dependency lib");
+    .expect("Failed to parse run CLI arguments with positional dependency lib");
 
     let execution_result = run(run_cli);
     assert!(execution_result.is_ok());
@@ -988,4 +987,109 @@ class AppWithBuiltin {
 
     let execution_result = run(run_cli);
     assert!(execution_result.is_err());
+}
+
+#[test]
+fn test_cli_run_direct_source_execution_multi_source_and_multi_lib_positional() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+
+    // 1. First library: lib1.slxb
+    let lib1_source = workspace
+        .write_file(
+            "lib1.slx",
+            r#"
+public class LibOne {
+    public static int32 value_one() {
+        return 100;
+    }
+}
+"#,
+        )
+        .unwrap();
+    let lib1_bin = workspace.file_path("lib1.slxb");
+    let compile_lib1 = Cli::try_parse_from([
+        "solix",
+        "compile",
+        lib1_source.to_str().unwrap(),
+        "--name",
+        "lib1",
+        "-o",
+        lib1_bin.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(run(compile_lib1).is_ok());
+
+    // 2. Second library: lib2.slxb
+    let lib2_source = workspace
+        .write_file(
+            "lib2.slx",
+            r#"
+public class LibTwo {
+    public static int32 value_two() {
+        return 200;
+    }
+}
+"#,
+        )
+        .unwrap();
+    let lib2_bin = workspace.file_path("lib2.slxb");
+    let compile_lib2 = Cli::try_parse_from([
+        "solix",
+        "compile",
+        lib2_source.to_str().unwrap(),
+        "--name",
+        "lib2",
+        "-o",
+        lib2_bin.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(run(compile_lib2).is_ok());
+
+    // 3. First source file: source1.slx
+    let source1_file = workspace
+        .write_file(
+            "source1.slx",
+            r#"
+package my.app;
+
+public class AppHelper {
+    public static int32 helper_value() {
+        return 50;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    // 4. Second source file: source2.slx (contains entry point main)
+    let source2_file = workspace
+        .write_file(
+            "source2.slx",
+            r#"
+import my.app.AppHelper;
+
+class MainConsumer {
+    public static int32 main() {
+        int32 sum = LibOne::value_one() + LibTwo::value_two() + AppHelper::helper_value();
+        return sum == 350 ? 0 : 1;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    // Execute: solix run source1.slx source2.slx lib1.slxb lib2.slxb
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        source1_file.to_str().unwrap(),
+        source2_file.to_str().unwrap(),
+        lib1_bin.to_str().unwrap(),
+        lib2_bin.to_str().unwrap(),
+    ])
+    .expect("Failed to parse run CLI arguments for positional multi-source and multi-lib");
+
+    let execution_result = run(run_cli);
+    assert!(execution_result.is_ok());
+    assert_eq!(execution_result.unwrap(), 0);
 }
