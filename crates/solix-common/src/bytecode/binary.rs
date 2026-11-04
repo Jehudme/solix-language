@@ -1,0 +1,687 @@
+//! Binary program container (`SLXB`), constant pool, and bit-level serialization.
+
+#![forbid(unsafe_code)]
+
+use crate::bytecode::class::CompiledClass;
+use crate::bytecode::function::{CompiledFunction, ExceptionHandlerEntry, SourceMapEntry};
+use crate::bytecode::instruction::Instruction;
+use crate::bytecode::manifest::ExportManifest;
+use crate::diagnostics::EmissionError;
+use crate::span::Span;
+use serde::{Deserialize, Serialize};
+
+/// Magic header identifier for Solix compiled binary files.
+pub const MAGIC: &[u8; 4] = b"SLXB";
+
+/// Container format major version number.
+pub const VERSION_MAJOR: u16 = 1;
+
+/// Container format minor version number.
+pub const VERSION_MINOR: u16 = 0;
+
+/// Typed constant pool entry representing an immutable literal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ConstantPoolValue {
+    /// 64-bit signed integer constant.
+    Int64(i64),
+    /// 64-bit floating point constant (stored as raw bits for bit-exact reproducibility).
+    Float64(u64),
+    /// UTF-8 string literal constant.
+    String(String),
+}
+
+impl ConstantPoolValue {
+    /// Constructs a Float64 entry from an `f64`.
+    #[must_use]
+    pub fn from_f64(value: f64) -> Self {
+        Self::Float64(value.to_bits())
+    }
+
+    /// Converts this entry to an `f64` if it is a Float64 variant.
+    #[must_use]
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Float64(bits) => Some(f64::from_bits(*bits)),
+            _ => None,
+        }
+    }
+}
+
+/// Deduplicating constant pool managing numeric and string literals.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ConstantPool {
+    /// Array of pool values indexed by position.
+    pub values: Vec<ConstantPoolValue>,
+}
+
+impl ConstantPool {
+    /// Creates a new empty constant pool.
+    #[must_use]
+    pub fn new() -> Self {
+        Self { values: Vec::new() }
+    }
+
+    /// Adds or deduplicates a 64-bit signed integer, returning its index.
+    pub fn add_i64(&mut self, value: i64) -> Result<u16, EmissionError> {
+        let entry = ConstantPoolValue::Int64(value);
+        if let Some(pos) = self.values.iter().position(|v| *v == entry) {
+            return Ok(pos as u16);
+        }
+        self.push_value(entry)
+    }
+
+    /// Adds or deduplicates a 64-bit float, returning its index.
+    pub fn add_f64(&mut self, value: f64) -> Result<u16, EmissionError> {
+        let entry = ConstantPoolValue::from_f64(value);
+        if let Some(pos) = self.values.iter().position(|v| *v == entry) {
+            return Ok(pos as u16);
+        }
+        self.push_value(entry)
+    }
+
+    /// Adds or deduplicates a string literal, returning its index.
+    pub fn add_string(&mut self, value: impl Into<String>) -> Result<u16, EmissionError> {
+        let text = value.into();
+        let entry = ConstantPoolValue::String(text);
+        if let Some(pos) = self.values.iter().position(|v| *v == entry) {
+            return Ok(pos as u16);
+        }
+        self.push_value(entry)
+    }
+
+    fn push_value(&mut self, value: ConstantPoolValue) -> Result<u16, EmissionError> {
+        if self.values.len() >= u16::MAX as usize {
+            return Err(EmissionError::ConstantPoolOverflow {
+                count: self.values.len(),
+                max: u16::MAX as usize,
+            });
+        }
+        let index = self.values.len() as u16;
+        self.values.push(value);
+        Ok(index)
+    }
+
+    /// Retrieves the constant value at `index`.
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&ConstantPoolValue> {
+        self.values.get(index)
+    }
+
+    /// Number of constants in the pool.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Returns `true` if the constant pool contains no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
+/// Standalone executable or library binary container (`SLXB`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BinaryProgram {
+    /// Format magic header (`SLXB`).
+    pub magic: [u8; 4],
+    /// Major container version.
+    pub version_major: u16,
+    /// Minor container version.
+    pub version_minor: u16,
+    /// Binary flags (bitmask for debug info, optimizations, etc.).
+    pub flags: u32,
+    /// Function table index of the `main` entry point, if an executable.
+    pub entry_point_id: Option<u32>,
+    /// Fully qualified symbol of the entry point, if present.
+    pub entry_point_symbol: Option<String>,
+    /// Total static variable memory slots required by this unit.
+    pub static_space_size: u32,
+    /// Exported static symbols and their module-local slot indices.
+    pub static_symbols_map: Vec<(String, u32)>,
+    /// Deduplicated constant pool.
+    pub constant_pool: ConstantPool,
+    /// Object-oriented class layouts and virtual method tables.
+    pub classes: Vec<CompiledClass>,
+    /// Vector of compiled functions and instruction chunks.
+    pub functions: Vec<CompiledFunction>,
+    /// Package name for modular libraries.
+    pub package_name: String,
+    /// Semantic version string.
+    pub package_version: String,
+    /// Human-readable package description.
+    pub package_description: String,
+    /// Full export manifest for dynamic linking and API reflection.
+    pub export_manifest: ExportManifest,
+}
+
+impl Default for BinaryProgram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BinaryProgram {
+    /// Creates a new empty `BinaryProgram` with current version and magic header.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            magic: *MAGIC,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            flags: 0,
+            entry_point_id: None,
+            entry_point_symbol: None,
+            static_space_size: 0,
+            static_symbols_map: Vec::new(),
+            constant_pool: ConstantPool::new(),
+            classes: Vec::new(),
+            functions: Vec::new(),
+            package_name: String::new(),
+            package_version: "0.1.0".to_string(),
+            package_description: String::new(),
+            export_manifest: ExportManifest::default(),
+        }
+    }
+
+    /// Serializes the binary program into raw bytes in the `SLXB` format.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        // 1. Header
+        buffer.extend_from_slice(&self.magic);
+        buffer.extend_from_slice(&self.version_major.to_le_bytes());
+        buffer.extend_from_slice(&self.version_minor.to_le_bytes());
+        buffer.extend_from_slice(&self.flags.to_le_bytes());
+
+        // Entry point
+        match self.entry_point_id {
+            Some(id) => {
+                buffer.push(1);
+                buffer.extend_from_slice(&id.to_le_bytes());
+            }
+            None => buffer.push(0),
+        }
+        match &self.entry_point_symbol {
+            Some(sym) => {
+                buffer.push(1);
+                write_string(&mut buffer, sym);
+            }
+            None => buffer.push(0),
+        }
+
+        // Static reservation
+        buffer.extend_from_slice(&self.static_space_size.to_le_bytes());
+
+        // 2. Static Symbols Map
+        buffer.extend_from_slice(&(self.static_symbols_map.len() as u32).to_le_bytes());
+        for (symbol, slot) in &self.static_symbols_map {
+            write_string(&mut buffer, symbol);
+            buffer.extend_from_slice(&slot.to_le_bytes());
+        }
+
+        // 3. Constant Pool
+        buffer.extend_from_slice(&(self.constant_pool.values.len() as u32).to_le_bytes());
+        for val in &self.constant_pool.values {
+            match val {
+                ConstantPoolValue::Int64(i) => {
+                    buffer.push(1);
+                    buffer.extend_from_slice(&i.to_le_bytes());
+                }
+                ConstantPoolValue::Float64(bits) => {
+                    buffer.push(2);
+                    buffer.extend_from_slice(&bits.to_le_bytes());
+                }
+                ConstantPoolValue::String(s) => {
+                    buffer.push(3);
+                    write_string(&mut buffer, s);
+                }
+            }
+        }
+
+        // 4. Classes
+        buffer.extend_from_slice(&(self.classes.len() as u32).to_le_bytes());
+        for cls in &self.classes {
+            write_string(&mut buffer, &cls.symbol);
+            buffer.extend_from_slice(&cls.vtable_id.to_le_bytes());
+            match cls.base_vtable_id {
+                Some(base) => {
+                    buffer.push(1);
+                    buffer.extend_from_slice(&base.to_le_bytes());
+                }
+                None => buffer.push(0),
+            }
+            buffer.extend_from_slice(&(cls.instance_size as u64).to_le_bytes());
+
+            // Reference field offsets
+            buffer.extend_from_slice(&(cls.reference_field_offsets.len() as u32).to_le_bytes());
+            for &offset in &cls.reference_field_offsets {
+                buffer.extend_from_slice(&(offset as u64).to_le_bytes());
+            }
+
+            // Weak field offsets
+            buffer.extend_from_slice(&(cls.weak_field_offsets.len() as u32).to_le_bytes());
+            for &offset in &cls.weak_field_offsets {
+                buffer.extend_from_slice(&(offset as u64).to_le_bytes());
+            }
+
+            // VTable
+            buffer.extend_from_slice(&(cls.vtable.len() as u32).to_le_bytes());
+            for &func_id in &cls.vtable {
+                buffer.extend_from_slice(&func_id.to_le_bytes());
+            }
+
+            // ITable
+            buffer.extend_from_slice(&(cls.itable.len() as u32).to_le_bytes());
+            for (iface_id, methods) in &cls.itable {
+                buffer.extend_from_slice(&iface_id.to_le_bytes());
+                buffer.extend_from_slice(&(methods.len() as u32).to_le_bytes());
+                for &m in methods {
+                    buffer.extend_from_slice(&m.to_le_bytes());
+                }
+            }
+
+            // Destructor
+            match cls.destructor_id {
+                Some(d) => {
+                    buffer.push(1);
+                    buffer.extend_from_slice(&d.to_le_bytes());
+                }
+                None => buffer.push(0),
+            }
+        }
+
+        // 5. Functions
+        buffer.extend_from_slice(&(self.functions.len() as u32).to_le_bytes());
+        for func in &self.functions {
+            write_string(&mut buffer, &func.symbol);
+            buffer.extend_from_slice(&func.source_id.to_le_bytes());
+            buffer.extend_from_slice(&func.param_count.to_le_bytes());
+            buffer.extend_from_slice(&func.num_registers.to_le_bytes());
+            buffer.extend_from_slice(&func.static_base_offset.to_le_bytes());
+
+            // Instructions
+            buffer.extend_from_slice(&(func.instructions.len() as u32).to_le_bytes());
+            for inst in &func.instructions {
+                buffer.extend_from_slice(&inst.to_le_bytes());
+            }
+
+            // Reference registers
+            buffer.extend_from_slice(&(func.reference_registers.len() as u32).to_le_bytes());
+            for &reg in &func.reference_registers {
+                buffer.extend_from_slice(&reg.to_le_bytes());
+            }
+
+            // Exception handlers
+            buffer.extend_from_slice(&(func.exception_handlers.len() as u32).to_le_bytes());
+            for handler in &func.exception_handlers {
+                buffer.extend_from_slice(&handler.try_start_pc.to_le_bytes());
+                buffer.extend_from_slice(&handler.try_end_pc.to_le_bytes());
+                match &handler.catch_type_symbol {
+                    Some(s) => {
+                        buffer.push(1);
+                        write_string(&mut buffer, s);
+                    }
+                    None => buffer.push(0),
+                }
+                buffer.extend_from_slice(&handler.catch_reg.to_le_bytes());
+                buffer.extend_from_slice(&handler.handler_pc.to_le_bytes());
+                match handler.finally_pc {
+                    Some(f) => {
+                        buffer.push(1);
+                        buffer.extend_from_slice(&f.to_le_bytes());
+                    }
+                    None => buffer.push(0),
+                }
+            }
+
+            // Source map
+            buffer.extend_from_slice(&(func.source_map.len() as u32).to_le_bytes());
+            for entry in &func.source_map {
+                buffer.extend_from_slice(&entry.instruction_pc.to_le_bytes());
+                buffer.extend_from_slice(&entry.span.id.to_le_bytes());
+                buffer.extend_from_slice(&entry.span.start.to_le_bytes());
+                buffer.extend_from_slice(&entry.span.end.to_le_bytes());
+            }
+        }
+
+        // 6. Metadata and Export Manifest
+        write_string(&mut buffer, &self.package_name);
+        write_string(&mut buffer, &self.package_version);
+        write_string(&mut buffer, &self.package_description);
+
+        let manifest_bytes = serde_json::to_vec(&self.export_manifest).unwrap_or_default();
+        buffer.extend_from_slice(&(manifest_bytes.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(&manifest_bytes);
+
+        buffer
+    }
+
+    /// Deserializes a `BinaryProgram` from raw bytes.
+    ///
+    /// # Errors
+    /// Returns `EmissionError` if the byte slice is truncated, corrupted, or incompatible.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, EmissionError> {
+        let mut reader = ByteReader::new(bytes);
+
+        // 1. Header
+        let magic_bytes = reader.read_bytes(4, "Header")?;
+        let mut magic = [0u8; 4];
+        magic.copy_from_slice(magic_bytes);
+        if &magic != MAGIC {
+            return Err(EmissionError::InvalidMagic { found: magic });
+        }
+
+        let version_major = reader.read_u16("Header")?;
+        let version_minor = reader.read_u16("Header")?;
+        if version_major != VERSION_MAJOR {
+            return Err(EmissionError::UnsupportedVersion {
+                expected_major: VERSION_MAJOR,
+                expected_minor: VERSION_MINOR,
+                found_major: version_major,
+                found_minor: version_minor,
+            });
+        }
+
+        let flags = reader.read_u32("Header")?;
+
+        let has_entry_point_id = reader.read_u8("Header")?;
+        let entry_point_id = if has_entry_point_id == 1 {
+            Some(reader.read_u32("Header")?)
+        } else {
+            None
+        };
+
+        let has_entry_symbol = reader.read_u8("Header")?;
+        let entry_point_symbol = if has_entry_symbol == 1 {
+            Some(reader.read_string("Header")?)
+        } else {
+            None
+        };
+
+        let static_space_size = reader.read_u32("Header")?;
+
+        // 2. Static Symbols Map
+        let static_sym_count = reader.read_u32("StaticSymbols")? as usize;
+        let mut static_symbols_map = Vec::with_capacity(static_sym_count);
+        for _ in 0..static_sym_count {
+            let sym = reader.read_string("StaticSymbols")?;
+            let slot = reader.read_u32("StaticSymbols")?;
+            static_symbols_map.push((sym, slot));
+        }
+
+        // 3. Constant Pool
+        let pool_count = reader.read_u32("ConstantPool")? as usize;
+        let mut constant_pool = ConstantPool::new();
+        for _ in 0..pool_count {
+            let tag = reader.read_u8("ConstantPool")?;
+            let val = match tag {
+                1 => ConstantPoolValue::Int64(reader.read_i64("ConstantPool")?),
+                2 => ConstantPoolValue::Float64(reader.read_u64("ConstantPool")?),
+                3 => ConstantPoolValue::String(reader.read_string("ConstantPool")?),
+                unknown => {
+                    return Err(EmissionError::CorruptBinaryContainer {
+                        section: "ConstantPool".to_string(),
+                        details: format!("Unknown constant tag: {unknown}"),
+                    });
+                }
+            };
+            constant_pool.values.push(val);
+        }
+
+        // 4. Classes
+        let class_count = reader.read_u32("Classes")? as usize;
+        let mut classes = Vec::with_capacity(class_count);
+        for _ in 0..class_count {
+            let symbol = reader.read_string("Classes")?;
+            let vtable_id = reader.read_u32("Classes")?;
+            let has_base = reader.read_u8("Classes")?;
+            let base_vtable_id = if has_base == 1 {
+                Some(reader.read_u32("Classes")?)
+            } else {
+                None
+            };
+            let instance_size = reader.read_u64("Classes")? as usize;
+
+            let ref_count = reader.read_u32("Classes")? as usize;
+            let mut reference_field_offsets = Vec::with_capacity(ref_count);
+            for _ in 0..ref_count {
+                reference_field_offsets.push(reader.read_u64("Classes")? as usize);
+            }
+
+            let weak_count = reader.read_u32("Classes")? as usize;
+            let mut weak_field_offsets = Vec::with_capacity(weak_count);
+            for _ in 0..weak_count {
+                weak_field_offsets.push(reader.read_u64("Classes")? as usize);
+            }
+
+            let vtable_len = reader.read_u32("Classes")? as usize;
+            let mut vtable = Vec::with_capacity(vtable_len);
+            for _ in 0..vtable_len {
+                vtable.push(reader.read_u32("Classes")?);
+            }
+
+            let itable_len = reader.read_u32("Classes")? as usize;
+            let mut itable = Vec::with_capacity(itable_len);
+            for _ in 0..itable_len {
+                let iface_id = reader.read_u32("Classes")?;
+                let method_len = reader.read_u32("Classes")? as usize;
+                let mut methods = Vec::with_capacity(method_len);
+                for _ in 0..method_len {
+                    methods.push(reader.read_u32("Classes")?);
+                }
+                itable.push((iface_id, methods));
+            }
+
+            let has_destructor = reader.read_u8("Classes")?;
+            let destructor_id = if has_destructor == 1 {
+                Some(reader.read_u32("Classes")?)
+            } else {
+                None
+            };
+
+            let mut class = CompiledClass::new(symbol, vtable_id, base_vtable_id, instance_size);
+            class.reference_field_offsets = reference_field_offsets;
+            class.weak_field_offsets = weak_field_offsets;
+            class.vtable = vtable;
+            class.itable = itable;
+            class.destructor_id = destructor_id;
+            classes.push(class);
+        }
+
+        // 5. Functions
+        let func_count = reader.read_u32("Functions")? as usize;
+        let mut functions = Vec::with_capacity(func_count);
+        for _ in 0..func_count {
+            let symbol = reader.read_string("Functions")?;
+            let source_id = reader.read_u16("Functions")?;
+            let param_count = reader.read_u16("Functions")?;
+            let num_registers = reader.read_u16("Functions")?;
+            let static_base_offset = reader.read_u32("Functions")?;
+
+            let inst_count = reader.read_u32("Functions")? as usize;
+            let mut instructions = Vec::with_capacity(inst_count);
+            for _ in 0..inst_count {
+                let bytes = reader.read_bytes(8, "Functions")?;
+                let mut inst_bytes = [0u8; 8];
+                inst_bytes.copy_from_slice(bytes);
+                instructions.push(Instruction::from_le_bytes(inst_bytes));
+            }
+
+            let ref_reg_count = reader.read_u32("Functions")? as usize;
+            let mut reference_registers = Vec::with_capacity(ref_reg_count);
+            for _ in 0..ref_reg_count {
+                reference_registers.push(reader.read_u16("Functions")?);
+            }
+
+            let handler_count = reader.read_u32("Functions")? as usize;
+            let mut exception_handlers = Vec::with_capacity(handler_count);
+            for _ in 0..handler_count {
+                let try_start_pc = reader.read_u32("Functions")?;
+                let try_end_pc = reader.read_u32("Functions")?;
+                let has_type = reader.read_u8("Functions")?;
+                let catch_type_symbol = if has_type == 1 {
+                    Some(reader.read_string("Functions")?)
+                } else {
+                    None
+                };
+                let catch_reg = reader.read_u16("Functions")?;
+                let handler_pc = reader.read_u32("Functions")?;
+                let has_finally = reader.read_u8("Functions")?;
+                let finally_pc = if has_finally == 1 {
+                    Some(reader.read_u32("Functions")?)
+                } else {
+                    None
+                };
+
+                exception_handlers.push(ExceptionHandlerEntry {
+                    try_start_pc,
+                    try_end_pc,
+                    catch_type_symbol,
+                    catch_reg,
+                    handler_pc,
+                    finally_pc,
+                });
+            }
+
+            let span_count = reader.read_u32("Functions")? as usize;
+            let mut source_map = Vec::with_capacity(span_count);
+            for _ in 0..span_count {
+                let instruction_pc = reader.read_u32("Functions")?;
+                let id = reader.read_u16("Functions")?;
+                let start = reader.read_u32("Functions")?;
+                let end = reader.read_u32("Functions")?;
+                source_map.push(SourceMapEntry {
+                    instruction_pc,
+                    span: Span { id, start, end },
+                });
+            }
+
+            let mut func = CompiledFunction::new(symbol, source_id, param_count, num_registers);
+            func.static_base_offset = static_base_offset;
+            func.instructions = instructions;
+            func.reference_registers = reference_registers;
+            func.exception_handlers = exception_handlers;
+            func.source_map = source_map;
+            functions.push(func);
+        }
+
+        // 6. Metadata and Export Manifest
+        let (package_name, package_version, package_description, export_manifest) = if reader
+            .has_remaining()
+        {
+            let pkg_name = reader.read_string("Metadata")?;
+            let pkg_version = reader.read_string("Metadata")?;
+            let pkg_desc = reader.read_string("Metadata")?;
+            let manifest_len = reader.read_u32("Metadata")? as usize;
+            let manifest_slice = reader.read_bytes(manifest_len, "ExportManifest")?;
+            let manifest: ExportManifest = serde_json::from_slice(manifest_slice).map_err(|e| {
+                EmissionError::MalformedExportManifest {
+                    reason: e.to_string(),
+                }
+            })?;
+            (pkg_name, pkg_version, pkg_desc, manifest)
+        } else {
+            (
+                String::new(),
+                "0.1.0".to_string(),
+                String::new(),
+                ExportManifest::default(),
+            )
+        };
+
+        Ok(BinaryProgram {
+            magic,
+            version_major,
+            version_minor,
+            flags,
+            entry_point_id,
+            entry_point_symbol,
+            static_space_size,
+            static_symbols_map,
+            constant_pool,
+            classes,
+            functions,
+            package_name,
+            package_version,
+            package_description,
+            export_manifest,
+        })
+    }
+}
+
+fn write_string(buffer: &mut Vec<u8>, s: &str) {
+    let bytes = s.as_bytes();
+    buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    buffer.extend_from_slice(bytes);
+}
+
+struct ByteReader<'a> {
+    data: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> ByteReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, offset: 0 }
+    }
+
+    fn has_remaining(&self) -> bool {
+        self.offset < self.data.len()
+    }
+
+    fn read_bytes(&mut self, count: usize, section: &str) -> Result<&'a [u8], EmissionError> {
+        if self.offset + count > self.data.len() {
+            return Err(EmissionError::UnexpectedEof {
+                section: section.to_string(),
+                required: count,
+                available: self.data.len().saturating_sub(self.offset),
+            });
+        }
+        let slice = &self.data[self.offset..self.offset + count];
+        self.offset += count;
+        Ok(slice)
+    }
+
+    fn read_u8(&mut self, section: &str) -> Result<u8, EmissionError> {
+        let bytes = self.read_bytes(1, section)?;
+        Ok(bytes[0])
+    }
+
+    fn read_u16(&mut self, section: &str) -> Result<u16, EmissionError> {
+        let bytes = self.read_bytes(2, section)?;
+        let mut arr = [0u8; 2];
+        arr.copy_from_slice(bytes);
+        Ok(u16::from_le_bytes(arr))
+    }
+
+    fn read_u32(&mut self, section: &str) -> Result<u32, EmissionError> {
+        let bytes = self.read_bytes(4, section)?;
+        let mut arr = [0u8; 4];
+        arr.copy_from_slice(bytes);
+        Ok(u32::from_le_bytes(arr))
+    }
+
+    fn read_i64(&mut self, section: &str) -> Result<i64, EmissionError> {
+        let bytes = self.read_bytes(8, section)?;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(bytes);
+        Ok(i64::from_le_bytes(arr))
+    }
+
+    fn read_u64(&mut self, section: &str) -> Result<u64, EmissionError> {
+        let bytes = self.read_bytes(8, section)?;
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(bytes);
+        Ok(u64::from_le_bytes(arr))
+    }
+
+    fn read_string(&mut self, section: &str) -> Result<String, EmissionError> {
+        let len = self.read_u32(section)? as usize;
+        let bytes = self.read_bytes(len, section)?;
+        String::from_utf8(bytes.to_vec()).map_err(|err| EmissionError::CorruptBinaryContainer {
+            section: section.to_string(),
+            details: format!("Invalid UTF-8 string encoding: {err}"),
+        })
+    }
+}

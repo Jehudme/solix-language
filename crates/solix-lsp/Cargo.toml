@@ -1,0 +1,24 @@
+[package]
+name = "solix-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "solix_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "solix-lsp"
+path = "src/main.rs"
+
+[dependencies]
+solix-common.workspace = true
+solix-compilation.workspace = true
+tower-lsp.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

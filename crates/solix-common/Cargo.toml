@@ -1,0 +1,16 @@
+[package]
+name = "solix-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+miette.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+compact_str.workspace = true
+unicode-ident.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

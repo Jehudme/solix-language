@@ -1,0 +1,150 @@
+// ============================================================================
+// Solix Master Positive Bytecode Emission Fixture: Comprehensive Coverage
+// ============================================================================
+
+package solix.tests.master;
+
+// 1. Type Alias
+alias ValueMultiplier = int32;
+
+// 2. Generic Template Class
+public class Box<T> {
+    public T value;
+    public Box(T v) {
+        this.value = v;
+    }
+    public T get_val() {
+        return this.value;
+    }
+}
+
+public interface ICalculator {
+    int32 calculate(int32 x, int32 y);
+}
+
+public class MathService implements ICalculator {
+    public static int32 global_counter = 100;
+    public ValueMultiplier base_multiplier;
+
+    public MathService(ValueMultiplier multiplier) {
+        this.base_multiplier = multiplier;
+    }
+
+    ~MathService() {
+        this.base_multiplier = 0;
+    }
+
+    public int32 calculate(int32 x, int32 y) {
+        return (x + y) * this.base_multiplier;
+    }
+
+    public static int32 increment_counter() {
+        MathService::global_counter = MathService::global_counter + 1;
+        return MathService::global_counter;
+    }
+}
+
+public class CustomException {
+    public int32 code;
+    public CustomException(int32 code) {
+        this.code = code;
+    }
+}
+
+public class Runner {
+    public static int32 run_all_checks() {
+        // 1. Primitive variables and arithmetic
+        int32 a = 10;
+        int32 b = 20;
+        int32 sum = a + b;
+
+        // 2. Control flow: If-else
+        if (sum > 25) {
+            sum = sum + 5;
+        } else {
+            sum = sum - 5;
+        }
+
+        // 3. Loops: while, break, continue
+        int32 count = 0;
+        while (count < 10) {
+            count = count + 1;
+            if (count == 5) {
+                continue;
+            }
+            if (count == 8) {
+                break;
+            }
+        }
+
+        // 4. Do-while loop
+        int32 do_count = 0;
+        do {
+            do_count = do_count + 1;
+        } while (do_count < 3);
+
+        // 5. For loop
+        int32 for_acc = 0;
+        for (int32 i = 0; i < 5; i = i + 1) {
+            for_acc = for_acc + i;
+        }
+
+        // 6. Switch-case
+        int32 switch_res = 0;
+        switch (a) {
+            case 10:
+                switch_res = 100;
+                break;
+            case 20:
+                switch_res = 200;
+                break;
+            default:
+                switch_res = 999;
+                break;
+        }
+
+        // 7. Arrays and Tuples (with Indexing and Tuple Element Instanceof)
+        int32[] items = [1, 2, 3, 4];
+        items[0] = 42;
+        int32 item_len = items.length;
+
+        tuple<int32, string> pair = tuple(42, "hello");
+        int32 first = pair[0];
+
+        // 8. Object allocation, generics, sizeof, instanceof, and interface dispatch
+        MathService service = new MathService(2);
+        int32 calc_res = service.calculate(3, 4);
+
+        Box<int32> box_item = new Box<int32>(0);
+        int32 box_val = box_item.get_val();
+
+        int32 sz_int = sizeof(int32);
+        int32 type_checks = 0;
+        if (service instanceof ICalculator && service instanceof MathService && sz_int == 4 && pair[0] instanceof int32) {
+            type_checks = box_val;
+        }
+
+        // 9. Static memory access
+        int32 counter = MathService::increment_counter();
+
+        // 10. Lambdas and closures
+        int32 factor = 3;
+        int32(*)(int32) closure = (val) => val * factor;
+        int32 closure_res = closure(10);
+
+        // 11. Exception handling (try-catch-finally)
+        int32 error_code = 0;
+        try {
+            if (closure_res > 1000) {
+                throw new CustomException(404);
+            }
+            error_code = 1;
+        } catch (CustomException err) {
+            error_code = err.code;
+        } finally {
+            error_code = error_code + 10;
+        }
+
+        return sum + count + do_count + for_acc + switch_res + first + calc_res + counter + closure_res + error_code + item_len + type_checks;
+    }
+}

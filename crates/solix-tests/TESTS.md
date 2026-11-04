@@ -1,0 +1,6272 @@
+# Solix Test Specification
+
+This document is the definitive master test specification for the Solix language test suite (Phase 8). It defines the comprehensive matrix of **Positive Test Scenarios** (valid syntax, semantics, and runtime execution guarantees) and **Negative Test Scenarios** (expected compile-time errors and runtime exceptions) for every construct in the language.
+
+## Table of Contents
+
+- **Part I: Compilation Unit & Module Statements**
+  - [AliasStatement](#aliasstatement)
+  - [ImportStatement](#importstatement)
+  - [PackageStatement](#packagestatement)
+- **Part II: Declarations**
+  - [ClassDeclaration](#classdeclaration)
+  - [ConstructorDeclaration](#constructordeclaration)
+  - [DestructorDeclaration](#destructordeclaration)
+  - [EnumDeclaration](#enumdeclaration)
+  - [FieldDeclaration](#fielddeclaration)
+  - [InterfaceDeclaration](#interfacedeclaration)
+  - [MethodDeclaration](#methoddeclaration)
+  - [OperatorDeclaration](#operatordeclaration)
+- **Part III: Control Flow & Execution Statements**
+  - [BlockStatement](#blockstatement)
+  - [BreakStatement](#breakstatement)
+  - [ContinueStatement](#continuestatement)
+  - [DoWhileStatement](#dowhilestatement)
+  - [ExpressionStatement](#expressionstatement)
+  - [ForStatement](#forstatement)
+  - [IfStatement](#ifstatement)
+  - [ReturnStatement](#returnstatement)
+  - [SwitchStatement](#switchstatement)
+  - [ThrowStatement](#throwstatement)
+  - [TryCatchFinallyStatement](#trycatchfinallystatement)
+  - [VariableDeclarationStatement](#variabledeclarationstatement)
+  - [WhileStatement](#whilestatement)
+- **Part IV: Expressions & Operators**
+  - [ArrayAccessExpression](#arrayaccessexpression)
+  - [ArrayCreationExpression](#arraycreationexpression)
+  - [ArrayLiteralExpression](#arrayliteralexpression)
+  - [AssignmentExpression](#assignmentexpression)
+  - [BinaryExpression](#binaryexpression)
+  - [CastExpression](#castexpression)
+  - [IdentifierNode](#identifiernode)
+  - [InstanceOfExpression](#instanceofexpression)
+  - [LiteralNode](#literalnode)
+  - [MemberAccessExpression](#memberaccessexpression)
+  - [MethodCallExpression](#methodcallexpression)
+  - [NewInstanceExpression](#newinstanceexpression)
+  - [TernaryExpression](#ternaryexpression)
+  - [UnaryExpression](#unaryexpression)
+- **Part V: Multi-Binary Support, Manifest Metadata, and Dynamic Linking**
+  - [ExternDeclarations](#externdeclarations)
+  - [DynamicLinkingAndQuickening](#dynamiclinkingandquickening)
+- **Part VI: Compiler Pipeline Modularization & Phase Architecture**
+  - [CompilerPipelineAndPhaseArchitecture](#compilerpipelineandphasearchitecture)
+- **Part VII: Solix CLI Tooling, Builtin Subsystems & Multi-Binary Host Driver**
+  - [SolixCommandLineToolchain](#solixcommandlinetoolchain)
+
+---
+
+# Part I: Compilation Unit & Module Statements
+
+## AliasStatement
+
+*Specification Reference*: [AliasStatement](statements/modules/alias_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Primitive Synonym [IMPLEMENTED]
+```solix
+alias Byte = uint8;
+
+void test() {
+    Byte b = 255;
+}
+```
+*Expected Result*: `Byte` compiles as a raw `uint8` with zero wrapper overhead.
+
+### Case 3.2: Parameterized Generic Alias [IMPLEMENTED]
+```solix
+alias StringMap<V> = Map<String, V>;
+
+void test() {
+    StringMap<int32> map = new StringMap<int32>();
+}
+```
+*Expected Result*: Substituted to `Map<String, int32>`; compiles cleanly.
+
+---
+
+### Case 3.3: Class and Qualified Type Alias [IMPLEMENTED]
+```solix
+// helper.slx
+package my.pkg;
+
+public class Helper {
+    public int32 val;
+    public Helper(int32 v) { this.val = v; }
+    public int32 getVal() { return this.val; }
+}
+
+// main.slx
+alias MyHelper = my.pkg.Helper;
+
+class Main {
+    public static int32 main() {
+        MyHelper h = new MyHelper(42);
+        return h.getVal() == 42 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: `MyHelper` resolves cleanly to `my.pkg.Helper`.
+
+### Case 3.4: Alias in Method Signature [IMPLEMENTED]
+```solix
+alias ID = int64;
+
+class User {
+    ID id;
+    ID getId() { return this.id; }
+}
+```
+*Expected Result*: Compiles and binds method parameter and return types through alias.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Circular Alias Definition [IMPLEMENTED]
+```solix
+alias A = B;
+alias B = A; // Error: circular alias
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Circular alias detected in 'A'
+```
+
+### Case 4.2: Generic Parameter Arity Mismatch [IMPLEMENTED]
+```solix
+alias Pair<K, V> = Map<K, V>;
+
+void test() {
+    Pair<String> bad; // Error: expected 2 parameters
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Alias 'Pair' expects 2 generic type arguments, got 1
+```
+
+### Case 4.3: Aliasing Undeclared Type [IMPLEMENTED]
+```solix
+alias Bad = NonExistentType;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot resolve alias target 'NonExistentType'
+```
+
+### Case 4.4: Duplicate Alias in Same Scope [IMPLEMENTED]
+```solix
+alias Value = int32;
+alias Value = float64;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Duplicate declaration of alias 'Value'
+```
+
+---
+
+## ImportStatement
+
+*Specification Reference*: [ImportStatement](statements/modules/import_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Selective Import [IMPLEMENTED]
+```solix
+import std.collections.List;
+
+void test() {
+    List items = new List();
+}
+```
+*Expected Result*: Compiles cleanly; `List` resolves to `std.collections.List`.
+
+### Case 3.2: Wildcard Import [IMPLEMENTED]
+```solix
+import std.io.*;
+
+void test() {
+    Console.println("Hello");
+}
+```
+*Expected Result*: `Console` resolves to `std.io.Console`.
+
+---
+
+### Case 3.3: Hierarchical Multi-Level Wildcard Import [IMPLEMENTED]
+```solix
+// collections/list.slx
+package my.collections;
+
+public class MyList {
+    public int32 size() { return 0; }
+}
+
+// main.slx
+import my.collections.*;
+
+class Main {
+    public static int32 main() {
+        MyList list = new MyList();
+        return list.size() == 0 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Wildcard import exposes all public types from nested package.
+
+### Case 3.4: Qualified Access with Active Import [IMPLEMENTED]
+```solix
+// core/item.slx
+package my.core;
+
+public class Item {
+    public int32 val;
+    public Item(int32 v) { this.val = v; }
+    public int32 getVal() { return this.val; }
+}
+
+// main.slx
+import my.core.Item;
+
+class Main {
+    public static int32 main() {
+        my.core.Item s1 = new my.core.Item(10);
+        Item s2 = new Item(20);
+        return (s1.getVal() == 10 && s2.getVal() == 20) ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Both fully qualified and imported unqualified names resolve to same type.
+
+### Case 3.5: Cross-Platform Binary Path Resolution [IMPLEMENTED]
+*Expected Result*: Verifies `solix::get_executable_path()` and `solix::get_executable_dir()` correctly resolve the running binary path and containing directory across Linux, macOS, and Windows without platform crashes.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Importing Non-Existent Package [IMPLEMENTED]
+```solix
+import invalid.pkg.Foo;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot resolve import 'invalid.pkg.Foo': package or symbol not found
+```
+
+### Case 4.2: Ambiguous Symbol Collision [IMPLEMENTED]
+```solix
+import pkg_a.*; // defines Token
+import pkg_b.*; // also defines Token
+
+void test() {
+    Token t; // Error: ambiguous
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Reference to 'Token' is ambiguous: matches 'pkg_a.Token' and 'pkg_b.Token'
+```
+
+### Case 4.3: Misplaced Import Statement [IMPLEMENTED]
+```solix
+class Foo {}
+import my.core.Item; // Error: imports must precede declarations
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Import statements must appear before class declarations
+```
+
+### Case 4.4: Importing Non-Existent Member from Existing Package [IMPLEMENTED]
+```solix
+// core.slx
+package my.core;
+public class RealSymbol {}
+
+// main.slx
+import my.core.FakeSymbol;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Symbol 'FakeSymbol' not found in package 'my.core'
+```
+
+### Case 4.5: Import Statement Inside Class Body [IMPLEMENTED]
+```solix
+class Foo {
+    import my.core.Item;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Import statements must appear before class declarations
+```
+
+### Case 4.6: Import Statement Inside Function Body [IMPLEMENTED]
+```solix
+void test() {
+    import my.core.Item;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Import statements must appear before class declarations
+```
+
+---
+
+## PackageStatement
+
+*Specification Reference*: [PackageStatement](statements/modules/package_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Hierarchical Multi-Level Package [IMPLEMENTED]
+```solix
+package std.collections.generic;
+
+class CustomList {}
+```
+*Expected Result*: Registered as `std.collections.generic.CustomList`; compiles cleanly.
+
+### Case 3.2: Intra-Package Unqualified Access [IMPLEMENTED]
+Two files sharing the same package can reference each other without imports.
+```solix
+// File 1
+package app.models;
+class User { String name; }
+
+// File 2
+package app.models;
+class Account { User owner; }
+```
+*Expected Result*: `Account` resolves `User` without needing an `import` statement.
+
+---
+
+### Case 3.3: Package Isolation Across Unimported Namespaces [IMPLEMENTED]
+```solix
+package alpha;
+public class Secret {
+    public int32 code;
+}
+```
+*Expected Result*: Types declared in package `alpha` are isolated and require explicit import in package `beta`.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Package Statement Not First [IMPLEMENTED]
+```solix
+import std.io;
+package app; // Error: package must appear before imports
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: 'package' statement must be the first statement in the file
+```
+
+### Case 4.2: Duplicate Package Statement [IMPLEMENTED]
+```solix
+package alpha;
+package beta; // Error: duplicate
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Only one 'package' statement is allowed per file
+```
+
+---
+
+# Part II: Declarations
+
+### Case 4.3: Invalid Package Identifier Syntax [IMPLEMENTED]
+```solix
+package 123.invalid; // Error: numeric start in package segment
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Expected identifier in package statement, got number
+```
+
+### Case 4.4: Package Statement Inside Class Body [IMPLEMENTED]
+```solix
+class Foo {
+    package invalid.placement;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: 'package' statement must be the first statement in the file
+```
+
+### Case 4.5: Package Statement Inside Function Body [IMPLEMENTED]
+```solix
+void test() {
+    package invalid.placement;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: 'package' statement must be the first statement in the file
+```
+
+---
+
+## ClassDeclaration
+
+*Specification Reference*: [ClassDeclaration](statements/declarations/class_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Single Inheritance and Dynamic Dispatch [IMPLEMENTED]
+```solix
+class Animal { String sound() { return "generic"; } }
+class Cat extends Animal { String sound() { return "meow"; } }
+
+void test() {
+    Animal pet = new Cat();
+    Console.println(pet.sound()); // Prints: meow
+}
+```
+*Expected Result*: Dispatches dynamically to `Cat.sound()`.
+
+---
+
+### Case 3.2: Multi-Level Inheritance Chain [IMPLEMENTED]
+```solix
+class GrandParent {
+    public int32 a;
+}
+class Parent extends GrandParent {
+    public int32 b;
+}
+class Child extends Parent {
+    public int32 c;
+}
+
+static int32 main() {
+    Child obj = new Child();
+    obj.a = 1;
+    obj.b = 2;
+    obj.c = 3;
+    return (obj.a + obj.b + obj.c) == 6 ? 0 : 1;
+}
+```
+*Expected Result*: Derived class inherits all ancestor fields across multi-tier hierarchy.
+
+### Case 3.3: Abstract Class Extension and Implementation [IMPLEMENTED]
+```solix
+abstract class Shape {
+    public abstract int32 getArea();
+}
+
+class Square extends Shape {
+    public int32 side;
+    public Square(int32 s) { this.side = s; }
+    public override int32 getArea() { return this.side * this.side; }
+}
+
+static int32 main() {
+    Shape s = new Square(5);
+    return s.getArea() == 25 ? 0 : 1;
+}
+```
+*Expected Result*: Concrete class implements abstract methods and allows polymorphic dispatch.
+
+### Case 3.4: Class Access Modifiers (Public vs Internal) [IMPLEMENTED]
+```solix
+public class ExportedService {
+    public int32 serve() { return 100; }
+}
+
+internal class InternalHelper {
+    public int32 help() { return 200; }
+}
+```
+*Expected Result*: `public` class exported outside package; `internal` class accessible within compilation unit.
+
+---
+
+### Case 3.6: Nested Class Declaration Inside Class [IMPLEMENTED]
+```solix
+class Outer {
+    public int32 outer_val;
+
+    public class Inner {
+        public int32 inner_val;
+        public Inner(int32 v) { this.inner_val = v; }
+    }
+}
+
+static int32 main() {
+    Outer.Inner obj = new Outer.Inner(42);
+    return obj.inner_val == 42 ? 0 : 1;
+}
+```
+*Expected Result*: Nested class compiles and can be instantiated via qualified outer class name.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Circular Class Inheritance [IMPLEMENTED]
+```solix
+class A extends B {}
+class B extends A {}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Circular inheritance detected for class 'A'
+```
+
+### Case 4.2: Unimplemented Abstract Method [IMPLEMENTED]
+```solix
+abstract class Shape { abstract float64 area(); }
+class Circle extends Shape {} // Error: missing area()
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Class 'Circle' must implement abstract method 'area()' from 'Shape'
+```
+
+### Case 4.3: Multiple Class Inheritance Disallowed [IMPLEMENTED]
+```solix
+class A {}
+class B {}
+class C extends A, B {} // Error: Solix enforces single inheritance
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Expected '{' after class inheritance clause
+```
+
+### Case 4.4: Extending Non-Class or Primitive Type [IMPLEMENTED]
+```solix
+class Invalid extends int32 {} // Error: cannot extend primitive
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot extend non-class type 'int32'
+```
+
+### Case 4.5: Instantiating Abstract Class Directly [IMPLEMENTED]
+```solix
+abstract class AbstractBase {}
+
+void test() {
+    AbstractBase a = new AbstractBase();
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot instantiate abstract class 'AbstractBase'
+```
+
+### Case 4.6: Class Declared Inside Function Body [IMPLEMENTED]
+```solix
+void test() {
+    class LocalClass {
+        int32 x;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Classes cannot be declared inside a function or method body
+```
+
+### Case 4.7: Class Declared Inside Control Flow Block [IMPLEMENTED]
+```solix
+void test(bool cond) {
+    if (cond) {
+        class BlockClass {}
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Classes cannot be declared inside a block or control flow statement
+```
+
+---
+
+## ConstructorDeclaration
+
+*Specification Reference*: [ConstructorDeclaration](statements/declarations/constructor_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Chained Super Constructor [IMPLEMENTED]
+```solix
+class Base { int32 id; Base(int32 id) { this.id = id; } }
+class Sub extends Base { Sub(int32 id) : super(id) {} }
+```
+*Expected Result*: Invokes `Base` constructor before running `Sub` constructor.
+
+---
+
+### Case 3.2: Overloaded Constructors with Varying Arity [IMPLEMENTED]
+```solix
+class Point {
+    public int32 x;
+    public int32 y;
+    public Point() { this.x = 0; this.y = 0; }
+    public Point(int32 x, int32 y) { this.x = x; this.y = y; }
+}
+
+static int32 main() {
+    Point p1 = new Point();
+    Point p2 = new Point(10, 20);
+    return (p1.x == 0 && p2.x == 10 && p2.y == 20) ? 0 : 1;
+}
+```
+*Expected Result*: Overloaded constructors resolve correctly by argument count and types.
+
+### Case 3.3: Protected Constructor for Subclass Construction [IMPLEMENTED]
+```solix
+class BaseAuth {
+    protected BaseAuth() {}
+}
+class UserAuth extends BaseAuth {
+    public UserAuth() { super(); }
+}
+```
+*Expected Result*: Protected constructor accessible from subclass constructor.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Constructor Name Mismatch [IMPLEMENTED]
+```solix
+class Widget {
+    Gadget() {} // Error: name mismatch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Constructor name 'Gadget' does not match enclosing class 'Widget'
+```
+
+### Case 4.2: Constructor with Explicit Return Type [IMPLEMENTED]
+```solix
+class Widget {
+    void Widget() {} // Error: constructors cannot declare return type
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Constructors must not specify a return type
+```
+
+### Case 4.3: Invoking Super Constructor Out of Order [IMPLEMENTED]
+```solix
+class Base {}
+class Sub extends Base {
+    public int32 val;
+    public Sub() {
+        this.val = 42;
+        super(); // Error: super() must be first statement
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Call to 'super()' must be the first statement in constructor
+```
+
+### Case 4.4: Constructor Declared Outside Any Class at Top Level [IMPLEMENTED]
+```solix
+StandaloneConstructor() {
+    // Error: constructor outside class
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Constructors can only be declared inside a class body
+```
+
+### Case 4.5: Constructor Declared Inside Method Body [IMPLEMENTED]
+```solix
+void test() {
+    MyClass() {} // Error: constructor inside method
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Constructors can only be declared inside a class body
+```
+
+---
+
+## DestructorDeclaration
+
+*Specification Reference*: [DestructorDeclaration](statements/declarations/destructors.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Explicit Dereference RAII Cleanup [IMPLEMENTED]
+```solix
+class Tracker {
+    public static int32 destroyed_count = 0;
+    public ~Tracker() {
+        Tracker.destroyed_count = Tracker.destroyed_count + 1;
+    }
+}
+
+static int32 main() {
+    Tracker t = new Tracker();
+    if (Tracker.destroyed_count != 0) return 1;
+    t = null;
+    if (Tracker.destroyed_count != 1) return 2;
+    return 0;
+}
+```
+*Expected Result*: Setting reference to `null` immediately runs `~Tracker()`, incrementing `destroyed_count` to 1.
+
+---
+
+### Case 3.2: Block Scope Exit RAII Cleanup [IMPLEMENTED]
+```solix
+class Resource {
+    public static int32 counter = 0;
+    public ~Resource() {
+        Resource.counter = Resource.counter + 1;
+    }
+}
+
+static int32 main() {
+    Resource.counter = 0;
+    {
+        Resource r1 = new Resource();
+        Resource r2 = new Resource();
+        if (Resource.counter != 0) return 1;
+    }
+    if (Resource.counter != 2) return 2;
+    return 0;
+}
+```
+*Expected Result*: Leaving block scope decrements active object references, triggering `~Resource()` for both locals.
+
+---
+
+### Case 3.3: Function Return RAII Cleanup [IMPLEMENTED]
+```solix
+class Guard {
+    public static int32 count = 0;
+    public ~Guard() {
+        Guard.count = Guard.count + 1;
+    }
+}
+
+int32 doWork() {
+    Guard g = new Guard();
+    return 42;
+}
+
+static int32 main() {
+    Guard.count = 0;
+    int32 val = doWork();
+    if (val != 42) return 1;
+    if (Guard.count != 1) return 2;
+    return 0;
+}
+```
+*Expected Result*: Returning from a function cleans up all local objects in the frame before returning value to caller.
+
+---
+
+### Case 3.4: Subclass-to-Base Inheritance Chaining [IMPLEMENTED]
+```solix
+class BaseResource {
+    public static int32 sequence = 0;
+    public ~BaseResource() {
+        BaseResource.sequence = BaseResource.sequence * 10 + 1;
+    }
+}
+
+class DerivedResource extends BaseResource {
+    public ~DerivedResource() {
+        BaseResource.sequence = BaseResource.sequence * 10 + 2;
+    }
+}
+
+static int32 main() {
+    BaseResource.sequence = 0;
+    {
+        DerivedResource d = new DerivedResource();
+    }
+    // Expected sequence: Derived runs (2), then Base runs (21)
+    if (BaseResource.sequence != 21) return 1;
+    return 0;
+}
+```
+*Expected Result*: `~DerivedResource()` runs first, followed automatically by ancestor `~BaseResource()`.
+
+---
+
+### Case 3.5: Multi-Level Inheritance Chaining [IMPLEMENTED]
+```solix
+class Grandparent {
+    public static int32 order = 0;
+    public ~Grandparent() {
+        Grandparent.order = Grandparent.order * 10 + 1;
+    }
+}
+
+class Parent extends Grandparent {
+    public ~Parent() {
+        Grandparent.order = Grandparent.order * 10 + 2;
+    }
+}
+
+class Child extends Parent {
+    public ~Child() {
+        Grandparent.order = Grandparent.order * 10 + 3;
+    }
+}
+
+static int32 main() {
+    Grandparent.order = 0;
+    {
+        Child c = new Child();
+    }
+    // Expected order: Child (3) -> Parent (32) -> Grandparent (321)
+    if (Grandparent.order != 321) return 1;
+    return 0;
+}
+```
+*Expected Result*: Strict reverse-inheritance destructor chaining across three hierarchy tiers.
+
+---
+
+### Case 3.6: Field and State Mutation within Destructor [IMPLEMENTED]
+```solix
+class Logger {
+    public static int32 last_logged = 0;
+    public int32 id;
+    public Logger(int32 id) { this.id = id; }
+    public ~Logger() {
+        Logger.last_logged = this.id;
+    }
+}
+
+static int32 main() {
+    {
+        Logger l = new Logger(777);
+    }
+    if (Logger.last_logged != 777) return 1;
+    return 0;
+}
+```
+*Expected Result*: Destructor safely accesses instance fields through `this` before deallocation.
+
+---
+
+### Case 3.7: Cascading Destruction of Nested Resources [IMPLEMENTED]
+```solix
+class InnerNode {
+    public static int32 count = 0;
+    public ~InnerNode() {
+        InnerNode.count = InnerNode.count + 1;
+    }
+}
+
+class OuterContainer {
+    public InnerNode node;
+    public OuterContainer() {
+        this.node = new InnerNode();
+    }
+    public ~OuterContainer() {
+        this.node = null;
+    }
+}
+
+static int32 main() {
+    InnerNode.count = 0;
+    {
+        OuterContainer c = new OuterContainer();
+    }
+    if (InnerNode.count != 1) return 1;
+    return 0;
+}
+```
+*Expected Result*: Dropping reference to outer container triggers cascade to inner member node.
+
+---
+
+### Case 3.8: Exception Rewinding RAII across Multiple Call Frames [IMPLEMENTED]
+```solix
+class Exception {}
+
+class AutoCleanup {
+    public static int32 cleaned_frames = 0;
+    public ~AutoCleanup() {
+        AutoCleanup.cleaned_frames = AutoCleanup.cleaned_frames + 1;
+    }
+}
+
+void levelThree() {
+    AutoCleanup c3 = new AutoCleanup();
+    throw new Exception();
+}
+
+void levelTwo() {
+    AutoCleanup c2 = new AutoCleanup();
+    levelThree();
+}
+
+void levelOne() {
+    AutoCleanup c1 = new AutoCleanup();
+    levelTwo();
+}
+
+static int32 main() {
+    AutoCleanup.cleaned_frames = 0;
+    try {
+        levelOne();
+    } catch (Exception e) {
+        if (AutoCleanup.cleaned_frames != 3) return 1;
+        return 0;
+    }
+    return 2;
+}
+```
+*Expected Result*: When exception unwinds `levelThree`, `levelTwo`, and `levelOne`, all local objects run their destructors in reverse declaration order before control enters the `catch` handler.
+
+---
+
+### Case 3.9: Exception in Try Block RAII [IMPLEMENTED]
+```solix
+class Exception {}
+
+class ScopedLock {
+    public static bool unlocked = false;
+    public ~ScopedLock() {
+        ScopedLock.unlocked = true;
+    }
+}
+
+static int32 main() {
+    ScopedLock.unlocked = false;
+    try {
+        ScopedLock lock = new ScopedLock();
+        throw new Exception();
+    } catch (Exception e) {
+        if (!ScopedLock.unlocked) return 1;
+        return 0;
+    }
+    return 2;
+}
+```
+*Expected Result*: Local objects declared in try block are destroyed before matching catch block executes.
+
+---
+
+### Case 3.10: Variable & Field Reassignment Cleanup [IMPLEMENTED]
+```solix
+class Cell {
+    public static int32 counter = 0;
+    public ~Cell() {
+        Cell.counter = Cell.counter + 1;
+    }
+}
+
+static int32 main() {
+    Cell.counter = 0;
+    Cell c = new Cell();
+    if (Cell.counter != 0) return 1;
+    c = new Cell();
+    if (Cell.counter != 1) return 2;
+    c = null;
+    if (Cell.counter != 2) return 3;
+    return 0;
+}
+```
+*Expected Result*: Overwriting reference variable immediately destroys previous object.
+
+---
+
+### Case 3.11: Array of Destructible Objects Cleanup [IMPLEMENTED]
+```solix
+class Item {
+    public static int32 count = 0;
+    public ~Item() {
+        Item.count = Item.count + 1;
+    }
+}
+
+static int32 main() {
+    Item.count = 0;
+    {
+        Item[] arr = new Item[3];
+        arr[0] = new Item();
+        arr[1] = new Item();
+        arr[2] = new Item();
+        if (Item.count != 0) return 1;
+    }
+    if (Item.count != 3) return 2;
+    return 0;
+}
+```
+*Expected Result*: Scope exit of array drops reference to array and recursively decrements and destructs all contained elements.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Destructor Declared with Parameters [IMPLEMENTED]
+```solix
+class Widget {
+    public ~Widget(int32 x) {} // Error: destructors must not take parameters
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Destructors cannot accept parameters
+```
+
+---
+
+### Case 4.2: Destructor Declared with Explicit Return Type or Returning Value [IMPLEMENTED]
+```solix
+class Widget {
+    public ~Widget() {
+        return 10; // Error: destructors cannot return a value
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot return a value from a destructor
+```
+
+---
+
+### Case 4.3: Duplicate Destructors in Same Class [IMPLEMENTED]
+```solix
+class Widget {
+    public ~Widget() {}
+    public ~Widget() {} // Error: duplicate destructor
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: cannot declare multiple destructors
+```
+
+---
+
+### Case 4.4: Destructor Name Mismatch [IMPLEMENTED]
+```solix
+class Widget {
+    public ~Other() {} // Error: name mismatch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Destructor name '~Other' does not match enclosing class 'Widget'
+```
+
+---
+
+### Case 4.5: Destructor in Interface [IMPLEMENTED]
+```solix
+interface IService {
+    ~IService(); // Error: interfaces cannot declare destructors
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Interfaces cannot declare destructors
+```
+
+---
+
+### Case 4.6: Destructor Declared with Forbidden Modifiers [IMPLEMENTED]
+```solix
+class Widget {
+    public static ~Widget() {} // Error: modifiers not allowed
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Destructors cannot have static, virtual, override, or abstract modifiers
+```
+
+---
+
+## EnumDeclaration
+
+*Specification Reference*: [EnumDeclaration](statements/declarations/enum_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Enum Equality and Switch [IMPLEMENTED]
+```solix
+enum Color { RED, GREEN, BLUE }
+
+void test(Color c) {
+    if (c == Color.RED) {
+        Console.println("Red");
+    }
+}
+```
+*Expected Result*: Compiles and compares correctly via `EQ_I64`.
+
+---
+
+### Case 3.2: Enum as Method Parameter and Return Value [IMPLEMENTED]
+```solix
+enum State { PENDING, ACTIVE, CLOSED }
+
+class Task {
+    public State state;
+    public void setState(State s) { this.state = s; }
+    public State getState() { return this.state; }
+}
+
+static int32 main() {
+    Task t = new Task();
+    t.setState(State.ACTIVE);
+    return t.getState() == State.ACTIVE ? 0 : 1;
+}
+```
+*Expected Result*: Enum values passed and returned cleanly with full type safety.
+
+---
+
+### Case 3.4: Nested Enum Declaration Inside Class [IMPLEMENTED]
+```solix
+class Window {
+    public enum State { MINIMIZED, MAXIMIZED, NORMAL }
+    public State state;
+}
+
+static int32 main() {
+    Window w = new Window();
+    w.state = Window.State.MAXIMIZED;
+    return w.state == Window.State.MAXIMIZED ? 0 : 1;
+}
+```
+*Expected Result*: Nested enum inside class compiles cleanly and qualifies with enclosing class.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Duplicate Enum Member [IMPLEMENTED]
+```solix
+enum State { READY, READY }
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Duplicate enum member 'READY' in enum 'State'
+```
+
+### Case 4.2: Implicit Integer Assignment to Enum [IMPLEMENTED]
+```solix
+enum Status { OK, FAIL }
+
+void test() {
+    Status s = 1; // Error: cannot implicitly convert int32 to Status
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot convert type 'int32' to enum 'Status'
+```
+
+### Case 4.3: Comparing Incompatible Enum Types [IMPLEMENTED]
+```solix
+enum Fruit { APPLE, ORANGE }
+enum Animal { CAT, DOG }
+
+void test() {
+    bool b = (Fruit.APPLE == Animal.CAT); // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Operator '==' cannot be applied to incompatible enums 'Fruit' and 'Animal'
+```
+
+### Case 4.4: Enum Declared Inside Function Body [IMPLEMENTED]
+```solix
+void test() {
+    enum LocalState { ON, OFF } // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Enums cannot be declared inside a function or method body
+```
+
+---
+
+## FieldDeclaration
+
+*Specification Reference*: [FieldDeclaration](statements/declarations/field_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Cycle Breaking with Weak References [IMPLEMENTED]
+```solix
+class Parent { Child c; }
+class Child { weak Parent p; }
+
+void test() {
+    Parent p = new Parent();
+    Child c = new Child();
+    p.c = c;
+    c.p = p; // Weak back-pointer: cycle is broken!
+}
+```
+*Expected Result*: Both objects are deallocated when `p` and `c` exit scope.
+
+---
+
+### Case 3.2: Field Access Modifiers (Public, Private, Protected) [IMPLEMENTED]
+```solix
+class Account {
+    public int32 id;
+    private int32 secret;
+    protected int32 balance;
+
+    public Account(int32 id, int32 sec, int32 bal) {
+        this.id = id;
+        this.secret = sec;
+        this.balance = bal;
+    }
+    public int32 getSecret() { return this.secret; }
+}
+```
+*Expected Result*: Enforces lexical visibility while permitting authorized access within class scope.
+
+### Case 3.3: Static Class Fields Shared Across Instances [IMPLEMENTED]
+```solix
+class Counter {
+    public static int32 count;
+}
+
+static int32 main() {
+    Counter.count = 10;
+    Counter c = new Counter();
+    Counter.count++;
+    return Counter.count == 11 ? 0 : 1;
+}
+```
+*Expected Result*: Static field retains singular memory index shared globally.
+
+### Case 3.4: Constant Field Declaration [IMPLEMENTED]
+```solix
+class Config {
+    public const int32 MAX_USERS = 500;
+}
+
+static int32 main() {
+    return Config.MAX_USERS == 500 ? 0 : 1;
+}
+```
+*Expected Result*: Const field inlines or preserves immutable compile-time value.
+
+### Case 3.5: In-Class Field Initialization with Object and Primitive Literals [IMPLEMENTED]
+```solix
+class Item {
+    public int32 id;
+    public Item(int32 i) { this.id = i; }
+}
+
+class Entity {
+    private Item item = new Item(42);
+    private int32 count = 100;
+
+    public int32 getItemId() {
+        return this.item.id;
+    }
+    public int32 getCount() {
+        return this.count;
+    }
+}
+
+static int32 main() {
+    Entity e = new Entity();
+    return (e.getItemId() == 42 && e.getCount() == 100) ? 0 : 1;
+}
+```
+*Expected Result*: In-class field initializers for reference and primitive types execute during constructor initialization.
+
+### Case 3.6: Static Field Initialization with Object Instantiation [IMPLEMENTED]
+```solix
+class Tag {
+    public int32 code;
+    public Tag(int32 c) { this.code = c; }
+}
+
+class Config {
+    public static Tag tag = new Tag(99);
+    public static int32 version = 3;
+
+    public static Tag getTag() {
+        return tag;
+    }
+}
+
+static int32 main() {
+    return (Config.getTag().code == 99 && Config.version == 3) ? 0 : 1;
+}
+```
+*Expected Result*: Static fields initialized with user class instances and primitives evaluate cleanly during class initialization.
+
+### Case 3.7: Deterministic Live Object Count Reclamation on Scope Exit [IMPLEMENTED]
+```solix
+class Parent {
+    public Child c;
+}
+class Child {
+    public weak Parent p;
+}
+
+static int32 main() {
+    Parent p = new Parent();
+    Child c = new Child();
+    p.c = c;
+    c.p = p;
+    return 0;
+}
+```
+*Expected Result*: Weak reference breaks the circular dependency so both objects are deallocated upon scope exit, dropping live object count to zero.
+
+### Case 3.8: Byte-Addressed Contiguous Field Packing and Natural Alignment [IMPLEMENTED]
+```solix
+class PackedStruct {
+    public uint8 b1;
+    public uint8 b2;
+    public uint16 s1;
+    public uint32 i1;
+    public uint64 l1;
+
+    public PackedStruct(uint8 b1, uint8 b2, uint16 s1, uint32 i1, uint64 l1) {
+        this.b1 = b1;
+        this.b2 = b2;
+        this.s1 = s1;
+        this.i1 = i1;
+        this.l1 = l1;
+    }
+}
+
+int32 main() {
+    PackedStruct p = new PackedStruct(10, 20, 300, 40000, 5000000000);
+    if (p.b1 != 10) return 1;
+    if (p.b2 != 20) return 2;
+    if (p.s1 != 300) return 3;
+    if (p.i1 != 40000) return 4;
+    if (p.l1 != 5000000000) return 5;
+    return 0;
+}
+```
+*Expected Result*: Fields are packed according to natural alignment byte offsets (b1 at +8, b2 at +9, s1 at +10, i1 at +12, l1 at +16) and read/write access correctly preserves values.
+
+### Case 3.9: Narrow Signed and Unsigned Field Sign-Extension and Truncation [IMPLEMENTED]
+```solix
+class SignExtensionTest {
+    public int8 s8;
+    public uint8 u8;
+    public int16 s16;
+    public uint16 u16;
+    public int32 s32;
+    public uint32 u32;
+
+    public SignExtensionTest(int8 a, uint8 b, int16 c, uint16 d, int32 e, uint32 f) {
+        this.s8 = a;
+        this.u8 = b;
+        this.s16 = c;
+        this.u16 = d;
+        this.s32 = e;
+        this.u32 = f;
+    }
+}
+
+int32 main() {
+    SignExtensionTest t = new SignExtensionTest(-5, 250, -300, 65000, -70000, 3000000000);
+    if (t.s8 != -5) return 1;
+    if (t.u8 != 250) return 2;
+    if (t.s16 != -300) return 3;
+    if (t.u16 != 65000) return 4;
+    if (t.s32 != -70000) return 5;
+    if (t.u32 != 3000000000) return 6;
+    return 0;
+}
+```
+*Expected Result*: GET_PROPERTY sign-extends signed fields (int8, int16, int32) and zero-extends unsigned fields (uint8, uint16, uint32) correctly onto the 64-bit operand stack.
+
+### Case 3.10: Segregated Free Lists and Adjacent Block Coalescing [IMPLEMENTED]
+```solix
+class Node {
+    public int32 val;
+    public Node(int32 v) { this.val = v; }
+}
+
+int32 main() {
+    for (int32 i = 0; i < 100; i++) {
+        Node n1 = new Node(i);
+        Node n2 = new Node(i + 1);
+        Node n3 = new Node(i + 2);
+    }
+    return 0;
+}
+```
+*Expected Result*: Loop completes cleanly without heap exhaustion or unbounded memory fragmentation, verifying that segregated free lists, coalescing, and dynamic heap boundary retraction recycle freed instance blocks.
+
+---
+
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Duplicate Field Identifier [IMPLEMENTED]
+```solix
+class Item {
+    int32 count;
+    float64 count; // Error: duplicate
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Field 'count' is already declared in class 'Item'
+```
+
+### Case 4.2: Field Access on Null Reference (Runtime Fault) [IMPLEMENTED]
+```solix
+void test() {
+    Item item = null;
+    item.count = 5; // Null dereference
+}
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] NullReferenceException: Attempted to write field on null object reference
+```
+
+### Case 4.3: Accessing Private Field Outside Class [IMPLEMENTED]
+```solix
+class Vault {
+    private int32 passcode;
+}
+
+void test() {
+    Vault v = new Vault();
+    int32 x = v.passcode; // Error: private field inaccessible
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot access private member 'passcode' of class 'Vault'
+```
+
+### Case 4.4: Modifying Const Field [IMPLEMENTED]
+```solix
+class Constants {
+    public const int32 RATE = 5;
+}
+
+void test() {
+    Constants.RATE = 10; // Error: cannot assign to const field
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot assign to read-only constant field 'RATE'
+```
+
+### Case 4.5: Incompatible Field Initializer Type [IMPLEMENTED]
+```solix
+class Model {
+    public int32 count = "invalid"; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Incompatible initializer for field 'count': expected 'int32', got 'String'
+```
+
+### Case 4.7: Field Access Modifier Applied to Local Variable [IMPLEMENTED]
+```solix
+void test() {
+    public int32 x = 10; // Error: access modifiers cannot be applied to local variables
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Access modifiers ('public', 'private', 'protected') are not allowed on local variables
+```
+
+### Case 4.8: Standalone Field Declared at File Top Level [IMPLEMENTED]
+```solix
+public int32 globalField = 42; // Error: Solix requires fields to be in a class
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Variable declarations with access modifiers must be inside a class body
+```
+
+---
+
+## InterfaceDeclaration
+
+*Specification Reference*: [InterfaceDeclaration](statements/declarations/interface_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Multiple Interface Conformance [IMPLEMENTED]
+```solix
+interface Printable { void print(); }
+interface Serializable { void save(); }
+
+class Doc implements Printable, Serializable {
+    public void print() {}
+    public void save() {}
+}
+```
+*Expected Result*: Compiles cleanly; instances can be passed to functions taking either `Printable` or `Serializable`.
+
+---
+
+### Case 3.2: Interface Hierarchy with Sub-Interface Extension [IMPLEMENTED]
+```solix
+interface Reader {
+    int32 read();
+}
+interface AdvancedReader extends Reader {
+    void reset();
+}
+```
+*Expected Result*: `AdvancedReader` inherits abstract method requirement `read()`.
+
+### Case 3.3: Polymorphic Method Invocation via Interface Variable [IMPLEMENTED]
+```solix
+interface Worker {
+    int32 work();
+}
+class Robot implements Worker {
+    public int32 work() { return 99; }
+}
+
+static int32 main() {
+    Worker w = new Robot();
+    return w.work() == 99 ? 0 : 1;
+}
+```
+*Expected Result*: Calls `work()` through interface vtable dispatch.
+
+---
+
+### Case 3.4: Nested Interface Declaration Inside Class [IMPLEMENTED]
+```solix
+class Button {
+    public interface OnClickListener {
+        void onClick();
+    }
+}
+```
+*Expected Result*: Interface declared as a static member of a class compiles cleanly.
+
+---
+
+### Case 3.5: Multi-Interface Dynamic Dispatch Execution [IMPLEMENTED]
+```solix
+interface Worker { int32 work(); }
+interface Greeter { int32 greet(); }
+
+class Android implements Worker, Greeter {
+    public int32 work() { return 10; }
+    public int32 greet() { return 20; }
+}
+
+static int32 main() {
+    Android a = new Android();
+    Worker w = a;
+    Greeter g = a;
+    if (w.work() != 10) return 1;
+    if (g.greet() != 20) return 2;
+    return 0;
+}
+```
+*Expected Result*: Dynamic dispatch invokes correct concrete methods across multiple implemented interfaces.
+
+---
+
+### Case 3.6: Order-Independent Multi-Interface Resolution [IMPLEMENTED]
+```solix
+interface FirstIface { int32 getA(); }
+interface SecondIface { int32 getB(); }
+
+class ClassAB implements FirstIface, SecondIface {
+    public int32 getA() { return 1; }
+    public int32 getB() { return 2; }
+}
+
+class ClassBA implements SecondIface, FirstIface {
+    public int32 getA() { return 10; }
+    public int32 getB() { return 20; }
+}
+
+static int32 main() {
+    FirstIface a1 = new ClassAB();
+    SecondIface b1 = new ClassAB();
+    FirstIface a2 = new ClassBA();
+    SecondIface b2 = new ClassBA();
+
+    if (a1.getA() != 1) return 1;
+    if (b1.getB() != 2) return 2;
+    if (a2.getA() != 10) return 3;
+    if (b2.getB() != 20) return 4;
+    return 0;
+}
+```
+*Expected Result*: Dynamic interface dispatch functions correctly irrespective of interface implementation declaration order.
+
+---
+
+### Case 3.7: Sub-Interface Dynamic Dispatch and Cast [IMPLEMENTED]
+```solix
+interface Reader { int32 read(); }
+interface AdvancedReader extends Reader { int32 reset(); }
+
+class StreamBuffer implements AdvancedReader {
+    public int32 read() { return 42; }
+    public int32 reset() { return 7; }
+}
+
+static int32 main() {
+    AdvancedReader ar = new StreamBuffer();
+    Reader r = ar;
+    if (r.read() != 42) return 1;
+    if (ar.read() != 42) return 2;
+    if (ar.reset() != 7) return 3;
+    return 0;
+}
+```
+*Expected Result*: Methods declared in base interfaces and extended interfaces dispatch correctly through both reference types.
+
+---
+
+### Case 3.8: Class Inheritance with Interface Implementation Override [IMPLEMENTED]
+```solix
+interface Action { int32 execute(); }
+
+class BaseTask implements Action {
+    public int32 execute() { return 50; }
+}
+
+class DerivedTask extends BaseTask {
+    public override int32 execute() { return 100; }
+}
+
+static int32 main() {
+    Action a1 = new BaseTask();
+    Action a2 = new DerivedTask();
+    if (a1.execute() != 50) return 1;
+    if (a2.execute() != 100) return 2;
+    return 0;
+}
+```
+*Expected Result*: Overridden methods in derived classes dispatch polymorphically when invoked via interface reference.
+
+---
+
+### Case 3.9: InstanceOf Check for Interfaces [IMPLEMENTED]
+```solix
+interface Worker { int32 work(); }
+interface Sleeper { void sleep(); }
+
+class Human implements Worker {
+    public int32 work() { return 1; }
+}
+
+static int32 main() {
+    Human h = new Human();
+    Worker w = h;
+    if (!(h instanceof Worker)) return 1;
+    if (!(w instanceof Worker)) return 2;
+    if (h instanceof Sleeper) return 3;
+    if (w instanceof Sleeper) return 4;
+    return 0;
+}
+```
+*Expected Result*: `instanceof` correctly checks interface conformance dynamically against itable mappings.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Interface Method with Body [IMPLEMENTED]
+```solix
+interface Reader {
+    int32 read() { return 0; } // Error: method cannot have body
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Interface methods cannot have a body
+```
+
+### Case 4.2: Class Incompletely Implementing Interface [IMPLEMENTED]
+```solix
+interface Service {
+    void start();
+    void stop();
+}
+class IncompleteService implements Service {
+    public void start() {} // Error: missing stop()
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Class 'IncompleteService' does not implement interface method 'stop()'
+```
+
+### Case 4.3: Interface Containing State Fields [IMPLEMENTED]
+```solix
+interface BadInterface {
+    int32 stateField; // Error: interfaces cannot contain instance state
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Interfaces must not declare instance fields
+```
+
+### Case 4.5: Interface Declared Inside Function Body [IMPLEMENTED]
+```solix
+void test() {
+    interface LocalInterface {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Interfaces cannot be declared inside a function or method body
+```
+
+---
+
+## MethodDeclaration
+
+*Specification Reference*: [MethodDeclaration](statements/declarations/method_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Virtual Method Overriding [IMPLEMENTED]
+```solix
+class Parent { String name() { return "parent"; } }
+class Child extends Parent { String name() { return "child"; } }
+
+void test() {
+    Parent p = new Child();
+    Console.println(p.name()); // Prints: child
+}
+```
+*Expected Result*: Dispatches dynamically to `Child.name()`.
+
+---
+
+### Case 3.2: Static Utility Method Invocation [IMPLEMENTED]
+```solix
+class MathUtil {
+    public static int32 add(int32 a, int32 b) {
+        return a + b;
+    }
+}
+
+static int32 main() {
+    return MathUtil.add(20, 22) == 42 ? 0 : 1;
+}
+```
+*Expected Result*: Static method invoked directly without class instance allocation.
+
+### Case 3.3: Method Overloading with Multiple Types [IMPLEMENTED]
+```solix
+class Calculator {
+    public int32 compute(int32 x) { return x * 2; }
+    public float64 compute(float64 x) { return x * 2.0; }
+}
+
+static int32 main() {
+    Calculator c = new Calculator();
+    return (c.compute(10) == 20 && c.compute(1.5) == 3.0) ? 0 : 1;
+}
+```
+*Expected Result*: Dispatches to correct overload based on argument types.
+
+### Case 3.4: Protected Method Accessible in Subclass [IMPLEMENTED]
+```solix
+class BaseWorker {
+    protected int32 getCode() { return 100; }
+}
+class DerivedWorker extends BaseWorker {
+    public int32 test() { return this.getCode(); }
+}
+```
+*Expected Result*: Subclass accesses protected superclass method without error.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Abstract Method with Body [IMPLEMENTED]
+```solix
+abstract class Base {
+    abstract void run() {} // Error: cannot have body
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Abstract method 'run' cannot have a body
+```
+
+### Case 4.2: Calling Private Method from Outside Class [IMPLEMENTED]
+```solix
+class Encapsulated {
+    private void secret() {}
+}
+
+void test() {
+    Encapsulated e = new Encapsulated();
+    e.secret(); // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot access private method 'secret' of class 'Encapsulated'
+```
+
+### Case 4.3: Missing Return Statement in Non-Void Method [IMPLEMENTED]
+```solix
+int32 badMethod(bool flag) {
+    if (flag) {
+        return 1;
+    }
+    // Error: missing return path
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Not all control paths return a value in function 'badMethod'
+```
+
+### Case 4.4: Incompatible Override Signature Return Type [IMPLEMENTED]
+```solix
+class SuperClass {
+    public virtual int32 getValue() { return 0; }
+}
+class SubClass extends SuperClass {
+    public override String getValue() { return "bad"; } // Error: return type mismatch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Overriding method 'getValue' has incompatible return type 'String' (expected 'int32')
+```
+
+### Case 4.7: Nested Method Declaration Inside Another Method [IMPLEMENTED]
+```solix
+void outer() {
+    void inner() {} // Error: nested functions are not supported
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Methods cannot be declared inside another method
+```
+
+---
+
+## OperatorDeclaration
+
+*Specification Reference*: [OperatorDeclaration](statements/declarations/operator_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Vector Addition Overload [IMPLEMENTED]
+```solix
+class Vector {
+    int32 x;
+    Vector(int32 x) { this.x = x; }
+    Vector operator+(Vector other) {
+        return new Vector(this.x + other.x);
+    }
+}
+
+void test() {
+    Vector v1 = new Vector(10);
+    Vector v2 = new Vector(20);
+    Vector v3 = v1 + v2; // Calls operator+
+}
+```
+*Expected Result*: `v3.x` equals 30.
+
+---
+
+### Case 3.2: Overloading Subtraction and Equality Operators [IMPLEMENTED]
+```solix
+class Complex {
+    public int32 re;
+    public int32 im;
+    public Complex(int32 r, int32 i) { this.re = r; this.im = i; }
+
+    public Complex operator-(Complex rhs) {
+        return new Complex(this.re - rhs.re, this.im - rhs.im);
+    }
+    public bool operator==(Complex rhs) {
+        return this.re == rhs.re && this.im == rhs.im;
+    }
+}
+
+static int32 main() {
+    Complex c1 = new Complex(10, 5);
+    Complex c2 = new Complex(4, 2);
+    Complex res = c1 - c2;
+    return (res == new Complex(6, 3)) ? 0 : 1;
+}
+```
+*Expected Result*: Binary `-` and `==` operators overload seamlessly.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Unsupported Operator Overload [IMPLEMENTED]
+```solix
+class Test {
+    bool operator&&(Test other) {} // Error: unsupported
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Operator '&&' cannot be overloaded
+```
+
+---
+
+# Part III: Control Flow & Execution Statements
+
+### Case 4.2: Binary Operator Declared with Wrong Arity [IMPLEMENTED]
+```solix
+class Vector {
+    public Vector operator+(Vector a, Vector b) {} // Error: member operator+ takes 1 argument
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Member binary operator '+' must take exactly 1 argument
+```
+
+### Case 4.4: Operator Overload Declared at Top Level [IMPLEMENTED]
+```solix
+public int32 operator+(int32 a, int32 b) {
+    return a + b;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Operator overloads can only be declared inside a class body
+```
+
+### Case 4.5: Operator Overload Declared Inside Method Body [IMPLEMENTED]
+```solix
+void test() {
+    operator+(int32 a) {}
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Operator overloads can only be declared inside a class body
+
+### Case 4.6: Package-Level Native Compatibility and Free Functions [NOT IMPLEMENTED]
+
+* **Source**: Generated Raylib package-level functions and compatibility facade.
+* **Positive**: Selectively import a generated free function, compile it, and verify it delegates to the native bridge.
+* **Negative**: Calling a missing or unsupported generated API function reports a binder/import error rather than silently compiling.
+```
+
+### Case 4.7: Raylib Variadic API Adapters [IMPLEMENTED]
+
+* **Source**: Generated `raylib.trace_log(int32, String)` and `raylib.text_format(String)` adapters.
+* **Positive**: The fixed-arity adapters compile, link to the native bridge, preserve literal text, and remain available through the `Raylib` compatibility facade.
+* **Negative**: Variadic arguments are not accepted at the Solix boundary, and callback/pointer-to-pointer APIs remain explicitly classified as unsupported rather than being generated with unsafe signatures.
+
+### Case 4.8: Raylib Value-Type Structural Equality [IMPLEMENTED]
+
+* **Source**: Generated Raylib value types (`Color`, `Rectangle`, `Matrix`, `Vector2`, `Vector3`, and `Vector4`).
+* **Positive**: Equal field values compare equal and any differing field produces inequality.
+* **Negative**: Equality is not generated for opaque alias-only facade types whose memory representation is not exposed as a value object.
+
+---
+
+## BlockStatement
+
+*Specification Reference*: [BlockStatement](statements/control_flow/block_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Empty and Nested Empty Blocks [IMPLEMENTED]
+Empty blocks compile to zero runtime instructions and produce zero stack delta.
+```solix
+void test() {
+    {}
+    {
+        {}
+        { {} }
+    }
+}
+```
+*Expected Result*: Compiles and runs cleanly; stack remains balanced.
+
+### Case 3.2: Lexical Variable Shadowing [IMPLEMENTED]
+An inner block can shadow an outer variable with a different type.
+```solix
+int32 value = 10;
+{
+    String value = new String("shadow");
+    Console.println(value); // Prints: shadow
+}
+Console.println(value);     // Prints: 10
+```
+*Expected Result*: Outputs `"shadow"` then `10`. The inner `String` is freed at the inner closing brace; outer `int32` is unaffected.
+
+### Case 3.3: Strict LIFO Destruction of Multiple Reference Objects [IMPLEMENTED]
+Multiple objects in a block are decremented in reverse declaration order.
+```solix
+{
+    String first = new String("first");
+    String second = new String("second");
+    String third = new String("third");
+}
+```
+*Expected Result*: Bytecode executes `DEC_REF third`, then `DEC_REF second`, then `DEC_REF first`.
+
+### Case 3.4: Early Return from Nested Blocks [IMPLEMENTED]
+Returning from inside deep blocks unwinds all intermediate scopes.
+```solix
+int32 compute(bool early) {
+    String a = new String("a");
+    {
+        String b = new String("b");
+        if (early) {
+            return 100; // Must clean up b and a before RETURN!
+        }
+    }
+    return 0;
+}
+```
+*Expected Result*: Calling `compute(true)` frees `b` and `a` with 0 memory leaks.
+
+### Case 3.5: LIFO Scope Cleanup Drops Live Object Count to Zero [IMPLEMENTED]
+```solix
+class Res {
+    int32 id;
+    Res(int32 id) { this.id = id; }
+}
+
+static int32 compute() {
+    Res a = new Res(1);
+    {
+        Res b = new Res(2);
+        {
+            Res c = new Res(3);
+        }
+    }
+    return 0;
+}
+
+static int32 main() {
+    compute();
+    return 0;
+}
+```
+*Expected Result*: Nested scopes unwind in LIFO order and all objects are deallocated with live object count dropping to zero.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Accessing Block-Scoped Variable Outside Its Block [IMPLEMENTED]
+```solix
+void test() {
+    {
+        int32 temp = 100;
+    }
+    int32 leak = temp; // Error: temp does not exist
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Undefined identifier: temp
+```
+
+### Case 4.2: Duplicate Variable in Same Immediate Scope [IMPLEMENTED]
+```solix
+void test() {
+    {
+        int32 score = 10;
+        float64 score = 20.0; // Error: duplicate declaration
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Variable 'score' is already defined in the current scope
+```
+
+### Case 4.3: Unclosed Block (Missing Brace) [IMPLEMENTED]
+```solix
+void test() {
+    {
+        int32 x = 1;
+// Missing '}'
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Syntax error: expected '}' before end of file
+```
+
+### Case 4.4: Stray Extra Closing Brace [IMPLEMENTED]
+```solix
+void test() {
+    { int32 x = 1; }
+    } // Extra brace
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Syntax error: unexpected token '}'
+```
+
+### Case 4.6: Bare Execution Block Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    {
+        int32 x = 5; // Error: executable block outside method
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Executable blocks are not allowed directly in class body
+```
+
+---
+
+## BreakStatement
+
+*Specification Reference*: [BreakStatement](statements/control_flow/break_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Breaking Out of Deep Nested Blocks [IMPLEMENTED]
+```solix
+while (true) {
+    String s1 = new String("s1");
+    {
+        String s2 = new String("s2");
+        break; // Cleans up s2 and s1
+    }
+}
+```
+*Expected Result*: `s2` and `s1` are freed cleanly; 0 memory leaks.
+
+---
+
+### Case 3.2: Break in For Loop Preserves State [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 sum = 0;
+    for (int32 i = 0; i < 10; i++) {
+        if (i == 5) {
+            break;
+        }
+        sum += i;
+    }
+    return sum == 10 ? 0 : 1;
+}
+```
+*Expected Result*: Loop terminates when `i == 5`, producing sum 0+1+2+3+4 = 10.
+
+### Case 3.3: Break Inside Switch Statement [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 x = 2;
+    int32 res = 0;
+    switch (x) {
+        case 1: res = 10; break;
+        case 2: res = 20; break;
+        default: res = 30; break;
+    }
+    return res == 20 ? 0 : 1;
+}
+```
+*Expected Result*: Break transfers control out of switch construct cleanly.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Break Outside Loop or Switch [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = 10;
+    break; // Error: break not inside loop/switch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'break' statement not allowed outside of loop or switch
+```
+
+### Case 4.2: Break at Function Top Level [IMPLEMENTED]
+```solix
+void test() {
+    break; // Error: break not enclosed in loop or switch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'break' statement outside of loop or switch
+```
+
+### Case 4.3: Break Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    break; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+### Case 4.4: Break Inside If Not Enclosed in Loop or Switch [IMPLEMENTED]
+```solix
+void test(bool flag) {
+    if (flag) {
+        break; // Error: no enclosing loop
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'break' statement outside of loop or switch
+```
+
+---
+
+## ContinueStatement
+
+*Specification Reference*: [ContinueStatement](statements/control_flow/continue_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Continue Advances Loop Variable [IMPLEMENTED]
+```solix
+int32 hits = 0;
+for (int32 i = 0; i < 6; i++) {
+    if (i % 2 == 0) continue;
+    hits++;
+}
+```
+*Expected Result*: `hits` equals 3 (processed for 1, 3, 5).
+
+---
+
+### Case 3.2: Continue in While Loop [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 i = 0;
+    int32 count = 0;
+    while (i < 10) {
+        i++;
+        if (i % 2 == 0) {
+            continue;
+        }
+        count++;
+    }
+    return count == 5 ? 0 : 1;
+}
+```
+*Expected Result*: Bypasses odd body executions, executing exactly 5 times.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Continue Outside Loop [IMPLEMENTED]
+```solix
+void test() {
+    continue; // Error: not in loop
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'continue' statement not allowed outside of loop
+```
+
+### Case 4.2: Continue Inside Switch Not in Loop [IMPLEMENTED]
+```solix
+void test(int32 x) {
+    switch (x) {
+        case 1:
+            continue; // Error: continue cannot target switch
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'continue' statement outside of loop
+```
+
+### Case 4.3: Continue Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    continue; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+### Case 4.4: Continue Inside If Not Enclosed in Loop [IMPLEMENTED]
+```solix
+void test(bool flag) {
+    if (flag) {
+        continue; // Error: no enclosing loop
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'continue' statement outside of loop
+```
+
+---
+
+## DoWhileStatement
+
+*Specification Reference*: [DoWhileStatement](statements/control_flow/do_while_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Guaranteed Initial Pass with False Condition [IMPLEMENTED]
+```solix
+int32 ran = 0;
+do {
+    ran++;
+} while (false);
+```
+*Expected Result*: `ran` equals 1; body ran exactly once.
+
+---
+
+### Case 3.2: Multi-Pass Iteration and Condition Evaluation [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 sum = 0;
+    int32 i = 1;
+    do {
+        sum += i;
+        i++;
+    } while (i <= 5);
+    return sum == 15 ? 0 : 1;
+}
+```
+*Expected Result*: Executes body 5 times and exits with sum 15.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Accessing Body Variable in Condition [IMPLEMENTED]
+Variables declared inside the `do` block are not in scope in the condition.
+```solix
+void test() {
+    do {
+        int32 inner = 10;
+    } while (inner > 0); // Error: inner undefined
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Undefined identifier: inner
+```
+
+### Case 4.2: Non-Boolean Condition in Do-While [IMPLEMENTED]
+```solix
+void test() {
+    do {} while (42); // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Do-while loop condition must be of type 'bool', got 'int32'
+```
+
+### Case 4.3: Do-While Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    do {} while (true); // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## ExpressionStatement
+
+*Specification Reference*: [ExpressionStatement](statements/control_flow/expression_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Method Calls and Assignments [IMPLEMENTED]
+```solix
+int32 x = 0;
+x = 10;
+x++;
+Console.println(x);
+```
+*Expected Result*: Evaluates side effects sequentially; stack depth remains 0 at every statement boundary.
+
+### Case 3.2: Immediate Temporary Reclamation [IMPLEMENTED]
+```solix
+String generate() { return new String("temporary"); }
+
+void test() {
+    generate(); // Call and discard
+}
+```
+*Expected Result*: Returned `String` is decremented via `DEC_REF` immediately; 0 heap leaks.
+
+---
+
+### Case 3.3: Chained Fluent Method Calls [IMPLEMENTED]
+```solix
+class Builder {
+    public int32 val;
+    public Builder add(int32 x) { this.val += x; return this; }
+}
+
+static int32 main() {
+    Builder b = new Builder();
+    b.add(10).add(20).add(30);
+    return b.val == 60 ? 0 : 1;
+}
+```
+*Expected Result*: Chained calls execute sequentially as single expression statement.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Missing Semicolon [IMPLEMENTED]
+```solix
+void test() {
+    x = 10 // Missing ';'
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Syntax error: expected ';' after expression
+```
+
+### Case 4.2: Method Call on Null Reference (Runtime Fault) [IMPLEMENTED]
+```solix
+void test() {
+    String s = null;
+    s.length(); // Null pointer dereference
+}
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] NullReferenceException: Attempted to invoke method on null object reference
+```
+
+### Case 4.3: Incomplete Expression Statement [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = ; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Expected expression, got ';'
+```
+
+### Case 4.4: Expression Statement Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    10 + 20; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## ForStatement
+
+*Specification Reference*: [ForStatement](statements/control_flow/for_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Standard For Loop with Continue [IMPLEMENTED]
+```solix
+int32 evens = 0;
+for (int32 i = 0; i < 10; i++) {
+    if (i % 2 != 0) continue; // Jumps to i++
+    evens++;
+}
+```
+*Expected Result*: `evens` equals 5.
+
+---
+
+### Case 3.2: Empty Header Clauses for Infinite Loop with Break [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 count = 0;
+    for (;;) {
+        count++;
+        if (count == 5) {
+            break;
+        }
+    }
+    return count == 5 ? 0 : 1;
+}
+```
+*Expected Result*: `for (;;)` runs infinitely until terminated by internal `break`.
+
+### Case 3.3: Nested For Loops for Matrix Summation [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 total = 0;
+    for (int32 i = 0; i < 3; i++) {
+        for (int32 j = 0; j < 3; j++) {
+            total += 1;
+        }
+    }
+    return total == 9 ? 0 : 1;
+}
+```
+*Expected Result*: Inner and outer loop induction variables remain isolated, summing to 9.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Induction Variable Leakage [IMPLEMENTED]
+```solix
+void test() {
+    for (int32 i = 0; i < 5; i++) {}
+    Console.println(i); // Error: i is out of scope
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Undefined identifier: i
+```
+
+### Case 4.2: Non-Boolean Condition in For Loop [IMPLEMENTED]
+```solix
+void test() {
+    for (int32 i = 0; 100; i++) {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Loop condition must be of type 'bool', got 'int32'
+```
+
+### Case 4.3: For Loop Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    for (int32 i = 0; i < 10; i++) {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## IfStatement
+
+*Specification Reference*: [IfStatement](statements/control_flow/if_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Single Branch If [IMPLEMENTED]
+```solix
+int32 x = 10;
+if (x > 5) {
+    x = 20;
+}
+```
+*Expected Result*: `x` becomes 20.
+
+### Case 3.2: If-Else Chain [IMPLEMENTED]
+```solix
+int32 score = 85;
+char grade = 'F';
+if (score >= 90) {
+    grade = 'A';
+} else if (score >= 80) {
+    grade = 'B';
+} else {
+    grade = 'C';
+}
+```
+*Expected Result*: `grade` evaluates to `'B'`.
+
+---
+
+### Case 3.3: Complex Short-Circuit Logical Condition [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 a = 10;
+    int32 b = 20;
+    bool executed = false;
+    if (a == 10 && (b == 20 || false)) {
+        executed = true;
+    }
+    return executed ? 0 : 1;
+}
+```
+*Expected Result*: Evaluates grouped boolean logic and enters true branch.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Non-Boolean Condition Type [IMPLEMENTED]
+```solix
+void test() {
+    int32 count = 1;
+    if (count) { // Error: int32 not allowed as condition
+        Console.println("yes");
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: If condition must be of type 'bool', got 'int32'
+```
+
+### Case 4.2: Incompatible Assignment in Condition [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = 0;
+    if (x = 5) {} // Error: assignment yields int32, not bool
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: If condition must be of type 'bool', got 'int32'
+```
+
+### Case 4.3: If Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    if (true) {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## ReturnStatement
+
+*Specification Reference*: [ReturnStatement](statements/control_flow/return_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Early Return from Nested Scopes [IMPLEMENTED]
+```solix
+int32 find(bool fast) {
+    String a = new String("a");
+    {
+        String b = new String("b");
+        if (fast) return 1;
+    }
+    return 0;
+}
+```
+*Expected Result*: Returns 1; both `b` and `a` are deallocated.
+
+---
+
+### Case 3.2: Return from Inside Try-Finally Executing Finally First [IMPLEMENTED]
+```solix
+static int32 result = 0;
+
+static int32 compute() {
+    try {
+        return 42;
+    } finally {
+        result = 100;
+    }
+}
+
+static int32 main() {
+    int32 val = compute();
+    return (val == 42 && result == 100) ? 0 : 1;
+}
+```
+*Expected Result*: Returns 42 while reliably executing `finally` block before stack unwind completes.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Missing Return Value in Non-Void Method [IMPLEMENTED]
+```solix
+int32 get_val() {
+    return; // Error: must return a value
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Must return a value from non-void method
+```
+
+### Case 4.2: Return Type Mismatch [IMPLEMENTED]
+```solix
+int32 get_num() {
+    return "text"; // Error: String cannot convert to int32
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Return type mismatch: expected 'int32', got 'String'
+```
+
+### Case 4.3: Returning Value from Void Method [IMPLEMENTED]
+```solix
+void test() {
+    return 42; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot return a value from a void method
+```
+
+### Case 4.5: Return Statement Placed at File Top Level [IMPLEMENTED]
+```solix
+return 0; // Error: return at top level outside any function
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: 'return' statement outside of function or method body
+```
+
+### Case 4.6: Return Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    return 0; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## SwitchStatement
+
+*Specification Reference*: [SwitchStatement](statements/control_flow/switch_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Switch with Explicit Break [IMPLEMENTED]
+```solix
+int32 value = 2;
+String name = "";
+switch (value) {
+    case 1: name = "one"; break;
+    case 2: name = "two"; break;
+    default: name = "other"; break;
+}
+```
+*Expected Result*: `name` equals `"two"`.
+
+---
+
+### Case 3.2: Switch on Strongly Typed Enum [IMPLEMENTED]
+```solix
+enum Status { PENDING, APPROVED, REJECTED }
+
+static int32 evaluate(Status s) {
+    switch (s) {
+        case Status.PENDING: return 1;
+        case Status.APPROVED: return 2;
+        case Status.REJECTED: return 3;
+        default: return 0;
+    }
+}
+
+static int32 main() {
+    return evaluate(Status.APPROVED) == 2 ? 0 : 1;
+}
+```
+*Expected Result*: Evaluates enum constants in switch case selection.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Duplicate Case Constant [IMPLEMENTED]
+```solix
+void test(int32 x) {
+    switch (x) {
+        case 1: break;
+        case 1: break; // Error: duplicate
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Duplicate case value '1' in switch statement
+```
+
+### Case 4.2: Variable Expression in Case Label [IMPLEMENTED]
+```solix
+void test(int32 x, int32 dynamicVal) {
+    switch (x) {
+        case dynamicVal: break; // Error: case label must be compile-time constant
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Case label must be a constant literal
+```
+
+### Case 4.4: Switch Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    switch (1) { case 1: break; } // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## ThrowStatement
+
+*Specification Reference*: [ThrowStatement](statements/control_flow/throw_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Throw Handled by Catch [IMPLEMENTED]
+```solix
+bool caught = false;
+try {
+    throw new std.Exception("test");
+} catch (std.Exception e) {
+    caught = true;
+}
+```
+*Expected Result*: `caught` is `true`.
+
+---
+
+### Case 3.2: Rethrowing Caught Exception Instance [IMPLEMENTED]
+```solix
+static int32 main() {
+    bool caught_outer = false;
+    try {
+        try {
+            throw new Exception("inner");
+        } catch (Exception e) {
+            throw e; // Rethrow
+        }
+    } catch (Exception outer) {
+        caught_outer = true;
+    }
+    return caught_outer ? 0 : 1;
+}
+```
+*Expected Result*: Rethrown exception safely propagates to enclosing catch handler.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Throwing Primitive Value [IMPLEMENTED]
+```solix
+void test() {
+    throw 404; // Error: cannot throw primitive
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot throw type 'int32': must inherit from 'std.Exception'
+```
+
+### Case 4.2: Throwing Null Reference at Runtime [IMPLEMENTED]
+```solix
+void test() {
+    std.Exception e = null;
+    throw e; // Throws NullReferenceException
+}
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] NullReferenceException: Attempted to throw null exception reference
+```
+
+### Case 4.3: Throwing Uninstantiated Class Identifier [IMPLEMENTED]
+```solix
+void test() {
+    throw Exception; // Error: expected instance, got type identifier
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot throw non-instantiated type 'Exception'
+```
+
+### Case 4.5: Throw Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    throw new Exception("bad"); // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## TryCatchFinallyStatement
+
+*Specification Reference*: [TryCatchFinallyStatement](statements/control_flow/try_catch_finally_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Specific Catch Hierarchy [IMPLEMENTED]
+```solix
+class CustomError extends std.Exception { CustomError() : super("Custom") {} }
+
+int32 result = 0;
+try {
+    throw new CustomError();
+} catch (CustomError c) {
+    result = 1; // Matches here
+} catch (std.Exception e) {
+    result = 2;
+}
+```
+*Expected Result*: `result` equals 1.
+
+---
+
+### Case 3.2: Try Block with Only Finally Clause [IMPLEMENTED]
+```solix
+static int32 cleanup_marker = 0;
+
+static void work() {
+    try {
+        cleanup_marker += 10;
+    } finally {
+        cleanup_marker += 20;
+    }
+}
+
+static int32 main() {
+    work();
+    return cleanup_marker == 30 ? 0 : 1;
+}
+```
+*Expected Result*: Executes try followed by finally block without catch clause.
+
+### Case 3.3: Exception in Catch with Guaranteed Finally Execution [IMPLEMENTED]
+```solix
+static bool finally_ran = false;
+
+static void faulty() {
+    try {
+        throw new Exception("one");
+    } catch (Exception e) {
+        throw new Exception("two");
+    } finally {
+        finally_ran = true;
+    }
+}
+
+static int32 main() {
+    try {
+        faulty();
+    } catch (Exception e) {}
+    return finally_ran ? 0 : 1;
+}
+```
+*Expected Result*: `finally` executes before the second exception escapes the frame.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Unreachable Catch Clause [IMPLEMENTED]
+```solix
+class SubErr extends std.Exception {}
+
+void test() {
+    try {
+        work();
+    } catch (std.Exception e) {
+    } catch (SubErr s) { // Error: unreachable catch
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Unreachable catch clause: 'SubErr' is already handled by preceding catch for 'std.Exception'
+```
+
+### Case 4.2: Catching Non-Exception Type [IMPLEMENTED]
+```solix
+void test() {
+    try {} catch (int32 x) {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Catch type must derive from 'Exception', got 'int32'
+```
+
+### Case 4.3: Duplicate Catch Clause for Same Type [IMPLEMENTED]
+```solix
+void test() {
+    try {}
+    catch (Exception e) {}
+    catch (Exception e2) {} // Error: duplicate catch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Duplicate catch clause for type 'Exception'
+```
+
+### Case 4.5: Try-Catch Statement Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    try {} catch (Exception e) {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## VariableDeclarationStatement
+
+*Specification Reference*: [VariableDeclarationStatement](statements/control_flow/variable_declaration.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Primitive and Reference Declarations [IMPLEMENTED]
+```solix
+int32 a = 1;
+float64 b = 2.5;
+bool c = true;
+String s = new String("hello");
+int32[] nums = new int32[5];
+```
+*Expected Result*: Compiles cleanly; each variable is assigned a contiguous slot in the activation frame.
+
+### Case 3.2: Polymorphic Upcasting [IMPLEMENTED]
+Assigning a derived class instance to a base class variable.
+```solix
+class Animal {}
+class Cat extends Animal {}
+
+void test() {
+    Animal a = new Cat(); // Valid polymorphic binding
+}
+```
+*Expected Result*: Passes type checking; `Cat` instance stored in `Animal` slot.
+
+### Case 3.3: Interface Binding [IMPLEMENTED]
+```solix
+interface Printable { void print(); }
+class Doc implements Printable { void print() {} }
+
+void test() {
+    Printable p = new Doc();
+}
+```
+*Expected Result*: Binds instance to interface variable with valid VTable slot.
+
+---
+
+### Case 3.4: Multiple Declarations on Single Line [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 a = 1, b = 2, c = 3;
+    return (a + b + c) == 6 ? 0 : 1;
+}
+```
+*Expected Result*: Emits sequential local allocations for comma-separated variables.
+
+### Case 3.5: Constant Local Variable Declaration [IMPLEMENTED]
+```solix
+static int32 main() {
+    const int32 LIMIT = 100;
+    return LIMIT == 100 ? 0 : 1;
+}
+```
+*Expected Result*: Marks local variable immutable in scope frame.
+
+### Case 3.6: File-Scope Global Variable Declaration [IMPLEMENTED]
+```solix
+int32 globalCounter = 45;
+
+public class Main {
+    public static int32 main() {
+        return globalCounter == 45 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Top-level file-scope variable `globalCounter` is allocated as a static global and accessible across functions and classes.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Type Mismatch in Initializer [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = "hello"; // Incompatible types
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Type mismatch in variable declaration: expected 'int32', got 'String'
+```
+
+### Case 4.2: Duplicate Declaration in Same Scope [IMPLEMENTED]
+```solix
+void test() {
+    int32 score = 10;
+    int32 score = 20; // Error: duplicate
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Variable 'score' is already defined in the current scope
+```
+
+### Case 4.3: Unknown Type Name [IMPLEMENTED]
+```solix
+void test() {
+    NonExistentType obj = null;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Unknown type 'NonExistentType'
+```
+
+### Case 4.4: Declaring Variable as Void [IMPLEMENTED]
+```solix
+void test() {
+    void placeholder;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Variable cannot be of type 'void'
+```
+
+### Case 4.5: Reassigning Const Local Variable [IMPLEMENTED]
+```solix
+void test() {
+    const int32 x = 10;
+    x = 20; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot assign to const variable 'x'
+```
+
+### Case 4.6: Assigning Null to Primitive Type [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = null; // Error: primitive types are non-nullable
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot assign 'null' to primitive type 'int32'
+```
+
+### Case 4.7: Solitary Variable Declaration in If Without Braces [IMPLEMENTED]
+```solix
+void test() {
+    if (true)
+        int32 x = 5; // Error: variable declaration cannot be solitary statement of branch
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Variable declarations are not allowed as immediate solitary branch statements without a block
+```
+
+### Case 4.8: Solitary Variable Declaration in While Without Braces [IMPLEMENTED]
+```solix
+void test() {
+    while (true)
+        int32 x = 5; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Variable declarations are not allowed as immediate solitary loop statements without a block
+```
+
+---
+
+## WhileStatement
+
+*Specification Reference*: [WhileStatement](statements/control_flow/while_statement.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Standard Counted Loop [IMPLEMENTED]
+```solix
+int32 total = 0;
+int32 i = 1;
+while (i <= 5) {
+    total = total + i;
+    i++;
+}
+```
+*Expected Result*: `total` equals 15.
+
+### Case 3.2: While Loop with Break and Continue [IMPLEMENTED]
+```solix
+int32 sum = 0;
+int32 i = 0;
+while (true) {
+    i++;
+    if (i % 2 == 0) continue;
+    if (i > 5) break;
+    sum = sum + i;
+}
+```
+*Expected Result*: `sum` equals 1 + 3 + 5 = 9.
+
+---
+
+### Case 3.3: While Loop with Complex Short-Circuit Condition [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 count = 0;
+    int32 limit = 5;
+    while (count < 10 && count < limit) {
+        count++;
+    }
+    return count == 5 ? 0 : 1;
+}
+```
+*Expected Result*: Terminates once compound condition evaluates to false.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Non-Boolean Loop Condition [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = 5;
+    while (x) { // Error: x is not bool
+        x--;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: While condition must be of type 'bool', got 'int32'
+```
+
+---
+
+# Part IV: Expressions & Operators
+
+### Case 4.2: While Loop Missing Condition Parentheses [IMPLEMENTED]
+```solix
+void test() {
+    while true {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Expected '(' after 'while'
+```
+
+### Case 4.3: While Loop Placed Directly in Class Body [IMPLEMENTED]
+```solix
+class BadClass {
+    while (true) {} // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Statements are not allowed directly in class body
+```
+
+---
+
+## ArrayAccessExpression
+
+*Specification Reference*: [ArrayAccessExpression](statements/expressions/array_access_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: In-Bounds Read and Write [IMPLEMENTED]
+```solix
+int32[] buffer = new int32[3];
+buffer[0] = 100;
+buffer[1] = 200;
+int32 sum = buffer[0] + buffer[1]; // 300
+```
+*Expected Result*: `sum` equals 300.
+
+---
+
+### Case 3.2: Multi-Dimensional Array Access [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32[][] grid = new int32[][2];
+    grid[0] = new int32[2];
+    grid[0][1] = 42;
+    return grid[0][1] == 42 ? 0 : 1;
+}
+```
+*Expected Result*: Successfully reads and writes through nested array index chains.
+
+### Case 3.3: Array Slot Mutation ARC Deallocation [IMPLEMENTED]
+```solix
+class Item {
+    public int32 id;
+    public Item(int32 id) { this.id = id; }
+}
+
+int32 main() {
+    Item[] arr = new Item[1];
+    for (int32 i = 0; i < 5; i++) {
+        arr[0] = new Item(i);
+    }
+    Item it = arr[0];
+    return it.id == 4 ? 0 : 1;
+}
+```
+*Expected Result*: Overwriting the element in `arr[0]` on each iteration decrements the old occupant, keeping live object count strictly bounded and reclaiming all previous items.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Index Out of Bounds (Runtime Fault) [IMPLEMENTED]
+```solix
+int32[] data = new int32[2];
+int32 fail = data[5]; // Out of bounds
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] IndexOutOfBoundsException: Index 5 out of bounds for array length 2
+```
+
+### Case 4.2: Non-Integer Array Subscript [IMPLEMENTED]
+```solix
+void test(int32[] arr) {
+    int32 v = arr["key"]; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Array index must be int32, got 'String'
+```
+
+### Case 4.4: Subscript Access on Null Reference at Runtime [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32[] arr = null;
+    int32 v = arr[0]; // Runtime Fault
+    return 0;
+}
+```
+*Expected Result*: Throws `NullPointerException`.
+
+---
+
+## ArrayCreationExpression
+
+*Specification Reference*: [ArrayCreationExpression](statements/expressions/array_creation_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Zero-Initialized Array [IMPLEMENTED]
+```solix
+int32[] data = new int32[5];
+int32 first = data[0]; // 0
+```
+*Expected Result*: `first` is 0.
+
+---
+
+### Case 3.2: Reference Type Array Allocation [IMPLEMENTED]
+```solix
+class Item {
+    public int32 id;
+}
+
+static int32 main() {
+    Item[] items = new Item[3];
+    return items[0] == null ? 0 : 1;
+}
+```
+*Expected Result*: Reference type array initializes elements to `null`.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Negative Size at Runtime (Runtime Fault) [IMPLEMENTED]
+```solix
+int32[] bad = new int32[-1];
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] NegativeArraySizeException: Attempted to create array with negative size -1
+```
+
+### Case 4.2: Array Creation with Missing Size [IMPLEMENTED]
+```solix
+void test() {
+    int32[] arr = new int32[](); // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Array allocation requires size expression
+```
+
+---
+
+## ArrayLiteralExpression
+
+*Specification Reference*: [ArrayLiteralExpression](statements/expressions/array_literal_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Dual Literal Syntax [IMPLEMENTED]
+```solix
+int32[] a = [10, 20];
+int32[] b = {10, 20}; // Both bracket and brace syntax supported
+```
+*Expected Result*: Both arrays initialize with identical elements.
+
+---
+
+### Case 3.2: Nested 2D Array Literal [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32[][] matrix = {{1, 2}, {3, 4}};
+    return (matrix[0][0] + matrix[1][1]) == 5 ? 0 : 1;
+}
+```
+*Expected Result*: Correctly constructs multidimensional array literal.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Incompatible Literal Elements [IMPLEMENTED]
+```solix
+var arr = [10, "text"]; // Incompatible types
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Incompatible types in array literal
+```
+
+### Case 4.2: Array Literal with Mixed Incompatible Types [IMPLEMENTED]
+```solix
+void test() {
+    var arr = {1, "two", true}; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Incompatible element types in array literal
+```
+
+---
+
+## AssignmentExpression
+
+*Specification Reference*: [AssignmentExpression](statements/expressions/assignment_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Chained Assignment [IMPLEMENTED]
+```solix
+int32 a; int32 b; int32 c;
+a = b = c = 10;
+```
+*Expected Result*: `a`, `b`, and `c` all equal 10.
+
+---
+
+### Case 3.2: Compound Assignments (+=, -=, *=, /=) [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 x = 10;
+    x += 5;  // 15
+    x -= 3;  // 12
+    x *= 2;  // 24
+    x /= 4;  // 6
+    return x == 6 ? 0 : 1;
+}
+```
+*Expected Result*: In-place arithmetic compound assignment computes cleanly.
+
+### Case 3.3: Assigning to Object Field Target [IMPLEMENTED]
+```solix
+class Box {
+    public int32 weight;
+}
+
+static int32 main() {
+    Box b = new Box();
+    b.weight = 50;
+    return b.weight == 50 ? 0 : 1;
+}
+```
+*Expected Result*: Correctly emits member setter bytecode sequence.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Assigning to Literal / RValue [IMPLEMENTED]
+```solix
+void test() {
+    10 = x; // Error: invalid lvalue
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Invalid assignment target
+```
+
+### Case 4.2: Compound Assignment Type Mismatch [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = 10;
+    x += "text"; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot apply operator '+=' to types 'int32' and 'String'
+```
+
+---
+
+## BinaryExpression
+
+*Specification Reference*: [BinaryExpression](statements/expressions/binary_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Short-Circuit Logical AND [IMPLEMENTED]
+```solix
+bool result = false && (10 / 0 == 0); // Division by zero avoided
+```
+*Expected Result*: `result` is `false`.
+
+---
+
+### Case 3.2: Short-Circuit Logical OR [IMPLEMENTED]
+```solix
+static int32 side_effects = 0;
+static bool get_false() { side_effects++; return false; }
+static bool get_true() { side_effects++; return true; }
+
+static int32 main() {
+    bool res = get_true() || get_false();
+    return (res && side_effects == 1) ? 0 : 1;
+}
+```
+*Expected Result*: Right-hand operand of `||` is never evaluated when left is true.
+
+### Case 3.3: Relational Comparisons (<, <=, >, >=) [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 a = 10;
+    int32 b = 20;
+    if (a < b && a <= 10 && b > a && b >= 20) {
+        return 0;
+    }
+    return 1;
+}
+```
+*Expected Result*: All relational comparisons evaluate correctly.
+
+### Case 3.4: Extreme Boundary Arithmetic & Signed Limits [IMPLEMENTED]
+```solix
+static int32 main() {
+    int64 min64 = -9223372036854775808L;
+    int64 divResult = min64 / -1;
+    int64 modResult = min64 % -1;
+
+    int64 max64 = 9223372036854775807L;
+    int64 divMax = max64 / -1;
+
+    int32 min32 = -2147483648;
+    int32 div32 = min32 / 2;
+
+    if (divResult == min64 && modResult == 0 &&
+        divMax == -max64 && div32 == -1073741824) {
+        return 0;
+    }
+    return 1;
+}
+```
+*Expected Result*: Evaluates division and modulo on INT64_MIN by -1 without hardware SIGFPE, and verifies extreme signed boundary arithmetic for int64 and int32.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Division by Zero (Runtime Fault) [IMPLEMENTED]
+```solix
+int32 x = 10 / 0;
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] ArithmeticException: Division by zero
+```
+
+### Case 4.2: Incompatible Arithmetic Types [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = 10 + true; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot apply operator '+' to types 'int32' and 'bool'
+```
+
+---
+
+## CastExpression
+
+*Specification Reference*: [CastExpression](statements/expressions/cast_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Valid Downcast [IMPLEMENTED]
+```solix
+Animal a = new Dog();
+Dog d = (Dog)a; // Succeeds
+```
+*Expected Result*: `d` holds a valid reference to `Dog`.
+
+---
+
+### Case 3.2: Numeric Widening and Narrowing Conversions [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 small = 42;
+    int64 big = (int64)small;
+    int8 tiny = (int8)small;
+    return (big == 42 && tiny == 42) ? 0 : 1;
+}
+```
+*Expected Result*: Widens and truncates integer values explicitly.
+
+---
+
+### Case 3.4: Casting Null Literal to Reference Type [IMPLEMENTED]
+```solix
+class Person {}
+
+static int32 main() {
+    Person p = (Person)null;
+    return p == null ? 0 : 1;
+}
+```
+*Expected Result*: Casting `null` to a class reference type succeeds cleanly and preserves null.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Bad Downcast (Runtime Fault) [IMPLEMENTED]
+```solix
+Animal a = new Cat();
+Dog d = (Dog)a; // Fails!
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] TypeCastException: Cannot cast 'Cat' to 'Dog'
+```
+
+### Case 4.2: Compile-Time Rejection of Unrelated Class Cast [IMPLEMENTED]
+```solix
+class Cat {}
+class Dog {}
+
+void test() {
+    Cat c = new Cat();
+    Dog d = (Dog)c; // Error: incompatible class hierarchies
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot cast between unrelated types 'Cat' and 'Dog'
+```
+
+### Case 4.4: Cast Expression with Non-Type Identifier [IMPLEMENTED]
+```solix
+void test(int32 x) {
+    int32 y = (123)x; // Error: 123 is not a type
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Expected type name in cast expression
+```
+
+---
+
+## IdentifierNode
+
+*Specification Reference*: [IdentifierNode](statements/expressions/identifier_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Local Resolution Precedence [IMPLEMENTED]
+```solix
+int32 val = 100;
+{
+    int32 val = 200;
+    Console.println(val); // Resolves to local slot (200)
+}
+```
+*Expected Result*: Prints 200.
+
+---
+
+### Case 3.2: Explicit Member Access via this Identifier [IMPLEMENTED]
+```solix
+class ScopeTest {
+    public int32 val;
+    public void setVal(int32 val) {
+        this.val = val; // Disambiguates parameter vs instance field
+    }
+}
+```
+*Expected Result*: Explicit `this` properly distinguishes field from local variable.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Undefined Identifier [IMPLEMENTED]
+```solix
+void test() {
+    int32 a = unknown_var;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Undefined identifier: unknown_var
+```
+
+### Case 4.2: Accessing Local Variable Before Declaration [IMPLEMENTED]
+```solix
+void test() {
+    x = 10; // Error: x not yet declared
+    int32 x = 0;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Undeclared identifier 'x'
+```
+
+### Case 4.3: Using This Keyword Outside Any Class [IMPLEMENTED]
+```solix
+void test() {
+    int32 x = this.val; // Error: 'this' outside class
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Keyword 'this' is only valid within non-static class member methods
+```
+
+### Case 4.4: Using This Keyword Inside Static Method [IMPLEMENTED]
+```solix
+class Example {
+    public static void staticMethod() {
+        int32 x = this.val; // Error: 'this' in static context
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Keyword 'this' cannot be used in a static method
+```
+
+---
+
+## InstanceOfExpression
+
+*Specification Reference*: [InstanceOfExpression](statements/expressions/instanceof_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Safe Null Evaluation [IMPLEMENTED]
+```solix
+Animal a = null;
+bool check = a instanceof Dog; // false, no panic!
+```
+*Expected Result*: `check` is `false`.
+
+---
+
+### Case 3.2: InstanceOf Subclass Evaluates True for Superclass [IMPLEMENTED]
+```solix
+class Base {}
+class Sub extends Base {}
+
+static int32 main() {
+    Base obj = new Sub();
+    if (obj instanceof Base && obj instanceof Sub) {
+        return 0;
+    }
+    return 1;
+}
+```
+*Expected Result*: Instance of derived class returns true for both base and derived tests.
+
+### Case 3.3: Primitive Array Evaluates False for Class InstanceOf [IMPLEMENTED]
+```solix
+class Dog {}
+
+static int32 main() {
+    int32[] arr = new int32[5];
+    arr[0] = 1;
+    bool check = arr instanceof Dog;
+    return check ? 1 : 0;
+}
+```
+*Expected Result*: Evaluates to false because primitive arrays are tagged with BlockTag::ARRAY_I32 rather than BlockTag::OBJECT, avoiding vtable confusion.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Primitive Target [IMPLEMENTED]
+```solix
+bool b = 10 instanceof int32; // Error
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: 'instanceof' cannot be applied to primitive types
+```
+
+### Case 4.2: InstanceOf with Undeclared Type Name [IMPLEMENTED]
+```solix
+void test(Object o) {
+    bool b = o instanceof NonExistentClass; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot resolve type 'NonExistentClass' in instanceof expression
+```
+
+---
+
+## LiteralNode
+
+*Specification Reference*: [LiteralNode](statements/expressions/literal_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: All Literal Types [IMPLEMENTED]
+```solix
+int64 big = 10000000000L;
+char letter = 'Z';
+String empty = "";
+```
+*Expected Result*: All primitives compile and load accurately.
+
+---
+
+### Case 3.2: Hexadecimal and Binary Numeric Literals [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 hex = 0x2A;    // 42
+    int32 bin = 0b101010; // 42
+    return (hex == 42 && bin == 42) ? 0 : 1;
+}
+```
+*Expected Result*: Hex (`0x`) and Binary (`0b`) integer prefixes parse correctly.
+
+### Case 3.3: Character Literals with Escapes [IMPLEMENTED]
+```solix
+static int32 main() {
+    char newline = '\n';
+    char tab = '\t';
+    char quote = '\'';
+    return 0;
+}
+```
+*Expected Result*: Character escape sequences produce valid 8-bit scalar values.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Integer Literal Overflow [IMPLEMENTED]
+```solix
+int32 x = 99999999999999999999;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] lexer.cpp: Integer literal out of range for type 'int32'
+```
+
+### Case 4.2: Unterminated String Literal [IMPLEMENTED]
+```solix
+void test() {
+    String s = "unterminated;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] lexer.cpp: Unterminated string literal
+```
+
+---
+
+## MemberAccessExpression
+
+*Specification Reference*: [MemberAccessExpression](statements/expressions/member_access_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Chained Member Access [IMPLEMENTED]
+```solix
+class Address { String city; }
+class Person { Address addr; }
+
+void test(Person p) {
+    String city = p.addr.city;
+}
+```
+*Expected Result*: Resolves offsets sequentially; compiles cleanly.
+
+---
+
+### Case 3.2: Static Field Access on Class Name [IMPLEMENTED]
+```solix
+class MathConstants {
+    public static int32 SCALE = 100;
+}
+
+static int32 main() {
+    return MathConstants.SCALE == 100 ? 0 : 1;
+}
+```
+*Expected Result*: Emits `GET_GLOBAL` targeting static class field.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Member Access on Null Reference (Runtime Fault) [IMPLEMENTED]
+```solix
+Person p = null;
+String c = p.addr; // Throws NullReferenceException
+```
+*Expected Runtime Exception*:
+```text
+[FATAL VM PANIC] NullReferenceException: Attempted to read property from null object reference
+```
+
+### Case 4.2: Accessing Non-Existent Member Field [IMPLEMENTED]
+```solix
+class Empty {}
+
+void test() {
+    Empty e = new Empty();
+    int32 x = e.unknownField; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Class 'Empty' has no member named 'unknownField'
+```
+
+### Case 4.4: Using Super Keyword in Non-Derived Class [IMPLEMENTED]
+```solix
+class BaseOnly {
+    public void test() {
+        super.doSomething(); // Error: class does not extend another class
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Keyword 'super' cannot be used in a class with no superclass
+```
+
+---
+
+## MethodCallExpression
+
+*Specification Reference*: [MethodCallExpression](statements/expressions/method_call_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Overloaded Method Selection [IMPLEMENTED]
+```solix
+class Printer {
+    void print(int32 x) { Console.println("int"); }
+    void print(String s) { Console.println("str"); }
+}
+
+void test() {
+    Printer p = new Printer();
+    p.print(42);       // Calls print(int32)
+    p.print("hello");  // Calls print(String)
+}
+```
+*Expected Result*: First prints `"int"`, second prints `"str"`.
+
+---
+
+### Case 3.2: Calling Inherited Superclass Method [IMPLEMENTED]
+```solix
+class BaseCalc {
+    public int32 add(int32 a, int32 b) { return a + b; }
+}
+class AdvancedCalc extends BaseCalc {
+    public int32 doubleAdd(int32 a, int32 b) {
+        return this.add(a, b) * 2;
+    }
+}
+
+static int32 main() {
+    AdvancedCalc calc = new AdvancedCalc();
+    return calc.doubleAdd(3, 4) == 14 ? 0 : 1;
+}
+```
+*Expected Result*: Inherited methods dispatched without error.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: No Matching Overload [IMPLEMENTED]
+```solix
+void test(Printer p) {
+    p.print(true); // Error: no boolean overload
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: No matching overload for method 'print' with arguments (bool)
+```
+
+### Case 4.2: Method Call with Incorrect Argument Count [IMPLEMENTED]
+```solix
+class Calculator {
+    public int32 compute(int32 a, int32 b) { return a + b; }
+}
+
+void test() {
+    Calculator c = new Calculator();
+    c.compute(10); // Error: expected 2 arguments, got 1
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: No matching overload for method 'compute' with arguments (int32)
+```
+
+---
+
+## NewInstanceExpression
+
+*Specification Reference*: [NewInstanceExpression](statements/expressions/new_instance_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Instantiation with Overloaded Constructor [IMPLEMENTED]
+```solix
+class Item {
+    int32 val;
+    Item() { this.val = 0; }
+    Item(int32 v) { this.val = v; }
+}
+
+void test() {
+    Item i1 = new Item();
+    Item i2 = new Item(42);
+}
+```
+*Expected Result*: `i1.val` is 0; `i2.val` is 42.
+
+---
+
+### Case 3.2: Instantiating Class with In-Class Field Initializers [IMPLEMENTED]
+```solix
+class Config {
+    public int32 timeout = 3000;
+    public bool enabled = true;
+}
+
+static int32 main() {
+    Config c = new Config();
+    return (c.timeout == 3000 && c.enabled == true) ? 0 : 1;
+}
+```
+*Expected Result*: Default field initializers execute upon instance creation.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Instantiating Abstract Class [IMPLEMENTED]
+```solix
+abstract class Base {}
+Base b = new Base(); // Error
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot instantiate abstract class 'Base'
+```
+
+### Case 4.2: Calling Non-Existent Constructor Overload [IMPLEMENTED]
+```solix
+class Box {
+    public Box(int32 w) {}
+}
+
+void test() {
+    Box b = new Box("bad"); // Error: no ctor taking String
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: No matching constructor: Box.ctor(String)
+```
+
+---
+
+## TernaryExpression
+
+*Specification Reference*: [TernaryExpression](statements/expressions/ternary_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Safe Guard with Null Check [IMPLEMENTED]
+```solix
+String s = null;
+int32 len = (s != null) ? s.length() : 0; // Short-circuits; does not call s.length()!
+```
+*Expected Result*: `len` equals 0; no null pointer exception occurs.
+
+---
+
+### Case 3.2: Nested Ternary Evaluation [IMPLEMENTED]
+```solix
+static int32 classify(int32 x) {
+    return x > 0 ? 1 : (x < 0 ? -1 : 0);
+}
+
+static int32 main() {
+    return (classify(10) == 1 && classify(-5) == -1 && classify(0) == 0) ? 0 : 1;
+}
+```
+*Expected Result*: Nested ternary expressions evaluate in correct order.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Non-Boolean Condition [IMPLEMENTED]
+```solix
+int32 res = 5 ? 1 : 2; // Error
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Ternary condition must be of type 'bool', got 'int32'
+```
+
+### Case 4.2: Mismatched Branch Types [IMPLEMENTED]
+```solix
+void test(bool cond) {
+    int32 val = cond ? 42 : "string"; // Error: incompatible branch types
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Ternary branches must have the same type
+```
+
+---
+
+## UnaryExpression
+
+*Specification Reference*: [UnaryExpression](statements/expressions/unary_expression.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 3.1: Postfix vs Prefix [IMPLEMENTED]
+```solix
+int32 x = 5;
+int32 post = x++; // post = 5, x = 6
+int32 pre = ++x;  // pre = 7, x = 7
+```
+*Expected Result*: `post` is 5, `pre` is 7.
+
+---
+
+### Case 3.2: Unary Negation on Numeric Expressions [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 x = 42;
+    int32 neg = -x;
+    return neg == -42 ? 0 : 1;
+}
+```
+*Expected Result*: Evaluates `-x` to -42.
+
+### Case 3.3: Logical NOT on Boolean Variable [IMPLEMENTED]
+```solix
+static int32 main() {
+    bool active = false;
+    bool inverted = !active;
+    return inverted == true ? 0 : 1;
+}
+```
+*Expected Result*: Inverts boolean operand with `LOGICAL_NOT` opcode.
+
+### Case 3.4: Extreme Signed Boundary Negation (INT32_MIN and INT64_MIN) [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 min32 = -2147483648;
+    int32 neg32 = -min32;
+    int64 min64 = -9223372036854775808L;
+    int64 neg64 = -min64;
+    if (neg32 == -2147483648 && neg64 == -9223372036854775808L) {
+        return 0;
+    }
+    return 1;
+}
+```
+*Expected Result*: In two's-complement arithmetic, negating INT32_MIN wraps to INT32_MIN and negating INT64_MIN wraps to INT64_MIN without undefined behavior.
+
+---
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 4.1: Increment on Constant [IMPLEMENTED]
+```solix
+++10; // Error
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] parser.cpp: Invalid operand for increment operator: expected lvalue
+```
+
+### Case 4.2: Unary Minus on Non-Numeric Operand [IMPLEMENTED]
+```solix
+class NonNumeric {}
+
+void test() {
+    NonNumeric obj = new NonNumeric();
+    NonNumeric neg = -obj; // Error
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Cannot apply unary operator '-' to type 'NonNumeric'
+```
+
+---
+
+## Suite 38: SizeOfExpression
+
+### Positive Test Scenarios (Functional Execution & State)
+
+### Case 1.1: Primitive Type Sizing [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 s1 = sizeof(int8);
+    int32 s2 = sizeof(int16);
+    int32 s4 = sizeof(int32);
+    int32 s8 = sizeof(int64);
+    int32 sf4 = sizeof(float32);
+    int32 sf8 = sizeof(float64);
+    int32 sb = sizeof(bool);
+    int32 sc = sizeof(char);
+    if (s1 == 1 && s2 == 2 && s4 == 4 && s8 == 8 && sf4 == 4 && sf8 == 8 && sb == 1 && sc == 1) {
+        return 0;
+    }
+    return 1;
+}
+```
+*Expected Result*: Returns 0 indicating all primitive types have correct byte sizes.
+
+### Case 1.2: Class Type Compile-Time Sizing [IMPLEMENTED]
+```solix
+class Point {
+    int32 x;
+    int32 y;
+}
+static int32 main() {
+    int32 sz = sizeof(Point);
+    return sz >= 16 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating compile-time class instance size includes fields and vtable header.
+
+### Case 2.1: Dynamic Instance Sizing on Heap Objects [IMPLEMENTED]
+```solix
+class Item {
+    int32 a;
+    int32 b;
+}
+static int32 main() {
+    Item item = new Item();
+    int32 sz = sizeof(item);
+    return sz >= 16 ? 0 : 1;
+}
+```
+*Expected Result*: Evaluates dynamic heap object capacity at runtime and returns 0.
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 3.1: SizeOf on Undeclared Identifier [IMPLEMENTED]
+```solix
+void test() {
+    int32 s = sizeof(NonExistentType);
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder.cpp: Unknown type 'NonExistentType' in sizeof expression
+```
+---
+
+## Suite 39: CalleeFrameAllocation (ALLOC_FRAME)
+
+### Positive Test Scenarios (Functional Execution & State)
+
+### Case 1.1: Polymorphic Virtual Dispatch with Variable Frame Sizes [IMPLEMENTED]
+```solix
+class Base {
+    public virtual int32 compute() {
+        return 1;
+    }
+}
+
+class Derived extends Base {
+    public override int32 compute() {
+        int32 a = 10;
+        int32 b = 20;
+        int32 c = 30;
+        return a + b + c;
+    }
+}
+
+static int32 main() {
+    Base b = new Derived();
+    return b.compute() == 60 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating derived method dynamically allocates 3 extra local variable slots via callee ALLOC_FRAME without stack corruption.
+
+### Case 1.2: Deep Call Stack & Recursion Integrity [IMPLEMENTED]
+```solix
+static int32 fib(int32 n) {
+    if (n <= 1) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+
+static int32 main() {
+    int32 res = fib(10);
+    return res == 55 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating deep recursive stack frame allocation and unwinding preserves operand stack balance across all frames.
+
+### Case 2.1: Method with Multiple Local Slots [IMPLEMENTED]
+```solix
+static int32 sum_locals(int32 x) {
+    int32 l1 = 1;
+    int32 l2 = 2;
+    int32 l3 = 3;
+    int32 l4 = 4;
+    int32 l5 = 5;
+    return x + l1 + l2 + l3 + l4 + l5;
+}
+
+static int32 main() {
+    return sum_locals(10) == 25 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating ALLOC_FRAME reserves all local variable slots and computes correct result.
+
+---
+
+## Suite 40: FunctionPointers (<return_type>(*)(<arguments_types>))
+
+### Positive Test Scenarios (Functional Execution & State)
+
+### Case 1.1: Direct Assignment and Invocation [IMPLEMENTED]
+```solix
+public class MathUtils {
+    public static int32 add(int32 a, int32 b) {
+        return a + b;
+    }
+}
+
+static int32 main() {
+    int32(*)(int32, int32) op = MathUtils.add;
+    return op(10, 20) == 30 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating direct function pointer assignment and indirect invocation computes 30.
+
+### Case 1.2: Null Initialization and Reassignment [IMPLEMENTED]
+```solix
+public class MathUtils {
+    public static int32 mul(int32 a, int32 b) {
+        return a * b;
+    }
+}
+
+static int32 main() {
+    int32(*)(int32, int32) op = null;
+    if (op != null) return 1;
+    op = MathUtils.mul;
+    if (op == null) return 2;
+    return op(6, 7) == 42 ? 0 : 3;
+}
+```
+*Expected Result*: Returns 0 indicating null initialization, null checks, and reassignment work correctly.
+
+### Case 1.3: Higher-Order Function Passing [IMPLEMENTED]
+```solix
+public class Operations {
+    public static int32 sub(int32 a, int32 b) {
+        return a - b;
+    }
+
+    public static int32 apply(int32 a, int32 b, int32(*)(int32, int32) fn) {
+        return fn(a, b);
+    }
+}
+
+static int32 main() {
+    int32 res = Operations.apply(50, 18, Operations.sub);
+    return res == 32 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating function pointer successfully passed as a parameter and invoked in higher-order method.
+
+### Case 1.4: Type Aliasing (alias) with Function Pointers [IMPLEMENTED]
+```solix
+alias BinaryOp = int32(*)(int32, int32);
+
+public class Calc {
+    public static int32 add(int32 a, int32 b) {
+        return a + b;
+    }
+}
+
+static int32 main() {
+    BinaryOp op = Calc.add;
+    return op(100, 200) == 300 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating aliased function pointer type definition behaves identically to raw type signature.
+
+### Case 1.5: Returning Function Pointer from Method [IMPLEMENTED]
+```solix
+public class Factory {
+    public static int32 double_val(int32 x) {
+        return x * 2;
+    }
+
+    public static int32(*)(int32) get_fn() {
+        return Factory.double_val;
+    }
+}
+
+static int32 main() {
+    int32(*)(int32) f = Factory.get_fn();
+    return f(21) == 42 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating returning function pointer from method preserves instruction address and executes correctly.
+
+### Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 2.1: Invoking Null Function Pointer Throws NullPointerException [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32(*)(int32, int32) op = null;
+    return op(1, 2);
+}
+```
+*Expected Result*: Throws `NullPointerException: Attempted to invoke null function pointer`.
+
+### Case 2.2: Parameter Count Mismatch (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class MathUtils {
+    public static int32 add(int32 a, int32 b) {
+        return a + b;
+    }
+}
+
+static void test() {
+    int32(*)(int32) op = MathUtils.add;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Type mismatch in variable declaration
+```
+
+### Case 2.3: Return Type Mismatch (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class MathUtils {
+    public static int32 add(int32 a, int32 b) {
+        return a + b;
+    }
+}
+
+static void test() {
+    void(*)(int32, int32) op = MathUtils.add;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Type mismatch in variable declaration
+```
+
+### Case 2.4: Address of Non-Static Method Error [IMPLEMENTED]
+```solix
+public class Greeter {
+    public void greet() {}
+}
+
+static void test() {
+    void(*)() f = Greeter.greet;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Cannot take address of non-static method 'greet'
+```
+
+### Case 2.5: SizeOf Function Pointer Type [IMPLEMENTED]
+```solix
+static int32 main() {
+    int32 sz = sizeof(int32(*)(int32, int32));
+    return sz == 8 ? 0 : 1;
+}
+```
+*Expected Result*: Returns 0 indicating compile-time sizeof operator evaluates function pointer type to 8 bytes.
+
+---
+
+# Test Suite 41: First-Class Lambdas & Closures
+
+## Positive Test Scenarios
+
+### Case 1.1: Stateless Lambda Expression (`[]`) [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32(*)(int32, int32) add = [](int32 a, int32 b) => a + b;
+        return add(10, 20) == 30 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Evaluates stateless lambda via fat-arrow expression, returning 0 with zero heap allocations.
+
+### Case 1.2: Lambda Capturing Primitive Local Variable [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32 factor = 5;
+        int32(*)(int32) mult = [factor](int32 x) => x * factor;
+        return mult(6) == 30 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Allocates closure backpack, stores `factor` in heap environment, unpacks inside lambda invocation, returning 0.
+
+### Case 1.3: Multi-Parameter Lambda with Block Body and Explicit Return Type [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32 base = 100;
+        int32(*)(int32, int32) compute = [base](int32 a, int32 b) : int32 {
+            int32 sum = a + b;
+            return base + sum;
+        };
+        return compute(20, 3) == 123 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Lambda with explicit return type and block statement compiles and executes correctly, returning 0.
+
+### Case 1.4: Lambda Capturing Object Reference with ARC Tracking [IMPLEMENTED]
+```solix
+public class Counter {
+    public int32 val;
+    public Counter(int32 v) { this.val = v; }
+}
+
+public class Main {
+    public static int32 main() {
+        Counter c = new Counter(42);
+        int32(*)() getVal = [c]() => c.val;
+        return getVal() == 42 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Object reference `c` is captured in closure environment with ref count incremented, and decremented when closure is reclaimed.
+
+### Case 1.5: Returning Closure from Function (Escaping Stack Frame) [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32(*)(int32) makeAdder(int32 x) {
+        return [x](int32 y) => x + y;
+    }
+
+    public static int32 main() {
+        int32(*)(int32) addTen = makeAdder(10);
+        return addTen(25) == 35 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Closure escapes outer stack frame, retaining its backpack captures on the heap.
+
+### Case 1.6: Capturing `this` in Instance Method [IMPLEMENTED]
+```solix
+public class Multiplier {
+    public int32 factor;
+    public Multiplier(int32 f) { this.factor = f; }
+
+    public int32(*)(int32) getMultiplier() {
+        return [this](int32 x) => x * this.factor;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        Multiplier m = new Multiplier(7);
+        int32(*)(int32) fn = m.getMultiplier();
+        return fn(6) == 42 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Capturing `this` binds instance pointer into closure backpack and correctly accesses instance members.
+
+### Case 1.7: Reassigning Closure Variable in a Loop (ARC Recycling) [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32(*)(int32) fn = [](int32 x) => x;
+        for (int32 i = 0; i < 50; ++i) {
+            int32 cur = i;
+            fn = [cur](int32 x) => x + cur;
+        }
+        return fn(10) == 59 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Loop repeatedly reassigns closure variable; old closure environments are recycled via `decrease_reference_callable`.
+
+### Case 1.8: Nested Closures with Deep Capture Hierarchy [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32 a = 10;
+        int32(*)(int32) outer = [a](int32 b) => {
+            int32(*)(int32) inner = [a, b](int32 c) => a + b + c;
+            return inner(30);
+        };
+        return outer(20) == 60 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Nested closure correctly unpacks multi-level captured variables and produces correct result.
+
+---
+
+## Negative Test Scenarios (Expected Errors & Faults)
+
+### Case 2.1: Undefined Variable in Capture List (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class Main {
+    public static void test() {
+        int32(*)() fn = [nonExistentVar]() => 0;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Undefined capture variable: nonExistentVar
+```
+
+### Case 2.2: Capturing `this` Outside Instance Method (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class Main {
+    public static void test() {
+        int32(*)() fn = [this]() => 0;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Cannot capture 'this' outside of an instance method
+```
+
+### Case 2.3: Lambda Signature Incompatible with Target Function Pointer (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class Main {
+    public static void test() {
+        int32(*)(int32, int32) fn = [](int32 a) => a;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Type mismatch in variable declaration
+```
+
+---
+
+# Test Suite 42: DefaultExpression & Generic Slot Clearance
+
+## Positive Test Scenarios
+
+### Case 1.1: Primitive Default Value Evaluation [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32 i = default(int32);
+        bool b = default(bool);
+        float64 f = default(float64);
+        char c = default(char);
+        if (i == 0 && b == false && f == 0.0 && c == '\0') {
+            return 0;
+        }
+        return 1;
+    }
+}
+```
+*Expected Result*: Returns 0 indicating all primitive types correctly initialize to their zero/false representations.
+
+### Case 1.2: Reference Type Default Values [IMPLEMENTED]
+```solix
+public class Item {
+    public int32 id;
+}
+
+public class Main {
+    public static int32 main() {
+        Item item = default(Item);
+        int32[] arr = default(int32[]);
+        if (item == null && arr == null) {
+            return 0;
+        }
+        return 1;
+    }
+}
+```
+*Expected Result*: Returns 0 indicating reference types and array types evaluate to null.
+
+### Case 1.3: Function Pointer Default Value [IMPLEMENTED]
+```solix
+public class Main {
+    public static int32 main() {
+        int32(*)(int32) fn = default(int32(*)(int32));
+        if (fn == null) {
+            return 0;
+        }
+        return 1;
+    }
+}
+```
+*Expected Result*: Returns 0 indicating function pointer type defaults to null pointer.
+
+### Case 1.4: Generic Container Slot Clearance with `default(T)` [IMPLEMENTED]
+```solix
+public class Box<T> {
+    public T val;
+    public Box(T v) { this.val = v; }
+    public void clear() {
+        this.val = default(T);
+    }
+}
+
+public class User {
+    public int32 id;
+}
+
+public class Main {
+    public static int32 main() {
+        Box<int32> intBox = new Box<int32>(42);
+        intBox.clear();
+        Box<User> userBox = new Box<User>(new User());
+        userBox.clear();
+        if (intBox.val == 0 && userBox.val == null) {
+            return 0;
+        }
+        return 1;
+    }
+}
+```
+*Expected Result*: Generic class instantiated with both scalar primitive `int32` and reference type `User` safely clears slots using `default(T)` without primitive nullability violations.
+
+### Case 1.5: Generic Function Returning `default(T)` [IMPLEMENTED]
+```solix
+public class Helpers {
+    public static T getDefault<T>() {
+        return default(T);
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        int32 defInt = Helpers.getDefault<int32>();
+        bool defBool = Helpers.getDefault<bool>();
+        if (defInt == 0 && defBool == false) {
+            return 0;
+        }
+        return 1;
+    }
+}
+```
+*Expected Result*: Generic method evaluates and returns `default(T)` correctly for instantiated types.
+
+---
+
+## Negative Test Scenarios
+
+### Case 2.1: Default of Void Type (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class Main {
+    public static void test() {
+        int32 x = default(void);
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Cannot use void in default expression
+```
+
+### Case 2.2: Default of Undeclared Type (Compile-Time Error) [IMPLEMENTED]
+```solix
+public class Main {
+    public static void test() {
+        var x = default(UnknownType);
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Unknown type: UnknownType
+```
+
+---
+
+# Test Suite 48: Generics & Template Metaprogramming
+
+## Positive Test Scenarios
+
+### Case 48.1: Single-Parameter Generic Class (`Box<T>`) [IMPLEMENTED]
+```solix
+public class Box<T> {
+    public T val;
+    public Box(T v) { this.val = v; }
+    public T get() { return this.val; }
+    public void set(T v) { this.val = v; }
+}
+
+public class Main {
+    public static int32 main() {
+        Box<int32> ib = new Box<int32>(42);
+        ib.set(100);
+        return ib.get() == 100 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Compiles cleanly and executes returning 0.
+
+### Case 48.2: Multi-Parameter Generic Class (`Pair<K, V>`) [IMPLEMENTED]
+```solix
+public class Pair<K, V> {
+    public K key;
+    public V val;
+    public Pair(K k, V v) {
+        this.key = k;
+        this.val = v;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        Pair<int32, bool> p = new Pair<int32, bool>(10, true);
+        if (p.key == 10 && p.val == true) {
+            return 0;
+        }
+        return 1;
+    }
+}
+```
+*Expected Result*: Compiles and executes returning 0.
+
+### Case 48.3: Generic Class Implementing Interface (`interface IContainer`) [IMPLEMENTED]
+```solix
+public interface IContainer {
+    int32 getVal();
+}
+
+public class Holder<T> implements IContainer {
+    public T item;
+    public Holder(T item) { this.item = item; }
+    public int32 getVal() { return 99; }
+}
+
+public class Main {
+    public static int32 main() {
+        IContainer container = new Holder<int32>(42);
+        return container.getVal() == 99 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Dynamic dispatch across interface from generic class succeeds, returning 0.
+
+### Case 48.4: Generic Method with Explicit Type Arguments [IMPLEMENTED]
+```solix
+public class Utils {
+    public static T convert<T>(T val) {
+        return val;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        int32 v = Utils.convert<int32>(55);
+        return v == 55 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Explicit template argument call site compiles and returns 0.
+
+### Case 48.5: Generic Method with Implicit Template Argument Deduction [IMPLEMENTED]
+```solix
+public class Deduce {
+    public static T identity<T>(T item) {
+        return item;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        int32 res = Deduce.identity(123);
+        return res == 123 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Type argument `int32` deduced implicitly from argument; returns 0.
+
+### Case 48.6: Generic Method with Deductions from Multiple Arguments [IMPLEMENTED]
+```solix
+public class DeduceMulti {
+    public static T selectFirst<T>(T a, T b) {
+        return a;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        int32 chosen = DeduceMulti.selectFirst(77, 88);
+        return chosen == 77 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Multi-argument consistent deduction succeeds; returns 0.
+
+### Case 48.7: Nested Generic Types [IMPLEMENTED]
+```solix
+public class Cell<T> {
+    public T content;
+    public Cell(T c) { this.content = c; }
+}
+
+public class Main {
+    public static int32 main() {
+        Cell<Cell<int32>> nested = new Cell<Cell<int32>>(new Cell<int32>(777));
+        return nested.content.content == 777 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Nested specialization compiles cleanly and returns 0.
+
+### Case 48.8: Generic Class with Function Pointer Fields / Lambdas [IMPLEMENTED]
+```solix
+public class Processor<T> {
+    public T(*)(T) transform;
+    public Processor(T(*)(T) fn) {
+        this.transform = fn;
+    }
+    public T execute(T input) {
+        return this.transform(input);
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        Processor<int32> p = new Processor<int32>([](int32 x) => x * 2);
+        return p.execute(21) == 42 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Generic class coordinating function pointers and closures compiles and returns 0.
+
+## Negative Test Scenarios
+
+### Case 48.9: Generic Type Argument Count Arity Mismatch [IMPLEMENTED]
+```solix
+public class Map<K, V> {
+    public K key;
+    public V val;
+}
+
+public class Main {
+    public static void test() {
+        Map<int32> m = null;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Type 'Map' expects 2 generic arguments, but got 1
+```
+
+### Case 48.10: Incompatible Type Assignment Between Specialized Generic Instances [IMPLEMENTED]
+```solix
+public class Item<T> {
+    public T value;
+}
+
+public class Main {
+    public static void test() {
+        Item<int32> a = new Item<bool>();
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Type mismatch in variable declaration
+```
+
+### Case 48.11: Conflicting Template Deduction at Call Site [IMPLEMENTED]
+```solix
+public class Matcher {
+    public static T choose<T>(T a, T b) { return a; }
+}
+
+public class Main {
+    public static void test() {
+        Matcher.choose(10, true);
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Template argument deduction failed
+```
+
+### Case 48.12: Unbound Type Parameter Identifier [IMPLEMENTED]
+```solix
+public class BadGeneric {
+    public static void doSomething() {
+        T invalidVar = null;
+    }
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] Unknown type: T
+```
+
+---
+
+## Native Interoperability & Dynamic Shared Library Loader
+
+*Specification Reference*: [Native Interoperability Specification](../../docs/spec/runtime/native_interop.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 49.1: Static Native Function Call [IMPLEMENTED]
+```solix
+public class NativeMath {
+    public static native int32 add(int32 a, int32 b);
+}
+
+public class Main {
+    public static int32 main() {
+        return NativeMath.add(15, 27) == 42 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Loads shared library, resolves static native function via C-ABI, executes addition and returns 0.
+
+---
+
+### Case 49.2: Instance Native Function Call with Object Context [IMPLEMENTED]
+```solix
+public class Counter {
+    public int32 value;
+    public native int32 increment();
+}
+
+public class Main {
+    public static int32 main() {
+        Counter c = new Counter();
+        c.value = 10;
+        int32 res = c.increment();
+        return (res == 11 && c.value == 11) ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Calls instance native method, passing `self_address` as object handle to native code, updates field, and returns 0.
+
+---
+
+### Case 49.3: Batch Registration Hook via `solix_register_natives` [IMPLEMENTED]
+```solix
+public class BatchPlugin {
+    public static native int32 multiply(int32 a, int32 b);
+    public static native int32 subtract(int32 a, int32 b);
+}
+
+public class Main {
+    public static int32 main() {
+        int32 m = BatchPlugin.multiply(6, 7);
+        int32 s = BatchPlugin.subtract(50, 8);
+        return (m == 42 && s == 42) ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Shared library exporting `solix_register_natives` hook registers both functions automatically on library load.
+
+---
+
+### Case 49.4: Direct Dynamic Symbol Resolution Fallback [IMPLEMENTED]
+```solix
+public class DynamicLib {
+    public static native int32 direct_export(int32 x);
+}
+
+public class Main {
+    public static int32 main() {
+        return DynamicLib.direct_export(99) == 100 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Dynamically exports symbol conforming to `NativeFunctionPtr` signature without init hook, resolved on-demand.
+
+---
+
+### Case 49.5: Multiple Shared Libraries Loaded Concurrently [IMPLEMENTED]
+```solix
+public class LibA {
+    public static native int32 funcA();
+}
+
+public class LibB {
+    public static native int32 funcB();
+}
+
+public class Main {
+    public static int32 main() {
+        return (LibA.funcA() + LibB.funcB()) == 100 ? 0 : 1;
+    }
+}
+```
+*Expected Result*: Multiple independent shared libraries loaded simultaneously without symbol collisions.
+
+---
+
+### Negative Test Scenarios
+
+### Case 49.6: Missing / Non-Existent Shared Library Path [IMPLEMENTED]
+```cpp
+// Runtime options specifying a non-existent shared library file path
+options.native_libraries.push_back("non_existent_plugin.dll");
+```
+*Expected Result*: Throws clean runtime error / exception `SharedLibraryException: Failed to load library 'non_existent_plugin.dll'`.
+
+---
+
+### Case 49.7: Corrupted or Non-Binary File Loaded as Shared Library [IMPLEMENTED]
+```cpp
+// Runtime options specifying a plain text or corrupted binary file
+options.native_libraries.push_back("corrupt_dummy.txt");
+```
+*Expected Result*: Throws clean runtime error detailing OS-level loader diagnostic (`dlerror` / `GetLastError`).
+
+---
+
+### Case 49.8: Unresolved Native Method Symbol at Invocation [IMPLEMENTED]
+```solix
+public class MissingNative {
+    public static native int32 non_existent_function();
+}
+
+public class Main {
+    public static int32 main() {
+        return MissingNative.non_existent_function();
+    }
+}
+```
+*Expected Result*: VM throws clean runtime exception `Call to unknown native function: MissingNative_non_existent_function`.
+
+---
+
+### Case 49.9: Reject Foreign Platform Native Library Format [IMPLEMENTED]
+```cpp
+// Runtime options specifying a foreign platform library format (e.g. .dll on Linux or .so on Windows)
+#ifdef _WIN32
+options.native_libraries.push_back("plugin.so");
+#else
+options.native_libraries.push_back("plugin.dll");
+#endif
+```
+*Expected Result*: Throws clean `SharedLibraryException` with message detailing unsupported native library format for host platform.
+
+---
+
+## Suite 50: Language Intrinsics (`assert`, `exit`)
+
+### Case 50.1: Basic Boolean Assertion Passing Silently [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        assert true;
+        assert(1 + 1 == 2);
+        return 0;
+    }
+}
+```
+*Expected Result*: Compiles and executes cleanly, returning 0 without raising any error.
+
+---
+
+### Case 50.2: Assertion with Custom Textual Message Passing Silently [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        assert(10 > 5, "Arithmetic consistency holds");
+        return 0;
+    }
+}
+```
+*Expected Result*: Compiles and executes cleanly without overhead when condition evaluates to true.
+
+---
+
+### Case 50.3: Failed Assertion Throws AssertionError Runtime Exception [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        assert(2 + 2 == 5, "Math verification failed");
+        return 0;
+    }
+}
+```
+*Expected Result*: Runtime execution fails throwing an exception containing `AssertionError` and `Math verification failed`.
+
+---
+
+### Case 50.4: Immediate Process Termination via `exit(code)` Intrinsics [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        exit(42);
+        return 0;
+    }
+}
+```
+*Expected Result*: Execution immediately halts and returns exit code 42, bypassing the subsequent return statement.
+
+---
+
+### Case 50.5: Negative: Assert Condition Non-Boolean Type Mismatch Rejected at Compile Time [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        assert 123;
+        return 0;
+    }
+}
+```
+*Expected Result*: Compilation fails reporting that assert condition must be of type `bool`.
+
+---
+
+### Case 50.6: Negative: Exit Code Non-Integer Type Mismatch Rejected at Compile Time [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        exit "fatal";
+        return 0;
+    }
+}
+```
+*Expected Result*: Compilation fails reporting that exit code must be an integer type.
+
+---
+
+## Suite 51: Compiler Diagnostics & Error Reporting Consistency
+
+### Case 51.1: Syntax Error Reports Source Name, Row, Column, and Caret [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        int32 x = ;
+        return 0;
+    }
+}
+```
+*Expected Result*: Compilation fails with `E_PARSE` diagnostic containing non-empty `source_path`, `line == 4`, and valid `column`.
+
+---
+
+### Case 51.2: Lexical Error Reports Source Name, Row, and Column [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        @
+        return 0;
+    }
+}
+```
+*Expected Result*: Lexical analysis fails with `E_LEX` diagnostic containing non-empty `source_path`, `line == 4`, and valid `column`.
+
+---
+
+### Case 51.3: Semantic Binding Error Reports Source Name, Row, Column, and Caret [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        int32 x = "mismatched";
+        return 0;
+    }
+}
+```
+*Expected Result*: Semantic binding fails with `E_BIND` diagnostic containing non-empty `source_path`, `line == 4`, and valid `column`.
+
+---
+
+## Suite 52: String Literal Escape Sequence Decoding
+
+### Case 52.1: Common Whitespace and Punctuation Escapes (`\n`, `\t`, `\r`, `\"`, `\\`) [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        char[] s = "hello\nworld\ttab\\slash\"quote";
+        if (s[5] != (char)10) return 1; // '\n'
+        if (s[11] != (char)9) return 2; // '\t'
+        if (s[15] != (char)92) return 3; // '\\'
+        if (s[21] != (char)34) return 4; // '\"'
+        return 0;
+    }
+}
+```
+*Expected Result*: The string literal decodes escape sequences into their respective ASCII character codepoints.
+
+---
+
+### Case 52.2: Hexadecimal Escape Sequences (`\xHH`) and Null Character (`\0`) [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        char[] s = "A\x42C\0D";
+        if (s[0] != 'A') return 1;
+        if (s[1] != 'B') return 2; // \x42 == 'B'
+        if (s[2] != 'C') return 3;
+        if (s[3] != '\0') return 4; // \0 == 0
+        if (s[4] != 'D') return 5;
+        return 0;
+    }
+}
+```
+*Expected Result*: Hexadecimal escape sequences (`\xHH`) and null character (`\0`) decode to exact binary values.
+
+---
+
+### Case 52.3: Negative: Unterminated Hex Escape in String Literal [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        char[] s = "bad\x4";
+        return 0;
+    }
+}
+```
+*Expected Result*: Compilation fails reporting an unterminated or invalid hex escape sequence in string literal.
+
+---
+
+## Suite 53: Function Declaration Scope Rules
+
+### Case 53.1: Free Function Entry Point Without `static` [IMPLEMENTED]
+```solix
+int32 helper(int32 x) {
+    return x * 2;
+}
+
+int32 main() {
+    return helper(21) == 42 ? 0 : 1;
+}
+```
+*Expected Result*: Top-level free functions outside a class are permitted without the `static` keyword, and non-`static` free `main()` is accepted as a valid executable entry point.
+
+---
+
+### Case 53.2: Rejection of `static` on Free Function Outside Class [IMPLEMENTED]
+```solix
+static int32 compute() {
+    return 10;
+}
+
+int32 main() {
+    return compute();
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+'static' modifier is not allowed on functions outside of a class
+```
+
+---
+
+## Suite 54: Entry Point Resolution Disambiguation
+
+### Case 54.1: Single Unambiguous Entry Point Execution [IMPLEMENTED]
+```solix
+// service.slx
+package app.service;
+
+public class Service {
+    public static int32 run_service() {
+        return 42;
+    }
+}
+
+// main.slx
+package app;
+import app.service.*;
+
+int32 main() {
+    return Service.run_service() == 42 ? 0 : 1;
+}
+```
+*Expected Result*: Compiles and executes cleanly with exit code 0 when an unambiguous entry point `main` is found.
+
+---
+
+### Case 54.2: Ambiguous Entry Point Detection Across Modules [IMPLEMENTED]
+```solix
+// mod_a.slx
+package app.alpha;
+
+int32 main() {
+    return 1;
+}
+
+// mod_b.slx
+package app.beta;
+
+int32 main() {
+    return 2;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+Ambiguous entry point 'main': multiple candidates found:
+  - mod_a.slx:4:1 (in free function 'main')
+  - mod_b.slx:4:1 (in free function 'main')
+```
+*Expected Result*: Compilation fails with compiler error listing candidate files, rows (lines), and columns.
+
+---
+
+## Suite 55: Tuple Primitive, Variadic Generics & Destructor RAII
+
+### Case 55.1: Direct `tuple` Creation & Constant Indexing [IMPLEMENTED]
+```solix
+int32 main() {
+    tuple t = new tuple(42, 'H', true);
+    if (t.length != 3) return 1;
+    int32 v0 = (int32)t[0];
+    char v1 = (char)t[1];
+    bool v2 = (bool)t[2];
+    if (v0 != 42 || v1 != 'H' || !v2) return 2;
+    return 0;
+}
+```
+*Expected Result*: Returns exit code 0.
+
+---
+
+### Case 55.2: Dynamic Loop Iteration over `tuple` [IMPLEMENTED]
+```solix
+int32 main() {
+    tuple t = new tuple(10, 20, 30);
+    int32 sum = 0;
+    for (int32 i = 0; i < t.length; i++) {
+        sum = sum + (int32)t[i];
+    }
+    return sum == 60 ? 0 : 1;
+}
+```
+*Expected Result*: Returns exit code 0.
+
+---
+
+### Case 55.3: Runtime `instanceof` with Primitives [IMPLEMENTED]
+```solix
+int32 main() {
+    tuple t = new tuple(42, true, 'X');
+    if (!(t[0] instanceof int32)) return 1;
+    if (t[0] instanceof bool) return 2;
+    if (!(t[1] instanceof bool)) return 3;
+    if (t[1] instanceof int32) return 4;
+    return 0;
+}
+```
+*Expected Result*: Returns exit code 0.
+
+---
+
+### Case 55.4: Runtime `instanceof` with Classes & Interfaces [IMPLEMENTED]
+```solix
+interface Worker {
+    int32 work();
+}
+
+class Robot implements Worker {
+    public int32 work() { return 100; }
+}
+
+class Person {}
+
+int32 main() {
+    tuple t = new tuple(new Robot(), new Person());
+    if (!(t[0] instanceof Worker)) return 1;
+    if (!(t[0] instanceof Robot)) return 2;
+    if (t[0] instanceof Person) return 3;
+    if (t[1] instanceof Worker) return 4;
+    if (!(t[1] instanceof Person)) return 5;
+    return 0;
+}
+```
+*Expected Result*: Returns exit code 0.
+
+---
+
+### Case 55.5: Function Template Lowering with `<args...>` [IMPLEMENTED]
+```solix
+int32 sum_all<args...>(int32 first, args...) {
+    int32 total = first;
+    for (int32 i = 0; i < args.length; i++) {
+        total = total + (int32)args[i];
+    }
+    return total;
+}
+
+int32 main() {
+    int32 res = sum_all(10, 20, 30, 40);
+    return res == 100 ? 0 : 1;
+}
+```
+*Expected Result*: Trailing variadic pack lowered into tuple, returns exit code 0.
+
+---
+
+### Case 55.6: Automatic Call-Site Argument Bundling [IMPLEMENTED]
+```solix
+int32 count_args<args...>(int32 label, args...) {
+    return args.length;
+}
+
+int32 main() {
+    if (count_args(0) != 0) return 1;
+    if (count_args(1, 100) != 1) return 2;
+    if (count_args(3, 1, 'b', true) != 3) return 3;
+    return 0;
+}
+```
+*Expected Result*: Call-site bundles excess arguments into a tuple automatically, returns exit code 0.
+
+---
+
+### Case 55.7: Destructor Trigger on Tuple Scope Exit [IMPLEMENTED]
+```solix
+class Tracker {
+    static int32 destroyed_count = 0;
+    ~Tracker() {
+        destroyed_count = destroyed_count + 1;
+    }
+}
+
+void test_scope() {
+    tuple t = new tuple(new Tracker(), new Tracker());
+}
+
+int32 main() {
+    test_scope();
+    return Tracker.destroyed_count == 2 ? 0 : 1;
+}
+```
+*Expected Result*: When the tuple goes out of scope, contained reference objects are destroyed recursively, exit code 0.
+
+---
+
+### Case 55.8: Destructor Trigger on Tuple Reassignment [IMPLEMENTED]
+```solix
+class Tracker {
+    static int32 destroyed_count = 0;
+    ~Tracker() {
+        destroyed_count = destroyed_count + 1;
+    }
+}
+
+int32 main() {
+    tuple t = new tuple(new Tracker());
+    if (Tracker.destroyed_count != 0) return 1;
+    t = null;
+    if (Tracker.destroyed_count != 1) return 2;
+    return 0;
+}
+```
+*Expected Result*: Reassigning tuple decrements references and immediately executes child destructors, exit code 0.
+
+---
+
+### Case 55.9: Exception Stack Unwinding RAII with `tuple` [IMPLEMENTED]
+```solix
+class Exception {}
+
+class Resource {
+    static int32 released = 0;
+    ~Resource() {
+        released = released + 1;
+    }
+}
+
+void risky() {
+    tuple t = new tuple(new Resource());
+    throw new Exception();
+}
+
+int32 main() {
+    try {
+        risky();
+    } catch (Exception e) {
+        if (Resource.released != 1) return 2;
+        return 0;
+    }
+    return 1;
+}
+```
+*Expected Result*: Frame unwinding decrements tuple references and invokes contained resource destructors before catch clause, exit code 0.
+
+---
+
+### Case 55.10: Nested Tuples Recursive Destruction [IMPLEMENTED]
+```solix
+class Leaf {
+    static int32 count = 0;
+    ~Leaf() {
+        count = count + 1;
+    }
+}
+
+void test_nested() {
+    tuple inner = new tuple(new Leaf());
+    tuple outer = new tuple(inner);
+}
+
+int32 main() {
+    test_nested();
+    return Leaf.count == 1 ? 0 : 1;
+}
+```
+*Expected Result*: Outer tuple destruction cascades into inner tuple destruction and then leaf destruction, exit code 0.
+
+---
+
+### Case 55.11: Invalid Type Cast Throws TypeCastException [IMPLEMENTED]
+```solix
+int32 main() {
+    tuple t = new tuple("not an int");
+    int32 x = (int32)t[0];
+    return 0;
+}
+```
+*Expected Result*: Runtime throws TypeCastException on incompatible cast, caught successfully, exit code 0.
+
+---
+
+### Case 55.12: Out of Bounds Index Access Throws IndexOutOfBoundsException [IMPLEMENTED]
+```solix
+int32 main() {
+    tuple t = new tuple(1, 2);
+    int32 x = (int32)t[5];
+    return 0;
+}
+```
+*Expected Result*: Out of bounds tuple access throws IndexOutOfBoundsException, caught successfully, exit code 0.
+
+---
+
+### Case 55.13: Variadic Parameter Not Trailing [IMPLEMENTED]
+```solix
+void invalid<args...>(args..., int32 extra) {}
+```
+*Expected Compiler Diagnostic*:
+```text
+Variadic parameter must be the last parameter in method signature
+```
+
+---
+
+### Case 55.14: Multiple Variadic Packs in Same Signature [IMPLEMENTED]
+```solix
+void invalid<args..., others...>(args..., others...) {}
+```
+*Expected Compiler Diagnostic*:
+```text
+Variadic template parameter must be the last parameter in template parameter list
+```
+
+---
+
+### Case 55.15: Incompatible Class Cast on Tuple Element Throws TypeCastException [IMPLEMENTED]
+```solix
+class Animal {}
+class Dog extends Animal {}
+class Cat extends Animal {}
+
+int32 main() {
+    tuple t = new tuple(new Dog());
+    Cat c = (Cat)t[0];
+    return 0;
+}
+```
+*Expected Result*: Casting `Dog` to unrelated class `Cat` throws TypeCastException, exit code 0.
+
+---
+
+# Part V: Multi-Binary Support, Manifest Metadata, and Dynamic Linking
+
+## ExternDeclarations
+
+*Specification Reference*: [ExternDeclarations](docs/internals/milestones/011-multi-binary-support-and-dynamic-linking.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 56.1: Extern Function Prototype Declaration
+```solix
+extern int32 external_add(int32 a, int32 b);
+
+int32 main() {
+    int32 result = external_add(10, 20);
+    return result;
+}
+```
+*Expected Result*: Compiles into `OpCode::CallExtern("external_add")`. When linked with a library providing `external_add`, executes cleanly and returns 30.
+
+---
+
+### Case 56.2: Extern Static Variable Declaration
+```solix
+extern int32 GLOBAL_FLAG;
+
+int32 main() {
+    return GLOBAL_FLAG;
+}
+```
+*Expected Result*: Compiles into `OpCode::GetStaticGlobal("GLOBAL_FLAG")`. When linked, resolves slot and returns value.
+
+---
+
+### Case 56.3: Extern Class with Methods and Fields
+```solix
+extern class Calculator {
+    public int32 base_val;
+    public Calculator(int32 init);
+    public int32 compute(int32 multiplier);
+}
+
+int32 main() {
+    Calculator calc = new Calculator(5);
+    return calc.compute(3);
+}
+```
+*Expected Result*: Compiles `new Calculator` into `OpCode::AllocObjectExtern("Calculator")` followed by `OpCode::CallExtern("Calculator::constructor")`. Method call emits `OpCode::CallExtern("Calculator::compute")`.
+
+---
+
+### Case 56.4: API Manifest JSON Extraction and Source Synthesis
+*Expected Result*: `extract_api_manifest` extracts full metadata (`ExportManifest`) from a compiled library binary, and `manifest_to_source` synthesizes a compilable Solix interface file named `<package_name>@<version>.slx`. Downstream consumer compiles against this synthesized interface without original implementation sources.
+
+---
+
+### Negative Test Scenarios (Invalid Variations)
+
+### Case 56.5: Extern Function With Body Implementation
+```solix
+// Error: E0137 (ExternWithBody)
+extern int32 bad_extern(int32 x) {
+    return x * 2;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+Extern function or method cannot have a body implementation
+```
+
+---
+
+### Case 56.6: Extern Variable With Initializer
+```solix
+// Error: E0154 (ExternWithInitializer)
+extern int32 initial_val = 100;
+```
+*Expected Compiler Diagnostic*:
+```text
+Extern variable declaration cannot have an initializer
+```
+
+---
+
+### Case 56.7: Extern Modifier Inside Local Scope
+```solix
+// Error: E0155 (ExternInsideFunction)
+int32 main() {
+    extern int32 local_extern;
+    return 0;
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+Extern modifier is not allowed inside a local function or block
+```
+
+---
+
+### Case 56.8: Extern Combined with Conflicting Modifier 'native'
+```solix
+// Error: E0156 (InvalidExternModifier)
+extern native int32 conflicting_fn();
+```
+*Expected Compiler Diagnostic*:
+```text
+Extern modifier cannot be combined with 'native'
+```
+
+---
+
+### Case 56.9: Extern Combined with Conflicting Modifier 'inline'
+```solix
+// Error: E0156 (InvalidExternModifier)
+extern inline int32 conflicting_inline();
+```
+*Expected Compiler Diagnostic*:
+```text
+Extern modifier cannot be combined with 'inline'
+```
+
+---
+
+### Case 56.10: Extern Combined with Conflicting Modifier 'abstract'
+```solix
+// Error: E0156 (InvalidExternModifier)
+class Base {
+    extern abstract void conflicting_abstract();
+}
+```
+*Expected Compiler Diagnostic*:
+```text
+Extern modifier cannot be combined with 'abstract'
+```
+
+---
+
+## DynamicLinkingAndQuickening
+
+*Specification Reference*: [DynamicLinking](docs/internals/milestones/011-multi-binary-support-and-dynamic-linking.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 57.1: Multi-Binary VTable and ITable Relocation
+*Expected Result*: Loading secondary library binaries shifts `vtable_id` by `vtable_id_offset`, relocating `class.vtable`, `class.itable`, and `class.destructor_id` to prevent class index collisions between independent binaries.
+
+---
+
+### Case 57.2: In-Place Instruction Quickening for Dynamic Calls
+*Expected Result*: On first execution of `OpCode::CallExtern`, the VM resolves the target global function ID from symbol tables and patches the caller instruction in-place to `OpCode::CallDirect`. Second execution dispatches directly with zero symbol resolution overhead.
+
+---
+
+### Case 57.3: In-Place Instruction Quickening for Static Variables
+*Expected Result*: On first execution of `OpCode::GetStaticGlobal` and `OpCode::SetStaticGlobal`, the VM resolves global static slots and patches caller instructions in-place to `OpCode::GetStaticDirect` and `OpCode::SetStaticDirect`.
+
+---
+
+### Case 57.4: In-Place Instruction Quickening for Object Allocation
+*Expected Result*: On first execution of `OpCode::AllocObjectExtern`, the VM resolves `(vtable_id, instance_size)` and patches caller instruction in-place to `OpCode::AllocObject`.
+
+---
+
+### Case 57.5: Cross-Binary Generic Monomorphization
+*Expected Result*: A library exports an uninstantiated template `Box<T>`. An application importing the library instantiates `Box<MyCustomType>`. The compiler monomorphizes the generic template locally using `generic_templates` source text, and execution completes with zero memory leaks (`vm.verify_clean_memory() == Ok(())`).
+
+---
+
+# Part VI: Compiler Pipeline Modularization & Phase Architecture
+
+## CompilerPipelineAndPhaseArchitecture
+
+*Specification Reference*: [PipelineModularization](docs/internals/milestones/012-compiler-pipeline-modularization-and-stabilization.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 58.1: Custom Lint Phase Insertion and Execution
+```solix
+class SecretClass {
+    public int32 key;
+}
+```
+*Expected Result*: Registering a custom `CompilationPhase` between `BinderPhase` and `EmitterPhase` detects the AST symbol and halts compilation with diagnostic error code `L001`.
+
+---
+
+### Case 58.2: Pipeline Flow Control: Early Termination on Halt
+```solix
+class X {}
+```
+*Expected Result*: When a phase fails and returns `PhaseDecision::Halt`, subsequent phases in the pipeline sequence are skipped immediately, preventing cascading errors.
+
+---
+
+### Case 58.3: Pipeline Flow Control: Diagnostic Accumulation on Continue
+```solix
+class X {}
+```
+*Expected Result*: When a non-fatal warning or lint phase returns `PhaseDecision::Continue`, errors and diagnostics accumulate while allowing subsequent phases to run.
+
+---
+
+### Case 58.4: Context Blackboard Extension Sharing Across Phases
+```solix
+class A {}
+class B {}
+```
+*Expected Result*: Multiple phases can communicate arbitrary structured metadata by mutating and reading typed extensions from `context.extensions` via `insert_extension` and `get_extension`.
+
+---
+
+### Case 58.5: LSP Preset Pipeline (Omits Bytecode Emission)
+```solix
+class Service {
+    public int32 compute(int32 x) {
+        return x * 2;
+    }
+}
+```
+*Expected Result*: `CompilationPipeline::lsp()` executes `LexerPhase`, `ParserPhase`, and `BinderPhase` (populating tokens, AST, and semantic symbol table), but strictly omits `EmitterPhase` (`context.emission_artifacts` is `None`).
+
+---
+
+### Case 58.6: Syntax-Only Preset Pipeline (Omits Binding and Emission)
+```solix
+class FastCheck {
+    public void ping() {}
+}
+```
+*Expected Result*: `CompilationPipeline::syntax_only()` executes `LexerPhase` and `ParserPhase` (populating tokens and AST), but omits `BinderPhase` and `EmitterPhase`.
+
+---
+
+# Part VII: Solix CLI Tooling, Builtin Subsystems & Multi-Binary Host Driver
+
+## SolixCommandLineToolchain
+
+*Specification Reference*: [SolixCLIToolchain](docs/internals/milestones/013-solix-cli-client-tooling.md)
+
+### Positive Test Scenarios (Valid Variations)
+
+### Case 59.1: Single Source Compilation to SLXB Binary and VM Execution [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        return 42;
+    }
+}
+```
+*Expected Result*: `solix compile main.slx -o main.slxb` emits a valid `.slxb` container, and `solix run main.slxb` executes to completion returning exit code `42`.
+
+---
+
+### Case 59.2: Builtin Standard Library Subsystem (`blt.io.println`) [IMPLEMENTED]
+```solix
+import blt.io.println;
+
+class Main {
+    public static int32 main() {
+        println("Hello from Solix builtins!");
+        return 0;
+    }
+}
+```
+*Expected Result*: With built-in libraries included by default (`--no-builtins` omitted), `blt.io.println` resolves seamlessly at compile-time and runtime prints message to stdout.
+
+---
+
+### Case 59.3: Automated Dependency API Extraction and Dynamic Multi-Binary Execution (`-l, --lib`) [IMPLEMENTED]
+```solix
+// greeter_lib.slx
+public class Greeter {
+    public static int32 calculate_code(int32 seed) {
+        return seed * 3;
+    }
+}
+
+// app.slx
+class Main {
+    public static int32 main() {
+        return Greeter::calculate_code(14);
+    }
+}
+```
+*Expected Result*: Compiling `app.slx` with `-l greeter.slxb` automatically extracts the library API manifest, synthesizes the Solix interface header, and permits compilation without manual header files. Running `solix run app.slxb greeter.slxb` executes with cross-binary dynamic linking returning exit code `42`.
+
+---
+
+### Case 59.4: Multi-Binary Peer Execution Order Invariance [IMPLEMENTED]
+```solix
+// calc.slx
+public class Calc {
+    public static int32 get_answer() {
+        return 84;
+    }
+}
+
+// runner.slx
+class Main {
+    public static int32 main() {
+        return Calc::get_answer();
+    }
+}
+```
+*Expected Result*: All loaded `.slxb` binary containers are treated as equal peers. Executing `solix run calc.slxb runner.slxb` resolves the entry point `Main::main` regardless of binary order on the command line.
+
+---
+
+### Case 59.5: Semantic Check Mode without Bytecode Emission (`--check`) [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        return 1;
+    }
+}
+```
+*Expected Result*: Executing `solix compile main.slx --check` runs the LSP validation pipeline (lexer, parser, and semantic binder), verifies code validity, and exits with code 0 without creating an output `.slxb` container.
+
+---
+
+### Case 59.6: API Interface Header Emission (`--emit-api`) [IMPLEMENTED]
+```solix
+public class MathLib {
+    public static int32 add(int32 a, int32 b) {
+        return a + b;
+    }
+}
+```
+*Expected Result*: Executing `solix compile math.slx --name my_math --emit-api math_api.slx` generates the synthesized Solix interface declarations (`extern public class MathLib { ... }`) to disk alongside the compiled binary.
+
+---
+
+### Case 59.7: Virtual Machine Entry Point Symbol Override (`--entry`) [IMPLEMENTED]
+```solix
+class App {
+    public static int32 main() {
+        return 10;
+    }
+    public static int32 secondary() {
+        return 99;
+    }
+}
+```
+*Expected Result*: Executing `solix run app.slxb` defaults to `App::main` returning `10`. Executing `solix run app.slxb --entry App::secondary` dispatches directly to the requested entry point returning `99`.
+
+---
+
+### Case 59.8: Virtual Heap Size and Call Stack Limits Configuration [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main() {
+        return 7;
+    }
+}
+```
+*Expected Result*: Specifying `--heap-size 16MB` and `--max-stack 512` configures custom virtual heap and call stack constraints and successfully executes the application.
+
+---
+
+### Case 59.9: Guest Application Command-Line Arguments Forwarding [IMPLEMENTED]
+```solix
+class Main {
+    public static int32 main(string[] args) {
+        return 0;
+    }
+}
+```
+*Expected Result*: Passing trailing arguments `solix run app.slxb -- alpha beta gamma` allocates guest string objects and passes them as `string[]` to `Main::main`.
+
+---
+
+### Case 59.10: Container Inspection: Metadata Summary and JSON Export (`--json`) [IMPLEMENTED]
+*Expected Result*: `solix info app.slxb` outputs human-readable container metrics (package name, version, static vars, functions, classes), and `solix info app.slxb --json` emits the raw deserialized JSON manifest.
+
+---
+
+### Case 59.11: Container Inspection: Interface Code Reconstruction (`--api`) [IMPLEMENTED]
+*Expected Result*: `solix info app.slxb --api` extracts the export manifest and emits reconstructed Solix interface declarations (`extern class ...`).
+
+---
+
+### Case 59.12: Container Inspection: Instruction Disassembly to File Destination (`--disasm`, `-o`) [IMPLEMENTED]
+*Expected Result*: `solix info app.slxb --disasm -o disasm.txt` disassembles bytecode instructions and writes the formatted assembly directly to `disasm.txt`.
+
+---
+
+### Negative Test Scenarios (Invalid Variations & Expected Errors)
+
+### Case 59.13: Builtin Standard Library Disabled Flag (`--no-builtins`) [IMPLEMENTED]
+```solix
+import blt.io.println;
+
+class Main {
+    public static int32 main() {
+        return 0;
+    }
+}
+```
+*Expected Result*: Passing `--no-builtins` disables automatic injection of `blt.io`, causing the semantic binder to fail with unresolved symbol diagnostic error.
+
+---
+
+### Case 59.14: Syntax Error Detection with Miette Diagnostic Display [IMPLEMENTED]
+```solix
+class BadSyntax {
+    public void broken() {
+        let x = ; // missing expression
+    }
+}
+```
+*Expected Result*: Compiling invalid syntax fails with a formatted `miette` diagnostic displaying line numbers, source snippets, and carets, and command terminates with non-zero exit code.
+
+---
+
+### Case 59.15: Missing Input Source File [IMPLEMENTED]
+*Expected Result*: Specifying a non-existent source file to `solix compile non_existent.slx` aborts with an I/O file not found error.
+
+---
+
+### Case 59.16: Missing Dependency Library Container File [IMPLEMENTED]
+*Expected Result*: Specifying a non-existent binary to `solix compile main.slx -l missing.slxb` fails with dependency read error.
+
+---
+
+### Case 59.17: Virtual Machine Missing Binary File [IMPLEMENTED]
+*Expected Result*: Executing `solix run missing.slxb` fails immediately with an I/O read error.
+
+---
+
+### Case 59.18: Missing Application Entry Point Symbol [IMPLEMENTED]
+```solix
+class Helper {
+    public int32 x;
+}
+```
+*Expected Result*: Attempting to execute a binary container without a discoverable `main` function (and without an `--entry` override) fails with runtime entry point not found error.
+
+---
+
+### Case 59.19: Inspection of Corrupted Binary Container [IMPLEMENTED]
+*Expected Result*: Executing `solix info corrupt.slxb` on invalid or corrupted binary data halts with container decoding error.
+
+
+

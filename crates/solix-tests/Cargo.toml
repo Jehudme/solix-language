@@ -1,0 +1,12 @@
+[package]
+name = "solix-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+solix-common = { workspace = true }
+solix-compilation = { workspace = true }
+solix-runtime = { workspace = true }
+tempfile = { workspace = true }
