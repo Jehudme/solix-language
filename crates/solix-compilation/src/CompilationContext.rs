@@ -108,6 +108,8 @@ pub struct CompilationContext {
     pub binding_artifacts: Option<crate::phases::binder::BindingArtifacts>,
     /// Bytecode emission artifacts (per-source compiled functions and SLXB binary program).
     pub emission_artifacts: Option<crate::phases::emitter::pipeline::EmissionArtifacts>,
+    /// Telemetry and stage throughput measurements recorded across pipeline execution.
+    pub telemetry: Option<crate::telemetry::CompilerTelemetry>,
     /// Generic type-map blackboard for arbitrary phase and plugin state.
     pub extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
@@ -160,6 +162,7 @@ impl CompilationContext {
             dependents,
             binding_artifacts: None,
             emission_artifacts: None,
+            telemetry: None,
             extensions: HashMap::new(),
         }
     }
