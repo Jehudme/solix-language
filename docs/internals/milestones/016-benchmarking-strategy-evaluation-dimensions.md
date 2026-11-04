@@ -388,8 +388,8 @@ In accordance with `GL-0008`, Milestone 016 is executed across four disciplined 
 
 | Requirement | Target Criteria | Verification Tool | Priority | Sign-off Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Direct `.slx` Execution** | `solix run script.slx` compiles and runs without intermediate disk artifact | `cargo test -p solix-client -- test_cli_run_direct_source` | `P0` | [ ] Pending |
-| **Multi-Source `.slx` Run** | `solix run a.slx b.slx` compiles multi-file programs on-the-fly | `cargo test -p solix-client -- test_cli_run_multi_source` | `P0` | [ ] Pending |
+| **Direct `.slx` Execution** | `solix run script.slx` compiles and runs without intermediate disk artifact | `cargo test -p solix-client -- test_cli_run_direct_source` | `P0` | [x] Complete |
+| **Multi-Source `.slx` Run** | `solix run a.slx b.slx` compiles multi-file programs on-the-fly | `cargo test -p solix-client -- test_cli_run_multi_source` | `P0` | [x] Complete |
 | **Compiler Phase Telemetry** | Microsecond phase breakdowns and MB/s throughput reported | `solix compile --metrics-json` | `P1` | [ ] Pending |
 | **Runtime & Memory Telemetry** | Pure VM time, Peak VirtualHeap, Alloc/Dealloc counts & Peak RSS | `solix run --metrics-json` | `P1` | [ ] Pending |
 | **Cross-Platform Memory RSS** | Accurate peak RSS recording on Windows, macOS, and Linux | `benchmarks/runner.py` | `P1` | [ ] Pending |
