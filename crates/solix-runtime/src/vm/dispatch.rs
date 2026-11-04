@@ -773,12 +773,12 @@ impl VirtualMachine {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let class = self
-                        .context
-                        .get_class_by_vtable_id(vtable_id)
-                        .ok_or_else(|| RuntimeError::FunctionNotFound {
-                            symbol_or_id: format!("vtable #{vtable_id}"),
-                        })?;
+                    let class =
+                        self.context
+                            .get_class_by_vtable_id(vtable_id)
+                            .ok_or_else(|| RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!("vtable #{vtable_id}"),
+                            })?;
                     let func_id = class.vtable.get(slot).copied().ok_or_else(|| {
                         RuntimeError::FunctionNotFound {
                             symbol_or_id: format!("vtable slot {slot} in class {}", class.symbol),
@@ -832,12 +832,12 @@ impl VirtualMachine {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let class = self
-                        .context
-                        .get_class_by_vtable_id(vtable_id)
-                        .ok_or_else(|| RuntimeError::FunctionNotFound {
-                            symbol_or_id: format!("vtable #{vtable_id}"),
-                        })?;
+                    let class =
+                        self.context
+                            .get_class_by_vtable_id(vtable_id)
+                            .ok_or_else(|| RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!("vtable #{vtable_id}"),
+                            })?;
 
                     let func_id = if iface_id != 0 {
                         class
@@ -962,11 +962,7 @@ impl VirtualMachine {
                                 cls.reference_field_offsets.contains(&offset)
                                     || cls.weak_field_offsets.contains(&offset)
                             });
-                            if is_ref {
-                                Value::Null
-                            } else {
-                                Value::I32(0)
-                            }
+                            if is_ref { Value::Null } else { Value::I32(0) }
                         } else {
                             Value::from_raw_u64(raw)
                         }
@@ -1005,7 +1001,9 @@ impl VirtualMachine {
                         let _ = self.heap.write_u64(field_addr, val.as_f64()?.to_bits());
                     }
                     Some(11) => {
-                        let _ = self.heap.write_u8(field_addr, if val.as_bool()? { 1 } else { 0 });
+                        let _ = self
+                            .heap
+                            .write_u8(field_addr, if val.as_bool()? { 1 } else { 0 });
                     }
                     Some(12) => {
                         let child_addr = val.as_ref()?;

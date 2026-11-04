@@ -95,6 +95,7 @@ impl<'a> Emitter<'a> {
                             | Expression::ArrayLiteral { .. }
                             | Expression::TupleCreation { .. }
                             | Expression::Lambda { .. }
+                            | Expression::Block { .. }
                     )
                 {
                     self.emit_instruction(

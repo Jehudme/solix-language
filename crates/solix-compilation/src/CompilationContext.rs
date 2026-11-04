@@ -9,7 +9,7 @@ use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 
 /// Configuration options provided to the compilation driver.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CompilationOptions {
     /// Mapping of source identifiers/paths to their source code contents.
     pub codes: HashMap<String, String>,
@@ -23,6 +23,14 @@ pub struct CompilationOptions {
     pub pipeline: Option<crate::pipeline::CompilationPipeline>,
     /// Whether to automatically include built-in standard library definitions (`blt.io`).
     pub include_builtins: bool,
+    /// Maximum statement threshold for automatic AST inlining (default 8). Set to 0 to disable automatic inlining.
+    pub inline_threshold: usize,
+}
+
+impl Default for CompilationOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CompilationOptions {
@@ -36,7 +44,15 @@ impl CompilationOptions {
             package_description: String::new(),
             pipeline: None,
             include_builtins: false,
+            inline_threshold: 8,
         }
+    }
+
+    /// Sets the maximum statement count threshold for automatic AST inlining.
+    #[must_use]
+    pub fn with_inline_threshold(mut self, threshold: usize) -> Self {
+        self.inline_threshold = threshold;
+        self
     }
 
     /// Sets whether to include the standard built-in libraries (`blt.io`).

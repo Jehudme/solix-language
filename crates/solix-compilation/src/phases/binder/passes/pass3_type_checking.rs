@@ -1152,6 +1152,13 @@ impl<'a> TypeCheckingVisitor<'a> {
                     .collect();
                 Type::Tuple(element_types)
             }
+            Expression::Block { result, .. } => {
+                if let Some(res) = result {
+                    self.evaluate_expression_type(res)
+                } else {
+                    Type::Primitive(PrimitiveKind::Void)
+                }
+            }
             Expression::Cast {
                 target_type,
                 expression,

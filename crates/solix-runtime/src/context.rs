@@ -195,13 +195,29 @@ impl RuntimeContext {
                 relocated_func.static_base_offset = stat_offset;
 
                 // Rewrite intra-module static instructions to direct global slots at load time
-                for inst in &mut relocated_func.instructions {
-                    if inst.raw_opcode() == OpCode::GetStatic as u8 {
-                        let absolute_slot = stat_offset + inst.imm32();
-                        *inst = Instruction::format_b(OpCode::GetStaticDirect, 0, inst.dst(), absolute_slot);
-                    } else if inst.raw_opcode() == OpCode::SetStatic as u8 {
-                        let absolute_slot = stat_offset + inst.imm32();
-                        *inst = Instruction::format_b(OpCode::SetStaticDirect, 0, inst.dst(), absolute_slot);
+                if binary.static_space_size > 0 {
+                    for inst in &mut relocated_func.instructions {
+                        if inst.raw_opcode() == OpCode::GetStatic as u8
+                            && inst.imm32() < binary.static_space_size
+                        {
+                            let absolute_slot = stat_offset + inst.imm32();
+                            *inst = Instruction::format_b(
+                                OpCode::GetStaticDirect,
+                                0,
+                                inst.dst(),
+                                absolute_slot,
+                            );
+                        } else if inst.raw_opcode() == OpCode::SetStatic as u8
+                            && inst.imm32() < binary.static_space_size
+                        {
+                            let absolute_slot = stat_offset + inst.imm32();
+                            *inst = Instruction::format_b(
+                                OpCode::SetStaticDirect,
+                                0,
+                                inst.dst(),
+                                absolute_slot,
+                            );
+                        }
                     }
                 }
 
@@ -299,7 +315,10 @@ impl RuntimeContext {
                 .map_or(0, |binary_unit| binary_unit.function_id_offset);
 
             let clean_symbol = func.symbol.split('(').next().unwrap_or(&func.symbol);
-            let simple_symbol = clean_symbol.rsplit(['.', ':']).next().unwrap_or(clean_symbol);
+            let simple_symbol = clean_symbol
+                .rsplit(['.', ':'])
+                .next()
+                .unwrap_or(clean_symbol);
             let has_qualifier = clean_symbol.contains("::");
             let native_fn = native_registry
                 .get(&func.symbol)

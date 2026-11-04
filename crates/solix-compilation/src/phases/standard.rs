@@ -6,6 +6,8 @@ use super::phase::CompilationPhase;
 use crate::CompilationContext::CompilationContext;
 use solix_common::CompilationDiagnostic;
 
+pub use super::optimizer::AstInlinerPhase;
+
 /// Lexical analysis phase tokenizing all registered sources in the context.
 #[derive(Debug, Default, Clone)]
 pub struct LexerPhase;

@@ -244,7 +244,9 @@ impl VirtualHeap {
             .allocate(required_block_size)
             .ok_or(RuntimeError::OutOfMemory {
                 requested: required_block_size,
-                available: self.dynamic_capacity.saturating_sub(self.current_allocated_bytes),
+                available: self
+                    .dynamic_capacity
+                    .saturating_sub(self.current_allocated_bytes),
             })?;
 
         let block_abs_addr = self.static_size + block_offset;

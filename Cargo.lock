@@ -990,6 +990,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solix-common",
+ "solix-runtime",
  "tempfile",
  "thiserror",
  "tracing",

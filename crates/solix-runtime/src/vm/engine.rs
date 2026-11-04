@@ -85,10 +85,10 @@ impl VirtualMachine {
         }
 
         let mut interned_string_addrs = HashSet::new();
-        let mut const_pool_cache: Vec<Vec<Value>> = Vec::with_capacity(context.loaded_binaries.len());
+        let mut const_pool_cache: Vec<Vec<Value>> =
+            Vec::with_capacity(context.loaded_binaries.len());
         for loaded_binary in &context.loaded_binaries {
-            let mut cached_values =
-                Vec::with_capacity(loaded_binary.constant_pool.values.len());
+            let mut cached_values = Vec::with_capacity(loaded_binary.constant_pool.values.len());
             for pool_val in &loaded_binary.constant_pool.values {
                 match pool_val {
                     solix_common::bytecode::ConstantPoolValue::Int64(int_val) => {
@@ -424,14 +424,14 @@ impl VirtualMachine {
         let binary_id = meta.binary_id;
         let func_id_offset = meta.func_id_offset;
 
-        let reg_base = self
-            .call_frames
-            .last()
-            .map_or(0, |last_frame| last_frame.register_base + last_frame.register_count);
+        let reg_base = self.call_frames.last().map_or(0, |last_frame| {
+            last_frame.register_base + last_frame.register_count
+        });
         let num_regs = (func.num_registers as usize).max(args.len());
 
         if reg_base + num_regs > self.register_stack.len() {
-            self.register_stack.resize(reg_base + num_regs + 4096, Value::Null);
+            self.register_stack
+                .resize(reg_base + num_regs + 4096, Value::Null);
         }
 
         if meta.has_references {

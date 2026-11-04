@@ -100,6 +100,20 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// Emits `DEC_REF` instructions for reference registers in current lexical scope upon exit, preserving `preserve_reg`.
+    pub fn emit_block_exit_arc_cleanup_except(&mut self, preserve_reg: Option<u16>) {
+        if let Some(allocated) = self.allocator.current_scope_allocated() {
+            for reg in allocated {
+                if self.function.reference_registers.contains(&reg) && Some(reg) != preserve_reg {
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::DecRef, 0, reg, 0, 0),
+                        None,
+                    );
+                }
+            }
+        }
+    }
+
     /// Emits `DEC_REF` cleanup for all active reference variables across all scopes upon return.
     ///
     /// Preserves the returned register `ret_reg` without decrementing it.
@@ -597,6 +611,33 @@ impl<'a> Emitter<'a> {
                     self.allocator.free_temp(r_val);
                 }
                 self.allocator.free_temp(r_idx);
+                Ok(dst)
+            }
+
+            Expression::Block {
+                span,
+                statements,
+                result,
+            } => {
+                self.allocator.enter_scope();
+                let mut inner_loop_stack = Vec::new();
+                for stmt in statements {
+                    self.emit_statement(stmt, &mut inner_loop_stack)?;
+                }
+                let dst = if let Some(res) = result {
+                    let val_reg = self.emit_expression(res, target_reg)?;
+                    self.emit_block_exit_arc_cleanup_except(Some(val_reg));
+                    val_reg
+                } else {
+                    self.emit_block_exit_arc_cleanup();
+                    let val_reg = self.resolve_dst(target_reg)?;
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::LoadNull, 0, val_reg, 0, 0),
+                        Some(*span),
+                    );
+                    val_reg
+                };
+                self.allocator.exit_scope();
                 Ok(dst)
             }
 

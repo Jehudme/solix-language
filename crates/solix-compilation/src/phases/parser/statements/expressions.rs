@@ -200,6 +200,15 @@ pub enum Expression {
         /// Element expressions composing the tuple.
         elements: Vec<Expression>,
     },
+    /// Inlined block expression evaluating a sequence of statements and a final expression.
+    Block {
+        /// Overall source coordinate span.
+        span: Span,
+        /// Inlined statements executed in a new lexical scope.
+        statements: Vec<super::Statement>,
+        /// Optional final expression value produced by the block.
+        result: Option<Box<Expression>>,
+    },
 }
 
 impl Expression {
@@ -224,7 +233,8 @@ impl Expression {
             | Self::Lambda { span, .. }
             | Self::Sizeof { span, .. }
             | Self::Default { span, .. }
-            | Self::TupleCreation { span, .. } => *span,
+            | Self::TupleCreation { span, .. }
+            | Self::Block { span, .. } => *span,
         }
     }
 }

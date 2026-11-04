@@ -46,7 +46,8 @@ impl VirtualMachine {
         let num_regs = (func.num_registers as usize).max(arg_count);
 
         if reg_base + num_regs > self.register_stack.len() {
-            self.register_stack.resize(reg_base + num_regs + 4096, Value::Null);
+            self.register_stack
+                .resize(reg_base + num_regs + 4096, Value::Null);
         }
 
         if meta.has_references {
@@ -677,7 +678,9 @@ impl VirtualMachine {
                     let meta = &self.context.function_meta[global_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack[caller_arg_start..caller_arg_start + arg_count].to_vec();
+                        let args = self.register_stack
+                            [caller_arg_start..caller_arg_start + arg_count]
+                            .to_vec();
                         let result = native_callback(self, &args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = result;
@@ -703,7 +706,9 @@ impl VirtualMachine {
                     let meta = &self.context.function_meta[global_func_id];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack[caller_arg_start..caller_arg_start + arg_count].to_vec();
+                        let args = self.register_stack
+                            [caller_arg_start..caller_arg_start + arg_count]
+                            .to_vec();
                         let result = native_callback(self, &args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = result;
@@ -727,21 +732,28 @@ impl VirtualMachine {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let class_entry = self.context.get_class_by_vtable_id(vtable_id).ok_or_else(|| {
-                        RuntimeError::FunctionNotFound {
-                            symbol_or_id: format!("vtable #{vtable_id}"),
-                        }
-                    })?;
-                    let global_func_id = class_entry.vtable.get(slot).copied().ok_or_else(|| {
-                        RuntimeError::FunctionNotFound {
-                            symbol_or_id: format!("vtable slot {slot} in class {}", class_entry.symbol),
-                        }
-                    })?;
+                    let class_entry =
+                        self.context
+                            .get_class_by_vtable_id(vtable_id)
+                            .ok_or_else(|| RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!("vtable #{vtable_id}"),
+                            })?;
+                    let global_func_id =
+                        class_entry.vtable.get(slot).copied().ok_or_else(|| {
+                            RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!(
+                                    "vtable slot {slot} in class {}",
+                                    class_entry.symbol
+                                ),
+                            }
+                        })?;
 
                     let meta = &self.context.function_meta[global_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack[caller_arg_start..caller_arg_start + arg_count].to_vec();
+                        let args = self.register_stack
+                            [caller_arg_start..caller_arg_start + arg_count]
+                            .to_vec();
                         let result = native_callback(self, &args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = result;
@@ -772,11 +784,12 @@ impl VirtualMachine {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let class_entry = self.context.get_class_by_vtable_id(vtable_id).ok_or_else(|| {
-                        RuntimeError::FunctionNotFound {
-                            symbol_or_id: format!("vtable #{vtable_id}"),
-                        }
-                    })?;
+                    let class_entry =
+                        self.context
+                            .get_class_by_vtable_id(vtable_id)
+                            .ok_or_else(|| RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!("vtable #{vtable_id}"),
+                            })?;
                     let resolved_func_id = if iface_id != 0 {
                         class_entry
                             .itable
@@ -794,13 +807,18 @@ impl VirtualMachine {
                             .or_else(|| class_entry.vtable.get(slot).copied())
                     })
                     .ok_or_else(|| RuntimeError::FunctionNotFound {
-                        symbol_or_id: format!("interface slot {slot} in class {}", class_entry.symbol),
+                        symbol_or_id: format!(
+                            "interface slot {slot} in class {}",
+                            class_entry.symbol
+                        ),
                     })?;
 
                     let meta = &self.context.function_meta[resolved_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack[caller_arg_start..caller_arg_start + arg_count].to_vec();
+                        let args = self.register_stack
+                            [caller_arg_start..caller_arg_start + arg_count]
+                            .to_vec();
                         let result = native_callback(self, &args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = result;
@@ -808,7 +826,12 @@ impl VirtualMachine {
                         continue;
                     }
 
-                    self.push_frame_fast(resolved_func_id, caller_dst, caller_arg_start, arg_count)?;
+                    self.push_frame_fast(
+                        resolved_func_id,
+                        caller_dst,
+                        caller_arg_start,
+                        arg_count,
+                    )?;
                     reload_frame!();
                     continue;
                 }
@@ -830,14 +853,21 @@ impl VirtualMachine {
                             let meta = &self.context.function_meta[global_func_id as usize];
                             if let Some(native_callback) = meta.native_fn {
                                 self.record_native_call();
-                                let args = self.register_stack[caller_arg_start..caller_arg_start + arg_count].to_vec();
+                                let args = self.register_stack
+                                    [caller_arg_start..caller_arg_start + arg_count]
+                                    .to_vec();
                                 let result = native_callback(self, &args)?;
                                 unsafe {
                                     *reg_base.add(caller_dst as usize) = result;
                                 }
                                 continue;
                             }
-                            self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
+                            self.push_frame_fast(
+                                global_func_id,
+                                caller_dst,
+                                caller_arg_start,
+                                arg_count,
+                            )?;
                             reload_frame!();
                             continue;
                         }
@@ -849,14 +879,21 @@ impl VirtualMachine {
                             let meta = &self.context.function_meta[global_func_id as usize];
                             if let Some(native_callback) = meta.native_fn {
                                 self.record_native_call();
-                                let args = self.register_stack[caller_arg_start..caller_arg_start + arg_count].to_vec();
+                                let args = self.register_stack
+                                    [caller_arg_start..caller_arg_start + arg_count]
+                                    .to_vec();
                                 let result = native_callback(self, &args)?;
                                 unsafe {
                                     *reg_base.add(caller_dst as usize) = result;
                                 }
                                 continue;
                             }
-                            self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
+                            self.push_frame_fast(
+                                global_func_id,
+                                caller_dst,
+                                caller_arg_start,
+                                arg_count,
+                            )?;
                             if let Some(new_frame) = self.call_frames.last_mut() {
                                 new_frame.active_closure = Some(closure_addr);
                             }
@@ -1010,11 +1047,7 @@ impl VirtualMachine {
                                     cls.reference_field_offsets.contains(&offset)
                                         || cls.weak_field_offsets.contains(&offset)
                                 });
-                                if is_ref {
-                                    Value::Null
-                                } else {
-                                    Value::I32(0)
-                                }
+                                if is_ref { Value::Null } else { Value::I32(0) }
                             } else {
                                 Value::from_raw_u64(raw)
                             }
@@ -1061,7 +1094,9 @@ impl VirtualMachine {
                             let _ = self.heap.write_u64(field_addr, bits);
                         }
                         Some(11) => {
-                            let _ = self.heap.write_u8(field_addr, if val.as_bool()? { 1 } else { 0 });
+                            let _ = self
+                                .heap
+                                .write_u8(field_addr, if val.as_bool()? { 1 } else { 0 });
                         }
                         _ => {
                             let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
@@ -1228,8 +1263,9 @@ impl VirtualMachine {
                     self.heap.write_u64(elem_addr, val.to_raw_u64())?;
                     let header = self.heap.read_header(arr_addr)?;
                     let elem_type_tag = self.heap.read_u8(arr_addr + 7).unwrap_or(0);
-                    let is_reference_element =
-                        header.tag == BlockTag::Tuple || elem_type_tag == 13 || elem_type_tag >= 0x80;
+                    let is_reference_element = header.tag == BlockTag::Tuple
+                        || elem_type_tag == 13
+                        || elem_type_tag >= 0x80;
                     if is_reference_element {
                         if let Value::Ref(child_addr) = val
                             && child_addr > 0
@@ -1416,9 +1452,9 @@ impl VirtualMachine {
                             12 => matches!(val, Value::I32(_)),
                             13 => {
                                 if let Value::Ref(target_addr) = val {
-                                    self.heap
-                                        .read_header(target_addr)
-                                        .is_ok_and(|header_info| header_info.tag == BlockTag::String)
+                                    self.heap.read_header(target_addr).is_ok_and(|header_info| {
+                                        header_info.tag == BlockTag::String
+                                    })
                                 } else {
                                     false
                                 }
@@ -1491,7 +1527,8 @@ impl VirtualMachine {
                     let imm_val = inst.src2() as i16 as i32;
                     let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_add(imm_val));
+                        *reg_base.add(inst.dst() as usize) =
+                            Value::I32(val_a.wrapping_add(imm_val));
                     }
                 }
 
@@ -1499,7 +1536,8 @@ impl VirtualMachine {
                     let imm_val = inst.src2() as i16 as i32;
                     let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_sub(imm_val));
+                        *reg_base.add(inst.dst() as usize) =
+                            Value::I32(val_a.wrapping_sub(imm_val));
                     }
                 }
 
