@@ -4,6 +4,10 @@
 
 use crate::cli::RunArgs;
 use crate::diagnostics::render_diagnostics;
+use crate::telemetry::{
+    ExecutionTelemetry, MemoryTelemetry, RunMetricsReport, TimingsTelemetry,
+    capture_process_telemetry,
+};
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
@@ -63,6 +67,9 @@ fn parse_byte_size(size_str: &str) -> Result<usize> {
 /// # Errors
 /// Returns an error if source compilation, binary loading, VM initialization, or execution fails.
 pub fn execute_run(args: RunArgs) -> Result<i32> {
+    let total_start = std::time::Instant::now();
+    let binary_load_timer = std::time::Instant::now();
+
     if args.binaries.is_empty() {
         bail!("No binary container or source files provided to execute");
     }
@@ -185,13 +192,127 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .map_err(|error| anyhow::anyhow!("Runtime initialization failed: {error}"))?;
 
     let mut vm = VirtualMachine::new(context);
+    let binary_load_time_us = binary_load_timer.elapsed().as_micros() as u64;
 
     // Run virtual machine
-    if let Err(runtime_error) = vm.run() {
-        bail!("Runtime error: {runtime_error}");
-    }
+    let run_result = vm.run();
+    let total_process_wall_time_us = total_start.elapsed().as_micros() as u64;
 
     let exit_code = vm.exit_code.unwrap_or(0);
+    let vm_telemetry = vm.telemetry();
+    let heap_telemetry = vm.heap.telemetry();
+    let process_telemetry = capture_process_telemetry();
+
+    let heap_amplification_ratio = if heap_telemetry.peak_allocated_bytes > 0 {
+        let raw_ratio = (process_telemetry.peak_rss_kb as f64 * 1024.0)
+            / (heap_telemetry.peak_allocated_bytes as f64);
+        (raw_ratio * 100.0).round() / 100.0
+    } else {
+        1.0
+    };
+
+    let workload_name = args
+        .binaries
+        .first()
+        .and_then(|path| path.file_stem())
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("app")
+        .to_string();
+
+    let status_str = if run_result.is_ok() {
+        "success"
+    } else {
+        "error"
+    };
+
+    if args.metrics_json {
+        let report = RunMetricsReport {
+            workload: workload_name,
+            status: status_str.to_string(),
+            exit_code,
+            timings: TimingsTelemetry {
+                total_process_wall_time_us,
+                pure_vm_execution_time_us: vm_telemetry.pure_execution_time_ns / 1_000,
+                binary_load_time_us,
+                static_init_time_us: 0,
+            },
+            memory: MemoryTelemetry {
+                peak_virtual_heap_bytes: heap_telemetry.peak_allocated_bytes,
+                peak_os_rss_kb: process_telemetry.peak_rss_kb,
+                heap_amplification_ratio,
+                total_allocations: heap_telemetry.total_allocations_count,
+                total_deallocations: heap_telemetry.total_deallocations_count,
+                active_leaks: heap_telemetry.active_live_objects,
+            },
+            execution: ExecutionTelemetry {
+                instructions_dispatched: vm_telemetry.instructions_dispatched,
+                peak_stack_depth: vm_telemetry.peak_call_stack_depth,
+                quickened_calls: vm_telemetry.quickened_instructions_count,
+            },
+        };
+        let json_output = serde_json::to_string_pretty(&report)
+            .context("Failed to serialize run metrics to JSON")?;
+        println!("{json_output}");
+    } else if args.metrics {
+        println!("=== Solix VM Telemetry ===");
+        println!("Workload:       {workload_name}");
+        println!("Status:         {status_str} (exit code: {exit_code})");
+        println!("Timings:");
+        println!(
+            "  Total Process Wall Time : {:.2} ms",
+            total_process_wall_time_us as f64 / 1000.0
+        );
+        println!(
+            "  Pure VM Execution Time  : {:.2} ms",
+            vm_telemetry.pure_execution_time_ns as f64 / 1_000_000.0
+        );
+        println!(
+            "  Binary Load Time        : {:.2} ms",
+            binary_load_time_us as f64 / 1000.0
+        );
+        println!("Memory:");
+        println!(
+            "  Peak VirtualHeap Bytes  : {} B",
+            heap_telemetry.peak_allocated_bytes
+        );
+        println!(
+            "  Peak Host OS RSS        : {} KB",
+            process_telemetry.peak_rss_kb
+        );
+        println!(
+            "  Heap Amplification Ratio: {:.2}x",
+            heap_amplification_ratio
+        );
+        println!(
+            "  Total Allocations       : {}",
+            heap_telemetry.total_allocations_count
+        );
+        println!(
+            "  Total Deallocations     : {}",
+            heap_telemetry.total_deallocations_count
+        );
+        println!(
+            "  Active Leaks            : {}",
+            heap_telemetry.active_live_objects
+        );
+        println!("Execution:");
+        println!(
+            "  Instructions Dispatched : {}",
+            vm_telemetry.instructions_dispatched
+        );
+        println!(
+            "  Peak Call Stack Depth   : {}",
+            vm_telemetry.peak_call_stack_depth
+        );
+        println!(
+            "  Quickened Instructions  : {}",
+            vm_telemetry.quickened_instructions_count
+        );
+    }
+
+    if let Err(runtime_error) = run_result {
+        bail!("Runtime error: {runtime_error}");
+    }
 
     if args.verbose {
         println!("\n--- Solix Execution Summary ---");

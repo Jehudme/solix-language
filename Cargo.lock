@@ -958,6 +958,8 @@ dependencies = [
  "anyhow",
  "clap",
  "miette",
+ "serde",
+ "serde_json",
  "solix-common",
  "solix-compilation",
  "solix-runtime",

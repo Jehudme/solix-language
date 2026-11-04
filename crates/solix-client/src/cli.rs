@@ -74,6 +74,14 @@ pub struct CompileArgs {
     /// Print wall-clock duration for each compilation phase
     #[arg(long)]
     pub time: bool,
+
+    /// Print compiler throughput metrics and phase duration breakdown
+    #[arg(long)]
+    pub metrics: bool,
+
+    /// Output compiler metrics formatted as machine-readable JSON
+    #[arg(long)]
+    pub metrics_json: bool,
 }
 
 /// Arguments for `solix run`.
@@ -106,6 +114,14 @@ pub struct RunArgs {
     /// Execute in safe mode (bounds-checked execution with defensive invariant validation)
     #[arg(long)]
     pub safe: bool,
+
+    /// Print execution telemetry and memory statistics
+    #[arg(long)]
+    pub metrics: bool,
+
+    /// Output execution telemetry formatted as machine-readable JSON
+    #[arg(long)]
+    pub metrics_json: bool,
 
     /// Arguments passed to the Solix application entry point
     #[arg(last = true)]

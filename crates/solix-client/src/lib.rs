@@ -5,10 +5,14 @@
 pub mod cli;
 pub mod commands;
 pub mod diagnostics;
+pub mod telemetry;
 
 pub use cli::{Cli, Commands, CompileArgs, InfoArgs, RunArgs};
 pub use commands::{execute_compile, execute_info, execute_run};
 pub use diagnostics::render_diagnostics;
+pub use telemetry::{
+    CompileMetricsReport, ProcessTelemetry, RunMetricsReport, capture_process_telemetry,
+};
 
 /// Main programmatic entry point for dispatching CLI commands.
 ///

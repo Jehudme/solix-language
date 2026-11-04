@@ -4,6 +4,7 @@
 
 use crate::cli::CompileArgs;
 use crate::diagnostics::render_diagnostics;
+use crate::telemetry::CompileMetricsReport;
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
@@ -24,8 +25,8 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let package_name = args.name.unwrap_or_else(|| {
         args.sources
             .first()
-            .and_then(|p| p.file_stem())
-            .and_then(|s| s.to_str())
+            .and_then(|path| path.file_stem())
+            .and_then(|stem| stem.to_str())
             .unwrap_or("app")
             .to_string()
     });
@@ -68,7 +69,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             )
         })?;
         let (api_filename, api_source) =
-            manifest_to_source(&manifest_json).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
 
         options = options.with_source(api_filename, api_source);
     }
@@ -93,7 +94,41 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
 
     // 6. Output handling
     if args.check {
-        if args.time {
+        if args.metrics_json {
+            let telemetry = context.telemetry.unwrap_or_default();
+            let report = CompileMetricsReport {
+                package_name,
+                status: "success".to_string(),
+                total_time_us: telemetry.total_time_us,
+                throughput_mb_s: telemetry.throughput_mb_s,
+                source_bytes: telemetry.source_bytes,
+                total_tokens: telemetry.total_tokens,
+                total_instructions: telemetry.total_instructions,
+                binary_size_bytes: telemetry.binary_size_bytes,
+                phases: telemetry.phases,
+            };
+            let json_output = serde_json::to_string_pretty(&report)
+                .context("Failed to serialize compiler metrics to JSON")?;
+            println!("{json_output}");
+        } else if args.metrics {
+            let telemetry = context.telemetry.unwrap_or_default();
+            println!("=== Solix Compiler Metrics ===");
+            println!("Package:      {package_name}");
+            println!("Status:       check passed");
+            println!(
+                "Total Time:   {:.2} ms",
+                telemetry.total_time_us as f64 / 1000.0
+            );
+            println!("Throughput:   {:.2} MB/s", telemetry.throughput_mb_s);
+            println!(
+                "Sources:      {} bytes, {} tokens",
+                telemetry.source_bytes, telemetry.total_tokens
+            );
+            println!("Phases:");
+            for phase in &telemetry.phases {
+                println!("  - {:<32} : {} µs", phase.name, phase.duration_us);
+            }
+        } else if args.time {
             println!(
                 "Check passed in {:.2}ms (0 errors)",
                 elapsed.as_secs_f64() * 1000.0
@@ -126,7 +161,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         let manifest_json = extract_api_manifest(&artifacts.program)
             .with_context(|| "Failed to serialize export manifest")?;
         let (_, api_source) =
-            manifest_to_source(&manifest_json).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
 
         if let Some(parent) = api_out_path.parent()
             && !parent.as_os_str().is_empty()
@@ -139,10 +174,47 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
                 api_out_path.display()
             )
         })?;
-        println!("Exported API header -> {}", api_out_path.display());
+        if !args.metrics_json {
+            println!("Exported API header -> {}", api_out_path.display());
+        }
     }
 
-    if args.time {
+    if args.metrics_json {
+        let telemetry = context.telemetry.unwrap_or_default();
+        let report = CompileMetricsReport {
+            package_name,
+            status: "success".to_string(),
+            total_time_us: telemetry.total_time_us,
+            throughput_mb_s: telemetry.throughput_mb_s,
+            source_bytes: telemetry.source_bytes,
+            total_tokens: telemetry.total_tokens,
+            total_instructions: telemetry.total_instructions,
+            binary_size_bytes: telemetry.binary_size_bytes,
+            phases: telemetry.phases,
+        };
+        let json_output = serde_json::to_string_pretty(&report)
+            .context("Failed to serialize compiler metrics to JSON")?;
+        println!("{json_output}");
+    } else if args.metrics {
+        let telemetry = context.telemetry.unwrap_or_default();
+        println!("=== Solix Compiler Metrics ===");
+        println!("Package:      {package_name}");
+        println!("Status:       success");
+        println!(
+            "Total Time:   {:.2} ms",
+            telemetry.total_time_us as f64 / 1000.0
+        );
+        println!("Throughput:   {:.2} MB/s", telemetry.throughput_mb_s);
+        println!(
+            "Sources:      {} bytes, {} tokens, {} instructions",
+            telemetry.source_bytes, telemetry.total_tokens, telemetry.total_instructions
+        );
+        println!("Binary Size:  {} bytes", telemetry.binary_size_bytes);
+        println!("Phases:");
+        for phase in &telemetry.phases {
+            println!("  - {:<32} : {} µs", phase.name, phase.duration_us);
+        }
+    } else if args.time {
         println!(
             "Compiled '{}' -> {} in {:.2}ms",
             package_name,
