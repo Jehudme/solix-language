@@ -160,7 +160,7 @@ fn test_case_4_4_stray_extra_closing_brace() {
             }
         }
     "#;
-    assert_compile_error(code, "E0103");
+    assert_compile_error(code, "E0195");
 }
 
 #[test]

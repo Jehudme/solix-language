@@ -518,6 +518,32 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
+        if modifiers.is_empty() && self.cursor.check(TokenKind::PunctuationSemicolon) {
+            let semi = self.cursor.advance().copied().unwrap_or_default();
+            return Err(ParsingError::UnexpectedSemicolon {
+                span: semi.span.to_source_span(),
+            });
+        }
+
+        if modifiers.is_empty()
+            && matches!(
+                self.cursor.peek_kind(),
+                TokenKind::KeywordCatch
+                    | TokenKind::KeywordFinally
+                    | TokenKind::KeywordCase
+                    | TokenKind::KeywordDefault
+                    | TokenKind::PunctuationCloseBrace
+                    | TokenKind::PunctuationCloseParen
+                    | TokenKind::PunctuationCloseBracket
+            )
+        {
+            let token = self.cursor.advance().copied().unwrap_or_default();
+            return Err(ParsingError::InvalidTopLevelToken {
+                token: token.kind.to_string(),
+                span: token.span.to_source_span(),
+            });
+        }
+
         if self.is_constructor_lookahead() {
             let name_span = self.cursor.advance().map(|t| t.span).unwrap_or_default();
             let ctor = self.parse_constructor_declaration(modifiers, name_span)?;
@@ -1034,12 +1060,29 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         if self.cursor.check(TokenKind::PunctuationOpenParen)
             || self.cursor.check(TokenKind::OperatorLessThan)
+            || self.cursor.check(TokenKind::PunctuationOpenBrace)
         {
             let method = self.parse_method_declaration(member_modifiers, type_annot, name_span)?;
             return Ok(ClassMember::Method(method));
         }
 
         // Field
+        let span = type_annot.span().combine(name_span);
+        self.validate_modifiers(
+            &member_modifiers,
+            &[
+                Modifier::Public,
+                Modifier::Protected,
+                Modifier::Private,
+                Modifier::Internal,
+                Modifier::Static,
+                Modifier::Const,
+                Modifier::Weak,
+                Modifier::Extern,
+            ],
+            "field",
+            span,
+        );
         let initializer = if self.cursor.match_token(TokenKind::OperatorAssign).is_some() {
             Some(self.parse_expression()?)
         } else {
@@ -1086,6 +1129,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
 
         let name_span = self.consume_identifier()?;
+
         let generic_params = self.parse_generic_params()?;
 
         let mut super_interfaces = Vec::new();
@@ -1254,6 +1298,26 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 span: name_span.to_source_span(),
             });
         }
+
+        let member_span = return_type.span().combine(name_span);
+        self.validate_modifiers(
+            &modifiers,
+            &[
+                Modifier::Public,
+                Modifier::Protected,
+                Modifier::Private,
+                Modifier::Internal,
+                Modifier::Static,
+                Modifier::Virtual,
+                Modifier::Override,
+                Modifier::Abstract,
+                Modifier::Inline,
+                Modifier::Native,
+                Modifier::Extern,
+            ],
+            "method",
+            member_span,
+        );
 
         let generic_params = self.parse_generic_params()?;
         let parameters = self.parse_parameter_list()?;
@@ -1513,6 +1577,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
     fn parse_statement_in_block(&mut self) -> Result<Vec<Statement>, ParsingError> {
         match self.cursor.peek_kind() {
+            TokenKind::PunctuationSemicolon => {
+                let semi = self.cursor.advance().copied().unwrap_or_default();
+                Err(ParsingError::UnexpectedSemicolon {
+                    span: semi.span.to_source_span(),
+                })
+            }
             TokenKind::PunctuationOpenBrace => Ok(vec![Statement::Block(self.parse_block()?)]),
             TokenKind::KeywordIf => Ok(vec![Statement::If(self.parse_if_statement()?)]),
             TokenKind::KeywordWhile => Ok(vec![Statement::While(self.parse_while_statement()?)]),
@@ -1807,6 +1877,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
+        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+            return Err(ParsingError::ExpectedConditionInIf {
+                span: self.cursor.current_span().to_source_span(),
+            });
+        }
+
         let condition = self.parse_expression()?;
 
         if self
@@ -1861,6 +1937,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             .is_some();
         if !has_paren {
             self.record_error(ParsingError::MalformedWhileCondition {
+                span: self.cursor.current_span().to_source_span(),
+            });
+        }
+
+        if has_paren && self.cursor.check(TokenKind::PunctuationCloseParen) {
+            return Err(ParsingError::ExpectedConditionInWhile {
                 span: self.cursor.current_span().to_source_span(),
             });
         }
@@ -1922,6 +2004,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             .is_some();
         if !has_paren {
             self.record_error(ParsingError::MalformedWhileCondition {
+                span: self.cursor.current_span().to_source_span(),
+            });
+        }
+
+        if has_paren && self.cursor.check(TokenKind::PunctuationCloseParen) {
+            return Err(ParsingError::ExpectedConditionInWhile {
                 span: self.cursor.current_span().to_source_span(),
             });
         }
@@ -2231,6 +2319,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 });
             }
 
+            if !self.cursor.check(TokenKind::PunctuationOpenBrace) {
+                return Err(ParsingError::ExpectedCatchOrFinallyBlock {
+                    span: self.cursor.current_span().to_source_span(),
+                });
+            }
+
             let block = self.parse_block()?;
             let span = catch_start.combine(block.span);
 
@@ -2243,6 +2337,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
 
         let finally_block = if self.cursor.match_token(TokenKind::KeywordFinally).is_some() {
+            if !self.cursor.check(TokenKind::PunctuationOpenBrace) {
+                return Err(ParsingError::ExpectedCatchOrFinallyBlock {
+                    span: self.cursor.current_span().to_source_span(),
+                });
+            }
             Some(self.parse_block()?)
         } else {
             None
@@ -2936,6 +3035,14 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     array: Box::new(expression),
                     index: Box::new(index),
                 };
+            } else if self
+                .cursor
+                .match_token(TokenKind::PunctuationArrayBrackets)
+                .is_some()
+            {
+                return Err(ParsingError::ExpectedExpressionInIndex {
+                    span: self.cursor.current_span().to_source_span(),
+                });
             } else if matches!(
                 self.cursor.peek_kind(),
                 TokenKind::OperatorIncrement | TokenKind::OperatorDecrement
@@ -3440,6 +3547,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
                 Ok(first_expr)
             }
+            TokenKind::OperatorQuestion => {
+                self.cursor.advance();
+                Err(ParsingError::UnexpectedQuestionOperator {
+                    span: token.span.to_source_span(),
+                })
+            }
             _ => Err(ParsingError::ExpectedExpression {
                 span: token.span.to_source_span(),
             }),
@@ -3839,6 +3952,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     .match_token(TokenKind::PunctuationColon)
                     .is_some()
                 {
+                    if self.cursor.check(TokenKind::OperatorGreaterThan)
+                        || self.cursor.check(TokenKind::PunctuationComma)
+                    {
+                        return Err(ParsingError::MalformedTypeBound {
+                            span: self.cursor.current_span().to_source_span(),
+                        });
+                    }
                     loop {
                         bounds.push(self.parse_type_annotation()?);
                         if self.cursor.match_token(TokenKind::OperatorPlus).is_none() {
@@ -3880,7 +4000,15 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
     }
 
     fn parse_parameter_list(&mut self) -> Result<Vec<Parameter>, ParsingError> {
-        self.consume_open_paren()?;
+        if self
+            .cursor
+            .match_token(TokenKind::PunctuationOpenParen)
+            .is_none()
+        {
+            return Err(ParsingError::ExpectedParameterList {
+                span: self.cursor.current_span().to_source_span(),
+            });
+        }
         let mut parameters = Vec::new();
 
         if !self.cursor.check(TokenKind::PunctuationCloseParen) {
@@ -4147,6 +4275,10 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
     fn consume_semicolon(&mut self) -> Result<Token, ParsingError> {
         if self.cursor.check(TokenKind::PunctuationSemicolon) {
             Ok(self.cursor.advance().copied().unwrap_or_default())
+        } else if self.is_expression_start(self.cursor.peek_kind()) {
+            Err(ParsingError::MissingOperatorInExpression {
+                span: self.cursor.current_span().to_source_span(),
+            })
         } else {
             Err(ParsingError::ExpectedSemicolon {
                 span: self.cursor.current_span().to_source_span(),

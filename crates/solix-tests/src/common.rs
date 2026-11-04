@@ -143,10 +143,9 @@ pub fn assert_compile_error(source_code: &str, expected_error_or_code: &str) {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let matches_code = diagnostics.iter().any(|diagnostic| {
-                diagnostic.error_code() == expected_error_or_code
-                    || diagnostic.error_code().to_string() == expected_error_or_code
-            });
+            let matches_code = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.error_code() == expected_error_or_code);
 
             let matches_text = combined_message
                 .to_lowercase()
@@ -192,10 +191,9 @@ pub fn assert_compile_sources_error(sources: &[(&str, &str)], expected_error_or_
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let matches_code = diagnostics.iter().any(|diagnostic| {
-                diagnostic.error_code() == expected_error_or_code
-                    || diagnostic.error_code().to_string() == expected_error_or_code
-            });
+            let matches_code = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.error_code() == expected_error_or_code);
 
             let matches_text = combined_message
                 .to_lowercase()

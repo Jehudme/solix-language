@@ -98,5 +98,5 @@ fn test_case_4_4_cast_expression_with_non_type_identifier() {
             int32 y = (123)x;
         }
     "#;
-    assert_compile_error(code, "Expected");
+    assert_compile_error(code, "E0193");
 }
