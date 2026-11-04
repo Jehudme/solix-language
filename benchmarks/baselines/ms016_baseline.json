@@ -1,0 +1,603 @@
+{
+  "metadata": {
+    "os": "Linux",
+    "mode": "fast",
+    "warmup": 2,
+    "iterations": 5,
+    "timestamp": 1793782335.551184
+  },
+  "workloads": {
+    "01_fib_recursive": {
+      "solix_fast": {
+        "median_ms": 289.07,
+        "min_ms": 285.67,
+        "max_ms": 292.26,
+        "stdev_ms": 2.83,
+        "rss_kb": 20528
+      },
+      "python3": {
+        "median_ms": 103.54,
+        "min_ms": 94.06,
+        "max_ms": 104.65,
+        "stdev_ms": 4.41,
+        "rss_kb": 20528
+      },
+      "lua": {
+        "median_ms": 49.41,
+        "min_ms": 47.0,
+        "max_ms": 51.99,
+        "stdev_ms": 1.84,
+        "rss_kb": 20528
+      },
+      "luajit": {
+        "median_ms": 18.33,
+        "min_ms": 8.21,
+        "max_ms": 21.85,
+        "stdev_ms": 6.52,
+        "rss_kb": 20528
+      },
+      "c": {
+        "median_ms": 2.37,
+        "min_ms": 2.19,
+        "max_ms": 2.7,
+        "stdev_ms": 0.19,
+        "rss_kb": 44412
+      }
+    },
+    "02_tight_loop_int": {
+      "solix_fast": {
+        "median_ms": 220.35,
+        "min_ms": 215.11,
+        "max_ms": 226.22,
+        "stdev_ms": 3.96,
+        "rss_kb": 44412
+      },
+      "python3": {
+        "median_ms": 326.58,
+        "min_ms": 313.55,
+        "max_ms": 359.43,
+        "stdev_ms": 17.53,
+        "rss_kb": 44412
+      },
+      "lua": {
+        "median_ms": 34.88,
+        "min_ms": 33.66,
+        "max_ms": 42.65,
+        "stdev_ms": 3.83,
+        "rss_kb": 44412
+      },
+      "luajit": {
+        "median_ms": 14.36,
+        "min_ms": 9.42,
+        "max_ms": 22.43,
+        "stdev_ms": 5.29,
+        "rss_kb": 44412
+      },
+      "c": {
+        "median_ms": 1.93,
+        "min_ms": 1.64,
+        "max_ms": 4.3,
+        "stdev_ms": 1.28,
+        "rss_kb": 44436
+      }
+    },
+    "03_nbody_float64": {
+      "solix_fast": {
+        "median_ms": 34.59,
+        "min_ms": 28.79,
+        "max_ms": 40.08,
+        "stdev_ms": 4.89,
+        "rss_kb": 44436
+      },
+      "python3": {
+        "median_ms": 68.43,
+        "min_ms": 59.43,
+        "max_ms": 73.29,
+        "stdev_ms": 5.56,
+        "rss_kb": 44436
+      },
+      "lua": {
+        "median_ms": 5.03,
+        "min_ms": 4.7,
+        "max_ms": 12.97,
+        "stdev_ms": 3.55,
+        "rss_kb": 44436
+      },
+      "luajit": {
+        "median_ms": 2.31,
+        "min_ms": 2.2,
+        "max_ms": 5.85,
+        "stdev_ms": 1.92,
+        "rss_kb": 44436
+      },
+      "c": {
+        "median_ms": 2.02,
+        "min_ms": 1.82,
+        "max_ms": 4.35,
+        "stdev_ms": 1.28,
+        "rss_kb": 44436
+      }
+    },
+    "04_ackermann_stack": {
+      "solix_fast": {
+        "median_ms": 63.58,
+        "min_ms": 60.57,
+        "max_ms": 64.19,
+        "stdev_ms": 1.47,
+        "rss_kb": 44436
+      },
+      "python3": {
+        "median_ms": 42.94,
+        "min_ms": 42.55,
+        "max_ms": 47.96,
+        "stdev_ms": 2.79,
+        "rss_kb": 44436
+      },
+      "lua": {
+        "median_ms": 7.45,
+        "min_ms": 7.29,
+        "max_ms": 21.18,
+        "stdev_ms": 6.17,
+        "rss_kb": 44436
+      },
+      "luajit": {
+        "median_ms": 2.66,
+        "min_ms": 2.5,
+        "max_ms": 3.9,
+        "stdev_ms": 0.71,
+        "rss_kb": 44436
+      },
+      "c": {
+        "median_ms": 1.27,
+        "min_ms": 1.25,
+        "max_ms": 2.74,
+        "stdev_ms": 0.8,
+        "rss_kb": 44436
+      }
+    },
+    "05_object_churn_pod": {
+      "solix_fast": {
+        "median_ms": 91.55,
+        "min_ms": 83.34,
+        "max_ms": 96.39,
+        "stdev_ms": 6.19,
+        "rss_kb": 44436
+      },
+      "python3": {
+        "median_ms": 62.86,
+        "min_ms": 52.78,
+        "max_ms": 63.67,
+        "stdev_ms": 5.44,
+        "rss_kb": 44436
+      },
+      "lua": {
+        "median_ms": 23.66,
+        "min_ms": 21.82,
+        "max_ms": 25.34,
+        "stdev_ms": 1.26,
+        "rss_kb": 44436
+      },
+      "luajit": {
+        "median_ms": 2.27,
+        "min_ms": 1.8,
+        "max_ms": 4.92,
+        "stdev_ms": 1.52,
+        "rss_kb": 44436
+      },
+      "c": {
+        "median_ms": 2.07,
+        "min_ms": 1.1,
+        "max_ms": 2.63,
+        "stdev_ms": 0.61,
+        "rss_kb": 44436
+      }
+    },
+    "06_binary_trees_arc": {
+      "solix_fast": {
+        "median_ms": 86.61,
+        "min_ms": 78.22,
+        "max_ms": 89.88,
+        "stdev_ms": 5.44,
+        "rss_kb": 44436
+      },
+      "python3": {
+        "median_ms": 44.16,
+        "min_ms": 40.44,
+        "max_ms": 44.46,
+        "stdev_ms": 1.78,
+        "rss_kb": 44436
+      },
+      "lua": {
+        "median_ms": 16.01,
+        "min_ms": 12.16,
+        "max_ms": 23.12,
+        "stdev_ms": 5.33,
+        "rss_kb": 44436
+      },
+      "luajit": {
+        "median_ms": 18.88,
+        "min_ms": 7.54,
+        "max_ms": 20.66,
+        "stdev_ms": 5.28,
+        "rss_kb": 44436
+      },
+      "c": {
+        "median_ms": 2.33,
+        "min_ms": 2.27,
+        "max_ms": 5.65,
+        "stdev_ms": 1.75,
+        "rss_kb": 49600
+      }
+    },
+    "07_virtual_dispatch": {
+      "solix_fast": {
+        "median_ms": 94.72,
+        "min_ms": 86.02,
+        "max_ms": 100.58,
+        "stdev_ms": 5.32,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 72.36,
+        "min_ms": 65.12,
+        "max_ms": 83.43,
+        "stdev_ms": 7.49,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 12.7,
+        "min_ms": 10.53,
+        "max_ms": 20.67,
+        "stdev_ms": 4.83,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 7.05,
+        "min_ms": 5.67,
+        "max_ms": 12.96,
+        "stdev_ms": 3.03,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 1.68,
+        "min_ms": 1.3,
+        "max_ms": 3.59,
+        "stdev_ms": 1.12,
+        "rss_kb": 49600
+      }
+    },
+    "08_interface_dispatch": {
+      "solix_fast": {
+        "median_ms": 85.36,
+        "min_ms": 76.51,
+        "max_ms": 92.96,
+        "stdev_ms": 6.07,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 75.22,
+        "min_ms": 67.25,
+        "max_ms": 83.32,
+        "stdev_ms": 6.2,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 20.14,
+        "min_ms": 9.31,
+        "max_ms": 22.14,
+        "stdev_ms": 5.9,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 7.69,
+        "min_ms": 4.91,
+        "max_ms": 8.3,
+        "stdev_ms": 1.42,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 1.63,
+        "min_ms": 1.33,
+        "max_ms": 3.14,
+        "stdev_ms": 0.87,
+        "rss_kb": 49600
+      }
+    },
+    "09_sieve_bool_array": {
+      "solix_fast": {
+        "median_ms": 134.45,
+        "min_ms": 123.81,
+        "max_ms": 138.39,
+        "stdev_ms": 6.39,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 56.4,
+        "min_ms": 49.78,
+        "max_ms": 57.4,
+        "stdev_ms": 3.14,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 7.87,
+        "min_ms": 7.3,
+        "max_ms": 18.86,
+        "stdev_ms": 6.04,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 3.85,
+        "min_ms": 3.68,
+        "max_ms": 4.63,
+        "stdev_ms": 0.37,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 3.0,
+        "min_ms": 1.46,
+        "max_ms": 3.63,
+        "stdev_ms": 0.96,
+        "rss_kb": 49600
+      }
+    },
+    "10_matrix_multiply_2d": {
+      "solix_fast": {
+        "median_ms": 13.85,
+        "min_ms": 8.14,
+        "max_ms": 18.44,
+        "stdev_ms": 4.63,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 28.55,
+        "min_ms": 21.71,
+        "max_ms": 30.61,
+        "stdev_ms": 4.31,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 4.66,
+        "min_ms": 2.21,
+        "max_ms": 4.99,
+        "stdev_ms": 1.15,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 4.42,
+        "min_ms": 1.84,
+        "max_ms": 4.46,
+        "stdev_ms": 1.25,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 1.82,
+        "min_ms": 1.12,
+        "max_ms": 2.6,
+        "stdev_ms": 0.66,
+        "rss_kb": 49600
+      }
+    },
+    "11_generic_containers": {
+      "solix_fast": {
+        "median_ms": 169.53,
+        "min_ms": 166.53,
+        "max_ms": 170.51,
+        "stdev_ms": 1.75,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 90.83,
+        "min_ms": 85.95,
+        "max_ms": 91.22,
+        "stdev_ms": 2.72,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 45.75,
+        "min_ms": 35.3,
+        "max_ms": 46.36,
+        "stdev_ms": 4.74,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 38.31,
+        "min_ms": 31.88,
+        "max_ms": 45.0,
+        "stdev_ms": 4.67,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 2.18,
+        "min_ms": 1.41,
+        "max_ms": 2.29,
+        "stdev_ms": 0.37,
+        "rss_kb": 49600
+      }
+    },
+    "12_closures_capture": {
+      "solix_fast": {
+        "median_ms": 32.23,
+        "min_ms": 28.77,
+        "max_ms": 36.28,
+        "stdev_ms": 2.91,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 43.54,
+        "min_ms": 32.41,
+        "max_ms": 45.81,
+        "stdev_ms": 5.4,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 4.75,
+        "min_ms": 4.49,
+        "max_ms": 11.53,
+        "stdev_ms": 3.68,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 4.84,
+        "min_ms": 2.34,
+        "max_ms": 5.12,
+        "stdev_ms": 1.45,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 1.28,
+        "min_ms": 1.11,
+        "max_ms": 2.65,
+        "stdev_ms": 0.7,
+        "rss_kb": 49600
+      }
+    },
+    "13_function_pointers": {
+      "solix_fast": {
+        "median_ms": 118.73,
+        "min_ms": 114.28,
+        "max_ms": 119.68,
+        "stdev_ms": 2.23,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 82.08,
+        "min_ms": 69.75,
+        "max_ms": 87.61,
+        "stdev_ms": 7.11,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 18.41,
+        "min_ms": 10.5,
+        "max_ms": 23.66,
+        "stdev_ms": 4.89,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 10.08,
+        "min_ms": 7.96,
+        "max_ms": 10.53,
+        "stdev_ms": 1.12,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 1.45,
+        "min_ms": 1.3,
+        "max_ms": 3.85,
+        "stdev_ms": 1.3,
+        "rss_kb": 49600
+      }
+    },
+    "14_exception_zero_cost": {
+      "solix_fast": {
+        "median_ms": 23.1,
+        "min_ms": 13.81,
+        "max_ms": 25.59,
+        "stdev_ms": 4.67,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 40.62,
+        "min_ms": 31.68,
+        "max_ms": 42.21,
+        "stdev_ms": 4.21,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 26.32,
+        "min_ms": 15.17,
+        "max_ms": 28.34,
+        "stdev_ms": 5.23,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 25.6,
+        "min_ms": 13.66,
+        "max_ms": 26.88,
+        "stdev_ms": 6.51,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 2.3,
+        "min_ms": 1.56,
+        "max_ms": 2.58,
+        "stdev_ms": 0.4,
+        "rss_kb": 49600
+      }
+    },
+    "15_string_processing": {
+      "solix_fast": {
+        "median_ms": 215.45,
+        "min_ms": 212.9,
+        "max_ms": 224.06,
+        "stdev_ms": 4.54,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 78.04,
+        "min_ms": 68.49,
+        "max_ms": 79.04,
+        "stdev_ms": 5.32,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 22.47,
+        "min_ms": 11.75,
+        "max_ms": 24.07,
+        "stdev_ms": 5.8,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 10.09,
+        "min_ms": 4.17,
+        "max_ms": 11.56,
+        "stdev_ms": 2.96,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 7.59,
+        "min_ms": 6.47,
+        "max_ms": 8.38,
+        "stdev_ms": 0.8,
+        "rss_kb": 49600
+      }
+    },
+    "16_multi_binary_link": {
+      "solix_fast": {
+        "median_ms": 41.07,
+        "min_ms": 39.79,
+        "max_ms": 41.76,
+        "stdev_ms": 0.73,
+        "rss_kb": 49600
+      },
+      "python3": {
+        "median_ms": 47.77,
+        "min_ms": 40.51,
+        "max_ms": 51.66,
+        "stdev_ms": 4.31,
+        "rss_kb": 49600
+      },
+      "lua": {
+        "median_ms": 5.26,
+        "min_ms": 5.17,
+        "max_ms": 8.59,
+        "stdev_ms": 1.48,
+        "rss_kb": 49600
+      },
+      "luajit": {
+        "median_ms": 2.45,
+        "min_ms": 2.23,
+        "max_ms": 5.94,
+        "stdev_ms": 1.58,
+        "rss_kb": 49600
+      },
+      "c": {
+        "median_ms": 1.23,
+        "min_ms": 1.13,
+        "max_ms": 2.46,
+        "stdev_ms": 0.69,
+        "rss_kb": 49600
+      }
+    }
+  }
+}

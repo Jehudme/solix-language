@@ -393,10 +393,10 @@ In accordance with `GL-0008`, Milestone 016 is executed across four disciplined 
 | :--- | :--- | :--- | :--- | :--- |
 | **Direct `.slx` Execution** | `solix run script.slx` compiles and runs without intermediate disk artifact | `cargo test -p solix-client -- test_cli_run_direct_source` | `P0` | [x] Complete |
 | **Multi-Source `.slx` Run** | `solix run a.slx b.slx` compiles multi-file programs on-the-fly | `cargo test -p solix-client -- test_cli_run_multi_source` | `P0` | [x] Complete |
-| **Compiler Phase Telemetry** | Microsecond phase breakdowns and MB/s throughput reported | `solix compile --metrics-json` | `P1` | [ ] Pending |
-| **Runtime & Memory Telemetry** | Pure VM time, Peak VirtualHeap, Alloc/Dealloc counts & Peak RSS | `solix run --metrics-json` | `P1` | [ ] Pending |
-| **Cross-Platform Memory RSS** | Accurate peak RSS recording on Windows, macOS, and Linux | `benchmarks/runner.py` | `P1` | [ ] Pending |
-| **16 Multi-Language Workloads** | All 16 workloads implemented in `.slx`, `.lua`, `.py`, `.go` with verified checksums | `python3 benchmarks/runner.py --verify` | `P1` | [ ] Pending |
-| **Safe vs. Fast Parity** | Verifies zero behavioral divergence between `--safe` and fast mode | `python3 benchmarks/runner.py --mode parity` | `P1` | [ ] Pending |
-| **Zero Workspace Regressions** | Full workspace test suite passes with 0 failures, 0 clippy warnings | `cargo test --workspace && cargo clippy` | `P0` | [ ] Pending |
-| **Automated Markdown Reporter** | Produces structured tabular reports with comparative speedup ratios | `BENCHMARK_RESULTS.md` | `P1` | [ ] Pending |
+| **Compiler Phase Telemetry** | Microsecond phase breakdowns and MB/s throughput reported | `solix compile --metrics-json` | `P1` | [x] Complete |
+| **Runtime & Memory Telemetry** | Pure VM time, Peak VirtualHeap, Alloc/Dealloc counts & Peak RSS | `solix run --metrics-json` | `P1` | [x] Complete |
+| **Cross-Platform Memory RSS** | Accurate peak RSS recording on Windows, macOS, and Linux | `benchmarks/runner.py` | `P1` | [x] Complete |
+| **16 Multi-Language Workloads** | All 16 workloads implemented in `.slx`, `.lua`, `.py`, `.c` with verified checksums | `python3 benchmarks/runner.py --verify` | `P1` | [x] Complete |
+| **Safe vs. Fast Parity** | Verifies zero behavioral divergence between `--safe` and fast mode | `python3 benchmarks/runner.py --mode parity` | `P1` | [x] Complete |
+| **Zero Workspace Regressions** | Full workspace test suite passes with 0 failures, 0 clippy warnings | `cargo test --workspace && cargo clippy` | `P0` | [x] Complete |
+| **Automated Markdown Reporter** | Produces structured tabular reports with comparative speedup ratios | `BENCHMARK_RESULTS.md` | `P1` | [x] Complete |
