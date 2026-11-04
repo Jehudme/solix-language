@@ -802,3 +802,190 @@ class SafeApp {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 77);
 }
+
+#[test]
+fn test_cli_run_direct_source_execution_single_file() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let source_path = workspace
+        .write_file(
+            "direct_main.slx",
+            r#"
+import blt.io.println;
+
+class DirectApp {
+    public static int32 main() {
+        println("Direct source execution works!");
+        return 42;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from(["solix", "run", source_path.to_str().unwrap()])
+        .expect("Failed to parse run CLI arguments for direct source execution");
+
+    let execution_result = run(run_cli);
+    assert!(execution_result.is_ok());
+    assert_eq!(execution_result.unwrap(), 42);
+}
+
+#[test]
+fn test_cli_run_direct_source_execution_multi_file() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let helper_path = workspace
+        .write_file(
+            "helper.slx",
+            r#"
+package my.calc;
+
+public class MathHelper {
+    public static int32 add(int32 left_operand, int32 right_operand) {
+        return left_operand + right_operand;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let main_path = workspace
+        .write_file(
+            "main.slx",
+            r#"
+import my.calc.MathHelper;
+
+class MainApp {
+    public static int32 main() {
+        return MathHelper::add(15, 25);
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        helper_path.to_str().unwrap(),
+        main_path.to_str().unwrap(),
+    ])
+    .expect("Failed to parse multi-source run CLI arguments");
+
+    let execution_result = run(run_cli);
+    assert!(execution_result.is_ok());
+    assert_eq!(execution_result.unwrap(), 40);
+}
+
+#[test]
+fn test_cli_run_direct_source_execution_with_dependency_lib() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let lib_source_path = workspace
+        .write_file(
+            "shared_lib.slx",
+            r#"
+public class Greeter {
+    public static int32 greet_code() {
+        return 99;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let lib_binary_path = workspace.file_path("shared_lib.slxb");
+
+    let compile_lib_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        lib_source_path.to_str().unwrap(),
+        "--name",
+        "greeter",
+        "-o",
+        lib_binary_path.to_str().unwrap(),
+    ])
+    .expect("Failed to parse compile lib CLI arguments");
+    assert!(run(compile_lib_cli).is_ok());
+
+    let app_source_path = workspace
+        .write_file(
+            "consumer_app.slx",
+            r#"
+class ConsumerApp {
+    public static int32 main() {
+        return Greeter::greet_code();
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        app_source_path.to_str().unwrap(),
+        "--lib",
+        lib_binary_path.to_str().unwrap(),
+    ])
+    .expect("Failed to parse run CLI arguments with dependency lib");
+
+    let execution_result = run(run_cli);
+    assert!(execution_result.is_ok());
+    assert_eq!(execution_result.unwrap(), 99);
+}
+
+#[test]
+fn test_cli_run_direct_source_negative_compilation_error() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let broken_source_path = workspace
+        .write_file(
+            "broken.slx",
+            r#"
+class BrokenApp {
+    public static int32 main() {
+        int32 syntax_error = ;
+        return 0;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from(["solix", "run", broken_source_path.to_str().unwrap()])
+        .expect("Failed to parse run CLI arguments");
+
+    let execution_result = run(run_cli);
+    assert!(execution_result.is_err());
+    let error_message = format!("{:?}", execution_result.err().unwrap());
+    assert!(error_message.contains("Compilation aborted due to previous error(s)"));
+}
+
+#[test]
+fn test_cli_run_direct_source_no_builtins_flag() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let source_path = workspace
+        .write_file(
+            "builtins_test.slx",
+            r#"
+import blt.io.println;
+
+class AppWithBuiltin {
+    public static int32 main() {
+        println("Should fail if builtins disabled");
+        return 0;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        "--no-builtins",
+        source_path.to_str().unwrap(),
+    ])
+    .expect("Failed to parse run CLI arguments");
+
+    let execution_result = run(run_cli);
+    assert!(execution_result.is_err());
+}
