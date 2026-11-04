@@ -283,6 +283,54 @@ impl VirtualHeap {
         Ok(())
     }
 
+    /// Fast inline deallocation for POD blocks where ref count has reached 0.
+    ///
+    /// Skips cascading destructor checks and pushes directly to quick lists or free list.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::NullReferenceAccess` if the address is invalid.
+    #[inline(always)]
+    pub fn deallocate_pod_fast(
+        &mut self,
+        payload_addr: u32,
+        size: u32,
+    ) -> Result<(), RuntimeError> {
+        if payload_addr == 0 {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        let addr_usize = payload_addr as usize;
+        if addr_usize < self.static_size + HEADER_SIZE || addr_usize > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+
+        let total_block_size = HEADER_SIZE + align_up(size as usize);
+        let block_abs_addr = addr_usize - HEADER_SIZE;
+        let block_offset = block_abs_addr - self.static_size;
+
+        // Clear payload and mark header dead
+        let dead_header = BlockHeader::new(size, BlockTag::Raw, 0);
+        let dead_bytes = dead_header.to_bytes();
+        self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE].copy_from_slice(&dead_bytes);
+
+        if total_block_size <= 256 {
+            // O(1) Quick-list push
+            let class_index = (total_block_size / 8) - 1;
+            let current_head = self.quick_lists[class_index];
+            self.write_u32(payload_addr, current_head)?;
+            self.quick_lists[class_index] = payload_addr;
+        } else {
+            self.free_list.deallocate(block_offset, total_block_size);
+        }
+
+        self.total_deallocations_count += 1;
+        self.active_live_objects = self.active_live_objects.saturating_sub(1);
+        self.current_allocated_bytes = self
+            .current_allocated_bytes
+            .saturating_sub(total_block_size);
+
+        Ok(())
+    }
+
     /// Flushes all entries cached in `quick_lists` into `FreeListManager`.
     pub fn flush_quick_lists_to_free_list(&mut self) {
         for class_index in 0..32 {

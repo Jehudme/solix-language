@@ -1304,7 +1304,12 @@ impl VirtualMachine {
                 OpCode::AllocObject => {
                     let vtable_id = inst.src1() as u32;
                     let size = inst.src2() as usize;
-                    let payload_addr = self.heap.allocate(size, BlockTag::Object)?;
+                    let tag = if inst.is_pod() {
+                        BlockTag::ObjectPod
+                    } else {
+                        BlockTag::Object
+                    };
+                    let payload_addr = self.heap.allocate(size, tag)?;
                     self.heap.write_u32(payload_addr, vtable_id)?;
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
@@ -1342,13 +1347,27 @@ impl VirtualMachine {
                             }
                         })?;
                     let alloc_size = size.max(8);
-                    let payload_addr = self.heap.allocate(alloc_size, BlockTag::Object)?;
+                    let is_pod = self
+                        .context
+                        .get_class_by_vtable_id(vtable_id)
+                        .is_some_and(|class_item| class_item.is_pod());
+                    let tag = if is_pod {
+                        BlockTag::ObjectPod
+                    } else {
+                        BlockTag::Object
+                    };
+                    let payload_addr = self.heap.allocate(alloc_size, tag)?;
                     self.heap.write_u32(payload_addr, vtable_id)?;
 
                     // In-place quickening to AllocObject
+                    let flags = if is_pod {
+                        solix_common::bytecode::instruction::FLAG_POD
+                    } else {
+                        0
+                    };
                     let quickened = Instruction::format_a(
                         OpCode::AllocObject,
-                        0,
+                        flags,
                         inst.dst(),
                         vtable_id as u16,
                         alloc_size as u16,
@@ -1368,9 +1387,18 @@ impl VirtualMachine {
                     }
                     let offset = inst.src2() as usize;
                     let field_addr = obj_addr + offset as u32;
-                    let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                    let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                    let field_type_tag = maybe_class.and_then(|cls| cls.get_field_type(offset));
+
+                    let raw_flags = inst.flags();
+                    let field_type_tag = if raw_flags > 0 && raw_flags <= 12 {
+                        Some(raw_flags)
+                    } else if raw_flags > 12 {
+                        Some(raw_flags >> 1)
+                    } else {
+                        let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                        self.context
+                            .get_class_by_vtable_id(vtable_id)
+                            .and_then(|cls| cls.get_field_type(offset))
+                    };
 
                     let val = match field_type_tag {
                         Some(1) => {
@@ -1420,6 +1448,8 @@ impl VirtualMachine {
                         _ => {
                             let raw = self.heap.read_u64(field_addr).unwrap_or(0);
                             if raw == 0 {
+                                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
                                 let is_ref = maybe_class.is_some_and(|cls| {
                                     cls.reference_field_offsets.contains(&offset)
                                         || cls.weak_field_offsets.contains(&offset)
@@ -1445,9 +1475,25 @@ impl VirtualMachine {
                     let val = unsafe { *reg_base.add(inst.dst() as usize) };
                     let field_addr = obj_addr + offset as u32;
 
-                    let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                    let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                    let field_type_tag = maybe_class.and_then(|cls| cls.get_field_type(offset));
+                    let raw_flags = inst.flags();
+                    let (field_type_tag, is_weak) =
+                        if raw_flags == solix_common::bytecode::instruction::FLAG_WEAK {
+                            (None, true)
+                        } else if raw_flags > 0 && raw_flags <= 12 {
+                            (Some(raw_flags), false)
+                        } else if raw_flags > 12 {
+                            (
+                                Some(raw_flags >> 1),
+                                (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0,
+                            )
+                        } else {
+                            let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                            let tag = self
+                                .context
+                                .get_class_by_vtable_id(vtable_id)
+                                .and_then(|cls| cls.get_field_type(offset));
+                            (tag, inst.is_weak())
+                        };
 
                     match field_type_tag {
                         Some(1) | Some(2) => {
@@ -1480,13 +1526,13 @@ impl VirtualMachine {
                             let old_val = Value::from_raw_u64(old_raw);
                             self.heap.write_u64(field_addr, val.to_raw_u64())?;
                             if let Value::Ref(child_addr) = val
-                                && !inst.is_weak()
+                                && !is_weak
                                 && child_addr > 0
                             {
                                 crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
                             }
                             if let Value::Ref(old_child) = old_val
-                                && !inst.is_weak()
+                                && !is_weak
                                 && old_child > 0
                             {
                                 self.release_reference(old_child)?;
@@ -1671,21 +1717,34 @@ impl VirtualMachine {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let index_i64 = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    let header = self.heap.read_header(arr_addr)?;
-                    if header.tag == BlockTag::String {
-                        let string_len = header.size as usize;
+                    let arr_offset = arr_addr as usize;
+                    if arr_offset < 8 || arr_offset + 8 > self.heap.buffer.len() {
+                        return Err(RuntimeError::NullReferenceAccess);
+                    }
+
+                    let tag_nibble = (self.heap.buffer[arr_offset - 1] >> 4) & 0x0F;
+                    if tag_nibble == BlockTag::String as u8 {
+                        let string_len = u32::from_le_bytes(
+                            self.heap.buffer[arr_offset - 8..arr_offset - 4]
+                                .try_into()
+                                .unwrap_or([0; 4]),
+                        ) as usize;
                         if (index_i64 as u64) >= (string_len as u64) {
                             return Err(RuntimeError::IndexOutOfBounds {
                                 index: index_i64,
                                 length: string_len,
                             });
                         }
-                        let byte_val = self.heap.read_u8(arr_addr + index_i64 as u32)?;
+                        let byte_val = self.heap.buffer[arr_offset + index_i64 as usize];
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::I32(byte_val as i32);
                         }
                     } else {
-                        let array_len = self.heap.read_u32(arr_addr)? as usize;
+                        let array_len = u32::from_le_bytes(
+                            self.heap.buffer[arr_offset..arr_offset + 4]
+                                .try_into()
+                                .unwrap_or([0; 4]),
+                        ) as usize;
                         if (index_i64 as u64) >= (array_len as u64) {
                             return Err(RuntimeError::IndexOutOfBounds {
                                 index: index_i64,
@@ -1693,11 +1752,18 @@ impl VirtualMachine {
                             });
                         }
                         let index_usize = index_i64 as usize;
-                        let elem_size = self.heap.read_u8(arr_addr + 4)? as usize;
-                        let elem_addr = arr_addr + 8 + (index_usize * elem_size) as u32;
-                        let raw_word = self.heap.read_u64(elem_addr).unwrap_or(0);
+                        let elem_size = self.heap.buffer[arr_offset + 4] as usize;
+                        let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+                        if elem_offset + 8 > self.heap.buffer.len() {
+                            return Err(RuntimeError::NullReferenceAccess);
+                        }
+                        let raw_word = u64::from_le_bytes(
+                            self.heap.buffer[elem_offset..elem_offset + 8]
+                                .try_into()
+                                .unwrap_or([0; 8]),
+                        );
                         let val = if raw_word == 0 {
-                            let elem_type_tag = self.heap.read_u8(arr_addr + 7).unwrap_or(0);
+                            let elem_type_tag = self.heap.buffer[arr_offset + 7];
                             match elem_type_tag {
                                 13 | 0x80..=0xFF => Value::Null,
                                 11 => Value::Bool(false),
@@ -1720,7 +1786,16 @@ impl VirtualMachine {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let index_i64 = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let array_len = self.heap.read_u32(arr_addr)? as usize;
+                    let arr_offset = arr_addr as usize;
+                    if arr_offset < 8 || arr_offset + 8 > self.heap.buffer.len() {
+                        return Err(RuntimeError::NullReferenceAccess);
+                    }
+
+                    let array_len = u32::from_le_bytes(
+                        self.heap.buffer[arr_offset..arr_offset + 4]
+                            .try_into()
+                            .unwrap_or([0; 4]),
+                    ) as usize;
                     if (index_i64 as u64) >= (array_len as u64) {
                         return Err(RuntimeError::IndexOutOfBounds {
                             index: index_i64,
@@ -1729,14 +1804,25 @@ impl VirtualMachine {
                     }
                     let index_usize = index_i64 as usize;
                     let val = unsafe { *reg_base.add(inst.src2() as usize) };
-                    let elem_size = self.heap.read_u8(arr_addr + 4)? as usize;
-                    let elem_addr = arr_addr + 8 + (index_usize * elem_size) as u32;
-                    let old_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                    let elem_size = self.heap.buffer[arr_offset + 4] as usize;
+                    let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+                    if elem_offset + 8 > self.heap.buffer.len() {
+                        return Err(RuntimeError::NullReferenceAccess);
+                    }
+
+                    let old_raw = u64::from_le_bytes(
+                        self.heap.buffer[elem_offset..elem_offset + 8]
+                            .try_into()
+                            .unwrap_or([0; 8]),
+                    );
                     let old_val = Value::from_raw_u64(old_raw);
-                    self.heap.write_u64(elem_addr, val.to_raw_u64())?;
-                    let header = self.heap.read_header(arr_addr)?;
-                    let elem_type_tag = self.heap.read_u8(arr_addr + 7).unwrap_or(0);
-                    let is_reference_element = header.tag == BlockTag::Tuple
+                    let new_raw = val.to_raw_u64();
+                    self.heap.buffer[elem_offset..elem_offset + 8]
+                        .copy_from_slice(&new_raw.to_le_bytes());
+
+                    let tag_nibble = (self.heap.buffer[arr_offset - 1] >> 4) & 0x0F;
+                    let elem_type_tag = self.heap.buffer[arr_offset + 7];
+                    let is_reference_element = tag_nibble == BlockTag::Tuple as u8
                         || elem_type_tag == 13
                         || elem_type_tag >= 0x80;
                     if is_reference_element {
@@ -1904,12 +1990,13 @@ impl VirtualMachine {
                     };
                     let target_vtable_id = inst.src2() as u32;
                     let header = self.heap.read_header(obj_addr)?;
-                    let is_instance = if header.tag == BlockTag::Object {
-                        let obj_vtable_id = self.heap.read_u32(obj_addr)?;
-                        self.is_instance_of(obj_vtable_id, target_vtable_id)
-                    } else {
-                        false
-                    };
+                    let is_instance =
+                        if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
+                            let obj_vtable_id = self.heap.read_u32(obj_addr)?;
+                            self.is_instance_of(obj_vtable_id, target_vtable_id)
+                        } else {
+                            false
+                        };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::Bool(is_instance);
                     }
@@ -1959,12 +2046,13 @@ impl VirtualMachine {
                     }
                     let target_vtable_id = inst.src2() as u32;
                     let header = self.heap.read_header(obj_addr)?;
-                    let is_instance = if header.tag == BlockTag::Object {
-                        let obj_vtable_id = self.heap.read_u32(obj_addr)?;
-                        self.is_instance_of(obj_vtable_id, target_vtable_id)
-                    } else {
-                        false
-                    };
+                    let is_instance =
+                        if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
+                            let obj_vtable_id = self.heap.read_u32(obj_addr)?;
+                            self.is_instance_of(obj_vtable_id, target_vtable_id)
+                        } else {
+                            false
+                        };
                     if !is_instance {
                         return Err(RuntimeError::InvalidCast {
                             from: format!("ref 0x{obj_addr:08X}"),
@@ -1993,7 +2081,18 @@ impl VirtualMachine {
                     if let Value::Ref(addr) = val
                         && addr > 0
                     {
-                        self.release_reference(addr)?;
+                        let header = self.heap.read_header(addr)?;
+                        if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
+                            // Immortal constant string or immortal object
+                        } else if header.ref_count > 1 {
+                            let mut updated_header = header;
+                            updated_header.ref_count -= 1;
+                            self.heap.write_header(addr, updated_header)?;
+                        } else if header.tag == BlockTag::ObjectPod {
+                            self.heap.deallocate_pod_fast(addr, header.size)?;
+                        } else {
+                            self.release_reference(addr)?;
+                        }
                     }
                 }
 

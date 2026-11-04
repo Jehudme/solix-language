@@ -245,7 +245,7 @@ impl RuntimeContext {
                                 let size = inst.src2();
                                 *inst = Instruction::format_a(
                                     OpCode::AllocObject,
-                                    0,
+                                    inst.flags(),
                                     inst.dst(),
                                     old_vtable_id + vtable_offset as u16,
                                     size,
@@ -254,7 +254,7 @@ impl RuntimeContext {
                                 let old_target = inst.src2();
                                 *inst = Instruction::format_a(
                                     OpCode::Instanceof,
-                                    0,
+                                    inst.flags(),
                                     inst.dst(),
                                     inst.src1(),
                                     old_target + vtable_offset as u16,
@@ -340,6 +340,22 @@ impl RuntimeContext {
                 native_fn,
                 has_references,
             });
+        }
+
+        // Annotate AllocObject instructions with FLAG_POD if the allocated class is POD
+        for func in &mut all_functions {
+            for inst in &mut func.instructions {
+                if inst.raw_opcode() == OpCode::AllocObject as u8 {
+                    let vtable_id = inst.src1() as usize;
+                    if let Some(Some(class_item)) = vtable_lookup.get(vtable_id)
+                        && class_item.is_pod()
+                    {
+                        *inst = inst.with_flags(
+                            inst.flags() | solix_common::bytecode::instruction::FLAG_POD,
+                        );
+                    }
+                }
+            }
         }
 
         // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, and static space

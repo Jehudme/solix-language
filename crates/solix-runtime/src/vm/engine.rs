@@ -42,7 +42,7 @@ pub struct VirtualMachine {
     /// Pre-allocated cached constant pool values across all loaded binaries.
     pub const_pool_cache: Vec<Vec<Value>>,
     /// Tracked payload addresses of interned immutable string constants.
-    pub interned_string_addrs: HashSet<u32>,
+    pub interned_string_addrs: Vec<u32>,
     /// Contiguous register window buffer backing in-flight call frames.
     pub register_stack: Vec<Value>,
     /// Activation call frame stack tracking nested function calls.
@@ -84,7 +84,7 @@ impl VirtualMachine {
             native_registry.register(name, *func);
         }
 
-        let mut interned_string_addrs = HashSet::new();
+        let mut interned_string_addrs = Vec::new();
         let mut const_pool_cache: Vec<Vec<Value>> =
             Vec::with_capacity(context.loaded_binaries.len());
         for loaded_binary in &context.loaded_binaries {
@@ -102,7 +102,11 @@ impl VirtualMachine {
                         let addr = heap.allocate(bytes.len(), BlockTag::String).unwrap_or(0);
                         if addr > 0 {
                             let _ = heap.write_bytes(addr, bytes);
-                            interned_string_addrs.insert(addr);
+                            if let Ok(mut header) = heap.read_header(addr) {
+                                header.ref_count = crate::memory::layout::MAX_REF_COUNT;
+                                let _ = heap.write_header(addr, header);
+                            }
+                            interned_string_addrs.push(addr);
                             cached_values.push(Value::Ref(addr));
                         } else {
                             cached_values.push(Value::Null);
@@ -143,92 +147,112 @@ impl VirtualMachine {
     /// # Errors
     /// Returns `RuntimeError` on destructor execution failure or invalid address.
     pub fn release_reference(&mut self, addr: u32) -> Result<(), RuntimeError> {
-        if addr == 0 || self.interned_string_addrs.contains(&addr) {
+        if addr == 0 {
             return Ok(());
         }
 
-        let rc = crate::memory::arc::dec_ref(&mut self.heap, addr)?;
-        if rc == 0 {
-            if self.active_destructors.contains(&addr) {
-                return Ok(());
-            }
-            self.active_destructors.insert(addr);
+        let header = self.heap.read_header(addr)?;
+        if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
+            return Ok(());
+        }
 
-            let header = self.heap.read_header(addr)?;
-            if header.tag == BlockTag::Object {
-                let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
-                let (maybe_destructor_id, reference_offsets) = {
-                    let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                    match maybe_class {
-                        Some(class_item) => (
-                            class_item.destructor_id,
-                            class_item.reference_field_offsets.clone(),
-                        ),
-                        None => (None, Vec::new()),
-                    }
-                };
+        if header.ref_count > 1 {
+            let mut updated_header = header;
+            updated_header.ref_count -= 1;
+            self.heap.write_header(addr, updated_header)?;
+            return Ok(());
+        }
 
-                // 1. Execute class destructor if defined
-                if let Some(destructor_id) = maybe_destructor_id {
-                    let destructor_result = (|| -> Result<(), RuntimeError> {
-                        self.push_frame(destructor_id, 0, &[Value::Ref(addr)])?;
-                        let target_depth = self.call_frames.len() - 1;
-                        self.run_loop(target_depth)?;
-                        Ok(())
-                    })();
-                    if let Err(ref error) = destructor_result {
-                        eprintln!("DTOR ERROR: {error:?}");
-                    }
+        // ref_count hit 0!
+        if self.active_destructors.contains(&addr) {
+            return Ok(());
+        }
+
+        if header.tag == BlockTag::ObjectPod {
+            return self.heap.deallocate_pod_fast(addr, header.size);
+        }
+
+        self.active_destructors.insert(addr);
+
+        if header.tag == BlockTag::Object {
+            let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
+            let (maybe_destructor_id, offset_count) = {
+                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
+                match maybe_class {
+                    Some(class_item) => (
+                        class_item.destructor_id,
+                        class_item.reference_field_offsets.len(),
+                    ),
+                    None => (None, 0),
                 }
+            };
 
-                // 2. Cascade drops to child reference fields directly from VirtualHeap in O(ref_fields)
-                for field_offset in reference_offsets {
-                    let field_addr = addr + field_offset as u32;
-                    let child_addr = self.heap.read_u64(field_addr).unwrap_or(0) as u32;
+            // 1. Execute class destructor if defined
+            if let Some(destructor_id) = maybe_destructor_id {
+                let destructor_result = (|| -> Result<(), RuntimeError> {
+                    self.push_frame(destructor_id, 0, &[Value::Ref(addr)])?;
+                    let target_depth = self.call_frames.len() - 1;
+                    self.run_loop(target_depth)?;
+                    Ok(())
+                })();
+                if let Err(ref error) = destructor_result {
+                    eprintln!("DTOR ERROR: {error:?}");
+                }
+            }
+
+            // 2. Cascade drops to child reference fields directly from VirtualHeap in O(ref_fields)
+            for offset_idx in 0..offset_count {
+                let field_offset = self
+                    .context
+                    .get_class_by_vtable_id(vtable_id)
+                    .map_or(0, |class_item| {
+                        class_item.reference_field_offsets[offset_idx]
+                    });
+                let field_addr = addr + field_offset as u32;
+                let child_addr = self.heap.read_u64(field_addr).unwrap_or(0) as u32;
+                if child_addr > 0 {
+                    self.release_reference(child_addr)?;
+                }
+            }
+        } else if header.tag == BlockTag::ArrayRef {
+            let len = self.heap.read_u32(addr).unwrap_or(0);
+            let elem_type_tag = self.heap.read_u8(addr + 7).unwrap_or(0);
+            if elem_type_tag == 13 || elem_type_tag >= 0x80 {
+                let elem_size = self.heap.read_u8(addr + 4).unwrap_or(8) as usize;
+                for index in 0..len {
+                    let elem_addr = addr + 8 + (index as usize * elem_size) as u32;
+                    let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
                     if child_addr > 0 {
                         self.release_reference(child_addr)?;
                     }
                 }
-            } else if header.tag == BlockTag::ArrayRef {
-                let len = self.heap.read_u32(addr).unwrap_or(0);
-                let elem_type_tag = self.heap.read_u8(addr + 7).unwrap_or(0);
-                if elem_type_tag == 13 || elem_type_tag >= 0x80 {
-                    let elem_size = self.heap.read_u8(addr + 4).unwrap_or(8) as usize;
-                    for index in 0..len {
-                        let elem_addr = addr + 8 + (index as usize * elem_size) as u32;
-                        let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
-                        if child_addr > 0 {
-                            self.release_reference(child_addr)?;
-                        }
-                    }
-                }
-            } else if header.tag == BlockTag::Tuple {
-                let count = self.heap.read_u32(addr).unwrap_or(0);
-                for index in 0..count {
-                    let elem_addr = addr + 8 + (index as usize * 8) as u32;
-                    let val = Value::from_raw_u64(self.heap.read_u64(elem_addr).unwrap_or(0));
-                    if let Value::Ref(child_addr) = val
-                        && child_addr > 0
-                    {
-                        self.release_reference(child_addr)?;
-                    }
-                }
-            } else if header.tag == BlockTag::Closure {
-                let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
-                for index in 0..cap_count {
-                    let cell_addr = addr + 8 + (index as usize * 8) as u32;
-                    let val = Value::from_raw_u64(self.heap.read_u64(cell_addr).unwrap_or(0));
-                    if let Value::Ref(child_addr) = val
-                        && child_addr > 0
-                    {
-                        self.release_reference(child_addr)?;
-                    }
+            }
+        } else if header.tag == BlockTag::Tuple {
+            let count = self.heap.read_u32(addr).unwrap_or(0);
+            for index in 0..count {
+                let elem_addr = addr + 8 + (index as usize * 8) as u32;
+                let val = Value::from_raw_u64(self.heap.read_u64(elem_addr).unwrap_or(0));
+                if let Value::Ref(child_addr) = val
+                    && child_addr > 0
+                {
+                    self.release_reference(child_addr)?;
                 }
             }
-
-            self.heap.deallocate(addr)?;
-            self.active_destructors.remove(&addr);
+        } else if header.tag == BlockTag::Closure {
+            let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
+            for index in 0..cap_count {
+                let cell_addr = addr + 8 + (index as usize * 8) as u32;
+                let val = Value::from_raw_u64(self.heap.read_u64(cell_addr).unwrap_or(0));
+                if let Value::Ref(child_addr) = val
+                    && child_addr > 0
+                {
+                    self.release_reference(child_addr)?;
+                }
+            }
         }
+
+        self.heap.deallocate(addr)?;
+        self.active_destructors.remove(&addr);
 
         Ok(())
     }
@@ -631,8 +655,8 @@ impl VirtualMachine {
             Ok(Value::I64(code)) => code as i32,
             Ok(Value::Null) => self.exit_code.unwrap_or(0),
             Ok(_) => self.exit_code.unwrap_or(0),
-            Err(e) => {
-                let code = e.error_code().as_i32();
+            Err(runtime_err) => {
+                let code = runtime_err.error_code().as_i32();
                 self.exit_code = Some(code);
                 code
             }
@@ -644,7 +668,7 @@ impl VirtualMachine {
     /// # Errors
     /// Returns `RuntimeError::MemoryLeak` if memory leaks or fragmentation exist.
     pub fn verify_clean_memory(&mut self) -> Result<(), RuntimeError> {
-        let interned_addrs: Vec<u32> = self.interned_string_addrs.drain().collect();
+        let interned_addrs = std::mem::take(&mut self.interned_string_addrs);
         for addr in interned_addrs {
             let _ = self.heap.deallocate(addr);
         }

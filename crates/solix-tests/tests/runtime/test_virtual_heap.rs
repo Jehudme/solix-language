@@ -39,11 +39,12 @@ fn test_block_header_all_tags() {
         BlockTag::Tuple,
         BlockTag::Closure,
         BlockTag::String,
+        BlockTag::ObjectPod,
     ];
 
     for tag in tags {
-        let h = BlockHeader::new(64, tag, 1);
-        let unpacked = BlockHeader::from_bytes(h.to_bytes());
+        let header_item = BlockHeader::new(64, tag, 1);
+        let unpacked = BlockHeader::from_bytes(header_item.to_bytes());
         assert_eq!(unpacked.tag, tag);
     }
 }
