@@ -51,6 +51,8 @@ pub struct RuntimeContext {
     pub all_functions: Vec<CompiledFunction>,
     /// Flattened array of all compiled class descriptors.
     pub all_classes: Vec<CompiledClass>,
+    /// Fast direct lookup table for compiled classes indexed directly by `vtable_id`.
+    pub vtable_lookup: Vec<Option<CompiledClass>>,
     /// Total static variable slots reserved across all loaded binaries.
     pub total_static_space: u32,
     /// Global function ID of the resolved program entry point, if available.
@@ -240,6 +242,16 @@ impl RuntimeContext {
             &symbol_to_function_id,
         );
 
+        let max_relocated_vtable_id = all_classes
+            .iter()
+            .map(|class_entry| class_entry.vtable_id)
+            .max()
+            .unwrap_or(0);
+        let mut vtable_lookup = vec![None; (max_relocated_vtable_id + 1) as usize];
+        for class_entry in &all_classes {
+            vtable_lookup[class_entry.vtable_id as usize] = Some(class_entry.clone());
+        }
+
         Ok(Self {
             options,
             loaded_binaries,
@@ -248,10 +260,19 @@ impl RuntimeContext {
             symbol_to_vtable_id,
             all_functions,
             all_classes,
+            vtable_lookup,
             total_static_space: current_static_offset,
             entry_point_function_id,
             init_function_ids,
         })
+    }
+
+    /// Returns a reference to the `CompiledClass` associated with `vtable_id`, if registered.
+    #[must_use]
+    pub fn get_class_by_vtable_id(&self, vtable_id: u32) -> Option<&CompiledClass> {
+        self.vtable_lookup
+            .get(vtable_id as usize)
+            .and_then(Option::as_ref)
     }
 
     /// Resolves the global entry point function ID.

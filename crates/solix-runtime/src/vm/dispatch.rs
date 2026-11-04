@@ -729,9 +729,7 @@ impl VirtualMachine {
                     let vtable_id = self.heap.read_u32(obj_addr)?;
                     let class = self
                         .context
-                        .all_classes
-                        .iter()
-                        .find(|c| c.vtable_id == vtable_id)
+                        .get_class_by_vtable_id(vtable_id)
                         .ok_or_else(|| RuntimeError::FunctionNotFound {
                             symbol_or_id: format!("vtable #{vtable_id}"),
                         })?;
@@ -790,9 +788,7 @@ impl VirtualMachine {
                     let vtable_id = self.heap.read_u32(obj_addr)?;
                     let class = self
                         .context
-                        .all_classes
-                        .iter()
-                        .find(|c| c.vtable_id == vtable_id)
+                        .get_class_by_vtable_id(vtable_id)
                         .ok_or_else(|| RuntimeError::FunctionNotFound {
                             symbol_or_id: format!("vtable #{vtable_id}"),
                         })?;
@@ -865,11 +861,7 @@ impl VirtualMachine {
                 let offset = inst.src2() as usize;
                 let field_addr = obj_addr + offset as u32;
                 let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                let maybe_class = self
-                    .context
-                    .all_classes
-                    .iter()
-                    .find(|cls| cls.vtable_id == vtable_id);
+                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
                 let field_type_tag = maybe_class.and_then(|cls| cls.get_field_type(offset));
 
                 let val = match field_type_tag {
@@ -947,11 +939,7 @@ impl VirtualMachine {
                 let field_addr = obj_addr + offset as u32;
 
                 let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                let maybe_class = self
-                    .context
-                    .all_classes
-                    .iter()
-                    .find(|cls| cls.vtable_id == vtable_id);
+                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
                 let field_type_tag = maybe_class.and_then(|cls| cls.get_field_type(offset));
 
                 match field_type_tag {

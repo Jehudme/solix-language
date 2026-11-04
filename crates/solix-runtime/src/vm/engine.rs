@@ -76,6 +76,7 @@ impl VirtualMachine {
         let total_static = context.total_static_space;
         let heap_size = context.options.heap_size;
         let mut heap = VirtualHeap::new(total_static, heap_size);
+        heap.set_safe_mode(context.options.safe_mode);
         let static_slots = vec![Value::Null; total_static as usize];
 
         let mut native_registry = NativeRegistry::with_builtins();
@@ -157,11 +158,7 @@ impl VirtualMachine {
             if header.tag == BlockTag::Object {
                 let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
                 let (maybe_destructor_id, reference_offsets) = {
-                    let maybe_class = self
-                        .context
-                        .all_classes
-                        .iter()
-                        .find(|cls| cls.vtable_id == vtable_id);
+                    let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
                     match maybe_class {
                         Some(class_item) => (
                             class_item.destructor_id,
@@ -261,12 +258,7 @@ impl VirtualMachine {
             return true;
         }
 
-        while let Some(class) = self
-            .context
-            .all_classes
-            .iter()
-            .find(|c| c.vtable_id == current_vtable_id)
-        {
+        while let Some(class) = self.context.get_class_by_vtable_id(current_vtable_id) {
             // Check implemented interfaces
             if class
                 .itable
