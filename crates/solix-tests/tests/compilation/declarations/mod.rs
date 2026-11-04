@@ -10,5 +10,6 @@ pub mod test_generics;
 pub mod test_granular_parser_diagnostics;
 pub mod test_interface_declaration;
 pub mod test_method_declaration;
+pub mod test_modifier_matrix;
 pub mod test_operator_declaration;
 pub mod test_tuple_primitive;
