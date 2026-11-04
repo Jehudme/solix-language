@@ -1,0 +1,12 @@
+// ============================================================================
+// Solix Master Negative Bytecode Emission Fixture: Invalid Symbols & Bounds
+// ============================================================================
+
+package solix.tests.negative;
+
+public class InvalidEmitterTarget {
+    public void execute_invalid() {
+        // Access non-existent symbol in emission
+        unresolved_function_call(1, 2, 3);
+    }
+}

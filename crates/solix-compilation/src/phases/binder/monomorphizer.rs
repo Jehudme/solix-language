@@ -1,0 +1,399 @@
+//! On-the-fly generic template monomorphization and AST synthesis engine.
+
+#![forbid(unsafe_code)]
+
+use crate::phases::binder::layout::ClassLayout;
+use crate::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
+use crate::phases::binder::type_resolver::resolve_type_annotation;
+use crate::phases::parser::statements::declarations::{ClassDeclaration, ClassMember, Modifier};
+use crate::phases::parser::statements::types::TypeAnnotation;
+use solix_common::{BindingError, PrimitiveKind, Type};
+use std::collections::HashMap;
+
+/// Registered AST blueprint for a generic type or method.
+#[derive(Debug, Clone)]
+pub struct GenericBlueprint {
+    /// Source file ID where the blueprint was declared.
+    pub source_id: u16,
+    /// Package prefix where the blueprint was declared.
+    pub package_prefix: String,
+    /// Unqualified blueprint name (e.g., `"MasterContainer"`).
+    pub name: String,
+    /// Fully qualified blueprint name (e.g., `"solix.tests.master.MasterContainer"`).
+    pub fully_qualified_name: String,
+    /// Declared generic parameter names (e.g., `["K", "V"]`).
+    pub parameter_names: Vec<String>,
+    /// The original AST class declaration.
+    pub class_ast: ClassDeclaration,
+}
+
+/// Registry storing generic blueprints and tracking instantiated concrete classes.
+#[derive(Debug, Clone, Default)]
+pub struct GenericBlueprintRegistry {
+    /// Blueprints indexed by fully qualified name (e.g., `"solix.tests.master.MasterContainer"`).
+    pub blueprints: HashMap<String, GenericBlueprint>,
+    /// Instantiated monomorphized class symbol IDs indexed by mangled name.
+    pub instantiated_classes: HashMap<String, SymbolId>,
+    /// Instantiated monomorphized class ASTs synthesized at compile time.
+    pub monomorphized_asts: Vec<ClassDeclaration>,
+}
+
+impl GenericBlueprintRegistry {
+    /// Registers a new generic class blueprint.
+    pub fn register_blueprint(&mut self, blueprint: GenericBlueprint) {
+        self.blueprints
+            .insert(blueprint.name.clone(), blueprint.clone());
+        self.blueprints
+            .insert(blueprint.fully_qualified_name.clone(), blueprint);
+    }
+
+    /// Checks if a blueprint exists for the given name.
+    #[must_use]
+    pub fn has_blueprint(&self, name: &str) -> bool {
+        self.blueprints.contains_key(name)
+    }
+
+    /// Mangles a generic template name with its concrete type arguments.
+    ///
+    /// Example: `("solix.collections.List", [int32])` -> `"solix.collections.List<int32>"`
+    #[must_use]
+    pub fn mangle_name(base_name: &str, type_arguments: &[Type]) -> String {
+        let mut mangled = String::with_capacity(base_name.len() + 16);
+        mangled.push_str(base_name);
+        mangled.push('<');
+        for (index, argument) in type_arguments.iter().enumerate() {
+            if index > 0 {
+                mangled.push_str(", ");
+            }
+            mangled.push_str(&argument.to_string());
+        }
+        mangled.push('>');
+        mangled
+    }
+
+    /// Monomorphizes a generic class blueprint on the fly for the specified concrete type arguments.
+    ///
+    /// # Errors
+    /// Returns [`BindingError`] if arity mismatches or blueprint is unknown.
+    pub fn monomorphize_class(
+        &mut self,
+        base_name: &str,
+        type_arguments: &[Type],
+        symbol_table: &mut SymbolTable,
+        layouts: &mut HashMap<SymbolId, ClassLayout>,
+        source_texts: &[String],
+        next_vtable_id: &mut u32,
+    ) -> Result<SymbolId, Vec<BindingError>> {
+        let mangled_name = Self::mangle_name(base_name, type_arguments);
+
+        // Check if already monomorphized
+        if let Some(&existing_id) = self.instantiated_classes.get(&mangled_name) {
+            return Ok(existing_id);
+        }
+
+        let blueprint = self.blueprints.get(base_name).cloned().ok_or_else(|| {
+            vec![BindingError::UndefinedSymbol {
+                symbol_name: base_name.to_string(),
+                span: miette::SourceSpan::new(0.into(), 0),
+            }]
+        })?;
+
+        if blueprint.parameter_names.len() != type_arguments.len() {
+            return Err(vec![BindingError::GenericArityMismatch {
+                template_name: base_name.to_string(),
+                expected: blueprint.parameter_names.len(),
+                found: type_arguments.len(),
+                span: blueprint.class_ast.span.to_source_span(),
+            }]);
+        }
+
+        // Build substitution map: "T" -> Type
+        let mut substitutions = HashMap::new();
+        for (param_name, concrete_type) in
+            blueprint.parameter_names.iter().zip(type_arguments.iter())
+        {
+            substitutions.insert(param_name.clone(), concrete_type.clone());
+        }
+
+        // Clone and substitute the class AST
+        let mut monomorphized_ast = blueprint.class_ast.clone();
+        monomorphized_ast.generic_params.clear();
+
+        // Register class symbol
+        let class_symbol_entry = SymbolEntry {
+            id: SymbolId(0),
+            name: mangled_name.clone(),
+            fully_qualified_name: mangled_name.clone(),
+            source_id: blueprint.source_id,
+            span: monomorphized_ast.span,
+            modifiers: monomorphized_ast.modifiers.clone(),
+            symbol_type: Type::Class {
+                symbol_name: mangled_name.clone(),
+                type_arguments: type_arguments.to_vec(),
+            },
+            parent_symbol: None,
+            members: Vec::new(),
+            is_static: false,
+            is_const: false,
+            slot_index: None,
+        };
+
+        let class_symbol_id = symbol_table.insert_symbol(class_symbol_entry);
+        self.instantiated_classes
+            .insert(mangled_name.clone(), class_symbol_id);
+
+        let current_vtable_id = *next_vtable_id;
+        *next_vtable_id += 1;
+
+        let mut class_layout =
+            ClassLayout::new(class_symbol_id, mangled_name.clone(), current_vtable_id);
+        let mut current_field_offset = 8usize; // After 8-byte vtable pointer / header
+        let mut child_symbol_ids = Vec::new();
+
+        let source_text = source_texts
+            .get(blueprint.source_id as usize)
+            .map(|text| text.as_str())
+            .unwrap_or("");
+
+        // Process members
+        for member in &mut monomorphized_ast.members {
+            match member {
+                ClassMember::Field(field_decl) => {
+                    let field_name = if field_decl.name_span.end as usize <= source_text.len() {
+                        &source_text
+                            [field_decl.name_span.start as usize..field_decl.name_span.end as usize]
+                    } else {
+                        "field"
+                    };
+
+                    let field_type = resolve_type_annotation_with_subs(
+                        blueprint.source_id,
+                        source_text,
+                        &field_decl.field_type,
+                        symbol_table,
+                        &substitutions,
+                    );
+
+                    let is_ref = field_type.is_reference_type();
+                    let field_size = match &field_type {
+                        Type::Primitive(prim) => prim.byte_size(),
+                        _ => 8,
+                    };
+
+                    class_layout
+                        .field_offsets
+                        .insert(field_name.to_string(), current_field_offset);
+                    if field_decl.modifiers.contains(&Modifier::Weak) {
+                        class_layout.weak_field_offsets.push(current_field_offset);
+                    } else if is_ref {
+                        class_layout
+                            .reference_field_offsets
+                            .push(current_field_offset);
+                    }
+                    current_field_offset += field_size.max(4); // 4-byte or 8-byte alignment
+
+                    let field_symbol = SymbolEntry {
+                        id: SymbolId(0),
+                        name: field_name.to_string(),
+                        fully_qualified_name: format!("{mangled_name}::{field_name}"),
+                        source_id: blueprint.source_id,
+                        span: field_decl.span,
+                        modifiers: field_decl.modifiers.clone(),
+                        symbol_type: field_type,
+                        parent_symbol: Some(class_symbol_id),
+                        members: Vec::new(),
+                        is_static: field_decl.modifiers.contains(&Modifier::Static),
+                        is_const: field_decl.modifiers.contains(&Modifier::Const),
+                        slot_index: None,
+                    };
+                    let field_id = symbol_table.insert_symbol(field_symbol);
+                    child_symbol_ids.push(field_id);
+                    field_decl.resolved_symbol_id = Some(field_id.0);
+                }
+                ClassMember::Method(method_decl) => {
+                    let method_name = if method_decl.name_span.end as usize <= source_text.len() {
+                        &source_text[method_decl.name_span.start as usize
+                            ..method_decl.name_span.end as usize]
+                    } else {
+                        "method"
+                    };
+
+                    let return_type = resolve_type_annotation_with_subs(
+                        blueprint.source_id,
+                        source_text,
+                        &method_decl.return_type,
+                        symbol_table,
+                        &substitutions,
+                    );
+
+                    let parameter_types: Vec<Type> = method_decl
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            resolve_type_annotation_with_subs(
+                                blueprint.source_id,
+                                source_text,
+                                &parameter.param_type,
+                                symbol_table,
+                                &substitutions,
+                            )
+                        })
+                        .collect();
+
+                    let param_sig = parameter_types
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let method_symbol = SymbolEntry {
+                        id: SymbolId(0),
+                        name: method_name.to_string(),
+                        fully_qualified_name: format!("{mangled_name}::{method_name}({param_sig})"),
+                        source_id: blueprint.source_id,
+                        span: method_decl.span,
+                        modifiers: method_decl.modifiers.clone(),
+                        symbol_type: Type::FunctionPointer {
+                            return_type: Box::new(return_type),
+                            parameter_types,
+                        },
+                        parent_symbol: Some(class_symbol_id),
+                        members: Vec::new(),
+                        is_static: method_decl.modifiers.contains(&Modifier::Static),
+                        is_const: false,
+                        slot_index: None,
+                    };
+                    let method_id = symbol_table.insert_symbol(method_symbol);
+                    child_symbol_ids.push(method_id);
+                    method_decl.resolved_symbol_id = Some(method_id.0);
+
+                    if !method_decl.modifiers.contains(&Modifier::Static) {
+                        let slot_idx = class_layout.vtable_methods.len();
+                        class_layout.vtable_methods.push(method_id);
+                        class_layout
+                            .method_slots
+                            .insert(method_name.to_string(), slot_idx);
+                    }
+                }
+                ClassMember::Constructor(constructor_decl) => {
+                    let constructor_symbol = SymbolEntry {
+                        id: SymbolId(0),
+                        name: "constructor".to_string(),
+                        fully_qualified_name: format!("{mangled_name}::constructor"),
+                        source_id: blueprint.source_id,
+                        span: constructor_decl.span,
+                        modifiers: constructor_decl.modifiers.clone(),
+                        symbol_type: Type::Primitive(PrimitiveKind::Void),
+                        parent_symbol: Some(class_symbol_id),
+                        members: Vec::new(),
+                        is_static: false,
+                        is_const: false,
+                        slot_index: None,
+                    };
+                    let constructor_id = symbol_table.insert_symbol(constructor_symbol);
+                    child_symbol_ids.push(constructor_id);
+                }
+                ClassMember::Destructor(destructor_decl) => {
+                    let destructor_symbol = SymbolEntry {
+                        id: SymbolId(0),
+                        name: "destructor".to_string(),
+                        fully_qualified_name: format!("{mangled_name}::destructor"),
+                        source_id: blueprint.source_id,
+                        span: destructor_decl.span,
+                        modifiers: Vec::new(),
+                        symbol_type: Type::Primitive(PrimitiveKind::Void),
+                        parent_symbol: Some(class_symbol_id),
+                        members: Vec::new(),
+                        is_static: false,
+                        is_const: false,
+                        slot_index: None,
+                    };
+                    let destructor_id = symbol_table.insert_symbol(destructor_symbol);
+                    child_symbol_ids.push(destructor_id);
+                }
+                ClassMember::Operator(operator_decl) => {
+                    let op_str = operator_decl.operator_token.as_static_str();
+                    let operator_symbol = SymbolEntry {
+                        id: SymbolId(0),
+                        name: format!("operator_{op_str}"),
+                        fully_qualified_name: format!("{mangled_name}::operator_{op_str}"),
+                        source_id: blueprint.source_id,
+                        span: operator_decl.span,
+                        modifiers: operator_decl.modifiers.clone(),
+                        symbol_type: Type::Primitive(PrimitiveKind::Void),
+                        parent_symbol: Some(class_symbol_id),
+                        members: Vec::new(),
+                        is_static: false,
+                        is_const: false,
+                        slot_index: None,
+                    };
+                    let operator_id = symbol_table.insert_symbol(operator_symbol);
+                    child_symbol_ids.push(operator_id);
+                }
+                ClassMember::Enum(_) | ClassMember::Class(_) | ClassMember::Interface(_) => {}
+            }
+        }
+
+        // Register implemented interfaces
+        for iface_annotation in &monomorphized_ast.interfaces {
+            let resolved_iface = resolve_type_annotation_with_subs(
+                blueprint.source_id,
+                source_text,
+                iface_annotation,
+                symbol_table,
+                &substitutions,
+            );
+            if let Type::Interface {
+                ref symbol_name, ..
+            } = resolved_iface
+            {
+                let simple = symbol_name
+                    .rsplit(['.', ':'])
+                    .next()
+                    .unwrap_or(symbol_name)
+                    .to_string();
+                let iface_methods = class_layout.vtable_methods.clone();
+                class_layout
+                    .itable_methods
+                    .insert(symbol_name.clone(), iface_methods.clone());
+                class_layout.itable_methods.insert(simple, iface_methods);
+            }
+        }
+
+        class_layout.instance_size_bytes = current_field_offset;
+        layouts.insert(class_symbol_id, class_layout);
+
+        if let Some(class_entry) = symbol_table.get_symbol_mut(class_symbol_id) {
+            class_entry.members = child_symbol_ids;
+        }
+
+        monomorphized_ast.resolved_symbol_id = Some(class_symbol_id.0);
+        self.monomorphized_asts.push(monomorphized_ast);
+
+        Ok(class_symbol_id)
+    }
+}
+
+/// Helper that resolves a [`TypeAnnotation`] while substituting generic parameter names with concrete types.
+#[must_use]
+pub fn resolve_type_annotation_with_subs(
+    source_id: u16,
+    source_text: &str,
+    annotation: &TypeAnnotation,
+    symbol_table: &SymbolTable,
+    substitutions: &HashMap<String, Type>,
+) -> Type {
+    if let TypeAnnotation::Named { path, .. } = annotation
+        && path.len() == 1
+    {
+        let start = path[0].start as usize;
+        let end = path[0].end as usize;
+        if end <= source_text.len() {
+            let name = &source_text[start..end];
+            if let Some(concrete_type) = substitutions.get(name) {
+                return concrete_type.clone();
+            }
+        }
+    }
+
+    resolve_type_annotation(source_id, source_text, annotation, symbol_table)
+}

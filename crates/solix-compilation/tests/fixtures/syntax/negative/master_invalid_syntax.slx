@@ -1,0 +1,142 @@
+// ============================================================================
+// Solix Master Negative Syntax Fixture: Exhaustive Syntax & Parser Errors
+// ============================================================================
+
+// Error E0118: Operator overload outside class
+operator +(int32 rhs) { return 0; }
+
+// Error E0119: Constructor outside class
+MyStandaloneConstructor() { }
+
+// Error E0124: Return statement outside function
+return 42;
+
+// Error E0146: Malformed alias statement
+alias MalformedAlias;
+
+// Valid class declaration used to trigger subsequent misplaced package/import errors
+class FirstClass {
+    public int32 val;
+}
+
+// Error E0111: Package statement not first (appears after class declaration)
+package misplaced.pkg;
+
+// Error E0112: Duplicate package statement
+package duplicate.pkg;
+
+// Error E0113: Import statement after class declaration
+import std.collections.List;
+
+// Interface declaration errors
+interface BadInterface {
+    // Error E0125: Interface declaring destructor
+    ~BadInterface() { }
+
+    // Error E0126: Interface declaring instance field
+    int32 illegal_field;
+
+    // Error E0127: Interface method with body
+    void bad_method() {
+        int32 x = 1;
+    }
+}
+
+// Class declaration with destructor and constructor errors
+class ErrorHostClass {
+    // Error E0134: Constructor specifying return type
+    void ErrorHostClass() { }
+
+    // Error E0130: Destructor with static modifier
+    static ~ErrorHostClass() { }
+
+    // Error E0131: Destructor name mismatch
+    ~WrongName() { }
+
+    // Error E0132: Destructor with parameters
+    ~ErrorHostClass(int32 param) { }
+
+    // Error E0129: Multiple destructors in class
+    ~ErrorHostClass() { }
+
+    // Error E0138: Abstract method with body
+    abstract void bad_abstract() { }
+
+    // Error E0136: Variadic parameter not last in method signature
+    void bad_variadic(int32... first, int32 second) { }
+
+    // Method enclosing local statement and expression errors
+    void test_method() {
+        // Error E0114: Class declared in local scope
+        class LocalClass { }
+
+        // Error E0115: Enum declared in local scope
+        enum LocalEnum { RED, BLUE }
+
+        // Error E0116: Interface declared in local scope
+        interface LocalInterface { }
+
+        // Error E0117: Visibility modifier on local variable
+        public int32 bad_local_var = 1;
+
+        // Error E0120: Solitary variable declaration in branch without block
+        if (true) int32 solitary_var = 5;
+
+        // Error E0123: Method declared inside another method
+        void nested_method() { }
+
+        // Error E0142: Malformed switch condition (missing parens)
+        switch 42 {
+            // Error E0122: Statement before case in switch
+            int32 orphaned = 10;
+            // Error E0121: Case label not constant
+            case (1 + 2):
+                break;
+        }
+
+        // Error E0140: Try statement missing catch or finally
+        try {
+            int32 try_val = 1;
+        }
+
+        // Error E0141: Malformed catch parameter
+        try {
+            int32 try_val2 = 2;
+        } catch () {
+            int32 err = 0;
+        }
+
+        // Error E0143: Malformed for loop (missing semicolon clause)
+        for (int32 iter = 0 iter < 10; iter++) { }
+
+        // Error E0144: Malformed while condition (missing parens)
+        while true { }
+
+        // Error E0145: Malformed do-while (missing while condition)
+        do { } while;
+
+        // Error E0106: Invalid assignment target (non l-value)
+        1 + 2 = 3;
+
+        // Error E0107: Invalid operand for increment (non l-value)
+        ++5;
+
+        // Error E0108: Array allocation requires size expression
+        int32[] bad_arr = new int32[];
+
+        // Error E0110: Cast expression missing type
+        int32 cast_err = cast(5, );
+
+        // Error E0150: Integer literal overflow (> u64::MAX)
+        uint64 huge_number = 9999999999999999999999999999999999999999;
+
+        // Error E0151: Invalid escape sequence in literal
+        string bad_escape = "\q";
+
+        // Error E0152: Empty character literal
+        char empty_char = '';
+
+        // Error E0153: Multi-character literal
+        char multi_char = 'abc';
+    }
+}

@@ -1,0 +1,276 @@
+package test.exhaustive.master;
+
+// 1. Type Aliases
+alias Status = int32;
+alias Flag = bool;
+
+// 2. Enums
+public enum Priority {
+    LOW,
+    MEDIUM,
+    HIGH,
+    CRITICAL
+}
+
+// 3. Interfaces
+public interface IIdentifiable {
+    int32 get_id();
+}
+
+public interface IPrintable {
+    int32 get_code();
+}
+
+// 4. Generics (Single & Multi-parameter)
+public class Container<T> {
+    public T value;
+    public Container(T val) {
+        this.value = val;
+    }
+    public T get_val() {
+        return this.value;
+    }
+}
+
+public class Pair<K, V> {
+    public K key;
+    public V val;
+    public Pair(K k, V v) {
+        this.key = k;
+        this.val = v;
+    }
+}
+
+// 5. Abstract Class & Inheritance
+public abstract class Entity implements IIdentifiable {
+    public int32 id;
+    public Entity(int32 id) {
+        this.id = id;
+    }
+    public int32 get_id() {
+        return this.id;
+    }
+    public abstract int32 compute();
+}
+
+// 6. Concrete Subclass with Destructor and Operator Overloading
+public class Widget extends Entity implements IPrintable {
+    public int32 weight;
+
+    public Widget(int32 id, int32 w) : super(id) {
+        this.weight = w;
+    }
+
+    ~Widget() {
+        this.weight = 0;
+    }
+
+    public int32 compute() {
+        return this.id * this.weight;
+    }
+
+    public int32 get_code() {
+        return 777;
+    }
+
+    public int32 operator+(Widget other) {
+        return this.weight + other.weight;
+    }
+}
+
+public class SpecialWidget extends Widget {
+    public int32 bonus;
+    public SpecialWidget(int32 id, int32 w, int32 b) : super(id, w) {
+        this.bonus = b;
+    }
+
+    public int32 compute() {
+        return this.id * this.weight + this.bonus;
+    }
+}
+
+// 7. Custom Exception
+public class MasterException {
+    public int32 code;
+    public MasterException(int32 c) {
+        this.code = c;
+    }
+}
+
+// 8. Native Console Output Interface
+public class Console {
+    public static native void println(string msg);
+}
+
+// 9. Main Application Runner Testing All Features
+public class App {
+    public static int32 main(string[] args) {
+        // --- 1. OOP, Single & Multi-level Inheritance Chaining ---
+        Entity e = new Widget(10, 5);
+        if (e.get_id() != 10 || e.compute() != 50) {
+            return 101;
+        }
+
+        SpecialWidget sw = new SpecialWidget(10, 5, 20);
+        if (sw.compute() != 70) {
+            return 102;
+        }
+        Console::println("CHECK 1: OOP AND INHERITANCE OK");
+
+        // --- 2. Interfaces & Virtual / Interface Dispatch ---
+        IIdentifiable id_ref = e;
+        if (id_ref.get_id() != 10) {
+            return 201;
+        }
+        IPrintable print_ref = sw;
+        if (print_ref.get_code() != 777) {
+            return 202;
+        }
+        Console::println("CHECK 2: INTERFACES AND VIRTUAL DISPATCH OK");
+
+        // --- 3. Generics & Template Monomorphization ---
+        Container<int32> box_int = new Container<int32>(42);
+        if (box_int.get_val() != 42) {
+            return 301;
+        }
+
+        Pair<int32, bool> pair = new Pair<int32, bool>(99, true);
+        if (pair.key != 99 || pair.val != true) {
+            return 302;
+        }
+        Console::println("CHECK 3: GENERICS AND MONOMORPHIZATION OK");
+
+        // --- 4. Operator Overloading & Enums ---
+        Widget w1 = new Widget(1, 100);
+        Widget w2 = new Widget(2, 250);
+        int32 total_weight = w1 + w2;
+        if (total_weight != 350) {
+            return 401;
+        }
+
+        int32 prio_high = Priority::HIGH;
+        if (prio_high != 2) {
+            return 402;
+        }
+        Console::println("CHECK 4: OPERATOR OVERLOADING OK");
+
+        // --- 5. Control Flow: While, Do-While, For, Switch ---
+        int32 sum = 0;
+        int32 i = 0;
+        while (i < 10) {
+            i = i + 1;
+            if (i % 2 != 0) {
+                continue;
+            }
+            sum = sum + i;
+        }
+        // Evens: 2+4+6+8+10 = 30
+        if (sum != 30) {
+            return 501;
+        }
+
+        int32 do_count = 0;
+        do {
+            do_count = do_count + 1;
+        } while (do_count < 3);
+        if (do_count != 3) {
+            return 502;
+        }
+
+        int32 for_acc = 0;
+        for (int32 k = 1; k <= 5; k = k + 1) {
+            for_acc = for_acc + k;
+        }
+        // 1+2+3+4+5 = 15
+        if (for_acc != 15) {
+            return 503;
+        }
+
+        int32 switch_result = 0;
+        switch (20) {
+            case 10:
+                switch_result = 1;
+                break;
+            case 20:
+                switch_result = 2;
+                break;
+            default:
+                switch_result = -1;
+                break;
+        }
+        if (switch_result != 2) {
+            return 504;
+        }
+        Console::println("CHECK 5: CONTROL FLOW AND SWITCH OK");
+
+        // --- 6. Exception Handling: Try, Catch, Finally ---
+        int32 exc_val = 0;
+        int32 finally_ran = 0;
+        try {
+            throw new MasterException(404);
+        } catch (MasterException ex) {
+            exc_val = ex.code;
+        } finally {
+            finally_ran = 1;
+        }
+        if (exc_val != 404 || finally_ran != 1) {
+            return 601;
+        }
+        Console::println("CHECK 6: EXCEPTION HANDLING AND FINALLY OK");
+
+        // --- 7. Sizeof and Nominal / Interface Instanceof ---
+        int32 s_i32 = sizeof(int32);
+        int32 s_i64 = sizeof(int64);
+        int32 s_widget = sizeof(Widget);
+        if (s_i32 != 4 || s_i64 != 8 || s_widget != 16) {
+            return 701;
+        }
+
+        if (!(sw instanceof SpecialWidget)) {
+            return 702;
+        }
+        if (!(sw instanceof Widget)) {
+            return 703;
+        }
+        if (!(sw instanceof Entity)) {
+            return 704;
+        }
+        if (!(sw instanceof IPrintable)) {
+            return 705;
+        }
+        Console::println("CHECK 7: SIZEOF AND INSTANCEOF OK");
+
+        // --- 8. Tuples and Tuple Element Instanceof ---
+        tuple<int32, bool> tup = tuple(888, true);
+        if (tup[0] != 888 || tup[1] != true) {
+            return 801;
+        }
+        if (!(tup[0] instanceof int32) || !(tup[1] instanceof bool)) {
+            return 802;
+        }
+        Console::println("CHECK 8: TUPLES AND TUPLE INSTANCEOF OK");
+
+        // --- 9. Dynamic Arrays and Length ---
+        int32[] arr = new int32[4];
+        arr[0] = 10;
+        arr[1] = 20;
+        arr[2] = 30;
+        arr[3] = 40;
+        if (arr.length != 4 || arr[0] + arr[1] + arr[2] + arr[3] != 100) {
+            return 901;
+        }
+        Console::println("CHECK 9: ARRAYS AND LENGTH OK");
+
+        // --- 10. Lambdas with Captures & Function Pointers ---
+        int32 factor = 3;
+        int32(*)(int32) lambda_fn = (n) => n * factor;
+        int32 r = lambda_fn(7);
+        if (r != 21) {
+            return 1001;
+        }
+        Console::println("CHECK 10: CLOSURES AND LAMBDAS OK");
+
+        Console::println("ALL CHECKS PASSED SUCCESSFULLY");
+        return 0;
+    }
+}

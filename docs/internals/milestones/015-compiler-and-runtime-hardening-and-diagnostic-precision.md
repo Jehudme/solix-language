@@ -347,42 +347,42 @@ An exhaustive cross-audit of `crates/solix-tests/TESTS.md` against `crates/solix
 ## 5. Phased Implementation Plan
 
 ### Phase 1: Lexer Completeness, Diagnostic Formatting Cleanup & Granular Parser Error Codes (`solix-common` & `solix-compilation`)
-- [ ] `[P0]` **Task 1.1:** Strip `at {span:?}` from all `#[error("...")]` strings in `lexing.rs`, `parsing.rs`, and `binding.rs`.
-- [ ] `[P0]` **Task 1.2:** Add missing bitwise tokens (`OperatorBitwiseOr` `|`, `OperatorBitwiseXor` `^`, `OperatorShiftLeft` `<<`, `OperatorShiftRight` `>>`) to `TokenKind`, `lexer.rs`, `parser.rs`, `pass3_type_checking.rs`, and `emitter.rs`, and add `E0011`–`E0015` to `LexingError`.
-- [ ] `[P0]` **Task 1.3:** Add `E0160` through `E0200` to `ParsingError` in `crates/solix-common/src/diagnostics/parsing.rs`.
-- [ ] `[P0]` **Task 1.4:** Replace all 27 misused `ExpectedClosingDelimiter` calls in `crates/solix-compilation/src/phases/parser/parser.rs` with the exact specific delimiter/construct error (`ExpectedOpenParen`, `ExpectedCloseParen`, `ExpectedCloseBracket`, `ExpectedCloseAngle`, `ExpectedColonInTernary`, `UnexpectedQuestionOperator`, etc.).
-- [ ] `[P0]` **Task 1.5:** Implement `validate_modifiers()` in `parser.rs` and `pass1`/`pass2` enforcing the complete **13-Modifier Legality Matrix** (Section 2.1) across classes, interfaces, enums, fields, methods, free functions, constructors, destructors, operators, local variables, and module statements (`E0172`–`E0175`, `E0185`, `E0196`–`E0200`, `E0273`–`E0281`).
-- [ ] `[P0]` **Task 1.6:** Reject duplicate `default:` branches in `switch` (`E0184`), empty enums (`E0191`), and support nested `class` and `interface` declarations inside `parse_class_member`.
+- [x] `[P0]` **Task 1.1:** Strip `at {span:?}` from all `#[error("...")]` strings in `lexing.rs`, `parsing.rs`, and `binding.rs`.
+- [x] `[P0]` **Task 1.2:** Add missing bitwise tokens (`OperatorBitwiseOr` `|`, `OperatorBitwiseXor` `^`, `OperatorShiftLeft` `<<`, `OperatorShiftRight` `>>`) to `TokenKind`, `lexer.rs`, `parser.rs`, `pass3_type_checking.rs`, and `emitter.rs`, and add `E0011`–`E0015` to `LexingError`.
+- [x] `[P0]` **Task 1.3:** Add `E0160` through `E0200` to `ParsingError` in `crates/solix-common/src/diagnostics/parsing.rs`.
+- [x] `[P0]` **Task 1.4:** Replace all 27 misused `ExpectedClosingDelimiter` calls in `crates/solix-compilation/src/phases/parser/parser.rs` with the exact specific delimiter/construct error (`ExpectedOpenParen`, `ExpectedCloseParen`, `ExpectedCloseBracket`, `ExpectedCloseAngle`, `ExpectedColonInTernary`, `UnexpectedQuestionOperator`, etc.).
+- [x] `[P0]` **Task 1.5:** Implement `validate_modifiers()` in `parser.rs` and `pass1`/`pass2` enforcing the complete **13-Modifier Legality Matrix** (Section 2.1) across classes, interfaces, enums, fields, methods, free functions, constructors, destructors, operators, local variables, and module statements (`E0172`–`E0175`, `E0185`, `E0196`–`E0200`, `E0273`–`E0281`).
+- [x] `[P0]` **Task 1.6:** Reject duplicate `default:` branches in `switch` (`E0184`), empty enums (`E0191`), and support nested `class` and `interface` declarations inside `parse_class_member`.
 
 ### Phase 2: Recursive Type Validation & Closing All 24 Semantic Binder Bypasses (`solix-common` & `solix-compilation`)
-- [ ] `[P0]` **Task 2.1:** Add helper `Type::first_unresolved_name(&self) -> Option<&str>` in `crates/solix-common/src/types.rs` that recursively inspects `Type::Unresolved`, `Type::Array`, `Type::Tuple`, `Type::FunctionPointer`, and `Type::Class / Interface` `type_arguments`.
-- [ ] `[P0]` **Task 2.2:** Add `E0233` through `E0288` to `BindingError` in `crates/solix-common/src/diagnostics/binding.rs`.
-- [ ] `[P0]` **Task 2.3:** Validate all resolved types in Pass 1, Pass 2, and Pass 3:
+- [x] `[P0]` **Task 2.1:** Add helper `Type::first_unresolved_name(&self) -> Option<&str>` in `crates/solix-common/src/types.rs` that recursively inspects `Type::Unresolved`, `Type::Array`, `Type::Tuple`, `Type::FunctionPointer`, and `Type::Class / Interface` `type_arguments`.
+- [x] `[P0]` **Task 2.2:** Add `E0233` through `E0288` to `BindingError` in `crates/solix-common/src/diagnostics/binding.rs`.
+- [x] `[P0]` **Task 2.3:** Validate all resolved types in Pass 1, Pass 2, and Pass 3:
   - Every function/method/constructor/operator/lambda parameter type **MUST** be checked via `first_unresolved_name()` -> emit `E0233` (`UnresolvedParameterType`) and reject `void` parameters with `E0253`.
   - Every parameter `default_value` **MUST** be type-checked against `param_type` -> emit `E0286` (`ParameterDefaultValueTypeMismatch`).
   - Every function/method/operator return type **MUST** be checked via `first_unresolved_name()` -> emit `E0234` (`UnresolvedReturnType`).
   - Every class field and global variable type **MUST** be checked via `first_unresolved_name()` -> emit `E0235` (`UnresolvedFieldType`).
   - Every local variable type **MUST** be checked recursively via `first_unresolved_name()` -> emit `E0201` / `E0237`.
   - Every `implements` clause on a class and `extends` clause on an interface **MUST** verify the target exists and is a `Type::Interface` -> emit `E0236`.
-- [ ] `[P0]` **Task 2.4:** Enforce complete call-site argument validation in `pass3_type_checking.rs`:
+- [x] `[P0]` **Task 2.4:** Enforce complete call-site argument validation in `pass3_type_checking.rs`:
   - Validate argument count (`E0238`) and argument type assignability (`E0239`) for **top-level free function calls** (`fn(args)`).
   - Validate method existence, argument count, and argument types for **interface method calls** (`Type::Interface`), **function pointer calls**, and **closure calls** (`BUG-05`, `BUG-20`).
   - Validate `super(...)` constructor call argument count and types against superclass constructors (`E0242`).
-- [ ] `[P0]` **Task 2.5:** Enforce `virtual` / `override` / `abstract` rules in `pass2_type_hierarchy.rs`:
+- [x] `[P0]` **Task 2.5:** Enforce `virtual` / `override` / `abstract` rules in `pass2_type_hierarchy.rs`:
   - Reject `override` when no superclass method matches (`E0282`).
   - Reject `override` when the superclass method is not `virtual` or `abstract` (`E0283`).
   - Reject overriding a method with a mismatched return type (`E0207`).
   - Reject `abstract` methods inside concrete (non-abstract) classes (`E0265`).
-- [ ] `[P0]` **Task 2.6:** Enforce enum explicit value evaluation & duplicate value checking (`E0262`, `E0285`), field initializer type checking (`E0240`), non-composite member access rejection (`E0241`), generic type bound checking (`E0264`), and `main` entry-point signature/ambiguity checking (`E0243`, `E0244`).
+- [x] `[P0]` **Task 2.6:** Enforce enum explicit value evaluation & duplicate value checking (`E0262`, `E0285`), field initializer type checking (`E0240`), non-composite member access rejection (`E0241`), generic type bound checking (`E0264`), and `main` entry-point signature/ambiguity checking (`E0243`, `E0244`).
 
 ### Phase 3: Audit `TESTS.md` Tags & Implement All Missing `TESTS.md` Scenarios
-- [ ] `[P1]` **Task 3.1:** Update `crates/solix-tests/TESTS.md` to tag all 25 currently unimplemented scenarios as `[NOT IMPLEMENTED]`.
-- [ ] `[P1]` **Task 3.2:** Implement the missing language features required by `TESTS.md` (sub-interface inheritance method collection, nested classes/interfaces, generic static methods with explicit and deduced type arguments, destructor unwinding during exceptions, explicit enum variant values in emitter).
-- [ ] `[P1]` **Task 3.3:** Write all missing `TESTS.md` test functions in `crates/solix-tests/tests/` and transition their tags in `TESTS.md` to `[IMPLEMENTED]` as each test passes.
+- [x] `[P1]` **Task 3.1:** Update `crates/solix-tests/TESTS.md` to tag all 25 currently unimplemented scenarios as `[NOT IMPLEMENTED]`.
+- [x] `[P1]` **Task 3.2:** Implement the missing language features required by `TESTS.md` (sub-interface inheritance method collection, nested classes/interfaces, generic static methods with explicit and deduced type arguments, destructor unwinding during exceptions, explicit enum variant values in emitter).
+- [x] `[P1]` **Task 3.3:** Write all missing `TESTS.md` test functions in `crates/solix-tests/tests/` and transition their tags in `TESTS.md` to `[IMPLEMENTED]` as each test passes.
 
 ### Phase 4: 250+ Granular Positive & Negative Conformance Tests (`crates/solix-tests`)
-- [ ] `[P1]` **Task 4.1:** Upgrade `assert_compile_error` in `crates/solix-tests/src/common.rs` so tests assert **exact error codes** (`E00XX`, `E01XX`, `E02XX`) and verify that no error string contains `SourceSpan {`.
-- [ ] `[P1]` **Task 4.2:** Add 250+ new positive and negative edge-case tests across `crates/solix-tests/tests/compilation/` and document every single one in `crates/solix-tests/TESTS.md`, covering every cell of the **13-Modifier Legality Matrix**, every `TokenKind` syntax error, and every semantic type check (`E0000`–`E0288`).
+- [x] `[P1]` **Task 4.1:** Upgrade `assert_compile_error` in `crates/solix-tests/src/common.rs` so tests assert **exact error codes** (`E00XX`, `E01XX`, `E02XX`) and verify that no error string contains `SourceSpan {`.
+- [x] `[P1]` **Task 4.2:** Add 250+ new positive and negative edge-case tests across `crates/solix-tests/tests/compilation/` and document every single one in `crates/solix-tests/TESTS.md`, covering every cell of the **13-Modifier Legality Matrix**, every `TokenKind` syntax error, and every semantic type check (`E0000`–`E0288`).
 
 ---
 
@@ -390,10 +390,10 @@ An exhaustive cross-audit of `crates/solix-tests/TESTS.md` against `crates/solix
 
 | DoD Requirement | Target Benchmark | Verification Tool | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **Zero Silent Type Bypasses** | `void main(tretertertreter[] args)` & `void fn(fdsfds args)` rejected with `E0233` | `cargo test -p solix-tests` | [ ] Pending |
-| **13-Modifier Matrix Enforced** | All illegal `native`, `extern`, `virtual`, `override`, `abstract`, `weak`, `const`, `static` combinations rejected | `cargo test -p solix-tests` | [ ] Pending |
-| **Clean Diagnostic Messages** | Zero occurrences of `SourceSpan {` in any error message | Diagnostic formatting test | [ ] Pending |
-| **Specific Delimiter Codes** | `E0104`, `E0160`–`E0200` tested individually | `cargo test --test parser_tests` | [ ] Pending |
-| **100% `TESTS.md` Accuracy** | Every `[IMPLEMENTED]` case in `TESTS.md` has a real test in `solix-tests` | Automated `TESTS.md` audit | [ ] Pending |
-| **250+ New Edge-Case Tests** | All new positive & negative tests pass with exact error code assertions | `cargo test --workspace --all-targets` | [ ] Pending |
-| **Clippy & Rustfmt Clean** | Zero warnings across workspace | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
+| **Zero Silent Type Bypasses** | `void main(tretertertreter[] args)` & `void fn(fdsfds args)` rejected with `E0233` | `cargo test -p solix-tests` | [x] Complete |
+| **13-Modifier Matrix Enforced** | All illegal `native`, `extern`, `virtual`, `override`, `abstract`, `weak`, `const`, `static` combinations rejected | `cargo test -p solix-tests` | [x] Complete |
+| **Clean Diagnostic Messages** | Zero occurrences of `SourceSpan {` in any error message | Diagnostic formatting test | [x] Complete |
+| **Specific Delimiter Codes** | `E0104`, `E0160`–`E0200` tested individually | `cargo test --test parser_tests` | [x] Complete |
+| **100% `TESTS.md` Accuracy** | Every `[IMPLEMENTED]` case in `TESTS.md` has a real test in `solix-tests` | Automated `TESTS.md` audit | [x] Complete |
+| **250+ New Edge-Case Tests** | All new positive & negative tests pass with exact error code assertions | `cargo test --workspace --all-targets` | [x] Complete |
+| **Clippy & Rustfmt Clean** | Zero warnings across workspace | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Complete |

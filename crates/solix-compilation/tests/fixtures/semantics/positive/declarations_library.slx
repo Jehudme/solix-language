@@ -1,0 +1,64 @@
+// ============================================================================
+// Solix Semantic Fixture: Declarations Library for Multi-File Imports
+// ============================================================================
+
+package solix.tests.library;
+
+alias UserID = int64;
+alias NumberList = int32[];
+
+public enum Status {
+    PENDING = 0,
+    ACTIVE = 1,
+    SUSPENDED = 2
+}
+
+public interface IIdentifiable {
+    int64 get_id();
+}
+
+public interface IDescribable extends IIdentifiable {
+    string get_description();
+}
+
+public class BaseEntity implements IIdentifiable {
+    public int64 id;
+
+    public BaseEntity(int64 id) {
+        this.id = id;
+    }
+
+    public int64 get_id() {
+        return this.id;
+    }
+}
+
+public class User extends BaseEntity implements IDescribable {
+    public string name;
+    public Status status;
+
+    public User(int64 id, string name) : super(id) {
+        this.name = name;
+        this.status = Status::ACTIVE;
+    }
+
+    public string get_description() {
+        return this.name;
+    }
+
+    public bool is_active() {
+        return this.status == Status::ACTIVE;
+    }
+}
+
+public class Repository<T> {
+    public int32 count;
+
+    public Repository() {
+        this.count = 0;
+    }
+
+    public int32 get_count() {
+        return this.count;
+    }
+}

@@ -1,0 +1,27 @@
+// ============================================================================
+// Solix Lexical Grammar Master Negative Fixture: Invalid & Unknown Tokens
+// ============================================================================
+
+// Error 1: Unrecognized symbol @
+int32 error_one = @;
+
+// Error 2: Unrecognized symbol #
+int32 error_two = #;
+
+// Error 3: Unrecognized symbol $
+int32 error_three = $;
+
+// Error 4: Unrecognized symbol `
+int32 error_four = `;
+
+// Error 5: Unrecognized symbol \
+int32 error_five = \;
+
+// Error 6: Malformed hexadecimal prefix 0x with no valid hex digits
+int32 error_six = 0x;
+
+// Error 7: Malformed binary prefix 0b with no valid binary digits
+int32 error_seven = 0b;
+
+// Error 8: Unterminated string literal at end of file
+string error_eight = "unterminated string literal

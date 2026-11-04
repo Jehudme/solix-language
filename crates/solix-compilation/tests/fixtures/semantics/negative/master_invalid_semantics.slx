@@ -1,0 +1,76 @@
+// ============================================================================
+// Solix Master Negative Semantic Fixture: Exhaustive Error Recovery Verification
+// ============================================================================
+
+package solix.tests.invalid;
+
+public interface IBaseInterface {
+    void execute();
+}
+
+// E0205: Invalid base class (cannot extend interface)
+public class InvalidBaseClass extends IBaseInterface {
+}
+
+// E0204: Cyclic inheritance
+public class CyclicA extends CyclicB {
+}
+
+public class CyclicB extends CyclicA {
+}
+
+// E0202: Duplicate symbol declaration
+public class DuplicateSymbol {
+}
+
+public class DuplicateSymbol {
+}
+
+public enum TestStatus {
+    ACTIVE,
+    INACTIVE
+}
+
+public class StaticInstanceTestClass {
+    public static int32 static_field = 42;
+    public int32 instance_field = 10;
+
+    public static void static_method() {
+    }
+
+    public void instance_method() {
+    }
+}
+
+public class SemanticErrorHarness {
+    public int32 number;
+
+    public int32 trigger_errors() {
+        // E0201: Undefined symbol
+        UndefinedType variable = null;
+
+        // E0203: Type mismatch (int32 expected, string found)
+        int32 mismatch = "invalid_string_literal";
+
+        // E0219: Break outside loop
+        break;
+
+        // E0219: Continue outside loop
+        continue;
+
+        // E0221: Non-indexable type indexed
+        bool flag = true;
+        int32 val = flag[0];
+
+        // E0226: Static member or enum variant accessed via '.' instead of '::'
+        int32 static_val = StaticInstanceTestClass.static_field;
+        TestStatus status_val = TestStatus.ACTIVE;
+
+        // E0227: Instance member accessed via '::' instead of '.'
+        StaticInstanceTestClass instance_obj = new StaticInstanceTestClass();
+        int32 inst_val = instance_obj::instance_field;
+
+        // E0213: Return type mismatch (int32 declared, string returned)
+        return "not_an_int";
+    }
+}

@@ -1,0 +1,37 @@
+// ============================================================================
+// Solix Lexical Grammar Master Fixture: All 103 Terminal Tokens
+// ============================================================================
+
+// 1. Primitive Type Keywords (14)
+void bool int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64 char tuple
+
+// 2. Control Flow & Declaration Keywords (42)
+if else for while do return break continue switch case default
+const class enum try catch finally throw static inline alias import
+public native protected private internal package new operator extends super
+virtual override weak abstract interface implements instanceof sizeof assert exit
+
+// 3. Operators (25)
+= ? + - * / % += -= *= /= %= ++ -- == != < > <= >= && || ! ~ =>
+
+// 4. Punctuation & Delimiters (14)
+; , . : :: ( ) { } [ ] [] & ...
+
+// 5. Numeric Literals (Decimal, Hexadecimal, Binary, Floats)
+0 42 1000 0xFF 0xDEAD_BEEF 0b1010 0b1111_0000 42L 0xFFL 3.14 0.5 1.0e-4 2e10 3.14f 1.0F
+
+// 6. String Literals with Escape Sequences
+"Hello, World!"
+""
+"Line 1\nLine 2\tTabbed\rReturn\\Backslash\'Single\"Double\0Null\x41Hex"
+
+// 7. Character Literals
+'A' 'z' '9' '\n' '\t' '\r' '\\' '\'' '\"' '\0' '\x7F'
+
+// 8. Comments (Single-Line and Multi-Line Block)
+// Single line comment up to line feed
+/* Multi-line block comment
+   spanning multiple lines */
+
+// 9. User-Defined Identifiers
+my_variable camelCase PascalCase _leadingUnderscore snake_case_name counter123
