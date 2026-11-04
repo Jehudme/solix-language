@@ -44,6 +44,7 @@ fn test_zero_cost_exception_caught_locally() {
         catch_reg: 2,
         handler_pc: 4,
         finally_pc: None,
+        try_ref_regs: Vec::new(),
     });
 
     binary.functions.push(func);
@@ -93,6 +94,7 @@ fn test_cross_frame_exception_unwinding() {
         catch_reg: 2,
         handler_pc: 2,
         finally_pc: None,
+        try_ref_regs: Vec::new(),
     });
 
     binary.functions.push(callee);

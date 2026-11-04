@@ -935,7 +935,37 @@ impl VirtualMachine {
             }
 
             OpCode::CastCheck => {
-                let obj_addr = self.get_reg(inst.src1())?.as_ref()?;
+                let val = self.get_reg(inst.src1())?;
+                let tag = inst.flags();
+                if tag != 0 {
+                    let is_match = match tag {
+                        1..=4 => matches!(val, Value::I32(_) | Value::I64(_)),
+                        5..=8 => matches!(val, Value::I32(_) | Value::I64(_)),
+                        9..=10 => matches!(val, Value::F64(_)),
+                        11 => matches!(val, Value::Bool(_)),
+                        12 => matches!(val, Value::I32(_)),
+                        13 => {
+                            if let Value::Ref(addr) = val {
+                                self.heap
+                                    .read_header(addr)
+                                    .is_ok_and(|header| header.tag == BlockTag::String)
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+                    if !is_match {
+                        return Err(RuntimeError::InvalidCast {
+                            from: format!("{val}"),
+                            to: format!("type tag #{tag}"),
+                        });
+                    }
+                    self.set_reg(inst.dst(), val)?;
+                    return Ok(());
+                }
+
+                let obj_addr = val.as_ref()?;
                 if obj_addr == 0 {
                     self.set_reg(inst.dst(), Value::Null)?;
                     return Ok(());
@@ -1215,6 +1245,22 @@ impl VirtualMachine {
                     }
 
                     if let Some(handler) = matched {
+                        let exception_address = if let Value::Ref(target_addr) = exc_val {
+                            target_addr
+                        } else {
+                            0
+                        };
+                        for &register_index in &handler.try_ref_regs {
+                            if register_index != handler.catch_reg
+                                && let Ok(Value::Ref(object_addr)) = self.get_reg(register_index)
+                                && object_addr > 0
+                                && object_addr != exception_address
+                            {
+                                let _ = self.release_reference(object_addr);
+                                let _ = self.set_reg(register_index, Value::Null);
+                            }
+                        }
+
                         if handler.finally_pc.is_none() {
                             self.set_reg(handler.catch_reg, exc_val)?;
                         }

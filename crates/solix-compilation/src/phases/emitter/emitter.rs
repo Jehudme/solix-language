@@ -336,9 +336,10 @@ impl<'a> Emitter<'a> {
                         Instruction::format_a(OpCode::CastCheck, 0, dst, src, vtable_id),
                         Some(*span),
                     );
-                } else if dst != src {
+                } else {
+                    let type_tag = self.resolve_type_tag_for_type(&result_type);
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, dst, src, 0),
+                        Instruction::format_a(OpCode::CastCheck, type_tag, dst, src, 0),
                         Some(*span),
                     );
                 }
@@ -733,6 +734,7 @@ impl<'a> Emitter<'a> {
             Expression::MethodCall {
                 span,
                 callee,
+                generic_arguments: _,
                 arguments,
             } => {
                 if let Expression::MemberAccess {
@@ -742,21 +744,34 @@ impl<'a> Emitter<'a> {
                     ..
                 } = callee.as_ref()
                 {
-                    if *is_scope_resolution {
-                        // Static method call Type::method(args)
-                        let obj_name = self.get_lexeme(object.span()).to_string();
-                        let method_name = self.get_lexeme(*member_span).to_string();
-                        let sym = format!("{obj_name}::{method_name}");
-                        let simple = obj_name.rsplit(['.', ':']).next().unwrap_or(&obj_name);
-                        let sym_simple = format!("{simple}::{method_name}");
+                    let object_name = self.get_lexeme(object.span()).to_string();
+                    let method_name = self.get_lexeme(*member_span).to_string();
+                    let symbol_full = format!("{object_name}::{method_name}");
+                    let simple_object = object_name
+                        .rsplit(['.', ':'])
+                        .next()
+                        .unwrap_or(&object_name);
+                    let symbol_simple = format!("{simple_object}::{method_name}");
+                    let is_static_fn = *is_scope_resolution
+                        || self
+                            .function_ids
+                            .map(|ids| {
+                                ids.contains_key(&symbol_full) || ids.contains_key(&symbol_simple)
+                            })
+                            .unwrap_or(false);
+
+                    if is_static_fn {
+                        // Static method call Type::method(args) or Type.method(args)
                         let func_id_opt = self
                             .function_ids
-                            .and_then(|ids| ids.get(&sym).or_else(|| ids.get(&sym_simple)))
+                            .and_then(|ids| {
+                                ids.get(&symbol_full).or_else(|| ids.get(&symbol_simple))
+                            })
                             .copied();
 
                         let arg_base = self.allocator.alloc_window(arguments.len())?;
-                        for (idx, arg) in arguments.iter().enumerate() {
-                            self.emit_expression(arg, Some(arg_base + idx as u16))?;
+                        for (arg_index, argument) in arguments.iter().enumerate() {
+                            self.emit_expression(argument, Some(arg_base + arg_index as u16))?;
                         }
                         let dst = self.resolve_dst(target_reg)?;
                         if let Some(func_id) = func_id_opt {
@@ -772,7 +787,7 @@ impl<'a> Emitter<'a> {
                             );
                         } else {
                             let arity = arguments.len();
-                            let mangled_sym = format!("{sym}/{arity}");
+                            let mangled_sym = format!("{symbol_full}/{arity}");
                             let sym_idx = self.pool.add_string(&mangled_sym)?;
                             self.emit_instruction(
                                 Instruction::format_call(
@@ -785,15 +800,15 @@ impl<'a> Emitter<'a> {
                                 Some(*span),
                             );
                         }
-                        for (idx, arg) in arguments.iter().enumerate() {
-                            if self.query_type(arg.span()).is_reference_type()
-                                && !matches!(arg, Expression::Identifier { .. })
+                        for (arg_index, argument) in arguments.iter().enumerate() {
+                            if self.query_type(argument.span()).is_reference_type()
+                                && !matches!(argument, Expression::Identifier { .. })
                             {
                                 self.emit_instruction(
                                     Instruction::format_a(
                                         OpCode::DecRef,
                                         0,
-                                        arg_base + idx as u16,
+                                        arg_base + arg_index as u16,
                                         0,
                                         0,
                                     ),

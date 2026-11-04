@@ -268,19 +268,17 @@ impl Type {
         match self {
             Self::Unresolved(name) => Some(name.as_str()),
             Self::Array { element_type, .. } => element_type.first_unresolved_name(),
-            Self::Tuple(elements) => {
-                elements.iter().find_map(|element| element.first_unresolved_name())
-            }
+            Self::Tuple(elements) => elements
+                .iter()
+                .find_map(|element| element.first_unresolved_name()),
             Self::FunctionPointer {
                 return_type,
                 parameter_types,
-            } => return_type
-                .first_unresolved_name()
-                .or_else(|| {
-                    parameter_types
-                        .iter()
-                        .find_map(|parameter| parameter.first_unresolved_name())
-                }),
+            } => return_type.first_unresolved_name().or_else(|| {
+                parameter_types
+                    .iter()
+                    .find_map(|parameter| parameter.first_unresolved_name())
+            }),
             Self::Class { type_arguments, .. } | Self::Interface { type_arguments, .. } => {
                 type_arguments
                     .iter()
@@ -663,19 +661,28 @@ mod tests {
     #[test]
     fn test_positive_first_unresolved_name_recursive() {
         let unresolved_direct = Type::Unresolved("MissingType".to_string());
-        assert_eq!(unresolved_direct.first_unresolved_name(), Some("MissingType"));
+        assert_eq!(
+            unresolved_direct.first_unresolved_name(),
+            Some("MissingType")
+        );
 
         let unresolved_array = Type::Array {
             element_type: Box::new(Type::Unresolved("MissingElement".to_string())),
             depth: 2,
         };
-        assert_eq!(unresolved_array.first_unresolved_name(), Some("MissingElement"));
+        assert_eq!(
+            unresolved_array.first_unresolved_name(),
+            Some("MissingElement")
+        );
 
         let unresolved_tuple = Type::Tuple(vec![
             Type::Primitive(PrimitiveKind::Int32),
             Type::Unresolved("MissingTupleItem".to_string()),
         ]);
-        assert_eq!(unresolved_tuple.first_unresolved_name(), Some("MissingTupleItem"));
+        assert_eq!(
+            unresolved_tuple.first_unresolved_name(),
+            Some("MissingTupleItem")
+        );
 
         let unresolved_fn_ptr = Type::FunctionPointer {
             return_type: Box::new(Type::Primitive(PrimitiveKind::Void)),
@@ -684,13 +691,19 @@ mod tests {
                 Type::Unresolved("MissingParam".to_string()),
             ],
         };
-        assert_eq!(unresolved_fn_ptr.first_unresolved_name(), Some("MissingParam"));
+        assert_eq!(
+            unresolved_fn_ptr.first_unresolved_name(),
+            Some("MissingParam")
+        );
 
         let unresolved_class_arg = Type::Class {
             symbol_name: "std.collections.List".to_string(),
             type_arguments: vec![Type::Unresolved("MissingGenericArg".to_string())],
         };
-        assert_eq!(unresolved_class_arg.first_unresolved_name(), Some("MissingGenericArg"));
+        assert_eq!(
+            unresolved_class_arg.first_unresolved_name(),
+            Some("MissingGenericArg")
+        );
     }
 
     #[test]

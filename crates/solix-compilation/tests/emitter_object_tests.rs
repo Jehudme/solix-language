@@ -187,6 +187,7 @@ fn test_virtual_and_interface_dispatch() {
             member_span: calc_span,
             is_scope_resolution: false,
         }),
+        generic_arguments: Vec::new(),
         arguments: vec![Expression::Literal {
             span: make_span(7, 9),
             value: LiteralValue::Int(10),
@@ -209,6 +210,7 @@ fn test_virtual_and_interface_dispatch() {
             member_span: print_span,
             is_scope_resolution: false,
         }),
+        generic_arguments: Vec::new(),
         arguments: Vec::new(),
     };
 

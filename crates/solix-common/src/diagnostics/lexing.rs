@@ -22,7 +22,9 @@ pub enum LexingError {
     #[error("Unterminated string literal")]
     #[diagnostic(
         code(solix::lexer::unterminated_string),
-        help("Add a closing quote '\"' to terminate the string literal before end of line or file.")
+        help(
+            "Add a closing quote '\"' to terminate the string literal before end of line or file."
+        )
     )]
     UnterminatedStringLiteral {
         token: Token,

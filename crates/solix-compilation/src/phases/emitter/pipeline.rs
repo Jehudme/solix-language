@@ -198,10 +198,14 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             if let ClassMember::Enum(enum_decl) = member {
                                 let enum_name = get_span_text(enum_decl.name_span, code);
                                 let mut current_variant_value = 0u32;
-                                for (variant_index, variant) in enum_decl.variants.iter().enumerate() {
+                                for (variant_index, variant) in
+                                    enum_decl.variants.iter().enumerate()
+                                {
                                     let variant_name = get_span_text(variant.name_span, code);
                                     if let Some(explicit) = &variant.explicit_value {
-                                        if let Some(integer_value) = evaluate_integer_constant(explicit) {
+                                        if let Some(integer_value) =
+                                            evaluate_integer_constant(explicit)
+                                        {
                                             current_variant_value = integer_value as u32;
                                         }
                                     } else if variant_index > 0 {
@@ -210,8 +214,10 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                     let full_symbol =
                                         format!("{class_name}::{enum_name}::{variant_name}");
                                     enum_variants.insert(full_symbol, current_variant_value);
-                                    enum_variants
-                                        .insert(format!("{enum_name}::{variant_name}"), current_variant_value);
+                                    enum_variants.insert(
+                                        format!("{enum_name}::{variant_name}"),
+                                        current_variant_value,
+                                    );
                                 }
                             }
                         }
@@ -664,6 +670,21 @@ fn collect_static_declarations(
     }
 }
 
+fn collect_classes(declarations: &[Declaration]) -> Vec<&ClassDeclaration> {
+    let mut classes = Vec::new();
+    for decl in declarations {
+        if let Declaration::Class(cls) = decl {
+            classes.push(cls);
+            for member in &cls.members {
+                if let ClassMember::Class(nested) = member {
+                    classes.push(nested);
+                }
+            }
+        }
+    }
+    classes
+}
+
 fn index_function_symbols(
     ast: &ProgramAst,
     sources: &[String],
@@ -685,119 +706,116 @@ fn index_function_symbols(
     });
 
     for decl in &ast.declarations {
-        match decl {
-            Declaration::Method(m) => {
-                if m.modifiers.contains(&Modifier::Extern) {
-                    continue;
-                }
-                let name = get_span_text(m.name_span, code);
-                let func_id = *next_func_id;
-                *next_func_id += 1;
-                function_ids.insert(name.to_string(), func_id);
-                if let Some(ref pkg) = pkg_prefix {
-                    let full_pkg_name = format!("{pkg}.{name}");
-                    function_ids.insert(full_pkg_name, func_id);
-                }
+        if let Declaration::Method(m) = decl {
+            if m.modifiers.contains(&Modifier::Extern) {
+                continue;
             }
-            Declaration::Class(cls) => {
-                if cls.modifiers.contains(&Modifier::Extern) {
-                    continue;
-                }
-                let cls_name = get_span_text(cls.name_span, code);
-                for member in &cls.members {
-                    match member {
-                        ClassMember::Method(m) => {
-                            if m.modifiers.contains(&Modifier::Extern) {
-                                continue;
-                            }
-                            let method_name = get_span_text(m.name_span, code);
-                            let param_sig = m
-                                .parameters
-                                .iter()
-                                .map(|p| get_span_text(p.param_type.span(), code))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            let full_sym_mangled = if param_sig.is_empty() {
-                                format!("{cls_name}::{method_name}")
-                            } else {
-                                format!("{cls_name}::{method_name}({param_sig})")
-                            };
-                            let full_sym = format!("{cls_name}::{method_name}");
-                            let func_id = *next_func_id;
-                            *next_func_id += 1;
-                            function_ids.insert(full_sym_mangled.clone(), func_id);
-                            function_ids.entry(full_sym.clone()).or_insert(func_id);
-                            if let Some(ref pkg) = pkg_prefix {
-                                let full_pkg_name_mangled = format!("{pkg}.{full_sym_mangled}");
-                                let full_pkg_name = format!("{pkg}.{full_sym}");
-                                function_ids.insert(full_pkg_name_mangled, func_id);
-                                function_ids.entry(full_pkg_name).or_insert(func_id);
-                            }
-                        }
-                        ClassMember::Constructor(ctor) => {
-                            if ctor.modifiers.contains(&Modifier::Extern) {
-                                continue;
-                            }
-                            let arity = ctor.parameters.len();
-                            let full_sym_arity = format!("{cls_name}::constructor/{arity}");
-                            let full_sym = format!("{cls_name}::constructor");
-                            let func_id = *next_func_id;
-                            *next_func_id += 1;
-                            function_ids.insert(full_sym_arity, func_id);
-                            function_ids.entry(full_sym).or_insert(func_id);
-                            if let Some(ref pkg) = pkg_prefix {
-                                let full_pkg_name_arity =
-                                    format!("{pkg}.{cls_name}::constructor/{arity}");
-                                let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
-                                function_ids.insert(full_pkg_name_arity, func_id);
-                                function_ids.entry(full_pkg_name).or_insert(func_id);
-                            }
-                        }
-                        ClassMember::Destructor(_) => {
-                            let full_sym = format!("{cls_name}::~destructor");
-                            let func_id = *next_func_id;
-                            *next_func_id += 1;
-                            function_ids.insert(full_sym, func_id);
-                            if let Some(ref pkg) = pkg_prefix {
-                                let full_pkg_name = format!("{pkg}.{cls_name}::~destructor");
-                                function_ids.insert(full_pkg_name, func_id);
-                            }
-                        }
-                        ClassMember::Operator(op) => {
-                            let op_str = op.operator_token.as_static_str();
-                            let full_sym = format!("{cls_name}::operator_{op_str}");
-                            let func_id = *next_func_id;
-                            *next_func_id += 1;
-                            function_ids.insert(full_sym, func_id);
-                            if let Some(ref pkg) = pkg_prefix {
-                                let full_pkg_name = format!("{pkg}.{cls_name}::operator_{op_str}");
-                                function_ids.insert(full_pkg_name, func_id);
-                            }
-                        }
-                        _ => {}
+            let name = get_span_text(m.name_span, code);
+            let func_id = *next_func_id;
+            *next_func_id += 1;
+            function_ids.insert(name.to_string(), func_id);
+            if let Some(ref pkg) = pkg_prefix {
+                let full_pkg_name = format!("{pkg}.{name}");
+                function_ids.insert(full_pkg_name, func_id);
+            }
+        }
+    }
+
+    for cls in collect_classes(&ast.declarations) {
+        if cls.modifiers.contains(&Modifier::Extern) {
+            continue;
+        }
+        let cls_name = get_span_text(cls.name_span, code);
+        for member in &cls.members {
+            match member {
+                ClassMember::Method(m) => {
+                    if m.modifiers.contains(&Modifier::Extern) {
+                        continue;
+                    }
+                    let method_name = get_span_text(m.name_span, code);
+                    let param_sig = m
+                        .parameters
+                        .iter()
+                        .map(|p| get_span_text(p.param_type.span(), code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym_mangled = if param_sig.is_empty() {
+                        format!("{cls_name}::{method_name}")
+                    } else {
+                        format!("{cls_name}::{method_name}({param_sig})")
+                    };
+                    let full_sym = format!("{cls_name}::{method_name}");
+                    let func_id = *next_func_id;
+                    *next_func_id += 1;
+                    function_ids.insert(full_sym_mangled.clone(), func_id);
+                    function_ids.entry(full_sym.clone()).or_insert(func_id);
+                    if let Some(ref pkg) = pkg_prefix {
+                        let full_pkg_name_mangled = format!("{pkg}.{full_sym_mangled}");
+                        let full_pkg_name = format!("{pkg}.{full_sym}");
+                        function_ids.insert(full_pkg_name_mangled, func_id);
+                        function_ids.entry(full_pkg_name).or_insert(func_id);
                     }
                 }
-
-                let has_explicit_ctor = cls
-                    .members
-                    .iter()
-                    .any(|m| matches!(m, ClassMember::Constructor(_)));
-                if !has_explicit_ctor {
-                    let full_sym_arity = format!("{cls_name}::constructor/0");
+                ClassMember::Constructor(ctor) => {
+                    if ctor.modifiers.contains(&Modifier::Extern) {
+                        continue;
+                    }
+                    let arity = ctor.parameters.len();
+                    let full_sym_arity = format!("{cls_name}::constructor/{arity}");
                     let full_sym = format!("{cls_name}::constructor");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym_arity, func_id);
                     function_ids.entry(full_sym).or_insert(func_id);
                     if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/0");
+                        let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/{arity}");
                         let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
                         function_ids.insert(full_pkg_name_arity, func_id);
                         function_ids.entry(full_pkg_name).or_insert(func_id);
                     }
                 }
+                ClassMember::Destructor(_) => {
+                    let full_sym = format!("{cls_name}::~destructor");
+                    let func_id = *next_func_id;
+                    *next_func_id += 1;
+                    function_ids.insert(full_sym, func_id);
+                    if let Some(ref pkg) = pkg_prefix {
+                        let full_pkg_name = format!("{pkg}.{cls_name}::~destructor");
+                        function_ids.insert(full_pkg_name, func_id);
+                    }
+                }
+                ClassMember::Operator(op) => {
+                    let op_str = op.operator_token.as_static_str();
+                    let full_sym = format!("{cls_name}::operator_{op_str}");
+                    let func_id = *next_func_id;
+                    *next_func_id += 1;
+                    function_ids.insert(full_sym, func_id);
+                    if let Some(ref pkg) = pkg_prefix {
+                        let full_pkg_name = format!("{pkg}.{cls_name}::operator_{op_str}");
+                        function_ids.insert(full_pkg_name, func_id);
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+        }
+
+        let has_explicit_ctor = cls
+            .members
+            .iter()
+            .any(|m| matches!(m, ClassMember::Constructor(_)));
+        if !has_explicit_ctor {
+            let full_sym_arity = format!("{cls_name}::constructor/0");
+            let full_sym = format!("{cls_name}::constructor");
+            let func_id = *next_func_id;
+            *next_func_id += 1;
+            function_ids.insert(full_sym_arity, func_id);
+            function_ids.entry(full_sym).or_insert(func_id);
+            if let Some(ref pkg) = pkg_prefix {
+                let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/0");
+                let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
+                function_ids.insert(full_pkg_name_arity, func_id);
+                function_ids.entry(full_pkg_name).or_insert(func_id);
+            }
         }
     }
 
@@ -829,138 +847,58 @@ fn compile_source_functions(
     let code = &sources[src_idx];
 
     for decl in &ast.declarations {
-        match decl {
-            Declaration::Method(m) => {
-                if m.modifiers.contains(&Modifier::Extern) {
-                    continue;
-                }
-                let name = get_span_text(m.name_span, code).to_string();
-                let func = compile_single_method(
-                    &name,
-                    ast.source_id,
-                    m,
-                    false,
-                    sources,
-                    class_layouts,
-                    function_ids,
-                    enum_variants,
-                    static_layout,
-                    node_types,
-                    pool,
-                    synthesized_lambdas,
-                )?;
-                output.push(func);
+        if let Declaration::Method(m) = decl {
+            if m.modifiers.contains(&Modifier::Extern) {
+                continue;
             }
-            Declaration::Class(cls) => {
-                if cls.modifiers.contains(&Modifier::Extern) {
-                    continue;
-                }
-                let cls_name = get_span_text(cls.name_span, code);
-                for member in &cls.members {
-                    match member {
-                        ClassMember::Method(m) => {
-                            if m.modifiers.contains(&Modifier::Extern) {
-                                continue;
-                            }
-                            let method_name = get_span_text(m.name_span, code);
-                            let param_sig = m
-                                .parameters
-                                .iter()
-                                .map(|p| get_span_text(p.param_type.span(), code))
-                                .collect::<Vec<_>>()
-                                .join(",");
-                            let full_sym = if param_sig.is_empty() {
-                                format!("{cls_name}::{method_name}")
-                            } else {
-                                format!("{cls_name}::{method_name}({param_sig})")
-                            };
-                            let is_instance = !m.modifiers.contains(&Modifier::Static);
-                            let func = compile_single_method(
-                                &full_sym,
-                                ast.source_id,
-                                m,
-                                is_instance,
-                                sources,
-                                class_layouts,
-                                function_ids,
-                                enum_variants,
-                                static_layout,
-                                node_types,
-                                pool,
-                                synthesized_lambdas,
-                            )?;
-                            output.push(func);
-                        }
-                        ClassMember::Constructor(ctor) => {
-                            if ctor.modifiers.contains(&Modifier::Extern) {
-                                continue;
-                            }
-                            let arity = ctor.parameters.len();
-                            let full_sym = format!("{cls_name}::constructor/{arity}");
-                            let func = compile_constructor(
-                                &full_sym,
-                                ast.source_id,
-                                ctor,
-                                sources,
-                                class_layouts,
-                                function_ids,
-                                enum_variants,
-                                static_layout,
-                                node_types,
-                                pool,
-                                synthesized_lambdas,
-                            )?;
-                            output.push(func);
-                        }
-                        ClassMember::Destructor(dtor) => {
-                            let full_sym = format!("{cls_name}::~destructor");
-                            let func = compile_destructor(
-                                &full_sym,
-                                ast.source_id,
-                                dtor,
-                                sources,
-                                class_layouts,
-                                function_ids,
-                                enum_variants,
-                                static_layout,
-                                node_types,
-                                pool,
-                                synthesized_lambdas,
-                            )?;
-                            output.push(func);
-                        }
-                        ClassMember::Operator(op) => {
-                            let op_str = op.operator_token.as_static_str();
-                            let full_sym = format!("{cls_name}::operator_{op_str}");
-                            let func = compile_operator(
-                                &full_sym,
-                                ast.source_id,
-                                op,
-                                sources,
-                                class_layouts,
-                                function_ids,
-                                enum_variants,
-                                static_layout,
-                                node_types,
-                                pool,
-                                synthesized_lambdas,
-                            )?;
-                            output.push(func);
-                        }
-                        _ => {}
-                    }
-                }
+            let name = get_span_text(m.name_span, code).to_string();
+            let func = compile_single_method(
+                &name,
+                ast.source_id,
+                m,
+                false,
+                sources,
+                class_layouts,
+                function_ids,
+                enum_variants,
+                static_layout,
+                node_types,
+                pool,
+                synthesized_lambdas,
+            )?;
+            output.push(func);
+        }
+    }
 
-                let has_explicit_ctor = cls
-                    .members
-                    .iter()
-                    .any(|m| matches!(m, ClassMember::Constructor(_)));
-                if !has_explicit_ctor {
-                    let full_sym = format!("{cls_name}::constructor");
-                    let func = compile_default_constructor(
+    for cls in collect_classes(&ast.declarations) {
+        if cls.modifiers.contains(&Modifier::Extern) {
+            continue;
+        }
+        let cls_name = get_span_text(cls.name_span, code);
+        for member in &cls.members {
+            match member {
+                ClassMember::Method(m) => {
+                    if m.modifiers.contains(&Modifier::Extern) {
+                        continue;
+                    }
+                    let method_name = get_span_text(m.name_span, code);
+                    let param_sig = m
+                        .parameters
+                        .iter()
+                        .map(|p| get_span_text(p.param_type.span(), code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym = if param_sig.is_empty() {
+                        format!("{cls_name}::{method_name}")
+                    } else {
+                        format!("{cls_name}::{method_name}({param_sig})")
+                    };
+                    let is_instance = !m.modifiers.contains(&Modifier::Static);
+                    let func = compile_single_method(
                         &full_sym,
                         ast.source_id,
-                        cls,
+                        m,
+                        is_instance,
                         sources,
                         class_layouts,
                         function_ids,
@@ -972,8 +910,86 @@ fn compile_source_functions(
                     )?;
                     output.push(func);
                 }
+                ClassMember::Constructor(ctor) => {
+                    if ctor.modifiers.contains(&Modifier::Extern) {
+                        continue;
+                    }
+                    let arity = ctor.parameters.len();
+                    let full_sym = format!("{cls_name}::constructor/{arity}");
+                    let func = compile_constructor(
+                        &full_sym,
+                        ast.source_id,
+                        ctor,
+                        sources,
+                        class_layouts,
+                        function_ids,
+                        enum_variants,
+                        static_layout,
+                        node_types,
+                        pool,
+                        synthesized_lambdas,
+                    )?;
+                    output.push(func);
+                }
+                ClassMember::Destructor(dtor) => {
+                    let full_sym = format!("{cls_name}::~destructor");
+                    let func = compile_destructor(
+                        &full_sym,
+                        ast.source_id,
+                        dtor,
+                        sources,
+                        class_layouts,
+                        function_ids,
+                        enum_variants,
+                        static_layout,
+                        node_types,
+                        pool,
+                        synthesized_lambdas,
+                    )?;
+                    output.push(func);
+                }
+                ClassMember::Operator(op) => {
+                    let op_str = op.operator_token.as_static_str();
+                    let full_sym = format!("{cls_name}::operator_{op_str}");
+                    let func = compile_operator(
+                        &full_sym,
+                        ast.source_id,
+                        op,
+                        sources,
+                        class_layouts,
+                        function_ids,
+                        enum_variants,
+                        static_layout,
+                        node_types,
+                        pool,
+                        synthesized_lambdas,
+                    )?;
+                    output.push(func);
+                }
+                _ => {}
             }
-            _ => {}
+        }
+
+        let has_explicit_ctor = cls
+            .members
+            .iter()
+            .any(|m| matches!(m, ClassMember::Constructor(_)));
+        if !has_explicit_ctor {
+            let full_sym = format!("{cls_name}::constructor");
+            let func = compile_default_constructor(
+                &full_sym,
+                ast.source_id,
+                cls,
+                sources,
+                class_layouts,
+                function_ids,
+                enum_variants,
+                static_layout,
+                node_types,
+                pool,
+                synthesized_lambdas,
+            )?;
+            output.push(func);
         }
     }
 

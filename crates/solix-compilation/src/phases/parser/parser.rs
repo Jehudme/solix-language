@@ -148,6 +148,10 @@ impl<'tokens> TokenCursor<'tokens> {
             .unwrap_or(TokenKind::Eof)
     }
 
+    fn peek_nth(&self, n: usize) -> Option<&Token> {
+        self.tokens.get(self.position + n)
+    }
+
     fn previous(&self) -> Option<&Token> {
         if self.position > 0 {
             self.tokens.get(self.position - 1)
@@ -614,8 +618,10 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     for modifier in &modifiers {
                         if matches!(
                             modifier,
-                            Modifier::Protected
+                            Modifier::Public
+                                | Modifier::Protected
                                 | Modifier::Private
+                                | Modifier::Internal
                         ) {
                             self.record_error(ParsingError::StandaloneFieldWithAccessModifier {
                                 modifier: modifier.as_str().to_string(),
@@ -747,10 +753,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             .filter(|modifier| {
                 matches!(
                     modifier,
-                    Modifier::Public
-                        | Modifier::Protected
-                        | Modifier::Private
-                        | Modifier::Internal
+                    Modifier::Public | Modifier::Protected | Modifier::Private | Modifier::Internal
                 )
             })
             .collect();
@@ -2763,6 +2766,56 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         self.parse_postfix()
     }
 
+    fn is_generic_call_lookahead(&self) -> bool {
+        if self.cursor.peek_kind() != TokenKind::OperatorLessThan {
+            return false;
+        }
+        let mut nesting_depth = 1usize;
+        let mut token_offset = 1usize;
+        while let Some(token) = self.cursor.peek_nth(token_offset) {
+            match token.kind {
+                TokenKind::OperatorLessThan => {
+                    nesting_depth += 1;
+                }
+                TokenKind::OperatorGreaterThan => {
+                    nesting_depth -= 1;
+                    if nesting_depth == 0 {
+                        if let Some(next_token) = self.cursor.peek_nth(token_offset + 1) {
+                            return next_token.kind == TokenKind::PunctuationOpenParen;
+                        }
+                        return false;
+                    }
+                }
+                TokenKind::Identifier
+                | TokenKind::PunctuationComma
+                | TokenKind::PunctuationDot
+                | TokenKind::PunctuationDoubleColon
+                | TokenKind::PunctuationOpenBracket
+                | TokenKind::PunctuationCloseBracket
+                | TokenKind::OperatorQuestion
+                | TokenKind::PrimitiveVoid
+                | TokenKind::PrimitiveBool
+                | TokenKind::PrimitiveInt8
+                | TokenKind::PrimitiveInt16
+                | TokenKind::PrimitiveInt32
+                | TokenKind::PrimitiveInt64
+                | TokenKind::PrimitiveUint8
+                | TokenKind::PrimitiveUint16
+                | TokenKind::PrimitiveUint32
+                | TokenKind::PrimitiveUint64
+                | TokenKind::PrimitiveFloat32
+                | TokenKind::PrimitiveFloat64
+                | TokenKind::PrimitiveChar
+                | TokenKind::PrimitiveTuple => {
+                    // Allowed tokens within generic type argument list
+                }
+                _ => return false,
+            }
+            token_offset += 1;
+        }
+        false
+    }
+
     fn parse_postfix(&mut self) -> Result<Expression, ParsingError> {
         let mut expression = self.parse_primary()?;
 
@@ -2791,6 +2844,53 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 expression = Expression::MethodCall {
                     span,
                     callee: Box::new(expression),
+                    generic_arguments: Vec::new(),
+                    arguments,
+                };
+            } else if self.cursor.peek_kind() == TokenKind::OperatorLessThan
+                && self.is_generic_call_lookahead()
+            {
+                self.cursor.advance();
+                let mut generic_arguments = Vec::new();
+                loop {
+                    generic_arguments.push(self.parse_type_annotation()?);
+                    if self
+                        .cursor
+                        .match_token(TokenKind::PunctuationComma)
+                        .is_none()
+                    {
+                        break;
+                    }
+                }
+                if self
+                    .cursor
+                    .match_token(TokenKind::OperatorGreaterThan)
+                    .is_none()
+                {
+                    return Err(ParsingError::ExpectedCloseAngle {
+                        span: self.cursor.current_span().to_source_span(),
+                    });
+                }
+                self.consume_open_paren()?;
+                let mut arguments = Vec::new();
+                if !self.cursor.check(TokenKind::PunctuationCloseParen) {
+                    loop {
+                        arguments.push(self.parse_expression()?);
+                        if self
+                            .cursor
+                            .match_token(TokenKind::PunctuationComma)
+                            .is_none()
+                        {
+                            break;
+                        }
+                    }
+                }
+                let close_paren = self.consume_close_paren()?;
+                let span = expression.span().combine(close_paren.span);
+                expression = Expression::MethodCall {
+                    span,
+                    callee: Box::new(expression),
+                    generic_arguments,
                     arguments,
                 };
             } else if self.cursor.match_token(TokenKind::PunctuationDot).is_some() {

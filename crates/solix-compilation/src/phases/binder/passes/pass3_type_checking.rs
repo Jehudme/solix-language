@@ -28,6 +28,7 @@ pub struct TypeCheckingVisitor<'a> {
     pub errors: &'a mut Vec<BindingError>,
     pub current_class: Option<SymbolId>,
     pub current_class_generic_names: std::collections::HashSet<String>,
+    pub current_method_generic_names: std::collections::HashSet<String>,
     pub current_method_return_type: Option<Type>,
     pub is_static_method: bool,
     pub is_inside_destructor: bool,
@@ -281,11 +282,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                             });
                             has_error = true;
                         }
-                        if has_error {
-                            Type::Error
-                        } else {
-                            left_type
-                        }
+                        if has_error { Type::Error } else { left_type }
                     }
                     _ => left_type,
                 }
@@ -533,7 +530,12 @@ impl<'a> TypeCheckingVisitor<'a> {
                                 {
                                     self.resolved_symbols.insert(*member_span, child_id);
 
-                                    if child_entry.is_static && !*is_scope_resolution {
+                                    let is_method = matches!(
+                                        child_entry.symbol_type,
+                                        Type::FunctionPointer { .. }
+                                    );
+                                    if !is_method && child_entry.is_static && !*is_scope_resolution
+                                    {
                                         self.errors.push(BindingError::StaticAccessViaDot {
                                             member_name: member_name.to_string(),
                                             owner: symbol_name.clone(),
@@ -602,7 +604,10 @@ impl<'a> TypeCheckingVisitor<'a> {
                     return Type::Error;
                 }
 
-                if let Type::Interface { ref symbol_name, .. } = target_type {
+                if let Type::Interface {
+                    ref symbol_name, ..
+                } = target_type
+                {
                     if let Some(iface_id) = self
                         .symbol_table
                         .resolve_symbol(self.source_id, symbol_name)
@@ -636,18 +641,22 @@ impl<'a> TypeCheckingVisitor<'a> {
                         | Type::Array { .. }
                         | Type::Tuple(_)
                 ) {
-                    self.errors.push(BindingError::MemberAccessOnNonCompositeType {
-                        found: target_type.to_string(),
-                        member_name: member_name.to_string(),
-                        span: member_span.to_source_span(),
-                    });
+                    self.errors
+                        .push(BindingError::MemberAccessOnNonCompositeType {
+                            found: target_type.to_string(),
+                            member_name: member_name.to_string(),
+                            span: member_span.to_source_span(),
+                        });
                     return Type::Error;
                 }
 
                 Type::Error
             }
             Expression::MethodCall {
-                callee, arguments, ..
+                callee,
+                generic_arguments,
+                arguments,
+                ..
             } => {
                 let callee_type = self.evaluate_expression_type(callee);
                 let evaluated_arg_types: Vec<Type> = arguments
@@ -712,16 +721,15 @@ impl<'a> TypeCheckingVisitor<'a> {
                                             ref parameter_types,
                                             ref return_type,
                                         } = child_entry.symbol_type
-                                        && parameter_types.len() == evaluated_arg_types.len()
-                                        && parameter_types.iter().zip(&evaluated_arg_types).all(
-                                            |(expected, actual)| {
-                                                actual.is_assignable_to(expected, &|src, tgt| {
-                                                    self.check_is_subtype(src, tgt)
-                                                }) || actual == expected
-                                            },
+                                        && let Some(matched_return) = self.match_method_signature(
+                                            parameter_types,
+                                            return_type,
+                                            generic_arguments,
+                                            &evaluated_arg_types,
+                                            arguments,
                                         )
                                     {
-                                        found_method = Some((child_id, *return_type.clone()));
+                                        found_method = Some((child_id, matched_return));
                                         break;
                                     }
                                 }
@@ -754,71 +762,66 @@ impl<'a> TypeCheckingVisitor<'a> {
                     if let Type::Interface {
                         ref symbol_name, ..
                     } = obj_type
-                    {
-                        if let Some(iface_id) = self
+                        && let Some(iface_id) = self
                             .symbol_table
                             .resolve_symbol(self.source_id, symbol_name)
-                            && let Some(iface_entry) = self.symbol_table.get_symbol(iface_id)
-                        {
-                            let mut found_method: Option<(SymbolId, Type, Vec<Type>)> = None;
-                            for &child_id in &iface_entry.members {
-                                if let Some(child_entry) = self.symbol_table.get_symbol(child_id)
-                                    && child_entry.name == member_name
-                                    && let Type::FunctionPointer {
-                                        ref parameter_types,
-                                        ref return_type,
-                                    } = child_entry.symbol_type
-                                {
-                                    found_method = Some((
-                                        child_id,
-                                        *return_type.clone(),
-                                        parameter_types.clone(),
-                                    ));
-                                    break;
-                                }
+                        && let Some(iface_entry) = self.symbol_table.get_symbol(iface_id)
+                    {
+                        let mut found_method: Option<(SymbolId, Type, Vec<Type>)> = None;
+                        for &child_id in &iface_entry.members {
+                            if let Some(child_entry) = self.symbol_table.get_symbol(child_id)
+                                && child_entry.name == member_name
+                                && let Type::FunctionPointer {
+                                    ref parameter_types,
+                                    ref return_type,
+                                } = child_entry.symbol_type
+                            {
+                                found_method =
+                                    Some((child_id, *return_type.clone(), parameter_types.clone()));
+                                break;
                             }
-                            if let Some((method_id, return_type, parameter_types)) = found_method {
-                                self.resolved_symbols.insert(*member_span, method_id);
-                                if evaluated_arg_types.len() != parameter_types.len() {
-                                    self.errors.push(BindingError::ArgumentCountMismatch {
-                                        expected: parameter_types.len(),
-                                        found: evaluated_arg_types.len(),
-                                        span: member_span.to_source_span(),
-                                    });
-                                } else {
-                                    for (param_index, (expected_param, actual_arg)) in
-                                        parameter_types.iter().zip(&evaluated_arg_types).enumerate()
-                                    {
-                                        let is_compatible = actual_arg.is_assignable_to(
-                                            expected_param,
-                                            &|src, tgt| self.check_is_subtype(src, tgt),
-                                        ) || is_literal_compatible_with_type(
+                        }
+                        if let Some((method_id, return_type, parameter_types)) = found_method {
+                            self.resolved_symbols.insert(*member_span, method_id);
+                            if evaluated_arg_types.len() != parameter_types.len() {
+                                self.errors.push(BindingError::ArgumentCountMismatch {
+                                    expected: parameter_types.len(),
+                                    found: evaluated_arg_types.len(),
+                                    span: member_span.to_source_span(),
+                                });
+                            } else {
+                                for (param_index, (expected_param, actual_arg)) in
+                                    parameter_types.iter().zip(&evaluated_arg_types).enumerate()
+                                {
+                                    let is_compatible =
+                                        actual_arg.is_assignable_to(expected_param, &|src, tgt| {
+                                            self.check_is_subtype(src, tgt)
+                                        }) || is_literal_compatible_with_type(
                                             &arguments[param_index],
                                             expected_param,
                                         );
-                                        if !is_compatible
-                                            && *expected_param != Type::Error
-                                            && *actual_arg != Type::Error
-                                        {
-                                            self.errors.push(BindingError::ArgumentTypeMismatch {
-                                                parameter_index: param_index,
-                                                expected: expected_param.to_string(),
-                                                found: actual_arg.to_string(),
-                                                span: arguments[param_index].span().to_source_span(),
-                                            });
-                                        }
+                                    if !is_compatible
+                                        && *expected_param != Type::Error
+                                        && *actual_arg != Type::Error
+                                    {
+                                        self.errors.push(BindingError::ArgumentTypeMismatch {
+                                            parameter_index: param_index,
+                                            expected: expected_param.to_string(),
+                                            found: actual_arg.to_string(),
+                                            span: arguments[param_index].span().to_source_span(),
+                                        });
                                     }
                                 }
-                                return return_type;
-                            } else {
-                                self.errors.push(BindingError::undefined_symbol(
-                                    format!(
-                                        "Interface '{symbol_name}' has no method named '{member_name}'"
-                                    ),
-                                    *member_span,
-                                ));
-                                return Type::Error;
                             }
+                            return return_type;
+                        } else {
+                            self.errors.push(BindingError::undefined_symbol(
+                                format!(
+                                    "Interface '{symbol_name}' has no method named '{member_name}'"
+                                ),
+                                *member_span,
+                            ));
+                            return Type::Error;
                         }
                     }
                 }
@@ -828,6 +831,15 @@ impl<'a> TypeCheckingVisitor<'a> {
                     parameter_types,
                 } = callee_type
                 {
+                    if let Some(matched_return) = self.match_method_signature(
+                        &parameter_types,
+                        &return_type,
+                        generic_arguments,
+                        &evaluated_arg_types,
+                        arguments,
+                    ) {
+                        return matched_return;
+                    }
                     if evaluated_arg_types.len() != parameter_types.len() {
                         self.errors.push(BindingError::ArgumentCountMismatch {
                             expected: parameter_types.len(),
@@ -838,11 +850,10 @@ impl<'a> TypeCheckingVisitor<'a> {
                         for (param_index, (expected_param, actual_arg)) in
                             parameter_types.iter().zip(&evaluated_arg_types).enumerate()
                         {
-                            let is_compatible = actual_arg
-                                .is_assignable_to(expected_param, &|src, tgt| {
+                            let is_compatible =
+                                actual_arg.is_assignable_to(expected_param, &|src, tgt| {
                                     self.check_is_subtype(src, tgt)
-                                })
-                                || is_literal_compatible_with_type(
+                                }) || is_literal_compatible_with_type(
                                     &arguments[param_index],
                                     expected_param,
                                 );
@@ -902,11 +913,10 @@ impl<'a> TypeCheckingVisitor<'a> {
                             for (param_index, (expected_param, actual_arg)) in
                                 parameter_types.iter().zip(&evaluated_arg_types).enumerate()
                             {
-                                let is_compatible = actual_arg
-                                    .is_assignable_to(expected_param, &|src, tgt| {
+                                let is_compatible =
+                                    actual_arg.is_assignable_to(expected_param, &|src, tgt| {
                                         self.check_is_subtype(src, tgt)
-                                    })
-                                    || is_literal_compatible_with_type(
+                                    }) || is_literal_compatible_with_type(
                                         &arguments[param_index],
                                         expected_param,
                                     );
@@ -1567,6 +1577,234 @@ impl<'a> TypeCheckingVisitor<'a> {
 
         false
     }
+
+    fn match_method_signature(
+        &self,
+        parameter_types: &[Type],
+        return_type: &Type,
+        generic_arguments: &[TypeAnnotation],
+        evaluated_arg_types: &[Type],
+        arguments: &[Expression],
+    ) -> Option<Type> {
+        if parameter_types.len() != evaluated_arg_types.len() {
+            return None;
+        }
+
+        let mut generic_param_order = Vec::new();
+        Self::collect_generic_params(return_type, &mut generic_param_order);
+        for parameter_type in parameter_types {
+            Self::collect_generic_params(parameter_type, &mut generic_param_order);
+        }
+
+        if generic_param_order.is_empty() && generic_arguments.is_empty() {
+            let is_matched = parameter_types
+                .iter()
+                .zip(evaluated_arg_types)
+                .enumerate()
+                .all(|(arg_index, (expected, actual))| {
+                    actual.is_assignable_to(expected, &|src, tgt| self.check_is_subtype(src, tgt))
+                        || actual == expected
+                        || is_literal_compatible_with_type(&arguments[arg_index], expected)
+                });
+            if is_matched {
+                Some(return_type.clone())
+            } else {
+                None
+            }
+        } else {
+            let mut substitutions: HashMap<String, Type> = HashMap::new();
+            if !generic_arguments.is_empty() {
+                if generic_arguments.len() != generic_param_order.len() {
+                    return None;
+                }
+                for (param_name, type_annotation) in
+                    generic_param_order.iter().zip(generic_arguments)
+                {
+                    let resolved_type = resolve_type_annotation(
+                        self.source_id,
+                        self.source_text,
+                        type_annotation,
+                        self.symbol_table,
+                    );
+                    substitutions.insert(param_name.clone(), resolved_type);
+                }
+            } else {
+                for (param_type, arg_type) in parameter_types.iter().zip(evaluated_arg_types) {
+                    if !Self::deduce_template_argument(param_type, arg_type, &mut substitutions) {
+                        return None;
+                    }
+                }
+                for param_name in &generic_param_order {
+                    if !substitutions.contains_key(param_name) {
+                        return None;
+                    }
+                }
+            }
+
+            let concrete_params: Vec<Type> = parameter_types
+                .iter()
+                .map(|param_type| Self::substitute_type(param_type, &substitutions))
+                .collect();
+            let concrete_return = Self::substitute_type(return_type, &substitutions);
+
+            let is_matched = concrete_params
+                .iter()
+                .zip(evaluated_arg_types)
+                .enumerate()
+                .all(|(arg_index, (expected, actual))| {
+                    actual.is_assignable_to(expected, &|src, tgt| self.check_is_subtype(src, tgt))
+                        || actual == expected
+                        || is_literal_compatible_with_type(&arguments[arg_index], expected)
+                });
+            if is_matched {
+                Some(concrete_return)
+            } else {
+                None
+            }
+        }
+    }
+
+    fn collect_generic_params(target_type: &Type, generic_param_order: &mut Vec<String>) {
+        match target_type {
+            Type::Unresolved(name) => {
+                if !generic_param_order.contains(name) {
+                    generic_param_order.push(name.clone());
+                }
+            }
+            Type::Array { element_type, .. } => {
+                Self::collect_generic_params(element_type, generic_param_order);
+            }
+            Type::Tuple(element_types) => {
+                for element_type in element_types {
+                    Self::collect_generic_params(element_type, generic_param_order);
+                }
+            }
+            Type::FunctionPointer {
+                parameter_types,
+                return_type,
+            } => {
+                Self::collect_generic_params(return_type, generic_param_order);
+                for parameter_type in parameter_types {
+                    Self::collect_generic_params(parameter_type, generic_param_order);
+                }
+            }
+            Type::Class { type_arguments, .. } | Type::Interface { type_arguments, .. } => {
+                for type_arg in type_arguments {
+                    Self::collect_generic_params(type_arg, generic_param_order);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn deduce_template_argument(
+        pattern_type: &Type,
+        concrete_type: &Type,
+        substitutions: &mut HashMap<String, Type>,
+    ) -> bool {
+        match pattern_type {
+            Type::Unresolved(param_name) => {
+                if let Some(existing_type) = substitutions.get(param_name) {
+                    existing_type == concrete_type
+                } else {
+                    substitutions.insert(param_name.clone(), concrete_type.clone());
+                    true
+                }
+            }
+            Type::Array {
+                element_type: pattern_element,
+                depth: pattern_depth,
+            } => {
+                if let Type::Array {
+                    element_type: concrete_element,
+                    depth: concrete_depth,
+                } = concrete_type
+                {
+                    if pattern_depth != concrete_depth {
+                        return false;
+                    }
+                    Self::deduce_template_argument(pattern_element, concrete_element, substitutions)
+                } else {
+                    false
+                }
+            }
+            Type::Tuple(pattern_elements) => {
+                if let Type::Tuple(concrete_elements) = concrete_type {
+                    if pattern_elements.len() != concrete_elements.len() {
+                        return false;
+                    }
+                    for (pattern_element, concrete_element) in
+                        pattern_elements.iter().zip(concrete_elements)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_element,
+                            concrete_element,
+                            substitutions,
+                        ) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => pattern_type == concrete_type,
+        }
+    }
+
+    fn substitute_type(target_type: &Type, substitutions: &HashMap<String, Type>) -> Type {
+        match target_type {
+            Type::Unresolved(name) => substitutions
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| target_type.clone()),
+            Type::Array {
+                element_type,
+                depth,
+            } => Type::Array {
+                element_type: Box::new(Self::substitute_type(element_type, substitutions)),
+                depth: *depth,
+            },
+            Type::Tuple(element_types) => Type::Tuple(
+                element_types
+                    .iter()
+                    .map(|elem| Self::substitute_type(elem, substitutions))
+                    .collect(),
+            ),
+            Type::FunctionPointer {
+                parameter_types,
+                return_type,
+            } => Type::FunctionPointer {
+                parameter_types: parameter_types
+                    .iter()
+                    .map(|param| Self::substitute_type(param, substitutions))
+                    .collect(),
+                return_type: Box::new(Self::substitute_type(return_type, substitutions)),
+            },
+            Type::Class {
+                symbol_name,
+                type_arguments,
+            } => Type::Class {
+                symbol_name: symbol_name.clone(),
+                type_arguments: type_arguments
+                    .iter()
+                    .map(|arg| Self::substitute_type(arg, substitutions))
+                    .collect(),
+            },
+            Type::Interface {
+                symbol_name,
+                type_arguments,
+            } => Type::Interface {
+                symbol_name: symbol_name.clone(),
+                type_arguments: type_arguments
+                    .iter()
+                    .map(|arg| Self::substitute_type(arg, substitutions))
+                    .collect(),
+            },
+            _ => target_type.clone(),
+        }
+    }
 }
 
 impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
@@ -1654,12 +1892,13 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 .is_assignable_to(&field_type, &|src, tgt| self.check_is_subtype(src, tgt))
                 || is_literal_compatible_with_type(initializer, &field_type);
             if !is_compatible && field_type != Type::Error && init_type != Type::Error {
-                self.errors.push(BindingError::FieldInitializerTypeMismatch {
-                    field_name: field_name.to_string(),
-                    expected: field_type.to_string(),
-                    found: init_type.to_string(),
-                    span: initializer.span().to_source_span(),
-                });
+                self.errors
+                    .push(BindingError::FieldInitializerTypeMismatch {
+                        field_name: field_name.to_string(),
+                        expected: field_type.to_string(),
+                        found: init_type.to_string(),
+                        span: initializer.span().to_source_span(),
+                    });
             }
         }
     }
@@ -1678,6 +1917,11 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             })
             .collect();
 
+        let previous_method_generic_names = std::mem::replace(
+            &mut self.current_method_generic_names,
+            method_generic_names.clone(),
+        );
+
         let return_type = resolve_type_annotation(
             self.source_id,
             self.source_text,
@@ -1685,15 +1929,14 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             self.symbol_table,
         );
 
-        if let Some(unresolved_name) = return_type.first_unresolved_name() {
-            if !self.current_class_generic_names.contains(unresolved_name)
-                && !method_generic_names.contains(unresolved_name)
-            {
-                self.errors.push(BindingError::UnknownTypeInDeclaration {
-                    type_name: unresolved_name.to_string(),
-                    span: node.return_type.span().to_source_span(),
-                });
-            }
+        if let Some(unresolved_name) = return_type.first_unresolved_name()
+            && !self.current_class_generic_names.contains(unresolved_name)
+            && !method_generic_names.contains(unresolved_name)
+        {
+            self.errors.push(BindingError::UnknownTypeInDeclaration {
+                type_name: unresolved_name.to_string(),
+                span: node.return_type.span().to_source_span(),
+            });
         }
 
         let previous_return = self.current_method_return_type.take();
@@ -1723,15 +1966,14 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                     span: parameter.span.to_source_span(),
                 });
             }
-            if let Some(unresolved_name) = param_type.first_unresolved_name() {
-                if !self.current_class_generic_names.contains(unresolved_name)
-                    && !method_generic_names.contains(unresolved_name)
-                {
-                    self.errors.push(BindingError::UnknownTypeInDeclaration {
-                        type_name: unresolved_name.to_string(),
-                        span: parameter.param_type.span().to_source_span(),
-                    });
-                }
+            if let Some(unresolved_name) = param_type.first_unresolved_name()
+                && !self.current_class_generic_names.contains(unresolved_name)
+                && !method_generic_names.contains(unresolved_name)
+            {
+                self.errors.push(BindingError::UnknownTypeInDeclaration {
+                    type_name: unresolved_name.to_string(),
+                    span: parameter.param_type.span().to_source_span(),
+                });
             }
 
             if let Some(default_val) = &parameter.default_value {
@@ -1740,12 +1982,13 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                     .is_assignable_to(&param_type, &|src, tgt| self.check_is_subtype(src, tgt))
                     || is_literal_compatible_with_type(default_val, &param_type);
                 if !is_compatible && param_type != Type::Error && default_type != Type::Error {
-                    self.errors.push(BindingError::ParameterDefaultValueMismatch {
-                        parameter_name: param_name.to_string(),
-                        expected: param_type.to_string(),
-                        found: default_type.to_string(),
-                        span: default_val.span().to_source_span(),
-                    });
+                    self.errors
+                        .push(BindingError::ParameterDefaultValueMismatch {
+                            parameter_name: param_name.to_string(),
+                            expected: param_type.to_string(),
+                            found: default_type.to_string(),
+                            span: default_val.span().to_source_span(),
+                        });
                 }
             }
 
@@ -1794,6 +2037,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
         self.symbol_table.exit_scope();
         self.current_method_return_type = previous_return;
         self.is_static_method = previous_static;
+        self.current_method_generic_names = previous_method_generic_names;
     }
 
     fn visit_constructor_declaration(&mut self, node: &ConstructorDeclaration) {
@@ -1816,13 +2060,13 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                     span: parameter.span.to_source_span(),
                 });
             }
-            if let Some(unresolved_name) = param_type.first_unresolved_name() {
-                if !self.current_class_generic_names.contains(unresolved_name) {
-                    self.errors.push(BindingError::UnknownTypeInDeclaration {
-                        type_name: unresolved_name.to_string(),
-                        span: parameter.param_type.span().to_source_span(),
-                    });
-                }
+            if let Some(unresolved_name) = param_type.first_unresolved_name()
+                && !self.current_class_generic_names.contains(unresolved_name)
+            {
+                self.errors.push(BindingError::UnknownTypeInDeclaration {
+                    type_name: unresolved_name.to_string(),
+                    span: parameter.param_type.span().to_source_span(),
+                });
             }
             let param_symbol = SymbolEntry {
                 id: SymbolId(0),
@@ -1872,10 +2116,9 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                                     .iter()
                                     .zip(&evaluated_super_arg_types)
                                     .all(|(expected_param, actual_arg)| {
-                                        actual_arg.is_assignable_to(
-                                            expected_param,
-                                            &|src, tgt| self.check_is_subtype(src, tgt),
-                                        ) || actual_arg == expected_param
+                                        actual_arg.is_assignable_to(expected_param, &|src, tgt| {
+                                            self.check_is_subtype(src, tgt)
+                                        }) || actual_arg == expected_param
                                     });
                                 if types_match {
                                     matching_ctor = true;
@@ -2033,14 +2276,15 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
         }
 
-        if let Some(unresolved_name) = declared_type.first_unresolved_name() {
-            if !self.current_class_generic_names.contains(unresolved_name) {
-                self.errors.push(BindingError::undefined_symbol(
-                    unresolved_name,
-                    node.var_type.span(),
-                ));
-                declared_type = Type::Error;
-            }
+        if let Some(unresolved_name) = declared_type.first_unresolved_name()
+            && !self.current_class_generic_names.contains(unresolved_name)
+            && !self.current_method_generic_names.contains(unresolved_name)
+        {
+            self.errors.push(BindingError::undefined_symbol(
+                unresolved_name,
+                node.var_type.span(),
+            ));
+            declared_type = Type::Error;
         }
 
         if declared_type == Type::Primitive(PrimitiveKind::Void) {

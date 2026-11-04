@@ -25,7 +25,15 @@ impl<'a> Emitter<'a> {
             self.finally_stack.push(finally_block.clone());
         }
 
+        let ref_regs_before = self.function.reference_registers.clone();
         self.emit_block_statement(&try_stmt.try_block, loop_stack)?;
+        let try_ref_regs: Vec<u16> = self
+            .function
+            .reference_registers
+            .iter()
+            .filter(|reg| !ref_regs_before.contains(reg))
+            .copied()
+            .collect();
 
         if try_stmt.finally_block.is_some() {
             self.finally_stack.pop();
@@ -40,6 +48,9 @@ impl<'a> Emitter<'a> {
         );
 
         let mut catch_jumps = Vec::new();
+
+        // Prevent catch clauses from reusing try_ref_regs while references are still live
+        self.allocator.exclude_from_free(&try_ref_regs);
 
         // Compile catch clauses
         for catch in &try_stmt.catch_clauses {
@@ -66,6 +77,7 @@ impl<'a> Emitter<'a> {
                     catch_reg,
                     handler_pc,
                     finally_pc: None,
+                    try_ref_regs: try_ref_regs.clone(),
                 });
 
             if let Some(finally_block) = &try_stmt.finally_block {
@@ -88,6 +100,8 @@ impl<'a> Emitter<'a> {
             catch_jumps.push(exit_catch as usize);
         }
 
+        self.allocator.return_to_free(&try_ref_regs);
+
         // If there's a finally block, compile it
         if let Some(finally_block) = &try_stmt.finally_block {
             let finally_pc = self.function.instructions.len() as u32;
@@ -109,6 +123,7 @@ impl<'a> Emitter<'a> {
                     catch_reg: 0,
                     handler_pc: finally_pc,
                     finally_pc: Some(finally_pc),
+                    try_ref_regs: try_ref_regs.clone(),
                 });
 
             // Patch normal jumps to point to the normal finally execution

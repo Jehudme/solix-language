@@ -94,12 +94,14 @@ pub enum Expression {
         /// Whether this was accessed via scope resolution operator `::` (true) or dot operator `.` (false).
         is_scope_resolution: bool,
     },
-    /// Invocation / method call (`callee(arguments)`).
+    /// Invocation / method call (`callee(arguments)` or `callee<T>(arguments)`).
     MethodCall {
         /// Overall source coordinate span from callee to closing `)`.
         span: Span,
         /// The callable target expression.
         callee: Box<Expression>,
+        /// Explicit generic type arguments passed to the method (e.g. `<int32>`).
+        generic_arguments: Vec<TypeAnnotation>,
         /// Evaluated arguments passed to the call.
         arguments: Vec<Expression>,
     },

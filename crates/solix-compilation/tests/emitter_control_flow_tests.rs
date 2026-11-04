@@ -288,6 +288,7 @@ fn test_disassembler_formatting_and_inspection() {
         catch_reg: 3,
         handler_pc: 5,
         finally_pc: Some(7),
+        try_ref_regs: Vec::new(),
     });
 
     func.emit(Instruction::format_b(OpCode::LoadI32, 0, 0, 42), None);

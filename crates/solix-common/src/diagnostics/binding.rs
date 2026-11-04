@@ -82,9 +82,7 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error(
-        "Method override mismatch for '{method_name}' in superclass '{super_class}': {reason}"
-    )]
+    #[error("Method override mismatch for '{method_name}' in superclass '{super_class}': {reason}")]
     #[diagnostic(
         code(solix::binder::override_mismatch),
         help(
@@ -150,9 +148,7 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error(
-        "Non-void method '{method_name}' must return a value of type '{expected_type}'"
-    )]
+    #[error("Non-void method '{method_name}' must return a value of type '{expected_type}'")]
     #[diagnostic(
         code(solix::binder::missing_return),
         help("Ensure all code paths return an expression matching the method's return type.")
@@ -188,9 +184,7 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error(
-        "No matching overload for '{method_name}' with arguments '({argument_types})'"
-    )]
+    #[error("No matching overload for '{method_name}' with arguments '({argument_types})'")]
     #[diagnostic(
         code(solix::binder::no_matching_overload),
         help("Verify method argument types or provide a suitable overload.")
@@ -294,9 +288,7 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error(
-        "Ambiguous imported symbol '{symbol_name}'; matches candidates: {candidates:?}"
-    )]
+    #[error("Ambiguous imported symbol '{symbol_name}'; matches candidates: {candidates:?}")]
     #[diagnostic(
         code(solix::binder::ambiguous_import),
         help(
@@ -405,11 +397,12 @@ pub enum BindingError {
     // ------------------------------------------------------------------------
     // Granular Binder Errors (E0233 - E0288)
     // ------------------------------------------------------------------------
-
     #[error("Duplicate local variable declaration '{name}'")]
     #[diagnostic(
         code(solix::binder::duplicate_local_variable),
-        help("Rename the variable to avoid shadowing or duplicate declarations in the same scope.")
+        help(
+            "Rename the variable to avoid shadowing or duplicate declarations in the same scope."
+        )
     )]
     DuplicateLocalVariable {
         name: String,
@@ -486,7 +479,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Field '{field_name}' initializer type mismatch: expected '{expected}', found '{found}'")]
+    #[error(
+        "Field '{field_name}' initializer type mismatch: expected '{expected}', found '{found}'"
+    )]
     #[diagnostic(
         code(solix::binder::field_initializer_type_mismatch),
         help("Provide an initializer expression matching the declared field type.")
@@ -537,7 +532,9 @@ pub enum BindingError {
     #[error("Multiple 'main' entry point functions discovered ({count} found across package)")]
     #[diagnostic(
         code(solix::binder::multiple_main_methods_found),
-        help("Ensure exactly one 'main' function is defined across all compiled files in the package.")
+        help(
+            "Ensure exactly one 'main' function is defined across all compiled files in the package."
+        )
     )]
     MultipleMainMethodsFound {
         count: usize,
@@ -581,7 +578,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Binary operator '{operator}' cannot be applied to types '{left_type}' and '{right_type}'")]
+    #[error(
+        "Binary operator '{operator}' cannot be applied to types '{left_type}' and '{right_type}'"
+    )]
     #[diagnostic(
         code(solix::binder::binary_operator_type_mismatch),
         help("Apply the binary operator to compatible operand types.")
@@ -717,7 +716,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Keyword 'this' can only be used inside instance methods, constructors, or destructors")]
+    #[error(
+        "Keyword 'this' can only be used inside instance methods, constructors, or destructors"
+    )]
     #[diagnostic(
         code(solix::binder::this_used_outside_instance_method),
         help("Remove 'this' from static or package-level contexts.")
@@ -737,7 +738,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Static method '{method_name}' of class '{class_name}' should be invoked via '::' rather than an instance")]
+    #[error(
+        "Static method '{method_name}' of class '{class_name}' should be invoked via '::' rather than an instance"
+    )]
     #[diagnostic(
         code(solix::binder::static_method_access_via_instance),
         help("Invoke static methods using the class name: 'ClassName::method()'.")
@@ -749,7 +752,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Instance method '{method_name}' of class '{class_name}' cannot be invoked statically without an instance")]
+    #[error(
+        "Instance method '{method_name}' of class '{class_name}' cannot be invoked statically without an instance"
+    )]
     #[diagnostic(
         code(solix::binder::instance_method_access_via_static),
         help("Instance methods require an object instance to be invoked.")
@@ -773,7 +778,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Class '{class_name}' must either be declared abstract or implement abstract method '{missing_method}'")]
+    #[error(
+        "Class '{class_name}' must either be declared abstract or implement abstract method '{missing_method}'"
+    )]
     #[diagnostic(
         code(solix::binder::non_abstract_class_missing_abstract_impl),
         help("Implement all inherited abstract methods or mark the class 'abstract'.")
@@ -809,10 +816,14 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Cannot reduce visibility of overridden method '{method_name}' from '{original_visibility}' to '{new_visibility}'")]
+    #[error(
+        "Cannot reduce visibility of overridden method '{method_name}' from '{original_visibility}' to '{new_visibility}'"
+    )]
     #[diagnostic(
         code(solix::binder::narrowing_visibility_in_override),
-        help("Overriding methods cannot declare more restrictive visibility than the parent method.")
+        help(
+            "Overriding methods cannot declare more restrictive visibility than the parent method."
+        )
     )]
     NarrowingVisibilityInOverride {
         method_name: String,
@@ -834,7 +845,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Right-hand operand of 'instanceof' must be a class or interface type, found '{found}'")]
+    #[error(
+        "Right-hand operand of 'instanceof' must be a class or interface type, found '{found}'"
+    )]
     #[diagnostic(
         code(solix::binder::invalid_type_for_instance_of),
         help("Use 'instanceof' only with nominal class or interface types.")
@@ -973,7 +986,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Cannot override method '{method_name}' of class '{base_class}' because it is not declared 'virtual'")]
+    #[error(
+        "Cannot override method '{method_name}' of class '{base_class}' because it is not declared 'virtual'"
+    )]
     #[diagnostic(
         code(solix::binder::override_non_virtual_method),
         help("Declare the base class method 'virtual' or remove 'override'.")
@@ -1006,7 +1021,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Default value for parameter '{parameter_name}' type mismatch: expected '{expected}', found '{found}'")]
+    #[error(
+        "Default value for parameter '{parameter_name}' type mismatch: expected '{expected}', found '{found}'"
+    )]
     #[diagnostic(
         code(solix::binder::parameter_default_value_mismatch),
         help("Ensure default parameter expression matches declared parameter type.")
@@ -1022,7 +1039,9 @@ pub enum BindingError {
     #[error("Expression cannot be evaluated in a constant context: {reason}")]
     #[diagnostic(
         code(solix::binder::invalid_expression_in_constant_context),
-        help("Only literal constants, basic arithmetic, and const references are allowed in constant expressions.")
+        help(
+            "Only literal constants, basic arithmetic, and const references are allowed in constant expressions."
+        )
     )]
     InvalidExpressionInConstantContext {
         reason: String,
@@ -1033,7 +1052,9 @@ pub enum BindingError {
     #[error("Bitwise operator '{operator}' can only be applied to integer types, found '{found}'")]
     #[diagnostic(
         code(solix::binder::bitwise_operator_on_non_integer),
-        help("Bitwise operators ('&', '|', '^', '<<', '>>', '~') are only valid on integer types.")
+        help(
+            "Bitwise operators ('&', '|', '^', '<<', '>>', '~') are only valid on integer types."
+        )
     )]
     BitwiseOperatorOnNonInteger {
         operator: String,

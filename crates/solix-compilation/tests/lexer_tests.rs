@@ -86,11 +86,23 @@ fn test_negative_inlined_unknown_tokens() {
     let test_cases = [
         ("int32 x = @;", "Unrecognized symbol @", "E0000"),
         ("int32 y = \\;", "Unrecognized symbol \\", "E0000"),
-        ("\"unterminated string", "Unterminated string at EOF", "E0011"),
-        ("'unterminated char", "Unterminated character literal", "E0012"),
+        (
+            "\"unterminated string",
+            "Unterminated string at EOF",
+            "E0011",
+        ),
+        (
+            "'unterminated char",
+            "Unterminated character literal",
+            "E0012",
+        ),
         ("0x;", "Hex prefix missing digits", "E0014"),
         ("0b;", "Binary prefix missing digits", "E0015"),
-        ("/* unclosed comment", "Unterminated block comment at EOF", "E0013"),
+        (
+            "/* unclosed comment",
+            "Unterminated block comment at EOF",
+            "E0013",
+        ),
     ];
 
     for (source_snippet, description, expected_code) in test_cases {
@@ -141,7 +153,9 @@ fn test_negative_invalid_tokens_fixture_detects_all_errors() {
         errors
     );
 
-    let expected_codes = ["E0000", "E0000", "E0000", "E0000", "E0000", "E0014", "E0015", "E0011"];
+    let expected_codes = [
+        "E0000", "E0000", "E0000", "E0000", "E0000", "E0014", "E0015", "E0011",
+    ];
     for (index, error) in errors.iter().enumerate() {
         assert_eq!(
             error.error_code(),

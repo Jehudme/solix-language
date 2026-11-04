@@ -203,6 +203,7 @@ fn test_callable_invocation_and_function_pointer() {
         callee: Box::new(Expression::Identifier {
             span: make_span(8, 14), // "fn_var"
         }),
+        generic_arguments: Vec::new(),
         arguments: vec![Expression::Literal {
             span: make_span(15, 17),
             value: LiteralValue::Int(42),

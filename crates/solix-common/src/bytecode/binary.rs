@@ -327,11 +327,15 @@ impl BinaryProgram {
                 buffer.extend_from_slice(&handler.catch_reg.to_le_bytes());
                 buffer.extend_from_slice(&handler.handler_pc.to_le_bytes());
                 match handler.finally_pc {
-                    Some(f) => {
+                    Some(finally_offset) => {
                         buffer.push(1);
-                        buffer.extend_from_slice(&f.to_le_bytes());
+                        buffer.extend_from_slice(&finally_offset.to_le_bytes());
                     }
                     None => buffer.push(0),
+                }
+                buffer.extend_from_slice(&(handler.try_ref_regs.len() as u32).to_le_bytes());
+                for &ref_register in &handler.try_ref_regs {
+                    buffer.extend_from_slice(&ref_register.to_le_bytes());
                 }
             }
 
@@ -534,6 +538,12 @@ impl BinaryProgram {
                     None
                 };
 
+                let try_ref_count = reader.read_u32("Functions")? as usize;
+                let mut try_ref_regs = Vec::with_capacity(try_ref_count);
+                for _ in 0..try_ref_count {
+                    try_ref_regs.push(reader.read_u16("Functions")?);
+                }
+
                 exception_handlers.push(ExceptionHandlerEntry {
                     try_start_pc,
                     try_end_pc,
@@ -541,6 +551,7 @@ impl BinaryProgram {
                     catch_reg,
                     handler_pc,
                     finally_pc,
+                    try_ref_regs,
                 });
             }
 

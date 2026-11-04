@@ -330,6 +330,94 @@ pub fn execute_pass1_symbol_discovery(
                                 cls_entry.members.push(enum_id);
                             }
                         }
+                        if let ClassMember::Class(nested_class) = member {
+                            let nested_class_name =
+                                if nested_class.name_span.end as usize <= source_text.len() {
+                                    &source_text[nested_class.name_span.start as usize
+                                        ..nested_class.name_span.end as usize]
+                                } else {
+                                    "class"
+                                };
+                            let nested_fqn = format!("{fully_qualified_name}::{nested_class_name}");
+                            let nested_dot = format!("{fully_qualified_name}.{nested_class_name}");
+                            let nested_sym = SymbolEntry {
+                                id: SymbolId(0),
+                                name: nested_class_name.to_string(),
+                                fully_qualified_name: nested_fqn.clone(),
+                                source_id,
+                                span: nested_class.span,
+                                modifiers: nested_class.modifiers.clone(),
+                                symbol_type: Type::Class {
+                                    symbol_name: nested_fqn.clone(),
+                                    type_arguments: Vec::new(),
+                                },
+                                parent_symbol: Some(class_id),
+                                members: Vec::new(),
+                                is_static: false,
+                                is_const: false,
+                                slot_index: None,
+                            };
+                            let nested_id = symbol_table.insert_symbol(nested_sym);
+                            symbol_table
+                                .global_names
+                                .entry(nested_class_name.to_string())
+                                .or_insert(nested_id);
+                            symbol_table
+                                .global_names
+                                .entry(nested_fqn.clone())
+                                .or_insert(nested_id);
+                            symbol_table
+                                .global_names
+                                .entry(nested_dot.clone())
+                                .or_insert(nested_id);
+                            if let Some(cls_entry) = symbol_table.get_symbol_mut(class_id) {
+                                cls_entry.members.push(nested_id);
+                            }
+                        }
+                        if let ClassMember::Interface(nested_iface) = member {
+                            let nested_iface_name =
+                                if nested_iface.name_span.end as usize <= source_text.len() {
+                                    &source_text[nested_iface.name_span.start as usize
+                                        ..nested_iface.name_span.end as usize]
+                                } else {
+                                    "interface"
+                                };
+                            let nested_fqn = format!("{fully_qualified_name}::{nested_iface_name}");
+                            let nested_dot = format!("{fully_qualified_name}.{nested_iface_name}");
+                            let nested_sym = SymbolEntry {
+                                id: SymbolId(0),
+                                name: nested_iface_name.to_string(),
+                                fully_qualified_name: nested_fqn.clone(),
+                                source_id,
+                                span: nested_iface.span,
+                                modifiers: nested_iface.modifiers.clone(),
+                                symbol_type: Type::Interface {
+                                    symbol_name: nested_fqn.clone(),
+                                    type_arguments: Vec::new(),
+                                },
+                                parent_symbol: Some(class_id),
+                                members: Vec::new(),
+                                is_static: false,
+                                is_const: false,
+                                slot_index: None,
+                            };
+                            let nested_id = symbol_table.insert_symbol(nested_sym);
+                            symbol_table
+                                .global_names
+                                .entry(nested_iface_name.to_string())
+                                .or_insert(nested_id);
+                            symbol_table
+                                .global_names
+                                .entry(nested_fqn.clone())
+                                .or_insert(nested_id);
+                            symbol_table
+                                .global_names
+                                .entry(nested_dot.clone())
+                                .or_insert(nested_id);
+                            if let Some(cls_entry) = symbol_table.get_symbol_mut(class_id) {
+                                cls_entry.members.push(nested_id);
+                            }
+                        }
                     }
                 }
                 Declaration::Interface(interface_declaration) => {

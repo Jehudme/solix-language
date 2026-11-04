@@ -329,9 +329,7 @@ impl GenericBlueprintRegistry {
                     let operator_id = symbol_table.insert_symbol(operator_symbol);
                     child_symbol_ids.push(operator_id);
                 }
-                ClassMember::Enum(_)
-                | ClassMember::Class(_)
-                | ClassMember::Interface(_) => {}
+                ClassMember::Enum(_) | ClassMember::Class(_) | ClassMember::Interface(_) => {}
             }
         }
 

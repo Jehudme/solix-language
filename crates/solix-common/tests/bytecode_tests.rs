@@ -225,6 +225,7 @@ fn test_slxb_binary_container_serialization_round_trip() {
         catch_reg: 2,
         handler_pc: 4,
         finally_pc: Some(6),
+        try_ref_regs: vec![1],
     });
     main_func.emit(
         Instruction::format_call(OpCode::CallDirect, 0, 2, 1, 1),

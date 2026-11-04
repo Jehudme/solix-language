@@ -86,6 +86,20 @@ impl RegisterAllocator {
         }
     }
 
+    /// Excludes specific registers from the free pool to prevent them from being reused immediately.
+    pub fn exclude_from_free(&mut self, regs: &[u16]) {
+        for reg in regs {
+            self.free_registers.remove(reg);
+        }
+    }
+
+    /// Returns previously excluded registers back to the free pool.
+    pub fn return_to_free(&mut self, regs: &[u16]) {
+        for &reg in regs {
+            self.free_registers.insert(reg);
+        }
+    }
+
     /// Allocates a register for a local variable in the current scope.
     ///
     /// # Errors

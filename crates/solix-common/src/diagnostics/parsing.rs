@@ -134,9 +134,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
 
-    #[error(
-        "Import statements must appear before class, interface, or enum declarations"
-    )]
+    #[error("Import statements must appear before class, interface, or enum declarations")]
     #[diagnostic(
         code(solix::parser::import_after_declaration),
         help("Move all 'import' statements to the top of the file before type declarations.")
@@ -294,9 +292,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
 
-    #[error(
-        "Executable statements or bare blocks are not allowed directly in class body"
-    )]
+    #[error("Executable statements or bare blocks are not allowed directly in class body")]
     #[diagnostic(
         code(solix::parser::statement_directly_in_class),
         help("Move statements inside a method or constructor.")
@@ -578,7 +574,6 @@ pub enum ParsingError {
     // ------------------------------------------------------------------------
     // Granular Parser Errors (E0160 - E0200)
     // ------------------------------------------------------------------------
-
     #[error("Expected opening parenthesis '('")]
     #[diagnostic(
         code(solix::parser::expected_open_paren),
@@ -642,7 +637,9 @@ pub enum ParsingError {
     #[error("Expected ':' in ternary conditional expression")]
     #[diagnostic(
         code(solix::parser::expected_colon_in_ternary),
-        help("Ternary conditional expressions require a ':' separating the true and false expressions.")
+        help(
+            "Ternary conditional expressions require a ':' separating the true and false expressions."
+        )
     )]
     ExpectedColonInTernary {
         #[label("expected ':' in ternary expression")]
@@ -682,7 +679,9 @@ pub enum ParsingError {
     #[error("Expected constructor call or array size expression after 'new'")]
     #[diagnostic(
         code(solix::parser::expected_constructor_call_or_size),
-        help("Provide an instantiated type call 'new Type(...)' or array allocation 'new Type[...]'.")
+        help(
+            "Provide an instantiated type call 'new Type(...)' or array allocation 'new Type[...]'."
+        )
     )]
     ExpectedConstructorCallOrSize {
         #[label("expected constructor call or array size")]
@@ -713,7 +712,9 @@ pub enum ParsingError {
     #[error("Conflicting visibility modifiers: cannot combine '{modifier1}' and '{modifier2}'")]
     #[diagnostic(
         code(solix::parser::conflicting_visibility_modifiers),
-        help("Specify at most one visibility modifier ('public', 'private', 'protected', 'internal').")
+        help(
+            "Specify at most one visibility modifier ('public', 'private', 'protected', 'internal')."
+        )
     )]
     ConflictingVisibilityModifiers {
         modifier1: String,
@@ -926,7 +927,9 @@ pub enum ParsingError {
     #[error("Malformed constructor chaining invocation: expected 'super(...)' or 'this(...)'")]
     #[diagnostic(
         code(solix::parser::malformed_constructor_chaining),
-        help("Use ': super(...)' or ': this(...)' immediately following the constructor parameter list.")
+        help(
+            "Use ': super(...)' or ': this(...)' immediately following the constructor parameter list."
+        )
     )]
     MalformedConstructorChaining {
         #[label("malformed constructor chaining")]
@@ -936,7 +939,9 @@ pub enum ParsingError {
     #[error("Unexpected token at top level: '{token}'")]
     #[diagnostic(
         code(solix::parser::invalid_top_level_token),
-        help("Expected package, import, class, interface, enum, or function declaration at top level.")
+        help(
+            "Expected package, import, class, interface, enum, or function declaration at top level."
+        )
     )]
     InvalidTopLevelToken {
         token: String,
@@ -947,7 +952,9 @@ pub enum ParsingError {
     #[error("Modifier '{modifier}' is not valid on class declarations")]
     #[diagnostic(
         code(solix::parser::invalid_class_modifier),
-        help("Valid class modifiers are: 'public', 'private', 'protected', 'internal', 'abstract', 'final'.")
+        help(
+            "Valid class modifiers are: 'public', 'private', 'protected', 'internal', 'abstract', 'final'."
+        )
     )]
     InvalidClassModifier {
         modifier: String,
@@ -980,7 +987,9 @@ pub enum ParsingError {
     #[error("Modifier '{modifier}' is not valid on package-level functions")]
     #[diagnostic(
         code(solix::parser::invalid_free_function_modifier),
-        help("Valid free function modifiers are: 'public', 'private', 'internal', 'native', 'inline', 'extern'.")
+        help(
+            "Valid free function modifiers are: 'public', 'private', 'internal', 'native', 'inline', 'extern'."
+        )
     )]
     InvalidFreeFunctionModifier {
         modifier: String,

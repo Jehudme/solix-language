@@ -105,6 +105,7 @@ pub fn bind_context(
                 errors: &mut accumulated_errors,
                 current_class: None,
                 current_class_generic_names: std::collections::HashSet::new(),
+                current_method_generic_names: std::collections::HashSet::new(),
                 current_method_return_type: None,
                 is_static_method: false,
                 is_inside_destructor: false,
@@ -146,12 +147,13 @@ pub fn bind_context(
                             ""
                         };
                         if method_name == "main" {
-                            let ret_type = crate::phases::binder::type_resolver::resolve_type_annotation(
-                                source_id,
-                                source_text,
-                                &method_decl.return_type,
-                                &symbol_table,
-                            );
+                            let ret_type =
+                                crate::phases::binder::type_resolver::resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &method_decl.return_type,
+                                    &symbol_table,
+                                );
                             let param_types: Vec<Type> = method_decl
                                 .parameters
                                 .iter()
@@ -174,8 +176,7 @@ pub fn bind_context(
                             if let crate::phases::parser::statements::declarations::ClassMember::Method(
                                 method_decl,
                             ) = member
-                            {
-                                if method_decl.modifiers.contains(
+                                && method_decl.modifiers.contains(
                                     &crate::phases::parser::statements::declarations::Modifier::Static,
                                 ) {
                                     let method_name = if method_decl.name_span.end as usize
@@ -209,7 +210,6 @@ pub fn bind_context(
                                         main_methods.push((method_decl.span, ret_type, param_types));
                                     }
                                 }
-                            }
                         }
                     }
                     _ => {}
@@ -243,7 +243,10 @@ pub fn bind_context(
             1 => {
                 let param_type = &parameter_types[0];
                 match param_type {
-                    Type::Array { element_type, depth } => {
+                    Type::Array {
+                        element_type,
+                        depth,
+                    } => {
                         if *depth == 1 {
                             match &**element_type {
                                 Type::Class { symbol_name, .. } => {

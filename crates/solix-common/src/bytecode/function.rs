@@ -21,6 +21,8 @@ pub struct ExceptionHandlerEntry {
     pub handler_pc: u32,
     /// Instruction PC of the finally block for stack unwinding, if present.
     pub finally_pc: Option<u32>,
+    /// Registers allocated for reference-counted values inside this try block for RAII unwinding.
+    pub try_ref_regs: Vec<u16>,
 }
 
 /// Source coordinate mapping linking an emitted instruction PC to its original source code span.

@@ -47,10 +47,10 @@ fn find_base_method(
     while let Some(base_id) = current_class_id {
         if let Some(base_entry) = symbol_table.get_symbol(base_id) {
             for &member_id in &base_entry.members {
-                if let Some(member_entry) = symbol_table.get_symbol(member_id) {
-                    if member_entry.name == method_name {
-                        return Some(member_entry.clone());
-                    }
+                if let Some(member_entry) = symbol_table.get_symbol(member_id)
+                    && member_entry.name == method_name
+                {
+                    return Some(member_entry.clone());
                 }
             }
         }
@@ -130,12 +130,10 @@ pub fn execute_pass2_type_hierarchy(
                     match resolved {
                         Type::Interface { .. } => {}
                         Type::Unresolved(ref name) => {
-                            accumulated_errors.push(
-                                BindingError::ImplementedTypeMustBeInterface {
-                                    found: name.clone(),
-                                    span: super_iface_annot.span().to_source_span(),
-                                },
-                            );
+                            accumulated_errors.push(BindingError::ImplementedTypeMustBeInterface {
+                                found: name.clone(),
+                                span: super_iface_annot.span().to_source_span(),
+                            });
                         }
                         other => {
                             let type_name = if let Some(unres) = other.first_unresolved_name() {
@@ -143,12 +141,10 @@ pub fn execute_pass2_type_hierarchy(
                             } else {
                                 other.to_string()
                             };
-                            accumulated_errors.push(
-                                BindingError::ImplementedTypeMustBeInterface {
-                                    found: type_name,
-                                    span: super_iface_annot.span().to_source_span(),
-                                },
-                            );
+                            accumulated_errors.push(BindingError::ImplementedTypeMustBeInterface {
+                                found: type_name,
+                                span: super_iface_annot.span().to_source_span(),
+                            });
                         }
                     }
                 }
@@ -170,7 +166,9 @@ pub fn execute_pass2_type_hierarchy(
                         .filter_map(|param| {
                             let span = param.name_span;
                             if span.end as usize <= source_text.len() {
-                                Some(source_text[span.start as usize..span.end as usize].to_string())
+                                Some(
+                                    source_text[span.start as usize..span.end as usize].to_string(),
+                                )
                             } else {
                                 None
                             }
@@ -189,13 +187,13 @@ pub fn execute_pass2_type_hierarchy(
                             &m.return_type,
                             symbol_table,
                         );
-                        if let Some(unres) = m_ret.first_unresolved_name() {
-                            if !iface_generic_names.contains(unres) {
-                                accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                    type_name: unres.to_string(),
-                                    span: m.return_type.span().to_source_span(),
-                                });
-                            }
+                        if let Some(unres) = m_ret.first_unresolved_name()
+                            && !iface_generic_names.contains(unres)
+                        {
+                            accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                                type_name: unres.to_string(),
+                                span: m.return_type.span().to_source_span(),
+                            });
                         }
                         let mut m_param_types = Vec::new();
                         for param in &m.parameters {
@@ -210,13 +208,13 @@ pub fn execute_pass2_type_hierarchy(
                                     span: param.span.to_source_span(),
                                 });
                             }
-                            if let Some(unres) = p_type.first_unresolved_name() {
-                                if !iface_generic_names.contains(unres) {
-                                    accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                        type_name: unres.to_string(),
-                                        span: param.span.to_source_span(),
-                                    });
-                                }
+                            if let Some(unres) = p_type.first_unresolved_name()
+                                && !iface_generic_names.contains(unres)
+                            {
+                                accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                                    type_name: unres.to_string(),
+                                    span: param.span.to_source_span(),
+                                });
                             }
                             m_param_types.push(p_type);
                         }
@@ -301,13 +299,13 @@ pub fn execute_pass2_type_hierarchy(
                     &method_declaration.return_type,
                     symbol_table,
                 );
-                if let Some(unres) = return_type.first_unresolved_name() {
-                    if !method_generic_names.contains(unres) {
-                        accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                            type_name: unres.to_string(),
-                            span: method_declaration.return_type.span().to_source_span(),
-                        });
-                    }
+                if let Some(unres) = return_type.first_unresolved_name()
+                    && !method_generic_names.contains(unres)
+                {
+                    accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                        type_name: unres.to_string(),
+                        span: method_declaration.return_type.span().to_source_span(),
+                    });
                 }
                 let parameter_types: Vec<Type> = method_declaration
                     .parameters
@@ -324,13 +322,13 @@ pub fn execute_pass2_type_hierarchy(
                                 span: p.span.to_source_span(),
                             });
                         }
-                        if let Some(unres) = ptype.first_unresolved_name() {
-                            if !method_generic_names.contains(unres) {
-                                accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                    type_name: unres.to_string(),
-                                    span: p.span.to_source_span(),
-                                });
-                            }
+                        if let Some(unres) = ptype.first_unresolved_name()
+                            && !method_generic_names.contains(unres)
+                        {
+                            accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                                type_name: unres.to_string(),
+                                span: p.span.to_source_span(),
+                            });
                         }
                         ptype
                     })
@@ -339,13 +337,11 @@ pub fn execute_pass2_type_hierarchy(
                 // Modifiers on free function
                 for modifier in &method_declaration.modifiers {
                     if matches!(modifier, Modifier::Const | Modifier::Weak) {
-                        accumulated_errors.push(
-                            BindingError::ModifierNotApplicableToDeclaration {
-                                modifier: modifier.as_str().to_string(),
-                                declaration_kind: "function".to_string(),
-                                span: method_declaration.span.to_source_span(),
-                            },
-                        );
+                        accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration {
+                            modifier: modifier.as_str().to_string(),
+                            declaration_kind: "function".to_string(),
+                            span: method_declaration.span.to_source_span(),
+                        });
                     }
                     if *modifier == Modifier::Virtual {
                         accumulated_errors.push(BindingError::VirtualOnNonMethod {
@@ -359,13 +355,13 @@ pub fn execute_pass2_type_hierarchy(
                     }
                 }
 
-                if let Some(sym_id) = symbol_table.resolve_symbol(source_id, method_name) {
-                    if let Some(entry) = symbol_table.get_symbol_mut(sym_id) {
-                        entry.symbol_type = Type::FunctionPointer {
-                            return_type: Box::new(return_type),
-                            parameter_types,
-                        };
-                    }
+                if let Some(sym_id) = symbol_table.resolve_symbol(source_id, method_name)
+                    && let Some(entry) = symbol_table.get_symbol_mut(sym_id)
+                {
+                    entry.symbol_type = Type::FunctionPointer {
+                        return_type: Box::new(return_type),
+                        parameter_types,
+                    };
                 }
             }
 
@@ -396,13 +392,11 @@ pub fn execute_pass2_type_hierarchy(
                             | Modifier::Inline
                             | Modifier::Weak
                     ) {
-                        accumulated_errors.push(
-                            BindingError::ModifierNotApplicableToDeclaration {
-                                modifier: modifier.as_str().to_string(),
-                                declaration_kind: "field".to_string(),
-                                span: field_declaration.span.to_source_span(),
-                            },
-                        );
+                        accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration {
+                            modifier: modifier.as_str().to_string(),
+                            declaration_kind: "field".to_string(),
+                            span: field_declaration.span.to_source_span(),
+                        });
                     }
                 }
             }
@@ -421,13 +415,11 @@ pub fn execute_pass2_type_hierarchy(
                         });
                     }
                     if *modifier == Modifier::Extern {
-                        accumulated_errors.push(
-                            BindingError::ModifierNotApplicableToDeclaration {
-                                modifier: "extern".to_string(),
-                                declaration_kind: "enum".to_string(),
-                                span: enum_declaration.span.to_source_span(),
-                            },
-                        );
+                        accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration {
+                            modifier: "extern".to_string(),
+                            declaration_kind: "enum".to_string(),
+                            span: enum_declaration.span.to_source_span(),
+                        });
                     }
                 }
                 let mut seen_values = HashSet::new();
@@ -460,10 +452,10 @@ pub fn execute_pass2_type_hierarchy(
                         });
                     }
                     let sym_name = format!("{enum_name}::{v_name}");
-                    if let Some(v_sym_id) = symbol_table.resolve_symbol(source_id, &sym_name) {
-                        if let Some(v_entry) = symbol_table.get_symbol_mut(v_sym_id) {
-                            v_entry.slot_index = Some(current_val as u32);
-                        }
+                    if let Some(v_sym_id) = symbol_table.resolve_symbol(source_id, &sym_name)
+                        && let Some(v_entry) = symbol_table.get_symbol_mut(v_sym_id)
+                    {
+                        v_entry.slot_index = Some(current_val as u32);
                     }
                 }
             }
@@ -484,13 +476,11 @@ pub fn execute_pass2_type_hierarchy(
                         });
                     }
                     if matches!(modifier, Modifier::Const | Modifier::Weak) {
-                        accumulated_errors.push(
-                            BindingError::ModifierNotApplicableToDeclaration {
-                                modifier: modifier.as_str().to_string(),
-                                declaration_kind: "class".to_string(),
-                                span: class_declaration.span.to_source_span(),
-                            },
-                        );
+                        accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration {
+                            modifier: modifier.as_str().to_string(),
+                            declaration_kind: "class".to_string(),
+                            span: class_declaration.span.to_source_span(),
+                        });
                     }
                     if *modifier == Modifier::Virtual {
                         accumulated_errors.push(BindingError::VirtualOnNonMethod {
@@ -510,6 +500,104 @@ pub fn execute_pass2_type_hierarchy(
                 };
 
                 class_ast_map.insert(class_symbol_id, (source_id, class_declaration));
+
+                for member in &class_declaration.members {
+                    if let ClassMember::Class(nested_class) = member {
+                        let nested_name =
+                            if nested_class.name_span.end as usize <= source_text.len() {
+                                &source_text[nested_class.name_span.start as usize
+                                    ..nested_class.name_span.end as usize]
+                            } else {
+                                "class"
+                            };
+                        let nested_fqn = format!("{class_name}::{nested_name}");
+                        let nested_dot = format!("{class_name}.{nested_name}");
+                        if let Some(nested_id) = symbol_table
+                            .resolve_symbol(source_id, &nested_fqn)
+                            .or_else(|| symbol_table.resolve_symbol(source_id, &nested_dot))
+                            .or_else(|| symbol_table.resolve_symbol(source_id, nested_name))
+                        {
+                            class_ast_map.insert(nested_id, (source_id, nested_class));
+                        }
+                    }
+                    if let ClassMember::Interface(nested_iface) = member {
+                        let nested_name =
+                            if nested_iface.name_span.end as usize <= source_text.len() {
+                                &source_text[nested_iface.name_span.start as usize
+                                    ..nested_iface.name_span.end as usize]
+                            } else {
+                                "interface"
+                            };
+                        let nested_fqn = format!("{class_name}::{nested_name}");
+                        let nested_dot = format!("{class_name}.{nested_name}");
+                        interface_by_name
+                            .insert(nested_name.to_string(), (source_id, nested_iface));
+                        interface_by_name.insert(nested_fqn.clone(), (source_id, nested_iface));
+                        interface_by_name.insert(nested_dot.clone(), (source_id, nested_iface));
+
+                        if let Some(iface_symbol_id) = symbol_table
+                            .resolve_symbol(source_id, &nested_fqn)
+                            .or_else(|| symbol_table.resolve_symbol(source_id, &nested_dot))
+                            .or_else(|| symbol_table.resolve_symbol(source_id, nested_name))
+                        {
+                            let iface_vtable_id = *next_vtable_id;
+                            *next_vtable_id += 1;
+                            let mut iface_layout = ClassLayout::new(
+                                iface_symbol_id,
+                                nested_fqn.clone(),
+                                iface_vtable_id,
+                            );
+                            let mut iface_child_ids = Vec::new();
+                            for (slot, m) in nested_iface.methods.iter().enumerate() {
+                                let m_name = if m.name_span.end as usize <= source_text.len() {
+                                    &source_text
+                                        [m.name_span.start as usize..m.name_span.end as usize]
+                                } else {
+                                    "method"
+                                };
+                                let m_ret = resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &m.return_type,
+                                    symbol_table,
+                                );
+                                let mut m_param_types = Vec::new();
+                                for param in &m.parameters {
+                                    m_param_types.push(resolve_type_annotation(
+                                        source_id,
+                                        source_text,
+                                        &param.param_type,
+                                        symbol_table,
+                                    ));
+                                }
+                                iface_layout.method_slots.insert(m_name.to_string(), slot);
+                                let method_symbol = SymbolEntry {
+                                    id: SymbolId(0),
+                                    name: m_name.to_string(),
+                                    fully_qualified_name: format!("{nested_fqn}::{m_name}"),
+                                    source_id,
+                                    span: m.span,
+                                    modifiers: m.modifiers.clone(),
+                                    symbol_type: Type::FunctionPointer {
+                                        return_type: Box::new(m_ret),
+                                        parameter_types: m_param_types,
+                                    },
+                                    parent_symbol: Some(iface_symbol_id),
+                                    members: Vec::new(),
+                                    is_static: false,
+                                    is_const: false,
+                                    slot_index: Some(slot as u32),
+                                };
+                                let m_id = symbol_table.insert_symbol(method_symbol);
+                                iface_child_ids.push(m_id);
+                            }
+                            if let Some(iface_sym) = symbol_table.get_symbol_mut(iface_symbol_id) {
+                                iface_sym.members = iface_child_ids;
+                            }
+                            layouts.insert(iface_symbol_id, iface_layout);
+                        }
+                    }
+                }
 
                 // Check superclass
                 if let Some(super_annotation) = &class_declaration.super_class {
@@ -617,8 +705,17 @@ pub fn execute_pass2_type_hierarchy(
                     super_annotation,
                     symbol_table,
                 );
-                if let Type::Interface { ref symbol_name, .. } = super_resolution {
+                if let Type::Interface {
+                    ref symbol_name, ..
+                } = super_resolution
+                {
                     interface_queue.push(symbol_name.clone());
+                    if let Some(super_sym_id) =
+                        symbol_table.resolve_symbol(source_file_id, symbol_name)
+                        && let Some(iface_entry) = symbol_table.get_symbol_mut(iface_id)
+                    {
+                        iface_entry.parent_symbol = Some(super_sym_id);
+                    }
                 }
             }
 
@@ -651,7 +748,10 @@ pub fn execute_pass2_type_hierarchy(
                             super_super_annot,
                             symbol_table,
                         );
-                        if let Type::Interface { ref symbol_name, .. } = super_super_res {
+                        if let Type::Interface {
+                            ref symbol_name, ..
+                        } = super_super_res
+                        {
                             interface_queue.push(symbol_name.clone());
                         }
                     }
@@ -659,9 +759,20 @@ pub fn execute_pass2_type_hierarchy(
             }
 
             if let Some(iface_entry) = symbol_table.get_symbol_mut(iface_id) {
-                for member_symbol_id in inherited_members {
-                    if !iface_entry.members.contains(&member_symbol_id) {
-                        iface_entry.members.push(member_symbol_id);
+                for member_symbol_id in &inherited_members {
+                    if !iface_entry.members.contains(member_symbol_id) {
+                        iface_entry.members.push(*member_symbol_id);
+                    }
+                }
+            }
+            if let Some(iface_layout) = layouts.get_mut(&iface_id) {
+                for member_symbol_id in &inherited_members {
+                    if let Some(member_sym) = symbol_table.get_symbol(*member_symbol_id) {
+                        let next_slot = iface_layout.method_slots.len();
+                        iface_layout
+                            .method_slots
+                            .entry(member_sym.name.clone())
+                            .or_insert(next_slot);
                     }
                 }
             }
@@ -761,15 +872,17 @@ pub fn execute_pass2_type_hierarchy(
                     );
 
                     if field_type == Type::Primitive(PrimitiveKind::Void) {
-                        accumulated_errors.push(BindingError::VoidTypeNotAllowedHere { span: field_declaration.span.to_source_span(), });
+                        accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
+                            span: field_declaration.span.to_source_span(),
+                        });
                     }
-                    if let Some(unres) = field_type.first_unresolved_name() {
-                        if !class_generic_names.contains(unres) {
-                            accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                type_name: unres.to_string(),
-                                span: field_declaration.span.to_source_span(),
-                            });
-                        }
+                    if let Some(unres) = field_type.first_unresolved_name()
+                        && !class_generic_names.contains(unres)
+                    {
+                        accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                            type_name: unres.to_string(),
+                            span: field_declaration.span.to_source_span(),
+                        });
                     }
 
                     for modifier in &field_declaration.modifiers {
@@ -780,10 +893,18 @@ pub fn execute_pass2_type_hierarchy(
                                 | Modifier::Abstract
                                 | Modifier::Inline
                         ) {
-                            accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration { modifier: modifier.as_str().to_string(), declaration_kind: "field".to_string(), span: field_declaration.span.to_source_span(), });
+                            accumulated_errors.push(
+                                BindingError::ModifierNotApplicableToDeclaration {
+                                    modifier: modifier.as_str().to_string(),
+                                    declaration_kind: "field".to_string(),
+                                    span: field_declaration.span.to_source_span(),
+                                },
+                            );
                         }
                         if *modifier == Modifier::Native {
-                            accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction { span: field_declaration.span.to_source_span(), });
+                            accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction {
+                                span: field_declaration.span.to_source_span(),
+                            });
                         }
                     }
 
@@ -844,7 +965,9 @@ pub fn execute_pass2_type_hierarchy(
                         .filter_map(|param| {
                             let span = param.name_span;
                             if span.end as usize <= source_text.len() {
-                                Some(source_text[span.start as usize..span.end as usize].to_string())
+                                Some(
+                                    source_text[span.start as usize..span.end as usize].to_string(),
+                                )
                             } else {
                                 None
                             }
@@ -858,15 +981,14 @@ pub fn execute_pass2_type_hierarchy(
                         symbol_table,
                     );
 
-                    if let Some(unres) = return_type.first_unresolved_name() {
-                        if !class_generic_names.contains(unres)
-                            && !method_generic_names.contains(unres)
-                        {
-                            accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                type_name: unres.to_string(),
-                                span: method_declaration.return_type.span().to_source_span(),
-                            });
-                        }
+                    if let Some(unres) = return_type.first_unresolved_name()
+                        && !class_generic_names.contains(unres)
+                        && !method_generic_names.contains(unres)
+                    {
+                        accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                            type_name: unres.to_string(),
+                            span: method_declaration.return_type.span().to_source_span(),
+                        });
                     }
 
                     let parameter_types: Vec<Type> = method_declaration
@@ -880,17 +1002,18 @@ pub fn execute_pass2_type_hierarchy(
                                 symbol_table,
                             );
                             if p_type == Type::Primitive(PrimitiveKind::Void) {
-                                accumulated_errors.push(BindingError::VoidTypeNotAllowedHere { span: parameter.span.to_source_span(), });
+                                accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
+                                    span: parameter.span.to_source_span(),
+                                });
                             }
-                            if let Some(unres) = p_type.first_unresolved_name() {
-                                if !class_generic_names.contains(unres)
-                                    && !method_generic_names.contains(unres)
-                                {
-                                    accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                        type_name: unres.to_string(),
-                                        span: parameter.span.to_source_span(),
-                                    });
-                                }
+                            if let Some(unres) = p_type.first_unresolved_name()
+                                && !class_generic_names.contains(unres)
+                                && !method_generic_names.contains(unres)
+                            {
+                                accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                                    type_name: unres.to_string(),
+                                    span: parameter.span.to_source_span(),
+                                });
                             }
                             p_type
                         })
@@ -901,18 +1024,22 @@ pub fn execute_pass2_type_hierarchy(
                     // Validate method modifiers
                     for modifier in &method_declaration.modifiers {
                         if matches!(modifier, Modifier::Const | Modifier::Weak) {
-                            accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration { modifier: modifier.as_str().to_string(), declaration_kind: "method".to_string(), span: method_declaration.span.to_source_span(), });
+                            accumulated_errors.push(
+                                BindingError::ModifierNotApplicableToDeclaration {
+                                    modifier: modifier.as_str().to_string(),
+                                    declaration_kind: "method".to_string(),
+                                    span: method_declaration.span.to_source_span(),
+                                },
+                            );
                         }
                     }
                     if method_declaration.modifiers.contains(&Modifier::Native) {
                         if !method_declaration.generic_params.is_empty() {
-                            accumulated_errors.push(
-                                BindingError::ConflictingModifierCombination {
-                                    modifier1: "native".to_string(),
-                                    modifier2: "generic <T>".to_string(),
-                                    span: method_declaration.span.to_source_span(),
-                                },
-                            );
+                            accumulated_errors.push(BindingError::ConflictingModifierCombination {
+                                modifier1: "native".to_string(),
+                                modifier2: "generic <T>".to_string(),
+                                span: method_declaration.span.to_source_span(),
+                            });
                         }
                         for modifier in &method_declaration.modifiers {
                             if matches!(
@@ -1002,18 +1129,57 @@ pub fn execute_pass2_type_hierarchy(
                             method_name,
                         ) {
                             None => {
-                                accumulated_errors.push(
-                                    BindingError::OverrideWithoutBaseMethod {
-                                        method_name: method_name.to_string(),
-                                        span: method_declaration.span.to_source_span(),
-                                    },
-                                );
+                                accumulated_errors.push(BindingError::OverrideWithoutBaseMethod {
+                                    method_name: method_name.to_string(),
+                                    span: method_declaration.span.to_source_span(),
+                                });
                             }
                             Some(base_entry) => {
-                                let is_virtual_or_abstract = base_entry
-                                    .modifiers
-                                    .contains(&Modifier::Virtual)
-                                    || base_entry.modifiers.contains(&Modifier::Abstract);
+                                let mut is_virtual_or_abstract =
+                                    base_entry.modifiers.contains(&Modifier::Virtual)
+                                        || base_entry.modifiers.contains(&Modifier::Abstract);
+                                if !is_virtual_or_abstract
+                                    && let Some(base_class_id) = base_entry.parent_symbol
+                                    && let Some(&(base_src_id, base_class_decl)) =
+                                        class_ast_map.get(&base_class_id)
+                                {
+                                    let base_src_text = source_texts
+                                        .get(base_src_id as usize)
+                                        .map(|s| s.as_str())
+                                        .unwrap_or("");
+                                    for iface_annot in &base_class_decl.interfaces {
+                                        let resolved_iface = resolve_type_annotation(
+                                            base_src_id,
+                                            base_src_text,
+                                            iface_annot,
+                                            symbol_table,
+                                        );
+                                        if let Type::Interface {
+                                            ref symbol_name, ..
+                                        } = resolved_iface
+                                            && let Some(&(if_src, iface_decl)) =
+                                                interface_by_name.get(symbol_name)
+                                        {
+                                            let if_text = source_texts
+                                                .get(if_src as usize)
+                                                .map(|s| s.as_str())
+                                                .unwrap_or("");
+                                            if iface_decl.methods.iter().any(|m| {
+                                                let m_name =
+                                                    if m.name_span.end as usize <= if_text.len() {
+                                                        &if_text[m.name_span.start as usize
+                                                            ..m.name_span.end as usize]
+                                                    } else {
+                                                        ""
+                                                    };
+                                                m_name == method_name
+                                            }) {
+                                                is_virtual_or_abstract = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                                 let base_class_name = base_entry
                                     .parent_symbol
                                     .and_then(|parent_id| symbol_table.get_symbol(parent_id))
@@ -1032,20 +1198,20 @@ pub fn execute_pass2_type_hierarchy(
                                     return_type: ref base_ret,
                                     parameter_types: ref base_params,
                                 } = base_entry.symbol_type
+                                    && (base_params != &parameter_types
+                                        || **base_ret != return_type)
                                 {
-                                    if base_params != &parameter_types || **base_ret != return_type
-                                    {
-                                        let expected_params = base_params
-                                            .iter()
-                                            .map(|param_type| param_type.to_string())
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-                                        let found_params = parameter_types
-                                            .iter()
-                                            .map(|param_type| param_type.to_string())
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-                                        accumulated_errors.push(
+                                    let expected_params = base_params
+                                        .iter()
+                                        .map(|param_type| param_type.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    let found_params = parameter_types
+                                        .iter()
+                                        .map(|param_type| param_type.to_string())
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    accumulated_errors.push(
                                             BindingError::MethodOverrideMismatch {
                                                 method_name: method_name.to_string(),
                                                 super_class: base_class_name,
@@ -1055,43 +1221,39 @@ pub fn execute_pass2_type_hierarchy(
                                                 span: method_declaration.span.to_source_span(),
                                             },
                                         );
-                                    }
                                 }
                             }
                         }
                     } else if !is_static
                         && !method_declaration.modifiers.contains(&Modifier::Private)
-                    {
-                        if let Some(base_entry) = find_base_method(
+                        && let Some(base_entry) = find_base_method(
                             symbol_table,
                             &class_inheritance_edges,
                             class_symbol_id,
                             method_name,
-                        ) {
-                            let is_virtual = base_entry
-                                .modifiers
-                                .contains(&Modifier::Virtual);
-                            if is_virtual
-                                && let Type::FunctionPointer {
-                                    parameter_types: ref base_params,
-                                    ..
-                                } = base_entry.symbol_type
-                                && base_params == &parameter_types
-                            {
-                                let base_class_name = base_entry
-                                    .parent_symbol
-                                    .and_then(|parent_id| symbol_table.get_symbol(parent_id))
-                                    .map(|parent_sym| parent_sym.name.clone())
-                                    .unwrap_or_else(|| "Base".to_string());
-                                accumulated_errors.push(
-                                    BindingError::MethodOverrideMismatch {
-                                        method_name: method_name.to_string(),
-                                        super_class: base_class_name,
-                                        reason: "missing 'override' modifier on virtual method implementation".to_string(),
-                                        span: method_declaration.span.to_source_span(),
-                                    },
-                                );
-                            }
+                        )
+                    {
+                        let is_virtual = base_entry.modifiers.contains(&Modifier::Virtual);
+                        if is_virtual
+                            && let Type::FunctionPointer {
+                                parameter_types: ref base_params,
+                                ..
+                            } = base_entry.symbol_type
+                            && base_params == &parameter_types
+                        {
+                            let base_class_name = base_entry
+                                .parent_symbol
+                                .and_then(|parent_id| symbol_table.get_symbol(parent_id))
+                                .map(|parent_sym| parent_sym.name.clone())
+                                .unwrap_or_else(|| "Base".to_string());
+                            accumulated_errors.push(BindingError::MethodOverrideMismatch {
+                                method_name: method_name.to_string(),
+                                super_class: base_class_name,
+                                reason:
+                                    "missing 'override' modifier on virtual method implementation"
+                                        .to_string(),
+                                span: method_declaration.span.to_source_span(),
+                            });
                         }
                     }
 
@@ -1175,10 +1337,18 @@ pub fn execute_pass2_type_hierarchy(
                                 | Modifier::Const
                                 | Modifier::Weak
                         ) {
-                            accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration { modifier: modifier.as_str().to_string(), declaration_kind: "constructor".to_string(), span: constructor_declaration.span.to_source_span(), });
+                            accumulated_errors.push(
+                                BindingError::ModifierNotApplicableToDeclaration {
+                                    modifier: modifier.as_str().to_string(),
+                                    declaration_kind: "constructor".to_string(),
+                                    span: constructor_declaration.span.to_source_span(),
+                                },
+                            );
                         }
                         if *modifier == Modifier::Native {
-                            accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction { span: constructor_declaration.span.to_source_span(), });
+                            accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction {
+                                span: constructor_declaration.span.to_source_span(),
+                            });
                         }
                     }
 
@@ -1193,15 +1363,17 @@ pub fn execute_pass2_type_hierarchy(
                                 symbol_table,
                             );
                             if p_type == Type::Primitive(PrimitiveKind::Void) {
-                                accumulated_errors.push(BindingError::VoidTypeNotAllowedHere { span: parameter.span.to_source_span(), });
+                                accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
+                                    span: parameter.span.to_source_span(),
+                                });
                             }
-                            if let Some(unres) = p_type.first_unresolved_name() {
-                                if !class_generic_names.contains(unres) {
-                                    accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                        type_name: unres.to_string(),
-                                        span: parameter.span.to_source_span(),
-                                    });
-                                }
+                            if let Some(unres) = p_type.first_unresolved_name()
+                                && !class_generic_names.contains(unres)
+                            {
+                                accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                                    type_name: unres.to_string(),
+                                    span: parameter.span.to_source_span(),
+                                });
                             }
                             p_type
                         })
@@ -1247,10 +1419,18 @@ pub fn execute_pass2_type_hierarchy(
                 ClassMember::Operator(operator_declaration) => {
                     for modifier in &operator_declaration.modifiers {
                         if *modifier == Modifier::Native {
-                            accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction { span: operator_declaration.span.to_source_span(), });
+                            accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction {
+                                span: operator_declaration.span.to_source_span(),
+                            });
                         }
                         if *modifier == Modifier::Extern {
-                            accumulated_errors.push(BindingError::ModifierNotApplicableToDeclaration { modifier: "extern".to_string(), declaration_kind: "operator".to_string(), span: operator_declaration.span.to_source_span(), });
+                            accumulated_errors.push(
+                                BindingError::ModifierNotApplicableToDeclaration {
+                                    modifier: "extern".to_string(),
+                                    declaration_kind: "operator".to_string(),
+                                    span: operator_declaration.span.to_source_span(),
+                                },
+                            );
                         }
                     }
 
@@ -1264,13 +1444,13 @@ pub fn execute_pass2_type_hierarchy(
                         &operator_declaration.return_type,
                         symbol_table,
                     );
-                    if let Some(unres) = return_type.first_unresolved_name() {
-                        if !class_generic_names.contains(unres) {
-                            accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                type_name: unres.to_string(),
-                                span: operator_declaration.return_type.span().to_source_span(),
-                            });
-                        }
+                    if let Some(unres) = return_type.first_unresolved_name()
+                        && !class_generic_names.contains(unres)
+                    {
+                        accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                            type_name: unres.to_string(),
+                            span: operator_declaration.return_type.span().to_source_span(),
+                        });
                     }
 
                     let parameter_types: Vec<Type> = operator_declaration
@@ -1284,15 +1464,17 @@ pub fn execute_pass2_type_hierarchy(
                                 symbol_table,
                             );
                             if p_type == Type::Primitive(PrimitiveKind::Void) {
-                                accumulated_errors.push(BindingError::VoidTypeNotAllowedHere { span: parameter.span.to_source_span(), });
+                                accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
+                                    span: parameter.span.to_source_span(),
+                                });
                             }
-                            if let Some(unres) = p_type.first_unresolved_name() {
-                                if !class_generic_names.contains(unres) {
-                                    accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
-                                        type_name: unres.to_string(),
-                                        span: parameter.span.to_source_span(),
-                                    });
-                                }
+                            if let Some(unres) = p_type.first_unresolved_name()
+                                && !class_generic_names.contains(unres)
+                            {
+                                accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
+                                    type_name: unres.to_string(),
+                                    span: parameter.span.to_source_span(),
+                                });
                             }
                             p_type
                         })
@@ -1373,13 +1555,23 @@ pub fn execute_pass2_type_hierarchy(
                             if let Some(int_val) = evaluate_integer_constant(explicit) {
                                 current_val = int_val;
                             } else {
-                                accumulated_errors.push(BindingError::EnumExplicitValueNotInteger { variant_name: variant_name.to_string(), found: "non-integer".to_string(), span: variant.span.to_source_span(), });
+                                accumulated_errors.push(
+                                    BindingError::EnumExplicitValueNotInteger {
+                                        variant_name: variant_name.to_string(),
+                                        found: "non-integer".to_string(),
+                                        span: variant.span.to_source_span(),
+                                    },
+                                );
                             }
                         } else if variant_index > 0 {
                             current_val += 1;
                         }
                         if !seen_values.insert(current_val) {
-                            accumulated_errors.push(BindingError::DuplicateEnumVariant { variant_name: variant_name.to_string(), enum_name: enum_name.to_string(), span: variant.span.to_source_span(), });
+                            accumulated_errors.push(BindingError::DuplicateEnumVariant {
+                                variant_name: variant_name.to_string(),
+                                enum_name: enum_name.to_string(),
+                                span: variant.span.to_source_span(),
+                            });
                         }
                         let variant_symbol = SymbolEntry {
                             id: SymbolId(0),
@@ -1412,7 +1604,9 @@ pub fn execute_pass2_type_hierarchy(
             let resolved_iface =
                 resolve_type_annotation(source_id, source_text, iface_annotation, symbol_table);
             match resolved_iface {
-                Type::Interface { ref symbol_name, .. } => {
+                Type::Interface {
+                    ref symbol_name, ..
+                } => {
                     let simple = symbol_name
                         .rsplit(['.', ':'])
                         .next()
@@ -1435,12 +1629,13 @@ pub fn execute_pass2_type_hierarchy(
                                 .map(|s| s.as_str())
                                 .unwrap_or("");
                             for method in &iface_decl.methods {
-                                let method_name = if method.name_span.end as usize <= iface_src_text.len() {
-                                    &iface_src_text
-                                        [method.name_span.start as usize..method.name_span.end as usize]
-                                } else {
-                                    ""
-                                };
+                                let method_name =
+                                    if method.name_span.end as usize <= iface_src_text.len() {
+                                        &iface_src_text[method.name_span.start as usize
+                                            ..method.name_span.end as usize]
+                                    } else {
+                                        ""
+                                    };
                                 required_methods.push(method_name.to_string());
                             }
                             for super_annot in &iface_decl.super_interfaces {
@@ -1481,6 +1676,75 @@ pub fn execute_pass2_type_hierarchy(
                         iface_methods = class_layout.vtable_methods.clone();
                     }
 
+                    for visited_name in &visited_ifaces {
+                        if let Some(&(vis_src_id, vis_decl)) = interface_by_name.get(visited_name) {
+                            let vis_text = source_texts
+                                .get(vis_src_id as usize)
+                                .map(|s| s.as_str())
+                                .unwrap_or("");
+                            let mut vis_methods = Vec::new();
+                            for m in &vis_decl.methods {
+                                let m_name = if m.name_span.end as usize <= vis_text.len() {
+                                    &vis_text[m.name_span.start as usize..m.name_span.end as usize]
+                                } else {
+                                    ""
+                                };
+                                if let Some(&cls_slot) = class_layout.method_slots.get(m_name)
+                                    && cls_slot < class_layout.vtable_methods.len()
+                                {
+                                    vis_methods.push(class_layout.vtable_methods[cls_slot]);
+                                }
+                            }
+                            // Also include inherited methods from super interfaces of this interface
+                            for super_annot in &vis_decl.super_interfaces {
+                                let super_res = resolve_type_annotation(
+                                    vis_src_id,
+                                    vis_text,
+                                    super_annot,
+                                    symbol_table,
+                                );
+                                if let Type::Interface {
+                                    ref symbol_name, ..
+                                } = super_res
+                                    && let Some(&(s_src, s_decl)) =
+                                        interface_by_name.get(symbol_name)
+                                {
+                                    let s_text = source_texts
+                                        .get(s_src as usize)
+                                        .map(|s| s.as_str())
+                                        .unwrap_or("");
+                                    for sm in &s_decl.methods {
+                                        let sm_name = if sm.name_span.end as usize <= s_text.len() {
+                                            &s_text[sm.name_span.start as usize
+                                                ..sm.name_span.end as usize]
+                                        } else {
+                                            ""
+                                        };
+                                        if let Some(&cls_slot) =
+                                            class_layout.method_slots.get(sm_name)
+                                            && cls_slot < class_layout.vtable_methods.len()
+                                            && !vis_methods
+                                                .contains(&class_layout.vtable_methods[cls_slot])
+                                        {
+                                            vis_methods.push(class_layout.vtable_methods[cls_slot]);
+                                        }
+                                    }
+                                }
+                            }
+
+                            let visited_simple = visited_name
+                                .rsplit(['.', ':'])
+                                .next()
+                                .unwrap_or(visited_name)
+                                .to_string();
+                            class_layout
+                                .itable_methods
+                                .insert(visited_name.clone(), vis_methods.clone());
+                            class_layout
+                                .itable_methods
+                                .insert(visited_simple, vis_methods);
+                        }
+                    }
                     class_layout
                         .itable_methods
                         .insert(symbol_name.clone(), iface_methods.clone());
