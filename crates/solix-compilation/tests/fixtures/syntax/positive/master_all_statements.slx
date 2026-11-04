@@ -1,0 +1,198 @@
+// ============================================================================
+// Solix Master Positive Syntax Fixture: Every Statement and Variation
+// ============================================================================
+
+package solix.tests.master;
+
+import std.collections.List;
+import std.collections.Map;
+import std.io.File as SolixFile;
+import std.math.*;
+
+alias Byte = uint8;
+alias StringMap<V> = Map<string, V>;
+alias Callback = void(*)(int32, bool);
+alias PointPair = tuple<int32, int32>;
+
+public interface IPrintable {
+    void print();
+}
+
+public interface IContainer<T> extends IPrintable {
+    T get(int32 index);
+    void add(T item);
+    int32 size();
+}
+
+public enum Color {
+    RED,
+    GREEN = 10,
+    BLUE = 20
+}
+
+public class Exception {
+    public string message;
+    public Exception(string msg) {
+        this.message = msg;
+    }
+}
+
+public class BaseEntity {
+    public int32 id;
+    public BaseEntity(int32 id) {
+        this.id = id;
+    }
+}
+
+public class MasterContainer<K, V> extends BaseEntity implements IContainer<V> {
+    public static const int32 CAPACITY = 1024;
+    private K key;
+    private V value;
+    protected int32[] numbers;
+    public string[][] grid;
+    public tuple<int32, string, bool> metadata;
+    public void(*)(int32, bool) event_handler;
+
+    public MasterContainer(int32 id, K key, V value) : super(id) {
+        this.key = key;
+        this.value = value;
+        this.numbers = new int32[10];
+        this.grid = new string[][5];
+        this.metadata = tuple(id, "init", true);
+    }
+
+    ~MasterContainer() {
+        this.numbers = null;
+        this.grid = null;
+    }
+
+    public MasterContainer<K, V> operator +(MasterContainer<K, V> rhs) {
+        return new MasterContainer<K, V>(this.id + rhs.id, this.key, this.value);
+    }
+
+    public V get(int32 index) {
+        return this.value;
+    }
+
+    public void add(V item) {
+        this.value = item;
+    }
+
+    public int32 size() {
+        return MasterContainer::CAPACITY;
+    }
+
+    public void print() {
+        assert(this.id >= 0, "ID must be non-negative");
+    }
+
+    public R transform<R>(R initial_val, int32 factor = 2) {
+        const int32 local_constant = 100;
+        int32 counter = 0;
+        float64 accumulator = 3.14159;
+        bool is_valid = true;
+        char flag = 'Z';
+        string greeting = "Hello, \n\t\"Solix\" World! \x41";
+
+        // If-Else Branching
+        if (counter == 0) {
+            counter = counter + 1;
+        } else if (counter < local_constant) {
+            counter = counter + factor;
+        } else {
+            counter = 0;
+        }
+
+        // While Loop
+        while (counter < 5) {
+            counter++;
+            if (counter == 3) {
+                continue;
+            }
+        }
+
+        // Do-While Loop
+        do {
+            counter--;
+        } while (counter > 0);
+
+        // For Loop
+        for (int32 iter = 0; iter < 10; iter++) {
+            if (iter == 8) {
+                break;
+            }
+        }
+
+        // Switch-Case Statement
+        switch (counter) {
+            case 0:
+                accumulator += 1.0;
+                break;
+            case 1:
+                accumulator -= 0.5;
+                break;
+            default:
+                accumulator *= 2.0;
+                break;
+        }
+
+        // Exception Handling: Try-Catch-Finally
+        try {
+            if (counter < 0) {
+                throw new Exception("Negative counter");
+            }
+        } catch (Exception error) {
+            counter = 0;
+        } finally {
+            is_valid = true;
+        }
+
+        // Array Literals and Indexing
+        int32[] inline_array = [10, 20, 30, 40, 50];
+        int32 first = inline_array[0];
+
+        // Complex Binary and Unary Operations
+        int32 calc = (10 + 20) * 3 - (40 / 2) % 3;
+        bool logic = (!is_valid && true) || (counter >= 0 && counter <= 100);
+        int32 bitwise = (~counter & 0xFF);
+
+        // Compound Assignments
+        calc += 5;
+        calc -= 2;
+        calc *= 3;
+        calc /= 2;
+        calc %= 4;
+
+        // Ternary Conditional
+        int32 ternary_result = (calc > 0) ? 100 : -100;
+
+        // Lambda Expressions: Zero-arg, Single-arg, Multi-arg, Block-body
+        Callback cb = (arg1, arg2) => {
+            if (arg2) {
+                counter += arg1;
+            }
+        };
+
+        bool(*)() zero_arg = () => true;
+        int32(*)(int32) single_arg = (x) => x * 2;
+        int32(*)(int32, int32) expr_lambda = (x, y) => x + y;
+
+        // Type Inspection and Conversion: Cast, Instanceof, Sizeof, Default
+        float64 casted = cast(calc, float64);
+        bool is_str = greeting instanceof string;
+        int32 size_bytes = sizeof(int64);
+        int32 default_val = default(int32);
+
+        // Tuples
+        PointPair coords = tuple(10, 20);
+        tuple<int32, string> pair = (42, "answer");
+
+        // Assert and Exit
+        assert(is_valid, "Invariant maintained");
+        if (false) {
+            exit(1);
+        }
+
+        return initial_val;
+    }
+}
