@@ -1,0 +1,6 @@
+package blt.io;
+
+public native void print(string msg);
+public native void println(string msg);
+public native void print_chars(char[] chars);
+public native void println_chars(char[] chars);
