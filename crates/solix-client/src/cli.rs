@@ -82,6 +82,10 @@ pub struct CompileArgs {
     /// Output compiler metrics formatted as machine-readable JSON
     #[arg(long)]
     pub metrics_json: bool,
+
+    /// Inlining statement threshold limit for AstInlinerPhase [default: 8]
+    #[arg(long, default_value_t = 8)]
+    pub inline_threshold: usize,
 }
 
 /// Arguments for `solix run`.
@@ -98,6 +102,10 @@ pub struct RunArgs {
     /// Do not automatically include built-in standard library definitions (blt.io)
     #[arg(long)]
     pub no_builtins: bool,
+
+    /// Inlining statement threshold limit for AstInlinerPhase [default: 8]
+    #[arg(long, default_value_t = 8)]
+    pub inline_threshold: usize,
 
     /// Virtual heap size limit (e.g., "32MB", "64MB") [default: 32MB]
     #[arg(long, default_value = "32MB")]

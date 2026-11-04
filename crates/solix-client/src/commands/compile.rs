@@ -42,7 +42,8 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             &args.version,
             args.description.as_deref().unwrap_or(""),
         )
-        .with_builtins(!args.no_builtins);
+        .with_builtins(!args.no_builtins)
+        .with_inline_threshold(args.inline_threshold);
 
     // 3. Register user source files
     for source_path in &args.sources {

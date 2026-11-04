@@ -139,7 +139,8 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
         let mut compilation_options = CompilationOptions::new()
             .with_package_metadata(first_stem, "0.1.0", "")
-            .with_builtins(!args.no_builtins);
+            .with_builtins(!args.no_builtins)
+            .with_inline_threshold(args.inline_threshold);
 
         for source_path in &source_paths {
             let source_code = fs::read_to_string(source_path).with_context(|| {

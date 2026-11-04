@@ -160,10 +160,10 @@ impl VirtualHeap {
             });
         }
 
-        let payload_abs_addr: u32 = if required_block_size <= 256 {
-            let class_index = (required_block_size / 8) - 1;
-            let cached_payload = self.quick_lists[class_index];
-            if cached_payload != 0 {
+        let payload_abs_addr: u32 =
+            if required_block_size <= 256 && self.quick_lists[(required_block_size / 8) - 1] != 0 {
+                let class_index = (required_block_size / 8) - 1;
+                let cached_payload = self.quick_lists[class_index];
                 // O(1) Quick-list pop
                 let next_cached = self.read_u32(cached_payload)?;
                 self.quick_lists[class_index] = next_cached;
@@ -179,7 +179,7 @@ impl VirtualHeap {
 
                 cached_payload
             } else if self.bump_cursor + required_block_size <= self.dynamic_capacity {
-                // O(1) Bump allocation
+                // O(1) Bump allocation for any block size fitting the remaining bump capacity
                 let block_offset = self.bump_cursor;
                 self.bump_cursor += required_block_size;
 
@@ -196,17 +196,15 @@ impl VirtualHeap {
 
                 payload_addr
             } else {
-                if self.bump_cursor >= self.dynamic_capacity {
-                    self.flush_quick_lists_to_free_list();
+                // Bump pointer exhausted. Flush un-bumped remainder to free_list and flush quick lists.
+                if self.bump_cursor < self.dynamic_capacity {
+                    let remaining_size = self.dynamic_capacity - self.bump_cursor;
+                    self.free_list.deallocate(self.bump_cursor, remaining_size);
+                    self.bump_cursor = self.dynamic_capacity;
                 }
-                self.allocate_from_free_list(required_block_size, payload_size, tag)?
-            }
-        } else {
-            if self.bump_cursor >= self.dynamic_capacity {
                 self.flush_quick_lists_to_free_list();
-            }
-            self.allocate_from_free_list(required_block_size, payload_size, tag)?
-        };
+                self.allocate_from_free_list(required_block_size, payload_size, tag)?
+            };
 
         self.total_allocations_count += 1;
         self.active_live_objects += 1;
