@@ -84,11 +84,10 @@ impl<'a> TypeCheckingVisitor<'a> {
                 // Check "this"
                 if identifier_name == "this" {
                     if self.is_static_method {
-                        self.errors.push(BindingError::UndefinedSymbol {
-                            symbol_name: "Keyword 'this' cannot be used in a static method"
-                                .to_string(),
-                            span: span.to_source_span(),
-                        });
+                        self.errors
+                            .push(BindingError::ThisUsedOutsideInstanceMethod {
+                                span: span.to_source_span(),
+                            });
                         return Type::Error;
                     }
                     if let Some(class_id) = self.current_class
@@ -96,10 +95,10 @@ impl<'a> TypeCheckingVisitor<'a> {
                     {
                         return class_entry.symbol_type.clone();
                     }
-                    self.errors.push(BindingError::UndefinedSymbol {
-                        symbol_name: "Keyword 'this' cannot be used outside of a class".to_string(),
-                        span: span.to_source_span(),
-                    });
+                    self.errors
+                        .push(BindingError::ThisUsedOutsideInstanceMethod {
+                            span: span.to_source_span(),
+                        });
                     return Type::Error;
                 }
 
@@ -534,14 +533,25 @@ impl<'a> TypeCheckingVisitor<'a> {
                                         child_entry.symbol_type,
                                         Type::FunctionPointer { .. }
                                     );
-                                    if !is_method && child_entry.is_static && !*is_scope_resolution
+                                    if is_method && !child_entry.is_static && *is_scope_resolution {
+                                        self.errors.push(
+                                            BindingError::InstanceMethodAccessViaStatic {
+                                                method_name: member_name.to_string(),
+                                                class_name: symbol_name.clone(),
+                                                span: member_span.to_source_span(),
+                                            },
+                                        );
+                                    } else if !is_method
+                                        && child_entry.is_static
+                                        && !*is_scope_resolution
                                     {
                                         self.errors.push(BindingError::StaticAccessViaDot {
                                             member_name: member_name.to_string(),
                                             owner: symbol_name.clone(),
                                             span: member_span.to_source_span(),
                                         });
-                                    } else if !child_entry.is_static
+                                    } else if !is_method
+                                        && !child_entry.is_static
                                         && !child_entry.is_const
                                         && *is_scope_resolution
                                     {
@@ -1168,11 +1178,9 @@ impl<'a> TypeCheckingVisitor<'a> {
                     && !self.check_is_subtype(src_cls, tgt_cls)
                     && !self.check_is_subtype(tgt_cls, src_cls)
                 {
-                    self.errors.push(BindingError::TypeMismatch {
-                        expected: tgt_cls.clone(),
-                        found: format!(
-                            "Cannot cast between unrelated types '{src_cls}' and '{tgt_cls}'"
-                        ),
+                    self.errors.push(BindingError::InvalidCastType {
+                        source_type: src_cls.clone(),
+                        target_type: tgt_cls.clone(),
                         span: span.to_source_span(),
                     });
                 }
@@ -1200,9 +1208,12 @@ impl<'a> TypeCheckingVisitor<'a> {
                 };
 
                 if !is_tuple_access && (src_type.is_primitive() || tgt_type.is_primitive()) {
-                    self.errors.push(BindingError::TypeMismatch {
-                        expected: "reference type".to_string(),
-                        found: "'instanceof' cannot be applied to primitive types".to_string(),
+                    self.errors.push(BindingError::InvalidTypeForInstanceOf {
+                        found: if src_type.is_primitive() {
+                            src_type.to_string()
+                        } else {
+                            tgt_type.to_string()
+                        },
                         span: span.to_source_span(),
                     });
                 }
@@ -2006,6 +2017,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 is_const: false,
                 slot_index: Some(slot_index as u32),
             };
+            if let Some(innermost_scope) = self.symbol_table.scope_stack.last()
+                && innermost_scope.contains_key(param_name)
+            {
+                self.errors.push(BindingError::DuplicateSymbol {
+                    symbol_name: format!(
+                        "Parameter '{param_name}' is already defined in this parameter list"
+                    ),
+                    span: parameter.name_span.to_source_span(),
+                });
+            }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
         }
@@ -2082,6 +2103,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 is_const: false,
                 slot_index: Some(slot_index as u32),
             };
+            if let Some(innermost_scope) = self.symbol_table.scope_stack.last()
+                && innermost_scope.contains_key(param_name)
+            {
+                self.errors.push(BindingError::DuplicateSymbol {
+                    symbol_name: format!(
+                        "Parameter '{param_name}' is already defined in this parameter list"
+                    ),
+                    span: parameter.name_span.to_source_span(),
+                });
+            }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
         }
@@ -2214,6 +2245,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 is_const: false,
                 slot_index: Some(slot_index as u32),
             };
+            if let Some(innermost_scope) = self.symbol_table.scope_stack.last()
+                && innermost_scope.contains_key(param_name)
+            {
+                self.errors.push(BindingError::DuplicateSymbol {
+                    symbol_name: format!(
+                        "Parameter '{param_name}' is already defined in this parameter list"
+                    ),
+                    span: parameter.name_span.to_source_span(),
+                });
+            }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
         }

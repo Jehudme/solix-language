@@ -833,7 +833,7 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Cannot cast expression of type '{source_type}' to '{target_type}'")]
+    #[error("Cannot cast expression of type '{source_type}' to '{target_type}' (unrelated types)")]
     #[diagnostic(
         code(solix::binder::invalid_cast_type),
         help("Ensure types are related by inheritance or numeric conversion paths.")
