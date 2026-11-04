@@ -6268,5 +6268,27 @@ class Helper {
 ### Case 59.19: Inspection of Corrupted Binary Container [IMPLEMENTED]
 *Expected Result*: Executing `solix info corrupt.slxb` on invalid or corrupted binary data halts with container decoding error.
 
+---
+
+## Suite 60: Milestone 015 Conformance & Granular Diagnostics Test Suites
+
+### Suite 60.1: Granular Lexer & Parser Syntax Diagnostics (`test_granular_parser_diagnostics.rs`) [IMPLEMENTED]
+* 80 test cases asserting exact diagnostic codes (`E0011`–`E0015`, `E0141`–`E0144`, `E0160`–`E0200`).
+* Validates clean diagnostic messages with zero raw `SourceSpan {` internal leakage.
+* Tests opening/closing delimiter mismatches, unclosed quotes, unterminated block comments, malformed numeric literals, modifier placement, and statement syntax.
+
+### Suite 60.2: 13-Modifier Legality Matrix Conformance (`test_modifier_matrix.rs`) [IMPLEMENTED]
+* 62 exhaustive test cases testing the complete 13-modifier legality matrix across declarations (classes, interfaces, enums, fields, methods, constructors, destructors, operators, free functions).
+* Validates exact error code emissions (`E0130`, `E0137`, `E0138`, `E0154`, `E0155`, `E0156`, `E0198`, `E0199`, `E0200`, `E0229`, `E0264`, `E0274`, `E0275`, `E0278`).
+
+### Suite 60.3: Semantic Binder Diagnostic Precision Suite (`test_granular_binder_diagnostics.rs`) [IMPLEMENTED]
+* 71 test cases asserting exact semantic error codes across `E0201` through `E0288`.
+* Covers undefined symbols, duplicate declarations, type mismatches, cyclic inheritance, invalid base classes, unimplemented interface methods, override mismatches, private/protected access violations, const reassignment, break/continue outside loops, switch non-constant cases, static/instance scope resolution access, alias cycles, unresolved imports, and entry point validation.
+
+### Suite 60.4: Positive Language Conformance Suite (`test_conformance_suite.rs`) [IMPLEMENTED]
+* 40 end-to-end positive compilation and execution test cases.
+* Covers bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) across integer types, 4+ level deep inheritance hierarchies with virtual dispatch, generic classes, multi-parameter generic methods with explicit and deduced arguments, pattern-matched switch statements, try-catch-finally exception unwinding, RAII LIFO destructor reclamation, sizeof, instanceof, arrays, tuples, and operator overloading.
+
+
 
 
