@@ -148,7 +148,7 @@ fn test_case_4_3_unclosed_block_missing_brace() {
                 int32 x = 1;
         }
     "#;
-    assert_compile_error(code, "}");
+    assert_compile_error(code, "E0161");
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn test_case_4_4_stray_extra_closing_brace() {
             }
         }
     "#;
-    assert_compile_error(code, "}");
+    assert_compile_error(code, "E0103");
 }
 
 #[test]

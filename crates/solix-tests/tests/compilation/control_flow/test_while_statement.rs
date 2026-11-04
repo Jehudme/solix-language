@@ -79,7 +79,7 @@ fn test_case_4_2_while_loop_missing_condition_parentheses() {
             while true {}
         }
     "#;
-    assert_compile_error(code, "(");
+    assert_compile_error(code, "E0144");
 }
 
 #[test]

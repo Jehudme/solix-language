@@ -118,30 +118,44 @@ pub fn compile_and_run_entry(source_code: &str, entry_point: &str) -> (Value, Vi
 /// Asserts that compiling `source_code` fails with a diagnostic containing `expected_error_or_code`.
 ///
 /// # Panics
-/// Panics if compilation succeeds or the error does not contain the expected pattern.
+/// Panics if compilation succeeds, if raw `SourceSpan {` debug formatting leaks into error messages,
+/// or if the error does not contain the expected pattern / code.
 pub fn assert_compile_error(source_code: &str, expected_error_or_code: &str) {
     let options = CompilationOptions::new().with_source("error_test.slx", source_code);
     let mut context = CompilationContext::new(options);
 
     match context.execute() {
         Ok(_) => panic!(
-            "Expected compilation to fail with error matching '{}', but compilation succeeded!",
-            expected_error_or_code
+            "Expected compilation to fail with error matching '{expected_error_or_code}', but compilation succeeded!",
         ),
         Err(diagnostics) => {
-            let err_msg = diagnostics
+            for diagnostic in &diagnostics {
+                let display_message = format!("{diagnostic}");
+                assert!(
+                    !display_message.contains("SourceSpan {"),
+                    "Diagnostic Display leaked raw SourceSpan debug formatting:\n{display_message}"
+                );
+            }
+
+            let combined_message = diagnostics
                 .iter()
-                .map(|e| format!("{} {} {:?}", e.error_code(), e, e))
+                .map(|diagnostic| format!("{} {}", diagnostic.error_code(), diagnostic))
                 .collect::<Vec<_>>()
                 .join("\n");
+
+            let matches_code = diagnostics.iter().any(|diagnostic| {
+                diagnostic.error_code() == expected_error_or_code
+                    || diagnostic.error_code().to_string() == expected_error_or_code
+            });
+
+            let matches_text = combined_message
+                .to_lowercase()
+                .contains(&expected_error_or_code.to_lowercase())
+                || combined_message.contains(expected_error_or_code);
+
             assert!(
-                err_msg
-                    .to_lowercase()
-                    .contains(&expected_error_or_code.to_lowercase())
-                    || err_msg.contains(expected_error_or_code),
-                "Expected error matching '{}', got: '{}'",
-                expected_error_or_code,
-                err_msg
+                matches_code || matches_text,
+                "Expected error matching '{expected_error_or_code}', got:\n{combined_message}"
             );
         }
     }
@@ -150,7 +164,8 @@ pub fn assert_compile_error(source_code: &str, expected_error_or_code: &str) {
 /// Asserts that compiling multiple Solix sources fails with a diagnostic containing `expected_error_or_code`.
 ///
 /// # Panics
-/// Panics if compilation succeeds or the error does not contain the expected pattern.
+/// Panics if compilation succeeds, if raw `SourceSpan {` debug formatting leaks into error messages,
+/// or if the error does not contain the expected pattern / code.
 pub fn assert_compile_sources_error(sources: &[(&str, &str)], expected_error_or_code: &str) {
     let mut options = CompilationOptions::new();
     for (name, code) in sources {
@@ -160,23 +175,36 @@ pub fn assert_compile_sources_error(sources: &[(&str, &str)], expected_error_or_
 
     match context.execute() {
         Ok(_) => panic!(
-            "Expected multi-source compilation to fail with error matching '{}', but compilation succeeded!",
-            expected_error_or_code
+            "Expected multi-source compilation to fail with error matching '{expected_error_or_code}', but compilation succeeded!",
         ),
         Err(diagnostics) => {
-            let err_msg = diagnostics
+            for diagnostic in &diagnostics {
+                let display_message = format!("{diagnostic}");
+                assert!(
+                    !display_message.contains("SourceSpan {"),
+                    "Diagnostic Display leaked raw SourceSpan debug formatting:\n{display_message}"
+                );
+            }
+
+            let combined_message = diagnostics
                 .iter()
-                .map(|e| format!("{} {} {:?}", e.error_code(), e, e))
+                .map(|diagnostic| format!("{} {}", diagnostic.error_code(), diagnostic))
                 .collect::<Vec<_>>()
                 .join("\n");
+
+            let matches_code = diagnostics.iter().any(|diagnostic| {
+                diagnostic.error_code() == expected_error_or_code
+                    || diagnostic.error_code().to_string() == expected_error_or_code
+            });
+
+            let matches_text = combined_message
+                .to_lowercase()
+                .contains(&expected_error_or_code.to_lowercase())
+                || combined_message.contains(expected_error_or_code);
+
             assert!(
-                err_msg
-                    .to_lowercase()
-                    .contains(&expected_error_or_code.to_lowercase())
-                    || err_msg.contains(expected_error_or_code),
-                "Expected error matching '{}', got: '{}'",
-                expected_error_or_code,
-                err_msg
+                matches_code || matches_text,
+                "Expected error matching '{expected_error_or_code}', got:\n{combined_message}"
             );
         }
     }
