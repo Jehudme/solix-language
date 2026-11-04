@@ -1093,3 +1093,139 @@ class MainConsumer {
     assert!(execution_result.is_ok());
     assert_eq!(execution_result.unwrap(), 0);
 }
+
+#[test]
+fn test_cli_compile_metrics_flag() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let source_file = workspace
+        .write_file(
+            "metrics_sample.slx",
+            r#"
+class Sample {
+    public static int32 main() {
+        return 0;
+    }
+}
+"#,
+        )
+        .unwrap();
+    let output_bin = workspace.file_path("metrics_sample.slxb");
+
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_file.to_str().unwrap(),
+        "-o",
+        output_bin.to_str().unwrap(),
+        "--metrics",
+    ])
+    .expect("Failed to parse compile with --metrics");
+
+    assert!(run(compile_cli).is_ok());
+    assert!(output_bin.exists());
+}
+
+#[test]
+fn test_cli_compile_metrics_json_flag() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let source_file = workspace
+        .write_file(
+            "json_sample.slx",
+            r#"
+class Sample {
+    public static int32 compute(int32 operand) {
+        return operand * 2;
+    }
+}
+"#,
+        )
+        .unwrap();
+    let output_bin = workspace.file_path("json_sample.slxb");
+
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_file.to_str().unwrap(),
+        "-o",
+        output_bin.to_str().unwrap(),
+        "--metrics-json",
+    ])
+    .expect("Failed to parse compile with --metrics-json");
+
+    assert!(run(compile_cli).is_ok());
+    assert!(output_bin.exists());
+}
+
+#[test]
+fn test_cli_run_metrics_flag() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let source_file = workspace
+        .write_file(
+            "run_sample.slx",
+            r#"
+class Main {
+    public static int32 main() {
+        return 77;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from(["solix", "run", source_file.to_str().unwrap(), "--metrics"])
+        .expect("Failed to parse run with --metrics");
+
+    let result = run(run_cli).expect("Execution failed");
+    assert_eq!(result, 77);
+}
+
+#[test]
+fn test_cli_run_metrics_json_flag() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let source_file = workspace
+        .write_file(
+            "fib_test.slx",
+            r#"
+class Fib {
+    public static int32 fib(int32 n) {
+        if (n <= 1) {
+            return n;
+        }
+        return Fib::fib(n - 1) + Fib::fib(n - 2);
+    }
+    public static int32 main() {
+        return Fib::fib(8);
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        source_file.to_str().unwrap(),
+        "--metrics-json",
+    ])
+    .expect("Failed to parse run with --metrics-json");
+
+    let result = run(run_cli).expect("Execution failed");
+    assert_eq!(result, 21);
+}
+
+#[test]
+fn test_process_telemetry_capture() {
+    let telemetry = solix_client::capture_process_telemetry();
+    #[cfg(target_os = "linux")]
+    {
+        assert!(
+            telemetry.peak_rss_kb > 0,
+            "peak_rss_kb was {}",
+            telemetry.peak_rss_kb
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = telemetry;
+    }
+}
