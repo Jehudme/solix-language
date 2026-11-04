@@ -2,7 +2,8 @@
 
 use solix_runtime::Value;
 use solix_tests::common::{
-    assert_compile_error, assert_compile_sources_error, compile_and_run_multi,
+    assert_compile_error, assert_compile_error_with_builtins, assert_compile_sources_error,
+    compile_and_run_multi, compile_and_run_with_builtins,
 };
 
 #[test]
@@ -148,6 +149,38 @@ fn test_case_3_5_cross_platform_binary_path_resolution() {
 }
 
 #[test]
+fn test_case_3_6_builtin_io_direct_symbol_import() {
+    let code = r#"
+        import blt.io.println;
+
+        class Main {
+            public static int32 main() {
+                println("Hello from direct builtin import!");
+                return 0;
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run_with_builtins(code);
+    assert_eq!(execution_result, Value::I32(0));
+}
+
+#[test]
+fn test_case_3_7_builtin_io_wildcard_import() {
+    let code = r#"
+        import blt.io.*;
+
+        class Main {
+            public static int32 main() {
+                println("Hello from wildcard builtin import!");
+                return 0;
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run_with_builtins(code);
+    assert_eq!(execution_result, Value::I32(0));
+}
+
+#[test]
 fn test_case_4_1_importing_non_existent_package() {
     // Error: E0232 (CannotResolveImport)
     let code = r#"
@@ -252,4 +285,76 @@ fn test_case_4_6_import_statement_inside_function_body() {
         }
     "#;
     assert_compile_error(code, "E0113");
+}
+
+#[test]
+fn test_case_4_7_importing_symbol_from_subpackage_prefix_fails() {
+    // Error: E0232 (CannotResolveImport) - 'blt' is not a package, only 'blt.io' is
+    let code = r#"
+        import blt.println;
+
+        class Main {
+            public static int32 main() {
+                return 0;
+            }
+        }
+    "#;
+    assert_compile_error_with_builtins(code, "E0232");
+}
+
+#[test]
+fn test_case_4_8_wildcard_import_of_subpackage_prefix_fails() {
+    // Error: E0232 (CannotResolveImport) - 'blt' is not a package, only 'blt.io' is
+    let code = r#"
+        import blt.*;
+
+        class Main {
+            public static int32 main() {
+                return 0;
+            }
+        }
+    "#;
+    assert_compile_error_with_builtins(code, "E0232");
+}
+
+#[test]
+fn test_case_4_9_importing_unknown_member_from_builtin_package_fails() {
+    // Error: E0201 (UndefinedSymbol) - 'nonexistent_symbol' does not exist in valid package 'blt.io'
+    let code = r#"
+        import blt.io.nonexistent_symbol;
+
+        class Main {
+            public static int32 main() {
+                return 0;
+            }
+        }
+    "#;
+    assert_compile_error_with_builtins(code, "E0201");
+}
+
+#[test]
+fn test_case_4_10_importing_intermediate_prefix_of_user_package_fails() {
+    // Error: E0232 (CannotResolveImport) - 'my.core' is not a package when only 'my.core.sub' is declared
+    let sources = [
+        (
+            "sub.slx",
+            r#"
+            package my.core.sub;
+            public class DeepItem {}
+        "#,
+        ),
+        (
+            "main.slx",
+            r#"
+            import my.core.DeepItem;
+
+            class Main {
+                public static int32 main() {
+                    return 0;
+                }
+            }
+        "#,
+        ),
+    ];
+    assert_compile_sources_error(&sources, "E0232");
 }

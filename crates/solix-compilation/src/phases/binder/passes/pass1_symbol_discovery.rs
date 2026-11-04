@@ -765,14 +765,20 @@ pub fn execute_pass1_symbol_discovery(
             if import_entry.is_wildcard {
                 let path = &import_entry.path;
                 let is_std = path.starts_with("std") || path.starts_with("solix");
-                let is_known_pkg = symbol_table.file_packages.iter().any(|p| p == path)
-                    || symbol_table
-                        .global_names
-                        .keys()
-                        .any(|k| k.starts_with(&format!("{path}::")));
+                let is_known_pkg = symbol_table
+                    .file_packages
+                    .iter()
+                    .any(|pkg_name| pkg_name == path)
+                    || symbol_table.global_names.keys().any(|key| {
+                        if let Some((symbol_package, _)) = key.rsplit_once("::") {
+                            symbol_package == path
+                        } else {
+                            false
+                        }
+                    });
                 if !is_std && !is_known_pkg {
                     accumulated_errors.push(BindingError::CannotResolveImport {
-                        import_path: path.clone(),
+                        import_path: path.replace("::", "."),
                         span: import_entry.span.to_source_span(),
                     });
                 }
@@ -783,11 +789,17 @@ pub fn execute_pass1_symbol_discovery(
                     let parts: Vec<&str> = path.split("::").collect();
                     if parts.len() > 1 {
                         let pkg = parts[..parts.len() - 1].join("::");
-                        let pkg_exists = symbol_table.file_packages.iter().any(|p| p == &pkg)
-                            || symbol_table
-                                .global_names
-                                .keys()
-                                .any(|k| k.starts_with(&format!("{pkg}::")));
+                        let pkg_exists = symbol_table
+                            .file_packages
+                            .iter()
+                            .any(|pkg_name| pkg_name == &pkg)
+                            || symbol_table.global_names.keys().any(|key| {
+                                if let Some((symbol_package, _)) = key.rsplit_once("::") {
+                                    symbol_package == pkg
+                                } else {
+                                    false
+                                }
+                            });
                         if pkg_exists {
                             accumulated_errors.push(BindingError::undefined_symbol(
                                 format!(
@@ -799,13 +811,13 @@ pub fn execute_pass1_symbol_discovery(
                             ));
                         } else {
                             accumulated_errors.push(BindingError::CannotResolveImport {
-                                import_path: path.clone(),
+                                import_path: path.replace("::", "."),
                                 span: import_entry.span.to_source_span(),
                             });
                         }
                     } else {
                         accumulated_errors.push(BindingError::CannotResolveImport {
-                            import_path: path.clone(),
+                            import_path: path.replace("::", "."),
                             span: import_entry.span.to_source_span(),
                         });
                     }

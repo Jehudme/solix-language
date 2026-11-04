@@ -55,6 +55,10 @@ pub fn run_binary(program: BinaryProgram, entry_point: Option<&str>) -> (Value, 
         .with_binary(program)
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
+        .with_native_function("blt::io::println", builtin_println)
+        .with_native_function("blt::io::print", builtin_print)
+        .with_native_function("blt::io::println_chars", builtin_println)
+        .with_native_function("blt::io::print_chars", builtin_print)
         .with_native_function("Console::println", builtin_println)
         .with_native_function("Console::print", builtin_print);
 
@@ -67,8 +71,8 @@ pub fn run_binary(program: BinaryProgram, entry_point: Option<&str>) -> (Value, 
 
     let result = vm.run().expect("VM execution failed");
 
-    if let Err(ref e) = vm.verify_clean_memory() {
-        panic!("CLEAN MEMORY FAILED: {:?}", e);
+    if let Err(ref error) = vm.verify_clean_memory() {
+        panic!("CLEAN MEMORY FAILED: {:?}", error);
     }
 
     (result, vm)
@@ -84,10 +88,135 @@ pub fn compile_and_run(source_code: &str) -> (Value, VirtualMachine) {
     let entry_opt = program
         .functions
         .iter()
-        .find(|f| f.symbol.ends_with("::main") || f.symbol == "main")
-        .map(|f| f.symbol.clone());
+        .find(|function| function.symbol.ends_with("::main") || function.symbol == "main")
+        .map(|function| function.symbol.clone());
 
     run_binary(program, entry_opt.as_deref())
+}
+
+/// Compiles and executes a single Solix source file with builtins enabled, auto-detecting the entry point.
+///
+/// # Panics
+/// Panics if compilation, VM execution, or memory verification fails.
+pub fn compile_and_run_with_builtins(source_code: &str) -> (Value, VirtualMachine) {
+    let options = CompilationOptions::new()
+        .with_source("test_main.slx", source_code)
+        .with_builtins(true);
+    let mut context = CompilationContext::new(options);
+
+    context.execute().expect("Compilation failed");
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Bytecode emission artifacts must be present");
+    let program = artifacts.program.clone();
+
+    let entry_opt = program
+        .functions
+        .iter()
+        .find(|function| function.symbol.ends_with("::main") || function.symbol == "main")
+        .map(|function| function.symbol.clone());
+
+    run_binary(program, entry_opt.as_deref())
+}
+
+/// Asserts that compiling `source_code` with builtins enabled fails with a diagnostic containing `expected_error_or_code`.
+///
+/// # Panics
+/// Panics if compilation succeeds, if raw `SourceSpan {` debug formatting leaks into error messages,
+/// or if the error does not contain the expected pattern / code.
+pub fn assert_compile_error_with_builtins(source_code: &str, expected_error_or_code: &str) {
+    let options = CompilationOptions::new()
+        .with_source("error_test.slx", source_code)
+        .with_builtins(true);
+    let mut context = CompilationContext::new(options);
+
+    match context.execute() {
+        Ok(_) => panic!(
+            "Expected compilation to fail with error matching '{expected_error_or_code}', but compilation succeeded!",
+        ),
+        Err(diagnostics) => {
+            for diagnostic in &diagnostics {
+                let display_message = format!("{diagnostic}");
+                assert!(
+                    !display_message.contains("SourceSpan {"),
+                    "Diagnostic Display leaked raw SourceSpan debug formatting:\n{display_message}"
+                );
+            }
+
+            let combined_message = diagnostics
+                .iter()
+                .map(|diagnostic| format!("{} {}", diagnostic.error_code(), diagnostic))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let matches_code = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.error_code() == expected_error_or_code);
+
+            let matches_text = combined_message
+                .to_lowercase()
+                .contains(&expected_error_or_code.to_lowercase())
+                || combined_message.contains(expected_error_or_code);
+
+            assert!(
+                matches_code || matches_text,
+                "Expected error matching '{expected_error_or_code}', got:\n{combined_message}"
+            );
+        }
+    }
+}
+
+/// Asserts that compiling multiple Solix sources with builtins enabled fails with a diagnostic containing `expected_error_or_code`.
+///
+/// # Panics
+/// Panics if compilation succeeds, if raw `SourceSpan {` debug formatting leaks into error messages,
+/// or if the error does not contain the expected pattern / code.
+pub fn assert_compile_sources_error_with_builtins(
+    sources: &[(&str, &str)],
+    expected_error_or_code: &str,
+) {
+    let mut options = CompilationOptions::new().with_builtins(true);
+    for (name, code) in sources {
+        options = options.with_source(*name, *code);
+    }
+    let mut context = CompilationContext::new(options);
+
+    match context.execute() {
+        Ok(_) => panic!(
+            "Expected multi-source compilation to fail with error matching '{expected_error_or_code}', but compilation succeeded!",
+        ),
+        Err(diagnostics) => {
+            for diagnostic in &diagnostics {
+                let display_message = format!("{diagnostic}");
+                assert!(
+                    !display_message.contains("SourceSpan {"),
+                    "Diagnostic Display leaked raw SourceSpan debug formatting:\n{display_message}"
+                );
+            }
+
+            let combined_message = diagnostics
+                .iter()
+                .map(|diagnostic| format!("{} {}", diagnostic.error_code(), diagnostic))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let matches_code = diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.error_code() == expected_error_or_code);
+
+            let matches_text = combined_message
+                .to_lowercase()
+                .contains(&expected_error_or_code.to_lowercase())
+                || combined_message.contains(expected_error_or_code);
+
+            assert!(
+                matches_code || matches_text,
+                "Expected error matching '{expected_error_or_code}', got:\n{combined_message}"
+            );
+        }
+    }
 }
 
 /// Compiles and executes multiple Solix source files, auto-detecting the entry point and verifying clean memory.

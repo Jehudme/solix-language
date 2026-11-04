@@ -244,6 +244,32 @@ class Main {
 ### Case 3.5: Cross-Platform Binary Path Resolution [IMPLEMENTED]
 *Expected Result*: Verifies `solix::get_executable_path()` and `solix::get_executable_dir()` correctly resolve the running binary path and containing directory across Linux, macOS, and Windows without platform crashes.
 
+### Case 3.6: Built-in IO Package Direct Symbol Import [IMPLEMENTED]
+```solix
+import blt.io.println;
+
+class Main {
+    public static int32 main() {
+        println("Hello from direct builtin import!");
+        return 0;
+    }
+}
+```
+*Expected Result*: Direct item import from built-in standard library resolves symbol and executes cleanly.
+
+### Case 3.7: Built-in IO Package Wildcard Import [IMPLEMENTED]
+```solix
+import blt.io.*;
+
+class Main {
+    public static int32 main() {
+        println("Hello from wildcard builtin import!");
+        return 0;
+    }
+}
+```
+*Expected Result*: Wildcard import from built-in package exposes all public package symbols and executes cleanly.
+
 ---
 
 ### Negative Test Scenarios (Expected Errors & Faults)
@@ -315,6 +341,47 @@ void test() {
 *Expected Compiler Diagnostic*:
 ```text
 [ERROR] parser.cpp: Import statements must appear before class declarations
+```
+
+### Case 4.7: Importing Symbol from Subpackage Prefix Fails [IMPLEMENTED]
+```solix
+import blt.println;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder: Cannot resolve import 'blt.println': package or symbol not found (E0232)
+```
+
+### Case 4.8: Wildcard Import of Subpackage Prefix Fails [IMPLEMENTED]
+```solix
+import blt.*;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder: Cannot resolve import 'blt': package or symbol not found (E0232)
+```
+
+### Case 4.9: Importing Unknown Member from Builtin Package Fails [IMPLEMENTED]
+```solix
+import blt.io.nonexistent_symbol;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder: Symbol 'nonexistent_symbol' not found in package 'blt.io' (E0201)
+```
+
+### Case 4.10: Importing Intermediate Prefix of User Package Fails [IMPLEMENTED]
+```solix
+// sub.slx
+package my.core.sub;
+public class DeepItem {}
+
+// main.slx
+import my.core.DeepItem;
+```
+*Expected Compiler Diagnostic*:
+```text
+[ERROR] binder: Cannot resolve import 'my.core.DeepItem': package or symbol not found (E0232)
 ```
 
 ---
