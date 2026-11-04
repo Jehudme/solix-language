@@ -25,7 +25,9 @@ pub fn disassemble_instruction(
         | OpCode::CallVirtual
         | OpCode::CallInterface
         | OpCode::CallSymbol
-        | OpCode::CallCallable => {
+        | OpCode::CallCallable
+        | OpCode::CallExtern
+        | OpCode::CallNativeDirect => {
             let dst = instruction.call_dst();
             let target = instruction.call_target();
             let base = instruction.arg_base();
@@ -62,6 +64,32 @@ pub fn disassemble_instruction(
             format!(
                 "{pc:04}  {:<16} r{cond}, @{target_pc:04} ({offset:+})",
                 opcode.mnemonic()
+            )
+        }
+
+        OpCode::JumpIfLtI32
+        | OpCode::JumpIfLteI32
+        | OpCode::JumpIfGtI32
+        | OpCode::JumpIfGteI32
+        | OpCode::JumpIfEqI32
+        | OpCode::JumpIfNeqI32 => {
+            let offset = instruction.src2() as i16 as i32;
+            let target_pc = pc as i32 + offset;
+            format!(
+                "{pc:04}  {:<16} r{}, r{}, @{target_pc:04} ({offset:+})",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.src1()
+            )
+        }
+
+        OpCode::AddI32Imm | OpCode::SubI32Imm => {
+            let imm = instruction.src2() as i16;
+            format!(
+                "{pc:04}  {:<16} r{}, r{}, {imm:+}",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.src1()
             )
         }
 

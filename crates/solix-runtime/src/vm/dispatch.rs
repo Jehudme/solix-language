@@ -613,11 +613,26 @@ impl VirtualMachine {
                     (s, args)
                 };
 
+                let (caller_func_id, caller_pc) = {
+                    let frame = self.current_frame()?;
+                    (frame.function_id, frame.pc.saturating_sub(1) as usize)
+                };
+
                 // Check native registry first
                 if let Some(&native_fn) = self.native_registry.get(&sym) {
                     self.record_native_call();
                     let result = native_fn(self, &args)?;
                     self.set_reg(caller_dst, result)?;
+                    if let Some(&global_id) = self.context.symbol_to_function_id.get(&sym) {
+                        let quickened = Instruction::format_call(
+                            OpCode::CallNativeDirect,
+                            caller_dst,
+                            global_id as u16,
+                            arg_base,
+                            arg_count as u8,
+                        );
+                        self.patch_instruction(caller_func_id, caller_pc, quickened);
+                    }
                     return Ok(());
                 }
 
@@ -629,7 +644,38 @@ impl VirtualMachine {
                     .copied()
                     .ok_or(RuntimeError::FunctionNotFound { symbol_or_id: sym })?;
 
+                let quickened = Instruction::format_call(
+                    OpCode::CallDirect,
+                    caller_dst,
+                    global_id as u16,
+                    arg_base,
+                    arg_count as u8,
+                );
+                self.patch_instruction(caller_func_id, caller_pc, quickened);
+
                 self.push_frame(global_id, caller_dst, &args)
+            }
+
+            OpCode::CallNativeDirect => {
+                let global_func_id = inst.call_target() as usize;
+                let arg_base = inst.arg_base();
+                let arg_count = inst.arg_count() as usize;
+                let caller_dst = inst.call_dst();
+
+                let mut args = Vec::with_capacity(arg_count);
+                for index in 0..arg_count {
+                    args.push(self.get_reg(arg_base + index as u16)?);
+                }
+
+                let meta = self.context.function_meta.get(global_func_id);
+                if let Some(function_meta) = meta
+                    && let Some(native_fn) = function_meta.native_fn
+                {
+                    self.record_native_call();
+                    let result = native_fn(self, &args)?;
+                    self.set_reg(caller_dst, result)?;
+                }
+                Ok(())
             }
 
             OpCode::CallCallable => {
@@ -1360,11 +1406,10 @@ impl VirtualMachine {
                         }
                     }
 
-                    let frame = self
+                    let _frame = self
                         .call_frames
                         .pop()
                         .ok_or(RuntimeError::NullReferenceAccess)?;
-                    self.register_stack.truncate(frame.register_base);
                 }
             }
 
@@ -1599,6 +1644,87 @@ impl VirtualMachine {
                 self.patch_instruction(caller_func_id, caller_pc, quickened);
 
                 self.set_reg(inst.dst(), Value::Ref(payload_addr))
+            }
+
+            // =================================================================
+            // 0xD0 .. 0xD7: Superinstructions
+            // =================================================================
+            OpCode::AddI32Imm => {
+                let imm_val = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.src1())?.as_i32()?;
+                self.set_reg(inst.dst(), Value::I32(val_a.wrapping_add(imm_val)))
+            }
+
+            OpCode::SubI32Imm => {
+                let imm_val = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.src1())?.as_i32()?;
+                self.set_reg(inst.dst(), Value::I32(val_a.wrapping_sub(imm_val)))
+            }
+
+            OpCode::JumpIfLtI32 => {
+                let offset = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.dst())?.as_i32()?;
+                let val_b = self.get_reg(inst.src1())?.as_i32()?;
+                if val_a < val_b {
+                    let frame = self.current_frame_mut()?;
+                    frame.pc = ((frame.pc as i32 - 1) + offset) as u32;
+                }
+                Ok(())
+            }
+
+            OpCode::JumpIfLteI32 => {
+                let offset = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.dst())?.as_i32()?;
+                let val_b = self.get_reg(inst.src1())?.as_i32()?;
+                if val_a <= val_b {
+                    let frame = self.current_frame_mut()?;
+                    frame.pc = ((frame.pc as i32 - 1) + offset) as u32;
+                }
+                Ok(())
+            }
+
+            OpCode::JumpIfGtI32 => {
+                let offset = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.dst())?.as_i32()?;
+                let val_b = self.get_reg(inst.src1())?.as_i32()?;
+                if val_a > val_b {
+                    let frame = self.current_frame_mut()?;
+                    frame.pc = ((frame.pc as i32 - 1) + offset) as u32;
+                }
+                Ok(())
+            }
+
+            OpCode::JumpIfGteI32 => {
+                let offset = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.dst())?.as_i32()?;
+                let val_b = self.get_reg(inst.src1())?.as_i32()?;
+                if val_a >= val_b {
+                    let frame = self.current_frame_mut()?;
+                    frame.pc = ((frame.pc as i32 - 1) + offset) as u32;
+                }
+                Ok(())
+            }
+
+            OpCode::JumpIfEqI32 => {
+                let offset = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.dst())?.as_i32()?;
+                let val_b = self.get_reg(inst.src1())?.as_i32()?;
+                if val_a == val_b {
+                    let frame = self.current_frame_mut()?;
+                    frame.pc = ((frame.pc as i32 - 1) + offset) as u32;
+                }
+                Ok(())
+            }
+
+            OpCode::JumpIfNeqI32 => {
+                let offset = inst.src2() as i16 as i32;
+                let val_a = self.get_reg(inst.dst())?.as_i32()?;
+                let val_b = self.get_reg(inst.src1())?.as_i32()?;
+                if val_a != val_b {
+                    let frame = self.current_frame_mut()?;
+                    frame.pc = ((frame.pc as i32 - 1) + offset) as u32;
+                }
+                Ok(())
             }
         }
     }

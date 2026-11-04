@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use crate::exceptions::RuntimeError;
+use crate::native::{NativeFunction, NativeRegistry};
 use crate::options::RuntimeOptions;
 use solix_common::bytecode::{
     BinaryProgram, CompiledClass, CompiledFunction, ConstantPool, Instruction, OpCode,
@@ -34,6 +35,19 @@ pub struct LoadedBinary {
     pub function_count: usize,
 }
 
+/// Pre-computed runtime metadata for a compiled function to eliminate per-call lookups.
+#[derive(Debug, Clone)]
+pub struct FunctionRuntimeMeta {
+    /// Index of the owning LoadedBinary in context.loaded_binaries.
+    pub binary_id: usize,
+    /// Function ID offset for the owning binary.
+    pub func_id_offset: u32,
+    /// Direct function pointer if this function is a native host function / builtin.
+    pub native_fn: Option<NativeFunction>,
+    /// Whether this function has any reference registers that require ARC tracking.
+    pub has_references: bool,
+}
+
 /// Central virtual machine execution context coordinating memory, loaded binaries, and symbols.
 #[derive(Debug, Clone)]
 pub struct RuntimeContext {
@@ -49,6 +63,8 @@ pub struct RuntimeContext {
     pub symbol_to_vtable_id: HashMap<String, (u32, usize)>,
     /// Flattened array of all compiled functions across all loaded binaries with relocated offsets.
     pub all_functions: Vec<CompiledFunction>,
+    /// Flattened array of pre-computed runtime metadata for each compiled function.
+    pub function_meta: Vec<FunctionRuntimeMeta>,
     /// Flattened array of all compiled class descriptors.
     pub all_classes: Vec<CompiledClass>,
     /// Fast direct lookup table for compiled classes indexed directly by `vtable_id`.
@@ -178,6 +194,17 @@ impl RuntimeContext {
                 let mut relocated_func = func.clone();
                 relocated_func.static_base_offset = stat_offset;
 
+                // Rewrite intra-module static instructions to direct global slots at load time
+                for inst in &mut relocated_func.instructions {
+                    if inst.raw_opcode() == OpCode::GetStatic as u8 {
+                        let absolute_slot = stat_offset + inst.imm32();
+                        *inst = Instruction::format_b(OpCode::GetStaticDirect, 0, inst.dst(), absolute_slot);
+                    } else if inst.raw_opcode() == OpCode::SetStatic as u8 {
+                        let absolute_slot = stat_offset + inst.imm32();
+                        *inst = Instruction::format_b(OpCode::SetStaticDirect, 0, inst.dst(), absolute_slot);
+                    }
+                }
+
                 // Relocate intra-binary call targets and object vtable IDs if func_offset > 0 or vtable_offset > 0
                 if func_offset > 0 || vtable_offset > 0 {
                     for inst in &mut relocated_func.instructions {
@@ -252,6 +279,50 @@ impl RuntimeContext {
             vtable_lookup[class_entry.vtable_id as usize] = Some(class_entry.clone());
         }
 
+        let mut native_registry = NativeRegistry::with_builtins();
+        for (native_name, native_callback) in &options.native_functions {
+            native_registry.register(native_name, *native_callback);
+        }
+
+        let mut function_meta = Vec::with_capacity(all_functions.len());
+        for (global_id, func) in all_functions.iter().enumerate() {
+            let binary_id = loaded_binaries
+                .iter()
+                .position(|binary_unit| {
+                    (global_id as u32) >= binary_unit.function_id_offset
+                        && (global_id as u32)
+                            < binary_unit.function_id_offset + binary_unit.function_count as u32
+                })
+                .unwrap_or(0);
+            let func_id_offset = loaded_binaries
+                .get(binary_id)
+                .map_or(0, |binary_unit| binary_unit.function_id_offset);
+
+            let clean_symbol = func.symbol.split('(').next().unwrap_or(&func.symbol);
+            let simple_symbol = clean_symbol.rsplit(['.', ':']).next().unwrap_or(clean_symbol);
+            let has_qualifier = clean_symbol.contains("::");
+            let native_fn = native_registry
+                .get(&func.symbol)
+                .copied()
+                .or_else(|| native_registry.get(clean_symbol).copied())
+                .or_else(|| {
+                    if !has_qualifier {
+                        native_registry.get(simple_symbol).copied()
+                    } else {
+                        None
+                    }
+                });
+
+            let has_references = !func.reference_registers.is_empty();
+
+            function_meta.push(FunctionRuntimeMeta {
+                binary_id,
+                func_id_offset,
+                native_fn,
+                has_references,
+            });
+        }
+
         Ok(Self {
             options,
             loaded_binaries,
@@ -259,6 +330,7 @@ impl RuntimeContext {
             symbol_to_static_slot,
             symbol_to_vtable_id,
             all_functions,
+            function_meta,
             all_classes,
             vtable_lookup,
             total_static_space: current_static_offset,

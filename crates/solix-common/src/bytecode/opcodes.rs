@@ -91,6 +91,7 @@ pub enum OpCode {
     ReturnValue = 0x66,
     Exit = 0x67,
     CallExtern = 0x68,
+    CallNativeDirect = 0x69,
 
     // 0x70 .. 0x7F: Object Model, Instance Fields & Static Memory
     AllocObject = 0x70,
@@ -129,6 +130,16 @@ pub enum OpCode {
     // 0xC0 .. 0xCF: ARC Reference Counting
     IncRef = 0xC0,
     DecRef = 0xC1,
+
+    // 0xD0 .. 0xD7: Superinstructions
+    AddI32Imm = 0xD0,
+    SubI32Imm = 0xD1,
+    JumpIfLtI32 = 0xD2,
+    JumpIfLteI32 = 0xD3,
+    JumpIfGtI32 = 0xD4,
+    JumpIfGteI32 = 0xD5,
+    JumpIfEqI32 = 0xD6,
+    JumpIfNeqI32 = 0xD7,
 }
 
 impl OpCode {
@@ -213,6 +224,7 @@ impl OpCode {
             0x66 => Ok(Self::ReturnValue),
             0x67 => Ok(Self::Exit),
             0x68 => Ok(Self::CallExtern),
+            0x69 => Ok(Self::CallNativeDirect),
 
             0x70 => Ok(Self::AllocObject),
             0x71 => Ok(Self::GetField),
@@ -245,6 +257,15 @@ impl OpCode {
 
             0xC0 => Ok(Self::IncRef),
             0xC1 => Ok(Self::DecRef),
+
+            0xD0 => Ok(Self::AddI32Imm),
+            0xD1 => Ok(Self::SubI32Imm),
+            0xD2 => Ok(Self::JumpIfLtI32),
+            0xD3 => Ok(Self::JumpIfLteI32),
+            0xD4 => Ok(Self::JumpIfGtI32),
+            0xD5 => Ok(Self::JumpIfGteI32),
+            0xD6 => Ok(Self::JumpIfEqI32),
+            0xD7 => Ok(Self::JumpIfNeqI32),
 
             _ => Err(EmissionError::InvalidOpcode {
                 raw_byte,
@@ -332,6 +353,7 @@ impl OpCode {
             Self::ReturnValue => "RETURN_VALUE",
             Self::Exit => "EXIT",
             Self::CallExtern => "CALL_EXTERN",
+            Self::CallNativeDirect => "CALL_NATIVE_DIRECT",
 
             Self::AllocObject => "ALLOC_OBJECT",
             Self::GetField => "GET_FIELD",
@@ -364,6 +386,15 @@ impl OpCode {
 
             Self::IncRef => "INC_REF",
             Self::DecRef => "DEC_REF",
+
+            Self::AddI32Imm => "ADD_I32_IMM",
+            Self::SubI32Imm => "SUB_I32_IMM",
+            Self::JumpIfLtI32 => "JUMP_IF_LT_I32",
+            Self::JumpIfLteI32 => "JUMP_IF_LTE_I32",
+            Self::JumpIfGtI32 => "JUMP_IF_GT_I32",
+            Self::JumpIfGteI32 => "JUMP_IF_GTE_I32",
+            Self::JumpIfEqI32 => "JUMP_IF_EQ_I32",
+            Self::JumpIfNeqI32 => "JUMP_IF_NEQ_I32",
         }
     }
 }

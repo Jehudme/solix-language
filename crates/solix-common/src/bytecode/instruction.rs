@@ -206,7 +206,8 @@ impl fmt::Display for Instruction {
                 | OpCode::CallInterface
                 | OpCode::CallSymbol
                 | OpCode::CallCallable
-                | OpCode::CallExtern => {
+                | OpCode::CallExtern
+                | OpCode::CallNativeDirect => {
                     write!(
                         f,
                         "{:<14} r{}, target:{}, args:r{}..r{}",

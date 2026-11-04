@@ -123,7 +123,7 @@ impl VirtualMachine {
             static_slots,
             const_pool_cache,
             interned_string_addrs,
-            register_stack: Vec::with_capacity(1024),
+            register_stack: vec![Value::Null; 65536],
             call_frames: Vec::with_capacity(64),
             halted: false,
             exit_code: None,
@@ -420,27 +420,23 @@ impl VirtualMachine {
             }
         })?;
 
-        // Determine which binary owns this function
-        let binary_id = self
-            .context
-            .loaded_binaries
-            .iter()
-            .position(|b| {
-                function_id >= b.function_id_offset
-                    && function_id < b.function_id_offset + b.function_count as u32
-            })
-            .unwrap_or(0);
+        let meta = &self.context.function_meta[function_id as usize];
+        let binary_id = meta.binary_id;
+        let func_id_offset = meta.func_id_offset;
 
-        let func_id_offset = self
-            .context
-            .loaded_binaries
-            .get(binary_id)
-            .map_or(0, |b| b.function_id_offset);
-
-        let reg_base = self.register_stack.len();
+        let reg_base = self
+            .call_frames
+            .last()
+            .map_or(0, |last_frame| last_frame.register_base + last_frame.register_count);
         let num_regs = (func.num_registers as usize).max(args.len());
 
-        self.register_stack.resize(reg_base + num_regs, Value::Null);
+        if reg_base + num_regs > self.register_stack.len() {
+            self.register_stack.resize(reg_base + num_regs + 4096, Value::Null);
+        }
+
+        if meta.has_references {
+            self.register_stack[reg_base..reg_base + num_regs].fill(Value::Null);
+        }
         self.register_stack[reg_base..reg_base + args.len()].copy_from_slice(args);
 
         let frame = CallFrame::new(
@@ -469,8 +465,6 @@ impl VirtualMachine {
             .call_frames
             .pop()
             .ok_or(RuntimeError::NullReferenceAccess)?;
-
-        self.register_stack.truncate(frame.register_base);
 
         if self.call_frames.is_empty() {
             self.last_return_value = return_val;
