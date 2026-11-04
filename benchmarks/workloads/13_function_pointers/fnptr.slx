@@ -1,0 +1,30 @@
+import blt.io.println;
+
+class FnPtrApp {
+    public static int32 fn1(int32 x) {
+        return x * 2 + 1;
+    }
+
+    public static int32 fn2(int32 x) {
+        return x * 3 - 2;
+    }
+
+    public static int32 fn3(int32 x) {
+        return x * 5 + 4;
+    }
+
+    public static void main() {
+        int32 total = 0;
+        for (int32 i = 0; i < 100000; i = i + 1) {
+            int32 idx = i % 3;
+            int32(*)(int32) f = (idx == 0) ? FnPtrApp::fn1 : ((idx == 1) ? FnPtrApp::fn2 : FnPtrApp::fn3);
+            total = (total + f(i % 50)) & 0x7FFFFFFF;
+        }
+
+        if (total == 8266617) {
+            println("RESULT: 8266617");
+        } else {
+            println("FAIL");
+        }
+    }
+}

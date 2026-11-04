@@ -1,0 +1,33 @@
+import blt.io.println;
+
+class SieveApp {
+    public static void main() {
+        int32 limit = 100000;
+        bool[] is_prime = new bool[100001];
+
+        for (int32 i = 2; i <= limit; i = i + 1) {
+            is_prime[i] = true;
+        }
+
+        for (int32 p = 2; p * p <= limit; p = p + 1) {
+            if (is_prime[p]) {
+                for (int32 m = p * p; m <= limit; m = m + p) {
+                    is_prime[m] = false;
+                }
+            }
+        }
+
+        int32 count = 0;
+        for (int32 i = 2; i <= limit; i = i + 1) {
+            if (is_prime[i]) {
+                count = count + 1;
+            }
+        }
+
+        if (count == 9592) {
+            println("RESULT: 9592");
+        } else {
+            println("FAIL");
+        }
+    }
+}

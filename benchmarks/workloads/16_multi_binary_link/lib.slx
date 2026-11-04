@@ -1,0 +1,7 @@
+package math.calc;
+
+public class Calculator {
+    public static int32 compute(int32 x, int32 y) {
+        return x * 3 + y * 7;
+    }
+}

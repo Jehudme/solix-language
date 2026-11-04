@@ -1,0 +1,19 @@
+import blt.io.println;
+
+class ClosureApp {
+    public static void main() {
+        int32 base = 7;
+        int32(*)(int32) adder = (n) => n + base;
+
+        int32 total = 0;
+        for (int32 i = 0; i < 50000; i = i + 1) {
+            total = (total + adder(i % 100)) & 0x7FFFFFFF;
+        }
+
+        if (total == 2825000) {
+            println("RESULT: 2825000");
+        } else {
+            println("FAIL");
+        }
+    }
+}

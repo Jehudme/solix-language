@@ -1,0 +1,36 @@
+import blt.io.println;
+
+interface IWorker {
+    int32 work(int32 x);
+}
+
+class WorkerA : IWorker {
+    public int32 work(int32 x) {
+        return x + 5;
+    }
+}
+
+class WorkerB : IWorker {
+    public int32 work(int32 x) {
+        return x * 3;
+    }
+}
+
+class IDispatchApp {
+    public static void main() {
+        IWorker wa = new WorkerA();
+        IWorker wb = new WorkerB();
+
+        int32 total = 0;
+        for (int32 i = 0; i < 100000; i = i + 1) {
+            IWorker w = (i % 2 == 0) ? wa : wb;
+            total = (total + w.work(i % 10)) & 0x7FFFFFFF;
+        }
+
+        if (total == 1200000) {
+            println("RESULT: 1200000");
+        } else {
+            println("FAIL");
+        }
+    }
+}

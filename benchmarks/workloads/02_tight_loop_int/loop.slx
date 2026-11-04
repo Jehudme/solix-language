@@ -1,0 +1,16 @@
+import blt.io.println;
+
+class TightLoopApp {
+    public static void main() {
+        int32 sum = 0;
+        for (int32 i = 0; i < 1000000; i = i + 1) {
+            sum = (sum + (i ^ (i % 7))) & 0x7FFFFFFF;
+        }
+
+        if (sum == 1783293643) {
+            println("RESULT: 1783293643");
+        } else {
+            println("FAIL");
+        }
+    }
+}
