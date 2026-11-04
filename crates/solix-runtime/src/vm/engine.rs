@@ -435,7 +435,12 @@ impl VirtualMachine {
         }
 
         if meta.has_references {
-            self.register_stack[reg_base..reg_base + num_regs].fill(Value::Null);
+            for &ref_reg in &func.reference_registers {
+                let reg_index = ref_reg as usize;
+                if reg_index >= args.len() && reg_index < num_regs {
+                    self.register_stack[reg_base + reg_index] = Value::Null;
+                }
+            }
         }
         self.register_stack[reg_base..reg_base + args.len()].copy_from_slice(args);
 
@@ -476,19 +481,12 @@ impl VirtualMachine {
         Ok(())
     }
 
-    /// Executes the VM instruction loop down to `target_depth` using either fast or safe mode.
+    /// Executes the VM instruction loop down to `target_depth`.
     ///
     /// # Errors
     /// Returns `RuntimeError` if an execution error occurs.
     pub fn run_loop(&mut self, target_depth: usize) -> Result<(), RuntimeError> {
-        if self.safe_mode {
-            while !self.halted && self.call_frames.len() > target_depth {
-                self.step()?;
-            }
-            Ok(())
-        } else {
-            self.run_fast(target_depth)
-        }
+        self.run_fast(target_depth)
     }
 
     /// Fetches and dispatches a single virtual machine instruction.
@@ -497,29 +495,7 @@ impl VirtualMachine {
             return Ok(());
         }
 
-        let (inst, _func_id) = {
-            let (func_id, pc) = {
-                let frame = self.current_frame()?;
-                (frame.function_id, frame.pc)
-            };
-            let func = self.context.get_function(func_id).ok_or_else(|| {
-                RuntimeError::FunctionNotFound {
-                    symbol_or_id: format!("#{func_id}"),
-                }
-            })?;
-
-            if (pc as usize) >= func.instructions.len() {
-                return self.pop_frame(Value::Null);
-            }
-
-            let inst = func.instructions[pc as usize];
-            let frame = self.current_frame_mut()?;
-            frame.pc += 1;
-            (inst, func_id)
-        };
-
-        self.instructions_dispatched += 1;
-        self.dispatch_instruction(inst)
+        self.run_fast_step()
     }
 
     /// Executes the loaded program: runs module `@init` initializers then the entry point.
@@ -528,8 +504,8 @@ impl VirtualMachine {
     /// Returns `RuntimeError` on execution errors or unhandled exceptions.
     pub fn run(&mut self) -> Result<Value, RuntimeError> {
         let res = self.run_internal();
-        if let Err(ref e) = res {
-            self.exit_code = Some(e.error_code().as_i32());
+        if let Err(ref error) = res {
+            self.exit_code = Some(error.error_code().as_i32());
             self.halted = true;
         }
         res

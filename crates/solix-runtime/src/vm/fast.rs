@@ -7,7 +7,7 @@ use crate::frame::CallFrame;
 use crate::memory::layout::BlockTag;
 use crate::value::Value;
 use crate::vm::engine::VirtualMachine;
-use solix_common::bytecode::{Instruction, OpCode};
+use solix_common::bytecode::{ConstantPoolValue, Instruction, OpCode};
 
 impl VirtualMachine {
     /// Fast-path frame activation: copies argument registers within `register_stack` without allocating a heap vector.
@@ -39,10 +39,13 @@ impl VirtualMachine {
         let binary_id = meta.binary_id;
         let func_id_offset = meta.func_id_offset;
 
-        let reg_base = self
-            .call_frames
-            .last()
-            .map_or(0, |frame| frame.register_base + frame.register_count);
+        let reg_base = if arg_count > 0 {
+            caller_arg_start
+        } else {
+            self.call_frames.last().map_or(0, |last_frame| {
+                last_frame.register_base + last_frame.register_count
+            })
+        };
         let num_regs = (func.num_registers as usize).max(arg_count);
 
         if reg_base + num_regs > self.register_stack.len() {
@@ -51,12 +54,12 @@ impl VirtualMachine {
         }
 
         if meta.has_references {
-            self.register_stack[reg_base..reg_base + num_regs].fill(Value::Null);
-        }
-
-        if arg_count > 0 {
-            self.register_stack
-                .copy_within(caller_arg_start..caller_arg_start + arg_count, reg_base);
+            for &ref_reg in &func.reference_registers {
+                let reg_index = ref_reg as usize;
+                if reg_index >= arg_count && reg_index < num_regs {
+                    self.register_stack[reg_base + reg_index] = Value::Null;
+                }
+            }
         }
 
         let frame = CallFrame::new(
@@ -81,7 +84,29 @@ impl VirtualMachine {
     /// # Errors
     /// Returns `RuntimeError` on guest traps, type mismatches, division by zero, or stack overflow.
     pub fn run_fast(&mut self, target_depth: usize) -> Result<(), RuntimeError> {
-        if self.halted || self.call_frames.len() <= target_depth {
+        self.run_fast_internal::<false>(target_depth)
+    }
+
+    /// Single-instruction step through the virtual machine using the unified engine loop.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` on guest traps, type mismatches, division by zero, or stack overflow.
+    pub fn run_fast_step(&mut self) -> Result<(), RuntimeError> {
+        self.run_fast_internal::<true>(0)
+    }
+
+    /// High-performance instruction dispatch loop using raw-pointer caching and local register windows.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` on guest traps, type mismatches, division by zero, or stack overflow.
+    pub(crate) fn run_fast_internal<const SINGLE_STEP: bool>(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<(), RuntimeError> {
+        if self.halted || (!SINGLE_STEP && self.call_frames.len() <= target_depth) {
+            return Ok(());
+        }
+        if SINGLE_STEP && self.call_frames.is_empty() {
             return Ok(());
         }
 
@@ -91,6 +116,7 @@ impl VirtualMachine {
         let mut static_base: u32;
         let mut binary_id: usize;
         let mut reg_base: *mut Value;
+        let mut local_inst_count: u64 = 0;
 
         macro_rules! reload_frame {
             () => {
@@ -106,6 +132,29 @@ impl VirtualMachine {
                 binary_id = curr.binary_id;
                 // SAFETY: curr.register_base is guaranteed within register_stack bounds
                 reg_base = unsafe { self.register_stack.as_mut_ptr().add(curr.register_base) };
+            };
+        }
+
+        macro_rules! flush_telemetry {
+            () => {
+                if local_inst_count > 0 {
+                    self.instructions_dispatched += local_inst_count;
+                    local_inst_count = 0;
+                }
+            };
+        }
+
+        macro_rules! finish_instruction {
+            () => {
+                if SINGLE_STEP {
+                    if let Some(frame) = self.call_frames.last_mut() {
+                        frame.pc = pc as u32;
+                    }
+                    if local_inst_count > 0 {
+                        self.instructions_dispatched += local_inst_count;
+                    }
+                    return Ok(());
+                }
             };
         }
 
@@ -134,14 +183,16 @@ impl VirtualMachine {
                         .add(caller_frame.register_base);
                     *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
                 }
+                flush_telemetry!();
                 reload_frame!();
+                finish_instruction!();
                 continue;
             }
 
             // SAFETY: pc < inst_len, so inst_ptr.add(pc) is in-bounds
             let inst = unsafe { *inst_ptr.add(pc) };
             pc += 1;
-            self.instructions_dispatched += 1;
+            local_inst_count += 1;
 
             let opcode = inst.opcode(pc).map_err(|_| RuntimeError::InvalidOpCode {
                 pc: pc as u32,
@@ -198,29 +249,38 @@ impl VirtualMachine {
                     }
                 }
 
+                OpCode::LoadConst => {
+                    let pool_idx = inst.imm32() as usize;
+                    let const_val = self.const_pool_cache[binary_id][pool_idx];
+                    // SAFETY: Destination register is within frame window
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) = const_val;
+                    }
+                }
+
                 // =============================================================
                 // 0x10 .. 0x20: Arithmetic Operations
                 // =============================================================
                 OpCode::AddI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_add(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_add(val_b));
                     }
                 }
 
                 OpCode::AddI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_add(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_add(val_b));
                     }
                 }
 
                 OpCode::AddF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) };
-                    match (a, b) {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    match (val_a, val_b) {
                         (Value::F64(x), Value::F64(y)) => unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::F64(x + y);
                         },
@@ -234,25 +294,25 @@ impl VirtualMachine {
                 }
 
                 OpCode::SubI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_sub(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_sub(val_b));
                     }
                 }
 
                 OpCode::SubI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_sub(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_sub(val_b));
                     }
                 }
 
                 OpCode::SubF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) };
-                    match (a, b) {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    match (val_a, val_b) {
                         (Value::F64(x), Value::F64(y)) => unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::F64(x - y);
                         },
@@ -266,25 +326,25 @@ impl VirtualMachine {
                 }
 
                 OpCode::MulI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_mul(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_mul(val_b));
                     }
                 }
 
                 OpCode::MulI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_mul(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_mul(val_b));
                     }
                 }
 
                 OpCode::MulF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) };
-                    match (a, b) {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    match (val_a, val_b) {
                         (Value::F64(x), Value::F64(y)) => unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::F64(x * y);
                         },
@@ -298,31 +358,31 @@ impl VirtualMachine {
                 }
 
                 OpCode::DivI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
-                    if b == 0 {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    if val_b == 0 {
                         return Err(RuntimeError::DivideByZero);
                     }
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_div(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_div(val_b));
                     }
                 }
 
                 OpCode::DivI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    if b == 0 {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    if val_b == 0 {
                         return Err(RuntimeError::DivideByZero);
                     }
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_div(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_div(val_b));
                     }
                 }
 
                 OpCode::DivF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) };
-                    match (a, b) {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    match (val_a, val_b) {
                         (Value::F64(x), Value::F64(y)) => unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::F64(x / y);
                         },
@@ -336,24 +396,24 @@ impl VirtualMachine {
                 }
 
                 OpCode::ModI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
-                    if b == 0 {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    if val_b == 0 {
                         return Err(RuntimeError::DivideByZero);
                     }
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_rem(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_rem(val_b));
                     }
                 }
 
                 OpCode::ModI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    if b == 0 {
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    if val_b == 0 {
                         return Err(RuntimeError::DivideByZero);
                     }
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_rem(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_rem(val_b));
                     }
                 }
 
@@ -390,51 +450,51 @@ impl VirtualMachine {
                 // 0x21 .. 0x26: Bitwise Operations
                 // =============================================================
                 OpCode::Band => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a & b);
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a & val_b);
                     }
                 }
 
                 OpCode::Bor => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a | b);
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a | val_b);
                     }
                 }
 
                 OpCode::Bxor => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a ^ b);
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a ^ val_b);
                     }
                 }
 
                 OpCode::Bnot => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(!a);
+                        *reg_base.add(inst.dst() as usize) = Value::I64(!val_a);
                     }
                 }
 
                 OpCode::Shl => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    let shift = (b & 63) as u32;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let shift = (val_b & 63) as u32;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_shl(shift));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_shl(shift));
                     }
                 }
 
                 OpCode::Shr => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    let shift = (b & 63) as u32;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let shift = (val_b & 63) as u32;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(a.wrapping_shr(shift));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_shr(shift));
                     }
                 }
 
@@ -442,178 +502,228 @@ impl VirtualMachine {
                 // 0x30 .. 0x47: Comparisons
                 // =============================================================
                 OpCode::EqI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a == b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
                     }
                 }
 
                 OpCode::EqI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a == b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
                     }
                 }
 
                 OpCode::EqF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a == b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
                     }
                 }
 
                 OpCode::EqBool => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_bool()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_bool()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_bool()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_bool()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a == b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
+                    }
+                }
+
+                OpCode::EqString => {
+                    let addr_left = unsafe { (*reg_base.add(inst.src1() as usize)).as_ref()? };
+                    let addr_right = unsafe { (*reg_base.add(inst.src2() as usize)).as_ref()? };
+                    let is_equal = if addr_left == addr_right {
+                        true
+                    } else if addr_left == 0 || addr_right == 0 {
+                        false
+                    } else {
+                        let hdr_left = self.heap.read_header(addr_left)?;
+                        let hdr_right = self.heap.read_header(addr_right)?;
+                        if hdr_left.size != hdr_right.size {
+                            false
+                        } else {
+                            let bytes_left =
+                                self.heap.read_bytes(addr_left, hdr_left.size as usize)?;
+                            let bytes_right =
+                                self.heap.read_bytes(addr_right, hdr_right.size as usize)?;
+                            bytes_left == bytes_right
+                        }
+                    };
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
                     }
                 }
 
                 OpCode::EqRef => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_ref()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_ref()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_ref()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_ref()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a == b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
                     }
                 }
 
                 OpCode::NeqI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a != b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
                     }
                 }
 
                 OpCode::NeqI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a != b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
                     }
                 }
 
                 OpCode::NeqF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a != b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
                     }
                 }
 
                 OpCode::NeqBool => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_bool()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_bool()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_bool()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_bool()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a != b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
+                    }
+                }
+
+                OpCode::NeqString => {
+                    let addr_left = unsafe { (*reg_base.add(inst.src1() as usize)).as_ref()? };
+                    let addr_right = unsafe { (*reg_base.add(inst.src2() as usize)).as_ref()? };
+                    let is_equal = if addr_left == addr_right {
+                        true
+                    } else if addr_left == 0 || addr_right == 0 {
+                        false
+                    } else {
+                        let hdr_left = self.heap.read_header(addr_left)?;
+                        let hdr_right = self.heap.read_header(addr_right)?;
+                        if hdr_left.size != hdr_right.size {
+                            false
+                        } else {
+                            let bytes_left =
+                                self.heap.read_bytes(addr_left, hdr_left.size as usize)?;
+                            let bytes_right =
+                                self.heap.read_bytes(addr_right, hdr_right.size as usize)?;
+                            bytes_left == bytes_right
+                        }
+                    };
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
                     }
                 }
 
                 OpCode::NeqRef => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_ref()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_ref()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_ref()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_ref()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a != b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
                     }
                 }
 
                 OpCode::LtI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a < b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
                     }
                 }
 
                 OpCode::LtI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a < b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
                     }
                 }
 
                 OpCode::LtF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a < b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
                     }
                 }
 
                 OpCode::LteI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a <= b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
                     }
                 }
 
                 OpCode::LteI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a <= b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
                     }
                 }
 
                 OpCode::LteF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a <= b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
                     }
                 }
 
                 OpCode::GtI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a > b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
                     }
                 }
 
                 OpCode::GtI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a > b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
                     }
                 }
 
                 OpCode::GtF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a > b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
                     }
                 }
 
                 OpCode::GteI32 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a >= b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
                     }
                 }
 
                 OpCode::GteI64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a >= b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
                     }
                 }
 
                 OpCode::GteF64 => {
-                    let a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
-                    let b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
+                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(a >= b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
                     }
                 }
 
@@ -625,23 +735,28 @@ impl VirtualMachine {
                 }
 
                 OpCode::ConvIToF => {
-                    let n = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let val_n = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::F64(n as f64);
+                        *reg_base.add(inst.dst() as usize) = Value::F64(val_n as f64);
                     }
                 }
 
                 OpCode::ConvFToI => {
-                    let f = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
+                    let val_f = unsafe { *reg_base.add(inst.src1() as usize) }.as_f64()?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(f as i64);
+                        *reg_base.add(inst.dst() as usize) = Value::I64(val_f as i64);
                     }
                 }
 
                 // =============================================================
                 // 0x50 .. 0x53: Control Flow & Branching
                 // =============================================================
-                OpCode::Jump | OpCode::Switch => {
+                OpCode::Jump => {
+                    let offset = inst.jump_offset();
+                    pc = ((pc as i32 - 1) + offset) as usize;
+                }
+
+                OpCode::Switch => {
                     let offset = inst.jump_offset();
                     pc = ((pc as i32 - 1) + offset) as usize;
                 }
@@ -678,18 +793,22 @@ impl VirtualMachine {
                     let meta = &self.context.function_meta[global_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack
+                        let call_args = self.register_stack
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
-                        let result = native_callback(self, &args)?;
+                        flush_telemetry!();
+                        let call_result = native_callback(self, &call_args)?;
                         unsafe {
-                            *reg_base.add(caller_dst as usize) = result;
+                            *reg_base.add(caller_dst as usize) = call_result;
                         }
+                        finish_instruction!();
                         continue;
                     }
 
+                    flush_telemetry!();
                     self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
                     reload_frame!();
+                    finish_instruction!();
                     continue;
                 }
 
@@ -706,14 +825,17 @@ impl VirtualMachine {
                     let meta = &self.context.function_meta[global_func_id];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack
+                        let call_args = self.register_stack
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
-                        let result = native_callback(self, &args)?;
+                        flush_telemetry!();
+                        let call_result = native_callback(self, &call_args)?;
                         unsafe {
-                            *reg_base.add(caller_dst as usize) = result;
+                            *reg_base.add(caller_dst as usize) = call_result;
                         }
                     }
+                    finish_instruction!();
+                    continue;
                 }
 
                 OpCode::CallVirtual => {
@@ -751,18 +873,22 @@ impl VirtualMachine {
                     let meta = &self.context.function_meta[global_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack
+                        let call_args = self.register_stack
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
-                        let result = native_callback(self, &args)?;
+                        flush_telemetry!();
+                        let call_result = native_callback(self, &call_args)?;
                         unsafe {
-                            *reg_base.add(caller_dst as usize) = result;
+                            *reg_base.add(caller_dst as usize) = call_result;
                         }
+                        finish_instruction!();
                         continue;
                     }
 
+                    flush_telemetry!();
                     self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
                     reload_frame!();
+                    finish_instruction!();
                     continue;
                 }
 
@@ -816,16 +942,19 @@ impl VirtualMachine {
                     let meta = &self.context.function_meta[resolved_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
                         self.record_native_call();
-                        let args = self.register_stack
+                        let call_args = self.register_stack
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
-                        let result = native_callback(self, &args)?;
+                        flush_telemetry!();
+                        let call_result = native_callback(self, &call_args)?;
                         unsafe {
-                            *reg_base.add(caller_dst as usize) = result;
+                            *reg_base.add(caller_dst as usize) = call_result;
                         }
+                        finish_instruction!();
                         continue;
                     }
 
+                    flush_telemetry!();
                     self.push_frame_fast(
                         resolved_func_id,
                         caller_dst,
@@ -833,6 +962,193 @@ impl VirtualMachine {
                         arg_count,
                     )?;
                     reload_frame!();
+                    finish_instruction!();
+                    continue;
+                }
+
+                OpCode::CallSymbol => {
+                    let const_idx = inst.call_target() as usize;
+                    let arg_base = inst.arg_base();
+                    let arg_count = inst.arg_count() as usize;
+                    let caller_dst = inst.call_dst();
+                    let caller_pc = pc.saturating_sub(1);
+
+                    let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: format!("constant pool missing for binary {binary_id}"),
+                        }
+                    })?;
+                    let pool_val =
+                        pool.get(const_idx)
+                            .ok_or_else(|| RuntimeError::TypeMismatch {
+                                expected: "symbol string in constant pool".to_string(),
+                                found: format!("index {const_idx}"),
+                            })?;
+                    let sym_str = match pool_val {
+                        ConstantPoolValue::String(sym) => sym.clone(),
+                        _ => {
+                            return Err(RuntimeError::TypeMismatch {
+                                expected: "string symbol".to_string(),
+                                found: format!("{pool_val:?}"),
+                            });
+                        }
+                    };
+
+                    let caller_frame = self.current_frame_mut()?;
+                    caller_frame.pc = pc as u32;
+                    let caller_func_id = caller_frame.function_id;
+                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+
+                    // Check native registry first
+                    if let Some(&native_fn) = self.native_registry.get(&sym_str) {
+                        self.record_native_call();
+                        let call_args = self.register_stack
+                            [caller_arg_start..caller_arg_start + arg_count]
+                            .to_vec();
+                        flush_telemetry!();
+                        let call_result = native_fn(self, &call_args)?;
+                        unsafe {
+                            *reg_base.add(caller_dst as usize) = call_result;
+                        }
+                        if let Some(&global_id) = self.context.symbol_to_function_id.get(&sym_str) {
+                            let quickened = Instruction::format_call(
+                                OpCode::CallNativeDirect,
+                                caller_dst,
+                                global_id as u16,
+                                arg_base,
+                                arg_count as u8,
+                            );
+                            self.patch_instruction(caller_func_id, caller_pc, quickened);
+                        }
+                        finish_instruction!();
+                        continue;
+                    }
+
+                    // Fallback to compiled guest function
+                    let global_id = self
+                        .context
+                        .symbol_to_function_id
+                        .get(&sym_str)
+                        .copied()
+                        .ok_or(RuntimeError::FunctionNotFound {
+                            symbol_or_id: sym_str,
+                        })?;
+
+                    let quickened = Instruction::format_call(
+                        OpCode::CallDirect,
+                        caller_dst,
+                        global_id as u16,
+                        arg_base,
+                        arg_count as u8,
+                    );
+                    self.patch_instruction(caller_func_id, caller_pc, quickened);
+
+                    flush_telemetry!();
+                    self.push_frame_fast(global_id, caller_dst, caller_arg_start, arg_count)?;
+                    reload_frame!();
+                    finish_instruction!();
+                    continue;
+                }
+
+                OpCode::CallExtern => {
+                    let const_idx = inst.call_target() as usize;
+                    let arg_base = inst.arg_base();
+                    let arg_count = inst.arg_count() as usize;
+                    let caller_dst = inst.call_dst();
+                    let caller_pc = pc.saturating_sub(1);
+
+                    let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: format!("constant pool missing for binary {binary_id}"),
+                        }
+                    })?;
+                    let pool_val =
+                        pool.get(const_idx)
+                            .ok_or_else(|| RuntimeError::TypeMismatch {
+                                expected: "symbol string in constant pool".to_string(),
+                                found: format!("index {const_idx}"),
+                            })?;
+                    let sym_str = match pool_val {
+                        ConstantPoolValue::String(sym) => sym.clone(),
+                        _ => {
+                            return Err(RuntimeError::TypeMismatch {
+                                expected: "string symbol".to_string(),
+                                found: format!("{pool_val:?}"),
+                            });
+                        }
+                    };
+
+                    let caller_frame = self.current_frame_mut()?;
+                    caller_frame.pc = pc as u32;
+                    let caller_func_id = caller_frame.function_id;
+                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+
+                    // Check native registry first
+                    if let Some(&native_fn) = self.native_registry.get(&sym_str) {
+                        self.record_native_call();
+                        let call_args = self.register_stack
+                            [caller_arg_start..caller_arg_start + arg_count]
+                            .to_vec();
+                        flush_telemetry!();
+                        let call_result = native_fn(self, &call_args)?;
+                        unsafe {
+                            *reg_base.add(caller_dst as usize) = call_result;
+                        }
+                        finish_instruction!();
+                        continue;
+                    }
+
+                    let global_id =
+                        self.context
+                            .resolve_function_symbol(&sym_str)
+                            .ok_or_else(|| RuntimeError::FunctionNotFound {
+                                symbol_or_id: sym_str.clone(),
+                            })?;
+
+                    // In-place quickening to CallDirect
+                    let quickened = Instruction::format_call(
+                        OpCode::CallDirect,
+                        caller_dst,
+                        global_id as u16,
+                        arg_base,
+                        arg_count as u8,
+                    );
+                    self.patch_instruction(caller_func_id, caller_pc, quickened);
+
+                    if let Some(func) = self.context.get_function(global_id) {
+                        let clean_sym = func.symbol.split('(').next().unwrap_or(&func.symbol);
+                        let simple_sym = clean_sym.rsplit(['.', ':']).next().unwrap_or(clean_sym);
+                        let has_qualifier = clean_sym.contains("::");
+                        if let Some(&native_fn) = self
+                            .native_registry
+                            .get(&func.symbol)
+                            .or_else(|| self.native_registry.get(clean_sym))
+                            .or_else(|| {
+                                if !has_qualifier {
+                                    self.native_registry.get(simple_sym)
+                                } else {
+                                    None
+                                }
+                            })
+                        {
+                            self.record_native_call();
+                            let call_args = self.register_stack
+                                [caller_arg_start..caller_arg_start + arg_count]
+                                .to_vec();
+                            flush_telemetry!();
+                            let call_result = native_fn(self, &call_args)?;
+                            unsafe {
+                                *reg_base.add(caller_dst as usize) = call_result;
+                            }
+                            finish_instruction!();
+                            continue;
+                        }
+                    }
+
+                    flush_telemetry!();
+                    self.push_frame_fast(global_id, caller_dst, caller_arg_start, arg_count)?;
+                    reload_frame!();
+                    finish_instruction!();
                     continue;
                 }
 
@@ -853,15 +1169,18 @@ impl VirtualMachine {
                             let meta = &self.context.function_meta[global_func_id as usize];
                             if let Some(native_callback) = meta.native_fn {
                                 self.record_native_call();
-                                let args = self.register_stack
+                                let call_args = self.register_stack
                                     [caller_arg_start..caller_arg_start + arg_count]
                                     .to_vec();
-                                let result = native_callback(self, &args)?;
+                                flush_telemetry!();
+                                let call_result = native_callback(self, &call_args)?;
                                 unsafe {
-                                    *reg_base.add(caller_dst as usize) = result;
+                                    *reg_base.add(caller_dst as usize) = call_result;
                                 }
+                                finish_instruction!();
                                 continue;
                             }
+                            flush_telemetry!();
                             self.push_frame_fast(
                                 global_func_id,
                                 caller_dst,
@@ -869,6 +1188,7 @@ impl VirtualMachine {
                                 arg_count,
                             )?;
                             reload_frame!();
+                            finish_instruction!();
                             continue;
                         }
                         Value::Ref(closure_addr) => {
@@ -879,15 +1199,18 @@ impl VirtualMachine {
                             let meta = &self.context.function_meta[global_func_id as usize];
                             if let Some(native_callback) = meta.native_fn {
                                 self.record_native_call();
-                                let args = self.register_stack
+                                let call_args = self.register_stack
                                     [caller_arg_start..caller_arg_start + arg_count]
                                     .to_vec();
-                                let result = native_callback(self, &args)?;
+                                flush_telemetry!();
+                                let call_result = native_callback(self, &call_args)?;
                                 unsafe {
-                                    *reg_base.add(caller_dst as usize) = result;
+                                    *reg_base.add(caller_dst as usize) = call_result;
                                 }
+                                finish_instruction!();
                                 continue;
                             }
+                            flush_telemetry!();
                             self.push_frame_fast(
                                 global_func_id,
                                 caller_dst,
@@ -898,6 +1221,7 @@ impl VirtualMachine {
                                 new_frame.active_closure = Some(closure_addr);
                             }
                             reload_frame!();
+                            finish_instruction!();
                             continue;
                         }
                         _ => {
@@ -931,7 +1255,9 @@ impl VirtualMachine {
                             .add(caller_frame.register_base);
                         *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
                     }
+                    flush_telemetry!();
                     reload_frame!();
+                    finish_instruction!();
                     continue;
                 }
 
@@ -958,7 +1284,9 @@ impl VirtualMachine {
                             .add(caller_frame.register_base);
                         *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
                     }
+                    flush_telemetry!();
                     reload_frame!();
+                    finish_instruction!();
                     continue;
                 }
 
@@ -978,6 +1306,55 @@ impl VirtualMachine {
                     let size = inst.src2() as usize;
                     let payload_addr = self.heap.allocate(size, BlockTag::Object)?;
                     self.heap.write_u32(payload_addr, vtable_id)?;
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
+                    }
+                }
+
+                OpCode::AllocObjectExtern => {
+                    let caller_func_id = self.current_frame()?.function_id;
+                    let caller_pc = pc.saturating_sub(1);
+                    let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: format!("constant pool missing for binary {binary_id}"),
+                        }
+                    })?;
+                    let pool_idx = inst.imm32() as usize;
+                    let pool_val =
+                        pool.get(pool_idx)
+                            .ok_or_else(|| RuntimeError::TypeMismatch {
+                                expected: "symbol string in constant pool".to_string(),
+                                found: format!("index {pool_idx}"),
+                            })?;
+                    let sym_str = match pool_val {
+                        ConstantPoolValue::String(sym) => sym.as_str(),
+                        _ => {
+                            return Err(RuntimeError::TypeMismatch {
+                                expected: "string symbol".to_string(),
+                                found: format!("{pool_val:?}"),
+                            });
+                        }
+                    };
+                    let (vtable_id, size) =
+                        self.context.resolve_vtable_info(sym_str).ok_or_else(|| {
+                            RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!("class {sym_str}"),
+                            }
+                        })?;
+                    let alloc_size = size.max(8);
+                    let payload_addr = self.heap.allocate(alloc_size, BlockTag::Object)?;
+                    self.heap.write_u32(payload_addr, vtable_id)?;
+
+                    // In-place quickening to AllocObject
+                    let quickened = Instruction::format_a(
+                        OpCode::AllocObject,
+                        0,
+                        inst.dst(),
+                        vtable_id as u16,
+                        alloc_size as u16,
+                    );
+                    self.patch_instruction(caller_func_id, caller_pc, quickened);
+
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
                     }
@@ -1127,10 +1504,10 @@ impl VirtualMachine {
                         });
                     }
                     // SAFETY: Slot is verified in bounds
-                    let val = unsafe { *self.static_slots.get_unchecked(slot) };
+                    let static_val = unsafe { *self.static_slots.get_unchecked(slot) };
                     // SAFETY: Destination register is within frame window
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = val;
+                        *reg_base.add(inst.dst() as usize) = static_val;
                     }
                 }
 
@@ -1143,11 +1520,107 @@ impl VirtualMachine {
                         });
                     }
                     // SAFETY: Slot is verified in bounds
-                    let val = unsafe { *self.static_slots.get_unchecked(slot) };
+                    let static_val = unsafe { *self.static_slots.get_unchecked(slot) };
                     // SAFETY: Destination register is within frame window
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = val;
+                        *reg_base.add(inst.dst() as usize) = static_val;
                     }
+                }
+
+                OpCode::SetStatic => {
+                    let slot_idx = static_base + inst.imm32();
+                    let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
+                    self.set_static(slot_idx, val_to_set)?;
+                }
+
+                OpCode::GetStaticGlobal => {
+                    let caller_func_id = self.current_frame()?.function_id;
+                    let caller_pc = pc.saturating_sub(1);
+                    let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: format!("constant pool missing for binary {binary_id}"),
+                        }
+                    })?;
+                    let pool_idx = inst.imm32() as usize;
+                    let pool_val =
+                        pool.get(pool_idx)
+                            .ok_or_else(|| RuntimeError::TypeMismatch {
+                                expected: "symbol string in constant pool".to_string(),
+                                found: format!("index {pool_idx}"),
+                            })?;
+                    let sym_str = match pool_val {
+                        ConstantPoolValue::String(sym) => sym.as_str(),
+                        _ => {
+                            return Err(RuntimeError::TypeMismatch {
+                                expected: "string symbol".to_string(),
+                                found: format!("{pool_val:?}"),
+                            });
+                        }
+                    };
+                    let resolved_slot = self.context.resolve_static_slot(sym_str).ok_or(
+                        RuntimeError::InvalidStaticOffset {
+                            offset: pool_idx as u32,
+                            total_static: self.static_slots.len() as u32,
+                        },
+                    )?;
+
+                    // In-place quickening to GetStaticDirect
+                    let quickened = Instruction::format_b(
+                        OpCode::GetStaticDirect,
+                        0,
+                        inst.dst(),
+                        resolved_slot,
+                    );
+                    self.patch_instruction(caller_func_id, caller_pc, quickened);
+
+                    let static_val = self.get_static(resolved_slot)?;
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) = static_val;
+                    }
+                }
+
+                OpCode::SetStaticGlobal => {
+                    let caller_func_id = self.current_frame()?.function_id;
+                    let caller_pc = pc.saturating_sub(1);
+                    let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: format!("constant pool missing for binary {binary_id}"),
+                        }
+                    })?;
+                    let pool_idx = inst.imm32() as usize;
+                    let pool_val =
+                        pool.get(pool_idx)
+                            .ok_or_else(|| RuntimeError::TypeMismatch {
+                                expected: "symbol string in constant pool".to_string(),
+                                found: format!("index {pool_idx}"),
+                            })?;
+                    let sym_str = match pool_val {
+                        ConstantPoolValue::String(sym) => sym.as_str(),
+                        _ => {
+                            return Err(RuntimeError::TypeMismatch {
+                                expected: "string symbol".to_string(),
+                                found: format!("{pool_val:?}"),
+                            });
+                        }
+                    };
+                    let resolved_slot = self.context.resolve_static_slot(sym_str).ok_or(
+                        RuntimeError::InvalidStaticOffset {
+                            offset: pool_idx as u32,
+                            total_static: self.static_slots.len() as u32,
+                        },
+                    )?;
+
+                    // In-place quickening to SetStaticDirect
+                    let quickened = Instruction::format_b(
+                        OpCode::SetStaticDirect,
+                        0,
+                        inst.dst(),
+                        resolved_slot,
+                    );
+                    self.patch_instruction(caller_func_id, caller_pc, quickened);
+
+                    let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
+                    self.set_static(resolved_slot, val_to_set)?;
                 }
 
                 OpCode::SetStaticDirect => {
@@ -1201,7 +1674,7 @@ impl VirtualMachine {
                     let header = self.heap.read_header(arr_addr)?;
                     if header.tag == BlockTag::String {
                         let string_len = header.size as usize;
-                        if index_i64 < 0 || (index_i64 as usize) >= string_len {
+                        if (index_i64 as u64) >= (string_len as u64) {
                             return Err(RuntimeError::IndexOutOfBounds {
                                 index: index_i64,
                                 length: string_len,
@@ -1213,7 +1686,7 @@ impl VirtualMachine {
                         }
                     } else {
                         let array_len = self.heap.read_u32(arr_addr)? as usize;
-                        if index_i64 < 0 || (index_i64 as usize) >= array_len {
+                        if (index_i64 as u64) >= (array_len as u64) {
                             return Err(RuntimeError::IndexOutOfBounds {
                                 index: index_i64,
                                 length: array_len,
@@ -1248,7 +1721,7 @@ impl VirtualMachine {
                     }
                     let index_i64 = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
                     let array_len = self.heap.read_u32(arr_addr)? as usize;
-                    if index_i64 < 0 || (index_i64 as usize) >= array_len {
+                    if (index_i64 as u64) >= (array_len as u64) {
                         return Err(RuntimeError::IndexOutOfBounds {
                             index: index_i64,
                             length: array_len,
@@ -1320,6 +1793,7 @@ impl VirtualMachine {
                             unsafe {
                                 *reg_base.add(inst.dst() as usize) = Value::Bool(false);
                             }
+                            finish_instruction!();
                             continue;
                         }
                     };
@@ -1424,6 +1898,7 @@ impl VirtualMachine {
                             unsafe {
                                 *reg_base.add(inst.dst() as usize) = Value::Bool(false);
                             }
+                            finish_instruction!();
                             continue;
                         }
                     };
@@ -1470,6 +1945,7 @@ impl VirtualMachine {
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = val;
                         }
+                        finish_instruction!();
                         continue;
                     }
 
@@ -1478,6 +1954,7 @@ impl VirtualMachine {
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Null;
                         }
+                        finish_instruction!();
                         continue;
                     }
                     let target_vtable_id = inst.src2() as u32;
@@ -1596,18 +2073,153 @@ impl VirtualMachine {
                 }
 
                 // =============================================================
-                // All other opcodes: synchronize frame PC and dispatch defensively
                 // =============================================================
-                _ => {
-                    self.current_frame_mut()?.pc = pc as u32;
-                    self.dispatch_instruction(inst)?;
-                    if self.halted || self.call_frames.len() <= target_depth {
-                        break;
+                // 0xB0 .. 0xBF: Exception Handling
+                // =============================================================
+                OpCode::Throw => {
+                    let exc_val = unsafe { *reg_base.add(inst.dst() as usize) };
+                    if exc_val.is_null() {
+                        return Err(RuntimeError::NullReferenceAccess);
                     }
-                    reload_frame!();
+
+                    loop {
+                        if self.call_frames.is_empty() {
+                            if local_inst_count > 0 {
+                                self.instructions_dispatched += local_inst_count;
+                            }
+                            return Err(RuntimeError::UserException {
+                                message: format!("{exc_val}"),
+                            });
+                        }
+
+                        let (func_id, cur_pc) = {
+                            let frame = self.current_frame()?;
+                            (frame.function_id, frame.pc.saturating_sub(1))
+                        };
+
+                        let func = self.context.get_function(func_id).ok_or_else(|| {
+                            RuntimeError::FunctionNotFound {
+                                symbol_or_id: format!("#{func_id}"),
+                            }
+                        })?;
+
+                        // Look for matching exception handler
+                        let mut matched_handler = None;
+                        let mut fallback_handler = None;
+                        for handler in &func.exception_handlers {
+                            if cur_pc >= handler.try_start_pc && cur_pc < handler.try_end_pc {
+                                match &handler.catch_type_symbol {
+                                    None => {
+                                        if fallback_handler.is_none() {
+                                            fallback_handler = Some(handler.clone());
+                                        }
+                                    }
+                                    Some(type_sym) => {
+                                        let is_match = if let Value::Ref(obj_addr) = exc_val
+                                            && obj_addr > 0
+                                        {
+                                            let obj_vtable_id =
+                                                self.heap.read_u32(obj_addr).unwrap_or(0);
+                                            if let Some(target_class) =
+                                                self.context.all_classes.iter().find(
+                                                    |candidate_class| {
+                                                        candidate_class.symbol == *type_sym
+                                                    },
+                                                )
+                                            {
+                                                self.is_instance_of(
+                                                    obj_vtable_id,
+                                                    target_class.vtable_id,
+                                                )
+                                            } else {
+                                                true
+                                            }
+                                        } else {
+                                            true
+                                        };
+                                        if is_match {
+                                            matched_handler = Some(handler.clone());
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if matched_handler.is_none() {
+                            matched_handler = fallback_handler;
+                        }
+
+                        if let Some(handler) = matched_handler {
+                            let exception_address = if let Value::Ref(target_addr) = exc_val {
+                                target_addr
+                            } else {
+                                0
+                            };
+                            let curr_frame = self.current_frame()?;
+                            let curr_reg_base = curr_frame.register_base;
+                            for &register_index in &handler.try_ref_regs {
+                                if register_index != handler.catch_reg {
+                                    let reg_val = self.register_stack
+                                        [curr_reg_base + register_index as usize];
+                                    if let Value::Ref(object_addr) = reg_val
+                                        && object_addr > 0
+                                        && object_addr != exception_address
+                                    {
+                                        let _ = self.release_reference(object_addr);
+                                        self.register_stack
+                                            [curr_reg_base + register_index as usize] = Value::Null;
+                                    }
+                                }
+                            }
+
+                            if handler.finally_pc.is_none() {
+                                self.register_stack[curr_reg_base + handler.catch_reg as usize] =
+                                    exc_val;
+                            }
+                            let frame = self.current_frame_mut()?;
+                            frame.pc = handler.handler_pc;
+                            flush_telemetry!();
+                            reload_frame!();
+                            finish_instruction!();
+                            break;
+                        }
+
+                        // No handler in this frame: unwind and drop frame references
+                        let curr_frame = self.current_frame()?;
+                        let curr_reg_base = curr_frame.register_base;
+                        let ref_regs = func.reference_registers.clone();
+                        for ref_reg in ref_regs {
+                            let reg_val = self.register_stack[curr_reg_base + ref_reg as usize];
+                            if let Value::Ref(addr) = reg_val
+                                && addr > 0
+                            {
+                                let _ = self.release_reference(addr);
+                            }
+                        }
+
+                        let _frame = self
+                            .call_frames
+                            .pop()
+                            .ok_or(RuntimeError::NullReferenceAccess)?;
+
+                        if self.call_frames.len() <= target_depth {
+                            if local_inst_count > 0 {
+                                self.instructions_dispatched += local_inst_count;
+                            }
+                            return Err(RuntimeError::UserException {
+                                message: format!("{exc_val}"),
+                            });
+                        }
+                    }
                     continue;
                 }
             }
+            finish_instruction!();
+        }
+
+        if local_inst_count > 0 {
+            self.instructions_dispatched += local_inst_count;
         }
 
         // Final PC synchronization if still running
