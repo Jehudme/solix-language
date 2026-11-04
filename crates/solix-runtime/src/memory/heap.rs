@@ -315,6 +315,26 @@ impl VirtualHeap {
         Ok(())
     }
 
+    /// Reads a little-endian 16-bit unsigned integer at virtual byte address `addr`.
+    pub fn read_u16(&self, addr: u32) -> Result<u16, RuntimeError> {
+        let pos = addr as usize;
+        if pos + 2 > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        let bytes = [self.buffer[pos], self.buffer[pos + 1]];
+        Ok(u16::from_le_bytes(bytes))
+    }
+
+    /// Writes a little-endian 16-bit unsigned integer at virtual byte address `addr`.
+    pub fn write_u16(&mut self, addr: u32, word_val: u16) -> Result<(), RuntimeError> {
+        let pos = addr as usize;
+        if pos + 2 > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        self.buffer[pos..pos + 2].copy_from_slice(&word_val.to_le_bytes());
+        Ok(())
+    }
+
     /// Reads a little-endian 32-bit unsigned integer at virtual byte address `addr`.
     pub fn read_u32(&self, addr: u32) -> Result<u32, RuntimeError> {
         let pos = addr as usize;

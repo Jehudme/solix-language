@@ -26,6 +26,14 @@ pub fn compile_class_layout(
     compiled.weak_field_offsets = layout.weak_field_offsets.clone();
     compiled.destructor_id = destructor_id;
 
+    let mut field_types: Vec<(usize, u8)> = layout
+        .field_types
+        .iter()
+        .map(|(&field_offset, &tag)| (field_offset, tag))
+        .collect();
+    field_types.sort_by_key(|(field_offset, _)| *field_offset);
+    compiled.field_types = field_types;
+
     // Compile VTable slots
     compiled.vtable = layout
         .vtable_methods

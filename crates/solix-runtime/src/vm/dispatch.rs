@@ -42,22 +42,18 @@ impl VirtualMachine {
 
             // 0x04: LoadF64
             OpCode::LoadF64 => {
-                let binary_id = self.current_frame()?.binary_id;
-                let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
-                    RuntimeError::BinaryLoadError {
-                        reason: format!("constant pool missing for binary {binary_id}"),
-                    }
-                })?;
-                let idx = inst.imm32() as usize;
-                let c_val = pool.get(idx).ok_or_else(|| RuntimeError::TypeMismatch {
-                    expected: "valid float constant pool index".to_string(),
-                    found: format!("index {idx} out of pool length {}", pool.len()),
-                })?;
-                let f = c_val.as_f64().ok_or_else(|| RuntimeError::TypeMismatch {
-                    expected: "Float64 constant".to_string(),
-                    found: format!("{c_val:?}"),
-                })?;
-                self.set_reg(inst.dst(), Value::F64(f))
+                let binary_index = self.current_frame()?.binary_id;
+                let pool_index = inst.imm32() as usize;
+                let val = self
+                    .const_pool_cache
+                    .get(binary_index)
+                    .and_then(|pool| pool.get(pool_index))
+                    .copied()
+                    .ok_or_else(|| RuntimeError::TypeMismatch {
+                        expected: "valid float constant pool index".to_string(),
+                        found: format!("index {pool_index} out of bounds"),
+                    })?;
+                self.set_reg(inst.dst(), val)
             }
 
             // 0x05: LoadBool
@@ -71,28 +67,17 @@ impl VirtualMachine {
 
             // 0x07: LoadConst
             OpCode::LoadConst => {
-                let binary_id = self.current_frame()?.binary_id;
-                let pool = self.context.get_constant_pool(binary_id).ok_or_else(|| {
-                    RuntimeError::BinaryLoadError {
-                        reason: format!("constant pool missing for binary {binary_id}"),
-                    }
-                })?;
-                let idx = inst.imm32() as usize;
-                let c_val = pool.get(idx).ok_or_else(|| RuntimeError::TypeMismatch {
-                    expected: "valid constant pool index".to_string(),
-                    found: format!("index {idx} out of pool length {}", pool.len()),
-                })?;
-
-                let val = match c_val {
-                    ConstantPoolValue::Int64(i) => Value::I64(*i),
-                    ConstantPoolValue::Float64(bits) => Value::F64(f64::from_bits(*bits)),
-                    ConstantPoolValue::String(s) => {
-                        let bytes = s.as_bytes();
-                        let addr = self.heap.allocate(bytes.len(), BlockTag::String)?;
-                        self.heap.write_bytes(addr, bytes)?;
-                        Value::Ref(addr)
-                    }
-                };
+                let binary_index = self.current_frame()?.binary_id;
+                let pool_index = inst.imm32() as usize;
+                let val = self
+                    .const_pool_cache
+                    .get(binary_index)
+                    .and_then(|pool| pool.get(pool_index))
+                    .copied()
+                    .ok_or_else(|| RuntimeError::TypeMismatch {
+                        expected: "valid constant pool index".to_string(),
+                        found: format!("index {pool_index} out of bounds"),
+                    })?;
                 self.set_reg(inst.dst(), val)
             }
 
@@ -686,8 +671,8 @@ impl VirtualMachine {
                 let dst = inst.call_dst();
 
                 let mut captures = Vec::with_capacity(cap_count);
-                for i in 0..cap_count {
-                    captures.push(self.get_reg(cap_base + i as u16)?);
+                for index in 0..cap_count {
+                    captures.push(self.get_reg(cap_base + index as u16)?);
                 }
 
                 let payload_size = 8 + cap_count * 8;
@@ -695,9 +680,8 @@ impl VirtualMachine {
                 self.heap.write_u32(payload_addr, target_lambda_id)?;
                 self.heap.write_u32(payload_addr + 4, cap_count as u32)?;
 
-                for (idx, cap_val) in captures.iter().enumerate() {
-                    self.closure_captures.insert((payload_addr, idx), *cap_val);
-                    let cell_addr = payload_addr + 8 + (idx * 8) as u32;
+                for (index, cap_val) in captures.iter().enumerate() {
+                    let cell_addr = payload_addr + 8 + (index * 8) as u32;
                     let _ = self.heap.write_u64(cell_addr, cap_val.to_raw_u64());
                     if let Value::Ref(child_addr) = cap_val
                         && *child_addr > 0
@@ -718,13 +702,10 @@ impl VirtualMachine {
                     .active_closure
                     .ok_or(RuntimeError::NullReferenceAccess)?;
 
-                for i in 0..capture_count {
-                    let val = self
-                        .closure_captures
-                        .get(&(closure_addr, i))
-                        .copied()
-                        .unwrap_or(Value::Null);
-                    self.set_reg(capture_base + i as u16, val)?;
+                for index in 0..capture_count {
+                    let cell_addr = closure_addr + 8 + (index * 8) as u32;
+                    let raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                    self.set_reg(capture_base + index as u16, Value::from_raw_u64(raw))?;
                 }
                 Ok(())
             }
@@ -882,12 +863,76 @@ impl VirtualMachine {
                     return Err(RuntimeError::NullReferenceAccess);
                 }
                 let offset = inst.src2() as usize;
-                let val = if let Some(&v) = self.object_fields.get(&(obj_addr, offset)) {
-                    v
-                } else {
-                    let field_addr = obj_addr + offset as u32;
-                    let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                    Value::I64(raw as i64)
+                let field_addr = obj_addr + offset as u32;
+                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                let maybe_class = self
+                    .context
+                    .all_classes
+                    .iter()
+                    .find(|cls| cls.vtable_id == vtable_id);
+                let field_type_tag = maybe_class.and_then(|cls| cls.get_field_type(offset));
+
+                let val = match field_type_tag {
+                    Some(1) => {
+                        let byte_val = self.heap.read_u8(field_addr).unwrap_or(0);
+                        Value::I32(byte_val as i8 as i32)
+                    }
+                    Some(2) => {
+                        let byte_val = self.heap.read_u8(field_addr).unwrap_or(0);
+                        Value::I32(byte_val as u32 as i32)
+                    }
+                    Some(3) => {
+                        let word_val = self.heap.read_u16(field_addr).unwrap_or(0);
+                        Value::I32(word_val as i16 as i32)
+                    }
+                    Some(4) => {
+                        let word_val = self.heap.read_u16(field_addr).unwrap_or(0);
+                        Value::I32(word_val as u32 as i32)
+                    }
+                    Some(5) => {
+                        let dword_val = self.heap.read_u32(field_addr).unwrap_or(0);
+                        Value::I32(dword_val as i32)
+                    }
+                    Some(6) => {
+                        let dword_val = self.heap.read_u32(field_addr).unwrap_or(0);
+                        Value::I64(dword_val as i64)
+                    }
+                    Some(7) | Some(8) => {
+                        let qword_val = self.heap.read_u64(field_addr).unwrap_or(0);
+                        Value::I64(qword_val as i64)
+                    }
+                    Some(9) | Some(10) => {
+                        let qword_val = self.heap.read_u64(field_addr).unwrap_or(0);
+                        Value::F64(f64::from_bits(qword_val))
+                    }
+                    Some(11) => {
+                        let byte_val = self.heap.read_u8(field_addr).unwrap_or(0);
+                        Value::Bool(byte_val != 0)
+                    }
+                    Some(12) => {
+                        let child_addr = self.heap.read_u64(field_addr).unwrap_or(0) as u32;
+                        if child_addr == 0 {
+                            Value::Null
+                        } else {
+                            Value::Ref(child_addr)
+                        }
+                    }
+                    _ => {
+                        let raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                        if raw == 0 {
+                            let is_ref = maybe_class.is_some_and(|cls| {
+                                cls.reference_field_offsets.contains(&offset)
+                                    || cls.weak_field_offsets.contains(&offset)
+                            });
+                            if is_ref {
+                                Value::Null
+                            } else {
+                                Value::I32(0)
+                            }
+                        } else {
+                            Value::from_raw_u64(raw)
+                        }
+                    }
                 };
                 self.set_reg(inst.dst(), val)
             }
@@ -899,20 +944,63 @@ impl VirtualMachine {
                 }
                 let offset = inst.src2() as usize;
                 let val = self.get_reg(inst.dst())?;
-                let old_val = self.object_fields.insert((obj_addr, offset), val);
                 let field_addr = obj_addr + offset as u32;
-                let _ = self.heap.write_u64(field_addr, val.to_raw_u64());
-                if let Value::Ref(child_addr) = val
-                    && !inst.is_weak()
-                    && child_addr > 0
-                {
-                    crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
-                }
-                if let Some(Value::Ref(old_child)) = old_val
-                    && !inst.is_weak()
-                    && old_child > 0
-                {
-                    self.release_reference(old_child)?;
+
+                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                let maybe_class = self
+                    .context
+                    .all_classes
+                    .iter()
+                    .find(|cls| cls.vtable_id == vtable_id);
+                let field_type_tag = maybe_class.and_then(|cls| cls.get_field_type(offset));
+
+                match field_type_tag {
+                    Some(1) | Some(2) => {
+                        let _ = self.heap.write_u8(field_addr, val.as_i32()? as u8);
+                    }
+                    Some(3) | Some(4) => {
+                        let _ = self.heap.write_u16(field_addr, val.as_i32()? as u16);
+                    }
+                    Some(5) | Some(6) => {
+                        let _ = self.heap.write_u32(field_addr, val.as_i32()? as u32);
+                    }
+                    Some(7) | Some(8) => {
+                        let _ = self.heap.write_u64(field_addr, val.as_i64()? as u64);
+                    }
+                    Some(9) | Some(10) => {
+                        let _ = self.heap.write_u64(field_addr, val.as_f64()?.to_bits());
+                    }
+                    Some(11) => {
+                        let _ = self.heap.write_u8(field_addr, if val.as_bool()? { 1 } else { 0 });
+                    }
+                    Some(12) => {
+                        let child_addr = val.as_ref()?;
+                        let old_child = self.heap.read_u64(field_addr).unwrap_or(0) as u32;
+                        self.heap.write_u64(field_addr, child_addr as u64)?;
+                        if child_addr > 0 && !inst.is_weak() {
+                            crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                        }
+                        if old_child > 0 && !inst.is_weak() {
+                            self.release_reference(old_child)?;
+                        }
+                    }
+                    _ => {
+                        let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                        let old_val = Value::from_raw_u64(old_raw);
+                        self.heap.write_u64(field_addr, val.to_raw_u64())?;
+                        if let Value::Ref(child_addr) = val
+                            && !inst.is_weak()
+                            && child_addr > 0
+                        {
+                            crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                        }
+                        if let Value::Ref(old_child) = old_val
+                            && !inst.is_weak()
+                            && old_child > 0
+                        {
+                            self.release_reference(old_child)?;
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -1037,18 +1125,19 @@ impl VirtualMachine {
                     });
                 }
                 let idx_usize = idx as usize;
-                let val = if let Some(&v) = self.array_elements.get(&(arr_addr, idx_usize)) {
-                    v
-                } else {
-                    let tag = self.heap.read_u8(arr_addr + 7).unwrap_or(0);
-                    match tag {
-                        0 | 13 | 0x80..=0xFF => Value::Null,
+                let elem_size = self.heap.read_u8(arr_addr + 4)? as usize;
+                let elem_addr = arr_addr + 8 + (idx_usize * elem_size) as u32;
+                let raw_word = self.heap.read_u64(elem_addr).unwrap_or(0);
+                let val = if raw_word == 0 {
+                    let elem_type_tag = self.heap.read_u8(arr_addr + 7).unwrap_or(0);
+                    match elem_type_tag {
+                        13 | 0x80..=0xFF => Value::Null,
                         11 => Value::Bool(false),
-                        1 | 2 | 3 | 5 | 6 | 7 | 12 => Value::I32(0),
-                        4 | 8 => Value::I64(0),
                         9 | 10 => Value::F64(0.0),
                         _ => Value::I32(0),
                     }
+                } else {
+                    Value::from_raw_u64(raw_word)
                 };
                 self.set_reg(inst.dst(), val)
             }
@@ -1068,19 +1157,26 @@ impl VirtualMachine {
                 }
                 let idx_usize = idx as usize;
                 let val = self.get_reg(inst.src2())?;
-                let old_val = self.array_elements.insert((arr_addr, idx_usize), val);
                 let elem_size = self.heap.read_u8(arr_addr + 4)? as usize;
                 let elem_addr = arr_addr + 8 + (idx_usize * elem_size) as u32;
-                let _ = self.heap.write_u64(elem_addr, val.to_raw_u64());
-                if let Value::Ref(child_addr) = val
-                    && child_addr > 0
-                {
-                    crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
-                }
-                if let Some(Value::Ref(old_child)) = old_val
-                    && old_child > 0
-                {
-                    self.release_reference(old_child)?;
+                let old_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                let old_val = Value::from_raw_u64(old_raw);
+                self.heap.write_u64(elem_addr, val.to_raw_u64())?;
+                let header = self.heap.read_header(arr_addr)?;
+                let elem_type_tag = self.heap.read_u8(arr_addr + 7).unwrap_or(0);
+                let is_reference_element =
+                    header.tag == BlockTag::Tuple || elem_type_tag == 13 || elem_type_tag >= 0x80;
+                if is_reference_element {
+                    if let Value::Ref(child_addr) = val
+                        && child_addr > 0
+                    {
+                        crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                    }
+                    if let Value::Ref(old_child) = old_val
+                        && old_child > 0
+                    {
+                        self.release_reference(old_child)?;
+                    }
                 }
                 Ok(())
             }
@@ -1116,14 +1212,9 @@ impl VirtualMachine {
                         length: len,
                     });
                 }
-                let val = if let Some(&v) = self.array_elements.get(&(tuple_addr, slot_idx)) {
-                    v
-                } else {
-                    let elem_addr = tuple_addr + 8 + (slot_idx * 8) as u32;
-                    let raw = self.heap.read_u64(elem_addr).unwrap_or(0);
-                    Value::I64(raw as i64)
-                };
-                self.set_reg(inst.dst(), val)
+                let elem_addr = tuple_addr + 8 + (slot_idx * 8) as u32;
+                let raw_word = self.heap.read_u64(elem_addr).unwrap_or(0);
+                self.set_reg(inst.dst(), Value::from_raw_u64(raw_word))
             }
 
             OpCode::TupleInstanceof => {
@@ -1140,11 +1231,9 @@ impl VirtualMachine {
                         length: len,
                     });
                 }
-                let val = self
-                    .array_elements
-                    .get(&(tuple_addr, idx as usize))
-                    .copied()
-                    .unwrap_or(Value::Null);
+                let elem_addr = tuple_addr + 8 + (idx as usize * 8) as u32;
+                let raw_word = self.heap.read_u64(elem_addr).unwrap_or(0);
+                let val = Value::from_raw_u64(raw_word);
                 let tag = inst.flags();
                 let is_match = match tag {
                     1..=4 => matches!(val, Value::I32(_) | Value::I64(_)),
@@ -1152,10 +1241,10 @@ impl VirtualMachine {
                     9..=10 => matches!(val, Value::F64(_)),
                     11 => matches!(val, Value::Bool(_)),
                     13 => {
-                        if let Value::Ref(a) = val {
+                        if let Value::Ref(addr) = val {
                             self.heap
-                                .read_header(a)
-                                .is_ok_and(|h| h.tag == BlockTag::String)
+                                .read_header(addr)
+                                .is_ok_and(|header_info| header_info.tag == BlockTag::String)
                         } else {
                             false
                         }

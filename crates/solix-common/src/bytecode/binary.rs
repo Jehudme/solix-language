@@ -289,6 +289,13 @@ impl BinaryProgram {
                 }
                 None => buffer.push(0),
             }
+
+            // Field types
+            buffer.extend_from_slice(&(cls.field_types.len() as u32).to_le_bytes());
+            for &(offset, tag) in &cls.field_types {
+                buffer.extend_from_slice(&(offset as u64).to_le_bytes());
+                buffer.push(tag);
+            }
         }
 
         // 5. Functions
@@ -490,6 +497,16 @@ impl BinaryProgram {
             class.vtable = vtable;
             class.itable = itable;
             class.destructor_id = destructor_id;
+
+            let field_types_len = reader.read_u32("Classes")? as usize;
+            let mut field_types = Vec::with_capacity(field_types_len);
+            for _ in 0..field_types_len {
+                let offset = reader.read_u64("Classes")? as usize;
+                let tag = reader.read_u8("Classes")?;
+                field_types.push((offset, tag));
+            }
+            class.field_types = field_types;
+
             classes.push(class);
         }
 

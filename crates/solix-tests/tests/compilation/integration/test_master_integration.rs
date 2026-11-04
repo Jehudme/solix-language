@@ -25,7 +25,7 @@ fn compile_fixture(file_name: &str, source_code: &str) -> BinaryProgram {
 fn test_master_all_statements_emission_and_execution() {
     let source_code = include_str!("../../../fixtures/master_all_statements_emission.slx");
     let program = compile_fixture("master_all_statements_emission.slx", source_code);
-    let (res, vm) = run_binary(program, Some("Runner::run_all_checks"));
+    let (res, mut vm) = run_binary(program, Some("Runner::run_all_checks"));
     assert_eq!(res, Value::I32(358));
     assert!(vm.verify_clean_memory().is_ok());
 }
@@ -34,7 +34,7 @@ fn test_master_all_statements_emission_and_execution() {
 fn test_master_all_features_exhaustive_integration() {
     let source_code = include_str!("../../../fixtures/master_all_features_exhaustive.slx");
     let program = compile_fixture("master_all_features_exhaustive.slx", source_code);
-    let (res, vm) = run_binary(program, Some("App::main"));
+    let (res, mut vm) = run_binary(program, Some("App::main"));
     assert_eq!(res, Value::I32(0), "App::main must return exit code 0");
 
     let expected_checkpoints = [

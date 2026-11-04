@@ -174,9 +174,11 @@ impl GenericBlueprintRegistry {
                         &substitutions,
                     );
 
-                    let is_ref = field_type.is_reference_type();
-                    let field_size = match &field_type {
+                    let unwrapped_field_type = field_type.unwrap_alias();
+                    let is_ref = unwrapped_field_type.is_reference_type();
+                    let field_size = match unwrapped_field_type {
                         Type::Primitive(prim) => prim.byte_size(),
+                        Type::Enum { .. } => 4,
                         _ => 8,
                     };
 
@@ -190,6 +192,30 @@ impl GenericBlueprintRegistry {
                             .reference_field_offsets
                             .push(current_field_offset);
                     }
+
+                    let field_type_tag: u8 = match unwrapped_field_type {
+                        Type::Primitive(prim) => match prim {
+                            PrimitiveKind::Int8 => 1,
+                            PrimitiveKind::UInt8 | PrimitiveKind::Char => 2,
+                            PrimitiveKind::Int16 => 3,
+                            PrimitiveKind::UInt16 => 4,
+                            PrimitiveKind::Int32 => 5,
+                            PrimitiveKind::UInt32 => 6,
+                            PrimitiveKind::Int64 => 7,
+                            PrimitiveKind::UInt64 => 8,
+                            PrimitiveKind::Float32 => 9,
+                            PrimitiveKind::Float64 => 10,
+                            PrimitiveKind::Bool => 11,
+                            PrimitiveKind::TuplePrimitive => 12,
+                            PrimitiveKind::Void => 0,
+                        },
+                        Type::Enum { .. } => 5,
+                        _ => 12,
+                    };
+                    class_layout
+                        .field_types
+                        .insert(current_field_offset, field_type_tag);
+
                     current_field_offset += field_size.max(4); // 4-byte or 8-byte alignment
 
                     let field_symbol = SymbolEntry {

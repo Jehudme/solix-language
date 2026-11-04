@@ -31,6 +31,8 @@ pub struct ClassLayout {
     pub weak_field_offsets: Vec<usize>,
     /// Virtual method slot indices mapped by method identifier name.
     pub method_slots: HashMap<String, usize>,
+    /// Explicit mapping of field byte offsets to their primitive or reference type tags.
+    pub field_types: HashMap<usize, u8>,
     /// Whether this class is an external declaration imported from a library.
     pub is_extern: bool,
 }
@@ -51,6 +53,7 @@ impl ClassLayout {
             reference_field_offsets: Vec::new(),
             weak_field_offsets: Vec::new(),
             method_slots: HashMap::new(),
+            field_types: HashMap::new(),
             is_extern: false,
         }
     }
