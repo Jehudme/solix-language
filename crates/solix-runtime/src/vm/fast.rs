@@ -84,6 +84,9 @@ impl VirtualMachine {
         );
 
         self.call_frames.push(frame);
+        if self.call_frames.len() > self.peak_call_stack_depth {
+            self.peak_call_stack_depth = self.call_frames.len();
+        }
         Ok(())
     }
 
@@ -153,6 +156,7 @@ impl VirtualMachine {
             // SAFETY: pc < inst_len, so inst_ptr.add(pc) is in-bounds
             let inst = unsafe { *inst_ptr.add(pc) };
             pc += 1;
+            self.instructions_dispatched += 1;
 
             let opcode = inst.opcode(pc).map_err(|_| RuntimeError::InvalidOpCode {
                 pc: pc as u32,

@@ -8,7 +8,23 @@ use crate::frame::CallFrame;
 use crate::memory::{BlockTag, VirtualHeap};
 use crate::native::NativeRegistry;
 use crate::value::Value;
+use solix_common::bytecode::Instruction;
 use std::collections::{HashMap, HashSet};
+
+/// Telemetry metrics recorded across virtual machine execution.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VmTelemetry {
+    /// Pure VM bytecode execution elapsed time in nanoseconds (excluding setup/teardown).
+    pub pure_execution_time_ns: u64,
+    /// Total count of bytecode instructions dispatched across all frames.
+    pub instructions_dispatched: u64,
+    /// Peak activation call stack depth reached during execution.
+    pub peak_call_stack_depth: usize,
+    /// Total count of native host or builtin function calls dispatched.
+    pub native_calls_count: u64,
+    /// Total count of dynamically quickened instructions.
+    pub quickened_instructions_count: u64,
+}
 
 /// Register-based virtual machine execution coordinator.
 #[derive(Debug)]
@@ -43,6 +59,16 @@ pub struct VirtualMachine {
     pub safe_mode: bool,
     /// Output buffer of lines printed via standard print/println builtins.
     pub stdout: Vec<String>,
+    /// Pure VM bytecode execution elapsed time in nanoseconds.
+    pub pure_execution_time_ns: u64,
+    /// Total count of bytecode instructions dispatched across all frames.
+    pub instructions_dispatched: u64,
+    /// Peak activation call stack depth reached during execution.
+    pub peak_call_stack_depth: usize,
+    /// Total count of native host or builtin function calls dispatched.
+    pub native_calls_count: u64,
+    /// Total count of dynamically quickened instructions.
+    pub quickened_instructions_count: u64,
 }
 
 impl VirtualMachine {
@@ -77,6 +103,11 @@ impl VirtualMachine {
             last_return_value: Value::Null,
             safe_mode,
             stdout: Vec::new(),
+            pure_execution_time_ns: 0,
+            instructions_dispatched: 0,
+            peak_call_stack_depth: 0,
+            native_calls_count: 0,
+            quickened_instructions_count: 0,
         }
     }
 
@@ -398,6 +429,9 @@ impl VirtualMachine {
         );
 
         self.call_frames.push(frame);
+        if self.call_frames.len() > self.peak_call_stack_depth {
+            self.peak_call_stack_depth = self.call_frames.len();
+        }
         Ok(())
     }
 
@@ -465,6 +499,7 @@ impl VirtualMachine {
             (inst, func_id)
         };
 
+        self.instructions_dispatched += 1;
         self.dispatch_instruction(inst)
     }
 
@@ -482,108 +517,114 @@ impl VirtualMachine {
     }
 
     fn run_internal(&mut self) -> Result<Value, RuntimeError> {
-        // 1. Static synthesis initialization: execute all @init functions
-        let init_ids = self.context.init_function_ids.clone();
-        for init_id in init_ids {
-            self.push_frame(init_id, 0, &[])?;
-            let target_depth = self.call_frames.len() - 1;
-            self.run_loop(target_depth)?;
+        let execution_start = std::time::Instant::now();
+        let execution_result = (|| -> Result<Value, RuntimeError> {
+            // 1. Static synthesis initialization: execute all @init functions
+            let init_ids = self.context.init_function_ids.clone();
+            for init_id in init_ids {
+                self.push_frame(init_id, 0, &[])?;
+                let target_depth = self.call_frames.len() - 1;
+                self.run_loop(target_depth)?;
+                if self.halted {
+                    break;
+                }
+            }
+
             if self.halted {
-                break;
-            }
-        }
-
-        if self.halted {
-            return Ok(self.exit_code.map_or(self.last_return_value, Value::I32));
-        }
-
-        // 2. Program entry point execution
-        let entry_id = self.context.entry_point_function_id.ok_or_else(|| {
-            RuntimeError::EntryPointNotFound {
-                symbol: self
-                    .context
-                    .options
-                    .entry_point
-                    .clone()
-                    .unwrap_or_else(|| "main".to_string()),
-            }
-        })?;
-
-        let entry_func = self.context.get_function(entry_id).ok_or_else(|| {
-            RuntimeError::EntryPointNotFound {
-                symbol: format!("#{entry_id}"),
-            }
-        })?;
-
-        // Entry point signature validation: parameter count must be 0 or 1
-        if entry_func.param_count > 1 {
-            return Err(RuntimeError::InvalidEntryPointSignature {
-                symbol: entry_func.symbol.clone(),
-                param_count: entry_func.param_count,
-            });
-        }
-
-        let mut entry_args = Vec::new();
-        if entry_func.param_count == 1 {
-            // Pack CLI arguments as ArrayRef of String
-            let args_len = self.context.options.args.len();
-            let args_arr_addr = self.heap.allocate(8 + args_len * 8, BlockTag::ArrayRef)?;
-            self.heap.write_u32(args_arr_addr, args_len as u32)?;
-            self.heap.write_u32(args_arr_addr + 4, 8)?;
-
-            for (i, arg_str) in self.context.options.args.iter().enumerate() {
-                let bytes = arg_str.as_bytes();
-                let str_addr = self.heap.allocate(bytes.len(), BlockTag::String)?;
-                self.heap.write_bytes(str_addr, bytes)?;
-                self.array_elements
-                    .insert((args_arr_addr, i), Value::Ref(str_addr));
-                let elem_addr = args_arr_addr + 8 + (i * 8) as u32;
-                self.heap
-                    .write_u64(elem_addr, Value::Ref(str_addr).to_raw_u64())?;
+                return Ok(self.exit_code.map_or(self.last_return_value, Value::I32));
             }
 
-            entry_args.push(Value::Ref(args_arr_addr));
-        }
-
-        self.push_frame(entry_id, 0, &entry_args)?;
-        self.run_loop(0)?;
-
-        for arg in entry_args {
-            if let Ok(addr) = arg.as_ref()
-                && addr != 0
-            {
-                let _ = self.release_reference(addr);
-            }
-        }
-
-        for i in 0..self.static_slots.len() {
-            if let Value::Ref(addr) = self.static_slots[i]
-                && addr > 0
-            {
-                self.static_slots[i] = Value::Null;
-                let _ = self.release_reference(addr);
-            }
-        }
-
-        if let Some(code) = self.exit_code {
-            Ok(Value::I32(code))
-        } else {
-            match self.last_return_value {
-                Value::Null => {
-                    self.exit_code = Some(0);
-                    Ok(Value::I32(0))
+            // 2. Program entry point execution
+            let entry_id = self.context.entry_point_function_id.ok_or_else(|| {
+                RuntimeError::EntryPointNotFound {
+                    symbol: self
+                        .context
+                        .options
+                        .entry_point
+                        .clone()
+                        .unwrap_or_else(|| "main".to_string()),
                 }
-                Value::I32(code) => {
-                    self.exit_code = Some(code);
-                    Ok(Value::I32(code))
+            })?;
+
+            let entry_func = self.context.get_function(entry_id).ok_or_else(|| {
+                RuntimeError::EntryPointNotFound {
+                    symbol: format!("#{entry_id}"),
                 }
-                Value::I64(code) => {
-                    self.exit_code = Some(code as i32);
-                    Ok(Value::I64(code))
-                }
-                other => Ok(other),
+            })?;
+
+            // Entry point signature validation: parameter count must be 0 or 1
+            if entry_func.param_count > 1 {
+                return Err(RuntimeError::InvalidEntryPointSignature {
+                    symbol: entry_func.symbol.clone(),
+                    param_count: entry_func.param_count,
+                });
             }
-        }
+
+            let mut entry_args = Vec::new();
+            if entry_func.param_count == 1 {
+                // Pack CLI arguments as ArrayRef of String
+                let args_len = self.context.options.args.len();
+                let args_arr_addr = self.heap.allocate(8 + args_len * 8, BlockTag::ArrayRef)?;
+                self.heap.write_u32(args_arr_addr, args_len as u32)?;
+                self.heap.write_u32(args_arr_addr + 4, 8)?;
+
+                for (arg_idx, arg_str) in self.context.options.args.iter().enumerate() {
+                    let bytes = arg_str.as_bytes();
+                    let str_addr = self.heap.allocate(bytes.len(), BlockTag::String)?;
+                    self.heap.write_bytes(str_addr, bytes)?;
+                    self.array_elements
+                        .insert((args_arr_addr, arg_idx), Value::Ref(str_addr));
+                    let elem_addr = args_arr_addr + 8 + (arg_idx * 8) as u32;
+                    self.heap
+                        .write_u64(elem_addr, Value::Ref(str_addr).to_raw_u64())?;
+                }
+
+                entry_args.push(Value::Ref(args_arr_addr));
+            }
+
+            self.push_frame(entry_id, 0, &entry_args)?;
+            self.run_loop(0)?;
+
+            for arg in entry_args {
+                if let Ok(addr) = arg.as_ref()
+                    && addr != 0
+                {
+                    let _ = self.release_reference(addr);
+                }
+            }
+
+            for slot_idx in 0..self.static_slots.len() {
+                if let Value::Ref(addr) = self.static_slots[slot_idx]
+                    && addr > 0
+                {
+                    self.static_slots[slot_idx] = Value::Null;
+                    let _ = self.release_reference(addr);
+                }
+            }
+
+            if let Some(code) = self.exit_code {
+                Ok(Value::I32(code))
+            } else {
+                match self.last_return_value {
+                    Value::Null => {
+                        self.exit_code = Some(0);
+                        Ok(Value::I32(0))
+                    }
+                    Value::I32(code) => {
+                        self.exit_code = Some(code);
+                        Ok(Value::I32(code))
+                    }
+                    Value::I64(code) => {
+                        self.exit_code = Some(code as i32);
+                        Ok(Value::I64(code))
+                    }
+                    other => Ok(other),
+                }
+            }
+        })();
+
+        self.pure_execution_time_ns = execution_start.elapsed().as_nanos() as u64;
+        execution_result
     }
 
     /// Executes the loaded program and returns the final process exit code.
@@ -610,5 +651,34 @@ impl VirtualMachine {
     /// Returns `RuntimeError::MemoryLeak` if memory leaks or fragmentation exist.
     pub fn verify_clean_memory(&self) -> Result<(), RuntimeError> {
         self.heap.verify_clean_memory()
+    }
+
+    /// Returns the live telemetry metrics of the virtual machine execution.
+    #[must_use]
+    pub fn telemetry(&self) -> VmTelemetry {
+        VmTelemetry {
+            pure_execution_time_ns: self.pure_execution_time_ns,
+            instructions_dispatched: self.instructions_dispatched,
+            peak_call_stack_depth: self.peak_call_stack_depth,
+            native_calls_count: self.native_calls_count,
+            quickened_instructions_count: self.quickened_instructions_count,
+        }
+    }
+
+    /// Records the dispatch of a native host or builtin function call.
+    pub(crate) fn record_native_call(&mut self) {
+        self.native_calls_count += 1;
+    }
+
+    /// Modifies a compiled instruction in-place and records the quickening operation.
+    pub(crate) fn patch_instruction(
+        &mut self,
+        function_id: u32,
+        instruction_pc: usize,
+        new_instruction: Instruction,
+    ) {
+        self.context
+            .patch_instruction(function_id, instruction_pc, new_instruction);
+        self.quickened_instructions_count += 1;
     }
 }

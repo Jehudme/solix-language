@@ -6,4 +6,4 @@ pub mod dispatch;
 pub mod engine;
 pub mod fast;
 
-pub use engine::VirtualMachine;
+pub use engine::{VirtualMachine, VmTelemetry};

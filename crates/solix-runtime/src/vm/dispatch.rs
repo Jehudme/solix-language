@@ -497,8 +497,7 @@ impl VirtualMachine {
 
                 // In-place quickening to GetStaticDirect
                 let quickened = Instruction::format_b(OpCode::GetStaticDirect, 0, inst.dst(), slot);
-                self.context
-                    .patch_instruction(caller_func_id, caller_pc, quickened);
+                self.patch_instruction(caller_func_id, caller_pc, quickened);
 
                 let val = self.get_static(slot)?;
                 self.set_reg(inst.dst(), val)
@@ -582,6 +581,7 @@ impl VirtualMachine {
                             }
                         })
                     {
+                        self.record_native_call();
                         let result = native_fn(self, &args)?;
                         self.set_reg(caller_dst, result)?;
                         return Ok(());
@@ -630,6 +630,7 @@ impl VirtualMachine {
 
                 // Check native registry first
                 if let Some(&native_fn) = self.native_registry.get(&sym) {
+                    self.record_native_call();
                     let result = native_fn(self, &args)?;
                     self.set_reg(caller_dst, result)?;
                     return Ok(());
@@ -777,6 +778,7 @@ impl VirtualMachine {
                             }
                         })
                     {
+                        self.record_native_call();
                         let result = native_fn(self, &args)?;
                         self.set_reg(caller_dst, result)?;
                         return Ok(());
@@ -853,6 +855,7 @@ impl VirtualMachine {
                             }
                         })
                     {
+                        self.record_native_call();
                         let result = native_fn(self, &args)?;
                         self.set_reg(caller_dst, result)?;
                         return Ok(());
@@ -1371,6 +1374,7 @@ impl VirtualMachine {
 
                 // Check native registry first
                 if let Some(&native_fn) = self.native_registry.get(&sym) {
+                    self.record_native_call();
                     let result = native_fn(self, &args)?;
                     self.set_reg(caller_dst, result)?;
                     return Ok(());
@@ -1390,8 +1394,7 @@ impl VirtualMachine {
                     arg_base,
                     arg_count as u8,
                 );
-                self.context
-                    .patch_instruction(caller_func_id, caller_pc, quickened);
+                self.patch_instruction(caller_func_id, caller_pc, quickened);
 
                 if let Some(func) = self.context.get_function(global_id) {
                     let clean = func.symbol.split('(').next().unwrap_or(&func.symbol);
@@ -1409,6 +1412,7 @@ impl VirtualMachine {
                             }
                         })
                     {
+                        self.record_native_call();
                         let result = native_fn(self, &args)?;
                         self.set_reg(caller_dst, result)?;
                         return Ok(());
@@ -1456,8 +1460,7 @@ impl VirtualMachine {
 
                 // In-place quickening to SetStaticDirect
                 let quickened = Instruction::format_b(OpCode::SetStaticDirect, 0, inst.dst(), slot);
-                self.context
-                    .patch_instruction(caller_func_id, caller_pc, quickened);
+                self.patch_instruction(caller_func_id, caller_pc, quickened);
 
                 let val = self.get_reg(inst.dst())?;
                 self.set_static(slot, val)
@@ -1516,8 +1519,7 @@ impl VirtualMachine {
                     vtable_id as u16,
                     size as u16,
                 );
-                self.context
-                    .patch_instruction(caller_func_id, caller_pc, quickened);
+                self.patch_instruction(caller_func_id, caller_pc, quickened);
 
                 self.set_reg(inst.dst(), Value::Ref(payload_addr))
             }

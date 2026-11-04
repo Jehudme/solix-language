@@ -1025,6 +1025,7 @@ dependencies = [
 name = "solix-runtime"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "solix-common",
  "tempfile",
  "thiserror",

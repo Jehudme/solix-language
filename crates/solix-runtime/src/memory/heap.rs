@@ -21,6 +21,21 @@ pub struct LiveAllocationInfo {
     pub tag: BlockTag,
 }
 
+/// Telemetry metrics recorded across virtual heap memory operations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HeapTelemetry {
+    /// Currently allocated dynamic block bytes.
+    pub current_allocated_bytes: usize,
+    /// Peak allocated dynamic block bytes recorded.
+    pub peak_allocated_bytes: usize,
+    /// Total number of dynamic allocation operations processed.
+    pub total_allocations_count: u64,
+    /// Total number of dynamic deallocation operations processed.
+    pub total_deallocations_count: u64,
+    /// Number of active live objects.
+    pub active_live_objects: usize,
+}
+
 /// Byte-addressed virtual memory buffer partitioned into static and dynamic regions.
 #[derive(Debug, Clone)]
 pub struct VirtualHeap {
@@ -34,6 +49,14 @@ pub struct VirtualHeap {
     free_list: FreeListManager,
     /// Active allocations indexed by their 32-bit payload addresses.
     live_allocations: BTreeMap<u32, LiveAllocationInfo>,
+    /// Currently allocated dynamic bytes.
+    current_allocated_bytes: usize,
+    /// Peak dynamic bytes allocated over the lifetime of the heap.
+    peak_allocated_bytes: usize,
+    /// Total count of allocations executed.
+    total_allocations_count: u64,
+    /// Total count of deallocations executed.
+    total_deallocations_count: u64,
 }
 
 impl VirtualHeap {
@@ -50,6 +73,10 @@ impl VirtualHeap {
             dynamic_capacity,
             free_list: FreeListManager::new(dynamic_capacity),
             live_allocations: BTreeMap::new(),
+            current_allocated_bytes: 0,
+            peak_allocated_bytes: 0,
+            total_allocations_count: 0,
+            total_deallocations_count: 0,
         }
     }
 
@@ -127,6 +154,12 @@ impl VirtualHeap {
             },
         );
 
+        self.total_allocations_count += 1;
+        self.current_allocated_bytes += allocated_block_size;
+        if self.current_allocated_bytes > self.peak_allocated_bytes {
+            self.peak_allocated_bytes = self.current_allocated_bytes;
+        }
+
         Ok(payload_addr_u32)
     }
 
@@ -154,7 +187,24 @@ impl VirtualHeap {
         self.free_list
             .deallocate(info.block_offset, info.total_block_size);
 
+        self.total_deallocations_count += 1;
+        self.current_allocated_bytes = self
+            .current_allocated_bytes
+            .saturating_sub(info.total_block_size);
+
         Ok(())
+    }
+
+    /// Returns the live telemetry metrics of the virtual heap.
+    #[must_use]
+    pub fn telemetry(&self) -> HeapTelemetry {
+        HeapTelemetry {
+            current_allocated_bytes: self.current_allocated_bytes,
+            peak_allocated_bytes: self.peak_allocated_bytes,
+            total_allocations_count: self.total_allocations_count,
+            total_deallocations_count: self.total_deallocations_count,
+            active_live_objects: self.live_allocations.len(),
+        }
     }
 
     // =========================================================================
