@@ -6,19 +6,19 @@ class Shape {
     }
 }
 
-class Circle : Shape {
+class Circle extends Shape {
     public override int32 get_area(int32 factor) {
         return factor * 2;
     }
 }
 
-class Square : Shape {
+class Square extends Shape {
     public override int32 get_area(int32 factor) {
         return factor * 3;
     }
 }
 
-class Triangle : Shape {
+class Triangle extends Shape {
     public override int32 get_area(int32 factor) {
         return factor * 4;
     }

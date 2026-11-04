@@ -250,12 +250,11 @@ class BenchmarkRunner:
                 results["c"] = self.extract_result_checksum(out) if code == 0 else None
 
         # Verification check
-        valid_checksums = [v for v in results.values() if v is not None]
-        if not valid_checksums:
-            return False, "No engine executed successfully", results
+        if results.get("solix") is None:
+            return False, "Solix execution failed or produced no checksum", results
 
-        target_checksum = valid_checksums[0]
-        all_match = all(v == target_checksum for v in valid_checksums)
+        target_checksum = results["solix"]
+        all_match = all(v == target_checksum for v in results.values() if v is not None)
         return all_match, target_checksum, results
 
     def benchmark_workload_engine(
