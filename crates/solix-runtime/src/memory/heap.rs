@@ -5,7 +5,6 @@
 use crate::exceptions::RuntimeError;
 use crate::memory::deallocator::FreeListManager;
 use crate::memory::layout::{BlockHeader, BlockTag, HEADER_SIZE, align_up};
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 /// Allocation metadata record maintained for heap integrity and leak auditing.
@@ -47,8 +46,6 @@ pub struct VirtualHeap {
     dynamic_capacity: usize,
     /// Segregated free list tracking unallocated dynamic blocks.
     pub free_list: FreeListManager,
-    /// Active allocations indexed by their 32-bit payload addresses.
-    live_allocations: BTreeMap<u32, LiveAllocationInfo>,
     /// Currently allocated dynamic bytes.
     current_allocated_bytes: usize,
     /// Peak dynamic bytes allocated over the lifetime of the heap.
@@ -57,9 +54,9 @@ pub struct VirtualHeap {
     total_allocations_count: u64,
     /// Total count of deallocations executed.
     total_deallocations_count: u64,
-    /// Whether safe mode is enabled with strict BTreeMap tracking.
+    /// Legacy safe mode flag (kept for compatibility).
     pub safe_mode: bool,
-    /// Live allocation counter for O(1) allocation tracking in fast mode.
+    /// Live allocation counter for O(1) allocation tracking.
     pub active_live_objects: usize,
     /// Monotonically advancing bump allocation cursor.
     pub bump_cursor: usize,
@@ -80,7 +77,6 @@ impl VirtualHeap {
             static_size,
             dynamic_capacity,
             free_list: FreeListManager::new_empty(dynamic_capacity),
-            live_allocations: BTreeMap::new(),
             current_allocated_bytes: 0,
             peak_allocated_bytes: 0,
             total_allocations_count: 0,
@@ -112,7 +108,6 @@ impl VirtualHeap {
             self.buffer = vec![0u8; total_size];
             self.static_size = new_static_size;
             self.free_list = FreeListManager::new_empty(self.dynamic_capacity);
-            self.live_allocations.clear();
             self.bump_cursor = 0;
             self.quick_lists = [0u32; 32];
             self.active_live_objects = 0;
@@ -134,11 +129,7 @@ impl VirtualHeap {
     /// Number of currently active, unfreed heap allocations.
     #[must_use]
     pub fn live_objects_count(&self) -> usize {
-        if self.safe_mode {
-            self.live_allocations.len()
-        } else {
-            self.active_live_objects
-        }
+        self.active_live_objects
     }
 
     // =========================================================================
@@ -213,20 +204,6 @@ impl VirtualHeap {
             self.peak_allocated_bytes = self.current_allocated_bytes;
         }
 
-        if self.safe_mode {
-            let block_abs_addr = payload_abs_addr as usize - HEADER_SIZE;
-            let block_offset = block_abs_addr - self.static_size;
-            self.live_allocations.insert(
-                payload_abs_addr,
-                LiveAllocationInfo {
-                    block_offset,
-                    total_block_size: required_block_size,
-                    payload_size,
-                    tag,
-                },
-            );
-        }
-
         Ok(payload_abs_addr)
     }
 
@@ -278,11 +255,7 @@ impl VirtualHeap {
         let block_abs_addr = addr - HEADER_SIZE;
         let block_offset = block_abs_addr - self.static_size;
 
-        if self.safe_mode {
-            self.live_allocations
-                .remove(&payload_addr)
-                .ok_or(RuntimeError::NullReferenceAccess)?;
-        } else if header.ref_count == 0 {
+        if header.ref_count == 0 {
             return Err(RuntimeError::NullReferenceAccess);
         }
 
@@ -562,11 +535,7 @@ impl VirtualHeap {
     /// Returns `RuntimeError::MemoryLeak` detailing leaked addresses and block tags
     /// if any allocations remain active or if the heap is fragmented.
     pub fn verify_clean_memory(&mut self) -> Result<(), RuntimeError> {
-        let unallocated_count = if self.safe_mode {
-            self.live_allocations.len()
-        } else {
-            self.active_live_objects
-        };
+        let unallocated_count = self.active_live_objects;
 
         if unallocated_count > 0 {
             let mut report = String::new();
@@ -575,35 +544,25 @@ impl VirtualHeap {
                 "Found {unallocated_count} live uncollected heap allocations:"
             );
 
-            if self.safe_mode {
-                for (&addr, info) in &self.live_allocations {
-                    let _ = writeln!(
-                        report,
-                        "  - Address 0x{addr:08X}: Tag={:?}, PayloadSize={}B, TotalBlockSize={}B",
-                        info.tag, info.payload_size, info.total_block_size
-                    );
-                }
-            } else {
-                let mut current_offset = 0;
-                while current_offset < self.bump_cursor {
-                    let block_abs_addr = self.static_size + current_offset;
-                    let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
-                    if let Ok(header) = self.read_header(payload_addr) {
-                        let total_block_size = HEADER_SIZE + align_up(header.size as usize);
-                        if total_block_size == 0 {
-                            break;
-                        }
-                        if header.ref_count > 0 {
-                            let _ = writeln!(
-                                report,
-                                "  - Address 0x{payload_addr:08X}: Tag={:?}, PayloadSize={}B, TotalBlockSize={}B",
-                                header.tag, header.size, total_block_size
-                            );
-                        }
-                        current_offset += total_block_size;
-                    } else {
+            let mut current_offset = 0;
+            while current_offset < self.bump_cursor {
+                let block_abs_addr = self.static_size + current_offset;
+                let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
+                if let Ok(header) = self.read_header(payload_addr) {
+                    let total_block_size = HEADER_SIZE + align_up(header.size as usize);
+                    if total_block_size == 0 {
                         break;
                     }
+                    if header.ref_count > 0 {
+                        let _ = writeln!(
+                            report,
+                            "  - Address 0x{payload_addr:08X}: Tag={:?}, PayloadSize={}B, TotalBlockSize={}B",
+                            header.tag, header.size, total_block_size
+                        );
+                    }
+                    current_offset += total_block_size;
+                } else {
+                    break;
                 }
             }
 

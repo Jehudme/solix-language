@@ -342,6 +342,9 @@ impl RuntimeContext {
             });
         }
 
+        // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, and static space
+        crate::verifier::verify_program(&loaded_binaries, &all_functions, current_static_offset)?;
+
         Ok(Self {
             options,
             loaded_binaries,

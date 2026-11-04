@@ -14,6 +14,7 @@ pub mod native;
 pub mod objects;
 pub mod options;
 pub mod value;
+pub mod verifier;
 pub mod vm;
 
 pub use context::{LoadedBinary, RuntimeContext};
