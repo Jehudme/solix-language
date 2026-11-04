@@ -231,3 +231,34 @@ fn test_builtins_inclusion_and_compilation() {
     assert!(context.execute().is_ok());
     assert!(context.emission_artifacts.is_some());
 }
+
+#[test]
+fn test_pipeline_telemetry_recording() {
+    let source_code = r#"
+        class MathUtils {
+            public static int32 add(int32 left_operand, int32 right_operand) {
+                return left_operand + right_operand;
+            }
+        }
+    "#;
+    let options = CompilationOptions::new()
+        .with_package_metadata("math_pkg", "1.0.0", "Math utilities")
+        .with_source("math.slx", source_code);
+
+    let mut context = CompilationContext::new(options);
+    let mut pipeline = CompilationPipeline::standard();
+    let result = pipeline.execute(&mut context);
+    assert!(result.is_ok());
+
+    let telemetry = context.telemetry.as_ref().expect("telemetry should be populated");
+    assert_eq!(telemetry.package_name, "math_pkg");
+    assert!(telemetry.source_bytes > 0);
+    assert!(telemetry.total_tokens > 0);
+    assert!(telemetry.total_instructions > 0);
+    assert!(telemetry.binary_size_bytes > 0);
+    assert_eq!(telemetry.phases.len(), 4);
+    assert_eq!(telemetry.phases[0].name, "Lexical Analysis");
+    assert_eq!(telemetry.phases[1].name, "Syntax Parsing");
+    assert_eq!(telemetry.phases[2].name, "Semantic Analysis & Type Binding");
+    assert_eq!(telemetry.phases[3].name, "Bytecode Emission");
+}
