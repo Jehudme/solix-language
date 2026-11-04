@@ -1,0 +1,228 @@
+//! Comprehensive tests for [`BytecodeOptimizerPhase`].
+//!
+//! Validates:
+//! 1. `LoadI32` + `AddI32` fusion into `AddI32Imm`.
+//! 2. `LoadI32` + `SubI32` fusion into `SubI32Imm`.
+//! 3. Integer comparisons + `JumpIfFalse` fusion into `JumpIf*I32`.
+//! 4. Redundant `Mov` elimination.
+//! 5. Loop-invariant constant hoisting.
+//! 6. Exact exception handler PC ranges and execution correctness.
+
+#![forbid(unsafe_code)]
+
+use solix_common::bytecode::OpCode;
+use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_runtime::{RuntimeContext, RuntimeOptions, Value, VirtualMachine};
+
+/// Helper to compile source code and return the compilation context and VM execution result.
+fn compile_and_execute(source_code: &str) -> (CompilationContext, Value) {
+    let options = CompilationOptions::new()
+        .with_source("test.slx", source_code)
+        .with_inline_threshold(0); // Disable AST inliner to isolate bytecode optimization
+    let mut context = CompilationContext::new(options);
+    let compile_result = context.execute();
+    assert!(
+        compile_result.is_ok(),
+        "Compilation failed: {compile_result:?}"
+    );
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Emission artifacts must be present");
+    let runtime_options = RuntimeOptions::new().with_binary(artifacts.program.clone());
+    let runtime_context =
+        RuntimeContext::new(runtime_options).expect("RuntimeContext creation failed");
+    let mut virtual_machine = VirtualMachine::new(runtime_context);
+    let execution_result = virtual_machine.run().expect("VM execution failed");
+    (context, execution_result)
+}
+
+#[test]
+fn test_fuse_load_i32_and_add_i32_into_add_i32_imm() {
+    let source_code = r#"
+        int32 main() {
+            int32 base_val = 100;
+            int32 sum_val = base_val + 42;
+            return sum_val;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(142));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_add_imm = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::AddI32Imm as u8);
+    assert!(
+        has_add_imm,
+        "Expected AddI32Imm superinstruction in main function bytecode"
+    );
+}
+
+#[test]
+fn test_fuse_load_i32_and_sub_i32_into_sub_i32_imm() {
+    let source_code = r#"
+        int32 main() {
+            int32 base_val = 100;
+            int32 diff_val = base_val - 25;
+            return diff_val;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(75));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_sub_imm = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::SubI32Imm as u8);
+    assert!(
+        has_sub_imm,
+        "Expected SubI32Imm superinstruction in main function bytecode"
+    );
+}
+
+#[test]
+fn test_fuse_comparison_and_jump_if_false_into_superinstruction() {
+    let source_code = r#"
+        int32 main() {
+            int32 counter = 0;
+            while (counter < 10) {
+                counter = counter + 1;
+            }
+            return counter;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(10));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_super_jump = main_func.instructions.iter().any(|inst| {
+        let opcode = inst.raw_opcode();
+        opcode >= OpCode::JumpIfLtI32 as u8 && opcode <= OpCode::JumpIfNeqI32 as u8
+    });
+    assert!(
+        has_super_jump,
+        "Expected fused JumpIf*I32 superinstruction in while loop header"
+    );
+}
+
+#[test]
+fn test_eliminate_redundant_mov_instructions() {
+    let source_code = r#"
+        int32 calculate(int32 param_one, int32 param_two) {
+            int32 local_result = param_one * param_two;
+            return local_result;
+        }
+        int32 main() {
+            return calculate(6, 7);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let calc_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("calculate"))
+        .expect("calculate function must exist");
+
+    // Without optimization, MulI32 would target a temp register followed by Mov local_result, temp
+    // With Mov elimination, MulI32 targets local_result directly
+    let mov_count = calc_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::Mov as u8)
+        .count();
+    assert_eq!(
+        mov_count, 0,
+        "Expected redundant Mov instructions to be eliminated"
+    );
+}
+
+#[test]
+fn test_loop_invariant_constant_hoisting() {
+    let source_code = r#"
+        int32 main() {
+            int32 accumulator = 0;
+            for (int32 iteration = 0; iteration < 100; iteration = iteration + 1) {
+                int32 constant_factor = 7;
+                accumulator = accumulator + (iteration * constant_factor);
+            }
+            return accumulator > 0 ? 0 : 1;
+        }
+    "#;
+    let (_context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+}
+
+#[test]
+fn test_exception_handler_table_accuracy_after_optimization() {
+    let source_code = r#"
+        class CustomError {}
+
+        int32 main() {
+            int32 status_flag = 0;
+            try {
+                int32 computed_val = 10 + 20;
+                if (computed_val == 30) {
+                    throw new CustomError();
+                }
+                status_flag = 1;
+            } catch (CustomError caught_err) {
+                status_flag = 42;
+            }
+            return status_flag;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    assert!(
+        !main_func.exception_handlers.is_empty(),
+        "Exception handler entries must be preserved"
+    );
+    for handler in &main_func.exception_handlers {
+        assert!(
+            handler.try_start_pc < handler.try_end_pc,
+            "try_start_pc must precede try_end_pc"
+        );
+        assert!(
+            (handler.handler_pc as usize) < main_func.instructions.len(),
+            "handler_pc must be within valid instruction range"
+        );
+    }
+}

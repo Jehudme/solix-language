@@ -25,6 +25,8 @@ pub struct CompilationOptions {
     pub include_builtins: bool,
     /// Maximum statement threshold for automatic AST inlining (default 8). Set to 0 to disable automatic inlining.
     pub inline_threshold: usize,
+    /// Whether to execute post-emission bytecode optimizations (default true).
+    pub bytecode_optimization: bool,
 }
 
 impl Default for CompilationOptions {
@@ -45,7 +47,15 @@ impl CompilationOptions {
             pipeline: None,
             include_builtins: false,
             inline_threshold: 8,
+            bytecode_optimization: true,
         }
+    }
+
+    /// Sets whether to run post-emission bytecode peephole optimizations.
+    #[must_use]
+    pub fn with_bytecode_optimization(mut self, enabled: bool) -> Self {
+        self.bytecode_optimization = enabled;
+        self
     }
 
     /// Sets the maximum statement count threshold for automatic AST inlining.

@@ -5,7 +5,7 @@
 use crate::CompilationContext::CompilationContext;
 use crate::phases::phase::{CompilationPhase, PhaseDecision};
 use crate::phases::standard::{
-    AstInlinerPhase, BinderPhase, EmitterPhase, LexerPhase, ParserPhase,
+    AstInlinerPhase, BinderPhase, BytecodeOptimizerPhase, EmitterPhase, LexerPhase, ParserPhase,
 };
 use crate::telemetry::{CompilerTelemetry, PhaseMetric};
 use solix_common::CompilationDiagnostic;
@@ -63,6 +63,7 @@ impl CompilationPipeline {
             .add_phase(BinderPhase::new())
             .add_phase(AstInlinerPhase::new())
             .add_phase(EmitterPhase::new())
+            .add_phase(BytecodeOptimizerPhase::new())
     }
 
     /// Pre-configured language server (LSP) pipeline:
