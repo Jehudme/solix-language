@@ -1,6 +1,7 @@
 //! Declarations test suites.
 
 pub mod test_class_declaration;
+pub mod test_conformance_suite;
 pub mod test_constructor_declaration;
 pub mod test_destructor_declaration;
 pub mod test_entry_point;
