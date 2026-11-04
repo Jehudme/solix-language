@@ -250,7 +250,10 @@ fn test_pipeline_telemetry_recording() {
     let result = pipeline.execute(&mut context);
     assert!(result.is_ok());
 
-    let telemetry = context.telemetry.as_ref().expect("telemetry should be populated");
+    let telemetry = context
+        .telemetry
+        .as_ref()
+        .expect("telemetry should be populated");
     assert_eq!(telemetry.package_name, "math_pkg");
     assert!(telemetry.source_bytes > 0);
     assert!(telemetry.total_tokens > 0);

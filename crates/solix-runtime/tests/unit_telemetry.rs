@@ -73,7 +73,8 @@ fn test_vm_telemetry_instruction_and_stack_tracking() {
     program.entry_point_id = Some(1);
 
     let options = RuntimeOptions::new().with_binary(program);
-    let context = RuntimeContext::new(options).expect("Runtime context construction should succeed");
+    let context =
+        RuntimeContext::new(options).expect("Runtime context construction should succeed");
     let mut machine = VirtualMachine::new(context);
 
     let result = machine.run().expect("VM run should succeed");
@@ -104,9 +105,13 @@ fn test_vm_telemetry_native_call_tracking() {
     // Call native builtin "clock"
     let mut main_func = CompiledFunction::new("main", 0, 0, 2);
     let sym_idx = program.constant_pool.add_string("clock").unwrap();
-    main_func
-        .instructions
-        .push(Instruction::format_call(OpCode::CallSymbol, 0, sym_idx, 0, 0));
+    main_func.instructions.push(Instruction::format_call(
+        OpCode::CallSymbol,
+        0,
+        sym_idx,
+        0,
+        0,
+    ));
     main_func
         .instructions
         .push(Instruction::format_a(OpCode::ReturnValue, 0, 0, 0, 0));
@@ -114,7 +119,8 @@ fn test_vm_telemetry_native_call_tracking() {
     program.entry_point_id = Some(0);
 
     let options = RuntimeOptions::new().with_binary(program);
-    let context = RuntimeContext::new(options).expect("Runtime context construction should succeed");
+    let context =
+        RuntimeContext::new(options).expect("Runtime context construction should succeed");
     let mut machine = VirtualMachine::new(context);
 
     let result = machine.run().expect("VM run should succeed");
@@ -147,9 +153,13 @@ fn test_vm_telemetry_quickened_instruction_tracking() {
     main_func
         .instructions
         .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 21));
-    main_func
-        .instructions
-        .push(Instruction::format_call(OpCode::CallExtern, 0, sym_idx, 1, 1));
+    main_func.instructions.push(Instruction::format_call(
+        OpCode::CallExtern,
+        0,
+        sym_idx,
+        1,
+        1,
+    ));
     main_func
         .instructions
         .push(Instruction::format_a(OpCode::ReturnValue, 0, 0, 0, 0));
@@ -159,7 +169,8 @@ fn test_vm_telemetry_quickened_instruction_tracking() {
     let options = RuntimeOptions::new()
         .with_binary(lib_bin)
         .with_binary(app_bin);
-    let context = RuntimeContext::new(options).expect("Runtime context construction should succeed");
+    let context =
+        RuntimeContext::new(options).expect("Runtime context construction should succeed");
     let mut machine = VirtualMachine::new(context);
 
     let result = machine.run().expect("VM run should succeed");

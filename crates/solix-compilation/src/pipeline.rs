@@ -140,17 +140,14 @@ impl CompilationPipeline {
         let total_time_us = total_timer.elapsed().as_micros() as u64;
         let source_bytes = context.sources.iter().map(|code| code.len()).sum();
         let total_tokens = context.tokens.iter().map(|stream| stream.len()).sum();
-        let total_instructions = context
-            .emission_artifacts
-            .as_ref()
-            .map_or(0, |artifacts| {
-                artifacts
-                    .program
-                    .functions
-                    .iter()
-                    .map(|func| func.instructions.len())
-                    .sum()
-            });
+        let total_instructions = context.emission_artifacts.as_ref().map_or(0, |artifacts| {
+            artifacts
+                .program
+                .functions
+                .iter()
+                .map(|func| func.instructions.len())
+                .sum()
+        });
         let binary_size_bytes = context
             .emission_artifacts
             .as_ref()
