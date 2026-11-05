@@ -59,6 +59,10 @@ pub struct CompileArgs {
     #[arg(long)]
     pub description: Option<String>,
 
+    /// Target build profile: debug, release (default), or test
+    #[arg(long, default_value = "release")]
+    pub profile: String,
+
     /// Save synthesized API interface source to disk (*.slx)
     #[arg(long)]
     pub emit_api: Option<PathBuf>,

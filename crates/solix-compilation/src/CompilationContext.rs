@@ -8,9 +8,48 @@ use solix_common::{LexingError, ParsingError};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 
+/// Target build profile controlling compiler optimizations and pipeline stages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuildProfile {
+    /// Fast compilation without AST inlining or bytecode peephole optimizations.
+    Debug,
+    /// Full compiler optimizations enabled (AST inlining and bytecode optimizer).
+    #[default]
+    Release,
+    /// Fast compilation with test harness entry point and exact assertion traces.
+    Test,
+}
+
+impl std::str::FromStr for BuildProfile {
+    type Err = String;
+
+    fn from_str(input_str: &str) -> Result<Self, Self::Err> {
+        match input_str.to_ascii_lowercase().as_str() {
+            "debug" => Ok(Self::Debug),
+            "release" => Ok(Self::Release),
+            "test" => Ok(Self::Test),
+            other => Err(format!(
+                "Invalid build profile '{other}', expected 'debug', 'release', or 'test'"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for BuildProfile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Debug => write!(formatter, "debug"),
+            Self::Release => write!(formatter, "release"),
+            Self::Test => write!(formatter, "test"),
+        }
+    }
+}
+
 /// Configuration options provided to the compilation driver.
 #[derive(Debug)]
 pub struct CompilationOptions {
+    /// Target build profile controlling optimization passes.
+    pub profile: BuildProfile,
     /// Mapping of source identifiers/paths to their source code contents.
     pub codes: HashMap<String, String>,
     /// Package or library name.
@@ -40,6 +79,7 @@ impl CompilationOptions {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            profile: BuildProfile::Release,
             codes: HashMap::new(),
             package_name: String::new(),
             package_version: "0.1.0".to_string(),
@@ -49,6 +89,23 @@ impl CompilationOptions {
             inline_threshold: 8,
             bytecode_optimization: true,
         }
+    }
+
+    /// Sets the build profile, automatically configuring optimization passes.
+    #[must_use]
+    pub fn with_profile(mut self, profile: BuildProfile) -> Self {
+        self.profile = profile;
+        match profile {
+            BuildProfile::Debug | BuildProfile::Test => {
+                self.inline_threshold = 0;
+                self.bytecode_optimization = false;
+            }
+            BuildProfile::Release => {
+                self.inline_threshold = 8;
+                self.bytecode_optimization = true;
+            }
+        }
+        self
     }
 
     /// Sets whether to run post-emission bytecode peephole optimizations.

@@ -14,6 +14,33 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+/// Recursively walks `directory_path` collecting all files with `.slx` extension in sorted order.
+fn collect_slx_sources_recursively(
+    directory_path: &std::path::Path,
+    collected_sources: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let mut entries = Vec::new();
+    for entry_result in fs::read_dir(directory_path)
+        .with_context(|| format!("Failed to read directory '{}'", directory_path.display()))?
+    {
+        let entry = entry_result?;
+        entries.push(entry.path());
+    }
+    entries.sort();
+
+    for child_path in entries {
+        if child_path.is_dir() {
+            collect_slx_sources_recursively(&child_path, collected_sources)?;
+        } else if child_path
+            .extension()
+            .is_some_and(|extension| extension == "slx")
+        {
+            collected_sources.push(child_path);
+        }
+    }
+    Ok(())
+}
+
 /// Executes the `compile` subcommand.
 ///
 /// # Errors
@@ -21,9 +48,29 @@ use std::time::Instant;
 pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let start_total = Instant::now();
 
-    // 1. Resolve package name and output destination
+    // 1. Resolve build profile
+    let profile = args
+        .profile
+        .parse::<solix_compilation::BuildProfile>()
+        .map_err(|error_message| anyhow::anyhow!("{error_message}"))?;
+
+    // 2. Resolve user source files (expanding directories recursively)
+    let mut resolved_sources = Vec::new();
+    for source_path in &args.sources {
+        if source_path.is_dir() {
+            collect_slx_sources_recursively(source_path, &mut resolved_sources)?;
+        } else {
+            resolved_sources.push(source_path.clone());
+        }
+    }
+
+    if resolved_sources.is_empty() {
+        bail!("No Solix source files (*.slx) found to compile");
+    }
+
+    // 3. Resolve package name and output destination
     let package_name = args.name.unwrap_or_else(|| {
-        args.sources
+        resolved_sources
             .first()
             .and_then(|path| path.file_stem())
             .and_then(|stem| stem.to_str())
@@ -35,24 +82,28 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         .output
         .unwrap_or_else(|| PathBuf::from(format!("{package_name}.slxb")));
 
-    // 2. Initialize compilation options
+    // 4. Initialize compilation options
     let mut options = CompilationOptions::new()
+        .with_profile(profile)
         .with_package_metadata(
             &package_name,
             &args.version,
             args.description.as_deref().unwrap_or(""),
         )
-        .with_builtins(!args.no_builtins)
-        .with_inline_threshold(args.inline_threshold);
+        .with_builtins(!args.no_builtins);
 
-    // 3. Register user source files
-    for source_path in &args.sources {
+    if args.inline_threshold != 8 {
+        options = options.with_inline_threshold(args.inline_threshold);
+    }
+
+    // 5. Register user source files
+    for source_path in &resolved_sources {
         let code = fs::read_to_string(source_path)
             .with_context(|| format!("Failed to read source file '{}'", source_path.display()))?;
         options = options.with_source(source_path.display().to_string(), code);
     }
 
-    // 4. Auto-extract and mount dependency API headers from `-l, --lib` binaries
+    // 6. Auto-extract and mount dependency API headers from `-l, --lib` binaries
     for lib_path in &args.libs {
         let lib_bytes = fs::read(lib_path).with_context(|| {
             format!("Failed to read dependency binary '{}'", lib_path.display())
@@ -75,11 +126,11 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         options = options.with_source(api_filename, api_source);
     }
 
-    // 5. Build and execute pipeline
+    // 7. Build and execute pipeline
     let mut pipeline = if args.check {
         CompilationPipeline::lsp()
     } else {
-        CompilationPipeline::standard()
+        CompilationPipeline::for_profile(profile)
     };
 
     let mut context = CompilationContext::new(options);

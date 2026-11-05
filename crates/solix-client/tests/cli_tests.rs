@@ -1229,3 +1229,130 @@ fn test_process_telemetry_capture() {
         let _ = telemetry;
     }
 }
+
+#[test]
+fn test_cli_compile_directory_recursive_discovery() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let source_dir = workspace.root_path().join("src");
+    let nested_dir = source_dir.join("models");
+    std::fs::create_dir_all(&nested_dir).expect("Failed to create nested directory");
+
+    std::fs::write(
+        nested_dir.join("user.slx"),
+        r#"
+package app.models;
+
+public class User {
+    public int32 id;
+    public User() {
+        this.id = 42;
+    }
+}
+"#,
+    )
+    .expect("Failed to write nested file");
+
+    std::fs::write(
+        source_dir.join("main.slx"),
+        r#"
+package app;
+import app.models.User;
+
+class Main {
+    public static int32 main() {
+        User user = new User();
+        return user.id == 42 ? 0 : 1;
+    }
+}
+"#,
+    )
+    .expect("Failed to write main file");
+
+    let binary_output = workspace.file_path("app.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_dir.to_str().expect("valid path"),
+        "--profile",
+        "release",
+        "-o",
+        binary_output.to_str().expect("valid path"),
+    ])
+    .expect("Failed to parse compile directory command");
+
+    assert_eq!(run(compile_cli).expect("Compilation failed"), 0);
+    assert!(binary_output.exists());
+
+    let run_cli =
+        Cli::try_parse_from(["solix", "run", binary_output.to_str().expect("valid path")])
+            .expect("Failed to parse run command");
+    assert_eq!(run(run_cli).expect("Execution failed"), 0);
+}
+
+#[test]
+fn test_cli_compile_profiles_debug_and_release() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let source_file = workspace
+        .write_file(
+            "calc.slx",
+            r#"
+class Calculator {
+    public static int32 add(int32 alpha, int32 beta) {
+        return alpha + beta;
+    }
+    public static int32 main() {
+        return Calculator::add(10, 32) == 42 ? 0 : 1;
+    }
+}
+"#,
+        )
+        .expect("Failed to write file");
+
+    let debug_binary = workspace.file_path("calc_debug.slxb");
+    let compile_debug_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_file.to_str().expect("valid path"),
+        "--profile",
+        "debug",
+        "-o",
+        debug_binary.to_str().expect("valid path"),
+    ])
+    .expect("Failed to parse compile debug command");
+    assert_eq!(run(compile_debug_cli).expect("Debug compile failed"), 0);
+
+    let release_binary = workspace.file_path("calc_release.slxb");
+    let compile_release_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_file.to_str().expect("valid path"),
+        "--profile",
+        "release",
+        "-o",
+        release_binary.to_str().expect("valid path"),
+    ])
+    .expect("Failed to parse compile release command");
+    assert_eq!(run(compile_release_cli).expect("Release compile failed"), 0);
+
+    let run_debug =
+        Cli::try_parse_from(["solix", "run", debug_binary.to_str().expect("valid path")])
+            .expect("Parse run debug");
+    assert_eq!(run(run_debug).expect("Run debug failed"), 0);
+
+    let run_release =
+        Cli::try_parse_from(["solix", "run", release_binary.to_str().expect("valid path")])
+            .expect("Parse run release");
+    assert_eq!(run(run_release).expect("Run release failed"), 0);
+}
+
+#[test]
+fn test_cli_compile_empty_directory_fails() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let empty_dir = workspace.root_path().join("empty_src");
+    std::fs::create_dir_all(&empty_dir).expect("Failed to create empty directory");
+
+    let compile_cli =
+        Cli::try_parse_from(["solix", "compile", empty_dir.to_str().expect("valid path")])
+            .expect("Failed to parse compile command");
+    assert!(run(compile_cli).is_err());
+}

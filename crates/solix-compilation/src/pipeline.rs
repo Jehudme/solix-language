@@ -66,6 +66,20 @@ impl CompilationPipeline {
             .add_phase(BytecodeOptimizerPhase::new())
     }
 
+    /// Pre-configured compilation pipeline tailored for a specific build profile.
+    #[must_use]
+    pub fn for_profile(profile: crate::CompilationContext::BuildProfile) -> Self {
+        match profile {
+            crate::CompilationContext::BuildProfile::Release => Self::standard(),
+            crate::CompilationContext::BuildProfile::Debug
+            | crate::CompilationContext::BuildProfile::Test => Self::empty()
+                .add_phase(LexerPhase::new())
+                .add_phase(ParserPhase::new())
+                .add_phase(BinderPhase::new())
+                .add_phase(EmitterPhase::new()),
+        }
+    }
+
     /// Pre-configured language server (LSP) pipeline:
     /// Lexical Analysis -> Syntax Parsing -> Semantic Binding (omits bytecode emission).
     #[must_use]
