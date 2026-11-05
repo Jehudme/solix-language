@@ -1,0 +1,116 @@
+package solix.time;
+
+import solix.core.IStringable;
+import solix.core.IEquatable;
+import solix.core.IComparable;
+import solix.core.ICloneable;
+import solix.core.String;
+
+public class Instant implements IStringable, IEquatable<Instant>, IComparable<Instant>, ICloneable<Instant> {
+    public int64 nanoseconds;
+
+    public Instant() {
+        this.nanoseconds = Instant::native_steady_nanos();
+    }
+
+    public Instant(int64 nanos) {
+        this.nanoseconds = nanos;
+    }
+
+    public static Instant now() {
+        return new Instant(Instant::native_steady_nanos());
+    }
+
+    public Duration elapsed() {
+        int64 current_nanos = Instant::native_steady_nanos();
+        return new Duration(current_nanos - this.nanoseconds);
+    }
+
+    public int64 elapsed_millis() {
+        return this.elapsed().to_milliseconds();
+    }
+
+    public Duration duration_since(Instant earlier_instant) {
+        if (earlier_instant == null) {
+            return new Duration(this.nanoseconds);
+        }
+        return new Duration(this.nanoseconds - earlier_instant.nanoseconds);
+    }
+
+    public int64 to_nanoseconds() {
+        return this.nanoseconds;
+    }
+
+    // Operator overloads
+    public Duration operator-(Instant earlier_instant) {
+        return this.duration_since(earlier_instant);
+    }
+
+    public Instant operator+(Duration added_duration) {
+        if (added_duration == null) {
+            return this;
+        }
+        return new Instant(this.nanoseconds + added_duration.to_nanoseconds());
+    }
+
+    public Instant operator-(Duration subtracted_duration) {
+        if (subtracted_duration == null) {
+            return this;
+        }
+        return new Instant(this.nanoseconds - subtracted_duration.to_nanoseconds());
+    }
+
+    public bool equals(Instant other_instant) {
+        if (other_instant == null) {
+            return false;
+        }
+        return this.nanoseconds == other_instant.nanoseconds;
+    }
+
+    public bool operator==(Instant other_instant) {
+        return this.equals(other_instant);
+    }
+
+    public bool operator!=(Instant other_instant) {
+        return !this.equals(other_instant);
+    }
+
+    public int32 compare_to(Instant other_instant) {
+        if (other_instant == null) {
+            return 1;
+        }
+        if (this.nanoseconds < other_instant.nanoseconds) {
+            return -1;
+        }
+        if (this.nanoseconds > other_instant.nanoseconds) {
+            return 1;
+        }
+        return 0;
+    }
+
+    public bool operator<(Instant other_instant) {
+        return this.compare_to(other_instant) < 0;
+    }
+
+    public bool operator<=(Instant other_instant) {
+        return this.compare_to(other_instant) <= 0;
+    }
+
+    public bool operator>(Instant other_instant) {
+        return this.compare_to(other_instant) > 0;
+    }
+
+    public bool operator>=(Instant other_instant) {
+        return this.compare_to(other_instant) >= 0;
+    }
+
+    public Instant clone() {
+        return new Instant(this.nanoseconds);
+    }
+
+    public String to_string() {
+        return new String("Instant(" + String::from_int64(this.nanoseconds) + " ns)");
+    }
+
+    private static native int64 native_steady_nanos();
+}

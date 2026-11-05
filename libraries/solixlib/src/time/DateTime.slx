@@ -1,0 +1,198 @@
+package solix.time;
+
+import solix.core.IStringable;
+import solix.core.IEquatable;
+import solix.core.IComparable;
+import solix.core.ICloneable;
+import solix.core.String;
+import solix.core.StringBuilder;
+
+public class DateTime implements IStringable, IEquatable<DateTime>, IComparable<DateTime>, ICloneable<DateTime> {
+    private int64 epoch_millis_val;
+    private bool is_utc_flag;
+    private int32 year_component;
+    private int32 month_component;
+    private int32 day_component;
+    private int32 hour_component;
+    private int32 minute_component;
+    private int32 second_component;
+    private int32 millisecond_component;
+
+    public DateTime(int64 epoch_ms, bool is_utc) {
+        this.epoch_millis_val = epoch_ms;
+        this.is_utc_flag = is_utc;
+
+        int64[] parts_box = new int64[7];
+        if (is_utc) {
+            DateTime::native_utc_parts(epoch_ms, parts_box);
+        } else {
+            DateTime::native_local_parts(epoch_ms, parts_box);
+        }
+
+        this.year_component = (int32)parts_box[0];
+        this.month_component = (int32)parts_box[1];
+        this.day_component = (int32)parts_box[2];
+        this.hour_component = (int32)parts_box[3];
+        this.minute_component = (int32)parts_box[4];
+        this.second_component = (int32)parts_box[5];
+        this.millisecond_component = (int32)parts_box[6];
+    }
+
+    public static DateTime now() {
+        int64 current_millis = DateTime::native_system_millis();
+        return new DateTime(current_millis, false);
+    }
+
+    public static DateTime now_local() {
+        return DateTime::now();
+    }
+
+    public static DateTime now_utc() {
+        int64 current_millis = DateTime::native_system_millis();
+        return new DateTime(current_millis, true);
+    }
+
+    public static DateTime utc_now() {
+        return DateTime::now_utc();
+    }
+
+    public static DateTime from_epoch_millis(int64 epoch_ms, bool is_utc) {
+        return new DateTime(epoch_ms, is_utc);
+    }
+
+    // Accessors
+    public int64 epoch_millis() {
+        return this.epoch_millis_val;
+    }
+
+    public bool is_utc() {
+        return this.is_utc_flag;
+    }
+
+    public int32 year() {
+        return this.year_component;
+    }
+
+    public int32 month() {
+        return this.month_component;
+    }
+
+    public int32 day() {
+        return this.day_component;
+    }
+
+    public int32 hour() {
+        return this.hour_component;
+    }
+
+    public int32 minute() {
+        return this.minute_component;
+    }
+
+    public int32 second() {
+        return this.second_component;
+    }
+
+    public int32 millisecond() {
+        return this.millisecond_component;
+    }
+
+    // Arithmetic
+    public DateTime add(Duration duration) {
+        if (duration == null) {
+            return this;
+        }
+        int64 new_millis = this.epoch_millis_val + duration.to_milliseconds();
+        return new DateTime(new_millis, this.is_utc_flag);
+    }
+
+    public DateTime subtract(Duration duration) {
+        if (duration == null) {
+            return this;
+        }
+        int64 new_millis = this.epoch_millis_val - duration.to_milliseconds();
+        return new DateTime(new_millis, this.is_utc_flag);
+    }
+
+    public Duration subtract(DateTime earlier_time) {
+        if (earlier_time == null) {
+            return Duration::from_millis(this.epoch_millis_val);
+        }
+        int64 millis_difference = this.epoch_millis_val - earlier_time.epoch_millis_val;
+        return Duration::from_millis(millis_difference);
+    }
+
+    public DateTime operator+(Duration duration) {
+        return this.add(duration);
+    }
+
+    public DateTime operator-(Duration duration) {
+        return this.subtract(duration);
+    }
+
+    public Duration operator-(DateTime earlier_time) {
+        return this.subtract(earlier_time);
+    }
+
+    public bool equals(DateTime other_time) {
+        if (other_time == null) {
+            return false;
+        }
+        return this.epoch_millis_val == other_time.epoch_millis_val;
+    }
+
+    public bool operator==(DateTime other_time) {
+        return this.equals(other_time);
+    }
+
+    public bool operator!=(DateTime other_time) {
+        return !this.equals(other_time);
+    }
+
+    public int32 compare_to(DateTime other_time) {
+        if (other_time == null) {
+            return 1;
+        }
+        if (this.epoch_millis_val < other_time.epoch_millis_val) {
+            return -1;
+        }
+        if (this.epoch_millis_val > other_time.epoch_millis_val) {
+            return 1;
+        }
+        return 0;
+    }
+
+    public bool operator<(DateTime other_time) {
+        return this.compare_to(other_time) < 0;
+    }
+
+    public bool operator<=(DateTime other_time) {
+        return this.compare_to(other_time) <= 0;
+    }
+
+    public bool operator>(DateTime other_time) {
+        return this.compare_to(other_time) > 0;
+    }
+
+    public bool operator>=(DateTime other_time) {
+        return this.compare_to(other_time) >= 0;
+    }
+
+    public DateTime clone() {
+        return new DateTime(this.epoch_millis_val, this.is_utc_flag);
+    }
+
+    public String to_iso_string() {
+        char[] chars_result = DateTime::native_iso8601(this.epoch_millis_val);
+        return new String(chars_result);
+    }
+
+    public String to_string() {
+        return this.to_iso_string();
+    }
+
+    private static native int64 native_system_millis();
+    private static native void native_utc_parts(int64 epoch_ms, int64[] parts_box);
+    private static native void native_local_parts(int64 epoch_ms, int64[] parts_box);
+    private static native char[] native_iso8601(int64 epoch_ms);
+}
