@@ -798,6 +798,7 @@ impl VirtualMachine {
                             .to_vec();
                         flush_telemetry!();
                         let call_result = native_callback.invoke(self, &call_args)?;
+                        reload_frame!();
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -830,6 +831,7 @@ impl VirtualMachine {
                             .to_vec();
                         flush_telemetry!();
                         let call_result = native_callback.invoke(self, &call_args)?;
+                        reload_frame!();
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -878,6 +880,7 @@ impl VirtualMachine {
                             .to_vec();
                         flush_telemetry!();
                         let call_result = native_callback.invoke(self, &call_args)?;
+                        reload_frame!();
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -947,6 +950,7 @@ impl VirtualMachine {
                             .to_vec();
                         flush_telemetry!();
                         let call_result = native_callback.invoke(self, &call_args)?;
+                        reload_frame!();
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -1017,6 +1021,7 @@ impl VirtualMachine {
                             .to_vec();
                         flush_telemetry!();
                         let call_result = native_fn.invoke(self, &call_args)?;
+                        reload_frame!();
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -1123,6 +1128,7 @@ impl VirtualMachine {
                             .to_vec();
                         flush_telemetry!();
                         let call_result = native_fn.invoke(self, &call_args)?;
+                        reload_frame!();
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -1206,6 +1212,7 @@ impl VirtualMachine {
                                     .to_vec();
                                 flush_telemetry!();
                                 let call_result = native_callback.invoke(self, &call_args)?;
+                                reload_frame!();
                                 unsafe {
                                     *reg_base.add(caller_dst as usize) = call_result;
                                 }
@@ -1236,6 +1243,7 @@ impl VirtualMachine {
                                     .to_vec();
                                 flush_telemetry!();
                                 let call_result = native_callback.invoke(self, &call_args)?;
+                                reload_frame!();
                                 unsafe {
                                     *reg_base.add(caller_dst as usize) = call_result;
                                 }
@@ -1557,7 +1565,10 @@ impl VirtualMachine {
                                 && !is_weak
                                 && old_child > 0
                             {
+                                let caller_frame = self.current_frame_mut()?;
+                                caller_frame.pc = pc as u32;
                                 self.release_reference(old_child)?;
+                                reload_frame!();
                             }
                         }
                     }
@@ -1726,7 +1737,12 @@ impl VirtualMachine {
                     if arr_addr == 0 {
                         return Err(RuntimeError::NullReferenceAccess);
                     }
-                    let array_len = self.heap.read_u32(arr_addr)?;
+                    let header = self.heap.read_header(arr_addr)?;
+                    let array_len = if header.tag == BlockTag::String {
+                        header.size
+                    } else {
+                        self.heap.read_u32(arr_addr)?
+                    };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::I32(array_len as i32);
                     }
@@ -1774,26 +1790,51 @@ impl VirtualMachine {
                             });
                         }
                         let index_usize = index_i64 as usize;
-                        let elem_size = self.heap.buffer[arr_offset + 4] as usize;
+                        let elem_size = (self.heap.buffer[arr_offset + 4] as usize).max(1);
                         let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                        if elem_offset + 8 > self.heap.buffer.len() {
+                        if elem_offset + elem_size > self.heap.buffer.len() {
                             return Err(RuntimeError::NullReferenceAccess);
                         }
-                        let raw_word = u64::from_le_bytes(
-                            self.heap.buffer[elem_offset..elem_offset + 8]
-                                .try_into()
-                                .unwrap_or([0; 8]),
-                        );
-                        let val = if raw_word == 0 {
-                            let elem_type_tag = self.heap.buffer[arr_offset + 7];
-                            match elem_type_tag {
-                                13 | 0x80..=0xFF => Value::Null,
-                                11 => Value::Bool(false),
-                                9 | 10 => Value::F64(0.0),
-                                _ => Value::I32(0),
+                        let raw_word = match elem_size {
+                            1 => self.heap.buffer[elem_offset] as u64,
+                            2 => u16::from_le_bytes(
+                                self.heap.buffer[elem_offset..elem_offset + 2]
+                                    .try_into()
+                                    .unwrap_or([0; 2]),
+                            ) as u64,
+                            4 => u32::from_le_bytes(
+                                self.heap.buffer[elem_offset..elem_offset + 4]
+                                    .try_into()
+                                    .unwrap_or([0; 4]),
+                            ) as u64,
+                            _ => u64::from_le_bytes(
+                                self.heap.buffer[elem_offset..elem_offset + 8]
+                                    .try_into()
+                                    .unwrap_or([0; 8]),
+                            ),
+                        };
+                        let elem_type_tag = self.heap.buffer[arr_offset + 7];
+                        let val = match elem_type_tag {
+                            0 => Value::from_raw_u64(raw_word),
+                            1 => Value::I32(raw_word as i8 as i32),
+                            2 => Value::I32(raw_word as i16 as i32),
+                            3 => Value::I32(raw_word as i32),
+                            4 => Value::I64(raw_word as i64),
+                            5 | 12 => Value::I32(raw_word as u8 as i32),
+                            6 => Value::I32(raw_word as u16 as i32),
+                            7 => Value::I32(raw_word as u32 as i32),
+                            8 => Value::I64(raw_word as i64),
+                            9 => Value::F64(f32::from_bits(raw_word as u32) as f64),
+                            10 => Value::F64(f64::from_bits(raw_word)),
+                            11 => Value::Bool(raw_word != 0),
+                            13 | 0x80..=0xFF => {
+                                if raw_word == 0 {
+                                    Value::Null
+                                } else {
+                                    Value::Ref(raw_word as u32)
+                                }
                             }
-                        } else {
-                            Value::from_raw_u64(raw_word)
+                            _ => Value::from_raw_u64(raw_word),
                         };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = val;
@@ -1826,28 +1867,32 @@ impl VirtualMachine {
                     }
                     let index_usize = index_i64 as usize;
                     let val = unsafe { *reg_base.add(inst.src2() as usize) };
-                    let elem_size = self.heap.buffer[arr_offset + 4] as usize;
-                    let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                    if elem_offset + 8 > self.heap.buffer.len() {
-                        return Err(RuntimeError::NullReferenceAccess);
-                    }
-
-                    let old_raw = u64::from_le_bytes(
-                        self.heap.buffer[elem_offset..elem_offset + 8]
-                            .try_into()
-                            .unwrap_or([0; 8]),
-                    );
-                    let old_val = Value::from_raw_u64(old_raw);
-                    let new_raw = val.to_raw_u64();
-                    self.heap.buffer[elem_offset..elem_offset + 8]
-                        .copy_from_slice(&new_raw.to_le_bytes());
-
                     let tag_nibble = (self.heap.buffer[arr_offset - 1] >> 4) & 0x0F;
-                    let elem_type_tag = self.heap.buffer[arr_offset + 7];
-                    let is_reference_element = tag_nibble == BlockTag::Tuple as u8
-                        || elem_type_tag == 13
-                        || elem_type_tag >= 0x80;
-                    if is_reference_element {
+                    let is_tuple = tag_nibble == BlockTag::Tuple as u8;
+
+                    if is_tuple {
+                        let elem_offset = arr_offset + 8 + (index_usize * 16);
+                        if elem_offset + 16 > self.heap.buffer.len() {
+                            return Err(RuntimeError::NullReferenceAccess);
+                        }
+                        let old_tag = u64::from_le_bytes(
+                            self.heap.buffer[elem_offset..elem_offset + 8]
+                                .try_into()
+                                .unwrap_or([0; 8]),
+                        );
+                        let old_payload = u64::from_le_bytes(
+                            self.heap.buffer[elem_offset + 8..elem_offset + 16]
+                                .try_into()
+                                .unwrap_or([0; 8]),
+                        );
+                        let old_val = Value::from_tagged_parts(old_tag, old_payload);
+
+                        let (new_tag, new_payload) = val.to_tagged_parts();
+                        self.heap.buffer[elem_offset..elem_offset + 8]
+                            .copy_from_slice(&new_tag.to_le_bytes());
+                        self.heap.buffer[elem_offset + 8..elem_offset + 16]
+                            .copy_from_slice(&new_payload.to_le_bytes());
+
                         if let Value::Ref(child_addr) = val
                             && child_addr > 0
                         {
@@ -1856,17 +1901,78 @@ impl VirtualMachine {
                         if let Value::Ref(old_child) = old_val
                             && old_child > 0
                         {
+                            let caller_frame = self.current_frame_mut()?;
+                            caller_frame.pc = pc as u32;
                             self.release_reference(old_child)?;
+                            reload_frame!();
+                        }
+                    } else {
+                        let elem_size = (self.heap.buffer[arr_offset + 4] as usize).max(1);
+                        let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+                        if elem_offset + elem_size > self.heap.buffer.len() {
+                            return Err(RuntimeError::NullReferenceAccess);
+                        }
+
+                        let elem_type_tag = self.heap.buffer[arr_offset + 7];
+                        let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+
+                        let old_child = if is_reference_element {
+                            u32::from_le_bytes(
+                                self.heap.buffer[elem_offset..elem_offset + 4]
+                                    .try_into()
+                                    .unwrap_or([0; 4]),
+                            )
+                        } else {
+                            0
+                        };
+
+                        if elem_type_tag == 0 {
+                            let encoded_word = val.to_raw_u64();
+                            self.heap.buffer[elem_offset..elem_offset + 8]
+                                .copy_from_slice(&encoded_word.to_le_bytes());
+                        } else {
+                            let primitive_val = val.to_primitive_u64();
+                            match elem_size {
+                                1 => {
+                                    self.heap.buffer[elem_offset] = primitive_val as u8;
+                                }
+                                2 => {
+                                    self.heap.buffer[elem_offset..elem_offset + 2]
+                                        .copy_from_slice(&(primitive_val as u16).to_le_bytes());
+                                }
+                                4 => {
+                                    self.heap.buffer[elem_offset..elem_offset + 4]
+                                        .copy_from_slice(&(primitive_val as u32).to_le_bytes());
+                                }
+                                _ => {
+                                    self.heap.buffer[elem_offset..elem_offset + 8]
+                                        .copy_from_slice(&primitive_val.to_le_bytes());
+                                }
+                            }
+                        }
+
+                        if is_reference_element {
+                            if let Value::Ref(child_addr) = val
+                                && child_addr > 0
+                            {
+                                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                            }
+                            if old_child > 0 {
+                                let caller_frame = self.current_frame_mut()?;
+                                caller_frame.pc = pc as u32;
+                                self.release_reference(old_child)?;
+                                reload_frame!();
+                            }
                         }
                     }
                 }
 
                 OpCode::AllocTuple => {
                     let tuple_count = inst.src1() as usize;
-                    let payload_size = 8 + tuple_count * 8;
+                    let payload_size = 8 + tuple_count * 16;
                     let payload_addr = self.heap.allocate(payload_size, BlockTag::Tuple)?;
                     self.heap.write_u32(payload_addr, tuple_count as u32)?;
-                    self.heap.write_u32(payload_addr + 4, 8)?;
+                    self.heap.write_u32(payload_addr + 4, 16)?;
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
                     }
@@ -1886,10 +1992,12 @@ impl VirtualMachine {
                             length: tuple_len,
                         });
                     }
-                    let elem_addr = tuple_addr + 8 + (slot_idx * 8) as u32;
-                    let raw_word = self.heap.read_u64(elem_addr).unwrap_or(0);
+                    let elem_addr = tuple_addr + 8 + (slot_idx * 16) as u32;
+                    let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                    let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::from_raw_u64(raw_word);
+                        *reg_base.add(inst.dst() as usize) =
+                            Value::from_tagged_parts(tag_raw, payload_raw);
                     }
                 }
 
@@ -1913,9 +2021,10 @@ impl VirtualMachine {
                             length: tuple_len,
                         });
                     }
-                    let elem_addr = tuple_addr + 8 + (index_i64 as usize * 8) as u32;
-                    let raw_word = self.heap.read_u64(elem_addr).unwrap_or(0);
-                    let val = Value::from_raw_u64(raw_word);
+                    let elem_addr = tuple_addr + 8 + (index_i64 as usize * 16) as u32;
+                    let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                    let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
+                    let val = Value::from_tagged_parts(tag_raw, payload_raw);
                     let tag = inst.flags();
                     let is_match = match tag {
                         1..=4 => matches!(val, Value::I32(_) | Value::I64(_)),
@@ -1956,15 +2065,17 @@ impl VirtualMachine {
                     let cap_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst() as usize;
 
-                    let payload_size = 8 + cap_count * 8;
+                    let payload_size = 8 + cap_count * 16;
                     let payload_addr = self.heap.allocate(payload_size, BlockTag::Closure)?;
                     self.heap.write_u32(payload_addr, target_lambda_id)?;
                     self.heap.write_u32(payload_addr + 4, cap_count as u32)?;
 
                     for index in 0..cap_count {
-                        let cell_addr = payload_addr + 8 + (index * 8) as u32;
+                        let cell_addr = payload_addr + 8 + (index * 16) as u32;
                         let cap_val = unsafe { *reg_base.add(cap_base + index) };
-                        let _ = self.heap.write_u64(cell_addr, cap_val.to_raw_u64());
+                        let (tag_raw, payload_raw) = cap_val.to_tagged_parts();
+                        let _ = self.heap.write_u64(cell_addr, tag_raw);
+                        let _ = self.heap.write_u64(cell_addr + 8, payload_raw);
                         if let Value::Ref(child_addr) = cap_val
                             && child_addr > 0
                         {
@@ -1987,10 +2098,12 @@ impl VirtualMachine {
                         .ok_or(RuntimeError::NullReferenceAccess)?;
 
                     for index in 0..capture_count {
-                        let cell_addr = closure_addr + 8 + (index * 8) as u32;
-                        let raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                        let cell_addr = closure_addr + 8 + (index * 16) as u32;
+                        let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                        let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
                         unsafe {
-                            *reg_base.add(capture_base + index) = Value::from_raw_u64(raw);
+                            *reg_base.add(capture_base + index) =
+                                Value::from_tagged_parts(tag_raw, payload_raw);
                         }
                     }
                 }
@@ -2113,7 +2226,10 @@ impl VirtualMachine {
                         } else if header.tag == BlockTag::ObjectPod {
                             self.heap.deallocate_pod_fast(addr, header.size)?;
                         } else {
+                            let caller_frame = self.current_frame_mut()?;
+                            caller_frame.pc = pc as u32;
                             self.release_reference(addr)?;
+                            reload_frame!();
                         }
                     }
                 }
@@ -2294,10 +2410,8 @@ impl VirtualMachine {
                                 }
                             }
 
-                            if handler.finally_pc.is_none() {
-                                self.register_stack[curr_reg_base + handler.catch_reg as usize] =
-                                    exc_val;
-                            }
+                            self.register_stack[curr_reg_base + handler.catch_reg as usize] =
+                                exc_val;
                             let frame = self.current_frame_mut()?;
                             frame.pc = handler.handler_pc;
                             flush_telemetry!();

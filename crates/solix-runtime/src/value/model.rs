@@ -165,6 +165,41 @@ impl Value {
         }
     }
 
+    /// Encodes this value into a 2-word (16-byte) tagged representation: `(tag, payload)`.
+    #[must_use]
+    pub fn to_tagged_parts(&self) -> (u64, u64) {
+        match self {
+            Self::Null => (0, 0),
+            Self::Bool(is_boolean) => (1, if *is_boolean { 1 } else { 0 }),
+            Self::I32(integer_val) => (2, *integer_val as u32 as u64),
+            Self::I64(integer_val) => (3, *integer_val as u64),
+            Self::F64(float_val) => (4, float_val.to_bits()),
+            Self::Ref(address_val) => (5, *address_val as u64),
+            Self::FnPtr(function_id) => (6, *function_id as u64),
+        }
+    }
+
+    /// Decodes a value from a 2-word (16-byte) tagged representation.
+    #[must_use]
+    pub fn from_tagged_parts(tag_id: u64, payload_word: u64) -> Self {
+        match tag_id {
+            1 => Self::Bool((payload_word & 1) != 0),
+            2 => Self::I32(payload_word as i32),
+            3 => Self::I64(payload_word as i64),
+            4 => Self::F64(f64::from_bits(payload_word)),
+            5 => {
+                let address_val = payload_word as u32;
+                if address_val == 0 {
+                    Self::Null
+                } else {
+                    Self::Ref(address_val)
+                }
+            }
+            6 => Self::FnPtr(payload_word as u32),
+            _ => Self::Null,
+        }
+    }
+
     /// Encodes this value into a raw 64-bit NaN-boxed word representation for memory storage.
     #[must_use]
     pub fn to_raw_u64(&self) -> u64 {

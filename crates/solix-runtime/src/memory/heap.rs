@@ -151,7 +151,7 @@ impl VirtualHeap {
             });
         }
 
-        let payload_abs_addr: u32 =
+        let (payload_abs_addr, allocated_bytes): (u32, usize) =
             if required_block_size <= 256 && self.quick_lists[(required_block_size / 8) - 1] != 0 {
                 let class_index = (required_block_size / 8) - 1;
                 let cached_payload = self.quick_lists[class_index];
@@ -168,7 +168,7 @@ impl VirtualHeap {
                 let payload_end = block_abs_addr + required_block_size;
                 self.buffer[cached_payload as usize..payload_end].fill(0);
 
-                cached_payload
+                (cached_payload, required_block_size)
             } else if self.bump_cursor + required_block_size <= self.dynamic_capacity {
                 // O(1) Bump allocation for any block size fitting the remaining bump capacity
                 let block_offset = self.bump_cursor;
@@ -185,7 +185,7 @@ impl VirtualHeap {
                 let payload_end = block_abs_addr + required_block_size;
                 self.buffer[payload_addr as usize..payload_end].fill(0);
 
-                payload_addr
+                (payload_addr, required_block_size)
             } else {
                 // Bump pointer exhausted. Flush un-bumped remainder to free_list and flush quick lists.
                 if self.bump_cursor < self.dynamic_capacity {
@@ -194,12 +194,12 @@ impl VirtualHeap {
                     self.bump_cursor = self.dynamic_capacity;
                 }
                 self.flush_quick_lists_to_free_list();
-                self.allocate_from_free_list(required_block_size, payload_size, tag)?
+                self.allocate_from_free_list(required_block_size, tag)?
             };
 
         self.total_allocations_count += 1;
         self.active_live_objects += 1;
-        self.current_allocated_bytes += required_block_size;
+        self.current_allocated_bytes += allocated_bytes;
         if self.current_allocated_bytes > self.peak_allocated_bytes {
             self.peak_allocated_bytes = self.current_allocated_bytes;
         }
@@ -211,9 +211,8 @@ impl VirtualHeap {
     fn allocate_from_free_list(
         &mut self,
         required_block_size: usize,
-        payload_size: usize,
         tag: BlockTag,
-    ) -> Result<u32, RuntimeError> {
+    ) -> Result<(u32, usize), RuntimeError> {
         let (block_offset, allocated_block_size) = self
             .free_list
             .allocate(required_block_size)
@@ -227,14 +226,14 @@ impl VirtualHeap {
         let block_abs_addr = self.static_size + block_offset;
         let payload_abs_addr = (block_abs_addr + HEADER_SIZE) as u32;
 
-        let header = BlockHeader::new(payload_size as u32, tag, 1);
+        let header = BlockHeader::new((allocated_block_size - HEADER_SIZE) as u32, tag, 1);
         let header_bytes = header.to_bytes();
         self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE].copy_from_slice(&header_bytes);
 
         let payload_end = block_abs_addr + allocated_block_size;
         self.buffer[payload_abs_addr as usize..payload_end].fill(0);
 
-        Ok(payload_abs_addr)
+        Ok((payload_abs_addr, allocated_block_size))
     }
 
     /// Deallocates a heap block given its payload address.

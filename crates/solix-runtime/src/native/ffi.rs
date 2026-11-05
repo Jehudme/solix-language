@@ -387,7 +387,23 @@ pub unsafe extern "C" fn solix_vm_get_field_i32(
         }
     };
     let vm = unsafe { &mut *(actual_vm_ptr as *mut VirtualMachine) };
-    let actual_offset = if offset < 8 { 8 + offset * 4 } else { offset };
+    let actual_offset = if offset < 8 {
+        let resolved_offset = vm
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_id| vm.context.get_class_by_vtable_id(vtable_id))
+            .and_then(|class_desc| {
+                let mut sorted_fields = class_desc.field_types.clone();
+                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
+                sorted_fields
+                    .get(offset as usize)
+                    .map(|&(field_offset, _)| field_offset as u32)
+            });
+        resolved_offset.unwrap_or(8 + offset * 4)
+    } else {
+        offset
+    };
     vm.heap
         .read_u32(object_address + actual_offset)
         .map(|value| value as i32)
@@ -418,7 +434,23 @@ pub unsafe extern "C" fn solix_vm_set_field_i32(
         }
     };
     let vm = unsafe { &mut *(actual_vm_ptr as *mut VirtualMachine) };
-    let actual_offset = if offset < 8 { 8 + offset * 4 } else { offset };
+    let actual_offset = if offset < 8 {
+        let resolved_offset = vm
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_id| vm.context.get_class_by_vtable_id(vtable_id))
+            .and_then(|class_desc| {
+                let mut sorted_fields = class_desc.field_types.clone();
+                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
+                sorted_fields
+                    .get(offset as usize)
+                    .map(|&(field_offset, _)| field_offset as u32)
+            });
+        resolved_offset.unwrap_or(8 + offset * 4)
+    } else {
+        offset
+    };
     let _ = vm
         .heap
         .write_u32(object_address + actual_offset, value as u32);

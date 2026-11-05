@@ -192,8 +192,9 @@ impl VirtualMachine {
                     self.run_loop(target_depth)?;
                     Ok(())
                 })();
-                if let Err(ref error) = destructor_result {
-                    eprintln!("DTOR ERROR: {error:?}");
+                if let Err(destructor_error) = destructor_result {
+                    self.active_destructors.remove(&addr);
+                    return Err(destructor_error);
                 }
             }
 
@@ -227,9 +228,11 @@ impl VirtualMachine {
         } else if header.tag == BlockTag::Tuple {
             let count = self.heap.read_u32(addr).unwrap_or(0);
             for index in 0..count {
-                let elem_addr = addr + 8 + (index as usize * 8) as u32;
-                let val = Value::from_raw_u64(self.heap.read_u64(elem_addr).unwrap_or(0));
-                if let Value::Ref(child_addr) = val
+                let elem_addr = addr + 8 + (index as usize * 16) as u32;
+                let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
+                let element_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                if let Value::Ref(child_addr) = element_val
                     && child_addr > 0
                 {
                     self.release_reference(child_addr)?;
@@ -238,9 +241,11 @@ impl VirtualMachine {
         } else if header.tag == BlockTag::Closure {
             let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
             for index in 0..cap_count {
-                let cell_addr = addr + 8 + (index as usize * 8) as u32;
-                let val = Value::from_raw_u64(self.heap.read_u64(cell_addr).unwrap_or(0));
-                if let Value::Ref(child_addr) = val
+                let cell_addr = addr + 8 + (index as usize * 16) as u32;
+                let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
+                let capture_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                if let Value::Ref(child_addr) = capture_val
                     && child_addr > 0
                 {
                     self.release_reference(child_addr)?;
