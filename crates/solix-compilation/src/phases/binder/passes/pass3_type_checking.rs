@@ -200,7 +200,8 @@ impl<'a> TypeCheckingVisitor<'a> {
                                     || symbol_name == "std::string"
                                     || symbol_name == "string"
                         );
-                        if *operator == TokenKind::OperatorPlus && (is_string_left || is_string_right)
+                        if *operator == TokenKind::OperatorPlus
+                            && (is_string_left || is_string_right)
                         {
                             Type::Class {
                                 symbol_name: "std.string".to_string(),

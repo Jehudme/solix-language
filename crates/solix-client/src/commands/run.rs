@@ -119,11 +119,11 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         } else if extension.eq_ignore_ascii_case("slxarc") {
             let loaded_archive = SlxarcArchive::extract_and_load(lib_path, temp_cache_dir.path())
                 .with_context(|| {
-                    format!(
-                        "Failed to extract dependency archive '{}'",
-                        lib_path.display()
-                    )
-                })?;
+                format!(
+                    "Failed to extract dependency archive '{}'",
+                    lib_path.display()
+                )
+            })?;
             for native_lib in loaded_archive.native_libraries {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
@@ -156,13 +156,15 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         if extension.eq_ignore_ascii_case("slx") {
             source_paths.push(target_path);
         } else if extension.eq_ignore_ascii_case("slxarc") {
-            let loaded_archive = SlxarcArchive::extract_and_load(target_path, temp_cache_dir.path())
-                .with_context(|| {
-                    format!(
-                        "Failed to extract archive container '{}'",
-                        target_path.display()
-                    )
-                })?;
+            let loaded_archive =
+                SlxarcArchive::extract_and_load(target_path, temp_cache_dir.path()).with_context(
+                    || {
+                        format!(
+                            "Failed to extract archive container '{}'",
+                            target_path.display()
+                        )
+                    },
+                )?;
             let archive_manifest = loaded_archive.manifest.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
                     "Invalid archive container '{}': missing mandatory 'manifest.toml'",

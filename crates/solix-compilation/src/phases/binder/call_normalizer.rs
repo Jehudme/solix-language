@@ -29,7 +29,7 @@ pub struct CallableMetadata {
 }
 
 /// Helper function to extract a string slice from source text given a coordinate span.
-fn extract_identifier<'a>(source_text: &'a str, span: Span) -> &'a str {
+fn extract_identifier(source_text: &str, span: Span) -> &str {
     let start_offset = span.start as usize;
     let end_offset = span.end as usize;
     if end_offset <= source_text.len() && start_offset <= end_offset {
@@ -390,12 +390,7 @@ fn normalize_expression(
             }
             match body {
                 LambdaBody::Expression(lambda_expression) => {
-                    normalize_expression(
-                        lambda_expression,
-                        catalog,
-                        source_text,
-                        enclosing_class,
-                    );
+                    normalize_expression(lambda_expression, catalog, source_text, enclosing_class);
                 }
                 LambdaBody::Block(lambda_block) => {
                     normalize_block(lambda_block, catalog, source_text, enclosing_class);
@@ -615,12 +610,7 @@ fn normalize_statement(
                                 }
                             }
                             if let Some(ref mut body) = method_declaration.body {
-                                normalize_block(
-                                    body,
-                                    catalog,
-                                    source_text,
-                                    Some(&current_class),
-                                );
+                                normalize_block(body, catalog, source_text, Some(&current_class));
                             }
                         }
                         ClassMember::Constructor(constructor_declaration) => {
@@ -740,12 +730,7 @@ fn normalize_statement(
             Declaration::Enum(enum_declaration) => {
                 for variant in &mut enum_declaration.variants {
                     if let Some(ref mut explicit_value) = variant.explicit_value {
-                        normalize_expression(
-                            explicit_value,
-                            catalog,
-                            source_text,
-                            enclosing_class,
-                        );
+                        normalize_expression(explicit_value, catalog, source_text, enclosing_class);
                     }
                 }
             }
@@ -891,10 +876,20 @@ pub fn normalize_call_sites(ast_forest: &mut [Option<ProgramAst>], sources: &[St
                             normalize_expression(argument, &catalog, source_text, None);
                         }
                     }
-                    normalize_block(&mut constructor_declaration.body, &catalog, source_text, None);
+                    normalize_block(
+                        &mut constructor_declaration.body,
+                        &catalog,
+                        source_text,
+                        None,
+                    );
                 }
                 Declaration::Destructor(destructor_declaration) => {
-                    normalize_block(&mut destructor_declaration.body, &catalog, source_text, None);
+                    normalize_block(
+                        &mut destructor_declaration.body,
+                        &catalog,
+                        source_text,
+                        None,
+                    );
                 }
                 Declaration::Operator(operator_declaration) => {
                     for parameter in &mut operator_declaration.parameters {

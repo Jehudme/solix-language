@@ -266,7 +266,9 @@ impl RuntimeContext {
                                     inst.src1(),
                                     old_target + vtable_offset as u16,
                                 );
-                            } else if inst.raw_opcode() == OpCode::CastCheck as u8 && inst.flags() == 0 {
+                            } else if inst.raw_opcode() == OpCode::CastCheck as u8
+                                && inst.flags() == 0
+                            {
                                 let old_target = inst.src2();
                                 *inst = Instruction::format_a(
                                     OpCode::CastCheck,
@@ -280,7 +282,8 @@ impl RuntimeContext {
                                 let old_iface_id = target >> 8;
                                 if old_iface_id > 0 {
                                     let slot = target & 0xFF;
-                                    let new_target = ((old_iface_id + vtable_offset as u16) << 8) | slot;
+                                    let new_target =
+                                        ((old_iface_id + vtable_offset as u16) << 8) | slot;
                                     *inst = Instruction::format_call(
                                         OpCode::CallInterface,
                                         inst.call_dst(),
@@ -293,7 +296,8 @@ impl RuntimeContext {
                                 && (inst.flags() & 0x80) != 0
                             {
                                 let old_vtable_id = inst.flags() & 0x7F;
-                                let new_flags = 0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
+                                let new_flags =
+                                    0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
                                 *inst = Instruction::format_a(
                                     OpCode::TupleInstanceof,
                                     new_flags,

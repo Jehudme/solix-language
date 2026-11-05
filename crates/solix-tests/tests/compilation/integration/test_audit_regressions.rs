@@ -485,7 +485,8 @@ fn test_regression_multi_binary_cast_check_and_interface_call_relocation() {
         .with_binary(binary_first)
         .with_binary(binary_second)
         .with_entry_point("SecondModuleMain::main");
-    let context = solix_runtime::RuntimeContext::new(options).expect("RuntimeContext creation failed");
+    let context =
+        solix_runtime::RuntimeContext::new(options).expect("RuntimeContext creation failed");
     let mut virtual_machine = solix_runtime::VirtualMachine::new(context);
     let execution_result = virtual_machine.run().expect("VM execution failed");
     assert_eq!(execution_result, Value::I32(0));

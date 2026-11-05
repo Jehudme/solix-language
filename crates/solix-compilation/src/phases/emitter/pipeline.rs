@@ -16,13 +16,13 @@ use crate::phases::emitter::static_layout::{
     StaticLayout, StaticVariableDecl, synthesize_module_init,
 };
 use crate::phases::lexing::TokenKind;
-use crate::phases::parser::statements::{ProgramAst, Statement};
 use crate::phases::parser::statements::declarations::{
     ClassDeclaration, ClassMember, ConstructorDeclaration, Declaration, DestructorDeclaration,
     MethodDeclaration, Modifier, OperatorDeclaration,
 };
 use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
 use crate::phases::parser::statements::types::TypeAnnotation;
+use crate::phases::parser::statements::{ProgramAst, Statement};
 use solix_common::bytecode::{
     BinaryProgram, CompiledFunction, DeclarationModifier, ExportManifest, ExportedClass,
     ExportedEnum, ExportedField, ExportedFunction, ExportedGenericTemplate, ExportedParameter,
@@ -522,7 +522,8 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             .iter()
                                             .map(|param| {
                                                 let param_name =
-                                                    get_span_text(param.name_span, code).to_string();
+                                                    get_span_text(param.name_span, code)
+                                                        .to_string();
                                                 let param_type = resolve_type_annotation(
                                                     ast.source_id,
                                                     code,
@@ -719,12 +720,10 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         if enum_declaration.modifiers.contains(&Modifier::Extern) {
                             continue;
                         }
-                        let enum_name =
-                            get_span_text(enum_declaration.name_span, code).to_string();
+                        let enum_name = get_span_text(enum_declaration.name_span, code).to_string();
                         let mut variants = Vec::new();
                         for variant in &enum_declaration.variants {
-                            let variant_name =
-                                get_span_text(variant.name_span, code).to_string();
+                            let variant_name = get_span_text(variant.name_span, code).to_string();
                             let explicit_disc =
                                 variant.explicit_value.as_ref().and_then(|expr| match expr {
                                     Expression::Literal {
@@ -874,11 +873,8 @@ fn collect_generic_calls_in_expression(
                 let argument_strings: Vec<String> = generic_arguments
                     .iter()
                     .map(|argument| {
-                        get_span_text(
-                            argument.span(),
-                            &sources[argument.span().id as usize],
-                        )
-                        .to_string()
+                        get_span_text(argument.span(), &sources[argument.span().id as usize])
+                            .to_string()
                     })
                     .collect();
                 let joined_arguments = argument_strings.join(", ");
@@ -1003,7 +999,11 @@ fn collect_generic_calls_in_statement(
         }
         Statement::DoWhile(do_while_statement) => {
             collect_generic_calls_in_statement(&do_while_statement.body, sources, invocations);
-            collect_generic_calls_in_expression(&do_while_statement.condition, sources, invocations);
+            collect_generic_calls_in_expression(
+                &do_while_statement.condition,
+                sources,
+                invocations,
+            );
         }
         Statement::For(for_statement) => {
             if let Some(ref initializer) = for_statement.initializer {
@@ -1018,7 +1018,11 @@ fn collect_generic_calls_in_statement(
             collect_generic_calls_in_statement(&for_statement.body, sources, invocations);
         }
         Statement::Switch(switch_statement) => {
-            collect_generic_calls_in_expression(&switch_statement.discriminant, sources, invocations);
+            collect_generic_calls_in_expression(
+                &switch_statement.discriminant,
+                sources,
+                invocations,
+            );
             for switch_case in &switch_statement.cases {
                 collect_generic_calls_in_expression(&switch_case.case_value, sources, invocations);
                 for case_statement in &switch_case.statements {
@@ -1055,7 +1059,11 @@ fn collect_generic_calls_in_statement(
             }
         }
         Statement::Expression(expression_statement) => {
-            collect_generic_calls_in_expression(&expression_statement.expression, sources, invocations);
+            collect_generic_calls_in_expression(
+                &expression_statement.expression,
+                sources,
+                invocations,
+            );
         }
         Statement::Assert(assert_statement) => {
             collect_generic_calls_in_expression(&assert_statement.condition, sources, invocations);
@@ -1119,7 +1127,11 @@ fn collect_generic_calls_in_ast(
                         ClassMember::Method(method_declaration) => {
                             if let Some(ref body) = method_declaration.body {
                                 for statement in &body.statements {
-                                    collect_generic_calls_in_statement(statement, sources, invocations);
+                                    collect_generic_calls_in_statement(
+                                        statement,
+                                        sources,
+                                        invocations,
+                                    );
                                 }
                             }
                         }
@@ -1171,16 +1183,15 @@ fn index_function_symbols(
                 let full_pkg_name = format!("{pkg}.{name}");
                 function_ids.insert(full_pkg_name, func_id);
             }
-            if !m.generic_params.is_empty() {
-                if let Some(specialization_args) =
+            if !m.generic_params.is_empty()
+                && let Some(specialization_args) =
                     generic_invocations.get(&(String::new(), name.to_string()))
-                {
-                    for args_str in specialization_args {
-                        let specialized_sym = format!("{name}<{args_str}>");
-                        let spec_id = *next_func_id;
-                        *next_func_id += 1;
-                        function_ids.insert(specialized_sym.clone(), spec_id);
-                    }
+            {
+                for args_str in specialization_args {
+                    let specialized_sym = format!("{name}<{args_str}>");
+                    let spec_id = *next_func_id;
+                    *next_func_id += 1;
+                    function_ids.insert(specialized_sym.clone(), spec_id);
                 }
             }
         }
@@ -1220,21 +1231,16 @@ fn index_function_symbols(
                         function_ids.insert(full_pkg_name_mangled, func_id);
                         function_ids.entry(full_pkg_name).or_insert(func_id);
                     }
-                    if !m.generic_params.is_empty() {
-                        if let Some(specialization_args) = generic_invocations
+                    if !m.generic_params.is_empty()
+                        && let Some(specialization_args) = generic_invocations
                             .get(&(cls_name.to_string(), method_name.to_string()))
-                        {
-                            for args_str in specialization_args {
-                                let specialized_sym =
-                                    format!("{cls_name}::{method_name}<{args_str}>");
-                                let spec_id = *next_func_id;
-                                *next_func_id += 1;
-                                function_ids.insert(specialized_sym.clone(), spec_id);
-                                function_ids.insert(
-                                    format!("{method_name}<{args_str}>"),
-                                    spec_id,
-                                );
-                            }
+                    {
+                        for args_str in specialization_args {
+                            let specialized_sym = format!("{cls_name}::{method_name}<{args_str}>");
+                            let spec_id = *next_func_id;
+                            *next_func_id += 1;
+                            function_ids.insert(specialized_sym.clone(), spec_id);
+                            function_ids.insert(format!("{method_name}<{args_str}>"), spec_id);
                         }
                     }
                 }
@@ -1351,28 +1357,27 @@ fn compile_source_functions(
             )?;
             output.push(func);
 
-            if !m.generic_params.is_empty() {
-                if let Some(specialization_args) =
+            if !m.generic_params.is_empty()
+                && let Some(specialization_args) =
                     generic_invocations.get(&(String::new(), name.clone()))
-                {
-                    for args_str in specialization_args {
-                        let specialized_sym = format!("{name}<{args_str}>");
-                        let func = compile_single_method(
-                            &specialized_sym,
-                            ast.source_id,
-                            m,
-                            false,
-                            sources,
-                            class_layouts,
-                            function_ids,
-                            enum_variants,
-                            static_layout,
-                            node_types,
-                            pool,
-                            synthesized_lambdas,
-                        )?;
-                        output.push(func);
-                    }
+            {
+                for args_str in specialization_args {
+                    let specialized_sym = format!("{name}<{args_str}>");
+                    let func = compile_single_method(
+                        &specialized_sym,
+                        ast.source_id,
+                        m,
+                        false,
+                        sources,
+                        class_layouts,
+                        function_ids,
+                        enum_variants,
+                        static_layout,
+                        node_types,
+                        pool,
+                        synthesized_lambdas,
+                    )?;
+                    output.push(func);
                 }
             }
         }
@@ -1418,29 +1423,27 @@ fn compile_source_functions(
                     )?;
                     output.push(func);
 
-                    if !m.generic_params.is_empty() {
-                        if let Some(specialization_args) = generic_invocations
+                    if !m.generic_params.is_empty()
+                        && let Some(specialization_args) = generic_invocations
                             .get(&(cls_name.to_string(), method_name.to_string()))
-                        {
-                            for args_str in specialization_args {
-                                let specialized_sym =
-                                    format!("{cls_name}::{method_name}<{args_str}>");
-                                let func = compile_single_method(
-                                    &specialized_sym,
-                                    ast.source_id,
-                                    m,
-                                    is_instance,
-                                    sources,
-                                    class_layouts,
-                                    function_ids,
-                                    enum_variants,
-                                    static_layout,
-                                    node_types,
-                                    pool,
-                                    synthesized_lambdas,
-                                )?;
-                                output.push(func);
-                            }
+                    {
+                        for args_str in specialization_args {
+                            let specialized_sym = format!("{cls_name}::{method_name}<{args_str}>");
+                            let func = compile_single_method(
+                                &specialized_sym,
+                                ast.source_id,
+                                m,
+                                is_instance,
+                                sources,
+                                class_layouts,
+                                function_ids,
+                                enum_variants,
+                                static_layout,
+                                node_types,
+                                pool,
+                                synthesized_lambdas,
+                            )?;
+                            output.push(func);
                         }
                     }
                 }

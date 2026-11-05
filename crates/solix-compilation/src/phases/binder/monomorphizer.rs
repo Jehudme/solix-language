@@ -108,8 +108,11 @@ impl GenericBlueprintRegistry {
         }
 
         let mut constraint_errors = Vec::new();
-        for (generic_param, concrete_type) in
-            blueprint.class_ast.generic_params.iter().zip(type_arguments)
+        for (generic_param, concrete_type) in blueprint
+            .class_ast
+            .generic_params
+            .iter()
+            .zip(type_arguments)
         {
             for bound_annot in &generic_param.bounds {
                 let bound_type = crate::phases::binder::type_resolver::resolve_type_annotation(
@@ -129,8 +132,9 @@ impl GenericBlueprintRegistry {
                     let param_name = if generic_param.name_span.end as usize
                         <= source_texts[blueprint.source_id as usize].len()
                     {
-                        &source_texts[blueprint.source_id as usize]
-                            [generic_param.name_span.start as usize..generic_param.name_span.end as usize]
+                        &source_texts[blueprint.source_id as usize][generic_param.name_span.start
+                            as usize
+                            ..generic_param.name_span.end as usize]
                     } else {
                         "T"
                     };

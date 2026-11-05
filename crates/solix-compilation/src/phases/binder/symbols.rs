@@ -306,12 +306,13 @@ impl SymbolTable {
                 if candidate_fqn.ends_with(&suffix) {
                     if caller_has_package {
                         let package_part = candidate_fqn.strip_suffix(&suffix).unwrap_or("");
-                        let is_imported = self.file_imports.get(source_index).is_some_and(|imports| {
-                            imports.iter().any(|import_entry| {
-                                import_entry.path == package_part
-                                    || import_entry.path.starts_with(package_part)
-                            })
-                        });
+                        let is_imported =
+                            self.file_imports.get(source_index).is_some_and(|imports| {
+                                imports.iter().any(|import_entry| {
+                                    import_entry.path == package_part
+                                        || import_entry.path.starts_with(package_part)
+                                })
+                            });
                         if !is_imported {
                             continue;
                         }

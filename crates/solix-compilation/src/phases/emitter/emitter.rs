@@ -762,8 +762,7 @@ impl<'a> Emitter<'a> {
                 }
                 self.allocator.free_temp(dummy_dst);
                 for (idx, arg) in arguments.iter().enumerate() {
-                    if self.is_reference_expr(arg)
-                        && !matches!(arg, Expression::Identifier { .. })
+                    if self.is_reference_expr(arg) && !matches!(arg, Expression::Identifier { .. })
                     {
                         self.emit_instruction(
                             Instruction::format_a(
@@ -848,10 +847,7 @@ impl<'a> Emitter<'a> {
                             Some(*span),
                         );
                         for (arg_index, argument) in arguments.iter().enumerate() {
-                            self.emit_expression(
-                                argument,
-                                Some(arg_base + 1 + arg_index as u16),
-                            )?;
+                            self.emit_expression(argument, Some(arg_base + 1 + arg_index as u16))?;
                         }
                         let dst = self.resolve_dst(target_reg)?;
                         if let Some(func_id) = func_id_opt {
@@ -2015,7 +2011,12 @@ impl<'a> Emitter<'a> {
                         } else {
                             let const_idx = self.pool.add_f64(1.0)?;
                             self.emit_instruction(
-                                Instruction::format_b(OpCode::LoadConst, 0, temp_one, const_idx as u32),
+                                Instruction::format_b(
+                                    OpCode::LoadConst,
+                                    0,
+                                    temp_one,
+                                    const_idx as u32,
+                                ),
                                 Some(span),
                             );
                             if matches!(operator, TokenKind::OperatorIncrement) {
@@ -2115,7 +2116,12 @@ impl<'a> Emitter<'a> {
                         } else if is_float {
                             let const_idx = self.pool.add_f64(1.0)?;
                             self.emit_instruction(
-                                Instruction::format_b(OpCode::LoadConst, 0, temp_one, const_idx as u32),
+                                Instruction::format_b(
+                                    OpCode::LoadConst,
+                                    0,
+                                    temp_one,
+                                    const_idx as u32,
+                                ),
                                 Some(span),
                             );
                             if matches!(operator, TokenKind::OperatorIncrement) {
