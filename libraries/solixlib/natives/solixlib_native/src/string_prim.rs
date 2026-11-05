@@ -1,8 +1,8 @@
 //! String manipulation and numeric primitive native functions.
 
 use crate::{
-    alloc_solix_chars, read_solix_chars, register_symbol_variants, write_out_box_f64,
-    write_out_box_i64, NativeCFunctionPtr, RegisterNativeCallback, SolixCValue,
+    alloc_solix_chars, alloc_solix_string, read_solix_chars, register_symbol_variants,
+    write_out_box_f64, write_out_box_i64, NativeCFunctionPtr, RegisterNativeCallback, SolixCValue,
 };
 use std::ffi::c_void;
 
@@ -19,7 +19,7 @@ pub unsafe extern "C" fn string_native_from_int(
     }
     let value = unsafe { (*args.add(0)).as_i64() };
     let formatted_string = value.to_string();
-    let address = unsafe { alloc_solix_chars(vm_context, &formatted_string) };
+    let address = unsafe { alloc_solix_string(vm_context, &formatted_string) };
     SolixCValue::ref_val(address)
 }
 
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn string_native_from_double(
         6
     };
     let formatted_string = format!("{value:.precision$}");
-    let address = unsafe { alloc_solix_chars(vm_context, &formatted_string) };
+    let address = unsafe { alloc_solix_string(vm_context, &formatted_string) };
     SolixCValue::ref_val(address)
 }
 
@@ -59,7 +59,7 @@ pub unsafe extern "C" fn string_native_from_bool(
     }
     let value = unsafe { (*args.add(0)).as_bool() };
     let formatted_string = if value { "true" } else { "false" };
-    let address = unsafe { alloc_solix_chars(vm_context, formatted_string) };
+    let address = unsafe { alloc_solix_string(vm_context, formatted_string) };
     SolixCValue::ref_val(address)
 }
 
@@ -117,7 +117,7 @@ pub unsafe extern "C" fn string_native_to_lower(
     let address = unsafe { (*args.add(0)).as_ref() };
     let text = unsafe { read_solix_chars(vm_context, address) };
     let lowercase_text = text.to_lowercase();
-    let allocated_address = unsafe { alloc_solix_chars(vm_context, &lowercase_text) };
+    let allocated_address = unsafe { alloc_solix_string(vm_context, &lowercase_text) };
     SolixCValue::ref_val(allocated_address)
 }
 
@@ -133,7 +133,7 @@ pub unsafe extern "C" fn string_native_to_upper(
     let address = unsafe { (*args.add(0)).as_ref() };
     let text = unsafe { read_solix_chars(vm_context, address) };
     let uppercase_text = text.to_uppercase();
-    let allocated_address = unsafe { alloc_solix_chars(vm_context, &uppercase_text) };
+    let allocated_address = unsafe { alloc_solix_string(vm_context, &uppercase_text) };
     SolixCValue::ref_val(allocated_address)
 }
 
@@ -160,8 +160,38 @@ pub unsafe extern "C" fn string_native_replace(
         source_text.replace(&old_token, &new_token)
     };
 
-    let allocated_address = unsafe { alloc_solix_chars(vm_context, &replaced_text) };
+    let allocated_address = unsafe { alloc_solix_string(vm_context, &replaced_text) };
     SolixCValue::ref_val(allocated_address)
+}
+
+pub unsafe extern "C" fn string_native_chars_to_string(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::null();
+    }
+    let address = unsafe { (*args.add(0)).as_ref() };
+    let text = unsafe { read_solix_chars(vm_context, address) };
+    let allocated = unsafe { alloc_solix_string(vm_context, &text) };
+    SolixCValue::ref_val(allocated)
+}
+
+pub unsafe extern "C" fn string_native_string_to_chars(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::null();
+    }
+    let address = unsafe { (*args.add(0)).as_ref() };
+    let text = unsafe { read_solix_chars(vm_context, address) };
+    let allocated = unsafe { alloc_solix_chars(vm_context, &text) };
+    SolixCValue::ref_val(allocated)
 }
 
 pub unsafe extern "C" fn string_native_index_of(
@@ -343,6 +373,194 @@ pub unsafe extern "C" fn int_native_bswap(
     SolixCValue::i32_val(value.swap_bytes() as i32)
 }
 
+pub unsafe extern "C" fn int_native_clz64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i32_val(64);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    SolixCValue::i32_val(value.leading_zeros() as i32)
+}
+
+pub unsafe extern "C" fn int_native_ctz64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i32_val(64);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    SolixCValue::i32_val(value.trailing_zeros() as i32)
+}
+
+pub unsafe extern "C" fn int_native_popcount64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i32_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    SolixCValue::i32_val(value.count_ones() as i32)
+}
+
+pub unsafe extern "C" fn int_native_bswap64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i64_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    SolixCValue::i64_val(value.swap_bytes() as i64)
+}
+
+pub unsafe extern "C" fn int_native_rotl32(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::i32_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i32() } as u32;
+    let distance = unsafe { (*args.add(1)).as_i32() } as u32;
+    SolixCValue::i32_val(value.rotate_left(distance) as i32)
+}
+
+pub unsafe extern "C" fn int_native_rotr32(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::i32_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i32() } as u32;
+    let distance = unsafe { (*args.add(1)).as_i32() } as u32;
+    SolixCValue::i32_val(value.rotate_right(distance) as i32)
+}
+
+pub unsafe extern "C" fn int_native_rotl64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::i64_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    let distance = unsafe { (*args.add(1)).as_i32() } as u32;
+    SolixCValue::i64_val(value.rotate_left(distance) as i64)
+}
+
+pub unsafe extern "C" fn int_native_rotr64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::i64_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    let distance = unsafe { (*args.add(1)).as_i32() } as u32;
+    SolixCValue::i64_val(value.rotate_right(distance) as i64)
+}
+
+pub unsafe extern "C" fn int_native_ushr32(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::i32_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i32() } as u32;
+    let shift = (unsafe { (*args.add(1)).as_i32() } as u32) & 31;
+    SolixCValue::i32_val((value >> shift) as i32)
+}
+
+pub unsafe extern "C" fn int_native_ushr64(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::i64_val(0);
+    }
+    let value = unsafe { (*args.add(0)).as_i64() } as u64;
+    let shift = (unsafe { (*args.add(1)).as_i32() } as u32) & 63;
+    SolixCValue::i64_val((value >> shift) as i64)
+}
+
+pub unsafe extern "C" fn prim_native_float_to_raw_bits(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i32_val(0);
+    }
+    let float_val = unsafe { (*args.add(0)).as_f64() } as f32;
+    SolixCValue::i32_val(float_val.to_bits() as i32)
+}
+
+pub unsafe extern "C" fn prim_native_raw_bits_to_float(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::f64_val(0.0);
+    }
+    let bits = unsafe { (*args.add(0)).as_i32() } as u32;
+    SolixCValue::f64_val(f32::from_bits(bits) as f64)
+}
+
+pub unsafe extern "C" fn prim_native_double_to_raw_bits(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i64_val(0);
+    }
+    let double_val = unsafe { (*args.add(0)).as_f64() };
+    SolixCValue::i64_val(double_val.to_bits() as i64)
+}
+
+pub unsafe extern "C" fn prim_native_raw_bits_to_double(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::f64_val(0.0);
+    }
+    let bits = unsafe { (*args.add(0)).as_i64() } as u64;
+    SolixCValue::f64_val(f64::from_bits(bits))
+}
+
 pub unsafe extern "C" fn primitives_native_hash_any(
     _vm_context: *mut c_void,
     args: *const SolixCValue,
@@ -448,6 +666,22 @@ pub unsafe fn register_string_prim_natives(
                 "String::native_last_index_of",
             ],
             string_native_last_index_of,
+        ),
+        (
+            &[
+                "String_native_chars_to_string",
+                "solix_core_String_native_chars_to_string",
+                "String::native_chars_to_string",
+            ],
+            string_native_chars_to_string,
+        ),
+        (
+            &[
+                "String_native_string_to_chars",
+                "solix_core_String_native_string_to_chars",
+                "String::native_string_to_chars",
+            ],
+            string_native_string_to_chars,
         ),
     ];
 
@@ -569,6 +803,118 @@ pub unsafe fn register_string_prim_natives(
                 "Primitives::native_hash_any",
             ],
             primitives_native_hash_any,
+        ),
+        (
+            &[
+                "Primitives_native_clz64",
+                "solix_core_Primitives_native_clz64",
+                "Primitives::native_clz64",
+            ],
+            int_native_clz64,
+        ),
+        (
+            &[
+                "Primitives_native_ctz64",
+                "solix_core_Primitives_native_ctz64",
+                "Primitives::native_ctz64",
+            ],
+            int_native_ctz64,
+        ),
+        (
+            &[
+                "Primitives_native_popcount64",
+                "solix_core_Primitives_native_popcount64",
+                "Primitives::native_popcount64",
+            ],
+            int_native_popcount64,
+        ),
+        (
+            &[
+                "Primitives_native_bswap64",
+                "solix_core_Primitives_native_bswap64",
+                "Primitives::native_bswap64",
+            ],
+            int_native_bswap64,
+        ),
+        (
+            &[
+                "Primitives_native_rotl32",
+                "solix_core_Primitives_native_rotl32",
+                "Primitives::native_rotl32",
+            ],
+            int_native_rotl32,
+        ),
+        (
+            &[
+                "Primitives_native_rotr32",
+                "solix_core_Primitives_native_rotr32",
+                "Primitives::native_rotr32",
+            ],
+            int_native_rotr32,
+        ),
+        (
+            &[
+                "Primitives_native_rotl64",
+                "solix_core_Primitives_native_rotl64",
+                "Primitives::native_rotl64",
+            ],
+            int_native_rotl64,
+        ),
+        (
+            &[
+                "Primitives_native_rotr64",
+                "solix_core_Primitives_native_rotr64",
+                "Primitives::native_rotr64",
+            ],
+            int_native_rotr64,
+        ),
+        (
+            &[
+                "Primitives_native_ushr32",
+                "solix_core_Primitives_native_ushr32",
+                "Primitives::native_ushr32",
+            ],
+            int_native_ushr32,
+        ),
+        (
+            &[
+                "Primitives_native_ushr64",
+                "solix_core_Primitives_native_ushr64",
+                "Primitives::native_ushr64",
+            ],
+            int_native_ushr64,
+        ),
+        (
+            &[
+                "Primitives_native_float_to_raw_bits",
+                "solix_core_Primitives_native_float_to_raw_bits",
+                "Primitives::native_float_to_raw_bits",
+            ],
+            prim_native_float_to_raw_bits,
+        ),
+        (
+            &[
+                "Primitives_native_raw_bits_to_float",
+                "solix_core_Primitives_native_raw_bits_to_float",
+                "Primitives::native_raw_bits_to_float",
+            ],
+            prim_native_raw_bits_to_float,
+        ),
+        (
+            &[
+                "Primitives_native_double_to_raw_bits",
+                "solix_core_Primitives_native_double_to_raw_bits",
+                "Primitives::native_double_to_raw_bits",
+            ],
+            prim_native_double_to_raw_bits,
+        ),
+        (
+            &[
+                "Primitives_native_raw_bits_to_double",
+                "solix_core_Primitives_native_raw_bits_to_double",
+                "Primitives::native_raw_bits_to_double",
+            ],
+            prim_native_raw_bits_to_double,
         ),
     ];
 

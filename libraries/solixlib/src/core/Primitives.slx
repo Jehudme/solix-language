@@ -1,0 +1,244 @@
+package solix.core;
+
+alias int = int32;
+alias long = int64;
+alias short = int16;
+alias byte = int8;
+alias ubyte = uint8;
+alias ushort = uint16;
+alias uint = uint32;
+alias ulong = uint64;
+alias float = float32;
+alias double = float64;
+
+public class Primitives {
+    public static int8 MIN_INT8 = (int8)-128;
+    public static int8 MAX_INT8 = (int8)127;
+    public static uint8 MIN_UINT8 = (uint8)0;
+    public static uint8 MAX_UINT8 = (uint8)255;
+
+    public static int16 MIN_INT16 = (int16)-32768;
+    public static int16 MAX_INT16 = (int16)32767;
+    public static uint16 MIN_UINT16 = (uint16)0;
+    public static uint16 MAX_UINT16 = (uint16)65535;
+
+    public static int32 MIN_INT32 = -2147483647 - 1;
+    public static int32 MAX_INT32 = 2147483647;
+    public static int32 MIN_INT = -2147483647 - 1;
+    public static int32 MAX_INT = 2147483647;
+
+    public static int64 MIN_INT64 = -9223372036854775807L - 1L;
+    public static int64 MAX_INT64 = 9223372036854775807L;
+
+    public static float64 NaN = Primitives.nan();
+    public static float64 POSITIVE_INFINITY = Primitives.pos_inf();
+    public static float64 NEGATIVE_INFINITY = Primitives.neg_inf();
+    public static float64 MIN_DOUBLE = Primitives.min_double();
+    public static float64 MAX_DOUBLE = Primitives.max_double();
+
+    // 32-bit bitwise primitives
+    public static int32 count_leading_zeros32(int32 value) {
+        return Primitives.native_clz(value);
+    }
+
+    public static int32 count_trailing_zeros32(int32 value) {
+        return Primitives.native_ctz(value);
+    }
+
+    public static int32 bit_count32(int32 value) {
+        return Primitives.native_popcount(value);
+    }
+
+    public static int32 reverse_bytes32(int32 value) {
+        return Primitives.native_bswap(value);
+    }
+
+    public static int32 rotate_left32(int32 value, int32 distance) {
+        return Primitives.native_rotl32(value, distance);
+    }
+
+    public static int32 rotate_right32(int32 value, int32 distance) {
+        return Primitives.native_rotr32(value, distance);
+    }
+
+    public static int32 highest_one_bit32(int32 value) {
+        value = value | (value >> 1);
+        value = value | (value >> 2);
+        value = value | (value >> 4);
+        value = value | (value >> 8);
+        value = value | (value >> 16);
+        return value - Primitives.native_ushr32(value, 1);
+    }
+
+    public static int32 lowest_one_bit32(int32 value) {
+        return value & (-value);
+    }
+
+    public static bool is_power_of_two32(int32 value) {
+        return value > 0 && (value & (value - 1)) == 0;
+    }
+
+    public static int32 next_power_of_two32(int32 value) {
+        if (value <= 1) {
+            return 1;
+        }
+        value = value - 1;
+        value = value | (value >> 1);
+        value = value | (value >> 2);
+        value = value | (value >> 4);
+        value = value | (value >> 8);
+        value = value | (value >> 16);
+        return value + 1;
+    }
+
+    // 64-bit bitwise primitives
+    public static int32 count_leading_zeros64(int64 value) {
+        return Primitives.native_clz64(value);
+    }
+
+    public static int32 count_trailing_zeros64(int64 value) {
+        return Primitives.native_ctz64(value);
+    }
+
+    public static int32 bit_count64(int64 value) {
+        return Primitives.native_popcount64(value);
+    }
+
+    public static int64 reverse_bytes64(int64 value) {
+        return Primitives.native_bswap64(value);
+    }
+
+    public static int64 rotate_left64(int64 value, int32 distance) {
+        return Primitives.native_rotl64(value, distance);
+    }
+
+    public static int64 rotate_right64(int64 value, int32 distance) {
+        return Primitives.native_rotr64(value, distance);
+    }
+
+    public static bool is_power_of_two64(int64 value) {
+        return value > 0L && (value & (value - 1L)) == 0L;
+    }
+
+    // Float64 / Double checks
+    public static bool is_nan(float64 value) {
+        return Primitives.native_is_nan(value);
+    }
+
+    public static bool is_infinite(float64 value) {
+        return Primitives.native_is_infinite(value);
+    }
+
+    public static bool is_finite(float64 value) {
+        return !Primitives.native_is_nan(value) && !Primitives.native_is_infinite(value);
+    }
+
+    public static float64 nan() {
+        return Primitives.native_nan();
+    }
+
+    public static float64 pos_inf() {
+        return Primitives.native_pos_inf();
+    }
+
+    public static float64 neg_inf() {
+        return Primitives.native_neg_inf();
+    }
+
+    public static float64 min_double() {
+        return Primitives.native_min_double();
+    }
+
+    public static float64 max_double() {
+        return Primitives.native_max_double();
+    }
+
+    // IEEE-754 bit representations
+    public static int32 float_to_raw_bits(float64 value) {
+        return Primitives.native_float_to_raw_bits(value);
+    }
+
+    public static float64 raw_bits_to_float(int32 bits) {
+        return Primitives.native_raw_bits_to_float(bits);
+    }
+
+    public static int64 double_to_raw_bits(float64 value) {
+        return Primitives.native_double_to_raw_bits(value);
+    }
+
+    public static float64 raw_bits_to_double(int64 bits) {
+        return Primitives.native_raw_bits_to_double(bits);
+    }
+
+    // Generic Hash Fallback
+    public static int32 hash_any<T>(T value) {
+        return Primitives.native_hash_any((int64)value);
+    }
+
+    // Char utilities
+    public static bool is_digit(char character) {
+        return character >= '0' && character <= '9';
+    }
+
+    public static bool is_letter(char character) {
+        return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+    }
+
+    public static bool is_whitespace(char character) {
+        return character == ' ' || character == '\t' || character == '\n' || character == '\r';
+    }
+
+    public static bool is_upper_case(char character) {
+        return character >= 'A' && character <= 'Z';
+    }
+
+    public static bool is_lower_case(char character) {
+        return character >= 'a' && character <= 'z';
+    }
+
+    public static char to_upper_case(char character) {
+        if (character >= 'a' && character <= 'z') {
+            return (char)((int32)character - 32);
+        }
+        return character;
+    }
+
+    public static char to_lower_case(char character) {
+        if (character >= 'A' && character <= 'Z') {
+            return (char)((int32)character + 32);
+        }
+        return character;
+    }
+
+    // Native Bridge Declarations
+    private static native float64 native_min_double();
+    private static native float64 native_max_double();
+    private static native float64 native_nan();
+    private static native float64 native_pos_inf();
+    private static native float64 native_neg_inf();
+    private static native bool native_is_nan(float64 value);
+    private static native bool native_is_infinite(float64 value);
+
+    private static native int32 native_clz(int32 value);
+    private static native int32 native_ctz(int32 value);
+    private static native int32 native_popcount(int32 value);
+    private static native int32 native_bswap(int32 value);
+    private static native int32 native_rotl32(int32 value, int32 distance);
+    private static native int32 native_rotr32(int32 value, int32 distance);
+    private static native int32 native_ushr32(int32 value, int32 distance);
+
+    private static native int32 native_clz64(int64 value);
+    private static native int32 native_ctz64(int64 value);
+    private static native int32 native_popcount64(int64 value);
+    private static native int64 native_bswap64(int64 value);
+    private static native int64 native_rotl64(int64 value, int32 distance);
+    private static native int64 native_rotr64(int64 value, int32 distance);
+    private static native int64 native_ushr64(int64 value, int32 distance);
+
+    private static native int32 native_float_to_raw_bits(float64 value);
+    private static native float64 native_raw_bits_to_float(int32 bits);
+    private static native int64 native_double_to_raw_bits(float64 value);
+    private static native float64 native_raw_bits_to_double(int64 bits);
+
+    private static native int32 native_hash_any(int64 value);
+}

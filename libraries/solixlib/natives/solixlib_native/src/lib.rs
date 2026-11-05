@@ -179,6 +179,18 @@ pub unsafe fn read_solix_bytes(vm_context: *mut c_void, address: u32) -> Vec<u8>
     buffer
 }
 
+/// Allocates a new `string` (`BlockTag::String`) on the guest heap from a Rust string slice.
+pub unsafe fn alloc_solix_string(vm_context: *mut c_void, text: &str) -> u32 {
+    if vm_context.is_null() {
+        return 0;
+    }
+    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
+    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+        return 0;
+    }
+    unsafe { (context_ref.alloc_string)(context_ref.vm_ptr, text.as_ptr(), text.len() as u32) }
+}
+
 /// Allocates a new `char[]` on the guest heap from a Rust string slice.
 pub unsafe fn alloc_solix_chars(vm_context: *mut c_void, text: &str) -> u32 {
     if vm_context.is_null() {

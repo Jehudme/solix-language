@@ -1,0 +1,95 @@
+package solix.core;
+
+public class Optional<T> implements IStringable {
+    private T value_field;
+    private bool has_value_flag;
+
+    public Optional() {
+        this.has_value_flag = false;
+    }
+
+    public Optional(T value) {
+        this.value_field = value;
+        this.has_value_flag = true;
+    }
+
+    public static Optional<T> of(T value) {
+        if (value == null) {
+            throw new NullPointerException("Optional.of() value cannot be null.");
+        }
+        return new Optional<T>(value);
+    }
+
+    public static Optional<T> empty() {
+        return new Optional<T>();
+    }
+
+    public static Optional<T> of_nullable(T value) {
+        if (value == null) {
+            return new Optional<T>();
+        }
+        return new Optional<T>(value);
+    }
+
+    public bool is_present() {
+        return this.has_value_flag;
+    }
+
+    public bool is_empty() {
+        return !this.has_value_flag;
+    }
+
+    public bool has_value() {
+        return this.has_value_flag;
+    }
+
+    public T get() {
+        if (!this.has_value_flag) {
+            throw new NoSuchElementException("Optional has no value.");
+        }
+        return this.value_field;
+    }
+
+    public T value() {
+        if (!this.has_value_flag) {
+            throw new NoSuchElementException("Optional has no value.");
+        }
+        return this.value_field;
+    }
+
+    public T or_else(T fallback) {
+        if (this.has_value_flag) {
+            return this.value_field;
+        }
+        return fallback;
+    }
+
+    public T or_else_get(T(*)() supplier) {
+        if (this.has_value_flag) {
+            return this.value_field;
+        }
+        return supplier();
+    }
+
+    public void if_present(void(*)(T) consumer) {
+        if (this.has_value_flag) {
+            consumer(this.value_field);
+        }
+    }
+
+    public Optional<T> filter(bool(*)(T) predicate) {
+        if (this.has_value_flag) {
+            if (predicate(this.value_field)) {
+                return this;
+            }
+        }
+        return new Optional<T>();
+    }
+
+    public String to_string() {
+        if (!this.has_value_flag) {
+            return new String("Optional.empty");
+        }
+        return new String("Optional[" + this.value_field + "]");
+    }
+}

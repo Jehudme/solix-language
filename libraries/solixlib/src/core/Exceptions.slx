@@ -1,0 +1,323 @@
+package solix.core;
+
+public class Exception {
+    public string message;
+    public Exception cause;
+
+    public Exception() {
+        this.message = "";
+        this.cause = null;
+    }
+
+    public Exception(string message) {
+        this.message = message;
+        this.cause = null;
+    }
+
+    public Exception(string message, Exception cause) {
+        this.message = message;
+        this.cause = cause;
+    }
+
+    public Exception(String message) {
+        if (message != null) {
+            this.message = message.data;
+        } else {
+            this.message = "";
+        }
+        this.cause = null;
+    }
+
+    public Exception(String message, Exception cause) {
+        if (message != null) {
+            this.message = message.data;
+        } else {
+            this.message = "";
+        }
+        this.cause = cause;
+    }
+
+    public string get_message() {
+        return this.message;
+    }
+
+    public Exception get_cause() {
+        return this.cause;
+    }
+
+    public String to_string() {
+        return new String(this.message);
+    }
+}
+
+public class RuntimeException extends Exception {
+    public RuntimeException() : super("") {}
+    public RuntimeException(string message) : super(message) {}
+    public RuntimeException(String message) : super(message) {}
+    public RuntimeException(string message, Exception cause) : super(message, cause) {}
+    public RuntimeException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class IllegalArgumentException extends RuntimeException {
+    public IllegalArgumentException() : super("Illegal argument provided.") {}
+    public IllegalArgumentException(string message) : super(message) {}
+    public IllegalArgumentException(String message) : super(message) {}
+    public IllegalArgumentException(string message, Exception cause) : super(message, cause) {}
+    public IllegalArgumentException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class ArgumentNullException extends IllegalArgumentException {
+    public string parameter_name;
+
+    public ArgumentNullException() : super("Argument cannot be null.") {
+        this.parameter_name = "";
+    }
+
+    public ArgumentNullException(string parameter_name) : super(parameter_name) {
+        this.parameter_name = parameter_name;
+    }
+
+    public ArgumentNullException(string parameter_name, string message) : super(message) {
+        this.parameter_name = parameter_name;
+    }
+
+    public ArgumentNullException(String parameter_name, String message) : super(message) {
+        if (parameter_name != null) {
+            this.parameter_name = parameter_name.data;
+        } else {
+            this.parameter_name = "";
+        }
+    }
+}
+
+public class ArgumentOutOfRangeException extends IllegalArgumentException {
+    public string parameter_name;
+
+    public ArgumentOutOfRangeException() : super("Argument was out of the range of valid values.") {
+        this.parameter_name = "";
+    }
+
+    public ArgumentOutOfRangeException(string parameter_name) : super(parameter_name) {
+        this.parameter_name = parameter_name;
+    }
+
+    public ArgumentOutOfRangeException(string parameter_name, string message) : super(message) {
+        this.parameter_name = parameter_name;
+    }
+
+    public ArgumentOutOfRangeException(String parameter_name, String message) : super(message) {
+        if (parameter_name != null) {
+            this.parameter_name = parameter_name.data;
+        } else {
+            this.parameter_name = "";
+        }
+    }
+}
+
+public class IndexOutOfBoundsException extends RuntimeException {
+    public int32 requested_index;
+    public int32 lower_bound;
+    public int32 upper_bound;
+
+    public IndexOutOfBoundsException() : super("Index was outside the bounds of the array or collection.") {
+        this.requested_index = 0;
+        this.lower_bound = 0;
+        this.upper_bound = 0;
+    }
+
+    public IndexOutOfBoundsException(string message) : super(message) {
+        this.requested_index = 0;
+        this.lower_bound = 0;
+        this.upper_bound = 0;
+    }
+
+    public IndexOutOfBoundsException(String message) : super(message) {
+        this.requested_index = 0;
+        this.lower_bound = 0;
+        this.upper_bound = 0;
+    }
+
+    public IndexOutOfBoundsException(string message, int32 requested_index, int32 lower_bound, int32 upper_bound) : super(message) {
+        this.requested_index = requested_index;
+        this.lower_bound = lower_bound;
+        this.upper_bound = upper_bound;
+    }
+
+    public IndexOutOfBoundsException(String message, int32 requested_index, int32 lower_bound, int32 upper_bound) : super(message) {
+        this.requested_index = requested_index;
+        this.lower_bound = lower_bound;
+        this.upper_bound = upper_bound;
+    }
+}
+
+public class NullPointerException extends RuntimeException {
+    public NullPointerException() : super("Null reference encountered.") {}
+    public NullPointerException(string message) : super(message) {}
+    public NullPointerException(String message) : super(message) {}
+    public NullPointerException(string message, Exception cause) : super(message, cause) {}
+    public NullPointerException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class InvalidOperationException extends RuntimeException {
+    public InvalidOperationException() : super("Operation is not valid due to the current state of the object.") {}
+    public InvalidOperationException(string message) : super(message) {}
+    public InvalidOperationException(String message) : super(message) {}
+    public InvalidOperationException(string message, Exception cause) : super(message, cause) {}
+    public InvalidOperationException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class ArithmeticException extends RuntimeException {
+    public ArithmeticException() : super("Arithmetic error occurred.") {}
+    public ArithmeticException(string message) : super(message) {}
+    public ArithmeticException(String message) : super(message) {}
+    public ArithmeticException(string message, Exception cause) : super(message, cause) {}
+    public ArithmeticException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class NumberFormatException extends IllegalArgumentException {
+    public NumberFormatException() : super("Input string was not in a valid numeric format.") {}
+    public NumberFormatException(string message) : super(message) {}
+    public NumberFormatException(String message) : super(message) {}
+    public NumberFormatException(string message, Exception cause) : super(message, cause) {}
+    public NumberFormatException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class IOException extends Exception {
+    public IOException() : super("I/O error occurred.") {}
+    public IOException(string message) : super(message) {}
+    public IOException(String message) : super(message) {}
+    public IOException(string message, Exception cause) : super(message, cause) {}
+    public IOException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class FileNotFoundException extends IOException {
+    public string target_path;
+
+    public FileNotFoundException() : super("File not found.") {
+        this.target_path = "";
+    }
+
+    public FileNotFoundException(string message) : super(message) {
+        this.target_path = "";
+    }
+
+    public FileNotFoundException(String message) : super(message) {
+        this.target_path = "";
+    }
+
+    public FileNotFoundException(string target_path, string message) : super(message) {
+        this.target_path = target_path;
+    }
+
+    public FileNotFoundException(String target_path, String message) : super(message) {
+        if (target_path != null) {
+            this.target_path = target_path.data;
+        } else {
+            this.target_path = "";
+        }
+    }
+}
+
+public class EndOfStreamException extends IOException {
+    public EndOfStreamException() : super("Attempted to read past the end of the stream.") {}
+    public EndOfStreamException(string message) : super(message) {}
+    public EndOfStreamException(String message) : super(message) {}
+    public EndOfStreamException(string message, Exception cause) : super(message, cause) {}
+    public EndOfStreamException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class DirectoryNotFoundException extends IOException {
+    public DirectoryNotFoundException() : super("Directory not found.") {}
+    public DirectoryNotFoundException(string message) : super(message) {}
+    public DirectoryNotFoundException(String message) : super(message) {}
+    public DirectoryNotFoundException(string message, Exception cause) : super(message, cause) {}
+    public DirectoryNotFoundException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class TimeoutException extends Exception {
+    public TimeoutException() : super("The operation timed out.") {}
+    public TimeoutException(string message) : super(message) {}
+    public TimeoutException(String message) : super(message) {}
+    public TimeoutException(string message, Exception cause) : super(message, cause) {}
+    public TimeoutException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class KeyNotFoundException extends RuntimeException {
+    public KeyNotFoundException() : super("The given key was not present in the dictionary or map.") {}
+    public KeyNotFoundException(string message) : super(message) {}
+    public KeyNotFoundException(String message) : super(message) {}
+    public KeyNotFoundException(string message, Exception cause) : super(message, cause) {}
+    public KeyNotFoundException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class InvalidCastException extends RuntimeException {
+    public InvalidCastException() : super("Specified cast is not valid.") {}
+    public InvalidCastException(string message) : super(message) {}
+    public InvalidCastException(String message) : super(message) {}
+    public InvalidCastException(string message, Exception cause) : super(message, cause) {}
+    public InvalidCastException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class UnsupportedOperationException extends RuntimeException {
+    public UnsupportedOperationException() : super("Specified method is not supported.") {}
+    public UnsupportedOperationException(string message) : super(message) {}
+    public UnsupportedOperationException(String message) : super(message) {}
+    public UnsupportedOperationException(string message, Exception cause) : super(message, cause) {}
+    public UnsupportedOperationException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class NoSuchElementException extends RuntimeException {
+    public NoSuchElementException() : super("No such element exists in the collection or iterator.") {}
+    public NoSuchElementException(string message) : super(message) {}
+    public NoSuchElementException(String message) : super(message) {}
+    public NoSuchElementException(string message, Exception cause) : super(message, cause) {}
+    public NoSuchElementException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class SecurityException extends Exception {
+    public SecurityException() : super("Security violation detected.") {}
+    public SecurityException(string message) : super(message) {}
+    public SecurityException(String message) : super(message) {}
+    public SecurityException(string message, Exception cause) : super(message, cause) {}
+    public SecurityException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class CryptoException extends Exception {
+    public CryptoException() : super("Cryptographic operation failed.") {}
+    public CryptoException(string message) : super(message) {}
+    public CryptoException(String message) : super(message) {}
+    public CryptoException(string message, Exception cause) : super(message, cause) {}
+    public CryptoException(String message, Exception cause) : super(message, cause) {}
+}
+
+public class ProcessException extends Exception {
+    public int32 process_exit_code;
+
+    public ProcessException() : super("Process operation failed.") {
+        this.process_exit_code = -1;
+    }
+
+    public ProcessException(string message) : super(message) {
+        this.process_exit_code = -1;
+    }
+
+    public ProcessException(String message) : super(message) {
+        this.process_exit_code = -1;
+    }
+
+    public ProcessException(string message, int32 process_exit_code) : super(message) {
+        this.process_exit_code = process_exit_code;
+    }
+
+    public ProcessException(String message, int32 process_exit_code) : super(message) {
+        this.process_exit_code = process_exit_code;
+    }
+}
+
+public class OutOfMemoryException extends RuntimeException {
+    public OutOfMemoryException() : super("Insufficient memory to continue execution of the program.") {}
+    public OutOfMemoryException(string message) : super(message) {}
+    public OutOfMemoryException(String message) : super(message) {}
+    public OutOfMemoryException(string message, Exception cause) : super(message, cause) {}
+    public OutOfMemoryException(String message, Exception cause) : super(message, cause) {}
+}

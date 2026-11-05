@@ -1,0 +1,61 @@
+package solix.core;
+
+public class Result<T, E> implements IStringable {
+    public T ok_value;
+    public E error_value;
+    public bool is_ok_flag;
+
+    public Result() {
+        this.is_ok_flag = false;
+    }
+
+    public static Result<T, E> ok(T value) {
+        Result<T, E> result = new Result<T, E>();
+        result.ok_value = value;
+        result.is_ok_flag = true;
+        return result;
+    }
+
+    public static Result<T, E> err(E error) {
+        Result<T, E> result = new Result<T, E>();
+        result.error_value = error;
+        result.is_ok_flag = false;
+        return result;
+    }
+
+    public bool is_ok() {
+        return this.is_ok_flag;
+    }
+
+    public bool is_err() {
+        return !this.is_ok_flag;
+    }
+
+    public T unwrap() {
+        if (!this.is_ok_flag) {
+            throw new InvalidOperationException("Called Result.unwrap() on an Err value: " + this.error_value);
+        }
+        return this.ok_value;
+    }
+
+    public E unwrap_err() {
+        if (this.is_ok_flag) {
+            throw new InvalidOperationException("Called Result.unwrap_err() on an Ok value: " + this.ok_value);
+        }
+        return this.error_value;
+    }
+
+    public T unwrap_or(T fallback) {
+        if (this.is_ok_flag) {
+            return this.ok_value;
+        }
+        return fallback;
+    }
+
+    public String to_string() {
+        if (this.is_ok_flag) {
+            return new String("Result.Ok(" + this.ok_value + ")");
+        }
+        return new String("Result.Err(" + this.error_value + ")");
+    }
+}

@@ -382,6 +382,9 @@ impl Type {
                     type_arguments: target_args,
                 },
             ) if source_name.replace('.', "::") == target_name.replace('.', "::") => {
+                if source_args.is_empty() || target_args.is_empty() {
+                    return true;
+                }
                 return source_args == target_args;
             }
             (
