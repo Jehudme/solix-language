@@ -2,7 +2,7 @@
 
 use crate::{
     alloc_solix_chars, read_solix_chars, register_symbol_variants, NativeCFunctionPtr,
-    RegisterNativeCallback, SolixCValue, SolixVmContext, SOLIX_VM_CONTEXT_MAGIC,
+    RegisterNativeCallback, SolixCValue,
 };
 use std::ffi::c_void;
 use std::fs;
@@ -408,8 +408,18 @@ pub unsafe extern "C" fn directory_native_delete(
     }
     let address = unsafe { (*args.add(0)).as_ref() };
     let raw_path = unsafe { read_solix_chars(vm_context, address) };
+    let recursive = if arg_count > 1 {
+        unsafe { (*args.add(1)).as_bool() }
+    } else {
+        false
+    };
     let target = resolve_target_path(&raw_path);
-    SolixCValue::bool_val(fs::remove_dir_all(target).is_ok())
+    let result = if recursive {
+        fs::remove_dir_all(target).is_ok()
+    } else {
+        fs::remove_dir(target).is_ok()
+    };
+    SolixCValue::bool_val(result)
 }
 
 pub unsafe extern "C" fn directory_native_list_entries(
@@ -424,37 +434,33 @@ pub unsafe extern "C" fn directory_native_list_entries(
     let address = unsafe { (*args.add(0)).as_ref() };
     let raw_path = unsafe { read_solix_chars(vm_context, address) };
     let target = resolve_target_path(&raw_path);
+    let mode = if arg_count > 1 {
+        unsafe { (*args.add(1)).as_i32() }
+    } else {
+        0
+    };
 
     let entries: Vec<String> = if let Ok(read_dir) = fs::read_dir(target) {
         read_dir
             .filter_map(|entry_result| entry_result.ok())
+            .filter(|entry| {
+                if mode == 1 {
+                    entry.file_type().map(|file_type| file_type.is_file()).unwrap_or(false)
+                } else if mode == 2 {
+                    entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false)
+                } else {
+                    true
+                }
+            })
             .map(|entry| entry.path().to_string_lossy().replace('\\', "/"))
             .collect()
     } else {
         Vec::new()
     };
 
-    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
-    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
-        return SolixCValue::null();
-    }
-
-    let array_length = entries.len() as u32;
-    // Allocate ArrayRef with type tag 13 (String)
-    let array_address = unsafe { (context_ref.alloc_array)(context_ref.vm_ptr, array_length, 13) };
-    for (entry_index, entry_path) in entries.iter().enumerate() {
-        let string_address = unsafe { alloc_solix_chars(vm_context, entry_path) };
-        unsafe {
-            (context_ref.array_set_u64)(
-                context_ref.vm_ptr,
-                array_address,
-                entry_index as u32,
-                string_address as u64,
-            );
-        }
-    }
-
-    SolixCValue::ref_val(array_address)
+    let joined_entries = entries.join("\n");
+    let allocated_address = unsafe { alloc_solix_chars(vm_context, &joined_entries) };
+    SolixCValue::ref_val(allocated_address)
 }
 
 pub unsafe extern "C" fn directory_native_get_current(

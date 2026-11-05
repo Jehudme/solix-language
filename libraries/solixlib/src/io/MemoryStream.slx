@@ -1,0 +1,183 @@
+package solix.io;
+
+import solix.core.IOException;
+import solix.core.ArgumentOutOfRangeException;
+
+public class MemoryStream implements IStream {
+    private int8[] internal_buffer;
+    private int32 buffer_capacity;
+    private int32 stream_length;
+    private int32 stream_position;
+    private bool closed_flag;
+
+    public MemoryStream() {
+        this.initialize_stream(64);
+    }
+
+    public MemoryStream(int32 initial_capacity) {
+        int32 chosen_capacity = (initial_capacity > 0) ? initial_capacity : 64;
+        this.initialize_stream(chosen_capacity);
+    }
+
+    public MemoryStream(int8[] initial_buffer) {
+        if (initial_buffer == null) {
+            this.initialize_stream(64);
+        } else {
+            this.buffer_capacity = initial_buffer.length;
+            this.stream_length = initial_buffer.length;
+            this.stream_position = 0;
+            this.closed_flag = false;
+            this.internal_buffer = new int8[this.buffer_capacity];
+            for (int32 copy_index = 0; copy_index < this.stream_length; copy_index = copy_index + 1) {
+                this.internal_buffer[copy_index] = initial_buffer[copy_index];
+            }
+        }
+    }
+
+    private void initialize_stream(int32 capacity_value) {
+        this.buffer_capacity = capacity_value;
+        this.stream_length = 0;
+        this.stream_position = 0;
+        this.closed_flag = false;
+        this.internal_buffer = new int8[this.buffer_capacity];
+    }
+
+    private void ensure_internal_capacity(int32 minimum_capacity) {
+        if (minimum_capacity > this.buffer_capacity) {
+            int32 doubled_capacity = this.buffer_capacity * 2;
+            if (doubled_capacity < minimum_capacity) {
+                doubled_capacity = minimum_capacity;
+            }
+            int8[] expanded_buffer = new int8[doubled_capacity];
+            for (int32 copy_index = 0; copy_index < this.stream_length; copy_index = copy_index + 1) {
+                expanded_buffer[copy_index] = this.internal_buffer[copy_index];
+            }
+            this.internal_buffer = expanded_buffer;
+            this.buffer_capacity = doubled_capacity;
+        }
+    }
+
+    public int32 read(int8[] destination_buffer, int32 target_offset, int32 bytes_to_read) {
+        if (this.closed_flag) {
+            throw new IOException("Stream is closed");
+        }
+        if (destination_buffer == null) {
+            return 0;
+        }
+        if (this.stream_position >= this.stream_length) {
+            return 0;
+        }
+
+        int32 available_bytes = this.stream_length - this.stream_position;
+        int32 count_to_copy = (bytes_to_read < available_bytes) ? bytes_to_read : available_bytes;
+        for (int32 read_index = 0; read_index < count_to_copy; read_index = read_index + 1) {
+            destination_buffer[target_offset + read_index] = this.internal_buffer[this.stream_position + read_index];
+        }
+        this.stream_position = this.stream_position + count_to_copy;
+        return count_to_copy;
+    }
+
+    public void write(int8[] source_buffer, int32 source_offset, int32 bytes_to_write) {
+        if (this.closed_flag) {
+            throw new IOException("Stream is closed");
+        }
+        if (source_buffer == null || bytes_to_write <= 0) {
+            return;
+        }
+
+        this.ensure_internal_capacity(this.stream_position + bytes_to_write);
+        for (int32 write_index = 0; write_index < bytes_to_write; write_index = write_index + 1) {
+            this.internal_buffer[this.stream_position + write_index] = source_buffer[source_offset + write_index];
+        }
+        this.stream_position = this.stream_position + bytes_to_write;
+        if (this.stream_position > this.stream_length) {
+            this.stream_length = this.stream_position;
+        }
+    }
+
+    public int32 read_byte() {
+        if (this.closed_flag) {
+            return -1;
+        }
+        if (this.stream_position >= this.stream_length) {
+            return -1;
+        }
+        int32 byte_value = (int32)this.internal_buffer[this.stream_position];
+        if (byte_value < 0) {
+            byte_value = byte_value + 256;
+        }
+        this.stream_position = this.stream_position + 1;
+        return byte_value;
+    }
+
+    public void write_byte(int32 byte_value) {
+        if (this.closed_flag) {
+            throw new IOException("Stream is closed");
+        }
+        this.ensure_internal_capacity(this.stream_position + 1);
+        this.internal_buffer[this.stream_position] = (int8)byte_value;
+        this.stream_position = this.stream_position + 1;
+        if (this.stream_position > this.stream_length) {
+            this.stream_length = this.stream_position;
+        }
+    }
+
+    public int64 seek(int64 byte_offset, SeekOrigin seek_origin) {
+        if (this.closed_flag) {
+            throw new IOException("Stream is closed");
+        }
+        int64 new_calculated_position = 0L;
+        if (seek_origin == SeekOrigin.BEGIN) {
+            new_calculated_position = byte_offset;
+        } else if (seek_origin == SeekOrigin.CURRENT) {
+            new_calculated_position = (int64)this.stream_position + byte_offset;
+        } else if (seek_origin == SeekOrigin.END) {
+            new_calculated_position = (int64)this.stream_length + byte_offset;
+        }
+        if (new_calculated_position < 0L) {
+            throw new ArgumentOutOfRangeException("Seek position cannot be negative");
+        }
+        this.stream_position = (int32)new_calculated_position;
+        return (int64)this.stream_position;
+    }
+
+    public void flush() {}
+
+    public void close() {
+        this.closed_flag = true;
+    }
+
+    public int64 length() {
+        if (this.closed_flag) {
+            throw new IOException("Stream is closed");
+        }
+        return (int64)this.stream_length;
+    }
+
+    public int64 position() {
+        if (this.closed_flag) {
+            throw new IOException("Stream is closed");
+        }
+        return (int64)this.stream_position;
+    }
+
+    public int8[] to_array() {
+        int8[] result_copy = new int8[this.stream_length];
+        for (int32 copy_index = 0; copy_index < this.stream_length; copy_index = copy_index + 1) {
+            result_copy[copy_index] = this.internal_buffer[copy_index];
+        }
+        return result_copy;
+    }
+
+    public bool can_read() {
+        return !this.closed_flag;
+    }
+
+    public bool can_write() {
+        return !this.closed_flag;
+    }
+
+    public bool can_seek() {
+        return !this.closed_flag;
+    }
+}

@@ -209,30 +209,30 @@ public class IOException extends Exception {
 }
 
 public class FileNotFoundException extends IOException {
-    public string target_path;
+    public String target_path;
 
     public FileNotFoundException() : super("File not found.") {
-        this.target_path = "";
+        this.target_path = new String("");
     }
 
     public FileNotFoundException(string message) : super(message) {
-        this.target_path = "";
+        this.target_path = new String("");
     }
 
     public FileNotFoundException(String message) : super(message) {
-        this.target_path = "";
+        this.target_path = new String("");
     }
 
     public FileNotFoundException(string target_path, string message) : super(message) {
-        this.target_path = target_path;
+        this.target_path = new String(target_path);
     }
 
     public FileNotFoundException(String target_path, String message) : super(message) {
-        if (target_path != null) {
-            this.target_path = target_path.data;
-        } else {
-            this.target_path = "";
-        }
+        this.target_path = (target_path != null) ? target_path : new String("");
+    }
+
+    public FileNotFoundException(char[] target_path, string message) : super(message) {
+        this.target_path = new String(target_path);
     }
 }
 
@@ -245,11 +245,39 @@ public class EndOfStreamException extends IOException {
 }
 
 public class DirectoryNotFoundException extends IOException {
-    public DirectoryNotFoundException() : super("Directory not found.") {}
-    public DirectoryNotFoundException(string message) : super(message) {}
-    public DirectoryNotFoundException(String message) : super(message) {}
-    public DirectoryNotFoundException(string message, Exception cause) : super(message, cause) {}
-    public DirectoryNotFoundException(String message, Exception cause) : super(message, cause) {}
+    public String target_path;
+
+    public DirectoryNotFoundException() : super("Directory not found.") {
+        this.target_path = new String("");
+    }
+
+    public DirectoryNotFoundException(string message) : super(message) {
+        this.target_path = new String("");
+    }
+
+    public DirectoryNotFoundException(String message) : super(message) {
+        this.target_path = new String("");
+    }
+
+    public DirectoryNotFoundException(string target_path, string message) : super(message) {
+        this.target_path = new String(target_path);
+    }
+
+    public DirectoryNotFoundException(String target_path, String message) : super(message) {
+        this.target_path = (target_path != null) ? target_path : new String("");
+    }
+
+    public DirectoryNotFoundException(char[] target_path, string message) : super(message) {
+        this.target_path = new String(target_path);
+    }
+
+    public DirectoryNotFoundException(string message, Exception cause) : super(message, cause) {
+        this.target_path = new String("");
+    }
+
+    public DirectoryNotFoundException(String message, Exception cause) : super(message, cause) {
+        this.target_path = new String("");
+    }
 }
 
 public class TimeoutException extends Exception {

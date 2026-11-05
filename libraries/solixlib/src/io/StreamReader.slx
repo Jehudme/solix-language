@@ -1,0 +1,55 @@
+package solix.io;
+
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.core.IOException;
+
+public class StreamReader {
+    private BufferedReader buffered_reader;
+    private bool closed_flag;
+
+    public StreamReader(IStream stream) {
+        this.buffered_reader = new BufferedReader(stream);
+        this.closed_flag = false;
+    }
+
+    ~StreamReader() {
+        this.close();
+    }
+
+    public int32 read() {
+        if (this.closed_flag) {
+            throw new IOException("Reader is closed");
+        }
+        return this.buffered_reader.read();
+    }
+
+    public String read_line() {
+        if (this.closed_flag) {
+            throw new IOException("Reader is closed");
+        }
+        return this.buffered_reader.read_line();
+    }
+
+    public String read_to_end() {
+        if (this.closed_flag) {
+            throw new IOException("Reader is closed");
+        }
+        StringBuilder content_builder = new StringBuilder();
+        while (true) {
+            int32 current_char = this.buffered_reader.read();
+            if (current_char == -1) {
+                break;
+            }
+            content_builder.append_char((char)current_char);
+        }
+        return content_builder.to_string();
+    }
+
+    public void close() {
+        if (!this.closed_flag) {
+            this.buffered_reader.close();
+            this.closed_flag = true;
+        }
+    }
+}

@@ -1,0 +1,137 @@
+package solix.io;
+
+import solix.core.String;
+import solix.collections.List;
+import solix.core.DirectoryNotFoundException;
+import solix.core.IOException;
+import solix.core.ArgumentNullException;
+
+public class Directory {
+    public static bool exists(string directory_path) {
+        if (directory_path == null) {
+            return false;
+        }
+        return Directory::exists(new String(directory_path));
+    }
+
+    public static bool exists(String directory_path) {
+        if (directory_path == null || directory_path.data == null) {
+            return false;
+        }
+        return Directory::native_exists(directory_path.to_chars());
+    }
+
+    public static void create_directory(string directory_path) {
+        if (directory_path == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        Directory::create_directory(new String(directory_path));
+    }
+
+    public static void create_directory(String directory_path) {
+        if (directory_path == null || directory_path.data == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        bool create_success = Directory::native_create(directory_path.to_chars());
+        if (!create_success) {
+            throw new IOException("Failed to create directory: " + directory_path.to_string());
+        }
+    }
+
+    public static void delete(string directory_path) {
+        if (directory_path == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        Directory::delete(new String(directory_path));
+    }
+
+    public static void delete(String directory_path) {
+        Directory::delete_with_recursive(directory_path, false);
+    }
+
+    public static void delete_with_recursive(String directory_path, bool recursive) {
+        if (directory_path == null || directory_path.data == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        if (!Directory::exists(directory_path)) {
+            throw new DirectoryNotFoundException(directory_path, new String("Directory not found"));
+        }
+        bool delete_success = Directory::native_delete(directory_path.to_chars(), recursive);
+        if (!delete_success) {
+            throw new IOException("Failed to delete directory: " + directory_path.to_string());
+        }
+    }
+
+    public static List<String> list_files(string directory_path) {
+        if (directory_path == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        return Directory::list_files(new String(directory_path));
+    }
+
+    public static List<String> list_files(String directory_path) {
+        return Directory::list_entries_internal(directory_path, 1);
+    }
+
+    public static List<String> list_directories(string directory_path) {
+        if (directory_path == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        return Directory::list_directories(new String(directory_path));
+    }
+
+    public static List<String> list_directories(String directory_path) {
+        return Directory::list_entries_internal(directory_path, 2);
+    }
+
+    private static List<String> list_entries_internal(String directory_path, int32 entry_mode) {
+        if (directory_path == null || directory_path.data == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        if (!Directory::exists(directory_path)) {
+            throw new DirectoryNotFoundException(directory_path, new String("Directory not found"));
+        }
+        char[] raw_chars = Directory::native_list_entries(directory_path.to_chars(), entry_mode);
+        List<String> result_entries = new List<String>();
+        if (raw_chars == null || raw_chars.length == 0) {
+            return result_entries;
+        }
+        String combined_text = new String(raw_chars);
+        String[] split_parts = combined_text.lines();
+        for (int32 entry_index = 0; entry_index < split_parts.length; entry_index = entry_index + 1) {
+            String entry_item = split_parts[entry_index];
+            if (entry_item.length() > 0) {
+                result_entries.add(entry_item);
+            }
+        }
+        return result_entries;
+    }
+
+    public static String get_current_directory() {
+        return new String(Directory::native_get_current());
+    }
+
+    public static void set_current_directory(string directory_path) {
+        if (directory_path == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        Directory::set_current_directory(new String(directory_path));
+    }
+
+    public static void set_current_directory(String directory_path) {
+        if (directory_path == null || directory_path.data == null) {
+            throw new ArgumentNullException("directory_path", "Directory path cannot be null");
+        }
+        bool set_success = Directory::native_set_current(directory_path.to_chars());
+        if (!set_success) {
+            throw new IOException("Failed to set current directory to: " + directory_path.to_string());
+        }
+    }
+
+    private static native bool native_exists(char[] directory_path);
+    private static native bool native_create(char[] directory_path);
+    private static native bool native_delete(char[] directory_path, bool recursive);
+    private static native char[] native_list_entries(char[] directory_path, int32 entry_mode);
+    private static native char[] native_get_current();
+    private static native bool native_set_current(char[] directory_path);
+}

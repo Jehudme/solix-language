@@ -1,0 +1,226 @@
+package solix.io;
+
+import solix.core.String;
+import solix.collections.List;
+import solix.core.FileNotFoundException;
+import solix.core.IOException;
+import solix.core.ArgumentNullException;
+
+public class File {
+    public static bool exists(string file_path) {
+        if (file_path == null) {
+            return false;
+        }
+        return File::exists(new String(file_path));
+    }
+
+    public static bool exists(String file_path) {
+        if (file_path == null || file_path.data == null) {
+            return false;
+        }
+        return File::native_exists(file_path.to_chars());
+    }
+
+    public static bool exists(String file_path, bool is_resource) {
+        if (is_resource) {
+            return Resource::exists(file_path);
+        }
+        return File::exists(file_path);
+    }
+
+    public static String read_all_text(string file_path) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        String wrapped_path = new String(file_path);
+        return File::read_all_text(wrapped_path);
+    }
+
+    public static String read_all_text(String file_path) {
+        if (file_path == null || file_path.data == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        if (!File::exists(file_path)) {
+            throw new FileNotFoundException(file_path, new String("File not found"));
+        }
+        char[] content_chars = File::native_read_all_text(file_path.to_chars());
+        return new String(content_chars);
+    }
+
+    public static String read_all_text(String file_path, bool is_resource) {
+        if (is_resource) {
+            return Resource::read_all_text(file_path);
+        }
+        return File::read_all_text(file_path);
+    }
+
+    public static void write_all_text(string file_path, string file_contents) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        String wrapped_path = new String(file_path);
+        String wrapped_contents = (file_contents != null) ? new String(file_contents) : new String("");
+        File::write_all_text(wrapped_path, wrapped_contents);
+    }
+
+    public static void write_all_text(String file_path, String file_contents) {
+        if (file_path == null || file_path.data == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        char[] text_chars = (file_contents != null && file_contents.data != null) ? file_contents.to_chars() : new char[0];
+        bool write_success = File::native_write_all_text(file_path.to_chars(), text_chars);
+        if (!write_success) {
+            throw new IOException("Failed to write to file: " + file_path.to_string());
+        }
+    }
+
+    public static void append_all_text(string file_path, string file_contents) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        String wrapped_path = new String(file_path);
+        String wrapped_contents = (file_contents != null) ? new String(file_contents) : new String("");
+        File::append_all_text(wrapped_path, wrapped_contents);
+    }
+
+    public static void append_all_text(String file_path, String file_contents) {
+        if (file_path == null || file_path.data == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        char[] text_chars = (file_contents != null && file_contents.data != null) ? file_contents.to_chars() : new char[0];
+        bool append_success = File::native_append_all_text(file_path.to_chars(), text_chars);
+        if (!append_success) {
+            throw new IOException("Failed to append to file: " + file_path.to_string());
+        }
+    }
+
+    public static List<String> read_all_lines(string file_path) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "File path cannot be null");
+        }
+        String wrapped_path = new String(file_path);
+        return File::read_all_lines(wrapped_path);
+    }
+
+    public static List<String> read_all_lines(String file_path) {
+        String full_content = File::read_all_text(file_path);
+        String[] split_parts = full_content.lines();
+        List<String> line_list = new List<String>(split_parts.length);
+        for (int32 line_index = 0; line_index < split_parts.length; line_index = line_index + 1) {
+            line_list.add(split_parts[line_index]);
+        }
+        return line_list;
+    }
+
+    public static List<String> read_all_lines(String file_path, bool is_resource) {
+        if (is_resource) {
+            return Resource::read_all_lines(file_path);
+        }
+        return File::read_all_lines(file_path);
+    }
+
+    public static void delete(string file_path) {
+        if (file_path == null) {
+            return;
+        }
+        String wrapped_path = new String(file_path);
+        File::delete(wrapped_path);
+    }
+
+    public static void delete(String file_path) {
+        if (file_path == null || file_path.data == null) {
+            return;
+        }
+        if (!File::exists(file_path)) {
+            throw new FileNotFoundException(file_path, new String("Cannot delete non-existent file"));
+        }
+        bool delete_success = File::native_delete(file_path.to_chars());
+        if (!delete_success) {
+            throw new IOException("Failed to delete file: " + file_path.to_string());
+        }
+    }
+
+    public static void copy(string source_path, string destination_path) {
+        if (source_path == null || destination_path == null) {
+            throw new ArgumentNullException("source_path", "Path cannot be null");
+        }
+        File::copy(new String(source_path), new String(destination_path));
+    }
+
+    public static void copy(String source_path, String destination_path) {
+        if (source_path == null || source_path.data == null || destination_path == null || destination_path.data == null) {
+            throw new ArgumentNullException("source_path", "Path cannot be null");
+        }
+        if (!File::exists(source_path)) {
+            throw new FileNotFoundException(source_path, new String("Source file not found"));
+        }
+        bool copy_success = File::native_copy(source_path.to_chars(), destination_path.to_chars());
+        if (!copy_success) {
+            throw new IOException("Failed to copy file from " + source_path.to_string() + " to " + destination_path.to_string());
+        }
+    }
+
+    public static void move(string source_path, string destination_path) {
+        if (source_path == null || destination_path == null) {
+            throw new ArgumentNullException("source_path", "Path cannot be null");
+        }
+        File::move(new String(source_path), new String(destination_path));
+    }
+
+    public static void move(String source_path, String destination_path) {
+        if (source_path == null || source_path.data == null || destination_path == null || destination_path.data == null) {
+            throw new ArgumentNullException("source_path", "Path cannot be null");
+        }
+        if (!File::exists(source_path)) {
+            throw new FileNotFoundException(source_path, new String("Source file not found"));
+        }
+        bool move_success = File::native_move(source_path.to_chars(), destination_path.to_chars());
+        if (!move_success) {
+            throw new IOException("Failed to move file from " + source_path.to_string() + " to " + destination_path.to_string());
+        }
+    }
+
+    public static int64 get_size(string file_path) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "Path cannot be null");
+        }
+        return File::get_size(new String(file_path));
+    }
+
+    public static int64 get_size(String file_path) {
+        if (file_path == null || file_path.data == null) {
+            throw new ArgumentNullException("file_path", "Path cannot be null");
+        }
+        if (!File::exists(file_path)) {
+            throw new FileNotFoundException(file_path, new String("File not found"));
+        }
+        return File::native_get_size(file_path.to_chars());
+    }
+
+    public static int64 get_last_modified_time(string file_path) {
+        if (file_path == null) {
+            throw new ArgumentNullException("file_path", "Path cannot be null");
+        }
+        return File::get_last_modified_time(new String(file_path));
+    }
+
+    public static int64 get_last_modified_time(String file_path) {
+        if (file_path == null || file_path.data == null) {
+            throw new ArgumentNullException("file_path", "Path cannot be null");
+        }
+        if (!File::exists(file_path)) {
+            throw new FileNotFoundException(file_path, new String("File not found"));
+        }
+        return File::native_get_last_modified(file_path.to_chars());
+    }
+
+    private static native bool native_exists(char[] file_path);
+    private static native char[] native_read_all_text(char[] file_path);
+    private static native bool native_write_all_text(char[] file_path, char[] file_contents);
+    private static native bool native_append_all_text(char[] file_path, char[] file_contents);
+    private static native bool native_delete(char[] file_path);
+    private static native bool native_copy(char[] source_path, char[] destination_path);
+    private static native bool native_move(char[] source_path, char[] destination_path);
+    private static native int64 native_get_size(char[] file_path);
+    private static native int64 native_get_last_modified(char[] file_path);
+}

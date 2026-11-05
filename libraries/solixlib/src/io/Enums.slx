@@ -1,0 +1,26 @@
+package solix.io;
+
+public enum FileMode {
+    READ = 0,
+    WRITE = 1,
+    APPEND = 2,
+    READ_WRITE = 3,
+}
+
+public enum SeekOrigin {
+    BEGIN = 0,
+    CURRENT = 1,
+    END = 2,
+}
+
+public enum ConsoleColor {
+    BLACK = 0,
+    RED = 1,
+    GREEN = 2,
+    YELLOW = 3,
+    BLUE = 4,
+    MAGENTA = 5,
+    CYAN = 6,
+    WHITE = 7,
+    RESET = 8,
+}

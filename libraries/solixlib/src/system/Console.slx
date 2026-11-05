@@ -1,0 +1,5 @@
+package solix.system;
+
+import solix.io.Console;
+
+alias Console = solix.io.Console;
