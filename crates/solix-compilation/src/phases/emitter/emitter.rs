@@ -795,7 +795,17 @@ impl<'a> Emitter<'a> {
                         .next()
                         .unwrap_or(&object_name);
                     let symbol_simple = format!("{simple_object}::{method_name}");
+
+                    let is_package_or_class_call =
+                        matches!(object.as_ref(), Expression::Identifier { .. })
+                            && self.allocator.lookup_local(&object_name).is_none()
+                            && (self.class_layouts.is_some_and(|layouts| {
+                                layouts.contains_key(&object_name)
+                                    || layouts.contains_key(simple_object)
+                            }) || !self.query_type(object.span()).is_reference_type());
+
                     let is_static_fn = *is_scope_resolution
+                        || is_package_or_class_call
                         || self
                             .function_ids
                             .map(|ids| {

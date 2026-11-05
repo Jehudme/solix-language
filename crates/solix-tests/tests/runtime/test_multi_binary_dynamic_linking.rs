@@ -92,6 +92,8 @@ fn test_case_57_2_in_place_instruction_quickening_for_dynamic_calls() {
 
     // 3. Compile consumer against synthesized header
     let app_code = r#"
+        import mathlib.*;
+
         class Main {
             public static int32 main() {
                 int32 s = 0;
@@ -225,6 +227,8 @@ fn test_case_57_4_in_place_instruction_quickening_for_object_allocation() {
     let (header_name, header_source) = manifest_to_source(&manifest_json).unwrap();
 
     let app_code = r#"
+        import geom.*;
+
         class Main {
             public static int32 main() {
                 Point pt = new Point(15, 35);

@@ -32,12 +32,12 @@ impl HermeticCliWorkspace {
 
     /// Writes content to a file at the given relative path within the workspace.
     pub fn write_file(&self, rel_path: &str, content: &str) -> std::io::Result<PathBuf> {
-        let p = self.file_path(rel_path);
-        if let Some(parent) = p.parent() {
+        let destination_path = self.file_path(rel_path);
+        if let Some(parent) = destination_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&p, content)?;
-        Ok(p)
+        fs::write(&destination_path, content)?;
+        Ok(destination_path)
     }
 
     /// Reads content from a file at the given relative path within the workspace.

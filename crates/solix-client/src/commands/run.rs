@@ -60,6 +60,8 @@ fn parse_byte_size(size_str: &str) -> Result<usize> {
     }
 }
 
+static RUN_INVOCATION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Executes the `run` subcommand.
 ///
 /// If any `.slx` source files are passed, they are automatically compiled on-the-fly
@@ -78,7 +80,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
     let heap_size = parse_byte_size(&args.heap_size)?;
 
-    let store_directory = resolve_package_store_dir(None);
+    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
 
     let mut runtime_options = RuntimeOptions::new()
@@ -99,7 +101,16 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         runtime_options = runtime_options.with_entry_point(entry);
     }
 
-    let temp_cache_dir = std::env::temp_dir().join(format!("solix_run_{}", std::process::id()));
+    let invocation_id = RUN_INVOCATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp_cache_dir = std::env::temp_dir().join(format!(
+        "solix_run_{}_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        invocation_id
+    ));
     let mut loaded_binary_programs = Vec::new();
 
     // Mount extra libraries passed via -l, --lib

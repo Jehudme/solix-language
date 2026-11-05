@@ -5,7 +5,7 @@
 * **Milestone ID:** MS-020
 * **Target Version:** `v0.1.0-alpha.20`
 * **Milestone Branch:** `milestone/020-package-manager-and-solver`
-* **Status:** DRAFT (Awaiting Architect Approval)
+* **Status:** COMPLETED
 * **Lead Architect:** @jehudme
 * **Target Delivery Date:** 2026-12-31
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
@@ -411,10 +411,10 @@ Every single feature and edge case in your plan will be tested across `solix-com
 
 | DoD Requirement | Target Benchmark / Artifact | Verification Tool | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **`install` / `uninstall` / `list`** | Cross-platform package store for `.slxb` & `.slxarc` | `cargo test -p solix-client` | [ ] Pending |
-| **`ModuleSolver` & `ClientModuleSolver`** | Trait in `solix-common` + disk/memory implementations | `cargo test -p solix-common` | [ ] Pending |
-| **`DependencyResolutionPhase`** | Pre-lexing dependency tree validation & API extraction | `cargo test -p solix-compilation` | [ ] Pending |
-| **`extern import` & Root Facade** | On-the-fly solver fetch in parser + `pkg.fn()` without `pkg.pkg.fn()` | `cargo test -p solix-tests` | [ ] Pending |
-| **`--deps <name>@<ver>` & `manifest.toml`** | Replaces `-l` on `compile`; `solix_toolbox.py` passes `--deps` | `cargo test -p solix-client` | [ ] Pending |
-| **Runtime Dependency Verification** | Auto-loads `.slxb`/`.slxarc` + native libs; rejects missing/incompatible | `cargo test -p solix-runtime` | [ ] Pending |
-| **Clippy & Formatting** | Zero warnings across all workspace crates | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
+| **`install` / `uninstall` / `list`** | Cross-platform package store for `.slxb` & `.slxarc` | `cargo test -p solix-client` | [x] Completed |
+| **`ModuleSolver` & `ClientModuleSolver`** | Trait in `solix-common` + disk/memory implementations | `cargo test -p solix-common` | [x] Completed |
+| **`DependencyResolutionPhase`** | Pre-lexing dependency tree validation & API extraction | `cargo test -p solix-compilation` | [x] Completed |
+| **`extern import` & Root Facade** | On-the-fly solver fetch in parser + `pkg.fn()` without `pkg.pkg.fn()` | `cargo test -p solix-tests` | [x] Completed |
+| **`--deps <name>@<ver>` & `manifest.toml`** | Replaces `-l` on `compile`; `solix_toolbox.py` passes `--deps` | `cargo test -p solix-client` | [x] Completed |
+| **Runtime Dependency Verification** | Auto-loads `.slxb`/`.slxarc` + native libs; rejects missing/incompatible | `cargo test -p solix-runtime` | [x] Completed |
+| **Clippy & Formatting** | Zero warnings across all workspace crates | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Completed |

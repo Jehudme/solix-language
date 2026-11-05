@@ -48,6 +48,9 @@ fn collect_slx_sources_recursively(
 ///
 /// # Errors
 /// Returns an error if file I/O fails or compilation encounters diagnostics.
+static COMPILE_INVOCATION_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let start_total = Instant::now();
 
@@ -86,7 +89,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         .unwrap_or_else(|| PathBuf::from(format!("{package_name}.slxb")));
 
     // 4. Initialize compilation options and attach package store solver
-    let store_directory = resolve_package_store_dir(None);
+    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
 
     let mut options = CompilationOptions::new()
@@ -127,8 +130,17 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             .extension()
             .is_some_and(|extension| extension == "slxarc")
         {
-            let temp_cache_dir =
-                std::env::temp_dir().join(format!("solix_compile_{}", std::process::id()));
+            let invocation_id =
+                COMPILE_INVOCATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let temp_cache_dir = std::env::temp_dir().join(format!(
+                "solix_compile_{}_{}_{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+                invocation_id
+            ));
             let loaded_archive =
                 solix_common::project::SlxarcArchive::extract_and_load(lib_path, &temp_cache_dir)
                     .map_err(|load_error| {

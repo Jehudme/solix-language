@@ -294,8 +294,14 @@ impl SymbolTable {
             return Some(symbol_id);
         }
 
-        // 6. Unqualified unique package fallback (root facade)
-        if !identifier.contains("::") && !identifier.contains('.') {
+        // 6. Unqualified unique package fallback (root facade for root/default package)
+        if !identifier.contains("::")
+            && !identifier.contains('.')
+            && self
+                .file_packages
+                .get(source_index)
+                .is_none_or(|package_prefix| package_prefix.is_empty())
+        {
             let suffix = format!("::{identifier}");
             let mut matched_symbol_id = None;
             for (candidate_fqn, &candidate_symbol_id) in &self.global_names {

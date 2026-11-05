@@ -66,6 +66,10 @@ pub struct BuildArgs {
     /// Shorthand flag for test build profile
     #[arg(long, conflicts_with_all = ["debug", "release"])]
     pub test: bool,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
 }
 
 impl BuildArgs {
@@ -146,6 +150,10 @@ pub struct CompileArgs {
     /// Inlining statement threshold limit for AstInlinerPhase [default: 8]
     #[arg(long, default_value_t = 8)]
     pub inline_threshold: usize,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
 }
 
 /// Arguments for `solix run`.
@@ -202,6 +210,10 @@ pub struct RunArgs {
     /// Arguments passed to the Solix application entry point
     #[arg(last = true)]
     pub args: Vec<String>,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
 }
 
 /// Arguments for `solix info`.

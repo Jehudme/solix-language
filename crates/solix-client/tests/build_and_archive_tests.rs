@@ -681,3 +681,119 @@ public class Main {
         "Running .slxarc without manifest.toml must return an error"
     );
 }
+
+#[test]
+fn test_build_project_with_dependencies_in_manifest() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("store");
+    fs::create_dir_all(&package_store_directory).expect("Failed to create store dir");
+
+    // 1. Compile and install dependency math 1.0.0
+    let math_source = workspace
+        .write_file(
+            "math.slx",
+            r#"
+public class Math {
+    public static int32 compute(int32 operand) {
+        return operand * 10;
+    }
+}
+"#,
+        )
+        .expect("write math");
+    let math_bin = workspace.file_path("math.slxb");
+    let compile_math = Cli::try_parse_from([
+        "solix",
+        "compile",
+        math_source.to_str().expect("valid path"),
+        "--name",
+        "math",
+        "--version",
+        "1.0.0",
+        "-o",
+        math_bin.to_str().expect("valid path"),
+        "--pkg-dir",
+        package_store_directory.to_str().expect("valid path"),
+    ])
+    .expect("compile math");
+    assert_eq!(run(compile_math).expect("compile math"), 0);
+
+    let install_math = Cli::try_parse_from([
+        "solix",
+        "install",
+        math_bin.to_str().expect("valid path"),
+        "--pkg-dir",
+        package_store_directory.to_str().expect("valid path"),
+    ])
+    .expect("install math");
+    assert_eq!(run(install_math).expect("install math"), 0);
+
+    // 2. Setup project from template
+    let template_source = locate_workspace_root()
+        .join("templates")
+        .join("untitled-rust");
+    let project_root = workspace.root_path().join("deps_project");
+    copy_project_tree(&template_source, &project_root).expect("copy template");
+
+    // 3. Update manifest.toml to declare dependency
+    let manifest_content = r#"
+[info]
+name = "deps_project"
+version = "0.1.0"
+description = "Project with dependencies"
+license = "Apache-2.0"
+authors = ["Tester"]
+
+[entrypoints]
+main = "Main::main"
+
+[dependencies]
+math = "1.0.0"
+"#;
+    fs::write(project_root.join("manifest.toml"), manifest_content).expect("write manifest");
+
+    // 4. Update src/main.slx to use Math::compute
+    let main_content = r#"
+import math.*;
+
+public class Main {
+    public static int32 main() {
+        return Math::compute(7);
+    }
+}
+"#;
+    fs::write(project_root.join("src").join("main.slx"), main_content).expect("write main.slx");
+
+    // 5. Build project with debug profile and explicit package store directory
+    let build_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid path"),
+        "--debug",
+        "--pkg-dir",
+        package_store_directory.to_str().expect("valid path"),
+    ])
+    .expect("parse build");
+    assert_eq!(run(build_cli).expect("build project"), 0);
+
+    let built_archive = project_root
+        .join("build")
+        .join("debug")
+        .join("deps_project.slxarc");
+    assert!(
+        built_archive.exists(),
+        "Built archive must exist at '{}'",
+        built_archive.display()
+    );
+
+    // 6. Run the built archive: Math::compute(7) = 70
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        built_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        package_store_directory.to_str().expect("valid path"),
+    ])
+    .expect("parse run");
+    assert_eq!(run(run_cli).expect("run built archive"), 70);
+}

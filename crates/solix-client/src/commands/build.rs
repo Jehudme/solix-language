@@ -74,6 +74,10 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         .current_dir(&project_root)
         .env("SOLIX_BIN", solix_bin);
 
+    if let Some(package_store_directory) = &args.pkg_dir {
+        command.env("SOLIX_PKG_DIR", package_store_directory);
+    }
+
     let status = command.status().with_context(|| {
         format!(
             "failed to execute python3 build script at '{}'",
