@@ -1,0 +1,11 @@
+[package]
+name = "solixlib_native"
+version = "2.0.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]

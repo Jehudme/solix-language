@@ -1,0 +1,13 @@
+[info]
+name = "solix"
+version = "2.0.0"
+description = "Solix Standard Library"
+license = "Apache-2.0"
+authors = []
+
+[entrypoints]
+main = "Main::main"
+test = "TestRunner::test"
+
+[dependencies]
+# solix = "2.0.0"
