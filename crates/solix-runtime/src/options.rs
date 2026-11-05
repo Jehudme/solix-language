@@ -5,8 +5,10 @@
 use crate::exceptions::RuntimeError;
 use crate::native::NativeFunction;
 use solix_common::bytecode::BinaryProgram;
+use solix_common::solver::ModuleSolver;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Default dynamic heap size: 64 megabytes.
 pub const DEFAULT_HEAP_SIZE: usize = 64 * 1024 * 1024;
@@ -15,7 +17,7 @@ pub const DEFAULT_HEAP_SIZE: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_CALL_STACK_DEPTH: usize = 65_536;
 
 /// Configuration options governing virtual machine execution.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RuntimeOptions {
     /// Optional symbol override for the entry point function (e.g. `"main"` or `"my_module::run"`).
     pub entry_point: Option<String>,
@@ -38,6 +40,28 @@ pub struct RuntimeOptions {
     pub sandboxed: bool,
     /// Custom host native Rust functions registered for execution.
     pub native_functions: HashMap<String, NativeFunction>,
+    /// Optional pluggable module solver for auto-fetching dependencies on PC B.
+    pub solver: Option<Arc<dyn ModuleSolver>>,
+}
+
+impl PartialEq for RuntimeOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry_point == other.entry_point
+            && self.binaries == other.binaries
+            && self.binary_paths == other.binary_paths
+            && self.native_libraries == other.native_libraries
+            && self.heap_size == other.heap_size
+            && self.max_call_stack_depth == other.max_call_stack_depth
+            && self.args == other.args
+            && self.safe_mode == other.safe_mode
+            && self.sandboxed == other.sandboxed
+            && self.native_functions == other.native_functions
+            && match (&self.solver, &other.solver) {
+                (Some(solver_a), Some(solver_b)) => Arc::ptr_eq(solver_a, solver_b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 impl Default for RuntimeOptions {
@@ -53,6 +77,7 @@ impl Default for RuntimeOptions {
             safe_mode: false,
             sandboxed: false,
             native_functions: HashMap::new(),
+            solver: None,
         }
     }
 }
@@ -169,6 +194,13 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_sandboxed(mut self, sandboxed: bool) -> Self {
         self.sandboxed = sandboxed;
+        self
+    }
+
+    /// Configures the pluggable module solver for runtime dependency resolution.
+    #[must_use]
+    pub fn with_solver(mut self, solver: Arc<dyn ModuleSolver>) -> Self {
+        self.solver = Some(solver);
         self
     }
 }

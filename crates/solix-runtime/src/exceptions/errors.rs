@@ -104,6 +104,10 @@ pub enum RuntimeError {
     /// Native shared library loading or symbol resolution failure.
     #[error("SharedLibraryException: Failed to load library '{path}': {reason}")]
     SharedLibraryError { path: String, reason: String },
+
+    /// Runtime package dependency resolution or version incompatibility failure.
+    #[error("DependencyException: {reason}")]
+    DependencyError { reason: String },
 }
 
 /// Canonical numerical error codes emitted on abnormal VM termination.
@@ -156,6 +160,8 @@ pub enum RuntimeErrorCode {
     ExplicitExit = 21,
     /// Native shared library load or invocation failure.
     SharedLibraryError = 22,
+    /// Dependency resolution or SemVer compatibility failure.
+    DependencyError = 23,
 }
 
 impl RuntimeErrorCode {
@@ -205,6 +211,7 @@ impl RuntimeError {
             Self::MemoryLeak { .. } => RuntimeErrorCode::MemoryLeak,
             Self::InvalidEntryPointSignature { .. } => RuntimeErrorCode::InvalidEntryPointSignature,
             Self::SharedLibraryError { .. } => RuntimeErrorCode::SharedLibraryError,
+            Self::DependencyError { .. } => RuntimeErrorCode::DependencyError,
         }
     }
 }

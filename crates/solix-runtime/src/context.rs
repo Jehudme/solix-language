@@ -97,6 +97,9 @@ impl RuntimeContext {
             options.binaries.push(binary);
         }
 
+        // Verify SemVer compatibility across dependencies and auto-mount external modules
+        verify_and_resolve_runtime_dependencies(&mut options)?;
+
         let mut loaded_binaries = Vec::with_capacity(options.binaries.len());
         let mut symbol_to_function_id = HashMap::new();
         let mut symbol_to_static_slot = HashMap::new();
@@ -577,6 +580,102 @@ impl RuntimeContext {
     pub fn get_constant_pool(&self, binary_id: usize) -> Option<&ConstantPool> {
         self.loaded_binaries
             .get(binary_id)
-            .map(|b| &b.constant_pool)
+            .map(|binary| &binary.constant_pool)
     }
+}
+
+fn verify_and_resolve_runtime_dependencies(
+    options: &mut RuntimeOptions,
+) -> Result<(), RuntimeError> {
+    let mut work_queue: std::collections::VecDeque<(
+        solix_common::solver::DependencyRequirement,
+        String,
+    )> = std::collections::VecDeque::new();
+    let mut loaded_packages: std::collections::HashMap<
+        String,
+        (solix_common::solver::PackageVersion, usize),
+    > = std::collections::HashMap::new();
+
+    for (binary_index, binary) in options.binaries.iter().enumerate() {
+        if !binary.package_name.is_empty()
+            && let Ok(version) =
+                solix_common::solver::PackageVersion::parse(&binary.package_version)
+        {
+            loaded_packages.insert(binary.package_name.clone(), (version, binary_index));
+        }
+        let requester_name = if !binary.package_name.is_empty() {
+            binary.package_name.clone()
+        } else {
+            "root binary".to_string()
+        };
+        for requirement in &binary.export_manifest.dependencies {
+            work_queue.push_back((requirement.clone(), requester_name.clone()));
+        }
+    }
+
+    while let Some((requirement, requester_name)) = work_queue.pop_front() {
+        if let Some((existing_version, _)) = loaded_packages.get(&requirement.name) {
+            if !existing_version.is_compatible_with(&requirement.version) {
+                return Err(RuntimeError::DependencyError {
+                    reason: format!(
+                        "Incompatible dependency '{}': package '{requester_name}' requires '{}', but loaded version is '{}'",
+                        requirement.name, requirement.version, existing_version
+                    ),
+                });
+            }
+        } else if let Some(solver) = &options.solver {
+            match solver.resolve_compatible(&requirement.name, requirement.version) {
+                Ok(solved_package) => {
+                    if !solved_package
+                        .version
+                        .is_compatible_with(&requirement.version)
+                    {
+                        return Err(RuntimeError::DependencyError {
+                            reason: format!(
+                                "Incompatible dependency '{}': solver returned version '{}' which does not satisfy required '{}' (requested by '{requester_name}')",
+                                requirement.name, solved_package.version, requirement.version
+                            ),
+                        });
+                    }
+
+                    let new_index = options.binaries.len();
+                    loaded_packages.insert(
+                        requirement.name.clone(),
+                        (solved_package.version, new_index),
+                    );
+
+                    for transitive in &solved_package.program.export_manifest.dependencies {
+                        work_queue.push_back((transitive.clone(), requirement.name.clone()));
+                    }
+
+                    options.binaries.push(solved_package.program);
+                    for secondary_program in solved_package.secondary_programs {
+                        options.binaries.push(secondary_program);
+                    }
+                    for native_library_path in solved_package.native_libraries {
+                        if !options.native_libraries.contains(&native_library_path) {
+                            options.native_libraries.push(native_library_path);
+                        }
+                    }
+                }
+                Err(solver_error) => {
+                    return Err(RuntimeError::DependencyError {
+                        reason: format!(
+                            "Missing required dependency '{}@{}' (requested by '{requester_name}'): {solver_error}",
+                            requirement.name, requirement.version
+                        ),
+                    });
+                }
+            }
+        } else {
+            return Err(RuntimeError::DependencyError {
+                reason: format!(
+                    "Missing required dependency '{}@{}' (requested by '{requester_name}') and no module solver configured",
+                    requirement.name, requirement.version
+                ),
+            });
+        }
+    }
+
+    Ok(())
 }
