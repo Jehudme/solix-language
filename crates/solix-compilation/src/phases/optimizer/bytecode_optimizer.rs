@@ -66,6 +66,7 @@ impl CompilationPhase for BytecodeOptimizerPhase {
 struct IntermediateInstruction {
     instruction: Instruction,
     original_pc: usize,
+    second_original_pc: Option<usize>,
     jump_target_old_pc: Option<usize>,
 }
 
@@ -109,21 +110,14 @@ fn optimize_function(function: &mut CompiledFunction) {
         intermediate_stream.push(IntermediateInstruction {
             instruction: *instruction,
             original_pc: pc_index,
+            second_original_pc: None,
             jump_target_old_pc: jump_target,
         });
     }
 
-    // Step 1: Hoist loop-invariant constants out of backward loops
-    hoist_invariants_in_stream(
-        &mut intermediate_stream,
-        &critical_targets,
-        &function.instructions,
-    );
-
-    // Step 2: Peephole fusion and redundant move elimination
-    let mut optimized_stream: Vec<IntermediateInstruction> =
+    // Step 1: Peephole fusion and redundant move elimination
+    let mut fused_stream: Vec<IntermediateInstruction> =
         Vec::with_capacity(intermediate_stream.len());
-    let mut old_pc_to_new_pc = vec![0u32; original_count + 1];
 
     let mut cursor = 0;
     while cursor < intermediate_stream.len() {
@@ -171,16 +165,13 @@ fn optimize_function(function: &mut CompiledFunction) {
                     _ => OpCode::JumpIfNeqI32,
                 };
 
-                let new_pc = optimized_stream.len();
-                old_pc_to_new_pc[current_entry.original_pc] = new_pc as u32;
-                old_pc_to_new_pc[next_entry.original_pc] = new_pc as u32;
-
                 let reg_a = current_entry.instruction.src1();
                 let reg_b = current_entry.instruction.src2();
 
-                optimized_stream.push(IntermediateInstruction {
+                fused_stream.push(IntermediateInstruction {
                     instruction: Instruction::format_a(fused_opcode, 0, reg_a, reg_b, 0),
                     original_pc: current_entry.original_pc,
+                    second_original_pc: Some(next_entry.original_pc),
                     jump_target_old_pc: next_entry.jump_target_old_pc,
                 });
 
@@ -212,11 +203,7 @@ fn optimize_function(function: &mut CompiledFunction) {
                         };
 
                         if let Some(r_other) = other_reg {
-                            let new_pc = optimized_stream.len();
-                            old_pc_to_new_pc[current_entry.original_pc] = new_pc as u32;
-                            old_pc_to_new_pc[next_entry.original_pc] = new_pc as u32;
-
-                            optimized_stream.push(IntermediateInstruction {
+                            fused_stream.push(IntermediateInstruction {
                                 instruction: Instruction::format_a(
                                     OpCode::AddI32Imm,
                                     0,
@@ -225,6 +212,7 @@ fn optimize_function(function: &mut CompiledFunction) {
                                     imm_val as i16 as u16,
                                 ),
                                 original_pc: current_entry.original_pc,
+                                second_original_pc: Some(next_entry.original_pc),
                                 jump_target_old_pc: None,
                             });
 
@@ -238,11 +226,7 @@ fn optimize_function(function: &mut CompiledFunction) {
 
                         // Only valid if subtracting immediate (r_a - imm)
                         if src2_reg == r_imm {
-                            let new_pc = optimized_stream.len();
-                            old_pc_to_new_pc[current_entry.original_pc] = new_pc as u32;
-                            old_pc_to_new_pc[next_entry.original_pc] = new_pc as u32;
-
-                            optimized_stream.push(IntermediateInstruction {
+                            fused_stream.push(IntermediateInstruction {
                                 instruction: Instruction::format_a(
                                     OpCode::SubI32Imm,
                                     0,
@@ -251,6 +235,7 @@ fn optimize_function(function: &mut CompiledFunction) {
                                     imm_val as i16 as u16,
                                 ),
                                 original_pc: current_entry.original_pc,
+                                second_original_pc: Some(next_entry.original_pc),
                                 jump_target_old_pc: None,
                             });
 
@@ -280,13 +265,10 @@ fn optimize_function(function: &mut CompiledFunction) {
                     let updated_instruction =
                         rewrite_instruction_destination(&current_entry.instruction, r_dest);
 
-                    let new_pc = optimized_stream.len();
-                    old_pc_to_new_pc[current_entry.original_pc] = new_pc as u32;
-                    old_pc_to_new_pc[next_entry.original_pc] = new_pc as u32;
-
-                    optimized_stream.push(IntermediateInstruction {
+                    fused_stream.push(IntermediateInstruction {
                         instruction: updated_instruction,
                         original_pc: current_entry.original_pc,
+                        second_original_pc: Some(next_entry.original_pc),
                         jump_target_old_pc: current_entry.jump_target_old_pc,
                     });
 
@@ -297,28 +279,38 @@ fn optimize_function(function: &mut CompiledFunction) {
         }
 
         // Default: keep current instruction
-        let new_pc = optimized_stream.len();
-        old_pc_to_new_pc[current_entry.original_pc] = new_pc as u32;
-        optimized_stream.push(IntermediateInstruction {
+        fused_stream.push(IntermediateInstruction {
             instruction: current_entry.instruction,
             original_pc: current_entry.original_pc,
+            second_original_pc: None,
             jump_target_old_pc: current_entry.jump_target_old_pc,
         });
 
         cursor += 1;
     }
 
-    old_pc_to_new_pc[original_count] = optimized_stream.len() as u32;
+    // Step 2: Hoist all loop-invariant constants out of backward loops
+    hoist_invariants_in_stream(&mut fused_stream, &critical_targets, &function.instructions);
+
+    // Step 3: Compute relocated instruction PCs and branch offsets
+    let mut old_pc_to_new_pc = vec![0u32; original_count + 1];
+    for (new_pc, entry) in fused_stream.iter().enumerate() {
+        old_pc_to_new_pc[entry.original_pc] = new_pc as u32;
+        if let Some(second_pc) = entry.second_original_pc {
+            old_pc_to_new_pc[second_pc] = new_pc as u32;
+        }
+    }
+    old_pc_to_new_pc[original_count] = fused_stream.len() as u32;
 
     // Relocate jump targets
-    let mut final_instructions = Vec::with_capacity(optimized_stream.len());
-    for (new_pc, intermediate) in optimized_stream.iter().enumerate() {
+    let mut final_instructions = Vec::with_capacity(fused_stream.len());
+    for (new_pc, intermediate) in fused_stream.iter().enumerate() {
         let mut final_inst = intermediate.instruction;
         if let Some(target_old_pc) = intermediate.jump_target_old_pc {
             let target_new_pc = if target_old_pc < old_pc_to_new_pc.len() {
                 old_pc_to_new_pc[target_old_pc]
             } else {
-                optimized_stream.len() as u32
+                fused_stream.len() as u32
             };
 
             let new_offset = (target_new_pc as i32) - (new_pc as i32);
@@ -372,7 +364,7 @@ fn hoist_invariants_in_stream(
     }
 
     for (loop_header, loop_back) in loop_pairs {
-        let mut candidate_idx = None;
+        let mut candidates = Vec::new();
         for (scan_idx, entry) in stream
             .iter()
             .enumerate()
@@ -380,21 +372,22 @@ fn hoist_invariants_in_stream(
             .skip(loop_header + 1)
         {
             let raw_opcode = entry.instruction.raw_opcode();
-            if raw_opcode == OpCode::LoadI32 as u8 || raw_opcode == OpCode::LoadConst as u8 {
+            if raw_opcode == OpCode::LoadI32 as u8
+                || raw_opcode == OpCode::LoadF64 as u8
+                || raw_opcode == OpCode::LoadConst as u8
+            {
                 let target_reg = entry.instruction.dst();
                 if count_register_writes(original_instructions, target_reg) == 1
                     && !critical_targets.contains(&entry.original_pc)
                 {
-                    candidate_idx = Some(scan_idx);
-                    break;
+                    candidates.push(scan_idx);
                 }
             }
         }
 
-        if let Some(cand_idx) = candidate_idx {
+        for cand_idx in candidates.into_iter().rev() {
             let candidate_entry = stream.remove(cand_idx);
             stream.insert(loop_header, candidate_entry);
-            break;
         }
     }
 }

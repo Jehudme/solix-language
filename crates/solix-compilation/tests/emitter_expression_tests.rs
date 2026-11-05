@@ -44,14 +44,14 @@ fn test_literal_expression_emission() {
     assert_eq!(inst2.opcode(1).unwrap(), OpCode::LoadConst);
     assert_eq!(inst2.dst(), 1);
 
-    // 3. Float literal (constant pool)
+    // 3. Float literal (emitted as LoadF64 from constant pool)
     let expr_f64 = Expression::Literal {
         span: make_span(11, 15),
         value: LiteralValue::Float(99.5),
     };
     let reg3 = emitter.emit_expression(&expr_f64, None).unwrap();
     let inst3 = emitter.function.instructions[2];
-    assert_eq!(inst3.opcode(2).unwrap(), OpCode::LoadConst);
+    assert_eq!(inst3.opcode(2).unwrap(), OpCode::LoadF64);
     assert_eq!(inst3.dst(), reg3);
 
     // 4. String literal (constant pool)

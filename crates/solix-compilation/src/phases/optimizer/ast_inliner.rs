@@ -25,6 +25,7 @@ struct InlinableFunctionInfo {
     parameter_types: Vec<TypeAnnotation>,
     return_type_annotation: TypeAnnotation,
     body_statements: Vec<Statement>,
+    has_this_receiver: bool,
 }
 
 /// AST inliner compilation phase.
@@ -50,10 +51,34 @@ impl CompilationPhase for AstInlinerPhase {
         // 1. Collect inlinable candidate functions across all ASTs
         let mut inlinable_functions: HashMap<String, InlinableFunctionInfo> = HashMap::new();
 
+        let mut free_func_counts: HashMap<&str, usize> = HashMap::new();
+        for ast in context.ast.iter().flatten() {
+            for declaration in &ast.declarations {
+                if let Declaration::Method(method) = declaration {
+                    let name_src = method.name_span.id as usize;
+                    if name_src < context.sources.len() {
+                        let name = &context.sources[name_src]
+                            [method.name_span.start as usize..method.name_span.end as usize];
+                        *free_func_counts.entry(name).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
         for ast in context.ast.iter().flatten() {
             for declaration in &ast.declarations {
                 match declaration {
                     Declaration::Method(method) => {
+                        let name_src = method.name_span.id as usize;
+                        let method_name = if name_src < context.sources.len() {
+                            &context.sources[name_src]
+                                [method.name_span.start as usize..method.name_span.end as usize]
+                        } else {
+                            ""
+                        };
+                        if free_func_counts.get(method_name).copied().unwrap_or(0) > 1 {
+                            continue;
+                        }
                         try_register_inlinable_method(
                             method,
                             None,
@@ -63,6 +88,7 @@ impl CompilationPhase for AstInlinerPhase {
                         );
                     }
                     Declaration::Class(class_decl) => {
+                        let is_generic_class = !class_decl.generic_params.is_empty();
                         let class_name =
                             if (class_decl.name_span.id as usize) < context.sources.len() {
                                 let source = &context.sources[class_decl.name_span.id as usize];
@@ -71,8 +97,38 @@ impl CompilationPhase for AstInlinerPhase {
                             } else {
                                 ""
                             };
+
+                        let mut method_counts: HashMap<&str, usize> = HashMap::new();
                         for member in &class_decl.members {
                             if let ClassMember::Method(method) = member {
+                                let name_src = method.name_span.id as usize;
+                                if name_src < context.sources.len() {
+                                    let name = &context.sources[name_src][method.name_span.start
+                                        as usize
+                                        ..method.name_span.end as usize];
+                                    *method_counts.entry(name).or_insert(0) += 1;
+                                }
+                            }
+                        }
+
+                        for member in &class_decl.members {
+                            if let ClassMember::Method(method) = member {
+                                let name_src = method.name_span.id as usize;
+                                let method_name = if name_src < context.sources.len() {
+                                    &context.sources[name_src][method.name_span.start as usize
+                                        ..method.name_span.end as usize]
+                                } else {
+                                    ""
+                                };
+                                let is_overloaded =
+                                    method_counts.get(method_name).copied().unwrap_or(0) > 1;
+                                if is_overloaded {
+                                    continue;
+                                }
+                                if !method.modifiers.contains(&Modifier::Static) && is_generic_class
+                                {
+                                    continue;
+                                }
                                 try_register_inlinable_method(
                                     method,
                                     Some(class_name),
@@ -168,6 +224,49 @@ impl CompilationPhase for AstInlinerPhase {
     }
 }
 
+/// Attempts to flatten a sequence of early guard returns into a nested ternary expression.
+fn try_flatten_guard_returns(statements: &[Statement]) -> Option<Expression> {
+    if statements.len() < 2 {
+        return None;
+    }
+    let last_return_expr = match statements.last()? {
+        Statement::Return(return_stmt) => return_stmt.value.clone()?,
+        _ => return None,
+    };
+
+    let mut guard_pairs = Vec::new();
+    for statement in &statements[..statements.len() - 1] {
+        match statement {
+            Statement::If(if_stmt) if if_stmt.else_branch.is_none() => {
+                let guard_ret = match &*if_stmt.then_branch {
+                    Statement::Return(ret) => ret.value.clone()?,
+                    Statement::Block(block) if block.statements.len() == 1 => {
+                        match &block.statements[0] {
+                            Statement::Return(ret) => ret.value.clone()?,
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                guard_pairs.push((if_stmt.span, if_stmt.condition.clone(), guard_ret));
+            }
+            _ => return None,
+        }
+    }
+
+    let mut current_expr = last_return_expr;
+    for (guard_span, guard_cond, guard_ret) in guard_pairs.into_iter().rev() {
+        current_expr = Expression::Ternary {
+            span: guard_span,
+            condition: Box::new(guard_cond),
+            then_branch: Box::new(guard_ret),
+            else_branch: Box::new(current_expr),
+        };
+    }
+
+    Some(current_expr)
+}
+
 /// Evaluates whether a method is eligible for automatic inlining and registers its metadata.
 fn try_register_inlinable_method(
     method: &MethodDeclaration,
@@ -213,28 +312,40 @@ fn try_register_inlinable_method(
         _ => false,
     };
 
-    if is_void {
+    let effective_statements = if is_void {
         // Void methods must not have ANY return statements
         if body.statements.iter().any(statement_has_return) {
             return;
         }
+        body.statements.clone()
     } else {
         // Value-returning methods must end with a top-level Return statement
         let Some(Statement::Return(_)) = body.statements.last() else {
             return;
         };
-        // And no mid-block returns allowed
+        // Mid-block returns allowed only if flattenable into ternary guards
         if statement_count > 1
             && body.statements[..statement_count - 1]
                 .iter()
                 .any(statement_has_return)
         {
-            return;
+            if let Some(ternary_expr) = try_flatten_guard_returns(&body.statements) {
+                vec![Statement::Return(
+                    crate::phases::parser::statements::control_flow::ReturnStatement {
+                        span: method.span,
+                        value: Some(ternary_expr),
+                    },
+                )]
+            } else {
+                return;
+            }
+        } else {
+            body.statements.clone()
         }
-    }
+    };
 
     // Prohibit inlining bodies containing lambdas (to prevent closure capture corruption)
-    if body.statements.iter().any(statement_has_lambda) {
+    if effective_statements.iter().any(statement_has_lambda) {
         return;
     }
 
@@ -247,8 +358,7 @@ fn try_register_inlinable_method(
         &sources[source_index][method.name_span.start as usize..method.name_span.end as usize];
 
     // Recursion check: body cannot call method_name
-    if body
-        .statements
+    if effective_statements
         .iter()
         .any(|statement| statement_calls_symbol(statement, sources, method_name))
     {
@@ -274,18 +384,141 @@ fn try_register_inlinable_method(
         parameter_names,
         parameter_types,
         return_type_annotation: method.return_type.clone(),
-        body_statements: body.statements.clone(),
+        body_statements: effective_statements,
+        has_this_receiver: false,
     };
 
     if let Some(class_name) = enclosing_class {
-        // Class methods: only static methods can be inlined as qualified static calls
+        let qualified_name = format!("{class_name}::{method_name}");
         if method.modifiers.contains(&Modifier::Static) {
-            let qualified_name = format!("{class_name}::{method_name}");
             inlinable_functions.insert(qualified_name, info);
+        } else {
+            // Non-virtual non-override instance method: bind "this" as parameter 0
+            // Only inline if return type is primitive non-void and body accesses "this"
+            let is_primitive_return = match &method.return_type {
+                TypeAnnotation::Primitive {
+                    span: type_span, ..
+                } => {
+                    let type_source_index = type_span.id as usize;
+                    type_source_index < sources.len()
+                        && &sources[type_source_index]
+                            [type_span.start as usize..type_span.end as usize]
+                            != "void"
+                }
+                _ => false,
+            };
+            let accesses_this = info
+                .body_statements
+                .iter()
+                .any(|stmt| statement_references_ident(stmt, sources, "this"));
+
+            if is_primitive_return && accesses_this {
+                let mut instance_info = info;
+                instance_info.has_this_receiver = true;
+                instance_info.parameter_names.insert(0, "this".to_string());
+                instance_info
+                    .parameter_types
+                    .insert(0, method.return_type.clone());
+                inlinable_functions.insert(qualified_name, instance_info);
+            }
         }
     } else {
         // Free / top-level functions
         inlinable_functions.insert(method_name.to_string(), info);
+    }
+}
+
+/// Recursively inspects expressions to see if an identifier is referenced.
+fn expression_references_ident(
+    expression: &Expression,
+    sources: &[String],
+    target_name: &str,
+) -> bool {
+    match expression {
+        Expression::Identifier { span } => {
+            let source_index = span.id as usize;
+            if source_index < sources.len() {
+                &sources[source_index][span.start as usize..span.end as usize] == target_name
+            } else {
+                false
+            }
+        }
+        Expression::MemberAccess { object, .. } => {
+            expression_references_ident(object, sources, target_name)
+        }
+        Expression::Binary { left, right, .. } => {
+            expression_references_ident(left, sources, target_name)
+                || expression_references_ident(right, sources, target_name)
+        }
+        Expression::Unary { operand, .. } => {
+            expression_references_ident(operand, sources, target_name)
+        }
+        Expression::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            expression_references_ident(condition, sources, target_name)
+                || expression_references_ident(then_branch, sources, target_name)
+                || expression_references_ident(else_branch, sources, target_name)
+        }
+        Expression::MethodCall {
+            callee, arguments, ..
+        } => {
+            expression_references_ident(callee, sources, target_name)
+                || arguments
+                    .iter()
+                    .any(|arg| expression_references_ident(arg, sources, target_name))
+        }
+        Expression::ArrayAccess { array, index, .. } => {
+            expression_references_ident(array, sources, target_name)
+                || expression_references_ident(index, sources, target_name)
+        }
+        Expression::Block {
+            statements, result, ..
+        } => {
+            statements
+                .iter()
+                .any(|stmt| statement_references_ident(stmt, sources, target_name))
+                || result
+                    .as_ref()
+                    .is_some_and(|res| expression_references_ident(res, sources, target_name))
+        }
+        _ => false,
+    }
+}
+
+/// Recursively inspects statements to see if an identifier is referenced.
+fn statement_references_ident(
+    statement: &Statement,
+    sources: &[String],
+    target_name: &str,
+) -> bool {
+    match statement {
+        Statement::Return(return_stmt) => return_stmt.value.as_ref().is_some_and(|return_val| {
+            expression_references_ident(return_val, sources, target_name)
+        }),
+        Statement::Expression(expr_stmt) => {
+            expression_references_ident(&expr_stmt.expression, sources, target_name)
+        }
+        Statement::VariableDeclaration(var_decl) => var_decl
+            .initializer
+            .as_ref()
+            .is_some_and(|init| expression_references_ident(init, sources, target_name)),
+        Statement::Block(block) => block
+            .statements
+            .iter()
+            .any(|stmt| statement_references_ident(stmt, sources, target_name)),
+        Statement::If(if_stmt) => {
+            expression_references_ident(&if_stmt.condition, sources, target_name)
+                || statement_references_ident(&if_stmt.then_branch, sources, target_name)
+                || if_stmt
+                    .else_branch
+                    .as_deref()
+                    .is_some_and(|stmt| statement_references_ident(stmt, sources, target_name))
+        }
+        _ => false,
     }
 }
 
@@ -546,6 +779,26 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
         }
         Statement::Exit(exit_stmt) => {
             expression_calls_symbol(&exit_stmt.code, sources, target_name)
+        }
+        Statement::Try(try_stmt) => {
+            try_stmt
+                .try_block
+                .statements
+                .iter()
+                .any(|nested_stmt| statement_calls_symbol(nested_stmt, sources, target_name))
+                || try_stmt.catch_clauses.iter().any(|catch_clause| {
+                    catch_clause.block.statements.iter().any(|nested_stmt| {
+                        statement_calls_symbol(nested_stmt, sources, target_name)
+                    })
+                })
+                || try_stmt
+                    .finally_block
+                    .as_ref()
+                    .is_some_and(|finally_block| {
+                        finally_block.statements.iter().any(|nested_stmt| {
+                            statement_calls_symbol(nested_stmt, sources, target_name)
+                        })
+                    })
         }
         _ => false,
     }
@@ -837,6 +1090,39 @@ fn transform_statement(
                 depth,
             );
         }
+        Statement::Try(try_stmt) => {
+            for try_statement in &mut try_stmt.try_block.statements {
+                transform_statement(
+                    try_statement,
+                    inlinable_functions,
+                    context,
+                    call_counter,
+                    depth,
+                );
+            }
+            for catch_clause in &mut try_stmt.catch_clauses {
+                for catch_statement in &mut catch_clause.block.statements {
+                    transform_statement(
+                        catch_statement,
+                        inlinable_functions,
+                        context,
+                        call_counter,
+                        depth,
+                    );
+                }
+            }
+            if let Some(finally_block) = &mut try_stmt.finally_block {
+                for finally_statement in &mut finally_block.statements {
+                    transform_statement(
+                        finally_statement,
+                        inlinable_functions,
+                        context,
+                        call_counter,
+                        depth,
+                    );
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -945,14 +1231,17 @@ fn transform_expression(
         ..
     } = expression
     {
-        let target_symbol = match callee.as_ref() {
+        let (target_symbol, this_receiver_arg) = match callee.as_ref() {
             Expression::Identifier { span: id_span } => {
                 let source_index = id_span.id as usize;
                 if source_index < context.sources.len() {
                     let source = &context.sources[source_index];
-                    Some(source[id_span.start as usize..id_span.end as usize].to_string())
+                    (
+                        Some(source[id_span.start as usize..id_span.end as usize].to_string()),
+                        None,
+                    )
                 } else {
-                    None
+                    (None, None)
                 }
             }
             Expression::MemberAccess {
@@ -960,41 +1249,76 @@ fn transform_expression(
                 member_span,
                 ..
             } => {
-                let obj_source_index = object.span().id as usize;
                 let member_source_index = member_span.id as usize;
-                if obj_source_index < context.sources.len()
-                    && member_source_index < context.sources.len()
-                {
-                    let obj_name = &context.sources[obj_source_index]
-                        [object.span().start as usize..object.span().end as usize];
+                if member_source_index < context.sources.len() {
                     let member_name = &context.sources[member_source_index]
                         [member_span.start as usize..member_span.end as usize];
-                    let qualified = format!("{obj_name}::{member_name}");
-                    if inlinable_functions.contains_key(&qualified) {
-                        Some(qualified)
+
+                    let obj_source_index = object.span().id as usize;
+                    let obj_name = if obj_source_index < context.sources.len() {
+                        &context.sources[obj_source_index]
+                            [object.span().start as usize..object.span().end as usize]
                     } else {
-                        None
+                        ""
+                    };
+
+                    let static_qualified = format!("{obj_name}::{member_name}");
+                    if let Some(target_info) = inlinable_functions.get(&static_qualified)
+                        && !target_info.has_this_receiver
+                    {
+                        (Some(static_qualified), None)
+                    } else {
+                        // Check if object is an instance with a known Class type
+                        let obj_type = context
+                            .binding_artifacts
+                            .as_ref()
+                            .and_then(|artifacts| artifacts.node_types.get(&object.span()))
+                            .cloned();
+
+                        if let Some(Type::Class { symbol_name, .. }) = obj_type {
+                            let base_class = symbol_name.split('<').next().unwrap_or(&symbol_name);
+                            let simple_class =
+                                base_class.rsplit(['.', ':']).next().unwrap_or(base_class);
+
+                            let instance_qualified = format!("{simple_class}::{member_name}");
+                            if let Some(target_info) = inlinable_functions.get(&instance_qualified)
+                                && target_info.has_this_receiver
+                            {
+                                (Some(instance_qualified), Some((**object).clone()))
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            (None, None)
+                        }
                     }
                 } else {
-                    None
+                    (None, None)
                 }
             }
-            _ => None,
+            _ => (None, None),
         };
 
         if let Some(symbol_key) = target_symbol
             && let Some(target_info) = inlinable_functions.get(&symbol_key).cloned()
-            && target_info.parameter_names.len() == arguments.len()
         {
-            let call_span = *span;
-            let inlined_block = inline_call_into_block(
-                call_span,
-                &target_info,
-                std::mem::take(arguments),
-                context,
-                call_counter,
-            );
-            *expression = inlined_block;
+            let mut call_args = Vec::new();
+            if let Some(receiver_expr) = this_receiver_arg {
+                call_args.push(receiver_expr);
+            }
+            call_args.extend(std::mem::take(arguments));
+
+            if target_info.parameter_names.len() == call_args.len() {
+                let call_span = *span;
+                let inlined_block = inline_call_into_block(
+                    call_span,
+                    &target_info,
+                    call_args,
+                    context,
+                    call_counter,
+                );
+                *expression = inlined_block;
+            }
         }
     }
 }
@@ -1021,6 +1345,13 @@ fn inline_call_into_block(
 
         let arg_expr = arguments[param_index].clone();
         let param_type = target_info.parameter_types[param_index].clone();
+
+        // Record argument's type for the synthetic renamed_span so Emitter knows its type
+        if let Some(artifacts) = context.binding_artifacts.as_mut()
+            && let Some(evaluated_type) = artifacts.node_types.get(&arg_expr.span()).cloned()
+        {
+            artifacts.node_types.insert(renamed_span, evaluated_type);
+        }
 
         let param_decl = VariableDeclarationStatement {
             span: renamed_span,
@@ -1367,6 +1698,21 @@ fn rename_statement(
         }
         Statement::Exit(exit_stmt) => {
             rename_expression(&mut exit_stmt.code, renamed_identifiers, sources);
+        }
+        Statement::Try(try_stmt) => {
+            for try_statement in &mut try_stmt.try_block.statements {
+                rename_statement(try_statement, renamed_identifiers, sources);
+            }
+            for catch_clause in &mut try_stmt.catch_clauses {
+                for catch_statement in &mut catch_clause.block.statements {
+                    rename_statement(catch_statement, renamed_identifiers, sources);
+                }
+            }
+            if let Some(finally_block) = &mut try_stmt.finally_block {
+                for finally_statement in &mut finally_block.statements {
+                    rename_statement(finally_statement, renamed_identifiers, sources);
+                }
+            }
         }
         _ => {}
     }

@@ -467,10 +467,12 @@ impl<'a> Emitter<'a> {
                     }
                 }
                 let offset = self.resolve_field_offset(object.span(), &member_name);
+                let field_tag = self.resolve_field_type_tag(object.span(), &member_name);
+                let flags = field_tag << 1;
                 let r_obj = self.emit_expression(object, None)?;
                 let dst = self.resolve_dst(target_reg)?;
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::GetField, 0, dst, r_obj, offset),
+                    Instruction::format_a(OpCode::GetField, flags, dst, r_obj, offset),
                     Some(*span),
                 );
                 if self.query_type(object.span()).is_reference_type()
@@ -1424,10 +1426,10 @@ impl<'a> Emitter<'a> {
                     );
                 }
             }
-            LiteralValue::Float(f) => {
-                let const_idx = self.pool.add_f64(*f)?;
+            LiteralValue::Float(float_val) => {
+                let const_idx = self.pool.add_f64(*float_val)?;
                 self.emit_instruction(
-                    Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
+                    Instruction::format_b(OpCode::LoadF64, 0, dst, const_idx as u32),
                     Some(span),
                 );
             }
@@ -1726,21 +1728,15 @@ impl<'a> Emitter<'a> {
                         }
                     })?;
 
-                    let temp_one = self.allocator.alloc_temp()?;
-                    self.emit_instruction(
-                        Instruction::format_b(OpCode::LoadI32, 0, temp_one, 1),
-                        Some(span),
-                    );
-
-                    let op = if matches!(operator, TokenKind::OperatorIncrement) {
-                        OpCode::AddI32
+                    let imm_op = if matches!(operator, TokenKind::OperatorIncrement) {
+                        OpCode::AddI32Imm
                     } else {
-                        OpCode::SubI32
+                        OpCode::SubI32Imm
                     };
 
                     if is_prefix {
                         self.emit_instruction(
-                            Instruction::format_a(op, 0, local_reg, local_reg, temp_one),
+                            Instruction::format_a(imm_op, 0, local_reg, local_reg, 1),
                             Some(span),
                         );
                         if dst != local_reg {
@@ -1758,12 +1754,10 @@ impl<'a> Emitter<'a> {
                             );
                         }
                         self.emit_instruction(
-                            Instruction::format_a(op, 0, local_reg, local_reg, temp_one),
+                            Instruction::format_a(imm_op, 0, local_reg, local_reg, 1),
                             Some(span),
                         );
                     }
-
-                    self.allocator.free_temp(temp_one);
                 } else if let Expression::MemberAccess {
                     object,
                     member_span,
@@ -1839,15 +1833,29 @@ impl<'a> Emitter<'a> {
                     let r_obj = self.emit_expression(object, None)?;
                     let member_name = self.get_lexeme(*member_span);
                     let offset = self.resolve_field_offset(object.span(), member_name);
+                    let field_tag = self.resolve_field_type_tag(object.span(), member_name);
                     let is_weak = self.is_weak_field(object.span(), member_name);
-                    let flags = if is_weak {
+                    let set_flags = if field_tag > 0 {
+                        (field_tag << 1)
+                            | (if is_weak {
+                                solix_common::bytecode::instruction::FLAG_WEAK
+                            } else {
+                                0
+                            })
+                    } else if is_weak {
                         solix_common::bytecode::instruction::FLAG_WEAK
                     } else {
                         0
                     };
                     let cur_val = self.allocator.alloc_temp()?;
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::GetField, 0, cur_val, r_obj, offset),
+                        Instruction::format_a(
+                            OpCode::GetField,
+                            field_tag << 1,
+                            cur_val,
+                            r_obj,
+                            offset,
+                        ),
                         Some(span),
                     );
                     let temp_one = self.allocator.alloc_temp()?;
@@ -1866,7 +1874,13 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                         self.emit_instruction(
-                            Instruction::format_a(OpCode::SetField, flags, cur_val, r_obj, offset),
+                            Instruction::format_a(
+                                OpCode::SetField,
+                                set_flags,
+                                cur_val,
+                                r_obj,
+                                offset,
+                            ),
                             Some(span),
                         );
                         if dst != cur_val {
@@ -1887,7 +1901,13 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                         self.emit_instruction(
-                            Instruction::format_a(OpCode::SetField, flags, cur_val, r_obj, offset),
+                            Instruction::format_a(
+                                OpCode::SetField,
+                                set_flags,
+                                cur_val,
+                                r_obj,
+                                offset,
+                            ),
                             Some(span),
                         );
                     }
@@ -1941,6 +1961,33 @@ impl<'a> Emitter<'a> {
                     }
                     self.allocator.free_temp(r_val);
                     return Ok(());
+                } else if let Expression::Literal {
+                    value: LiteralValue::Int(imm_val),
+                    ..
+                } = value
+                    && !self.query_type(target.span()).is_floating_point()
+                    && *imm_val >= -32768
+                    && *imm_val <= 32767
+                    && matches!(
+                        operator,
+                        TokenKind::OperatorPlusAssign | TokenKind::OperatorMinusAssign
+                    )
+                {
+                    let imm_op = if matches!(operator, TokenKind::OperatorPlusAssign) {
+                        OpCode::AddI32Imm
+                    } else {
+                        OpCode::SubI32Imm
+                    };
+                    self.emit_instruction(
+                        Instruction::format_a(
+                            imm_op,
+                            0,
+                            local_reg,
+                            local_reg,
+                            *imm_val as i16 as u16,
+                        ),
+                        Some(span),
+                    );
                 } else {
                     let r_val = self.emit_expression(value, None)?;
                     let operand_type = self.query_type(target.span());
@@ -2110,8 +2157,16 @@ impl<'a> Emitter<'a> {
             let mut r_val = self.emit_expression(value, None)?;
             let member_name = self.get_lexeme(*member_span);
             let offset = self.resolve_field_offset(object.span(), member_name);
+            let field_tag = self.resolve_field_type_tag(object.span(), member_name);
             let is_weak = self.is_weak_field(object.span(), member_name);
-            let flags = if is_weak {
+            let set_flags = if field_tag > 0 {
+                (field_tag << 1)
+                    | (if is_weak {
+                        solix_common::bytecode::instruction::FLAG_WEAK
+                    } else {
+                        0
+                    })
+            } else if is_weak {
                 solix_common::bytecode::instruction::FLAG_WEAK
             } else {
                 0
@@ -2120,7 +2175,7 @@ impl<'a> Emitter<'a> {
             if !matches!(operator, TokenKind::OperatorAssign) {
                 let r_cur = self.allocator.alloc_temp()?;
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::GetField, flags, r_cur, r_obj, offset),
+                    Instruction::format_a(OpCode::GetField, field_tag << 1, r_cur, r_obj, offset),
                     Some(*mem_span),
                 );
                 let operand_type = self.query_type(target.span());
@@ -2166,7 +2221,7 @@ impl<'a> Emitter<'a> {
             }
 
             self.emit_instruction(
-                Instruction::format_a(OpCode::SetField, flags, r_val, r_obj, offset),
+                Instruction::format_a(OpCode::SetField, set_flags, r_val, r_obj, offset),
                 Some(*mem_span),
             );
 
@@ -2449,6 +2504,78 @@ impl<'a> Emitter<'a> {
             }
         }
         false
+    }
+
+    fn resolve_field_type_tag(&self, object_span: Span, member_name: &str) -> u8 {
+        let obj_name = self.get_lexeme(object_span);
+        if obj_name == "this"
+            && let Some(ref cls) = self.enclosing_class
+        {
+            let simple = cls.rsplit(['.', ':']).next().unwrap_or(cls);
+            if let Some(layouts) = self.class_layouts
+                && let Some(layout) = layouts.get(cls).or_else(|| layouts.get(simple))
+                && let Some(&offset) = layout.field_offsets.get(member_name)
+                && let Some(&tag) = layout.field_types.get(&offset)
+            {
+                return tag;
+            }
+        }
+
+        let obj_type = self.query_type(object_span);
+        if let Type::Class {
+            symbol_name,
+            type_arguments,
+        } = obj_type
+        {
+            let mangled = if !type_arguments.is_empty() && !symbol_name.contains('<') {
+                format!(
+                    "{symbol_name}<{}>",
+                    type_arguments
+                        .iter()
+                        .map(|arg_type| arg_type.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                symbol_name.clone()
+            };
+            let simple_base = symbol_name
+                .rsplit(['.', ':'])
+                .next()
+                .unwrap_or(&symbol_name);
+            let simple_mangled = if !type_arguments.is_empty() && !simple_base.contains('<') {
+                format!(
+                    "{simple_base}<{}>",
+                    type_arguments
+                        .iter()
+                        .map(|arg_type| arg_type.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                simple_base.to_string()
+            };
+
+            let tag_opt = self
+                .class_layouts
+                .and_then(|layouts| {
+                    layouts
+                        .get(&mangled)
+                        .or_else(|| layouts.get(&simple_mangled))
+                        .or_else(|| layouts.get(&symbol_name))
+                        .or_else(|| layouts.get(simple_base))
+                })
+                .and_then(|layout| {
+                    layout
+                        .field_offsets
+                        .get(member_name)
+                        .and_then(|&offset| layout.field_types.get(&offset).copied())
+                });
+            if let Some(tag) = tag_opt {
+                return tag;
+            }
+        }
+        0
     }
 
     fn resolve_type_byte_size(&self, type_name: &str) -> usize {

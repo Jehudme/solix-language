@@ -1389,9 +1389,7 @@ impl VirtualMachine {
                     let field_addr = obj_addr + offset as u32;
 
                     let raw_flags = inst.flags();
-                    let field_type_tag = if raw_flags > 0 && raw_flags <= 12 {
-                        Some(raw_flags)
-                    } else if raw_flags > 12 {
+                    let field_type_tag = if raw_flags > 1 {
                         Some(raw_flags >> 1)
                     } else {
                         let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
@@ -1438,11 +1436,11 @@ impl VirtualMachine {
                             Value::Bool(raw != 0)
                         }
                         Some(12) => {
-                            let child_addr = self.heap.read_u64(field_addr).unwrap_or(0) as u32;
-                            if child_addr == 0 {
+                            let raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                            if raw == 0 || raw == Value::TAG_NULL {
                                 Value::Null
                             } else {
-                                Value::Ref(child_addr)
+                                Value::from_raw_u64(raw)
                             }
                         }
                         _ => {
@@ -1476,24 +1474,16 @@ impl VirtualMachine {
                     let field_addr = obj_addr + offset as u32;
 
                     let raw_flags = inst.flags();
-                    let (field_type_tag, is_weak) =
-                        if raw_flags == solix_common::bytecode::instruction::FLAG_WEAK {
-                            (None, true)
-                        } else if raw_flags > 0 && raw_flags <= 12 {
-                            (Some(raw_flags), false)
-                        } else if raw_flags > 12 {
-                            (
-                                Some(raw_flags >> 1),
-                                (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0,
-                            )
-                        } else {
-                            let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                            let tag = self
-                                .context
-                                .get_class_by_vtable_id(vtable_id)
-                                .and_then(|cls| cls.get_field_type(offset));
-                            (tag, inst.is_weak())
-                        };
+                    let is_weak = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
+                    let tag_shifted = raw_flags >> 1;
+                    let field_type_tag = if tag_shifted > 0 {
+                        Some(tag_shifted)
+                    } else {
+                        let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                        self.context
+                            .get_class_by_vtable_id(vtable_id)
+                            .and_then(|cls| cls.get_field_type(offset))
+                    };
 
                     match field_type_tag {
                         Some(1) | Some(2) => {
