@@ -1,44 +1,39 @@
-# Solix Benchmark Results & Evaluation Dimensions (Milestone 017)
+# Solix Benchmark Results & Evaluation Dimensions (Milestone 018)
 
 ## 1. Executive Summary
 
-Milestone 017 ("Unboxed Register VM, Two-Stage Optimization Pipeline & Lua-Competitive Performance") delivers an architectural overhaul of both the compiler (`crates/solix-compilation`) and runtime engine (`crates/solix-runtime`).
+Milestone 018 ("Unified 100%-Inlined VM Engine, AOT Bytecode Verifier & Compiler Optimizer Overhaul") delivers a comprehensive consolidation and performance overhaul of both the compiler (`crates/solix-compilation`) and runtime engine (`crates/solix-runtime`).
 
 The evaluation suite exercises 16 canonical computational workloads ranging from recursive microbenchmarks to object graph churn, virtual/interface dispatch, generic container operations, and zero-cost exception handling. Every workload is evaluated across five target engines:
-1. **Solix Virtual Machine** (Fast dispatch mode and `--safe` bounds-checked mode)
+1. **Solix Virtual Machine** (Unified 100%-inlined fast dispatch engine with AOT bytecode verification)
 2. **CPython 3.12**
 3. **Lua 5.4**
 4. **LuaJIT 2.1**
 5. **Native C** (Compiled via GCC with `-O3` optimization)
 
-### Key Achievements in Milestone 017
-* **Dramatic Speedups Over Milestone 016 (Up to 2.84x faster):**
-  * `11_generic_containers`: **2.84x faster** (169.53 ms $\to$ 59.72 ms)
-  * `06_binary_trees_arc`: **2.47x faster** (86.61 ms $\to$ 35.04 ms)
-  * `15_string_processing`: **2.39x faster** (215.45 ms $\to$ 90.11 ms)
-  * `05_object_churn_pod`: **2.19x faster** (91.55 ms $\to$ 41.83 ms)
-  * `10_matrix_multiply_2d`: **2.14x faster** (13.85 ms $\to$ 6.47 ms)
-  * `09_sieve_bool_array`: **2.09x faster** (134.45 ms $\to$ 64.43 ms)
-  * `16_multi_binary_link`: **1.90x faster** (41.07 ms $\to$ 21.62 ms)
-  * `01_fib_recursive`: **1.82x faster** (289.07 ms $\to$ 159.02 ms)
-  * `07_virtual_dispatch`: **1.66x faster** (94.72 ms $\to$ 57.08 ms)
-* **Outperforming CPython 3.12 Across 13 Workloads:**
-  * `10_matrix_multiply_2d`: **3.55x faster** than Python 3.12
-  * `03_nbody_float64`: **2.22x faster** than Python 3.12
-  * `16_multi_binary_link`: **2.08x faster** than Python 3.12
-  * `05_object_churn_pod`: **1.78x faster** than Python 3.12
-  * `02_tight_loop_int`: **1.47x faster** than Python 3.12
-  * `04_ackermann_stack`: **1.46x faster** than Python 3.12
-  * `11_generic_containers`: **1.45x faster** than Python 3.12
-  * `12_closures_capture`: **1.33x faster** than Python 3.12
-  * `14_exception_zero_cost`: **1.33x faster** than Python 3.12
-  * `08_interface_dispatch`: **1.12x faster** than Python 3.12
-  * `13_function_pointers`: **1.09x faster** than Python 3.12
-  * `06_binary_trees_arc`: **1.08x faster** than Python 3.12
-  * `07_virtual_dispatch`: **1.05x faster** than Python 3.12
+### Key Achievements in Milestone 018
+* **100% Inlined VM Loop & Zero Out-of-Line Slowpaths:**
+  * All 83 opcodes are directly inlined into `vm/fast.rs` with zero call-frame bouncing, eliminating the legacy `dispatch.rs` and out-of-line fallback routines.
+* **AOT Bytecode Verifier Deploys Ahead-of-Time Memory Safety:**
+  * Bytecode validation (register indices, relative branch destinations, constant pool boundaries, static slot offsets) runs once at load time, enabling safe direct raw pointer heap operations without runtime bounds-checking flags.
+* **Direct Heap Access & Pod Quick Lists:**
+  * `BlockTag::ObjectPod` objects bypass recursive ARC graph traversals on deallocation, returning to quick lists via a 3-instruction push.
+  * Interned string constants are loaded with `MAX_REF_COUNT` (immortal), eliminating hash set queries during reference acquisition and release.
+  * Array indexing (`GetArray`, `SetArray`) operates directly on the underlying heap buffer without redundant header round-trips.
+* **Outperforming CPython 3.12 Across Key Workloads & Beating Lua/LuaJIT on Exceptions:**
+  * `14_exception_zero_cost`: **14.28 ms** — **2.27x faster than Python 3.12** (32.38 ms), **faster than Lua 5.4** (15.64 ms), and **faster than LuaJIT 2.1** (15.91 ms).
+  * `10_matrix_multiply_2d`: **6.43 ms** — **3.49x faster than Python 3.12** (22.42 ms).
+  * `03_nbody_float64`: **27.72 ms** — **2.28x faster than Python 3.12** (63.17 ms).
+  * `16_multi_binary_link`: **20.67 ms** — **2.18x faster than Python 3.12** (45.04 ms).
+  * `12_closures_capture`: **20.24 ms** — **1.73x faster than Python 3.12** (35.03 ms).
+  * `11_generic_containers`: **61.07 ms** — **1.43x faster than Python 3.12** (87.09 ms).
+  * `06_binary_trees_arc`: **26.41 ms** — **1.41x faster than Python 3.12** (37.12 ms).
+  * `02_tight_loop_int`: **252.65 ms** — **1.37x faster than Python 3.12** (345.16 ms).
+  * `07_virtual_dispatch`: **54.67 ms** — **1.34x faster than Python 3.12** (73.09 ms).
+  * `05_object_churn_pod`: **44.23 ms** — **1.27x faster than Python 3.12** (56.15 ms).
+  * `13_function_pointers`: **68.07 ms** — **1.19x faster than Python 3.12** (81.24 ms).
+  * `08_interface_dispatch`: **58.61 ms** — **1.19x faster than Python 3.12** (69.78 ms).
 * **Algorithmic Parity & Correctness:** 100% (16/16) workloads produce bit-identical checksums across all five engines, verified by the automated correctness gate (`benchmarks/runner.py --verify`).
-* **Zero HashMap Overhead:** Eliminated all runtime `HashMap` probes in `GetField`, `SetField`, `GetArray`, `SetArray`, `PackClosure`, `UnpackCaptures`, and `release_reference` via direct contiguous `VirtualHeap` memory layout.
-* **Two-Stage Optimization Pipeline:** Automatic pre-emission AST Inliner ($\le 8$ statements) and post-emission linear bytecode peephole optimizer (`0xD0..0xD7` superinstructions, loop constant hoisting, redundant `Mov` coalescing).
 
 ---
 
@@ -51,19 +46,19 @@ The evaluation suite exercises 16 canonical computational workloads ranging from
 
 ### Dimension 2: Pure Algorithmic Throughput
 * **Metric:** Instruction dispatch throughput and computational rate for arithmetic, loop, and stack operations.
-* **Findings:** The Solix 3-address register VM engine achieves high throughput for integer arithmetic and tight control flow loops (232 ms for 200M operations in `02_tight_loop_int`), beating stack-based interpreters like CPython by 1.47x.
+* **Findings:** The unified inlined register VM engine achieves high throughput for integer arithmetic, loop hoisting, and superinstructions (`AddI32Imm`, `SubI32Imm`, `JumpIf*I32`), outperforming stack interpreters across complex control flows.
 
 ### Dimension 3: Physical Memory Footprint (Peak RSS)
 * **Metric:** Resident Set Size (RSS) queried via cross-platform APIs (`/proc/self/status` on Linux, `getrusage` on macOS, and `GetProcessMemoryInfo` on Windows).
-* **Solix Footprint:** Base VM memory footprint remains compact at **~20.5 MB - 51.3 MB** across all 16 benchmark workloads even with compiler telemetry and heap monitoring active.
+* **Solix Footprint:** Base VM memory footprint remains compact at **~20.4 MB - 49.6 MB** across all 16 benchmark workloads even with compiler telemetry and heap monitoring active.
 
 ### Dimension 4: ARC Reclamation Overhead
 * **Metric:** Cost of reference count updates and destructor cascading during transient object allocation.
-* **Findings:** In `06_binary_trees_arc` and `05_object_churn_pod`, Solix continuously allocates and reclaims balanced trees and POD objects with $O(1)$ size-class quick-lists and direct child field pointer traversals, eliminating $O(N)$ global map scanning.
+* **Findings:** In `06_binary_trees_arc` and `05_object_churn_pod`, Solix continuously allocates and reclaims balanced trees and POD objects with $O(1)$ size-class quick-lists, immortal string constants, and direct field offsets, eliminating redundant traversal overhead.
 
 ### Dimension 5: Processor Execution Efficiency
 * **Metric:** In-place instruction quickening efficiency, direct branch locality, and zero-cost exception handling tables.
-* **Findings:** `14_exception_zero_cost` demonstrates **zero runtime dispatch penalty** during non-exceptional execution paths. Exception tables are loaded out-of-band and only queried when an exception is thrown.
+* **Findings:** `14_exception_zero_cost` demonstrates **14.28 ms** runtime performance, surpassing Lua and LuaJIT by eliminating runtime frame checks during non-exceptional paths.
 
 ### Dimension 6: Edit-to-Run Iteration Speed
 * **Metric:** Time to parse, bind, optimize, emit, and execute from source code without manual intermediate compilation steps.
@@ -77,22 +72,22 @@ The evaluation suite exercises 16 canonical computational workloads ranging from
 
 | Workload | Solix Fast (ms) | Python 3 (ms) | Lua 5.4 (ms) | LuaJIT (ms) | C -O3 (ms) | Speedup vs Python | RSS (KB) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `01_fib_recursive` | **155.69** | 100.81 | 50.09 | 8.66 | 2.42 | 0.65x | 20516 |
-| `02_tight_loop_int` | **232.14** | 340.60 | 39.58 | 12.75 | 1.79 | **1.47x** | 44504 |
-| `03_nbody_float64` | **29.28** | 64.86 | 8.40 | 2.50 | 2.08 | **2.22x** | 45840 |
-| `04_ackermann_stack` | **34.51** | 50.28 | 7.75 | 2.99 | 1.82 | **1.46x** | 45840 |
-| `05_object_churn_pod` | **36.10** | 64.33 | 15.50 | 1.95 | 2.15 | **1.78x** | 45840 |
-| `06_binary_trees_arc` | **33.79** | 36.53 | 14.14 | 8.19 | 2.14 | **1.08x** | 45840 |
-| `07_virtual_dispatch` | **62.19** | 65.18 | 15.37 | 5.83 | 1.46 | **1.05x** | 49632 |
-| `08_interface_dispatch` | **67.83** | 75.89 | 9.95 | 3.12 | 1.35 | **1.12x** | 49632 |
-| `09_sieve_bool_array` | **59.96** | 52.50 | 7.69 | 3.52 | 1.60 | 0.88x | 49632 |
-| `10_matrix_multiply_2d` | **6.57** | 23.32 | 3.08 | 1.78 | 1.13 | **3.55x** | 49632 |
-| `11_generic_containers` | **63.07** | 91.54 | 45.69 | 38.38 | 1.10 | **1.45x** | 51292 |
-| `12_closures_capture` | **29.15** | 38.72 | 12.37 | 4.11 | 1.82 | **1.33x** | 51292 |
-| `13_function_pointers` | **81.90** | 89.34 | 19.29 | 11.06 | 1.48 | **1.09x** | 51292 |
-| `14_exception_zero_cost` | **26.20** | 34.86 | 21.99 | 25.12 | 2.41 | **1.33x** | 51292 |
-| `15_string_processing` | **113.96** | 77.95 | 24.28 | 8.10 | 3.87 | 0.68x | 51292 |
-| `16_multi_binary_link` | **21.13** | 44.00 | 9.58 | 2.63 | 1.34 | **2.08x** | 51292 |
+| `01_fib_recursive` | **153.69** | 105.99 | 49.90 | 11.20 | 3.00 | 0.69x | 20440 |
+| `02_tight_loop_int` | **252.65** | 345.16 | 32.21 | 9.89 | 2.24 | **1.37x** | 44384 |
+| `03_nbody_float64` | **27.72** | 63.17 | 5.28 | 2.32 | 1.84 | **2.28x** | 44440 |
+| `04_ackermann_stack` | **42.25** | 41.52 | 8.77 | 2.68 | 2.63 | 0.98x | 44440 |
+| `05_object_churn_pod` | **44.23** | 56.15 | 15.70 | 3.09 | 1.42 | **1.27x** | 44440 |
+| `06_binary_trees_arc` | **26.41** | 37.12 | 12.58 | 10.70 | 2.47 | **1.41x** | 44440 |
+| `07_virtual_dispatch` | **54.67** | 73.09 | 16.71 | 5.67 | 2.18 | **1.34x** | 49388 |
+| `08_interface_dispatch` | **58.61** | 69.78 | 13.01 | 3.04 | 1.57 | **1.19x** | 49388 |
+| `09_sieve_bool_array` | **62.06** | 52.23 | 7.80 | 4.10 | 1.35 | 0.84x | 49388 |
+| `10_matrix_multiply_2d` | **6.43** | 22.42 | 1.93 | 1.83 | 1.29 | **3.49x** | 49388 |
+| `11_generic_containers` | **61.07** | 87.09 | 41.22 | 29.98 | 0.99 | **1.43x** | 49612 |
+| `12_closures_capture` | **20.24** | 35.03 | 6.06 | 3.53 | 1.87 | **1.73x** | 49612 |
+| `13_function_pointers` | **68.07** | 81.24 | 11.49 | 3.94 | 1.41 | **1.19x** | 49612 |
+| `14_exception_zero_cost` | **14.28** | 32.38 | 15.64 | 15.91 | 1.61 | **2.27x** | 49612 |
+| `15_string_processing` | **89.71** | 81.62 | 12.63 | 4.08 | 3.51 | 0.91x | 49612 |
+| `16_multi_binary_link` | **20.67** | 45.04 | 6.63 | 2.39 | 1.15 | **2.18x** | 49612 |
 
 ---
 
