@@ -1,0 +1,165 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.InvalidOperationException;
+import solix.core.NoSuchElementException;
+
+public class PriorityQueueIterator<T> implements IIterator<T> {
+    private List<T> heap_items;
+    private int32 iteration_index;
+
+    public PriorityQueueIterator(List<T> heap) {
+        this.heap_items = heap;
+        this.iteration_index = 0;
+    }
+
+    public bool has_next() {
+        return this.iteration_index < this.heap_items.size();
+    }
+
+    public T next() {
+        if (this.iteration_index >= this.heap_items.size()) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T item_value = this.heap_items.get(this.iteration_index);
+        this.iteration_index = this.iteration_index + 1;
+        return item_value;
+    }
+}
+
+public class PriorityQueue<T> implements IReadOnlyCollection<T>, IIterable<T>, IStringable {
+    private List<T> heap_elements;
+    private int32(*)(T, T) custom_comparator;
+
+    public PriorityQueue() {
+        this.heap_elements = new List<T>();
+        this.custom_comparator = null;
+    }
+
+    public PriorityQueue(int32(*)(T, T) comparator) {
+        this.heap_elements = new List<T>();
+        this.custom_comparator = comparator;
+    }
+
+    private bool has_higher_priority(T first_item, T second_item) {
+        if (this.custom_comparator != null) {
+            int32 compare_result = this.custom_comparator(first_item, second_item);
+            return compare_result < 0;
+        }
+        return first_item < second_item;
+    }
+
+    private void swap_elements(int32 first_index, int32 second_index) {
+        T temporary = this.heap_elements.get(first_index);
+        this.heap_elements.set(first_index, this.heap_elements.get(second_index));
+        this.heap_elements.set(second_index, temporary);
+    }
+
+    private void sift_up(int32 element_index) {
+        while (element_index > 0) {
+            int32 parent_index = (element_index - 1) / 2;
+            T current_item = this.heap_elements.get(element_index);
+            T parent_item = this.heap_elements.get(parent_index);
+            if (this.has_higher_priority(current_item, parent_item)) {
+                this.swap_elements(element_index, parent_index);
+                element_index = parent_index;
+            } else {
+                break;
+            }
+        }
+    }
+
+    private void sift_down(int32 element_index) {
+        int32 total_count = this.heap_elements.size();
+        while (true) {
+            int32 highest_priority_index = element_index;
+            int32 left_child_index = 2 * element_index + 1;
+            int32 right_child_index = 2 * element_index + 2;
+
+            if (left_child_index < total_count) {
+                T left_child_item = this.heap_elements.get(left_child_index);
+                T current_best_item = this.heap_elements.get(highest_priority_index);
+                if (this.has_higher_priority(left_child_item, current_best_item)) {
+                    highest_priority_index = left_child_index;
+                }
+            }
+            if (right_child_index < total_count) {
+                T right_child_item = this.heap_elements.get(right_child_index);
+                T current_best_item = this.heap_elements.get(highest_priority_index);
+                if (this.has_higher_priority(right_child_item, current_best_item)) {
+                    highest_priority_index = right_child_index;
+                }
+            }
+
+            if (highest_priority_index != element_index) {
+                this.swap_elements(element_index, highest_priority_index);
+                element_index = highest_priority_index;
+            } else {
+                break;
+            }
+        }
+    }
+
+    public void enqueue(T item) {
+        this.heap_elements.add(item);
+        int32 last_index = this.heap_elements.size() - 1;
+        this.sift_up(last_index);
+    }
+
+    public T dequeue() {
+        if (this.heap_elements.is_empty()) {
+            throw new InvalidOperationException("PriorityQueue is empty");
+        }
+        T root_item = this.heap_elements.get(0);
+        int32 last_index = this.heap_elements.size() - 1;
+        T last_item = this.heap_elements.remove_at(last_index);
+        if (this.heap_elements.size() > 0) {
+            this.heap_elements.set(0, last_item);
+            this.sift_down(0);
+        }
+        return root_item;
+    }
+
+    public T peek() {
+        if (this.heap_elements.is_empty()) {
+            throw new InvalidOperationException("PriorityQueue is empty");
+        }
+        return this.heap_elements.get(0);
+    }
+
+    public int32 size() {
+        return this.heap_elements.size();
+    }
+
+    public bool is_empty() {
+        return this.heap_elements.is_empty();
+    }
+
+    public void clear() {
+        this.heap_elements.clear();
+    }
+
+    public T[] to_array() {
+        return this.heap_elements.to_array();
+    }
+
+    public bool contains(T item) {
+        return this.heap_elements.contains(item);
+    }
+
+    public void for_each(void(*)(T) action_callback) {
+        if (action_callback == null) {
+            return;
+        }
+        this.heap_elements.for_each(action_callback);
+    }
+
+    public IIterator<T> iterator() {
+        return new PriorityQueueIterator<T>(this.heap_elements);
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this.heap_elements);
+    }
+}

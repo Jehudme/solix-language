@@ -1,0 +1,436 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.core.KeyNotFoundException;
+import solix.core.NoSuchElementException;
+
+class TreeMapNode<K, V> {
+    public K key;
+    public V value;
+    public int32 height;
+    public TreeMapNode<K, V> left_child;
+    public TreeMapNode<K, V> right_child;
+    public TreeMapNode<K, V> parent_node;
+
+    public TreeMapNode(K initial_key, V initial_value, TreeMapNode<K, V> initial_parent) {
+        this.key = initial_key;
+        this.value = initial_value;
+        this.height = 1;
+        this.left_child = null;
+        this.right_child = null;
+        this.parent_node = initial_parent;
+    }
+}
+
+public class TreeMap<K, V> implements IMap<K, V>, IStringable {
+    private TreeMapNode<K, V> root_node;
+    private int32 entry_count;
+    private int32(*)(K, K) custom_comparator;
+
+    public TreeMap() {
+        this.root_node = null;
+        this.entry_count = 0;
+        this.custom_comparator = null;
+    }
+
+    public TreeMap(int32(*)(K, K) comparator) {
+        this.root_node = null;
+        this.entry_count = 0;
+        this.custom_comparator = comparator;
+    }
+
+    private int32 compare_keys(K first_key, K second_key) {
+        if (this.custom_comparator != null) {
+            return this.custom_comparator(first_key, second_key);
+        }
+        if (first_key < second_key) {
+            return -1;
+        }
+        if (first_key > second_key) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private int32 get_node_height(TreeMapNode<K, V> target_node) {
+        if (target_node == null) {
+            return 0;
+        }
+        return target_node.height;
+    }
+
+    private void update_node_height(TreeMapNode<K, V> target_node) {
+        if (target_node != null) {
+            int32 left_height = this.get_node_height(target_node.left_child);
+            int32 right_height = this.get_node_height(target_node.right_child);
+            target_node.height = 1 + (left_height > right_height ? left_height : right_height);
+        }
+    }
+
+    private int32 get_balance_factor(TreeMapNode<K, V> target_node) {
+        if (target_node == null) {
+            return 0;
+        }
+        return this.get_node_height(target_node.left_child) - this.get_node_height(target_node.right_child);
+    }
+
+    private TreeMapNode<K, V> rotate_right(TreeMapNode<K, V> pivot_node) {
+        TreeMapNode<K, V> left_pivot = pivot_node.left_child;
+        pivot_node.left_child = left_pivot.right_child;
+        if (left_pivot.right_child != null) {
+            left_pivot.right_child.parent_node = pivot_node;
+        }
+        left_pivot.parent_node = pivot_node.parent_node;
+        left_pivot.right_child = pivot_node;
+        pivot_node.parent_node = left_pivot;
+        this.update_node_height(pivot_node);
+        this.update_node_height(left_pivot);
+        return left_pivot;
+    }
+
+    private TreeMapNode<K, V> rotate_left(TreeMapNode<K, V> pivot_node) {
+        TreeMapNode<K, V> right_pivot = pivot_node.right_child;
+        pivot_node.right_child = right_pivot.left_child;
+        if (right_pivot.left_child != null) {
+            right_pivot.left_child.parent_node = pivot_node;
+        }
+        right_pivot.parent_node = pivot_node.parent_node;
+        right_pivot.left_child = pivot_node;
+        pivot_node.parent_node = right_pivot;
+        this.update_node_height(pivot_node);
+        this.update_node_height(right_pivot);
+        return right_pivot;
+    }
+
+    private void rebalance_ancestors(TreeMapNode<K, V> starting_node) {
+        TreeMapNode<K, V> current_node = starting_node;
+        while (current_node != null) {
+            this.update_node_height(current_node);
+            int32 balance_val = this.get_balance_factor(current_node);
+            TreeMapNode<K, V> parent_node = current_node.parent_node;
+            TreeMapNode<K, V> replacement_node = current_node;
+
+            if (balance_val > 1) {
+                if (this.get_balance_factor(current_node.left_child) < 0) {
+                    current_node.left_child = this.rotate_left(current_node.left_child);
+                }
+                replacement_node = this.rotate_right(current_node);
+            } else if (balance_val < -1) {
+                if (this.get_balance_factor(current_node.right_child) > 0) {
+                    current_node.right_child = this.rotate_right(current_node.right_child);
+                }
+                replacement_node = this.rotate_left(current_node);
+            }
+
+            if (parent_node == null) {
+                this.root_node = replacement_node;
+            } else if (parent_node.left_child == current_node) {
+                parent_node.left_child = replacement_node;
+            } else {
+                parent_node.right_child = replacement_node;
+            }
+
+            current_node = parent_node;
+        }
+    }
+
+    public int32 size() {
+        return this.entry_count;
+    }
+
+    public bool is_empty() {
+        return this.entry_count == 0;
+    }
+
+    public void clear() {
+        this.root_node = null;
+        this.entry_count = 0;
+    }
+
+    private TreeMapNode<K, V> find_node(K lookup_key) {
+        TreeMapNode<K, V> current_node = this.root_node;
+        while (current_node != null) {
+            int32 compare_result = this.compare_keys(lookup_key, current_node.key);
+            if (compare_result < 0) {
+                current_node = current_node.left_child;
+            } else if (compare_result > 0) {
+                current_node = current_node.right_child;
+            } else {
+                return current_node;
+            }
+        }
+        return null;
+    }
+
+    public bool contains_key(K lookup_key) {
+        return this.find_node(lookup_key) != null;
+    }
+
+    public bool contains_value(V target_value) {
+        List<V> value_list = this.values();
+        return value_list.contains(target_value);
+    }
+
+    public V get(K lookup_key) {
+        TreeMapNode<K, V> found_node = this.find_node(lookup_key);
+        if (found_node == null) {
+            throw new KeyNotFoundException("Key not found in TreeMap");
+        }
+        return found_node.value;
+    }
+
+    public V get_or_default(K lookup_key, V default_val) {
+        TreeMapNode<K, V> found_node = this.find_node(lookup_key);
+        if (found_node == null) {
+            return default_val;
+        }
+        return found_node.value;
+    }
+
+    public void put(K insert_key, V insert_value) {
+        if (this.root_node == null) {
+            this.root_node = new TreeMapNode<K, V>(insert_key, insert_value, null);
+            this.entry_count = 1;
+            return;
+        }
+        TreeMapNode<K, V> current_node = this.root_node;
+        TreeMapNode<K, V> parent_node = null;
+        int32 compare_result = 0;
+        while (current_node != null) {
+            parent_node = current_node;
+            compare_result = this.compare_keys(insert_key, current_node.key);
+            if (compare_result < 0) {
+                current_node = current_node.left_child;
+            } else if (compare_result > 0) {
+                current_node = current_node.right_child;
+            } else {
+                current_node.value = insert_value;
+                return;
+            }
+        }
+        TreeMapNode<K, V> new_node = new TreeMapNode<K, V>(insert_key, insert_value, parent_node);
+        if (compare_result < 0) {
+            parent_node.left_child = new_node;
+        } else {
+            parent_node.right_child = new_node;
+        }
+        this.entry_count = this.entry_count + 1;
+        this.rebalance_ancestors(parent_node);
+    }
+
+    private TreeMapNode<K, V> find_min_node(TreeMapNode<K, V> starting_node) {
+        TreeMapNode<K, V> current_node = starting_node;
+        while (current_node.left_child != null) {
+            current_node = current_node.left_child;
+        }
+        return current_node;
+    }
+
+    public V remove(K target_key) {
+        TreeMapNode<K, V> node_to_remove = this.find_node(target_key);
+        if (node_to_remove == null) {
+            return default(V);
+        }
+        V old_value = node_to_remove.value;
+
+        if (node_to_remove.left_child != null && node_to_remove.right_child != null) {
+            TreeMapNode<K, V> successor = this.find_min_node(node_to_remove.right_child);
+            node_to_remove.key = successor.key;
+            node_to_remove.value = successor.value;
+            node_to_remove = successor;
+        }
+
+        TreeMapNode<K, V> replacement_child = (node_to_remove.left_child != null) ? node_to_remove.left_child : node_to_remove.right_child;
+        TreeMapNode<K, V> parent_node = node_to_remove.parent_node;
+
+        if (replacement_child != null) {
+            replacement_child.parent_node = parent_node;
+        }
+
+        if (parent_node == null) {
+            this.root_node = replacement_child;
+        } else if (parent_node.left_child == node_to_remove) {
+            parent_node.left_child = replacement_child;
+        } else {
+            parent_node.right_child = replacement_child;
+        }
+
+        this.entry_count = this.entry_count - 1;
+        this.rebalance_ancestors(parent_node);
+        return old_value;
+    }
+
+    public K first_key() {
+        if (this.root_node == null) {
+            throw new NoSuchElementException("TreeMap is empty");
+        }
+        return this.find_min_node(this.root_node).key;
+    }
+
+    public K last_key() {
+        if (this.root_node == null) {
+            throw new NoSuchElementException("TreeMap is empty");
+        }
+        TreeMapNode<K, V> current_node = this.root_node;
+        while (current_node.right_child != null) {
+            current_node = current_node.right_child;
+        }
+        return current_node.key;
+    }
+
+    public K floor_key(K target_key) {
+        TreeMapNode<K, V> current_node = this.root_node;
+        TreeMapNode<K, V> candidate_node = null;
+        while (current_node != null) {
+            int32 compare_result = this.compare_keys(target_key, current_node.key);
+            if (compare_result == 0) {
+                return current_node.key;
+            } else if (compare_result > 0) {
+                candidate_node = current_node;
+                current_node = current_node.right_child;
+            } else {
+                current_node = current_node.left_child;
+            }
+        }
+        if (candidate_node == null) {
+            throw new NoSuchElementException("No floor key found");
+        }
+        return candidate_node.key;
+    }
+
+    public K ceiling_key(K target_key) {
+        TreeMapNode<K, V> current_node = this.root_node;
+        TreeMapNode<K, V> candidate_node = null;
+        while (current_node != null) {
+            int32 compare_result = this.compare_keys(target_key, current_node.key);
+            if (compare_result == 0) {
+                return current_node.key;
+            } else if (compare_result < 0) {
+                candidate_node = current_node;
+                current_node = current_node.left_child;
+            } else {
+                current_node = current_node.right_child;
+            }
+        }
+        if (candidate_node == null) {
+            throw new NoSuchElementException("No ceiling key found");
+        }
+        return candidate_node.key;
+    }
+
+    public K lower_key(K target_key) {
+        TreeMapNode<K, V> current_node = this.root_node;
+        TreeMapNode<K, V> candidate_node = null;
+        while (current_node != null) {
+            int32 compare_result = this.compare_keys(target_key, current_node.key);
+            if (compare_result > 0) {
+                candidate_node = current_node;
+                current_node = current_node.right_child;
+            } else {
+                current_node = current_node.left_child;
+            }
+        }
+        if (candidate_node == null) {
+            throw new NoSuchElementException("No lower key found");
+        }
+        return candidate_node.key;
+    }
+
+    public K higher_key(K target_key) {
+        TreeMapNode<K, V> current_node = this.root_node;
+        TreeMapNode<K, V> candidate_node = null;
+        while (current_node != null) {
+            int32 compare_result = this.compare_keys(target_key, current_node.key);
+            if (compare_result < 0) {
+                candidate_node = current_node;
+                current_node = current_node.left_child;
+            } else {
+                current_node = current_node.right_child;
+            }
+        }
+        if (candidate_node == null) {
+            throw new NoSuchElementException("No higher key found");
+        }
+        return candidate_node.key;
+    }
+
+    private void inorder_traverse_keys(TreeMapNode<K, V> traverse_node, List<K> output_list) {
+        if (traverse_node == null) {
+            return;
+        }
+        this.inorder_traverse_keys(traverse_node.left_child, output_list);
+        output_list.add(traverse_node.key);
+        this.inorder_traverse_keys(traverse_node.right_child, output_list);
+    }
+
+    private void inorder_traverse_values(TreeMapNode<K, V> traverse_node, List<V> output_list) {
+        if (traverse_node == null) {
+            return;
+        }
+        this.inorder_traverse_values(traverse_node.left_child, output_list);
+        output_list.add(traverse_node.value);
+        this.inorder_traverse_values(traverse_node.right_child, output_list);
+    }
+
+    private void inorder_traverse_entries(TreeMapNode<K, V> traverse_node, List<KeyValuePair<K, V>> output_list) {
+        if (traverse_node == null) {
+            return;
+        }
+        this.inorder_traverse_entries(traverse_node.left_child, output_list);
+        KeyValuePair<K, V> pair_entry = new KeyValuePair<K, V>(traverse_node.key, traverse_node.value);
+        output_list.add(pair_entry);
+        this.inorder_traverse_entries(traverse_node.right_child, output_list);
+    }
+
+    public List<K> keys() {
+        List<K> result_list = new List<K>(this.entry_count);
+        this.inorder_traverse_keys(this.root_node, result_list);
+        return result_list;
+    }
+
+    public List<V> values() {
+        List<V> result_list = new List<V>(this.entry_count);
+        this.inorder_traverse_values(this.root_node, result_list);
+        return result_list;
+    }
+
+    public List<KeyValuePair<K, V>> entries() {
+        List<KeyValuePair<K, V>> result_list = new List<KeyValuePair<K, V>>(this.entry_count);
+        this.inorder_traverse_entries(this.root_node, result_list);
+        return result_list;
+    }
+
+    private void inorder_traverse_action(TreeMapNode<K, V> traverse_node, void(*)(K, V) action_callback) {
+        if (traverse_node == null) {
+            return;
+        }
+        this.inorder_traverse_action(traverse_node.left_child, action_callback);
+        action_callback(traverse_node.key, traverse_node.value);
+        this.inorder_traverse_action(traverse_node.right_child, action_callback);
+    }
+
+    public void for_each(void(*)(K, V) action_callback) {
+        if (action_callback == null) {
+            return;
+        }
+        this.inorder_traverse_action(this.root_node, action_callback);
+    }
+
+    public String to_string() {
+        StringBuilder builder = new StringBuilder("{");
+        List<KeyValuePair<K, V>> entry_list = this.entries();
+        for (int32 entry_index = 0; entry_index < entry_list.size(); entry_index = entry_index + 1) {
+            if (entry_index > 0) {
+                builder.append(", ");
+            }
+            KeyValuePair<K, V> pair_item = entry_list.get(entry_index);
+            builder.append(String::from_any<K>(pair_item.key));
+            builder.append(": ");
+            builder.append(String::from_any<V>(pair_item.value));
+        }
+        builder.append("}");
+        return builder.to_string();
+    }
+}

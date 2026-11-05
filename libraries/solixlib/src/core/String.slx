@@ -42,7 +42,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (characters == null || characters.length == 0) {
             this.data = "";
         } else {
-            this.data = String.native_chars_to_string(characters);
+            this.data = String::native_chars_to_string(characters);
         }
     }
 
@@ -59,29 +59,29 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
             slice_buffer[copy_index] = characters[offset + copy_index];
             copy_index = copy_index + 1;
         }
-        this.data = String.native_chars_to_string(slice_buffer);
+        this.data = String::native_chars_to_string(slice_buffer);
     }
 
     public String(int32 value) {
-        this.data = String.native_from_int((int64)value);
+        this.data = String::native_from_int((int64)value);
     }
 
     public String(int64 value) {
-        this.data = String.native_from_int(value);
+        this.data = String::native_from_int(value);
     }
 
     public String(float64 value) {
-        this.data = String.native_from_double(value, 6);
+        this.data = String::native_from_double(value, 6);
     }
 
     public String(bool value) {
-        this.data = String.native_from_bool(value);
+        this.data = String::native_from_bool(value);
     }
 
     public String(char character) {
         char[] single_buffer = new char[1];
         single_buffer[0] = character;
-        this.data = String.native_chars_to_string(single_buffer);
+        this.data = String::native_chars_to_string(single_buffer);
     }
 
     // Properties
@@ -100,7 +100,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         int32 scan_index = 0;
         while (scan_index < this.data.length) {
             char current_char = this.data[scan_index];
-            if (!Primitives.is_whitespace(current_char)) {
+            if (!Primitives::is_whitespace(current_char)) {
                 return false;
             }
             scan_index = scan_index + 1;
@@ -146,20 +146,20 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     }
 
     public String to_upper() {
-        return new String(String.native_to_upper(this.data));
+        return new String(String::native_to_upper(this.data));
     }
 
     public String to_lower() {
-        return new String(String.native_to_lower(this.data));
+        return new String(String::native_to_lower(this.data));
     }
 
     public String trim() {
         int32 start_index = 0;
         int32 end_index = this.data.length;
-        while (start_index < end_index && Primitives.is_whitespace(this.data[start_index])) {
+        while (start_index < end_index && Primitives::is_whitespace(this.data[start_index])) {
             start_index = start_index + 1;
         }
-        while (end_index > start_index && Primitives.is_whitespace(this.data[end_index - 1])) {
+        while (end_index > start_index && Primitives::is_whitespace(this.data[end_index - 1])) {
             end_index = end_index - 1;
         }
         return this.slice(start_index, end_index);
@@ -168,7 +168,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     public String trim_start() {
         int32 start_index = 0;
         int32 end_index = this.data.length;
-        while (start_index < end_index && Primitives.is_whitespace(this.data[start_index])) {
+        while (start_index < end_index && Primitives::is_whitespace(this.data[start_index])) {
             start_index = start_index + 1;
         }
         return this.slice(start_index, end_index);
@@ -177,7 +177,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     public String trim_end() {
         int32 start_index = 0;
         int32 end_index = this.data.length;
-        while (end_index > start_index && Primitives.is_whitespace(this.data[end_index - 1])) {
+        while (end_index > start_index && Primitives::is_whitespace(this.data[end_index - 1])) {
             end_index = end_index - 1;
         }
         return this.slice(start_index, end_index);
@@ -253,42 +253,42 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (needle == null) {
             return -1;
         }
-        return (int32)String.native_index_of(this.data, needle.data, 0);
+        return (int32)String::native_index_of(this.data, needle.data, 0);
     }
 
     public int32 index_of(string needle) {
         if (needle == null) {
             return -1;
         }
-        return (int32)String.native_index_of(this.data, needle, 0);
+        return (int32)String::native_index_of(this.data, needle, 0);
     }
 
     public int32 index_of(String needle, int32 start_index) {
         if (needle == null) {
             return -1;
         }
-        return (int32)String.native_index_of(this.data, needle.data, start_index);
+        return (int32)String::native_index_of(this.data, needle.data, start_index);
     }
 
     public int32 index_of(string needle, int32 start_index) {
         if (needle == null) {
             return -1;
         }
-        return (int32)String.native_index_of(this.data, needle, start_index);
+        return (int32)String::native_index_of(this.data, needle, start_index);
     }
 
     public int32 last_index_of(String needle) {
         if (needle == null) {
             return -1;
         }
-        return (int32)String.native_last_index_of(this.data, needle.data);
+        return (int32)String::native_last_index_of(this.data, needle.data);
     }
 
     public int32 last_index_of(string needle) {
         if (needle == null) {
             return -1;
         }
-        return (int32)String.native_last_index_of(this.data, needle);
+        return (int32)String::native_last_index_of(this.data, needle);
     }
 
     public int32 count(String needle) {
@@ -298,7 +298,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         int32 occurrences = 0;
         int32 search_offset = 0;
         while (search_offset <= this.data.length - needle.data.length) {
-            int32 found_pos = (int32)String.native_index_of(this.data, needle.data, search_offset);
+            int32 found_pos = (int32)String::native_index_of(this.data, needle.data, search_offset);
             if (found_pos < 0) {
                 break;
             }
@@ -312,14 +312,14 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (old_token == null || new_token == null) {
             return this;
         }
-        return new String(String.native_replace(this.data, old_token.data, new_token.data));
+        return new String(String::native_replace(this.data, old_token.data, new_token.data));
     }
 
     public String replace(string old_token, string new_token) {
         if (old_token == null || new_token == null) {
             return this;
         }
-        return new String(String.native_replace(this.data, old_token, new_token));
+        return new String(String::native_replace(this.data, old_token, new_token));
     }
 
     public String replace_first(String old_token, String new_token) {
@@ -481,7 +481,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
                     }
                     if (closing_brace < format_len) {
                         String index_str = format_string.substring(cursor_index + 1, closing_brace - (cursor_index + 1));
-                        int32 parsed_index = String.parse_int(index_str);
+                        int32 parsed_index = String::parse_int(index_str);
                         if (parsed_index >= 0 && parsed_index < arguments.length && arguments[parsed_index] != null) {
                             builder.append(arguments[parsed_index].data);
                         }
@@ -512,10 +512,10 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         String[] arguments_array = new String[arguments_tuple.length];
         int32 tuple_index = 0;
         while (tuple_index < arguments_tuple.length) {
-            arguments_array[tuple_index] = String.from_any(arguments_tuple[tuple_index]);
+            arguments_array[tuple_index] = String::from_any(arguments_tuple[tuple_index]);
             tuple_index = tuple_index + 1;
         }
-        return String.format_array(format_string, arguments_array);
+        return String::format_array(format_string, arguments_array);
     }
 
     public static String from_int32(int32 value) {
@@ -542,23 +542,23 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     }
 
     public int32 to_int32() {
-        return String.parse_int(this);
+        return String::parse_int(this);
     }
 
     public int64 to_int64() {
         int64[] out_box = new int64[1];
-        if (String.native_try_parse_int(this.data, out_box) != 1) {
+        if (String::native_try_parse_int(this.data, out_box) != 1) {
             throw new NumberFormatException("Failed to parse int64 from '" + this.data + "'");
         }
         return out_box[0];
     }
 
     public float64 to_float64() {
-        return String.parse_double(this);
+        return String::parse_double(this);
     }
 
     public bool to_bool() {
-        return String.parse_bool(this);
+        return String::parse_bool(this);
     }
 
     public static int32 parse_int(String text) {
@@ -566,7 +566,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
             throw new NumberFormatException("Cannot parse int32 from null");
         }
         int64[] out_box = new int64[1];
-        if (String.native_try_parse_int(text.data, out_box) != 1) {
+        if (String::native_try_parse_int(text.data, out_box) != 1) {
             throw new NumberFormatException("Failed to parse integer from '" + text.data + "'");
         }
         return (int32)out_box[0];
@@ -577,7 +577,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
             throw new NumberFormatException("Cannot parse double from null");
         }
         float64[] out_box = new float64[1];
-        if (String.native_try_parse_double(text.data, out_box) != 1) {
+        if (String::native_try_parse_double(text.data, out_box) != 1) {
             throw new NumberFormatException("Failed to parse double from '" + text.data + "'");
         }
         return out_box[0];
@@ -594,7 +594,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     }
 
     public char[] to_chars() {
-        return String.native_string_to_chars(this.data);
+        return String::native_string_to_chars(this.data);
     }
 
     public int32 hash_code() {

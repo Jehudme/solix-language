@@ -1,0 +1,254 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.core.Primitives;
+import solix.core.IllegalArgumentException;
+import solix.core.IndexOutOfBoundsException;
+
+public class BitSet implements IStringable {
+    private int64[] storage_words;
+
+    public BitSet() {
+        this.storage_words = new int64[1];
+        this.storage_words[0] = 0L;
+    }
+
+    public BitSet(int32 initial_bit_count) {
+        if (initial_bit_count < 0) {
+            throw new IllegalArgumentException("initial_bit_count", "BitSet size cannot be negative");
+        }
+        int32 required_word_count = (initial_bit_count + 63) / 64;
+        if (required_word_count < 1) {
+            required_word_count = 1;
+        }
+        this.storage_words = new int64[required_word_count];
+        for (int32 word_index = 0; word_index < required_word_count; word_index = word_index + 1) {
+            this.storage_words[word_index] = 0L;
+        }
+    }
+
+    private void ensure_word_capacity(int32 required_words) {
+        if (required_words <= this.storage_words.length) {
+            return;
+        }
+        int32 new_word_count = this.storage_words.length * 2;
+        if (new_word_count < required_words) {
+            new_word_count = required_words;
+        }
+        int64[] new_storage = new int64[new_word_count];
+        for (int32 word_index = 0; word_index < this.storage_words.length; word_index = word_index + 1) {
+            new_storage[word_index] = this.storage_words[word_index];
+        }
+        for (int32 word_index = this.storage_words.length; word_index < new_word_count; word_index = word_index + 1) {
+            new_storage[word_index] = 0L;
+        }
+        this.storage_words = new_storage;
+    }
+
+    public int32 size() {
+        return this.storage_words.length * 64;
+    }
+
+    public int32 length() {
+        for (int32 word_index = this.storage_words.length - 1; word_index >= 0; word_index = word_index - 1) {
+            int64 word_value = this.storage_words[word_index];
+            if (word_value != 0L) {
+                int32 leading_zeros = Primitives::count_leading_zeros64(word_value);
+                return (word_index * 64) + (64 - leading_zeros);
+            }
+        }
+        return 0;
+    }
+
+    public bool is_empty() {
+        return this.cardinality() == 0;
+    }
+
+    public int32 cardinality() {
+        int32 total_set_bits = 0;
+        for (int32 word_index = 0; word_index < this.storage_words.length; word_index = word_index + 1) {
+            total_set_bits = total_set_bits + Primitives::bit_count64(this.storage_words[word_index]);
+        }
+        return total_set_bits;
+    }
+
+    public bool get(int32 bit_index) {
+        if (bit_index < 0) {
+            throw new IndexOutOfBoundsException("Bit index cannot be negative");
+        }
+        int32 word_index = bit_index / 64;
+        if (word_index >= this.storage_words.length) {
+            return false;
+        }
+        int64 bit_mask = 1L << (bit_index % 64);
+        return (this.storage_words[word_index] & bit_mask) != 0L;
+    }
+
+    public void set(int32 bit_index) {
+        if (bit_index < 0) {
+            throw new IndexOutOfBoundsException("Bit index cannot be negative");
+        }
+        int32 word_index = bit_index / 64;
+        this.ensure_word_capacity(word_index + 1);
+        int64 bit_mask = 1L << (bit_index % 64);
+        this.storage_words[word_index] = this.storage_words[word_index] | bit_mask;
+    }
+
+    public void set_value(int32 bit_index, bool bit_value) {
+        if (bit_value) {
+            this.set(bit_index);
+        } else {
+            this.clear(bit_index);
+        }
+    }
+
+    public void clear(int32 bit_index) {
+        if (bit_index < 0) {
+            throw new IndexOutOfBoundsException("Bit index cannot be negative");
+        }
+        int32 word_index = bit_index / 64;
+        if (word_index < this.storage_words.length) {
+            int64 bit_mask = 1L << (bit_index % 64);
+            this.storage_words[word_index] = this.storage_words[word_index] & (~bit_mask);
+        }
+    }
+
+    public void clear_all() {
+        for (int32 word_index = 0; word_index < this.storage_words.length; word_index = word_index + 1) {
+            this.storage_words[word_index] = 0L;
+        }
+    }
+
+    public void flip(int32 bit_index) {
+        if (bit_index < 0) {
+            throw new IndexOutOfBoundsException("Bit index cannot be negative");
+        }
+        int32 word_index = bit_index / 64;
+        this.ensure_word_capacity(word_index + 1);
+        int64 bit_mask = 1L << (bit_index % 64);
+        this.storage_words[word_index] = this.storage_words[word_index] ^ bit_mask;
+    }
+
+    public void and_with(BitSet other_bitset) {
+        if (other_bitset == null) {
+            throw new IllegalArgumentException("other_bitset", "BitSet cannot be null");
+        }
+        int32 common_words = this.storage_words.length;
+        if (other_bitset.storage_words.length < common_words) {
+            common_words = other_bitset.storage_words.length;
+        }
+        for (int32 word_index = 0; word_index < common_words; word_index = word_index + 1) {
+            this.storage_words[word_index] = this.storage_words[word_index] & other_bitset.storage_words[word_index];
+        }
+        for (int32 word_index = common_words; word_index < this.storage_words.length; word_index = word_index + 1) {
+            this.storage_words[word_index] = 0L;
+        }
+    }
+
+    public void and(BitSet other_bitset) {
+        this.and_with(other_bitset);
+    }
+
+    public void or_with(BitSet other_bitset) {
+        if (other_bitset == null) {
+            throw new IllegalArgumentException("other_bitset", "BitSet cannot be null");
+        }
+        this.ensure_word_capacity(other_bitset.storage_words.length);
+        for (int32 word_index = 0; word_index < other_bitset.storage_words.length; word_index = word_index + 1) {
+            this.storage_words[word_index] = this.storage_words[word_index] | other_bitset.storage_words[word_index];
+        }
+    }
+
+    public void or(BitSet other_bitset) {
+        this.or_with(other_bitset);
+    }
+
+    public void xor_with(BitSet other_bitset) {
+        if (other_bitset == null) {
+            throw new IllegalArgumentException("other_bitset", "BitSet cannot be null");
+        }
+        this.ensure_word_capacity(other_bitset.storage_words.length);
+        for (int32 word_index = 0; word_index < other_bitset.storage_words.length; word_index = word_index + 1) {
+            this.storage_words[word_index] = this.storage_words[word_index] ^ other_bitset.storage_words[word_index];
+        }
+    }
+
+    public void xor(BitSet other_bitset) {
+        this.xor_with(other_bitset);
+    }
+
+    public void and_not(BitSet other_bitset) {
+        if (other_bitset == null) {
+            throw new IllegalArgumentException("other_bitset", "BitSet cannot be null");
+        }
+        int32 common_words = this.storage_words.length;
+        if (other_bitset.storage_words.length < common_words) {
+            common_words = other_bitset.storage_words.length;
+        }
+        for (int32 word_index = 0; word_index < common_words; word_index = word_index + 1) {
+            this.storage_words[word_index] = this.storage_words[word_index] & (~other_bitset.storage_words[word_index]);
+        }
+    }
+
+    public int32 next_set_bit(int32 from_index) {
+        if (from_index < 0) {
+            throw new IndexOutOfBoundsException("from_index cannot be negative");
+        }
+        int32 start_word = from_index / 64;
+        if (start_word >= this.storage_words.length) {
+            return -1;
+        }
+        int64 mask_from = (~0L) << (from_index % 64);
+        int64 first_word = this.storage_words[start_word] & mask_from;
+        if (first_word != 0L) {
+            return (start_word * 64) + Primitives::count_trailing_zeros64(first_word);
+        }
+        for (int32 word_index = start_word + 1; word_index < this.storage_words.length; word_index = word_index + 1) {
+            int64 word_value = this.storage_words[word_index];
+            if (word_value != 0L) {
+                return (word_index * 64) + Primitives::count_trailing_zeros64(word_value);
+            }
+        }
+        return -1;
+    }
+
+    public int32 next_clear_bit(int32 from_index) {
+        if (from_index < 0) {
+            throw new IndexOutOfBoundsException("from_index cannot be negative");
+        }
+        int32 start_word = from_index / 64;
+        if (start_word >= this.storage_words.length) {
+            return from_index;
+        }
+        int64 mask_from = (~0L) << (from_index % 64);
+        int64 inverted_first_word = (~this.storage_words[start_word]) & mask_from;
+        if (inverted_first_word != 0L) {
+            return (start_word * 64) + Primitives::count_trailing_zeros64(inverted_first_word);
+        }
+        for (int32 word_index = start_word + 1; word_index < this.storage_words.length; word_index = word_index + 1) {
+            int64 inverted_word = ~this.storage_words[word_index];
+            if (inverted_word != 0L) {
+                return (word_index * 64) + Primitives::count_trailing_zeros64(inverted_word);
+            }
+        }
+        return this.storage_words.length * 64;
+    }
+
+    public String to_string() {
+        StringBuilder builder = new StringBuilder("{");
+        bool is_first = true;
+        int32 set_bit_index = this.next_set_bit(0);
+        while (set_bit_index >= 0) {
+            if (!is_first) {
+                builder.append(", ");
+            }
+            builder.append_int(set_bit_index);
+            is_first = false;
+            set_bit_index = this.next_set_bit(set_bit_index + 1);
+        }
+        builder.append("}");
+        return builder.to_string();
+    }
+}

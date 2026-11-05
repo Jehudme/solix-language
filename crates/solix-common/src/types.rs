@@ -450,7 +450,7 @@ impl Type {
                 },
             ) => {
                 if is_subtype(source_name, target_name) {
-                    if target_args.is_empty() {
+                    if source_args.is_empty() || target_args.is_empty() {
                         true
                     } else {
                         // Invariant generic parameters: arguments must match exactly

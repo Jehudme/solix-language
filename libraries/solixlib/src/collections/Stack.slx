@@ -1,0 +1,98 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.NoSuchElementException;
+
+public class StackIterator<T> implements IIterator<T> {
+    private Stack<T> stack_reference;
+    private int32 current_offset;
+
+    public StackIterator(Stack<T> stack_ref) {
+        this.stack_reference = stack_ref;
+        this.current_offset = 0;
+    }
+
+    public bool has_next() {
+        return this.current_offset < this.stack_reference.size();
+    }
+
+    public T next() {
+        if (!this.has_next()) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T element_value = this.stack_reference.get(this.stack_reference.size() - 1 - this.current_offset);
+        this.current_offset = this.current_offset + 1;
+        return element_value;
+    }
+}
+
+public class Stack<T> implements ICollection<T>, IIterable<T>, IStringable {
+    private List<T> inner_list;
+
+    public Stack() {
+        this.inner_list = new List<T>();
+    }
+
+    public Stack(int32 initial_capacity) {
+        this.inner_list = new List<T>(initial_capacity);
+    }
+
+    public int32 size() {
+        return this.inner_list.size();
+    }
+
+    public bool is_empty() {
+        return this.inner_list.is_empty();
+    }
+
+    public void clear() {
+        this.inner_list.clear();
+    }
+
+    public void push(T item) {
+        this.inner_list.add(item);
+    }
+
+    public void add(T item) {
+        this.inner_list.add(item);
+    }
+
+    public T pop() {
+        if (this.inner_list.is_empty()) {
+            throw new NoSuchElementException("Stack is empty");
+        }
+        return this.inner_list.remove_at(this.inner_list.size() - 1);
+    }
+
+    public T peek() {
+        if (this.inner_list.is_empty()) {
+            throw new NoSuchElementException("Stack is empty");
+        }
+        return this.inner_list.get(this.inner_list.size() - 1);
+    }
+
+    public T get(int32 index) {
+        return this.inner_list.get(index);
+    }
+
+    public bool contains(T item) {
+        return this.inner_list.contains(item);
+    }
+
+    public bool remove(T item) {
+        return this.inner_list.remove(item);
+    }
+
+    public T[] to_array() {
+        return this.inner_list.to_array();
+    }
+
+    public IIterator<T> iterator() {
+        return new StackIterator<T>(this);
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this);
+    }
+}

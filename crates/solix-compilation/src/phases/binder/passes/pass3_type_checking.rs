@@ -824,6 +824,27 @@ impl<'a> TypeCheckingVisitor<'a> {
                         ref type_arguments,
                     } = obj_type
                     {
+                        let mut class_substitutions = HashMap::new();
+                        if !type_arguments.is_empty() {
+                            let clean_name = symbol_name.replace("::", ".");
+                            if let Some(blueprint) = self
+                                .blueprint_registry
+                                .blueprints
+                                .get(symbol_name)
+                                .or_else(|| self.blueprint_registry.blueprints.get(&clean_name))
+                                .or_else(|| {
+                                    let short_name = symbol_name.rsplit("::").next().unwrap_or(symbol_name);
+                                    self.blueprint_registry.blueprints.get(short_name)
+                                })
+                            {
+                                for (param_name, arg_type) in
+                                    blueprint.parameter_names.iter().zip(type_arguments)
+                                {
+                                    class_substitutions.insert(param_name.clone(), arg_type.clone());
+                                }
+                            }
+                        }
+
                         let cls_id = if !type_arguments.is_empty() {
                             let mangled =
                                 crate::phases::binder::monomorphizer::GenericBlueprintRegistry::mangle_name(
@@ -859,16 +880,30 @@ impl<'a> TypeCheckingVisitor<'a> {
                                             ref parameter_types,
                                             ref return_type,
                                         } = child_entry.symbol_type
-                                        && let Some(matched_return) = self.match_method_signature(
-                                            parameter_types,
-                                            return_type,
+                                    {
+                                        let effective_params: Vec<Type> = if class_substitutions.is_empty() {
+                                            parameter_types.clone()
+                                        } else {
+                                            parameter_types
+                                                .iter()
+                                                .map(|param_type| Self::substitute_type(param_type, &class_substitutions))
+                                                .collect()
+                                        };
+                                        let effective_return = if class_substitutions.is_empty() {
+                                            *return_type.clone()
+                                        } else {
+                                            Self::substitute_type(return_type, &class_substitutions)
+                                        };
+                                        if let Some(matched_return) = self.match_method_signature(
+                                            &effective_params,
+                                            &effective_return,
                                             generic_arguments,
                                             &evaluated_arg_types,
                                             arguments,
-                                        )
-                                    {
-                                        found_method = Some((child_id, matched_return));
-                                        break;
+                                        ) {
+                                            found_method = Some((child_id, matched_return));
+                                            break;
+                                        }
                                     }
                                 }
                                 if found_method.is_some() {
@@ -1742,15 +1777,20 @@ impl<'a> TypeCheckingVisitor<'a> {
             Self::collect_generic_params(parameter_type, &mut generic_param_order);
         }
 
-        if generic_param_order.is_empty() && generic_arguments.is_empty() {
+        let mut generic_params_in_args = Vec::new();
+        for parameter_type in parameter_types {
+            Self::collect_generic_params(parameter_type, &mut generic_params_in_args);
+        }
+
+        if generic_arguments.is_empty() && generic_params_in_args.is_empty() {
             let is_matched = parameter_types
                 .iter()
                 .zip(evaluated_arg_types)
                 .enumerate()
-                .all(|(arg_index, (expected, actual))| {
-                    actual.is_assignable_to(expected, &|src, tgt| self.check_is_subtype(src, tgt))
-                        || actual == expected
-                        || is_literal_compatible_with_type(&arguments[arg_index], expected)
+                .all(|(arg_index, (expected_type, actual_type))| {
+                    actual_type.is_assignable_to(expected_type, &|src, tgt| self.check_is_subtype(src, tgt))
+                        || actual_type == expected_type
+                        || is_literal_compatible_with_type(&arguments[arg_index], expected_type)
                 });
             if is_matched {
                 Some(return_type.clone())
@@ -1775,12 +1815,12 @@ impl<'a> TypeCheckingVisitor<'a> {
                     substitutions.insert(param_name.clone(), resolved_type);
                 }
             } else {
-                for (param_type, arg_type) in parameter_types.iter().zip(evaluated_arg_types) {
-                    if !Self::deduce_template_argument(param_type, arg_type, &mut substitutions) {
+                for (parameter_type, argument_type) in parameter_types.iter().zip(evaluated_arg_types) {
+                    if !Self::deduce_template_argument(parameter_type, argument_type, &mut substitutions) {
                         return None;
                     }
                 }
-                for param_name in &generic_param_order {
+                for param_name in &generic_params_in_args {
                     if !substitutions.contains_key(param_name) {
                         return None;
                     }
@@ -1887,6 +1927,79 @@ impl<'a> TypeCheckingVisitor<'a> {
                             concrete_element,
                             substitutions,
                         ) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Type::Class {
+                symbol_name: pattern_symbol_name,
+                type_arguments: pattern_type_arguments,
+            } => {
+                if let Type::Class {
+                    symbol_name: concrete_symbol_name,
+                    type_arguments: concrete_type_arguments,
+                } = concrete_type
+                {
+                    if pattern_symbol_name.replace('.', "::") != concrete_symbol_name.replace('.', "::")
+                        || pattern_type_arguments.len() != concrete_type_arguments.len()
+                    {
+                        return false;
+                    }
+                    for (pattern_argument, concrete_argument) in pattern_type_arguments.iter().zip(concrete_type_arguments) {
+                        if !Self::deduce_template_argument(pattern_argument, concrete_argument, substitutions) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Type::Interface {
+                symbol_name: pattern_symbol_name,
+                type_arguments: pattern_type_arguments,
+            } => {
+                if let Type::Interface {
+                    symbol_name: concrete_symbol_name,
+                    type_arguments: concrete_type_arguments,
+                } = concrete_type
+                {
+                    if pattern_symbol_name.replace('.', "::") != concrete_symbol_name.replace('.', "::")
+                        || pattern_type_arguments.len() != concrete_type_arguments.len()
+                    {
+                        return false;
+                    }
+                    for (pattern_argument, concrete_argument) in pattern_type_arguments.iter().zip(concrete_type_arguments) {
+                        if !Self::deduce_template_argument(pattern_argument, concrete_argument, substitutions) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Type::FunctionPointer {
+                parameter_types: pattern_parameters,
+                return_type: pattern_return,
+            } => {
+                if let Type::FunctionPointer {
+                    parameter_types: concrete_parameters,
+                    return_type: concrete_return,
+                } = concrete_type
+                {
+                    if pattern_parameters.len() != concrete_parameters.len() {
+                        return false;
+                    }
+                    if !Self::deduce_template_argument(pattern_return, concrete_return, substitutions) {
+                        return false;
+                    }
+                    for (pattern_param, concrete_param) in pattern_parameters.iter().zip(concrete_parameters) {
+                        if !Self::deduce_template_argument(pattern_param, concrete_param, substitutions) {
                             return false;
                         }
                     }

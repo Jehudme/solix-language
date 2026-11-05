@@ -33,14 +33,14 @@ public class Result<T, E> implements IStringable {
 
     public T unwrap() {
         if (!this.is_ok_flag) {
-            throw new InvalidOperationException("Called Result.unwrap() on an Err value: " + this.error_value);
+            throw new InvalidOperationException("Called Result::unwrap() on an Err value: " + this.error_value);
         }
         return this.ok_value;
     }
 
     public E unwrap_err() {
         if (this.is_ok_flag) {
-            throw new InvalidOperationException("Called Result.unwrap_err() on an Ok value: " + this.ok_value);
+            throw new InvalidOperationException("Called Result::unwrap_err() on an Ok value: " + this.ok_value);
         }
         return this.error_value;
     }
@@ -54,8 +54,8 @@ public class Result<T, E> implements IStringable {
 
     public String to_string() {
         if (this.is_ok_flag) {
-            return new String("Result.Ok(" + this.ok_value + ")");
+            return new String("Result::Ok(" + this.ok_value + ")");
         }
-        return new String("Result.Err(" + this.error_value + ")");
+        return new String("Result::Err(" + this.error_value + ")");
     }
 }

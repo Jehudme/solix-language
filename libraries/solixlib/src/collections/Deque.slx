@@ -1,0 +1,217 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.IndexOutOfBoundsException;
+import solix.core.NoSuchElementException;
+
+public class DequeIterator<T> implements IIterator<T> {
+    private Deque<T> deque_reference;
+    private int32 current_offset;
+
+    public DequeIterator(Deque<T> deque_ref) {
+        this.deque_reference = deque_ref;
+        this.current_offset = 0;
+    }
+
+    public bool has_next() {
+        return this.current_offset < this.deque_reference.size();
+    }
+
+    public T next() {
+        if (!this.has_next()) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T element_value = this.deque_reference.get(this.current_offset);
+        this.current_offset = this.current_offset + 1;
+        return element_value;
+    }
+}
+
+public class Deque<T> implements IDeque<T>, ICollection<T>, IIterable<T>, IStringable {
+    public T[] buffer;
+    public int32 head_index;
+    public int32 tail_index;
+    public int32 count;
+
+    public Deque() {
+        this.buffer = new T[16];
+        this.head_index = 0;
+        this.tail_index = 0;
+        this.count = 0;
+    }
+
+    public Deque(int32 initial_capacity) {
+        if (initial_capacity < 4) {
+            initial_capacity = 4;
+        }
+        this.buffer = new T[initial_capacity];
+        this.head_index = 0;
+        this.tail_index = 0;
+        this.count = 0;
+    }
+
+    public int32 size() {
+        return this.count;
+    }
+
+    public bool is_empty() {
+        return this.count == 0;
+    }
+
+    public void clear() {
+        int32 clear_index = 0;
+        while (clear_index < this.buffer.length) {
+            this.buffer[clear_index] = default(T);
+            clear_index = clear_index + 1;
+        }
+        this.head_index = 0;
+        this.tail_index = 0;
+        this.count = 0;
+    }
+
+    private void ensure_capacity() {
+        if (this.count == this.buffer.length) {
+            int32 new_capacity = this.buffer.length * 2;
+            T[] new_buffer = new T[new_capacity];
+            int32 copy_index = 0;
+            while (copy_index < this.count) {
+                int32 source_slot = (this.head_index + copy_index) % this.buffer.length;
+                new_buffer[copy_index] = this.buffer[source_slot];
+                copy_index = copy_index + 1;
+            }
+            this.buffer = new_buffer;
+            this.head_index = 0;
+            this.tail_index = this.count;
+        }
+    }
+
+    public void add_first(T item) {
+        this.ensure_capacity();
+        this.head_index = (this.head_index - 1 + this.buffer.length) % this.buffer.length;
+        this.buffer[this.head_index] = item;
+        this.count = this.count + 1;
+    }
+
+    public void add_last(T item) {
+        this.ensure_capacity();
+        this.buffer[this.tail_index] = item;
+        this.tail_index = (this.tail_index + 1) % this.buffer.length;
+        this.count = this.count + 1;
+    }
+
+    public void push_front(T item) {
+        this.add_first(item);
+    }
+
+    public void push_back(T item) {
+        this.add_last(item);
+    }
+
+    public void add(T item) {
+        this.add_last(item);
+    }
+
+    public T remove_first() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("Deque is empty");
+        }
+        T removed_item = this.buffer[this.head_index];
+        this.buffer[this.head_index] = default(T);
+        this.head_index = (this.head_index + 1) % this.buffer.length;
+        this.count = this.count - 1;
+        return removed_item;
+    }
+
+    public T remove_last() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("Deque is empty");
+        }
+        this.tail_index = (this.tail_index - 1 + this.buffer.length) % this.buffer.length;
+        T removed_item = this.buffer[this.tail_index];
+        this.buffer[this.tail_index] = default(T);
+        this.count = this.count - 1;
+        return removed_item;
+    }
+
+    public T pop_front() {
+        return this.remove_first();
+    }
+
+    public T pop_back() {
+        return this.remove_last();
+    }
+
+    public T peek_first() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("Deque is empty");
+        }
+        return this.buffer[this.head_index];
+    }
+
+    public T peek_last() {
+        if (this.count == 0) {
+            throw new NoSuchElementException("Deque is empty");
+        }
+        int32 last_slot = (this.tail_index - 1 + this.buffer.length) % this.buffer.length;
+        return this.buffer[last_slot];
+    }
+
+    public T get(int32 index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException("Deque index out of bounds", index, 0, this.count);
+        }
+        int32 physical_slot = (this.head_index + index) % this.buffer.length;
+        return this.buffer[physical_slot];
+    }
+
+    public bool contains(T item) {
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (this.get(scan_index) == item) {
+                return true;
+            }
+            scan_index = scan_index + 1;
+        }
+        return false;
+    }
+
+    public bool remove(T item) {
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (this.get(scan_index) == item) {
+                int32 shift_index = scan_index;
+                while (shift_index < this.count - 1) {
+                    int32 current_slot = (this.head_index + shift_index) % this.buffer.length;
+                    int32 next_slot = (this.head_index + shift_index + 1) % this.buffer.length;
+                    this.buffer[current_slot] = this.buffer[next_slot];
+                    shift_index = shift_index + 1;
+                }
+                this.tail_index = (this.tail_index - 1 + this.buffer.length) % this.buffer.length;
+                this.buffer[this.tail_index] = default(T);
+                this.count = this.count - 1;
+                return true;
+            }
+            scan_index = scan_index + 1;
+        }
+        return false;
+    }
+
+    public T[] to_array() {
+        T[] array_result = new T[this.count];
+        int32 copy_index = 0;
+        while (copy_index < this.count) {
+            array_result[copy_index] = this.get(copy_index);
+            copy_index = copy_index + 1;
+        }
+        return array_result;
+    }
+
+    public IIterator<T> iterator() {
+        return new DequeIterator<T>(this);
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this);
+    }
+}

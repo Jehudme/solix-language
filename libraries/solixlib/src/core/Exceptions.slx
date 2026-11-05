@@ -59,16 +59,36 @@ public class RuntimeException extends Exception {
 }
 
 public class IllegalArgumentException extends RuntimeException {
-    public IllegalArgumentException() : super("Illegal argument provided.") {}
-    public IllegalArgumentException(string message) : super(message) {}
-    public IllegalArgumentException(String message) : super(message) {}
-    public IllegalArgumentException(string message, Exception cause) : super(message, cause) {}
-    public IllegalArgumentException(String message, Exception cause) : super(message, cause) {}
+    public string parameter_name;
+
+    public IllegalArgumentException() : super("Illegal argument provided.") {
+        this.parameter_name = "";
+    }
+    public IllegalArgumentException(string message) : super(message) {
+        this.parameter_name = "";
+    }
+    public IllegalArgumentException(String message) : super(message) {
+        this.parameter_name = "";
+    }
+    public IllegalArgumentException(string parameter_name, string message) : super(message) {
+        this.parameter_name = parameter_name;
+    }
+    public IllegalArgumentException(String parameter_name, String message) : super(message) {
+        if (parameter_name != null) {
+            this.parameter_name = parameter_name.data;
+        } else {
+            this.parameter_name = "";
+        }
+    }
+    public IllegalArgumentException(string message, Exception cause) : super(message, cause) {
+        this.parameter_name = "";
+    }
+    public IllegalArgumentException(String message, Exception cause) : super(message, cause) {
+        this.parameter_name = "";
+    }
 }
 
 public class ArgumentNullException extends IllegalArgumentException {
-    public string parameter_name;
-
     public ArgumentNullException() : super("Argument cannot be null.") {
         this.parameter_name = "";
     }
@@ -91,8 +111,6 @@ public class ArgumentNullException extends IllegalArgumentException {
 }
 
 public class ArgumentOutOfRangeException extends IllegalArgumentException {
-    public string parameter_name;
-
     public ArgumentOutOfRangeException() : super("Argument was out of the range of valid values.") {
         this.parameter_name = "";
     }

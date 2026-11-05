@@ -15,7 +15,7 @@ public class Optional<T> implements IStringable {
 
     public static Optional<T> of(T value) {
         if (value == null) {
-            throw new NullPointerException("Optional.of() value cannot be null.");
+            throw new NullPointerException("Optional::of() value cannot be null.");
         }
         return new Optional<T>(value);
     }
@@ -88,7 +88,7 @@ public class Optional<T> implements IStringable {
 
     public String to_string() {
         if (!this.has_value_flag) {
-            return new String("Optional.empty");
+            return new String("Optional::empty");
         }
         return new String("Optional[" + this.value_field + "]");
     }

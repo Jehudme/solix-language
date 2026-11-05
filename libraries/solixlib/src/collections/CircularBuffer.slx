@@ -1,0 +1,166 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.IndexOutOfBoundsException;
+import solix.core.NoSuchElementException;
+
+public class CircularBufferIterator<T> implements IIterator<T> {
+    private CircularBuffer<T> buffer_reference;
+    private int32 current_offset;
+
+    public CircularBufferIterator(CircularBuffer<T> buffer_ref) {
+        this.buffer_reference = buffer_ref;
+        this.current_offset = 0;
+    }
+
+    public bool has_next() {
+        return this.current_offset < this.buffer_reference.size();
+    }
+
+    public T next() {
+        if (!this.has_next()) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T element_value = this.buffer_reference.get(this.current_offset);
+        this.current_offset = this.current_offset + 1;
+        return element_value;
+    }
+}
+
+public class CircularBuffer<T> implements ICollection<T>, IIterable<T>, IStringable {
+    private T[] storage;
+    private int32 head_cursor;
+    private int32 tail_cursor;
+    private int32 total_count;
+
+    public CircularBuffer(int32 fixed_capacity) {
+        if (fixed_capacity < 1) {
+            fixed_capacity = 1;
+        }
+        this.storage = new T[fixed_capacity];
+        this.head_cursor = 0;
+        this.tail_cursor = 0;
+        this.total_count = 0;
+    }
+
+    public int32 capacity() {
+        return this.storage.length;
+    }
+
+    public int32 size() {
+        return this.total_count;
+    }
+
+    public bool is_empty() {
+        return this.total_count == 0;
+    }
+
+    public bool is_full() {
+        return this.total_count == this.storage.length;
+    }
+
+    public void clear() {
+        int32 clear_index = 0;
+        while (clear_index < this.storage.length) {
+            this.storage[clear_index] = default(T);
+            clear_index = clear_index + 1;
+        }
+        this.head_cursor = 0;
+        this.tail_cursor = 0;
+        this.total_count = 0;
+    }
+
+    public void write(T item) {
+        if (this.is_full()) {
+            // Overwrite oldest item at head
+            this.storage[this.head_cursor] = item;
+            this.head_cursor = (this.head_cursor + 1) % this.storage.length;
+            this.tail_cursor = this.head_cursor;
+        } else {
+            this.storage[this.tail_cursor] = item;
+            this.tail_cursor = (this.tail_cursor + 1) % this.storage.length;
+            this.total_count = this.total_count + 1;
+        }
+    }
+
+    public void add(T item) {
+        this.write(item);
+    }
+
+    public T read() {
+        if (this.total_count == 0) {
+            throw new NoSuchElementException("CircularBuffer is empty");
+        }
+        T item = this.storage[this.head_cursor];
+        this.storage[this.head_cursor] = default(T);
+        this.head_cursor = (this.head_cursor + 1) % this.storage.length;
+        this.total_count = this.total_count - 1;
+        return item;
+    }
+
+    public T peek() {
+        if (this.total_count == 0) {
+            throw new NoSuchElementException("CircularBuffer is empty");
+        }
+        return this.storage[this.head_cursor];
+    }
+
+    public T get(int32 index) {
+        if (index < 0 || index >= this.total_count) {
+            throw new IndexOutOfBoundsException("CircularBuffer index out of bounds", index, 0, this.total_count);
+        }
+        int32 physical_slot = (this.head_cursor + index) % this.storage.length;
+        return this.storage[physical_slot];
+    }
+
+    public bool contains(T item) {
+        int32 scan_index = 0;
+        while (scan_index < this.total_count) {
+            if (this.get(scan_index) == item) {
+                return true;
+            }
+            scan_index = scan_index + 1;
+        }
+        return false;
+    }
+
+    public bool remove(T item) {
+        int32 scan_index = 0;
+        while (scan_index < this.total_count) {
+            if (this.get(scan_index) == item) {
+                int32 shift_index = scan_index;
+                while (shift_index < this.total_count - 1) {
+                    int32 current_slot = (this.head_cursor + shift_index) % this.storage.length;
+                    int32 next_slot = (this.head_cursor + shift_index + 1) % this.storage.length;
+                    this.storage[current_slot] = this.storage[next_slot];
+                    shift_index = shift_index + 1;
+                }
+                this.tail_cursor = (this.tail_cursor - 1 + this.storage.length) % this.storage.length;
+                this.storage[this.tail_cursor] = default(T);
+                this.total_count = this.total_count - 1;
+                return true;
+            }
+            scan_index = scan_index + 1;
+        }
+        return false;
+    }
+
+    public T[] to_array() {
+        T[] array_result = new T[this.total_count];
+        int32 copy_index = 0;
+        while (copy_index < this.total_count) {
+            array_result[copy_index] = this.get(copy_index);
+            copy_index = copy_index + 1;
+        }
+        return array_result;
+    }
+
+    public IIterator<T> iterator() {
+        return new CircularBufferIterator<T>(this);
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this);
+    }
+}

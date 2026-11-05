@@ -1,0 +1,32 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.StringBuilder;
+
+public class Collections {
+    public static String to_string<T>(IIterable<T> collection) {
+        if (collection == null) {
+            return new String("null");
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append_char('[');
+        IIterator<T> iterator = collection.iterator();
+        bool is_first = true;
+        while (iterator != null && iterator.has_next()) {
+            if (!is_first) {
+                builder.append_char(',');
+                builder.append_char(' ');
+            }
+            T item = iterator.next();
+            if (item == null) {
+                builder.append("null");
+            } else {
+                builder.append(String::from_any<T>(item));
+            }
+            is_first = false;
+        }
+        builder.append_char(']');
+        return builder.to_string();
+    }
+}

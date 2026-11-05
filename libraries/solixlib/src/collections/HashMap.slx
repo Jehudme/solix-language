@@ -1,0 +1,299 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.core.Primitives;
+import solix.core.KeyNotFoundException;
+import solix.core.IllegalArgumentException;
+
+class HashMapEntry<K, V> {
+    public K key;
+    public V value;
+    public int32 hash_code;
+    public HashMapEntry<K, V> next_entry;
+
+    public HashMapEntry(K initial_key, V initial_value, int32 initial_hash, HashMapEntry<K, V> next_node) {
+        this.key = initial_key;
+        this.value = initial_value;
+        this.hash_code = initial_hash;
+        this.next_entry = next_node;
+    }
+}
+
+public class HashMap<K, V> implements IMap<K, V>, IStringable {
+    private HashMapEntry<K, V>[] table;
+    private int32 entry_count;
+    private int32 resize_threshold;
+    private int32(*)(K) custom_hasher;
+    private bool(*)(K, K) key_equality_fn;
+
+    public HashMap() {
+        this.table = new HashMapEntry<K, V>[16];
+        this.entry_count = 0;
+        this.resize_threshold = 12;
+        this.custom_hasher = null;
+        this.key_equality_fn = null;
+    }
+
+    public HashMap(int32 initial_capacity) {
+        if (initial_capacity < 4) {
+            initial_capacity = 4;
+        }
+        this.table = new HashMapEntry<K, V>[initial_capacity];
+        this.entry_count = 0;
+        this.resize_threshold = initial_capacity * 3 / 4;
+        this.custom_hasher = null;
+        this.key_equality_fn = null;
+    }
+
+    public HashMap(int32(*)(K) hasher) {
+        this.table = new HashMapEntry<K, V>[16];
+        this.entry_count = 0;
+        this.resize_threshold = 12;
+        this.custom_hasher = hasher;
+        this.key_equality_fn = null;
+    }
+
+    public HashMap(int32 initial_capacity, int32(*)(K) hasher) {
+        if (initial_capacity < 4) {
+            initial_capacity = 4;
+        }
+        this.table = new HashMapEntry<K, V>[initial_capacity];
+        this.entry_count = 0;
+        this.resize_threshold = initial_capacity * 3 / 4;
+        this.custom_hasher = hasher;
+        this.key_equality_fn = null;
+    }
+
+    public HashMap(int32(*)(K) hasher, bool(*)(K, K) key_equality) {
+        this.table = new HashMapEntry<K, V>[16];
+        this.entry_count = 0;
+        this.resize_threshold = 12;
+        this.custom_hasher = hasher;
+        this.key_equality_fn = key_equality;
+    }
+
+    public HashMap(int32 initial_capacity, int32(*)(K) hasher, bool(*)(K, K) key_equality) {
+        if (initial_capacity < 4) {
+            initial_capacity = 4;
+        }
+        this.table = new HashMapEntry<K, V>[initial_capacity];
+        this.entry_count = 0;
+        this.resize_threshold = initial_capacity * 3 / 4;
+        this.custom_hasher = hasher;
+        this.key_equality_fn = key_equality;
+    }
+
+    private bool check_keys_equal(K first_key, K second_key) {
+        if (this.key_equality_fn != null) {
+            return this.key_equality_fn(first_key, second_key);
+        }
+        return first_key == second_key;
+    }
+
+    private int32 calculate_hash(K lookup_key) {
+        if (this.custom_hasher != null) {
+            int32 custom_hash = this.custom_hasher(lookup_key);
+            return custom_hash & 0x7FFFFFFF;
+        }
+        int32 default_hash = Primitives::hash_any<K>(lookup_key);
+        return default_hash & 0x7FFFFFFF;
+    }
+
+    private int32 calculate_bucket_index(int32 hash_val, int32 table_length) {
+        int32 bucket_idx = hash_val % table_length;
+        if (bucket_idx < 0) {
+            bucket_idx = bucket_idx + table_length;
+        }
+        return bucket_idx;
+    }
+
+    public int32 size() {
+        return this.entry_count;
+    }
+
+    public bool is_empty() {
+        return this.entry_count == 0;
+    }
+
+    public void clear() {
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            this.table[bucket_index] = null;
+        }
+        this.entry_count = 0;
+    }
+
+    public bool contains_key(K lookup_key) {
+        int32 hash_val = this.calculate_hash(lookup_key);
+        int32 bucket_idx = this.calculate_bucket_index(hash_val, this.table.length);
+        HashMapEntry<K, V> current_entry = this.table[bucket_idx];
+        while (current_entry != null) {
+            if (current_entry.hash_code == hash_val && this.check_keys_equal(current_entry.key, lookup_key)) {
+                return true;
+            }
+            current_entry = current_entry.next_entry;
+        }
+        return false;
+    }
+
+    public bool contains_value(V target_value) {
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            HashMapEntry<K, V> current_entry = this.table[bucket_index];
+            while (current_entry != null) {
+                if (current_entry.value == target_value) {
+                    return true;
+                }
+                current_entry = current_entry.next_entry;
+            }
+        }
+        return false;
+    }
+
+    public V get(K lookup_key) {
+        int32 hash_val = this.calculate_hash(lookup_key);
+        int32 bucket_idx = this.calculate_bucket_index(hash_val, this.table.length);
+        HashMapEntry<K, V> current_entry = this.table[bucket_idx];
+        while (current_entry != null) {
+            if (current_entry.hash_code == hash_val && this.check_keys_equal(current_entry.key, lookup_key)) {
+                return current_entry.value;
+            }
+            current_entry = current_entry.next_entry;
+        }
+        throw new KeyNotFoundException("Key not found in HashMap");
+    }
+
+    public V get_or_default(K lookup_key, V default_val) {
+        int32 hash_val = this.calculate_hash(lookup_key);
+        int32 bucket_idx = this.calculate_bucket_index(hash_val, this.table.length);
+        HashMapEntry<K, V> current_entry = this.table[bucket_idx];
+        while (current_entry != null) {
+            if (current_entry.hash_code == hash_val && this.check_keys_equal(current_entry.key, lookup_key)) {
+                return current_entry.value;
+            }
+            current_entry = current_entry.next_entry;
+        }
+        return default_val;
+    }
+
+    public void put(K insert_key, V insert_value) {
+        int32 hash_val = this.calculate_hash(insert_key);
+        int32 bucket_idx = this.calculate_bucket_index(hash_val, this.table.length);
+        HashMapEntry<K, V> current_entry = this.table[bucket_idx];
+        while (current_entry != null) {
+            if (current_entry.hash_code == hash_val && this.check_keys_equal(current_entry.key, insert_key)) {
+                current_entry.value = insert_value;
+                return;
+            }
+            current_entry = current_entry.next_entry;
+        }
+        this.table[bucket_idx] = new HashMapEntry<K, V>(insert_key, insert_value, hash_val, this.table[bucket_idx]);
+        this.entry_count = this.entry_count + 1;
+        if (this.entry_count >= this.resize_threshold) {
+            this.resize(this.table.length * 2);
+        }
+    }
+
+    private void resize(int32 new_capacity) {
+        HashMapEntry<K, V>[] new_table = new HashMapEntry<K, V>[new_capacity];
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            HashMapEntry<K, V> current_entry = this.table[bucket_index];
+            while (current_entry != null) {
+                HashMapEntry<K, V> next_node = current_entry.next_entry;
+                int32 new_bucket_idx = this.calculate_bucket_index(current_entry.hash_code, new_capacity);
+                current_entry.next_entry = new_table[new_bucket_idx];
+                new_table[new_bucket_idx] = current_entry;
+                current_entry = next_node;
+            }
+        }
+        this.table = new_table;
+        this.resize_threshold = new_capacity * 3 / 4;
+    }
+
+    public V remove(K target_key) {
+        int32 hash_val = this.calculate_hash(target_key);
+        int32 bucket_idx = this.calculate_bucket_index(hash_val, this.table.length);
+        HashMapEntry<K, V> previous_entry = null;
+        HashMapEntry<K, V> current_entry = this.table[bucket_idx];
+        while (current_entry != null) {
+            if (current_entry.hash_code == hash_val && this.check_keys_equal(current_entry.key, target_key)) {
+                if (previous_entry == null) {
+                    this.table[bucket_idx] = current_entry.next_entry;
+                } else {
+                    previous_entry.next_entry = current_entry.next_entry;
+                }
+                this.entry_count = this.entry_count - 1;
+                return current_entry.value;
+            }
+            previous_entry = current_entry;
+            current_entry = current_entry.next_entry;
+        }
+        return default(V);
+    }
+
+    public List<K> keys() {
+        List<K> result_list = new List<K>(this.entry_count);
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            HashMapEntry<K, V> current_entry = this.table[bucket_index];
+            while (current_entry != null) {
+                result_list.add(current_entry.key);
+                current_entry = current_entry.next_entry;
+            }
+        }
+        return result_list;
+    }
+
+    public List<V> values() {
+        List<V> result_list = new List<V>(this.entry_count);
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            HashMapEntry<K, V> current_entry = this.table[bucket_index];
+            while (current_entry != null) {
+                result_list.add(current_entry.value);
+                current_entry = current_entry.next_entry;
+            }
+        }
+        return result_list;
+    }
+
+    public List<KeyValuePair<K, V>> entries() {
+        List<KeyValuePair<K, V>> result_list = new List<KeyValuePair<K, V>>(this.entry_count);
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            HashMapEntry<K, V> current_entry = this.table[bucket_index];
+            while (current_entry != null) {
+                KeyValuePair<K, V> pair_entry = new KeyValuePair<K, V>(current_entry.key, current_entry.value);
+                result_list.add(pair_entry);
+                current_entry = current_entry.next_entry;
+            }
+        }
+        return result_list;
+    }
+
+    public void for_each(void(*)(K, V) action_callback) {
+        if (action_callback == null) {
+            return;
+        }
+        for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
+            HashMapEntry<K, V> current_entry = this.table[bucket_index];
+            while (current_entry != null) {
+                action_callback(current_entry.key, current_entry.value);
+                current_entry = current_entry.next_entry;
+            }
+        }
+    }
+
+    public String to_string() {
+        StringBuilder builder = new StringBuilder("{");
+        List<KeyValuePair<K, V>> entry_list = this.entries();
+        for (int32 entry_index = 0; entry_index < entry_list.size(); entry_index = entry_index + 1) {
+            if (entry_index > 0) {
+                builder.append(", ");
+            }
+            KeyValuePair<K, V> pair_item = entry_list.get(entry_index);
+            builder.append(String::from_any<K>(pair_item.key));
+            builder.append(": ");
+            builder.append(String::from_any<V>(pair_item.value));
+        }
+        builder.append("}");
+        return builder.to_string();
+    }
+}
