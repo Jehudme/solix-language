@@ -4,6 +4,7 @@
 
 pub mod bytecode;
 pub mod diagnostics;
+pub mod project;
 pub mod span;
 pub mod tokens;
 pub mod types;
@@ -16,6 +17,10 @@ pub use bytecode::{
 };
 pub use diagnostics::{
     BindingError, CompilationDiagnostic, EmissionError, LexingError, ParsingError,
+};
+pub use project::{
+    LoadedSlxarc, ProjectEntryPoints, ProjectInfo, ProjectManifest, SlxarcArchive, SlxarcFileEntry,
+    SlxarcInspection,
 };
 pub use span::Span;
 pub use tokens::{KEYWORDS, Token, TokenKind, lookup_keyword};

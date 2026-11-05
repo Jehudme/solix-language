@@ -11,6 +11,8 @@ serde.workspace = true
 serde_json.workspace = true
 compact_str.workspace = true
 unicode-ident.workspace = true
+toml.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

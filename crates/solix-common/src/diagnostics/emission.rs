@@ -117,6 +117,13 @@ pub enum EmissionError {
         help("Ensure the binary container has a valid serialized export manifest.")
     )]
     MalformedExportManifest { reason: String },
+
+    #[error("Project archive or container error: {reason}")]
+    #[diagnostic(
+        code(solix::emitter::container_serialization_failed),
+        help("Check project structure, manifest.toml, or archive container integrity.")
+    )]
+    ContainerSerializationFailed { reason: String },
 }
 
 impl EmissionError {
@@ -137,6 +144,7 @@ impl EmissionError {
             Self::DuplicateSymbol { .. } => "E0311",
             Self::SymbolNotFound { .. } => "E0312",
             Self::MalformedExportManifest { .. } => "E0313",
+            Self::ContainerSerializationFailed { .. } => "E0314",
         }
     }
 }
