@@ -1,0 +1,16 @@
+import blt.io.println;
+
+public class MathBridge {
+    public static native int32 fast_add(int32 a, int32 b);
+}
+
+public class Main {
+    public static int32 main() {
+        int32 result = MathBridge.fast_add(15, 27);
+        if (result == 42) {
+            println("MathBridge.fast_add(15, 27) succeeded with result 42");
+            return 0;
+        }
+        return 1;
+    }
+}

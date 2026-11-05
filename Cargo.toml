@@ -9,6 +9,9 @@ members = [
     "crates/solix-dbg",
     "crates/solix-tests",
 ]
+exclude = [
+    "templates/untitled-rust/natives/rust_bridge",
+]
 
 [workspace.package]
 version = "0.1.0"
