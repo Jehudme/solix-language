@@ -609,6 +609,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
+        dependencies: Vec::new(),
         exported_classes,
         exported_functions,
         exported_statics,

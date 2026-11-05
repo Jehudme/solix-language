@@ -33,6 +33,15 @@ pub enum Commands {
 
     /// Inspects metadata, export manifests, and bytecode of an SLXB binary container or .slxarc archive
     Info(InfoArgs),
+
+    /// Installs a .slxb or .slxarc package into the local package store
+    Install(InstallArgs),
+
+    /// Uninstalls a package or package version from the local package store
+    Uninstall(UninstallArgs),
+
+    /// Lists all installed packages in the local package store
+    List(ListArgs),
 }
 
 /// Arguments for `solix build`.
@@ -86,8 +95,12 @@ pub struct CompileArgs {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
-    /// Paths to library binary containers (*.slxb) whose API interfaces should be extracted
-    #[arg(short = 'l', long = "lib", alias = "dep")]
+    /// Package dependency requirements formatted as <name>@<version> (e.g. raylib@1.0.0)
+    #[arg(short = 'd', long = "deps", visible_alias = "dep")]
+    pub deps: Vec<String>,
+
+    /// Paths to library binary containers (*.slxb) or archives (*.slxarc) whose API interfaces should be extracted
+    #[arg(short = 'l', long = "lib")]
     pub libs: Vec<PathBuf>,
 
     /// Package or library name
@@ -213,4 +226,40 @@ pub struct InfoArgs {
     /// Disassemble bytecode instructions
     #[arg(long)]
     pub disasm: bool,
+}
+
+/// Arguments for `solix install`.
+#[derive(Debug, Args, Clone)]
+pub struct InstallArgs {
+    /// Path to a .slxb binary or .slxarc archive container to install into the package store
+    #[arg(required = true)]
+    pub path: PathBuf,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
+}
+
+/// Arguments for `solix uninstall`.
+#[derive(Debug, Args, Clone)]
+pub struct UninstallArgs {
+    /// Package name (to remove all versions) or package@version (e.g. raylib@1.0.0)
+    #[arg(required = true)]
+    pub spec: String,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
+}
+
+/// Arguments for `solix list`.
+#[derive(Debug, Args, Clone)]
+pub struct ListArgs {
+    /// Output package listing as machine-readable JSON
+    #[arg(long)]
+    pub json: bool,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
 }

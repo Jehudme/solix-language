@@ -5,11 +5,18 @@
 pub mod cli;
 pub mod commands;
 pub mod diagnostics;
+pub mod solver;
 pub mod telemetry;
 
-pub use cli::{BuildArgs, Cli, Commands, CompileArgs, InfoArgs, RunArgs};
-pub use commands::{execute_build, execute_compile, execute_info, execute_run};
+pub use cli::{
+    BuildArgs, Cli, Commands, CompileArgs, InfoArgs, InstallArgs, ListArgs, RunArgs, UninstallArgs,
+};
+pub use commands::{
+    execute_build, execute_compile, execute_info, execute_install, execute_list, execute_run,
+    execute_uninstall,
+};
 pub use diagnostics::render_diagnostics;
+pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
 pub use telemetry::{
     CompileMetricsReport, ProcessTelemetry, RunMetricsReport, capture_process_telemetry,
 };
@@ -34,6 +41,18 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
         }
         Commands::Info(args) => {
             execute_info(args)?;
+            Ok(0)
+        }
+        Commands::Install(args) => {
+            execute_install(args)?;
+            Ok(0)
+        }
+        Commands::Uninstall(args) => {
+            execute_uninstall(args)?;
+            Ok(0)
+        }
+        Commands::List(args) => {
+            execute_list(args)?;
             Ok(0)
         }
     }
