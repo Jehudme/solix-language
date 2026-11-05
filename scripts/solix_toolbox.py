@@ -321,5 +321,38 @@ def auto_build(profile: str = "debug", project_root: Path | None = None) -> Path
     return final_archive_path
 
 
+def init_project(
+    target_path: Path | str,
+    name: str | None = None,
+    version: str = "0.1.0",
+    description: str = "A Solix project",
+    license_id: str = "Apache-2.0",
+    authors: list[str] | None = None,
+    main_entry: str = "Main::main",
+    test_entry: str = "TestRunner::test",
+    is_library: bool = False,
+    no_native: bool = False,
+    dependencies: list[str] | None = None,
+    force: bool = False,
+) -> Path:
+    """Convenience wrapper delegating to init_project.generate_project."""
+    import init_project as project_generator
+
+    return project_generator.generate_project(
+        target_path=Path(target_path),
+        name=name,
+        version=version,
+        description=description,
+        license_id=license_id,
+        authors=authors,
+        main_entry=main_entry,
+        test_entry=test_entry,
+        is_library=is_library,
+        no_native=no_native,
+        dependencies=dependencies,
+        force=force,
+    )
+
+
 if __name__ == "__main__":
     auto_build()

@@ -22,6 +22,9 @@ pub struct Cli {
 /// Available subcommands in the Solix CLI driver.
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Creates a new Solix project with build automation and tests
+    New(NewArgs),
+
     /// Compiles Solix source files into an executable binary container (.slxb)
     Compile(CompileArgs),
 
@@ -274,4 +277,55 @@ pub struct ListArgs {
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
+}
+
+/// Arguments for `solix new`.
+#[derive(Debug, Args, Clone)]
+pub struct NewArgs {
+    /// Target directory path for the new project
+    pub path: PathBuf,
+
+    /// Project name [default: directory name]
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Initial project version [default: 0.1.0]
+    #[arg(long, default_value = "0.1.0")]
+    pub version: String,
+
+    /// Project description
+    #[arg(long, default_value = "A Solix project")]
+    pub description: String,
+
+    /// License identifier
+    #[arg(long, default_value = "Apache-2.0")]
+    pub license: String,
+
+    /// Author name (can be repeated)
+    #[arg(long = "author")]
+    pub authors: Vec<String>,
+
+    /// Main entrypoint symbol [default: Main::main]
+    #[arg(long, default_value = "Main::main")]
+    pub main: String,
+
+    /// Test entrypoint symbol [default: TestRunner::test]
+    #[arg(long, default_value = "TestRunner::test")]
+    pub test: String,
+
+    /// Generate a library project instead of an application
+    #[arg(long)]
+    pub lib: bool,
+
+    /// Do not create a Rust native cdylib bridge
+    #[arg(long)]
+    pub no_native: bool,
+
+    /// Add dependency in pkg@ver format (can be repeated)
+    #[arg(short = 'd', long = "deps")]
+    pub deps: Vec<String>,
+
+    /// Overwrite existing manifest.toml if present
+    #[arg(long)]
+    pub force: bool,
 }

@@ -9,11 +9,12 @@ pub mod solver;
 pub mod telemetry;
 
 pub use cli::{
-    BuildArgs, Cli, Commands, CompileArgs, InfoArgs, InstallArgs, ListArgs, RunArgs, UninstallArgs,
+    BuildArgs, Cli, Commands, CompileArgs, InfoArgs, InstallArgs, ListArgs, NewArgs, RunArgs,
+    UninstallArgs,
 };
 pub use commands::{
-    execute_build, execute_compile, execute_info, execute_install, execute_list, execute_run,
-    execute_uninstall,
+    execute_build, execute_compile, execute_info, execute_install, execute_list, execute_new,
+    execute_run, execute_uninstall,
 };
 pub use diagnostics::render_diagnostics;
 pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
@@ -27,6 +28,10 @@ pub use telemetry::{
 /// Returns an error if any subcommand execution fails.
 pub fn run(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
+        Commands::New(args) => {
+            execute_new(args)?;
+            Ok(0)
+        }
         Commands::Compile(args) => {
             execute_compile(args)?;
             Ok(0)
