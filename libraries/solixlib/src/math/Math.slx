@@ -1,0 +1,363 @@
+package solix.math;
+
+public class Math {
+    public static float64 PI = 3.141592653589793;
+    public static float64 EULER = 2.718281828459045;
+    public static float64 E_CONST = 2.718281828459045;
+    public static float64 TAU = 6.283185307179586;
+    public static float64 EPSILON = 0.000000000000001;
+
+    // Basic arithmetic & bounds (int32)
+    public static int32 abs(int32 target_val) {
+        if (target_val < 0) {
+            return -target_val;
+        }
+        return target_val;
+    }
+
+    public static int32 min(int32 first_val, int32 second_val) {
+        if (first_val < second_val) {
+            return first_val;
+        }
+        return second_val;
+    }
+
+    public static int32 max(int32 first_val, int32 second_val) {
+        if (first_val > second_val) {
+            return first_val;
+        }
+        return second_val;
+    }
+
+    public static int32 clamp(int32 target_val, int32 min_val, int32 max_val) {
+        if (target_val < min_val) {
+            return min_val;
+        }
+        if (target_val > max_val) {
+            return max_val;
+        }
+        return target_val;
+    }
+
+    public static int32 sign(int32 target_val) {
+        if (target_val < 0) {
+            return -1;
+        }
+        if (target_val > 0) {
+            return 1;
+        }
+        return 0;
+    }
+
+    public static int32 copy_sign(int32 magnitude, int32 sign_source) {
+        int32 abs_magnitude = Math::abs(magnitude);
+        if (sign_source < 0) {
+            return -abs_magnitude;
+        }
+        return abs_magnitude;
+    }
+
+    // Basic arithmetic & bounds (int64)
+    public static int64 abs(int64 target_val) {
+        if (target_val < 0L) {
+            return -target_val;
+        }
+        return target_val;
+    }
+
+    public static int64 min(int64 first_val, int64 second_val) {
+        if (first_val < second_val) {
+            return first_val;
+        }
+        return second_val;
+    }
+
+    public static int64 max(int64 first_val, int64 second_val) {
+        if (first_val > second_val) {
+            return first_val;
+        }
+        return second_val;
+    }
+
+    public static int64 clamp(int64 target_val, int64 min_val, int64 max_val) {
+        if (target_val < min_val) {
+            return min_val;
+        }
+        if (target_val > max_val) {
+            return max_val;
+        }
+        return target_val;
+    }
+
+    public static int32 sign(int64 target_val) {
+        if (target_val < 0L) {
+            return -1;
+        }
+        if (target_val > 0L) {
+            return 1;
+        }
+        return 0;
+    }
+
+    public static int64 copy_sign(int64 magnitude, int64 sign_source) {
+        int64 abs_magnitude = Math::abs(magnitude);
+        if (sign_source < 0L) {
+            return -abs_magnitude;
+        }
+        return abs_magnitude;
+    }
+
+    // Basic arithmetic & bounds (float64)
+    public static float64 abs(float64 target_val) {
+        if (target_val < 0.0) {
+            return -target_val;
+        }
+        return target_val;
+    }
+
+    public static float64 min(float64 first_val, float64 second_val) {
+        if (first_val < second_val) {
+            return first_val;
+        }
+        return second_val;
+    }
+
+    public static float64 max(float64 first_val, float64 second_val) {
+        if (first_val > second_val) {
+            return first_val;
+        }
+        return second_val;
+    }
+
+    public static float64 clamp(float64 target_val, float64 min_val, float64 max_val) {
+        if (target_val < min_val) {
+            return min_val;
+        }
+        if (target_val > max_val) {
+            return max_val;
+        }
+        return target_val;
+    }
+
+    public static int32 sign(float64 target_val) {
+        if (target_val < 0.0) {
+            return -1;
+        }
+        if (target_val > 0.0) {
+            return 1;
+        }
+        return 0;
+    }
+
+    public static float64 copy_sign(float64 magnitude, float64 sign_source) {
+        float64 abs_magnitude = Math::abs(magnitude);
+        if (sign_source < 0.0) {
+            return -abs_magnitude;
+        }
+        return abs_magnitude;
+    }
+
+    // Variadic min_all / max_all
+    public static int32 min_all<args...>(int32 first_val, args...) {
+        int32 current_minimum = first_val;
+        int32 argument_index = 0;
+        while (argument_index < args.length) {
+            int32 candidate_val = cast(args[argument_index], int32);
+            if (candidate_val < current_minimum) {
+                current_minimum = candidate_val;
+            }
+            argument_index = argument_index + 1;
+        }
+        return current_minimum;
+    }
+
+    public static int32 max_all<args...>(int32 first_val, args...) {
+        int32 current_maximum = first_val;
+        int32 argument_index = 0;
+        while (argument_index < args.length) {
+            int32 candidate_val = cast(args[argument_index], int32);
+            if (candidate_val > current_maximum) {
+                current_maximum = candidate_val;
+            }
+            argument_index = argument_index + 1;
+        }
+        return current_maximum;
+    }
+
+    // Exponential & Logarithmic
+    public static float64 sqrt(float64 input_val) {
+        return Math::native_sqrt(input_val);
+    }
+
+    public static float64 cbrt(float64 input_val) {
+        return Math::native_cbrt(input_val);
+    }
+
+    public static float64 hypot(float64 first_coord, float64 second_coord) {
+        return Math::native_hypot(first_coord, second_coord);
+    }
+
+    public static float64 pow(float64 base_val, float64 exponent_val) {
+        return Math::native_pow(base_val, exponent_val);
+    }
+
+    public static float64 exp(float64 input_val) {
+        return Math::native_exp(input_val);
+    }
+
+    public static float64 log(float64 input_val) {
+        return Math::native_log(input_val);
+    }
+
+    public static float64 log10(float64 input_val) {
+        return Math::native_log10(input_val);
+    }
+
+    public static float64 log2(float64 input_val) {
+        return Math::native_log2(input_val);
+    }
+
+    // Trigonometric
+    public static float64 sin(float64 angle_radians) {
+        return Math::native_sin(angle_radians);
+    }
+
+    public static float64 cos(float64 angle_radians) {
+        return Math::native_cos(angle_radians);
+    }
+
+    public static float64 tan(float64 angle_radians) {
+        return Math::native_tan(angle_radians);
+    }
+
+    public static float64 asin(float64 input_val) {
+        return Math::native_asin(input_val);
+    }
+
+    public static float64 acos(float64 input_val) {
+        return Math::native_acos(input_val);
+    }
+
+    public static float64 atan(float64 input_val) {
+        return Math::native_atan(input_val);
+    }
+
+    public static float64 atan2(float64 y_coord, float64 x_coord) {
+        return Math::native_atan2(y_coord, x_coord);
+    }
+
+    public static float64 to_radians(float64 degrees_angle) {
+        return degrees_angle * (Math::PI / 180.0);
+    }
+
+    public static float64 to_degrees(float64 radians_angle) {
+        return radians_angle * (180.0 / Math::PI);
+    }
+
+    // Hyperbolic
+    public static float64 sinh(float64 input_val) {
+        return Math::native_sinh(input_val);
+    }
+
+    public static float64 cosh(float64 input_val) {
+        return Math::native_cosh(input_val);
+    }
+
+    public static float64 tanh(float64 input_val) {
+        return Math::native_tanh(input_val);
+    }
+
+    // Rounding & Truncation
+    public static float64 floor(float64 input_val) {
+        return Math::native_floor(input_val);
+    }
+
+    public static float64 ceil(float64 input_val) {
+        return Math::native_ceil(input_val);
+    }
+
+    public static float64 round(float64 input_val) {
+        return Math::native_round(input_val);
+    }
+
+    public static float64 trunc(float64 input_val) {
+        return Math::native_trunc(input_val);
+    }
+
+    // Integer utilities
+    public static int64 gcd(int64 first_val, int64 second_val) {
+        int64 operand_a = Math::abs(first_val);
+        int64 operand_b = Math::abs(second_val);
+        while (operand_b != 0L) {
+            int64 remainder_val = operand_a % operand_b;
+            operand_a = operand_b;
+            operand_b = remainder_val;
+        }
+        return operand_a;
+    }
+
+    public static int64 lcm(int64 first_val, int64 second_val) {
+        if (first_val == 0L || second_val == 0L) {
+            return 0L;
+        }
+        int64 gcd_val = Math::gcd(first_val, second_val);
+        return Math::abs((first_val / gcd_val) * second_val);
+    }
+
+    public static int64 factorial(int32 target_number) {
+        if (target_number <= 1) {
+            return 1L;
+        }
+        int64 accumulator = 1L;
+        int32 current_factor = 2;
+        while (current_factor <= target_number) {
+            accumulator = accumulator * (int64)current_factor;
+            current_factor = current_factor + 1;
+        }
+        return accumulator;
+    }
+
+    public static bool is_prime(int64 candidate) {
+        if (candidate <= 1L) {
+            return false;
+        }
+        if (candidate <= 3L) {
+            return true;
+        }
+        if ((candidate % 2L) == 0L || (candidate % 3L) == 0L) {
+            return false;
+        }
+        int64 test_factor = 5L;
+        while (test_factor * test_factor <= candidate) {
+            if ((candidate % test_factor) == 0L || (candidate % (test_factor + 2L)) == 0L) {
+                return false;
+            }
+            test_factor = test_factor + 6L;
+        }
+        return true;
+    }
+
+    // Native declarations
+    private static native float64 native_sqrt(float64 input_val);
+    private static native float64 native_cbrt(float64 input_val);
+    private static native float64 native_hypot(float64 first_coord, float64 second_coord);
+    private static native float64 native_pow(float64 base_val, float64 exponent_val);
+    private static native float64 native_exp(float64 input_val);
+    private static native float64 native_log(float64 input_val);
+    private static native float64 native_log10(float64 input_val);
+    private static native float64 native_log2(float64 input_val);
+    private static native float64 native_sin(float64 angle_radians);
+    private static native float64 native_cos(float64 angle_radians);
+    private static native float64 native_tan(float64 angle_radians);
+    private static native float64 native_asin(float64 input_val);
+    private static native float64 native_acos(float64 input_val);
+    private static native float64 native_atan(float64 input_val);
+    private static native float64 native_atan2(float64 y_coord, float64 x_coord);
+    private static native float64 native_sinh(float64 input_val);
+    private static native float64 native_cosh(float64 input_val);
+    private static native float64 native_tanh(float64 input_val);
+    private static native float64 native_floor(float64 input_val);
+    private static native float64 native_ceil(float64 input_val);
+    private static native float64 native_round(float64 input_val);
+    private static native float64 native_trunc(float64 input_val);
+}

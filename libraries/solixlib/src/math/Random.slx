@@ -1,0 +1,99 @@
+package solix.math;
+
+import solix.core.IllegalArgumentException;
+
+public class Random {
+    private int64 prng_state;
+
+    public Random() {
+        int64 seed_val = Random::native_seed();
+        if (seed_val == 0L) {
+            seed_val = (int64)0x853c49e6748fea9bL;
+        }
+        this.prng_state = seed_val;
+    }
+
+    public Random(int64 seed_value) {
+        if (seed_value == 0L) {
+            this.prng_state = (int64)0x853c49e6748fea9bL;
+        } else {
+            this.prng_state = seed_value;
+        }
+    }
+
+    public int64 next_int64() {
+        this.prng_state = this.prng_state + (int64)0x9e3779b97f4a7c15L;
+        int64 intermediate = this.prng_state;
+        int64 shift_thirty = (intermediate >> 30) & (int64)0x00000003FFFFFFFFL;
+        intermediate = (intermediate ^ shift_thirty) * (int64)0xbf58476d1ce4e5b9L;
+        int64 shift_twenty_seven = (intermediate >> 27) & (int64)0x0000001FFFFFFFFFL;
+        intermediate = (intermediate ^ shift_twenty_seven) * (int64)0x94d049bb133111ebL;
+        int64 shift_thirty_one = (intermediate >> 31) & (int64)0x00000001FFFFFFFFL;
+        return intermediate ^ shift_thirty_one;
+    }
+
+    public int32 next_int32() {
+        int64 random_word = this.next_int64();
+        int32 non_negative_int = (int32)(random_word & (int64)0x7FFFFFFFL);
+        return non_negative_int;
+    }
+
+    public int32 next_int32(int32 upper_bound) {
+        if (upper_bound <= 0) {
+            throw new IllegalArgumentException("upper_bound", "Bound must be strictly positive");
+        }
+        return this.next_int32() % upper_bound;
+    }
+
+    public int32 next_int32(int32 lower_bound, int32 upper_bound) {
+        if (lower_bound >= upper_bound) {
+            throw new IllegalArgumentException("lower_bound", "Minimum bound must be strictly less than maximum bound");
+        }
+        int32 range_span = upper_bound - lower_bound;
+        return lower_bound + this.next_int32(range_span);
+    }
+
+    // Compatibility aliases
+    public int32 next_int() {
+        return this.next_int32();
+    }
+
+    public int32 next_int(int32 upper_bound) {
+        return this.next_int32(upper_bound);
+    }
+
+    public int32 next_int(int32 lower_bound, int32 upper_bound) {
+        return this.next_int32(lower_bound, upper_bound);
+    }
+
+    public float64 next_float64() {
+        int64 mantissa_bits = (this.next_int64() >> 11) & (int64)0x1FFFFFFFFFFFFFL;
+        return (float64)mantissa_bits / 9007199254740992.0;
+    }
+
+    public float64 next_double() {
+        return this.next_float64();
+    }
+
+    public bool next_bool() {
+        return (this.next_int64() & 1L) == 1L;
+    }
+
+    public void next_bytes(int8[] target_buffer) {
+        if (target_buffer == null) {
+            return;
+        }
+        int32 buffer_position = 0;
+        while (buffer_position < target_buffer.length) {
+            int64 random_chunk = this.next_int64();
+            int32 byte_step = 0;
+            while (byte_step < 8 && buffer_position < target_buffer.length) {
+                target_buffer[buffer_position] = (int8)((random_chunk >> (byte_step * 8)) & (int64)0xFFL);
+                byte_step = byte_step + 1;
+                buffer_position = buffer_position + 1;
+            }
+        }
+    }
+
+    private static native int64 native_seed();
+}

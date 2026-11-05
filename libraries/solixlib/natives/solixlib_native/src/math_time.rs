@@ -313,6 +313,19 @@ pub unsafe extern "C" fn math_native_trunc(
 
 // --- PRNG Natives ---
 
+pub unsafe extern "C" fn random_native_seed(
+    _vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let seed_value = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or(0x1234_5678_9ABC_DEF0);
+    SolixCValue::i64_val(seed_value as i64)
+}
+
 pub unsafe extern "C" fn random_native_init(
     _vm_context: *mut c_void,
     args: *const SolixCValue,
@@ -720,6 +733,14 @@ pub unsafe fn register_math_time_natives(collector: *mut c_void, callback: Regis
                 "Math::native_trunc",
             ],
             math_native_trunc,
+        ),
+        (
+            &[
+                "Random_native_seed",
+                "solix_math_Random_native_seed",
+                "Random::native_seed",
+            ],
+            random_native_seed,
         ),
         (
             &[
