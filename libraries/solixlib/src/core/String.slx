@@ -277,6 +277,34 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         return (int32)String::native_index_of(this.data, needle, start_index);
     }
 
+    public int32 index_of(char needle) {
+        return this.index_of(needle, 0);
+    }
+
+    public int32 index_of(char needle, int32 start_index) {
+        char[] chars_array = this.to_chars();
+        int32 current_position = start_index;
+        while (current_position < chars_array.length) {
+            if (chars_array[current_position] == needle) {
+                return current_position;
+            }
+            current_position = current_position + 1;
+        }
+        return -1;
+    }
+
+    public int32 last_index_of(char needle) {
+        char[] chars_array = this.to_chars();
+        int32 current_position = chars_array.length - 1;
+        while (current_position >= 0) {
+            if (chars_array[current_position] == needle) {
+                return current_position;
+            }
+            current_position = current_position - 1;
+        }
+        return -1;
+    }
+
     public int32 last_index_of(String needle) {
         if (needle == null) {
             return -1;

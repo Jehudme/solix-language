@@ -168,6 +168,29 @@ pub unsafe extern "C" fn env_native_processor_count(
     SolixCValue::i32_val(core_count)
 }
 
+pub unsafe extern "C" fn env_native_exit(
+    _vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let exit_code = if arg_count > 0 && !args.is_null() {
+        unsafe { (*args.add(0)).as_i32() }
+    } else {
+        0
+    };
+    std::process::exit(exit_code);
+}
+
+pub unsafe extern "C" fn env_native_pid(
+    _vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    SolixCValue::i64_val(std::process::id() as i64)
+}
+
 // --- Process Natives ---
 
 pub unsafe extern "C" fn process_native_start(
@@ -186,20 +209,12 @@ pub unsafe extern "C" fn process_native_start(
     let mut command_runner = Command::new(&command_string);
 
     if arguments_address != 0 && !vm_context.is_null() {
-        let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
-        if context_ref.magic == SOLIX_VM_CONTEXT_MAGIC {
-            let argument_count =
-                unsafe { (context_ref.array_len)(context_ref.vm_ptr, arguments_address) };
-            for argument_index in 0..argument_count {
-                let argument_slot = unsafe {
-                    (context_ref.array_get_u64)(
-                        context_ref.vm_ptr,
-                        arguments_address,
-                        argument_index,
-                    )
-                } as u32;
-                let single_argument = unsafe { read_solix_chars(vm_context, argument_slot) };
-                command_runner.arg(single_argument);
+        let args_str = unsafe { read_solix_chars(vm_context, arguments_address) };
+        if !args_str.is_empty() {
+            for arg_part in args_str.split('\t') {
+                if !arg_part.is_empty() {
+                    command_runner.arg(arg_part);
+                }
             }
         }
     }
@@ -409,6 +424,22 @@ pub unsafe fn register_sys_process_natives(
                 "Environment::native_processor_count",
             ],
             env_native_processor_count,
+        ),
+        (
+            &[
+                "Environment_native_exit",
+                "solix_system_Environment_native_exit",
+                "Environment::native_exit",
+            ],
+            env_native_exit,
+        ),
+        (
+            &[
+                "Environment_native_pid",
+                "solix_system_Environment_native_pid",
+                "Environment::native_pid",
+            ],
+            env_native_pid,
         ),
     ];
 
