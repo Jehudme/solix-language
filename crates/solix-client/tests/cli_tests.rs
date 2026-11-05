@@ -1356,3 +1356,141 @@ fn test_cli_compile_empty_directory_fails() {
             .expect("Failed to parse compile command");
     assert!(run(compile_cli).is_err());
 }
+
+#[test]
+fn test_cli_info_slxarc_archive_inspection_and_json() {
+    use solix_common::project::SlxarcArchive;
+
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let stage_directory = workspace.root_path().join("stage");
+    let bin_directory = stage_directory.join("bin");
+    let lib_directory = stage_directory.join("lib");
+    std::fs::create_dir_all(&bin_directory).expect("create bin dir");
+    std::fs::create_dir_all(&lib_directory).expect("create lib dir");
+
+    let manifest_toml = r#"
+[info]
+name = "archive_info_test"
+version = "2.5.0"
+description = "Test inspecting slxarc archive container"
+license = "Apache-2.0"
+authors = ["Tester <tester@example.com>"]
+
+[entrypoints]
+main = "Main::main"
+test = "TestRunner::main"
+"#;
+    std::fs::write(stage_directory.join("manifest.toml"), manifest_toml).expect("write manifest");
+
+    // Compile a real binary to put in bin/
+    let source_path = workspace
+        .write_file(
+            "app.slx",
+            r#"
+class Main {
+    public static int32 main() {
+        return 77;
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+    let bin_path = bin_directory.join("archive_info_test.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().expect("valid path"),
+        "-o",
+        bin_path.to_str().expect("valid path"),
+    ])
+    .expect("parse compile");
+    assert_eq!(run(compile_cli).expect("compile success"), 0);
+
+    // Write a dummy native lib into lib/
+    std::fs::write(lib_directory.join("libsample.so"), b"sample_native_content")
+        .expect("write lib");
+
+    let archive_path = workspace.file_path("archive_info_test.slxarc");
+    SlxarcArchive::pack_directory(&stage_directory, &archive_path).expect("pack slxarc");
+    assert!(archive_path.exists());
+
+    // 1. Text info inspection
+    let info_cli =
+        Cli::try_parse_from(["solix", "info", archive_path.to_str().expect("valid path")])
+            .expect("parse info");
+    assert_eq!(run(info_cli).expect("info run success"), 0);
+
+    // 2. JSON info inspection to output file
+    let json_output_path = workspace.file_path("archive_info.json");
+    let info_json_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        archive_path.to_str().expect("valid path"),
+        "--json",
+        "-o",
+        json_output_path.to_str().expect("valid path"),
+    ])
+    .expect("parse info json");
+    assert_eq!(run(info_json_cli).expect("info json success"), 0);
+    assert!(json_output_path.exists());
+
+    let json_content = std::fs::read_to_string(&json_output_path).expect("read json");
+    let parsed_json: serde_json::Value = serde_json::from_str(&json_content).expect("parse json");
+    assert_eq!(parsed_json["manifest"]["info"]["name"], "archive_info_test");
+    assert_eq!(parsed_json["manifest"]["info"]["version"], "2.5.0");
+    assert_eq!(parsed_json["manifest"]["entrypoints"]["main"], "Main::main");
+}
+
+#[test]
+fn test_cli_run_slxarc_archive_directly() {
+    use solix_common::project::SlxarcArchive;
+
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let stage_directory = workspace.root_path().join("stage_run");
+    let bin_directory = stage_directory.join("bin");
+    std::fs::create_dir_all(&bin_directory).expect("create bin dir");
+
+    let manifest_toml = r#"
+[info]
+name = "runner_app"
+version = "1.0.0"
+
+[entrypoints]
+main = "Main::main"
+"#;
+    std::fs::write(stage_directory.join("manifest.toml"), manifest_toml).expect("write manifest");
+
+    let source_path = workspace
+        .write_file(
+            "entry.slx",
+            r#"
+class Main {
+    public static int32 main() {
+        return 99;
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+    let bin_path = bin_directory.join("runner_app.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().expect("valid path"),
+        "-o",
+        bin_path.to_str().expect("valid path"),
+    ])
+    .expect("parse compile");
+    assert_eq!(run(compile_cli).expect("compile success"), 0);
+
+    let archive_path = workspace.file_path("runner_app.slxarc");
+    SlxarcArchive::pack_directory(&stage_directory, &archive_path).expect("pack slxarc");
+
+    let run_cli = Cli::try_parse_from(["solix", "run", archive_path.to_str().expect("valid path")])
+        .expect("parse run");
+
+    let exit_code = run(run_cli).expect("run archive success");
+    assert_eq!(exit_code, 99);
+}

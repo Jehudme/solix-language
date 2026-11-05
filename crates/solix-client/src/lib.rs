@@ -7,8 +7,8 @@ pub mod commands;
 pub mod diagnostics;
 pub mod telemetry;
 
-pub use cli::{Cli, Commands, CompileArgs, InfoArgs, RunArgs};
-pub use commands::{execute_compile, execute_info, execute_run};
+pub use cli::{BuildArgs, Cli, Commands, CompileArgs, InfoArgs, RunArgs};
+pub use commands::{execute_build, execute_compile, execute_info, execute_run};
 pub use diagnostics::render_diagnostics;
 pub use telemetry::{
     CompileMetricsReport, ProcessTelemetry, RunMetricsReport, capture_process_telemetry,
@@ -22,6 +22,10 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
         Commands::Compile(args) => {
             execute_compile(args)?;
+            Ok(0)
+        }
+        Commands::Build(args) => {
+            execute_build(args)?;
             Ok(0)
         }
         Commands::Run(args) => {

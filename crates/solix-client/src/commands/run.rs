@@ -10,6 +10,7 @@ use crate::telemetry::{
 };
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
+use solix_common::project::SlxarcArchive;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::manifest::manifest_to_source;
 use solix_compilation::pipeline::CompilationPipeline;
@@ -93,26 +94,84 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         runtime_options = runtime_options.with_entry_point(entry);
     }
 
-    // Partition target paths into source files (*.slx) and precompiled binaries (*.slxb)
+    let temp_cache_dir = std::env::temp_dir().join(format!("solix_run_{}", std::process::id()));
+    let mut loaded_binary_programs = Vec::new();
+
+    // Mount extra libraries passed via -l, --lib
+    for lib_path in &args.libs {
+        let extension = lib_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        if extension.eq_ignore_ascii_case("so")
+            || extension.eq_ignore_ascii_case("dll")
+            || extension.eq_ignore_ascii_case("dylib")
+        {
+            runtime_options = runtime_options.with_native_library(lib_path);
+        } else if extension.eq_ignore_ascii_case("slxarc") {
+            let loaded_archive = SlxarcArchive::extract_and_load(lib_path, &temp_cache_dir)
+                .with_context(|| {
+                    format!(
+                        "Failed to extract dependency archive '{}'",
+                        lib_path.display()
+                    )
+                })?;
+            for native_lib in loaded_archive.native_libraries {
+                runtime_options = runtime_options.with_native_library(native_lib);
+            }
+            loaded_binary_programs.extend(loaded_archive.binaries);
+            loaded_binary_programs.extend(loaded_archive.secondary_binaries);
+        } else if extension.eq_ignore_ascii_case("slxb") {
+            let bytes = fs::read(lib_path).with_context(|| {
+                format!("Failed to read dependency binary '{}'", lib_path.display())
+            })?;
+            let program = BinaryProgram::from_bytes(&bytes).with_context(|| {
+                format!(
+                    "Failed to deserialize dependency binary from '{}'",
+                    lib_path.display()
+                )
+            })?;
+            loaded_binary_programs.push(program);
+        }
+    }
+
+    // Partition target paths into source files (*.slx), archives (*.slxarc), and precompiled binaries (*.slxb)
     let mut source_paths: Vec<&PathBuf> = Vec::new();
     let mut binary_paths: Vec<&PathBuf> = Vec::new();
 
     for target_path in &args.binaries {
-        let is_source = target_path
+        let extension = target_path
             .extension()
-            .and_then(|extension| extension.to_str())
-            .map(|ext_str| ext_str.eq_ignore_ascii_case("slx"))
-            .unwrap_or(false);
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
 
-        if is_source {
+        if extension.eq_ignore_ascii_case("slx") {
             source_paths.push(target_path);
+        } else if extension.eq_ignore_ascii_case("slxarc") {
+            let loaded_archive = SlxarcArchive::extract_and_load(target_path, &temp_cache_dir)
+                .with_context(|| {
+                    format!(
+                        "Failed to extract archive container '{}'",
+                        target_path.display()
+                    )
+                })?;
+            for native_lib in loaded_archive.native_libraries {
+                runtime_options = runtime_options.with_native_library(native_lib);
+            }
+            if runtime_options.entry_point.is_none()
+                && let Some(ref manifest) = loaded_archive.manifest
+                && let Some(ref main_sym) = manifest.entrypoints.main
+            {
+                runtime_options = runtime_options.with_entry_point(main_sym);
+            }
+            loaded_binary_programs.extend(loaded_archive.binaries);
+            loaded_binary_programs.extend(loaded_archive.secondary_binaries);
         } else {
             binary_paths.push(target_path);
         }
     }
 
     // Pre-load and deserialize any provided binary containers (*.slxb)
-    let mut loaded_binary_programs = Vec::with_capacity(binary_paths.len());
     for binary_path in &binary_paths {
         let bytes = fs::read(binary_path).with_context(|| {
             format!(

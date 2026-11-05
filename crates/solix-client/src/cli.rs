@@ -25,11 +25,54 @@ pub enum Commands {
     /// Compiles Solix source files into an executable binary container (.slxb)
     Compile(CompileArgs),
 
+    /// Builds a Solix project into a .slxarc archive container
+    Build(BuildArgs),
+
     /// Executes compiled Solix binary containers in the virtual machine
     Run(RunArgs),
 
-    /// Inspects metadata, export manifests, and bytecode of an SLXB binary container
+    /// Inspects metadata, export manifests, and bytecode of an SLXB binary container or .slxarc archive
     Info(InfoArgs),
+}
+
+/// Arguments for `solix build`.
+#[derive(Debug, Args, Clone)]
+pub struct BuildArgs {
+    /// Project root directory containing manifest.toml and scripts/build.py [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Target build profile: debug, release, or test
+    #[arg(long, default_value = "debug")]
+    pub profile: String,
+
+    /// Shorthand flag for debug build profile
+    #[arg(long, conflicts_with_all = ["release", "test"])]
+    pub debug: bool,
+
+    /// Shorthand flag for release build profile
+    #[arg(long, conflicts_with_all = ["debug", "test"])]
+    pub release: bool,
+
+    /// Shorthand flag for test build profile
+    #[arg(long, conflicts_with_all = ["debug", "release"])]
+    pub test: bool,
+}
+
+impl BuildArgs {
+    /// Resolves the effective build profile string considering shorthand flags.
+    #[must_use]
+    pub fn resolved_profile(&self) -> &str {
+        if self.release {
+            "release"
+        } else if self.test {
+            "test"
+        } else if self.debug {
+            "debug"
+        } else {
+            &self.profile
+        }
+    }
 }
 
 /// Arguments for `solix compile`.
@@ -95,9 +138,13 @@ pub struct CompileArgs {
 /// Arguments for `solix run`.
 #[derive(Debug, Args, Clone)]
 pub struct RunArgs {
-    /// Executable binary containers (*.slxb) and/or source files (*.slx) to execute
+    /// Executable binary containers (*.slxb), archive containers (*.slxarc), and/or source files (*.slx) to execute
     #[arg(required = true)]
     pub binaries: Vec<PathBuf>,
+
+    /// Library files to load (*.slxb, *.slxarc, *.so, *.dll, *.dylib)
+    #[arg(short = 'l', long = "lib")]
+    pub libs: Vec<PathBuf>,
 
     /// Override default entry point symbol (e.g. "Main::main")
     #[arg(short, long)]
