@@ -100,6 +100,10 @@ pub enum RuntimeError {
         "invalid entry point signature: {symbol} has {param_count} parameters (expected 0 or 1)"
     )]
     InvalidEntryPointSignature { symbol: String, param_count: u16 },
+
+    /// Native shared library loading or symbol resolution failure.
+    #[error("SharedLibraryException: Failed to load library '{path}': {reason}")]
+    SharedLibraryError { path: String, reason: String },
 }
 
 /// Canonical numerical error codes emitted on abnormal VM termination.
@@ -150,6 +154,8 @@ pub enum RuntimeErrorCode {
     InvalidEntryPointSignature = 20,
     /// Explicit exit with non-zero code.
     ExplicitExit = 21,
+    /// Native shared library load or invocation failure.
+    SharedLibraryError = 22,
 }
 
 impl RuntimeErrorCode {
@@ -198,6 +204,7 @@ impl RuntimeError {
             Self::AssertionFailed { .. } => RuntimeErrorCode::AssertionFailed,
             Self::MemoryLeak { .. } => RuntimeErrorCode::MemoryLeak,
             Self::InvalidEntryPointSignature { .. } => RuntimeErrorCode::InvalidEntryPointSignature,
+            Self::SharedLibraryError { .. } => RuntimeErrorCode::SharedLibraryError,
         }
     }
 }

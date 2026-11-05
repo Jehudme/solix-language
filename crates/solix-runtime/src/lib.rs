@@ -24,7 +24,10 @@ pub use memory::{
     ALIGNMENT, BlockHeader, BlockTag, FreeListManager, HEADER_SIZE, HeapTelemetry,
     LiveAllocationInfo, MAX_REF_COUNT, VirtualHeap, align_up, dec_ref, inc_ref,
 };
-pub use native::{NativeFunction, NativeRegistry};
+pub use native::{
+    LoadedSharedLibrary, NativeCFunctionPtr, NativeCallback, NativeFunction, NativeRegistry,
+    SharedLibraryLoader, SolixCValue, SolixVmContext,
+};
 pub use options::{DEFAULT_HEAP_SIZE, DEFAULT_MAX_CALL_STACK_DEPTH, RuntimeOptions};
 pub use value::Value;
 pub use vm::{VirtualMachine, VmTelemetry};

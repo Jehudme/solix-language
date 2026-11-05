@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use crate::exceptions::RuntimeError;
-use crate::native::{NativeFunction, NativeRegistry};
+use crate::native::{LoadedSharedLibrary, NativeCallback, NativeRegistry};
 use crate::options::RuntimeOptions;
 use solix_common::bytecode::{
     BinaryProgram, CompiledClass, CompiledFunction, ConstantPool, Instruction, OpCode,
@@ -43,7 +43,7 @@ pub struct FunctionRuntimeMeta {
     /// Function ID offset for the owning binary.
     pub func_id_offset: u32,
     /// Direct function pointer if this function is a native host function / builtin.
-    pub native_fn: Option<NativeFunction>,
+    pub native_fn: Option<NativeCallback>,
     /// Whether this function has any reference registers that require ARC tracking.
     pub has_references: bool,
 }
@@ -53,6 +53,10 @@ pub struct FunctionRuntimeMeta {
 pub struct RuntimeContext {
     /// Active runtime configuration options.
     pub options: RuntimeOptions,
+    /// Loaded dynamic shared libraries kept alive for runtime execution.
+    pub shared_libraries: Vec<LoadedSharedLibrary>,
+    /// Resolved host and C-ABI native functions repository.
+    pub native_registry: NativeRegistry,
     /// Metadata for each loaded binary unit.
     pub loaded_binaries: Vec<LoadedBinary>,
     /// Global lookup table mapping fully qualified symbols to global function indices.
@@ -300,6 +304,18 @@ impl RuntimeContext {
             native_registry.register(native_name, *native_callback);
         }
 
+        let mut shared_libraries = Vec::new();
+        for library_path in &options.native_libraries {
+            let mut loader = crate::native::ffi::SharedLibraryLoader::new();
+            loader.load_library(library_path)?;
+            for (symbol, function_ptr) in loader.registered_functions {
+                native_registry.register_c(symbol, function_ptr);
+            }
+            for library in loader.loaded_libraries {
+                shared_libraries.push(LoadedSharedLibrary(std::sync::Arc::new(library)));
+            }
+        }
+
         let mut function_meta = Vec::with_capacity(all_functions.len());
         for (global_id, func) in all_functions.iter().enumerate() {
             let binary_id = loaded_binaries
@@ -320,7 +336,7 @@ impl RuntimeContext {
                 .next()
                 .unwrap_or(clean_symbol);
             let has_qualifier = clean_symbol.contains("::");
-            let native_fn = native_registry
+            let mut native_fn = native_registry
                 .get(&func.symbol)
                 .copied()
                 .or_else(|| native_registry.get(clean_symbol).copied())
@@ -331,6 +347,17 @@ impl RuntimeContext {
                         None
                     }
                 });
+
+            // If not found in native_registry, probe loaded shared libraries directly for fallback symbols
+            if native_fn.is_none() && !shared_libraries.is_empty() {
+                for loaded_library in &shared_libraries {
+                    if let Some(c_func) = loaded_library.get_symbol(&func.symbol) {
+                        native_fn = Some(NativeCallback::C(c_func));
+                        native_registry.register_c(&func.symbol, c_func);
+                        break;
+                    }
+                }
+            }
 
             let has_references = !func.reference_registers.is_empty();
 
@@ -363,6 +390,8 @@ impl RuntimeContext {
 
         Ok(Self {
             options,
+            shared_libraries,
+            native_registry,
             loaded_binaries,
             symbol_to_function_id,
             symbol_to_static_slot,

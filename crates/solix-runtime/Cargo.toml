@@ -9,6 +9,7 @@ solix-common.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
+libloading.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

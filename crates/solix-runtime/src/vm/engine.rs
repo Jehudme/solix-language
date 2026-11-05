@@ -79,10 +79,7 @@ impl VirtualMachine {
         heap.set_safe_mode(context.options.safe_mode);
         let static_slots = vec![Value::Null; total_static as usize];
 
-        let mut native_registry = NativeRegistry::with_builtins();
-        for (name, func) in &context.options.native_functions {
-            native_registry.register(name, *func);
-        }
+        let native_registry = context.native_registry.clone();
 
         let mut interned_string_addrs = Vec::new();
         let mut const_pool_cache: Vec<Vec<Value>> =

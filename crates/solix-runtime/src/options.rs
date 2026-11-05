@@ -23,6 +23,8 @@ pub struct RuntimeOptions {
     pub binaries: Vec<BinaryProgram>,
     /// File paths of `.slxb` compiled binaries to load upon context creation.
     pub binary_paths: Vec<PathBuf>,
+    /// File paths of native dynamic shared libraries (`.so`, `.dll`, `.dylib`) to load upon context creation.
+    pub native_libraries: Vec<PathBuf>,
     /// Dynamic heap memory capacity in bytes.
     pub heap_size: usize,
     /// Maximum allowable call frame recursion depth before triggering a stack overflow.
@@ -44,6 +46,7 @@ impl Default for RuntimeOptions {
             entry_point: None,
             binaries: Vec::new(),
             binary_paths: Vec::new(),
+            native_libraries: Vec::new(),
             heap_size: DEFAULT_HEAP_SIZE,
             max_call_stack_depth: DEFAULT_MAX_CALL_STACK_DEPTH,
             args: Vec::new(),
@@ -113,6 +116,24 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_binary_path(mut self, path: impl AsRef<Path>) -> Self {
         self.binary_paths.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// Appends a native dynamic shared library path to load during context creation.
+    #[must_use]
+    pub fn with_native_library(mut self, path: impl AsRef<Path>) -> Self {
+        self.native_libraries.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// Appends multiple native dynamic shared library paths to load during context creation.
+    #[must_use]
+    pub fn with_native_libraries(
+        mut self,
+        paths: impl IntoIterator<Item = impl AsRef<Path>>,
+    ) -> Self {
+        self.native_libraries
+            .extend(paths.into_iter().map(|path| path.as_ref().to_path_buf()));
         self
     }
 

@@ -22,6 +22,7 @@ use crate::phases::parser::statements::declarations::{
     MethodDeclaration, Modifier, OperatorDeclaration,
 };
 use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
+use crate::phases::parser::statements::types::TypeAnnotation;
 use solix_common::bytecode::{
     BinaryProgram, CompiledFunction, DeclarationModifier, ExportManifest, ExportedClass,
     ExportedField, ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic,
@@ -1092,6 +1093,29 @@ fn compile_single_method(
         if !has_return {
             emitter.emit_return_arc_cleanup(None);
             emitter.emit_instruction(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
+        }
+    } else if m.modifiers.contains(&Modifier::Native) {
+        let clean_symbol = symbol.split('(').next().unwrap_or(symbol);
+        let sym_idx = pool.add_string(clean_symbol)?;
+        let dst = allocator.alloc_temp()?;
+        func.emit(
+            Instruction::format_call(OpCode::CallSymbol, dst, sym_idx, 0, param_count as u8),
+            None,
+        );
+        let is_void = matches!(
+            m.return_type,
+            TypeAnnotation::Primitive {
+                kind: TokenKind::PrimitiveVoid,
+                ..
+            }
+        );
+        if is_void {
+            func.emit(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
+        } else {
+            func.emit(
+                Instruction::format_a(OpCode::ReturnValue, 0, 0, dst, 0),
+                None,
+            );
         }
     } else {
         func.emit(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);

@@ -797,7 +797,7 @@ impl VirtualMachine {
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
                         flush_telemetry!();
-                        let call_result = native_callback(self, &call_args)?;
+                        let call_result = native_callback.invoke(self, &call_args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -829,7 +829,7 @@ impl VirtualMachine {
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
                         flush_telemetry!();
-                        let call_result = native_callback(self, &call_args)?;
+                        let call_result = native_callback.invoke(self, &call_args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -877,7 +877,7 @@ impl VirtualMachine {
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
                         flush_telemetry!();
-                        let call_result = native_callback(self, &call_args)?;
+                        let call_result = native_callback.invoke(self, &call_args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -946,7 +946,7 @@ impl VirtualMachine {
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
                         flush_telemetry!();
-                        let call_result = native_callback(self, &call_args)?;
+                        let call_result = native_callback.invoke(self, &call_args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -1000,13 +1000,23 @@ impl VirtualMachine {
                     let caller_arg_start = caller_frame.register_base + arg_base as usize;
 
                     // Check native registry first
-                    if let Some(&native_fn) = self.native_registry.get(&sym_str) {
+                    let clean_sym = sym_str.split('(').next().unwrap_or(&sym_str);
+                    let mangled_sym = clean_sym.replace("::", "_");
+                    let simple_sym = clean_sym.rsplit(['.', ':']).next().unwrap_or(clean_sym);
+                    let native_candidate = self
+                        .native_registry
+                        .get(&sym_str)
+                        .or_else(|| self.native_registry.get(clean_sym))
+                        .or_else(|| self.native_registry.get(&mangled_sym))
+                        .or_else(|| self.native_registry.get(simple_sym));
+
+                    if let Some(&native_fn) = native_candidate {
                         self.record_native_call();
                         let call_args = self.register_stack
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
                         flush_telemetry!();
-                        let call_result = native_fn(self, &call_args)?;
+                        let call_result = native_fn.invoke(self, &call_args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -1030,9 +1040,31 @@ impl VirtualMachine {
                         .symbol_to_function_id
                         .get(&sym_str)
                         .copied()
-                        .ok_or(RuntimeError::FunctionNotFound {
-                            symbol_or_id: sym_str,
+                        .ok_or_else(|| {
+                            if sym_str.contains("::") || sym_str.contains('_') {
+                                let mangled_unresolved = sym_str.replace("::", "_");
+                                RuntimeError::FunctionNotFound {
+                                    symbol_or_id: format!(
+                                        "Call to unknown native function: {mangled_unresolved}"
+                                    ),
+                                }
+                            } else {
+                                RuntimeError::FunctionNotFound {
+                                    symbol_or_id: format!(
+                                        "Call to unknown native function: {sym_str}"
+                                    ),
+                                }
+                            }
                         })?;
+
+                    if caller_func_id == global_id {
+                        let mangled_unresolved = sym_str.replace("::", "_");
+                        return Err(RuntimeError::FunctionNotFound {
+                            symbol_or_id: format!(
+                                "Call to unknown native function: {mangled_unresolved}"
+                            ),
+                        });
+                    }
 
                     let quickened = Instruction::format_call(
                         OpCode::CallDirect,
@@ -1090,7 +1122,7 @@ impl VirtualMachine {
                             [caller_arg_start..caller_arg_start + arg_count]
                             .to_vec();
                         flush_telemetry!();
-                        let call_result = native_fn(self, &call_args)?;
+                        let call_result = native_fn.invoke(self, &call_args)?;
                         unsafe {
                             *reg_base.add(caller_dst as usize) = call_result;
                         }
@@ -1136,7 +1168,7 @@ impl VirtualMachine {
                                 [caller_arg_start..caller_arg_start + arg_count]
                                 .to_vec();
                             flush_telemetry!();
-                            let call_result = native_fn(self, &call_args)?;
+                            let call_result = native_fn.invoke(self, &call_args)?;
                             unsafe {
                                 *reg_base.add(caller_dst as usize) = call_result;
                             }
@@ -1173,7 +1205,7 @@ impl VirtualMachine {
                                     [caller_arg_start..caller_arg_start + arg_count]
                                     .to_vec();
                                 flush_telemetry!();
-                                let call_result = native_callback(self, &call_args)?;
+                                let call_result = native_callback.invoke(self, &call_args)?;
                                 unsafe {
                                     *reg_base.add(caller_dst as usize) = call_result;
                                 }
@@ -1203,7 +1235,7 @@ impl VirtualMachine {
                                     [caller_arg_start..caller_arg_start + arg_count]
                                     .to_vec();
                                 flush_telemetry!();
-                                let call_result = native_callback(self, &call_args)?;
+                                let call_result = native_callback.invoke(self, &call_args)?;
                                 unsafe {
                                     *reg_base.add(caller_dst as usize) = call_result;
                                 }
