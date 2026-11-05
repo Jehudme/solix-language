@@ -192,6 +192,14 @@ public class ArithmeticException extends RuntimeException {
     public ArithmeticException(String message, Exception cause) : super(message, cause) {}
 }
 
+public class FormatException extends RuntimeException {
+    public FormatException() : super("Invalid format.") {}
+    public FormatException(string message) : super(message) {}
+    public FormatException(String message) : super(message) {}
+    public FormatException(string message, Exception cause) : super(message, cause) {}
+    public FormatException(String message, Exception cause) : super(message, cause) {}
+}
+
 public class NumberFormatException extends IllegalArgumentException {
     public NumberFormatException() : super("Input string was not in a valid numeric format.") {}
     public NumberFormatException(string message) : super(message) {}

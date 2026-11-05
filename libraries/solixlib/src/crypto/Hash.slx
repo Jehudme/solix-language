@@ -1,0 +1,105 @@
+package solix.crypto;
+
+import solix.core.String;
+
+public class Hash {
+    public static int8[] sha256(int8[] input_bytes) {
+        if (input_bytes == null) {
+            return new int8[0];
+        }
+        return Hash::native_sha256(input_bytes);
+    }
+
+    public static String sha256_hex(String input_text) {
+        if (input_text == null || input_text.data == null) {
+            return new String("");
+        }
+        char[] digest_chars = Hash::native_sha256_hex(input_text.to_chars());
+        if (digest_chars == null) {
+            return new String("");
+        }
+        return new String(digest_chars);
+    }
+
+    public static String sha256_hex(string input_text) {
+        if (input_text == null) {
+            return new String("");
+        }
+        return Hash::sha256_hex(new String(input_text));
+    }
+
+    public static int8[] sha1(int8[] input_bytes) {
+        if (input_bytes == null) {
+            return new int8[0];
+        }
+        return Hash::native_sha1(input_bytes);
+    }
+
+    public static String sha1_hex(String input_text) {
+        if (input_text == null || input_text.data == null) {
+            return new String("");
+        }
+        char[] digest_chars = Hash::native_sha1_hex(input_text.to_chars());
+        if (digest_chars == null) {
+            return new String("");
+        }
+        return new String(digest_chars);
+    }
+
+    public static String sha1_hex(string input_text) {
+        if (input_text == null) {
+            return new String("");
+        }
+        return Hash::sha1_hex(new String(input_text));
+    }
+
+    public static int8[] md5(int8[] input_bytes) {
+        if (input_bytes == null) {
+            return new int8[0];
+        }
+        return Hash::native_md5(input_bytes);
+    }
+
+    public static String md5_hex(String input_text) {
+        if (input_text == null || input_text.data == null) {
+            return new String("");
+        }
+        char[] digest_chars = Hash::native_md5_hex(input_text.to_chars());
+        if (digest_chars == null) {
+            return new String("");
+        }
+        return new String(digest_chars);
+    }
+
+    public static String md5_hex(string input_text) {
+        if (input_text == null) {
+            return new String("");
+        }
+        return Hash::md5_hex(new String(input_text));
+    }
+
+    public static bool constant_time_equals(int8[] first_bytes, int8[] second_bytes) {
+        if (first_bytes == null || second_bytes == null) {
+            return first_bytes == second_bytes;
+        }
+        if (first_bytes.length != second_bytes.length) {
+            return false;
+        }
+        int32 difference_accumulator = 0;
+        int32 byte_index = 0;
+        while (byte_index < first_bytes.length) {
+            int32 first_val = (int32)first_bytes[byte_index];
+            int32 second_val = (int32)second_bytes[byte_index];
+            difference_accumulator = difference_accumulator | (first_val ^ second_val);
+            byte_index = byte_index + 1;
+        }
+        return difference_accumulator == 0;
+    }
+
+    private static native int8[] native_sha256(int8[] input_bytes);
+    private static native char[] native_sha256_hex(char[] input_chars);
+    private static native int8[] native_sha1(int8[] input_bytes);
+    private static native char[] native_sha1_hex(char[] input_chars);
+    private static native int8[] native_md5(int8[] input_bytes);
+    private static native char[] native_md5_hex(char[] input_chars);
+}
