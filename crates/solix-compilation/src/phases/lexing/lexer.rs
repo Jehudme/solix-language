@@ -350,7 +350,7 @@ impl<'source> LexerState<'source> {
 }
 
 /// Tokenizes a single source string, returning the token stream alongside accumulated unknown token errors.
-fn tokenize_source(source_id: u16, source: &str) -> (Vec<Token>, Vec<LexingError>) {
+pub fn tokenize_source(source_id: u16, source: &str) -> (Vec<Token>, Vec<LexingError>) {
     let mut state = LexerState::new(source_id, source);
 
     // Consume optional UTF-8 Byte Order Mark (BOM: 0xEF, 0xBB, 0xBF)

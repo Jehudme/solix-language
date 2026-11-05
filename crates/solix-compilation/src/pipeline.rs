@@ -5,7 +5,8 @@
 use crate::CompilationContext::CompilationContext;
 use crate::phases::phase::{CompilationPhase, PhaseDecision};
 use crate::phases::standard::{
-    AstInlinerPhase, BinderPhase, BytecodeOptimizerPhase, EmitterPhase, LexerPhase, ParserPhase,
+    AstInlinerPhase, BinderPhase, BytecodeOptimizerPhase, DependencyResolutionPhase, EmitterPhase,
+    LexerPhase, ParserPhase,
 };
 use crate::telemetry::{CompilerTelemetry, PhaseMetric};
 use solix_common::CompilationDiagnostic;
@@ -54,10 +55,11 @@ impl CompilationPipeline {
     }
 
     /// Pre-configured full compilation pipeline:
-    /// Lexical Analysis -> Syntax Parsing -> Semantic Binding -> Bytecode Emission.
+    /// Dependency Resolution -> Lexical Analysis -> Syntax Parsing -> Semantic Binding -> Bytecode Emission.
     #[must_use]
     pub fn standard() -> Self {
         Self::empty()
+            .add_phase(DependencyResolutionPhase::new())
             .add_phase(LexerPhase::new())
             .add_phase(ParserPhase::new())
             .add_phase(BinderPhase::new())
@@ -73,6 +75,7 @@ impl CompilationPipeline {
             crate::CompilationContext::BuildProfile::Release => Self::standard(),
             crate::CompilationContext::BuildProfile::Debug
             | crate::CompilationContext::BuildProfile::Test => Self::empty()
+                .add_phase(DependencyResolutionPhase::new())
                 .add_phase(LexerPhase::new())
                 .add_phase(ParserPhase::new())
                 .add_phase(BinderPhase::new())
@@ -100,10 +103,12 @@ impl CompilationPipeline {
     }
 
     /// Pre-configured lexer-only pipeline:
-    /// Lexical Analysis.
+    /// Dependency Resolution -> Lexical Analysis.
     #[must_use]
     pub fn lex_only() -> Self {
-        Self::empty().add_phase(LexerPhase::new())
+        Self::empty()
+            .add_phase(DependencyResolutionPhase::new())
+            .add_phase(LexerPhase::new())
     }
 
     /// Executes all registered phases in sequence against the compilation context.

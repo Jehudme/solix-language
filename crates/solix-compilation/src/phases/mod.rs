@@ -1,4 +1,5 @@
 pub mod binder;
+pub mod dependency;
 pub mod emitter;
 pub mod lexing;
 pub mod optimizer;
@@ -6,6 +7,7 @@ pub mod parser;
 pub mod phase;
 pub mod standard;
 
+pub use dependency::DependencyResolutionPhase;
 pub use optimizer::{AstInlinerPhase, BytecodeOptimizerPhase};
 pub use phase::{CompilationPhase, PhaseDecision};
 pub use standard::{BinderPhase, EmitterPhase, LexerPhase, ParserPhase};

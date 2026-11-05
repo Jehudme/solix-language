@@ -348,7 +348,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         self.synchronize();
                     }
                 },
-                TokenKind::KeywordImport => match self.parse_import_statement() {
+                TokenKind::KeywordImport => match self.parse_import_statement(false, None) {
                     Ok(import_stmt) => {
                         if self.has_parsed_declaration {
                             self.record_error(ParsingError::ImportAfterDeclaration {
@@ -378,6 +378,14 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     }
                     Ok(TopLevelElement::Statement(stmt)) => {
                         program.root_statements.push(stmt);
+                    }
+                    Ok(TopLevelElement::Import(import_stmt)) => {
+                        if self.has_parsed_declaration {
+                            self.record_error(ParsingError::ImportAfterDeclaration {
+                                span: import_stmt.span.to_source_span(),
+                            });
+                        }
+                        program.imports.push(import_stmt);
                     }
                     Err(error) => {
                         self.record_error(error);
@@ -409,8 +417,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         Ok(PackageStatement { span, path })
     }
 
-    fn parse_import_statement(&mut self) -> Result<ImportStatement, ParsingError> {
-        let start_span = self.cursor.current_span();
+    fn parse_import_statement(
+        &mut self,
+        is_extern: bool,
+        extern_span: Option<Span>,
+    ) -> Result<ImportStatement, ParsingError> {
+        let start_span = extern_span.unwrap_or_else(|| self.cursor.current_span());
         self.cursor.advance(); // consume 'import'
 
         let mut path = Vec::new();
@@ -449,6 +461,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             path,
             is_wildcard,
             alias,
+            is_extern,
         })
     }
 
@@ -512,6 +525,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 TokenKind::KeywordPackage | TokenKind::KeywordImport | TokenKind::KeywordAlias
             )
         {
+            if modifiers.len() == 1
+                && modifiers[0] == Modifier::Extern
+                && self.cursor.peek_kind() == TokenKind::KeywordImport
+            {
+                let import_statement = self.parse_import_statement(true, None)?;
+                return Ok(TopLevelElement::Import(import_statement));
+            }
             let span = self.cursor.current_span();
             return Err(ParsingError::ModifierOnModuleStatement {
                 span: span.to_source_span(),
@@ -1696,7 +1716,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 self.record_error(ParsingError::ImportAfterDeclaration {
                     span: span.to_source_span(),
                 });
-                let imp = self.parse_import_statement()?;
+                let imp = self.parse_import_statement(false, None)?;
                 Ok(vec![Statement::Block(BlockStatement {
                     span: imp.span,
                     statements: Vec::new(),
@@ -4463,4 +4483,5 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 enum TopLevelElement {
     Declaration(Declaration),
     Statement(Statement),
+    Import(ImportStatement),
 }

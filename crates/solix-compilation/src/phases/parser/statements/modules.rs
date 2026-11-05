@@ -32,6 +32,8 @@ pub struct ImportStatement {
     pub is_wildcard: bool,
     /// Optional rename alias specified via `as <Alias>`.
     pub alias: Option<Span>,
+    /// Whether this import was declared with `extern import`.
+    pub is_extern: bool,
 }
 
 /// Type alias statement defining a synonym for a type or generic parameterization.

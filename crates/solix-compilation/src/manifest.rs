@@ -43,6 +43,10 @@ pub fn manifest_to_source(manifest_json: &str) -> Result<(String, String), serde
     }
     out.push('\n');
 
+    if !manifest.package_name.is_empty() {
+        out.push_str(&format!("package {};\n\n", manifest.package_name));
+    }
+
     // 1. Generic templates (preserved source code for monomorphization)
     for template in &manifest.generic_templates {
         out.push_str(&template.template_source);

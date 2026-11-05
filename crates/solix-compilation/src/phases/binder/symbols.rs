@@ -290,7 +290,29 @@ impl SymbolTable {
         }
 
         // 5. Global FQN direct match
-        self.lookup_global(identifier)
+        if let Some(symbol_id) = self.lookup_global(identifier) {
+            return Some(symbol_id);
+        }
+
+        // 6. Unqualified unique package fallback (root facade)
+        if !identifier.contains("::") && !identifier.contains('.') {
+            let suffix = format!("::{identifier}");
+            let mut matched_symbol_id = None;
+            for (candidate_fqn, &candidate_symbol_id) in &self.global_names {
+                if candidate_fqn.ends_with(&suffix) {
+                    if matched_symbol_id.is_some() {
+                        // Ambiguous across multiple packages
+                        return None;
+                    }
+                    matched_symbol_id = Some(candidate_symbol_id);
+                }
+            }
+            if let Some(symbol_id) = matched_symbol_id {
+                return Some(symbol_id);
+            }
+        }
+
+        None
     }
 
     /// Finds all candidate fully qualified symbol paths matching an identifier across active wildcard imports in `source_id`.

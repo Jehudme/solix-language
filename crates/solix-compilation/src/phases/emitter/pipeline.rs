@@ -605,11 +605,17 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     program.package_name = context.options.package_name.clone();
     program.package_version = context.options.package_version.clone();
     program.package_description = context.options.package_description.clone();
+
+    let mut dependencies: Vec<solix_common::solver::DependencyRequirement> =
+        context.dependencies_map.values().cloned().collect();
+    dependencies
+        .sort_by(|requirement_a, requirement_b| requirement_a.name.cmp(&requirement_b.name));
+
     program.export_manifest = ExportManifest {
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
-        dependencies: Vec::new(),
+        dependencies,
         exported_classes,
         exported_functions,
         exported_statics,

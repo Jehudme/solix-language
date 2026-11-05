@@ -6,6 +6,7 @@ use super::phase::CompilationPhase;
 use crate::CompilationContext::CompilationContext;
 use solix_common::CompilationDiagnostic;
 
+pub use super::dependency::DependencyResolutionPhase;
 pub use super::optimizer::{AstInlinerPhase, BytecodeOptimizerPhase};
 
 /// Lexical analysis phase tokenizing all registered sources in the context.
@@ -103,6 +104,35 @@ impl CompilationPhase for ParserPhase {
                             .push(CompilationDiagnostic::from(err).with_source_id(source_id));
                     }
                 }
+            }
+        }
+
+        let mut extern_imports_to_resolve = Vec::new();
+        for source_index in 0..sources_count {
+            if let Some(ast) = &context.ast[source_index] {
+                for import_statement in &ast.imports {
+                    if import_statement.is_extern {
+                        let package_name =
+                            if let Some(first_segment) = import_statement.path.first() {
+                                context.get_lexeme(*first_segment).to_string()
+                            } else {
+                                String::new()
+                            };
+                        if !package_name.is_empty() {
+                            extern_imports_to_resolve.push((package_name, import_statement.span));
+                        }
+                    }
+                }
+            }
+        }
+
+        for (package_name, import_span) in extern_imports_to_resolve {
+            if let Err(resolution_errors) = crate::phases::dependency::resolve_extern_import(
+                &package_name,
+                import_span,
+                context,
+            ) {
+                accumulated_diagnostics.extend(resolution_errors);
             }
         }
 

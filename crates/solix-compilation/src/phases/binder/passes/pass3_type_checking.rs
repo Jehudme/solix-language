@@ -38,6 +38,32 @@ pub struct TypeCheckingVisitor<'a> {
     pub source_texts: &'a [String],
 }
 
+fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Option<String> {
+    match expression {
+        Expression::Identifier { span } => {
+            if span.end as usize <= source_text.len() {
+                Some(source_text[span.start as usize..span.end as usize].to_string())
+            } else {
+                None
+            }
+        }
+        Expression::MemberAccess {
+            object,
+            member_span,
+            ..
+        } => {
+            let base_path = get_qualified_member_path(object, source_text)?;
+            let member_name = if member_span.end as usize <= source_text.len() {
+                &source_text[member_span.start as usize..member_span.end as usize]
+            } else {
+                return None;
+            };
+            Some(format!("{base_path}::{member_name}"))
+        }
+        _ => None,
+    }
+}
+
 impl<'a> TypeCheckingVisitor<'a> {
     /// Evaluates the semantic [`Type`] of an arbitrary expression.
     pub fn evaluate_expression_type(&mut self, expression: &Expression) -> Type {
@@ -445,17 +471,32 @@ impl<'a> TypeCheckingVisitor<'a> {
                 }
             }
             Expression::MemberAccess {
+                span: member_access_span,
                 object,
                 member_span,
                 is_scope_resolution,
-                ..
             } => {
-                let target_type = self.evaluate_expression_type(object);
                 let member_name = if member_span.end as usize <= self.source_text.len() {
                     &self.source_text[member_span.start as usize..member_span.end as usize]
                 } else {
                     ""
                 };
+
+                // Check if this MemberAccess chain represents a package-qualified top-level function or variable
+                if let Some(qualified_path) =
+                    get_qualified_member_path(expression, self.source_text)
+                    && let Some(symbol_id) = self
+                        .symbol_table
+                        .resolve_symbol(self.source_id, &qualified_path)
+                    && let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id)
+                    && symbol_entry.parent_symbol.is_none()
+                {
+                    self.resolved_symbols.insert(*member_span, symbol_id);
+                    self.resolved_symbols.insert(*member_access_span, symbol_id);
+                    return symbol_entry.symbol_type.clone();
+                }
+
+                let target_type = self.evaluate_expression_type(object);
 
                 // Array and tuple .length property
                 if (matches!(target_type, Type::Array { .. })

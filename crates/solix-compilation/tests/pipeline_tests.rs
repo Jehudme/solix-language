@@ -259,14 +259,15 @@ fn test_pipeline_telemetry_recording() {
     assert!(telemetry.total_tokens > 0);
     assert!(telemetry.total_instructions > 0);
     assert!(telemetry.binary_size_bytes > 0);
-    assert_eq!(telemetry.phases.len(), 6);
-    assert_eq!(telemetry.phases[0].name, "Lexical Analysis");
-    assert_eq!(telemetry.phases[1].name, "Syntax Parsing");
-    assert_eq!(telemetry.phases[2].name, "Semantic Analysis & Type Binding");
-    assert_eq!(telemetry.phases[3].name, "AST Function & Method Inliner");
-    assert_eq!(telemetry.phases[4].name, "Bytecode Emission");
+    assert_eq!(telemetry.phases.len(), 7);
+    assert_eq!(telemetry.phases[0].name, "Dependency Resolution");
+    assert_eq!(telemetry.phases[1].name, "Lexical Analysis");
+    assert_eq!(telemetry.phases[2].name, "Syntax Parsing");
+    assert_eq!(telemetry.phases[3].name, "Semantic Analysis & Type Binding");
+    assert_eq!(telemetry.phases[4].name, "AST Function & Method Inliner");
+    assert_eq!(telemetry.phases[5].name, "Bytecode Emission");
     assert_eq!(
-        telemetry.phases[5].name,
+        telemetry.phases[6].name,
         "Bytecode Peephole & Superinstruction Optimizer"
     );
 }

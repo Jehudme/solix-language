@@ -4,9 +4,12 @@
 
 use crate::phases::lexing::tokens::{Span, Token};
 use crate::phases::parser::statements::ProgramAst;
+use solix_common::bytecode::BinaryProgram;
+use solix_common::solver::{DependencyRequirement, ModuleSolver};
 use solix_common::{LexingError, ParsingError};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Target build profile controlling compiler optimizations and pipeline stages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -66,6 +69,12 @@ pub struct CompilationOptions {
     pub inline_threshold: usize,
     /// Whether to execute post-emission bytecode optimizations (default true).
     pub bytecode_optimization: bool,
+    /// Pre-loaded binary programs to link as external dependencies.
+    pub dependency_binaries: Vec<BinaryProgram>,
+    /// Explicit dependency requirements (e.g. from `--deps raylib@1.0.0`).
+    pub dependency_specs: Vec<DependencyRequirement>,
+    /// Pluggable module solver for fetching missing/transitive dependencies.
+    pub solver: Option<Arc<dyn ModuleSolver>>,
 }
 
 impl Default for CompilationOptions {
@@ -88,6 +97,9 @@ impl CompilationOptions {
             include_builtins: false,
             inline_threshold: 8,
             bytecode_optimization: true,
+            dependency_binaries: Vec::new(),
+            dependency_specs: Vec::new(),
+            solver: None,
         }
     }
 
@@ -150,6 +162,27 @@ impl CompilationOptions {
         self
     }
 
+    /// Appends a pre-loaded dependency binary program.
+    #[must_use]
+    pub fn with_dependency_binary(mut self, program: BinaryProgram) -> Self {
+        self.dependency_binaries.push(program);
+        self
+    }
+
+    /// Appends an explicit dependency requirement specification.
+    #[must_use]
+    pub fn with_dependency_spec(mut self, spec: DependencyRequirement) -> Self {
+        self.dependency_specs.push(spec);
+        self
+    }
+
+    /// Configures the pluggable module solver for dependency resolution.
+    #[must_use]
+    pub fn with_solver(mut self, solver: Arc<dyn ModuleSolver>) -> Self {
+        self.solver = Some(solver);
+        self
+    }
+
     /// Sets a customized compilation pipeline for this compilation context.
     #[must_use]
     pub fn with_pipeline(mut self, pipeline: crate::pipeline::CompilationPipeline) -> Self {
@@ -195,6 +228,12 @@ pub struct CompilationContext {
     pub telemetry: Option<crate::telemetry::CompilerTelemetry>,
     /// Generic type-map blackboard for arbitrary phase and plugin state.
     pub extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    /// Resolved package dependencies for this compilation unit, mapped by package name.
+    pub dependencies_map: HashMap<String, DependencyRequirement>,
+    /// Set of package names whose API sources have already been synthesized and loaded into context.
+    pub loaded_api_packages: HashSet<String>,
+    /// Pluggable module solver reference for resolving external modules.
+    pub solver: Option<Arc<dyn ModuleSolver>>,
 }
 
 impl CompilationContext {
@@ -235,6 +274,8 @@ impl CompilationContext {
             }
         }
 
+        let solver = options.solver.clone();
+
         Self {
             options,
             source_names,
@@ -247,6 +288,9 @@ impl CompilationContext {
             emission_artifacts: None,
             telemetry: None,
             extensions: HashMap::new(),
+            dependencies_map: HashMap::new(),
+            loaded_api_packages: HashSet::new(),
+            solver,
         }
     }
 
@@ -274,7 +318,7 @@ impl CompilationContext {
     pub fn get_source_name(&self, source_id: u16) -> Option<&str> {
         self.source_names
             .get(source_id as usize)
-            .map(|s| s.as_str())
+            .map(|name| name.as_str())
     }
 
     /// Resolves the numeric `source_id` associated with a registered source name or path.
@@ -282,14 +326,16 @@ impl CompilationContext {
     pub fn get_source_id(&self, name: &str) -> Option<u16> {
         self.source_names
             .iter()
-            .position(|s| s == name)
-            .map(|idx| idx as u16)
+            .position(|name_str| name_str == name)
+            .map(|index| index as u16)
     }
 
     /// Returns the raw source code text associated with a given `source_id`.
     #[must_use]
     pub fn get_source_code(&self, source_id: u16) -> Option<&str> {
-        self.sources.get(source_id as usize).map(|s| s.as_str())
+        self.sources
+            .get(source_id as usize)
+            .map(|code| code.as_str())
     }
 
     /// Updates the source text of an existing source file and invalidates its cached artifacts.
