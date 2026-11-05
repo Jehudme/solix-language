@@ -1581,7 +1581,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
         };
 
-        let body = self.parse_block()?;
+        let body = if self.cursor.check(TokenKind::PunctuationSemicolon) {
+            let semi_span = self.cursor.current_span();
+            self.cursor.advance();
+            BlockStatement {
+                span: semi_span,
+                statements: Vec::new(),
+            }
+        } else {
+            self.parse_block()?
+        };
         let span = op_kw_span.combine(body.span);
 
         Ok(OperatorDeclaration {
@@ -1732,19 +1741,19 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
             _ => {
                 let mut had_modifier = false;
-                // Check if it starts with access modifiers or extern
-                if self.cursor.check(TokenKind::KeywordExtern) {
+                while self.cursor.check(TokenKind::KeywordExtern)
+                    || self.is_non_const_modifier(self.cursor.peek_kind())
+                {
                     let mod_span = self.cursor.current_span();
-                    self.record_error(ParsingError::ExternInsideFunction {
-                        span: mod_span.to_source_span(),
-                    });
-                    self.cursor.advance();
-                    had_modifier = true;
-                } else if self.is_access_modifier(self.cursor.peek_kind()) {
-                    let mod_span = self.cursor.current_span();
-                    self.record_error(ParsingError::ModifierOnLocalVariable {
-                        span: mod_span.to_source_span(),
-                    });
+                    if self.cursor.check(TokenKind::KeywordExtern) {
+                        self.record_error(ParsingError::ExternInsideFunction {
+                            span: mod_span.to_source_span(),
+                        });
+                    } else {
+                        self.record_error(ParsingError::ModifierOnLocalVariable {
+                            span: mod_span.to_source_span(),
+                        });
+                    }
                     self.cursor.advance();
                     had_modifier = true;
                 }
@@ -4106,6 +4115,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
     fn parse_numeric_literal(&mut self, span: Span) -> Result<LiteralValue, ParsingError> {
         let raw = self.get_lexeme(span);
+        let stripped_lexeme;
+        let raw = if raw.contains('_') {
+            stripped_lexeme = raw.replace('_', "");
+            stripped_lexeme.as_str()
+        } else {
+            raw
+        };
 
         // Check for float
         if raw.contains('.')
@@ -4465,13 +4481,20 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         )
     }
 
-    fn is_access_modifier(&self, kind: TokenKind) -> bool {
+    fn is_non_const_modifier(&self, kind: TokenKind) -> bool {
         matches!(
             kind,
             TokenKind::KeywordPublic
                 | TokenKind::KeywordProtected
                 | TokenKind::KeywordPrivate
                 | TokenKind::KeywordInternal
+                | TokenKind::KeywordStatic
+                | TokenKind::KeywordInline
+                | TokenKind::KeywordNative
+                | TokenKind::KeywordVirtual
+                | TokenKind::KeywordOverride
+                | TokenKind::KeywordWeak
+                | TokenKind::KeywordAbstract
         )
     }
 

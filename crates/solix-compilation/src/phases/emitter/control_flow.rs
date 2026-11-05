@@ -11,6 +11,7 @@ use crate::phases::parser::statements::control_flow::{
 use crate::phases::parser::statements::expressions::Expression;
 use solix_common::bytecode::{Instruction, OpCode};
 use solix_common::diagnostics::EmissionError;
+use solix_common::types::{PrimitiveKind, Type};
 
 /// Active loop context tracking forward break jumps and loop continue targets.
 #[derive(Debug, Clone, Default)]
@@ -395,11 +396,31 @@ impl<'a> Emitter<'a> {
 
         loop_stack.push(switch_break_ctx);
 
+        let discriminant_type = self.query_type(switch_stmt.discriminant.span());
+        let comparison_opcode = if matches!(
+            &discriminant_type,
+            Type::Class { symbol_name, .. }
+                if symbol_name == "std::string"
+                    || symbol_name == "std.string"
+                    || symbol_name == "string"
+        ) {
+            OpCode::EqString
+        } else if matches!(
+            &discriminant_type,
+            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+        ) {
+            OpCode::EqI64
+        } else if discriminant_type.is_floating_point() {
+            OpCode::EqF64
+        } else {
+            OpCode::EqI32
+        };
+
         for case in &switch_stmt.cases {
             let r_val = self.emit_expression(&case.case_value, None)?;
             let r_cmp = self.allocator.alloc_temp()?;
             self.emit_instruction(
-                Instruction::format_a(OpCode::EqI32, 0, r_cmp, r_disc, r_val),
+                Instruction::format_a(comparison_opcode, 0, r_cmp, r_disc, r_val),
                 Some(case.span),
             );
             self.allocator.free_temp(r_val);

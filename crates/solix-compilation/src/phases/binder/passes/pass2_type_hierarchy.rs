@@ -197,12 +197,16 @@ pub fn execute_pass2_type_hierarchy(
                         }
                         let mut m_param_types = Vec::new();
                         for param in &m.parameters {
-                            let p_type = resolve_type_annotation(
-                                source_id,
-                                source_text,
-                                &param.param_type,
-                                symbol_table,
-                            );
+                            let p_type = if param.is_variadic {
+                                Type::Primitive(PrimitiveKind::TuplePrimitive)
+                            } else {
+                                resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &param.param_type,
+                                    symbol_table,
+                                )
+                            };
                             if p_type == Type::Primitive(PrimitiveKind::Void) {
                                 accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
                                     span: param.span.to_source_span(),
@@ -311,12 +315,16 @@ pub fn execute_pass2_type_hierarchy(
                     .parameters
                     .iter()
                     .map(|p| {
-                        let ptype = resolve_type_annotation(
-                            source_id,
-                            source_text,
-                            &p.param_type,
-                            symbol_table,
-                        );
+                        let ptype = if p.is_variadic {
+                            Type::Primitive(PrimitiveKind::TuplePrimitive)
+                        } else {
+                            resolve_type_annotation(
+                                source_id,
+                                source_text,
+                                &p.param_type,
+                                symbol_table,
+                            )
+                        };
                         if ptype == Type::Primitive(PrimitiveKind::Void) {
                             accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
                                 span: p.span.to_source_span(),
@@ -563,12 +571,17 @@ pub fn execute_pass2_type_hierarchy(
                                 );
                                 let mut m_param_types = Vec::new();
                                 for param in &m.parameters {
-                                    m_param_types.push(resolve_type_annotation(
-                                        source_id,
-                                        source_text,
-                                        &param.param_type,
-                                        symbol_table,
-                                    ));
+                                    let p_type = if param.is_variadic {
+                                        Type::Primitive(PrimitiveKind::TuplePrimitive)
+                                    } else {
+                                        resolve_type_annotation(
+                                            source_id,
+                                            source_text,
+                                            &param.param_type,
+                                            symbol_table,
+                                        )
+                                    };
+                                    m_param_types.push(p_type);
                                 }
                                 iface_layout.method_slots.insert(m_name.to_string(), slot);
                                 let method_symbol = SymbolEntry {
@@ -1022,12 +1035,16 @@ pub fn execute_pass2_type_hierarchy(
                         .parameters
                         .iter()
                         .map(|parameter| {
-                            let p_type = resolve_type_annotation(
-                                source_id,
-                                source_text,
-                                &parameter.param_type,
-                                symbol_table,
-                            );
+                            let p_type = if parameter.is_variadic {
+                                Type::Primitive(PrimitiveKind::TuplePrimitive)
+                            } else {
+                                resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &parameter.param_type,
+                                    symbol_table,
+                                )
+                            };
                             if p_type == Type::Primitive(PrimitiveKind::Void) {
                                 accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
                                     span: parameter.span.to_source_span(),

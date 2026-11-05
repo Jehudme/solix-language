@@ -804,6 +804,85 @@ impl<'a> Emitter<'a> {
                                     || layouts.contains_key(simple_object)
                             }) || !self.query_type(object.span()).is_reference_type());
 
+                    if object_name == "super" {
+                        let super_type = self.query_type(object.span());
+                        let (super_name, simple_super) = match &super_type {
+                            Type::Class { symbol_name, .. } => {
+                                let simple =
+                                    symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+                                (symbol_name.as_str(), simple)
+                            }
+                            _ => ("", ""),
+                        };
+                        let super_method_sym = format!("{super_name}::{method_name}");
+                        let simple_super_sym = format!("{simple_super}::{method_name}");
+                        let func_id_opt = self
+                            .function_ids
+                            .and_then(|ids| {
+                                ids.get(&super_method_sym)
+                                    .or_else(|| ids.get(&simple_super_sym))
+                            })
+                            .copied();
+
+                        let total_args = 1 + arguments.len();
+                        let arg_base = self.allocator.alloc_window(total_args)?;
+                        // Pass `this` (register 0) in argument position 0
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::Mov, 0, arg_base, 0, 0),
+                            Some(*span),
+                        );
+                        for (arg_index, argument) in arguments.iter().enumerate() {
+                            self.emit_expression(
+                                argument,
+                                Some(arg_base + 1 + arg_index as u16),
+                            )?;
+                        }
+                        let dst = self.resolve_dst(target_reg)?;
+                        if let Some(func_id) = func_id_opt {
+                            self.emit_instruction(
+                                Instruction::format_call(
+                                    OpCode::CallDirect,
+                                    dst,
+                                    func_id as u16,
+                                    arg_base,
+                                    total_args as u8,
+                                ),
+                                Some(*span),
+                            );
+                        } else {
+                            let mangled_sym = format!("{super_method_sym}/{total_args}");
+                            let sym_idx = self.pool.add_string(&mangled_sym)?;
+                            self.emit_instruction(
+                                Instruction::format_call(
+                                    OpCode::CallExtern,
+                                    dst,
+                                    sym_idx as u16,
+                                    arg_base,
+                                    total_args as u8,
+                                ),
+                                Some(*span),
+                            );
+                        }
+                        for (arg_index, argument) in arguments.iter().enumerate() {
+                            if self.query_type(argument.span()).is_reference_type()
+                                && !matches!(argument, Expression::Identifier { .. })
+                            {
+                                self.emit_instruction(
+                                    Instruction::format_a(
+                                        OpCode::DecRef,
+                                        0,
+                                        arg_base + 1 + arg_index as u16,
+                                        0,
+                                        0,
+                                    ),
+                                    Some(*span),
+                                );
+                            }
+                        }
+                        self.allocator.free_window(arg_base, total_args);
+                        return Ok(dst);
+                    }
+
                     let is_static_fn = *is_scope_resolution
                         || is_package_or_class_call
                         || self
@@ -1276,7 +1355,19 @@ impl<'a> Emitter<'a> {
                         self.resolve_type_byte_size(short_name)
                     }
                     _ => {
-                        let type_name = self.get_lexeme(target_type.span());
+                        let mut type_name = self.get_lexeme(target_type.span());
+                        if type_name == "T" || type_name == "K" || type_name == "V" {
+                            if let Some(enc) = &self.enclosing_class
+                                && let Some(open) = enc.find('<')
+                                && let Some(close) = enc.rfind('>')
+                            {
+                                type_name = enc[open + 1..close].trim();
+                            } else if let Some(open) = self.function.symbol.find('<')
+                                && let Some(close) = self.function.symbol.rfind('>')
+                            {
+                                type_name = self.function.symbol[open + 1..close].trim();
+                            }
+                        }
                         self.resolve_type_byte_size(type_name)
                     }
                 };
@@ -1300,6 +1391,11 @@ impl<'a> Emitter<'a> {
                     if lex == "T" || lex == "K" || lex == "V" || !enc.starts_with(lex) {
                         extracted = Some(arg_str.to_string());
                     }
+                } else if let Some(open) = self.function.symbol.find('<')
+                    && let Some(close) = self.function.symbol.rfind('>')
+                {
+                    let arg_str = self.function.symbol[open + 1..close].trim();
+                    extracted = Some(arg_str.to_string());
                 }
 
                 if let Some(type_name) = extracted {
@@ -1317,9 +1413,14 @@ impl<'a> Emitter<'a> {
                                 Some(*span),
                             );
                         }
+                        "int64" | "uint64" | "i64" | "u64" => {
+                            self.emit_instruction(
+                                Instruction::format_b(OpCode::LoadI64, 0, dst, 0),
+                                Some(*span),
+                            );
+                        }
                         "int8" | "uint8" | "i8" | "u8" | "char" | "int16" | "uint16" | "i16"
-                        | "u16" | "int32" | "uint32" | "i32" | "u32" | "int64" | "uint64"
-                        | "i64" | "u64" => {
+                        | "u16" | "int32" | "uint32" | "i32" | "u32" => {
                             self.emit_instruction(
                                 Instruction::format_b_signed(OpCode::LoadI32, 0, dst, 0),
                                 Some(*span),
@@ -1342,6 +1443,14 @@ impl<'a> Emitter<'a> {
                     } else if matches!(sem_type, Type::Primitive(PrimitiveKind::Bool)) {
                         self.emit_instruction(
                             Instruction::format_b(OpCode::LoadBool, 0, dst, 0),
+                            Some(*span),
+                        );
+                    } else if matches!(
+                        sem_type,
+                        Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                    ) {
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadI64, 0, dst, 0),
                             Some(*span),
                         );
                     } else if sem_type.is_signed_integer()
@@ -1567,6 +1676,65 @@ impl<'a> Emitter<'a> {
             }
         }
 
+        if matches!(operator, TokenKind::OperatorPlus) {
+            let left_type = self.query_type(left.span());
+            let right_type = self.query_type(right.span());
+            let is_string_type = |type_info: &Type| {
+                matches!(
+                    type_info,
+                    Type::Class { symbol_name, .. }
+                        if symbol_name == "std::string"
+                            || symbol_name == "std.string"
+                            || symbol_name == "string"
+                )
+            };
+            if is_string_type(&left_type) || is_string_type(&right_type) {
+                let r_left = self.emit_expression(left, None)?;
+                let r_right = self.emit_expression(right, None)?;
+                let window_size = 2;
+                let arg_base = self.allocator.alloc_window(window_size)?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, arg_base, r_left, 0),
+                    Some(span),
+                );
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, arg_base + 1, r_right, 0),
+                    Some(span),
+                );
+                let sym_idx = self.pool.add_string("__builtin_str_concat")?;
+                self.emit_instruction(
+                    Instruction::format_call(
+                        OpCode::CallSymbol,
+                        dst,
+                        sym_idx,
+                        arg_base,
+                        window_size as u8,
+                    ),
+                    Some(span),
+                );
+                if self.query_type(left.span()).is_reference_type()
+                    && !matches!(left, Expression::Identifier { .. })
+                {
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::DecRef, 0, r_left, 0, 0),
+                        Some(span),
+                    );
+                }
+                if self.query_type(right.span()).is_reference_type()
+                    && !matches!(right, Expression::Identifier { .. })
+                {
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::DecRef, 0, r_right, 0, 0),
+                        Some(span),
+                    );
+                }
+                self.allocator.free_window(arg_base, window_size);
+                self.allocator.free_temp(r_left);
+                self.allocator.free_temp(r_right);
+                return Ok(());
+            }
+        }
+
         let r_left = self.emit_expression(left, None)?;
         let r_right = self.emit_expression(right, None)?;
 
@@ -1604,6 +1772,60 @@ impl<'a> Emitter<'a> {
         self.allocator.free_temp(r_left);
         self.allocator.free_temp(r_right);
         Ok(())
+    }
+
+    fn select_compound_opcode(&self, operator: TokenKind, operand_type: &Type) -> OpCode {
+        let is_floating = operand_type.is_floating_point();
+        let is_i64 = matches!(
+            operand_type,
+            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+        );
+        match operator {
+            TokenKind::OperatorPlusAssign => {
+                if is_floating {
+                    OpCode::AddF64
+                } else if is_i64 {
+                    OpCode::AddI64
+                } else {
+                    OpCode::AddI32
+                }
+            }
+            TokenKind::OperatorMinusAssign => {
+                if is_floating {
+                    OpCode::SubF64
+                } else if is_i64 {
+                    OpCode::SubI64
+                } else {
+                    OpCode::SubI32
+                }
+            }
+            TokenKind::OperatorMultiplyAssign => {
+                if is_floating {
+                    OpCode::MulF64
+                } else if is_i64 {
+                    OpCode::MulI64
+                } else {
+                    OpCode::MulI32
+                }
+            }
+            TokenKind::OperatorDivideAssign => {
+                if is_floating {
+                    OpCode::DivF64
+                } else if is_i64 {
+                    OpCode::DivI64
+                } else {
+                    OpCode::DivI32
+                }
+            }
+            TokenKind::OperatorModuloAssign => {
+                if is_i64 {
+                    OpCode::ModI64
+                } else {
+                    OpCode::ModI32
+                }
+            }
+            _ => OpCode::AddI32,
+        }
     }
 
     fn select_binary_opcode(&self, operator: TokenKind, operand_type: &Type) -> OpCode {
@@ -1730,6 +1952,13 @@ impl<'a> Emitter<'a> {
                 self.allocator.free_temp(r_op);
             }
             TokenKind::OperatorIncrement | TokenKind::OperatorDecrement => {
+                let operand_type = self.query_type(operand.span());
+                let is_float = operand_type.is_floating_point();
+                let is_i64 = matches!(
+                    operand_type,
+                    Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                );
+
                 if let Expression::Identifier { span: id_span } = operand {
                     let name = self.get_lexeme(*id_span);
                     let local_reg = self.allocator.lookup_local(name).ok_or_else(|| {
@@ -1738,35 +1967,86 @@ impl<'a> Emitter<'a> {
                         }
                     })?;
 
-                    let imm_op = if matches!(operator, TokenKind::OperatorIncrement) {
-                        OpCode::AddI32Imm
-                    } else {
-                        OpCode::SubI32Imm
-                    };
+                    if is_i64 || is_float {
+                        let temp_one = self.allocator.alloc_temp()?;
+                        let op = if is_i64 {
+                            self.emit_instruction(
+                                Instruction::format_b(OpCode::LoadI64, 0, temp_one, 1),
+                                Some(span),
+                            );
+                            if matches!(operator, TokenKind::OperatorIncrement) {
+                                OpCode::AddI64
+                            } else {
+                                OpCode::SubI64
+                            }
+                        } else {
+                            let const_idx = self.pool.add_f64(1.0)?;
+                            self.emit_instruction(
+                                Instruction::format_b(OpCode::LoadConst, 0, temp_one, const_idx as u32),
+                                Some(span),
+                            );
+                            if matches!(operator, TokenKind::OperatorIncrement) {
+                                OpCode::AddF64
+                            } else {
+                                OpCode::SubF64
+                            }
+                        };
 
-                    if is_prefix {
-                        self.emit_instruction(
-                            Instruction::format_a(imm_op, 0, local_reg, local_reg, 1),
-                            Some(span),
-                        );
-                        if dst != local_reg {
+                        if is_prefix {
                             self.emit_instruction(
-                                Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                                Instruction::format_a(op, 0, local_reg, local_reg, temp_one),
+                                Some(span),
+                            );
+                            if dst != local_reg {
+                                self.emit_instruction(
+                                    Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                                    Some(span),
+                                );
+                            }
+                        } else {
+                            if dst != local_reg {
+                                self.emit_instruction(
+                                    Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                                    Some(span),
+                                );
+                            }
+                            self.emit_instruction(
+                                Instruction::format_a(op, 0, local_reg, local_reg, temp_one),
                                 Some(span),
                             );
                         }
+                        self.allocator.free_temp(temp_one);
                     } else {
-                        // Postfix: yield old value first, then mutate local
-                        if dst != local_reg {
+                        let imm_op = if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddI32Imm
+                        } else {
+                            OpCode::SubI32Imm
+                        };
+
+                        if is_prefix {
                             self.emit_instruction(
-                                Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                                Instruction::format_a(imm_op, 0, local_reg, local_reg, 1),
+                                Some(span),
+                            );
+                            if dst != local_reg {
+                                self.emit_instruction(
+                                    Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                                    Some(span),
+                                );
+                            }
+                        } else {
+                            // Postfix: yield old value first, then mutate local
+                            if dst != local_reg {
+                                self.emit_instruction(
+                                    Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                                    Some(span),
+                                );
+                            }
+                            self.emit_instruction(
+                                Instruction::format_a(imm_op, 0, local_reg, local_reg, 1),
                                 Some(span),
                             );
                         }
-                        self.emit_instruction(
-                            Instruction::format_a(imm_op, 0, local_reg, local_reg, 1),
-                            Some(span),
-                        );
                     }
                 } else if let Expression::MemberAccess {
                     object,
@@ -1789,14 +2069,37 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                         let temp_one = self.allocator.alloc_temp()?;
-                        self.emit_instruction(
-                            Instruction::format_b(OpCode::LoadI32, 0, temp_one, 1),
-                            Some(span),
-                        );
-                        let op = if matches!(operator, TokenKind::OperatorIncrement) {
-                            OpCode::AddI32
+                        let op = if is_i64 {
+                            self.emit_instruction(
+                                Instruction::format_b(OpCode::LoadI64, 0, temp_one, 1),
+                                Some(span),
+                            );
+                            if matches!(operator, TokenKind::OperatorIncrement) {
+                                OpCode::AddI64
+                            } else {
+                                OpCode::SubI64
+                            }
+                        } else if is_float {
+                            let const_idx = self.pool.add_f64(1.0)?;
+                            self.emit_instruction(
+                                Instruction::format_b(OpCode::LoadConst, 0, temp_one, const_idx as u32),
+                                Some(span),
+                            );
+                            if matches!(operator, TokenKind::OperatorIncrement) {
+                                OpCode::AddF64
+                            } else {
+                                OpCode::SubF64
+                            }
                         } else {
-                            OpCode::SubI32
+                            self.emit_instruction(
+                                Instruction::format_b(OpCode::LoadI32, 0, temp_one, 1),
+                                Some(span),
+                            );
+                            if matches!(operator, TokenKind::OperatorIncrement) {
+                                OpCode::AddI32
+                            } else {
+                                OpCode::SubI32
+                            }
                         };
 
                         if is_prefix {
@@ -1869,14 +2172,37 @@ impl<'a> Emitter<'a> {
                         Some(span),
                     );
                     let temp_one = self.allocator.alloc_temp()?;
-                    self.emit_instruction(
-                        Instruction::format_b(OpCode::LoadI32, 0, temp_one, 1),
-                        Some(span),
-                    );
-                    let op = if matches!(operator, TokenKind::OperatorIncrement) {
-                        OpCode::AddI32
+                    let op = if is_i64 {
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadI64, 0, temp_one, 1),
+                            Some(span),
+                        );
+                        if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddI64
+                        } else {
+                            OpCode::SubI64
+                        }
+                    } else if is_float {
+                        let const_idx = self.pool.add_f64(1.0)?;
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadConst, 0, temp_one, const_idx as u32),
+                            Some(span),
+                        );
+                        if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddF64
+                        } else {
+                            OpCode::SubF64
+                        }
                     } else {
-                        OpCode::SubI32
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadI32, 0, temp_one, 1),
+                            Some(span),
+                        );
+                        if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddI32
+                        } else {
+                            OpCode::SubI32
+                        }
                     };
                     if is_prefix {
                         self.emit_instruction(
@@ -1924,6 +2250,88 @@ impl<'a> Emitter<'a> {
                     self.allocator.free_temp(temp_one);
                     self.allocator.free_temp(cur_val);
                     self.allocator.free_temp(r_obj);
+                } else if let Expression::ArrayAccess {
+                    span: arr_span,
+                    array,
+                    index,
+                } = operand
+                {
+                    let r_arr = self.emit_expression(array, None)?;
+                    let r_idx = self.emit_expression(index, None)?;
+                    let cur_val = self.allocator.alloc_temp()?;
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::GetArray, 0, cur_val, r_arr, r_idx),
+                        Some(*arr_span),
+                    );
+                    let temp_one = self.allocator.alloc_temp()?;
+                    let op = if is_i64 {
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadI64, 0, temp_one, 1),
+                            Some(span),
+                        );
+                        if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddI64
+                        } else {
+                            OpCode::SubI64
+                        }
+                    } else if is_float {
+                        let const_idx = self.pool.add_f64(1.0)?;
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadConst, 0, temp_one, const_idx as u32),
+                            Some(span),
+                        );
+                        if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddF64
+                        } else {
+                            OpCode::SubF64
+                        }
+                    } else {
+                        self.emit_instruction(
+                            Instruction::format_b(OpCode::LoadI32, 0, temp_one, 1),
+                            Some(span),
+                        );
+                        if matches!(operator, TokenKind::OperatorIncrement) {
+                            OpCode::AddI32
+                        } else {
+                            OpCode::SubI32
+                        }
+                    };
+
+                    if is_prefix {
+                        self.emit_instruction(
+                            Instruction::format_a(op, 0, cur_val, cur_val, temp_one),
+                            Some(span),
+                        );
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::SetArray, 0, cur_val, r_arr, r_idx),
+                            Some(span),
+                        );
+                        if dst != cur_val {
+                            self.emit_instruction(
+                                Instruction::format_a(OpCode::Mov, 0, dst, cur_val, 0),
+                                Some(span),
+                            );
+                        }
+                    } else {
+                        if dst != cur_val {
+                            self.emit_instruction(
+                                Instruction::format_a(OpCode::Mov, 0, dst, cur_val, 0),
+                                Some(span),
+                            );
+                        }
+                        self.emit_instruction(
+                            Instruction::format_a(op, 0, cur_val, cur_val, temp_one),
+                            Some(span),
+                        );
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::SetArray, 0, cur_val, r_arr, r_idx),
+                            Some(span),
+                        );
+                    }
+                    self.allocator.free_temp(temp_one);
+                    self.allocator.free_temp(cur_val);
+                    self.allocator.free_temp(r_idx);
+                    self.allocator.free_temp(r_arr);
                 }
             }
             _ => {}
@@ -1971,11 +2379,69 @@ impl<'a> Emitter<'a> {
                     }
                     self.allocator.free_temp(r_val);
                     return Ok(());
-                } else if let Expression::Literal {
+                }
+
+                let target_type = self.query_type(target.span());
+                if matches!(operator, TokenKind::OperatorPlusAssign)
+                    && matches!(
+                        &target_type,
+                        Type::Class { symbol_name, .. }
+                            if symbol_name == "std::string"
+                                || symbol_name == "std.string"
+                                || symbol_name == "string"
+                    )
+                {
+                    let r_val = self.emit_expression(value, None)?;
+                    let window_size = 2;
+                    let arg_base = self.allocator.alloc_window(window_size)?;
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::Mov, 0, arg_base, local_reg, 0),
+                        Some(span),
+                    );
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::Mov, 0, arg_base + 1, r_val, 0),
+                        Some(span),
+                    );
+                    let sym_idx = self.pool.add_string("__builtin_str_concat")?;
+                    self.emit_instruction(
+                        Instruction::format_call(
+                            OpCode::CallSymbol,
+                            local_reg,
+                            sym_idx,
+                            arg_base,
+                            window_size as u8,
+                        ),
+                        Some(span),
+                    );
+                    self.allocator.free_window(arg_base, window_size);
+                    self.allocator.free_temp(r_val);
+                    if dst != local_reg {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                            Some(span),
+                        );
+                    }
+                    return Ok(());
+                }
+
+                let is_narrow_or_i32 = matches!(
+                    target_type,
+                    Type::Primitive(
+                        PrimitiveKind::Int8
+                            | PrimitiveKind::Int16
+                            | PrimitiveKind::Int32
+                            | PrimitiveKind::UInt8
+                            | PrimitiveKind::UInt16
+                            | PrimitiveKind::UInt32
+                            | PrimitiveKind::Char
+                    )
+                );
+
+                if let Expression::Literal {
                     value: LiteralValue::Int(imm_val),
                     ..
                 } = value
-                    && !self.query_type(target.span()).is_floating_point()
+                    && is_narrow_or_i32
                     && *imm_val >= -32768
                     && *imm_val <= 32767
                     && matches!(
@@ -2000,38 +2466,7 @@ impl<'a> Emitter<'a> {
                     );
                 } else {
                     let r_val = self.emit_expression(value, None)?;
-                    let operand_type = self.query_type(target.span());
-                    let op = match operator {
-                        TokenKind::OperatorPlusAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::AddF64
-                            } else {
-                                OpCode::AddI32
-                            }
-                        }
-                        TokenKind::OperatorMinusAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::SubF64
-                            } else {
-                                OpCode::SubI32
-                            }
-                        }
-                        TokenKind::OperatorMultiplyAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::MulF64
-                            } else {
-                                OpCode::MulI32
-                            }
-                        }
-                        TokenKind::OperatorDivideAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::DivF64
-                            } else {
-                                OpCode::DivI32
-                            }
-                        }
-                        _ => OpCode::AddI32,
-                    };
+                    let op = self.select_compound_opcode(operator, &target_type);
                     self.emit_instruction(
                         Instruction::format_a(op, 0, local_reg, local_reg, r_val),
                         Some(span),
@@ -2098,37 +2533,7 @@ impl<'a> Emitter<'a> {
                         Some(*mem_span),
                     );
                     let operand_type = self.query_type(target.span());
-                    let op = match operator {
-                        TokenKind::OperatorPlusAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::AddF64
-                            } else {
-                                OpCode::AddI32
-                            }
-                        }
-                        TokenKind::OperatorMinusAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::SubF64
-                            } else {
-                                OpCode::SubI32
-                            }
-                        }
-                        TokenKind::OperatorMultiplyAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::MulF64
-                            } else {
-                                OpCode::MulI32
-                            }
-                        }
-                        TokenKind::OperatorDivideAssign => {
-                            if operand_type.is_floating_point() {
-                                OpCode::DivF64
-                            } else {
-                                OpCode::DivI32
-                            }
-                        }
-                        _ => OpCode::AddI32,
-                    };
+                    let op = self.select_compound_opcode(operator, &operand_type);
                     let r_calc = self.allocator.alloc_temp()?;
                     self.emit_instruction(
                         Instruction::format_a(op, 0, r_calc, r_cur, r_val),
@@ -2189,37 +2594,7 @@ impl<'a> Emitter<'a> {
                     Some(*mem_span),
                 );
                 let operand_type = self.query_type(target.span());
-                let op = match operator {
-                    TokenKind::OperatorPlusAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::AddF64
-                        } else {
-                            OpCode::AddI32
-                        }
-                    }
-                    TokenKind::OperatorMinusAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::SubF64
-                        } else {
-                            OpCode::SubI32
-                        }
-                    }
-                    TokenKind::OperatorMultiplyAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::MulF64
-                        } else {
-                            OpCode::MulI32
-                        }
-                    }
-                    TokenKind::OperatorDivideAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::DivF64
-                        } else {
-                            OpCode::DivI32
-                        }
-                    }
-                    _ => OpCode::AddI32,
-                };
+                let op = self.select_compound_opcode(operator, &operand_type);
                 let r_calc = self.allocator.alloc_temp()?;
                 self.emit_instruction(
                     Instruction::format_a(op, 0, r_calc, r_cur, r_val),
@@ -2269,37 +2644,7 @@ impl<'a> Emitter<'a> {
                     Some(*arr_span),
                 );
                 let operand_type = self.query_type(target.span());
-                let op = match operator {
-                    TokenKind::OperatorPlusAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::AddF64
-                        } else {
-                            OpCode::AddI32
-                        }
-                    }
-                    TokenKind::OperatorMinusAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::SubF64
-                        } else {
-                            OpCode::SubI32
-                        }
-                    }
-                    TokenKind::OperatorMultiplyAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::MulF64
-                        } else {
-                            OpCode::MulI32
-                        }
-                    }
-                    TokenKind::OperatorDivideAssign => {
-                        if operand_type.is_floating_point() {
-                            OpCode::DivF64
-                        } else {
-                            OpCode::DivI32
-                        }
-                    }
-                    _ => OpCode::AddI32,
-                };
+                let op = self.select_compound_opcode(operator, &operand_type);
                 let r_calc = self.allocator.alloc_temp()?;
                 self.emit_instruction(
                     Instruction::format_a(op, 0, r_calc, r_cur, r_val),

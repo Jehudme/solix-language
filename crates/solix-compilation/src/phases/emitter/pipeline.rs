@@ -25,8 +25,8 @@ use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
 use crate::phases::parser::statements::types::TypeAnnotation;
 use solix_common::bytecode::{
     BinaryProgram, CompiledFunction, DeclarationModifier, ExportManifest, ExportedClass,
-    ExportedField, ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic,
-    Instruction, OpCode,
+    ExportedEnum, ExportedField, ExportedFunction, ExportedGenericTemplate, ExportedParameter,
+    ExportedStatic, Instruction, OpCode,
 };
 use solix_common::diagnostics::EmissionError;
 use solix_common::types::{PrimitiveKind, Type};
@@ -331,6 +331,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
     // 7. Collect public export manifest and metadata
     let mut exported_classes = Vec::new();
+    let mut exported_enums = Vec::new();
     let mut exported_functions = Vec::new();
     let mut exported_statics = Vec::new();
     let mut generic_templates = Vec::new();
@@ -438,6 +439,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             return_type: ret_type,
                                             is_constructor: false,
                                             is_destructor: false,
+                                            is_operator: false,
                                         });
                                     }
                                     ClassMember::Constructor(ctor) => {
@@ -474,6 +476,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             return_type: Type::Primitive(PrimitiveKind::Void),
                                             is_constructor: true,
                                             is_destructor: false,
+                                            is_operator: false,
                                         });
                                     }
                                     ClassMember::Destructor(_) => {
@@ -486,6 +489,54 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             return_type: Type::Primitive(PrimitiveKind::Void),
                                             is_constructor: false,
                                             is_destructor: true,
+                                            is_operator: false,
+                                        });
+                                    }
+                                    ClassMember::Operator(operator_declaration) => {
+                                        let operator_text =
+                                            get_span_text(operator_declaration.operator_span, code)
+                                                .to_string();
+                                        let arity = operator_declaration.parameters.len();
+                                        let full_sym =
+                                            format!("{cls_name}::operator{operator_text}/{arity}");
+                                        let ret_type = resolve_type_annotation(
+                                            ast.source_id,
+                                            code,
+                                            &operator_declaration.return_type,
+                                            sym_table,
+                                        );
+                                        let params = operator_declaration
+                                            .parameters
+                                            .iter()
+                                            .map(|param| {
+                                                let param_name =
+                                                    get_span_text(param.name_span, code).to_string();
+                                                let param_type = resolve_type_annotation(
+                                                    ast.source_id,
+                                                    code,
+                                                    &param.param_type,
+                                                    sym_table,
+                                                );
+                                                ExportedParameter {
+                                                    name: param_name,
+                                                    param_type,
+                                                }
+                                            })
+                                            .collect();
+                                        let mods = operator_declaration
+                                            .modifiers
+                                            .iter()
+                                            .filter_map(|&modifier| to_decl_modifier(modifier))
+                                            .collect();
+                                        methods.push(ExportedFunction {
+                                            symbol: full_sym,
+                                            simple_name: format!("operator{operator_text}"),
+                                            modifiers: mods,
+                                            parameters: params,
+                                            return_type: ret_type,
+                                            is_constructor: false,
+                                            is_destructor: false,
+                                            is_operator: true,
                                         });
                                     }
                                     _ => {}
@@ -559,6 +610,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             return_type: ret_type,
                             is_constructor: false,
                             is_destructor: false,
+                            is_operator: false,
                         });
                     }
                     Declaration::Field(f) => {
@@ -580,6 +632,106 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             var_type,
                             modifiers: mods,
                             slot,
+                        });
+                    }
+                    Declaration::Interface(interface_declaration) => {
+                        if interface_declaration.modifiers.contains(&Modifier::Extern) {
+                            continue;
+                        }
+                        let iface_name =
+                            get_span_text(interface_declaration.name_span, code).to_string();
+                        let mut methods = Vec::new();
+                        for method_declaration in &interface_declaration.methods {
+                            let func_name =
+                                get_span_text(method_declaration.name_span, code).to_string();
+                            let arity = method_declaration.parameters.len();
+                            let full_sym = format!("{iface_name}::{func_name}/{arity}");
+                            let ret_type = resolve_type_annotation(
+                                ast.source_id,
+                                code,
+                                &method_declaration.return_type,
+                                sym_table,
+                            );
+                            let params = method_declaration
+                                .parameters
+                                .iter()
+                                .map(|param| {
+                                    let param_name =
+                                        get_span_text(param.name_span, code).to_string();
+                                    let param_type = resolve_type_annotation(
+                                        ast.source_id,
+                                        code,
+                                        &param.param_type,
+                                        sym_table,
+                                    );
+                                    ExportedParameter {
+                                        name: param_name,
+                                        param_type,
+                                    }
+                                })
+                                .collect();
+                            let mods = method_declaration
+                                .modifiers
+                                .iter()
+                                .filter_map(|&modifier| to_decl_modifier(modifier))
+                                .collect();
+                            methods.push(ExportedFunction {
+                                symbol: full_sym,
+                                simple_name: func_name,
+                                modifiers: mods,
+                                parameters: params,
+                                return_type: ret_type,
+                                is_constructor: false,
+                                is_destructor: false,
+                                is_operator: false,
+                            });
+                        }
+                        let mods = interface_declaration
+                            .modifiers
+                            .iter()
+                            .filter_map(|&modifier| to_decl_modifier(modifier))
+                            .collect();
+                        exported_classes.push(ExportedClass {
+                            symbol: iface_name.clone(),
+                            name: iface_name,
+                            modifiers: mods,
+                            is_interface: true,
+                            base_class: None,
+                            interfaces: Vec::new(),
+                            generic_parameters: Vec::new(),
+                            fields: Vec::new(),
+                            methods,
+                        });
+                    }
+                    Declaration::Enum(enum_declaration) => {
+                        if enum_declaration.modifiers.contains(&Modifier::Extern) {
+                            continue;
+                        }
+                        let enum_name =
+                            get_span_text(enum_declaration.name_span, code).to_string();
+                        let mut variants = Vec::new();
+                        for variant in &enum_declaration.variants {
+                            let variant_name =
+                                get_span_text(variant.name_span, code).to_string();
+                            let explicit_disc =
+                                variant.explicit_value.as_ref().and_then(|expr| match expr {
+                                    Expression::Literal {
+                                        value: LiteralValue::Int(val),
+                                        ..
+                                    } => Some(*val),
+                                    _ => None,
+                                });
+                            variants.push((variant_name, explicit_disc));
+                        }
+                        let mods = enum_declaration
+                            .modifiers
+                            .iter()
+                            .filter_map(|&modifier| to_decl_modifier(modifier))
+                            .collect();
+                        exported_enums.push(ExportedEnum {
+                            name: enum_name,
+                            modifiers: mods,
+                            variants,
                         });
                     }
                     _ => {}
@@ -617,6 +769,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         package_description: program.package_description.clone(),
         dependencies,
         exported_classes,
+        exported_enums,
         exported_functions,
         exported_statics,
         generic_templates,

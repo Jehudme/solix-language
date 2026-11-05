@@ -30,6 +30,7 @@ fn create_dummy_library_binary(
         package_description: format!("Test package {package_name}"),
         dependencies,
         exported_classes: Vec::new(),
+        exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {
             symbol: format!("{package_name}::{exported_function_name}"),
             simple_name: exported_function_name.to_string(),
@@ -47,6 +48,7 @@ fn create_dummy_library_binary(
             return_type: Type::Primitive(PrimitiveKind::Int32),
             is_constructor: false,
             is_destructor: false,
+            is_operator: false,
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),

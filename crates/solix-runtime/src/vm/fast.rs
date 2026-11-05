@@ -1777,6 +1777,37 @@ impl VirtualMachine {
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::I32(byte_val as i32);
                         }
+                    } else if tag_nibble == BlockTag::Tuple as u8 {
+                        let tuple_len = u32::from_le_bytes(
+                            self.heap.buffer[arr_offset..arr_offset + 4]
+                                .try_into()
+                                .unwrap_or([0; 4]),
+                        ) as usize;
+                        if (index_i64 as u64) >= (tuple_len as u64) {
+                            return Err(RuntimeError::IndexOutOfBounds {
+                                index: index_i64,
+                                length: tuple_len,
+                            });
+                        }
+                        let index_usize = index_i64 as usize;
+                        let elem_offset = arr_offset + 8 + (index_usize * 16);
+                        if elem_offset + 16 > self.heap.buffer.len() {
+                            return Err(RuntimeError::NullReferenceAccess);
+                        }
+                        let tag_raw = u64::from_le_bytes(
+                            self.heap.buffer[elem_offset..elem_offset + 8]
+                                .try_into()
+                                .unwrap_or([0; 8]),
+                        );
+                        let payload_raw = u64::from_le_bytes(
+                            self.heap.buffer[elem_offset + 8..elem_offset + 16]
+                                .try_into()
+                                .unwrap_or([0; 8]),
+                        );
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::from_tagged_parts(tag_raw, payload_raw);
+                        }
                     } else {
                         let array_len = u32::from_le_bytes(
                             self.heap.buffer[arr_offset..arr_offset + 4]

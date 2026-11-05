@@ -107,6 +107,46 @@ impl GenericBlueprintRegistry {
             }]);
         }
 
+        let mut constraint_errors = Vec::new();
+        for (generic_param, concrete_type) in
+            blueprint.class_ast.generic_params.iter().zip(type_arguments)
+        {
+            for bound_annot in &generic_param.bounds {
+                let bound_type = crate::phases::binder::type_resolver::resolve_type_annotation(
+                    blueprint.source_id,
+                    &source_texts[blueprint.source_id as usize],
+                    bound_annot,
+                    symbol_table,
+                );
+                let satisfies = concrete_type == &bound_type
+                    || concrete_type.is_assignable_to(&bound_type, &|src_name, tgt_name| {
+                        symbol_table
+                            .resolve_symbol(blueprint.source_id, src_name)
+                            .and_then(|src_symbol_id| layouts.get(&src_symbol_id))
+                            .is_some_and(|layout| layout.itable_methods.contains_key(tgt_name))
+                    });
+                if !satisfies && bound_type != Type::Error {
+                    let param_name = if generic_param.name_span.end as usize
+                        <= source_texts[blueprint.source_id as usize].len()
+                    {
+                        &source_texts[blueprint.source_id as usize]
+                            [generic_param.name_span.start as usize..generic_param.name_span.end as usize]
+                    } else {
+                        "T"
+                    };
+                    constraint_errors.push(BindingError::GenericTypeConstraintViolation {
+                        type_param: param_name.to_string(),
+                        expected: bound_type.to_string(),
+                        actual: concrete_type.to_string(),
+                        span: generic_param.span.to_source_span(),
+                    });
+                }
+            }
+        }
+        if !constraint_errors.is_empty() {
+            return Err(constraint_errors);
+        }
+
         // Build substitution map: "T" -> Type
         let mut substitutions = HashMap::new();
         for (param_name, concrete_type) in

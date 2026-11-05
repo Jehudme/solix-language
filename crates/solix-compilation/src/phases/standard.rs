@@ -107,9 +107,11 @@ impl CompilationPhase for ParserPhase {
             }
         }
 
-        let mut extern_imports_to_resolve = Vec::new();
-        for source_index in 0..sources_count {
-            if let Some(ast) = &context.ast[source_index] {
+        let mut resolved_packages = std::collections::HashSet::new();
+        let mut ast_cursor = 0;
+        while ast_cursor < context.ast.len() {
+            let mut new_extern_imports = Vec::new();
+            if let Some(ast) = &context.ast[ast_cursor] {
                 for import_statement in &ast.imports {
                     if import_statement.is_extern {
                         let package_name =
@@ -118,21 +120,24 @@ impl CompilationPhase for ParserPhase {
                             } else {
                                 String::new()
                             };
-                        if !package_name.is_empty() {
-                            extern_imports_to_resolve.push((package_name, import_statement.span));
+                        if !package_name.is_empty()
+                            && resolved_packages.insert(package_name.clone())
+                        {
+                            new_extern_imports.push((package_name, import_statement.span));
                         }
                     }
                 }
             }
-        }
+            ast_cursor += 1;
 
-        for (package_name, import_span) in extern_imports_to_resolve {
-            if let Err(resolution_errors) = crate::phases::dependency::resolve_extern_import(
-                &package_name,
-                import_span,
-                context,
-            ) {
-                accumulated_diagnostics.extend(resolution_errors);
+            for (package_name, import_span) in new_extern_imports {
+                if let Err(resolution_errors) = crate::phases::dependency::resolve_extern_import(
+                    &package_name,
+                    import_span,
+                    context,
+                ) {
+                    accumulated_diagnostics.extend(resolution_errors);
+                }
             }
         }
 

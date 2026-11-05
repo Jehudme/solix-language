@@ -344,6 +344,7 @@ fn test_export_manifest_json_extraction() {
         return_type: Type::Primitive(PrimitiveKind::Int32),
         is_constructor: false,
         is_destructor: false,
+        is_operator: false,
     };
 
     let exported_static = ExportedStatic {
@@ -388,6 +389,7 @@ fn test_export_manifest_json_extraction() {
             return_type: Type::Primitive(PrimitiveKind::Float64),
             is_constructor: false,
             is_destructor: false,
+            is_operator: false,
         }],
     };
 
@@ -403,6 +405,7 @@ fn test_export_manifest_json_extraction() {
         package_description: program.package_description.clone(),
         dependencies: Vec::new(),
         exported_classes: vec![exported_class],
+        exported_enums: Vec::new(),
         exported_functions: vec![exported_func],
         exported_statics: vec![exported_static],
         generic_templates: vec![generic_template],
@@ -432,6 +435,7 @@ fn test_binary_program_manifest_round_trip() {
         package_description: "Networking library".to_string(),
         dependencies: Vec::new(),
         exported_classes: Vec::new(),
+        exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {
             symbol: "network::connect/1".to_string(),
             simple_name: "connect".to_string(),
@@ -443,6 +447,7 @@ fn test_binary_program_manifest_round_trip() {
             return_type: Type::Primitive(PrimitiveKind::Bool),
             is_constructor: false,
             is_destructor: false,
+            is_operator: false,
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),

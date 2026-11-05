@@ -5700,7 +5700,7 @@ int32 main() {
 
 ---
 
-### Case 55.5: Function Template Lowering with `<args...>` [NOT IMPLEMENTED]
+### Case 55.5: Function Template Lowering with `<args...>` [IMPLEMENTED]
 ```solix
 int32 sum_all<args...>(int32 first, args...) {
     int32 total = first;
@@ -5719,7 +5719,7 @@ int32 main() {
 
 ---
 
-### Case 55.6: Automatic Call-Site Argument Bundling [NOT IMPLEMENTED]
+### Case 55.6: Automatic Call-Site Argument Bundling [IMPLEMENTED]
 ```solix
 int32 count_args<args...>(int32 label, args...) {
     return args.length;

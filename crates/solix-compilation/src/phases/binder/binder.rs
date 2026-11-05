@@ -84,6 +84,11 @@ pub fn bind_context(
         accumulated_errors.extend(errors);
     }
 
+    crate::phases::binder::call_normalizer::normalize_call_sites(
+        &mut context.ast,
+        &context.sources,
+    );
+
     // Pass 3: Detailed Type Checking & Expression Traversal
     for (source_index, ast_option) in context.ast.iter().enumerate() {
         let source_id = source_index as u16;

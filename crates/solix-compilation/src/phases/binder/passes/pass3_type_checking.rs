@@ -128,6 +128,31 @@ impl<'a> TypeCheckingVisitor<'a> {
                     return Type::Error;
                 }
 
+                // Check "super"
+                if identifier_name == "super" {
+                    if self.is_static_method || self.current_class.is_none() {
+                        self.errors.push(BindingError::InvalidSuperCall {
+                            span: span.to_source_span(),
+                        });
+                        return Type::Error;
+                    }
+                    let class_id = self.current_class.unwrap();
+                    let parent_class_id = self
+                        .symbol_table
+                        .get_symbol(class_id)
+                        .and_then(|class_entry| class_entry.parent_symbol);
+                    if let Some(base_id) = parent_class_id
+                        && let Some(base_entry) = self.symbol_table.get_symbol(base_id)
+                    {
+                        return base_entry.symbol_type.clone();
+                    } else {
+                        self.errors.push(BindingError::InvalidSuperCall {
+                            span: span.to_source_span(),
+                        });
+                        return Type::Error;
+                    }
+                }
+
                 if let Some(symbol_id) = self
                     .symbol_table
                     .resolve_symbol(self.source_id, identifier_name)
@@ -454,6 +479,9 @@ impl<'a> TypeCheckingVisitor<'a> {
                                 .unwrap_or(Type::Primitive(PrimitiveKind::Void)),
                         }
                     }
+                    Type::Primitive(PrimitiveKind::TuplePrimitive) => {
+                        Type::Primitive(PrimitiveKind::Int32)
+                    }
                     Type::Class { symbol_name, .. }
                         if symbol_name == "std.string"
                             || symbol_name == "string"
@@ -485,15 +513,51 @@ impl<'a> TypeCheckingVisitor<'a> {
                 // Check if this MemberAccess chain represents a package-qualified top-level function or variable
                 if let Some(qualified_path) =
                     get_qualified_member_path(expression, self.source_text)
-                    && let Some(symbol_id) = self
+                {
+                    let resolved = self
                         .symbol_table
                         .resolve_symbol(self.source_id, &qualified_path)
-                    && let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id)
-                    && symbol_entry.parent_symbol.is_none()
-                {
-                    self.resolved_symbols.insert(*member_span, symbol_id);
-                    self.resolved_symbols.insert(*member_access_span, symbol_id);
-                    return symbol_entry.symbol_type.clone();
+                        .or_else(|| {
+                            if let Some((prefix, suffix)) = qualified_path.split_once("::") {
+                                self.symbol_table.resolve_symbol(
+                                    self.source_id,
+                                    &format!("{prefix}::{prefix}::{suffix}"),
+                                )
+                            } else {
+                                None
+                            }
+                        });
+                    if let Some(symbol_id) = resolved
+                        && let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id)
+                        && (symbol_entry.parent_symbol.is_none()
+                            || (*is_scope_resolution && symbol_entry.is_static)
+                            || (symbol_entry.is_static && {
+                                let parent_entry = symbol_entry
+                                    .parent_symbol
+                                    .and_then(|parent_id| self.symbol_table.get_symbol(parent_id));
+                                parent_entry
+                                    .map(|parent_symbol_entry| {
+                                        let fqn_parts: Vec<&str> = parent_symbol_entry
+                                            .fully_qualified_name
+                                            .split("::")
+                                            .collect();
+                                        fqn_parts.len() <= 2
+                                            && fqn_parts
+                                                .first()
+                                                .map(|package_name| {
+                                                    package_name.eq_ignore_ascii_case(
+                                                        &parent_symbol_entry.name,
+                                                    )
+                                                })
+                                                .unwrap_or(false)
+                                    })
+                                    .unwrap_or(false)
+                            }))
+                    {
+                        self.resolved_symbols.insert(*member_span, symbol_id);
+                        self.resolved_symbols.insert(*member_access_span, symbol_id);
+                        return symbol_entry.symbol_type.clone();
+                    }
                 }
 
                 let target_type = self.evaluate_expression_type(object);
@@ -2013,12 +2077,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 "arg"
             };
 
-            let param_type = resolve_type_annotation(
-                self.source_id,
-                self.source_text,
-                &parameter.param_type,
-                self.symbol_table,
-            );
+            let param_type = if parameter.is_variadic {
+                Type::Primitive(PrimitiveKind::TuplePrimitive)
+            } else {
+                resolve_type_annotation(
+                    self.source_id,
+                    self.source_text,
+                    &parameter.param_type,
+                    self.symbol_table,
+                )
+            };
 
             if param_type == Type::Primitive(PrimitiveKind::Void) {
                 self.errors.push(BindingError::VoidTypeNotAllowedHere {
@@ -2118,12 +2186,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             } else {
                 "arg"
             };
-            let param_type = resolve_type_annotation(
-                self.source_id,
-                self.source_text,
-                &parameter.param_type,
-                self.symbol_table,
-            );
+            let param_type = if parameter.is_variadic {
+                Type::Primitive(PrimitiveKind::TuplePrimitive)
+            } else {
+                resolve_type_annotation(
+                    self.source_id,
+                    self.source_text,
+                    &parameter.param_type,
+                    self.symbol_table,
+                )
+            };
             if param_type == Type::Primitive(PrimitiveKind::Void) {
                 self.errors.push(BindingError::VoidTypeNotAllowedHere {
                     span: parameter.span.to_source_span(),
@@ -2272,12 +2344,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 "param"
             };
 
-            let param_type = resolve_type_annotation(
-                self.source_id,
-                self.source_text,
-                &parameter.param_type,
-                self.symbol_table,
-            );
+            let param_type = if parameter.is_variadic {
+                Type::Primitive(PrimitiveKind::TuplePrimitive)
+            } else {
+                resolve_type_annotation(
+                    self.source_id,
+                    self.source_text,
+                    &parameter.param_type,
+                    self.symbol_table,
+                )
+            };
 
             let param_symbol = SymbolEntry {
                 id: SymbolId(0),

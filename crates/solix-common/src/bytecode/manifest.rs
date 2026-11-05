@@ -68,6 +68,9 @@ pub struct ExportedFunction {
     pub is_constructor: bool,
     /// Whether this function is a destructor.
     pub is_destructor: bool,
+    /// Whether this function is an operator overload.
+    #[serde(default)]
+    pub is_operator: bool,
 }
 
 /// Metadata describing an exported static global variable.
@@ -96,6 +99,17 @@ pub struct ExportedField {
     pub modifiers: Vec<DeclarationModifier>,
     /// Byte offset within the class heap object layout.
     pub offset: usize,
+}
+
+/// Metadata describing an exported enumeration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportedEnum {
+    /// Identifier name of the enum.
+    pub name: String,
+    /// Declaration modifiers applied to the enum.
+    pub modifiers: Vec<DeclarationModifier>,
+    /// Enumeration variants with optional explicit integer discriminator values.
+    pub variants: Vec<(String, Option<i64>)>,
 }
 
 /// Metadata describing an exported nominal class or interface.
@@ -147,6 +161,9 @@ pub struct ExportManifest {
     pub dependencies: Vec<crate::solver::DependencyRequirement>,
     /// Exported nominal classes and interfaces.
     pub exported_classes: Vec<ExportedClass>,
+    /// Exported nominal enumerations.
+    #[serde(default)]
+    pub exported_enums: Vec<ExportedEnum>,
     /// Exported top-level functions.
     pub exported_functions: Vec<ExportedFunction>,
     /// Exported static variables.

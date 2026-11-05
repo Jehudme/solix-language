@@ -172,7 +172,13 @@ impl CompilationPipeline {
         }
 
         let total_time_us = total_timer.elapsed().as_micros() as u64;
-        let source_bytes = context.sources.iter().map(|code| code.len()).sum();
+        let source_bytes = context
+            .sources
+            .iter()
+            .zip(&context.source_names)
+            .filter(|(_, source_name)| source_name.as_str() != "<inliner_synthetic>")
+            .map(|(code, _)| code.len())
+            .sum();
         let total_tokens = context.tokens.iter().map(|stream| stream.len()).sum();
         let total_instructions = context.emission_artifacts.as_ref().map_or(0, |artifacts| {
             artifacts

@@ -1448,16 +1448,27 @@ fn inline_call_into_block(
     }
 }
 
-/// Allocates a valid source span representing `name` by appending to the primary source buffer.
+/// Allocates a valid source span representing `name` by appending to the synthetic inliner source buffer.
 fn allocate_synthetic_identifier(context: &mut CompilationContext, name: &str) -> Span {
-    if context.sources.is_empty() {
+    let synthetic_source_index = if let Some(found_index) = context
+        .source_names
+        .iter()
+        .position(|source_name| source_name == "<inliner_synthetic>")
+    {
+        found_index
+    } else {
         context.sources.push(String::new());
-        context.source_names.push("<synthetic>".to_string());
-    }
-    let start = context.sources[0].len() as u32;
-    context.sources[0].push_str(name);
-    let end = context.sources[0].len() as u32;
-    Span::new(0, start, end)
+        context.source_names.push("<inliner_synthetic>".to_string());
+        if context.ast.len() < context.sources.len() {
+            context.ast.resize_with(context.sources.len(), || None);
+        }
+        context.sources.len() - 1
+    };
+
+    let start_offset = context.sources[synthetic_source_index].len() as u32;
+    context.sources[synthetic_source_index].push_str(name);
+    let end_offset = context.sources[synthetic_source_index].len() as u32;
+    Span::new(synthetic_source_index as u16, start_offset, end_offset)
 }
 
 /// Recursively collects local variable declaration names inside statement blocks.

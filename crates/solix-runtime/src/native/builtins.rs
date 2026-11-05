@@ -21,6 +21,7 @@ pub fn register_all_builtins(registry: &mut NativeRegistry) {
     registry.register("assert", builtin_assert);
     registry.register("clock", builtin_clock);
     registry.register("now", builtin_clock);
+    registry.register("__builtin_str_concat", builtin_str_concat);
 }
 
 fn format_vm_value(vm: &VirtualMachine, val: &Value) -> String {
@@ -91,4 +92,23 @@ pub fn builtin_clock(_vm: &mut VirtualMachine, _args: &[Value]) -> Result<Value,
         }
     })?;
     Ok(Value::I64(now.as_millis() as i64))
+}
+
+/// Built-in string concatenation helper: concatenates two VM values into a new string.
+pub fn builtin_str_concat(vm: &mut VirtualMachine, args: &[Value]) -> Result<Value, RuntimeError> {
+    let first_text = args
+        .first()
+        .map(|first_arg| format_vm_value(vm, first_arg))
+        .unwrap_or_default();
+    let second_text = args
+        .get(1)
+        .map(|second_arg| format_vm_value(vm, second_arg))
+        .unwrap_or_default();
+    let concatenated = format!("{first_text}{second_text}");
+    let string_bytes = concatenated.as_bytes();
+    let allocated_address = vm
+        .heap
+        .allocate(string_bytes.len(), crate::memory::BlockTag::String)?;
+    vm.heap.write_bytes(allocated_address, string_bytes)?;
+    Ok(Value::Ref(allocated_address))
 }

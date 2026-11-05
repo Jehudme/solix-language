@@ -63,6 +63,27 @@ pub fn manifest_to_source(manifest_json: &str) -> Result<(String, String), serde
         out.push('\n');
     }
 
+    // Exported enums
+    for exported_enum in &manifest.exported_enums {
+        append_modifiers(&mut out, &exported_enum.modifiers);
+        out.push_str(&format!("enum {} {{\n", exported_enum.name));
+        for (variant_index, (variant_name, discriminant_option)) in
+            exported_enum.variants.iter().enumerate()
+        {
+            out.push_str("    ");
+            out.push_str(variant_name);
+            if let Some(discriminant) = discriminant_option {
+                out.push_str(&format!(" = {discriminant}"));
+            }
+            if variant_index + 1 < exported_enum.variants.len() {
+                out.push_str(",\n");
+            } else {
+                out.push('\n');
+            }
+        }
+        out.push_str("}\n\n");
+    }
+
     // 3. Exported top-level functions
     for func in &manifest.exported_functions {
         out.push_str("extern ");
@@ -113,6 +134,13 @@ pub fn manifest_to_source(manifest_json: &str) -> Result<(String, String), serde
                 out.push_str(&format!("{}(", cls.name));
             } else if method.is_destructor {
                 out.push_str(&format!("~{}()", cls.name));
+            } else if method.is_operator {
+                let operator_name = if method.simple_name.starts_with("operator") {
+                    method.simple_name.clone()
+                } else {
+                    format!("operator{}", method.simple_name)
+                };
+                out.push_str(&format!("{} {operator_name}(", method.return_type));
             } else {
                 out.push_str(&format!("{} {}(", method.return_type, method.simple_name));
             }

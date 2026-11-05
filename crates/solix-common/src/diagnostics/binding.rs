@@ -1088,6 +1088,21 @@ pub enum BindingError {
         #[label("package not found")]
         span: SourceSpan,
     },
+
+    #[error(
+        "Generic type constraint violation: type '{actual}' does not satisfy constraint '{expected}' for parameter '{type_param}'"
+    )]
+    #[diagnostic(
+        code(solix::binder::generic_type_constraint_violation),
+        help("Ensure the provided type argument implements or inherits the required bound.")
+    )]
+    GenericTypeConstraintViolation {
+        type_param: String,
+        expected: String,
+        actual: String,
+        #[label("constraint violation")]
+        span: SourceSpan,
+    },
 }
 
 impl BindingError {
@@ -1159,7 +1174,8 @@ impl BindingError {
             Self::SuperUsedOutsideSubclass { .. } => "E0261",
             Self::StaticMethodAccessViaInstance { .. } => "E0262",
             Self::InstanceMethodAccessViaStatic { .. } => "E0263",
-            Self::AbstractMethodInNonAbstractClass { .. } => "E0264",
+            Self::AbstractMethodInNonAbstractClass { .. }
+            | Self::GenericTypeConstraintViolation { .. } => "E0264",
             Self::NonAbstractClassMissingAbstractImpl { .. } => "E0265",
             Self::InterfaceFieldNotConstant { .. } => "E0266",
             Self::FinalMethodOverridden { .. } => "E0267",
@@ -1282,7 +1298,8 @@ impl BindingError {
             | Self::InvalidExpressionInConstantContext { span, .. }
             | Self::BitwiseOperatorOnNonInteger { span, .. }
             | Self::IncompatibleDependencyVersion { span, .. }
-            | Self::ExternalPackageNotFound { span, .. } => *span,
+            | Self::ExternalPackageNotFound { span, .. }
+            | Self::GenericTypeConstraintViolation { span, .. } => *span,
         }
     }
 

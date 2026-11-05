@@ -491,7 +491,8 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
     if (OpCode::AddI32 as u8..=OpCode::NeqString as u8).contains(&raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
-        || raw == OpCode::LoadNull as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
         || raw == OpCode::GetField as u8
         || raw == OpCode::GetArray as u8
         || raw == OpCode::AllocObject as u8
@@ -514,10 +515,15 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
 
     // Format B instructions that write to dst
     if raw == OpCode::LoadI32 as u8
+        || raw == OpCode::LoadI64 as u8
+        || raw == OpCode::LoadF64 as u8
+        || raw == OpCode::LoadBool as u8
+        || raw == OpCode::LoadNull as u8
         || raw == OpCode::LoadConst as u8
         || raw == OpCode::GetStatic as u8
         || raw == OpCode::GetStaticDirect as u8
         || raw == OpCode::GetStaticGlobal as u8
+        || raw == OpCode::AllocObjectExtern as u8
     {
         return true;
     }
@@ -529,6 +535,7 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::CallCallable as u8
         || raw == OpCode::CallNativeDirect as u8
         || raw == OpCode::CallSymbol as u8
+        || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
     {
         return true;
@@ -551,6 +558,7 @@ fn rewrite_instruction_destination(instruction: &Instruction, new_dst: u16) -> I
         || raw == OpCode::CallCallable as u8
         || raw == OpCode::CallNativeDirect as u8
         || raw == OpCode::CallSymbol as u8
+        || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
     {
         return Instruction::format_call(
@@ -564,10 +572,15 @@ fn rewrite_instruction_destination(instruction: &Instruction, new_dst: u16) -> I
 
     // Format B
     if raw == OpCode::LoadI32 as u8
+        || raw == OpCode::LoadI64 as u8
+        || raw == OpCode::LoadF64 as u8
+        || raw == OpCode::LoadBool as u8
+        || raw == OpCode::LoadNull as u8
         || raw == OpCode::LoadConst as u8
         || raw == OpCode::GetStatic as u8
         || raw == OpCode::GetStaticDirect as u8
         || raw == OpCode::GetStaticGlobal as u8
+        || raw == OpCode::AllocObjectExtern as u8
     {
         return Instruction::format_b(opcode, instruction.flags(), new_dst, instruction.imm32());
     }
@@ -598,6 +611,8 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
 
     // Format A: Mov, Unary ops, GetField, ArrayLength, UnpackCaptures, CastCheck, Instanceof read src1
     if raw == OpCode::Mov as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
         || raw == OpCode::Not as u8
         || raw == OpCode::Bnot as u8
         || raw == OpCode::NegI32 as u8
@@ -668,6 +683,7 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         || raw == OpCode::CallCallable as u8
         || raw == OpCode::CallNativeDirect as u8
         || raw == OpCode::CallSymbol as u8
+        || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
     {
         let base = instruction.arg_base();
@@ -689,6 +705,7 @@ fn count_register_writes(instructions: &[Instruction], target_reg: u16) -> usize
             || raw == OpCode::CallCallable as u8
             || raw == OpCode::CallNativeDirect as u8
             || raw == OpCode::CallSymbol as u8
+            || raw == OpCode::CallExtern as u8
             || raw == OpCode::PackClosure as u8
         {
             instruction.call_dst() == target_reg

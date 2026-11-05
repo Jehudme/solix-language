@@ -9,7 +9,7 @@ use crate::phases::lexing::Span;
 use crate::phases::parser::statements::ProgramAst;
 use crate::phases::parser::statements::declarations::{ClassMember, Declaration, Modifier};
 use crate::phases::parser::statements::types::TypeAnnotation;
-use solix_common::{BindingError, Type};
+use solix_common::{BindingError, PrimitiveKind, Type};
 use std::collections::{HashMap, HashSet};
 
 struct RawAliasInfo {
@@ -573,13 +573,17 @@ pub fn execute_pass1_symbol_discovery(
                     let parameter_types = method_declaration
                         .parameters
                         .iter()
-                        .map(|p| {
-                            resolve_type_annotation(
-                                source_id,
-                                source_text,
-                                &p.param_type,
-                                symbol_table,
-                            )
+                        .map(|param| {
+                            if param.is_variadic {
+                                Type::Primitive(PrimitiveKind::TuplePrimitive)
+                            } else {
+                                resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &param.param_type,
+                                    symbol_table,
+                                )
+                            }
                         })
                         .collect();
 

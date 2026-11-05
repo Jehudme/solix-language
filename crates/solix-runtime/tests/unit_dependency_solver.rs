@@ -26,6 +26,7 @@ fn create_math_binary(package_version: &str) -> BinaryProgram {
         package_description: "Math Library".to_string(),
         dependencies: Vec::new(),
         exported_classes: Vec::new(),
+        exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {
             symbol: "math::add".to_string(),
             simple_name: "add".to_string(),
@@ -43,6 +44,7 @@ fn create_math_binary(package_version: &str) -> BinaryProgram {
             return_type: Type::Primitive(PrimitiveKind::Int32),
             is_constructor: false,
             is_destructor: false,
+            is_operator: false,
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
@@ -76,6 +78,7 @@ fn create_app_binary_requiring(dependency_version: PackageVersion) -> BinaryProg
             version: dependency_version,
         }],
         exported_classes: Vec::new(),
+        exported_enums: Vec::new(),
         exported_functions: Vec::new(),
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
