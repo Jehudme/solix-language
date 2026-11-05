@@ -4,14 +4,17 @@
 
 use crate::cli::CompileArgs;
 use crate::diagnostics::render_diagnostics;
+use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use crate::telemetry::CompileMetricsReport;
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
+use solix_common::solver::DependencyRequirement;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::CompilationPipeline;
 use solix_compilation::manifest_to_source;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Recursively walks `directory_path` collecting all files with `.slx` extension in sorted order.
@@ -82,7 +85,10 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         .output
         .unwrap_or_else(|| PathBuf::from(format!("{package_name}.slxb")));
 
-    // 4. Initialize compilation options
+    // 4. Initialize compilation options and attach package store solver
+    let store_directory = resolve_package_store_dir(None);
+    let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
+
     let mut options = CompilationOptions::new()
         .with_profile(profile)
         .with_package_metadata(
@@ -90,7 +96,8 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             &args.version,
             args.description.as_deref().unwrap_or(""),
         )
-        .with_builtins(!args.no_builtins);
+        .with_builtins(!args.no_builtins)
+        .with_solver(solver);
 
     if args.inline_threshold != 8 {
         options = options.with_inline_threshold(args.inline_threshold);
@@ -103,32 +110,56 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         options = options.with_source(source_path.display().to_string(), code);
     }
 
-    // 6. Auto-extract and mount dependency API headers from `-l, --lib` binaries
-    for lib_path in &args.libs {
-        let lib_bytes = fs::read(lib_path).with_context(|| {
-            format!("Failed to read dependency binary '{}'", lib_path.display())
-        })?;
-        let lib_bin = BinaryProgram::from_bytes(&lib_bytes).with_context(|| {
-            format!(
-                "Failed to decode binary container from '{}'",
-                lib_path.display()
-            )
-        })?;
-        let manifest_json = extract_api_manifest(&lib_bin).with_context(|| {
-            format!(
-                "Failed to extract export manifest from '{}'",
-                lib_path.display()
-            )
-        })?;
-        let (api_filename, api_source) =
-            manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
-
-        options = options.with_source(api_filename, api_source);
+    // 6. Register explicit dependency specifications (--deps <name>@<version>)
+    for dependency_specification in &args.deps {
+        let requirement =
+            DependencyRequirement::parse(dependency_specification).map_err(|parse_error| {
+                anyhow::anyhow!(
+                    "Invalid dependency requirement '{dependency_specification}': {parse_error}"
+                )
+            })?;
+        options = options.with_dependency_spec(requirement);
     }
 
-    // 7. Build and execute pipeline
+    // 7. Mount dependency library binaries or archives passed via `-l, --lib`
+    for lib_path in &args.libs {
+        if lib_path
+            .extension()
+            .is_some_and(|extension| extension == "slxarc")
+        {
+            let temp_cache_dir =
+                std::env::temp_dir().join(format!("solix_compile_{}", std::process::id()));
+            let loaded_archive =
+                solix_common::project::SlxarcArchive::extract_and_load(lib_path, &temp_cache_dir)
+                    .map_err(|load_error| {
+                    anyhow::anyhow!(
+                        "Failed to extract dependency archive '{}': {load_error}",
+                        lib_path.display()
+                    )
+                })?;
+            for binary_program in loaded_archive.binaries {
+                options = options.with_dependency_binary(binary_program);
+            }
+            for secondary_program in loaded_archive.secondary_binaries {
+                options = options.with_dependency_binary(secondary_program);
+            }
+        } else {
+            let lib_bytes = fs::read(lib_path).with_context(|| {
+                format!("Failed to read dependency library '{}'", lib_path.display())
+            })?;
+            let lib_binary = BinaryProgram::from_bytes(&lib_bytes).with_context(|| {
+                format!(
+                    "Failed to decode binary container from '{}'",
+                    lib_path.display()
+                )
+            })?;
+            options = options.with_dependency_binary(lib_binary);
+        }
+    }
+
+    // 8. Build and execute pipeline
     let mut pipeline = if args.check {
-        CompilationPipeline::lsp()
+        CompilationPipeline::check()
     } else {
         CompilationPipeline::for_profile(profile)
     };

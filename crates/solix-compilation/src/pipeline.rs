@@ -83,6 +83,17 @@ impl CompilationPipeline {
         }
     }
 
+    /// Pre-configured syntax and semantic verification pipeline (omits bytecode emission):
+    /// Dependency Resolution -> Lexical Analysis -> Syntax Parsing -> Semantic Binding.
+    #[must_use]
+    pub fn check() -> Self {
+        Self::empty()
+            .add_phase(DependencyResolutionPhase::new())
+            .add_phase(LexerPhase::new())
+            .add_phase(ParserPhase::new())
+            .add_phase(BinderPhase::new())
+    }
+
     /// Pre-configured language server (LSP) pipeline:
     /// Lexical Analysis -> Syntax Parsing -> Semantic Binding (omits bytecode emission).
     #[must_use]

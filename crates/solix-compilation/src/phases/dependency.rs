@@ -48,20 +48,27 @@ pub fn run_dependency_resolution(
     let mut accumulated_diagnostics = Vec::new();
 
     // 1. Enqueue pre-loaded binary programs
-    for binary_program in &context.options.dependency_binaries {
-        if !binary_program.package_name.is_empty() {
-            let parsed_version = PackageVersion::parse(&binary_program.package_version)
-                .unwrap_or_else(|_| PackageVersion::new(0, 1, 0));
-            solved_map.insert(
-                binary_program.package_name.clone(),
-                (parsed_version, binary_program.clone()),
-            );
-            for transitive_requirement in &binary_program.export_manifest.dependencies {
-                work_queue.push_back((
-                    transitive_requirement.clone(),
-                    binary_program.package_name.clone(),
-                ));
-            }
+    for (index, binary_program) in context.options.dependency_binaries.iter().enumerate() {
+        let package_name = if !binary_program.package_name.is_empty() {
+            binary_program.package_name.clone()
+        } else if !binary_program.export_manifest.package_name.is_empty() {
+            binary_program.export_manifest.package_name.clone()
+        } else {
+            format!("lib_{index}")
+        };
+        let raw_version = if !binary_program.package_version.is_empty() {
+            &binary_program.package_version
+        } else {
+            &binary_program.export_manifest.package_version
+        };
+        let parsed_version =
+            PackageVersion::parse(raw_version).unwrap_or_else(|_| PackageVersion::new(0, 1, 0));
+        solved_map.insert(
+            package_name.clone(),
+            (parsed_version, binary_program.clone()),
+        );
+        for transitive_requirement in &binary_program.export_manifest.dependencies {
+            work_queue.push_back((transitive_requirement.clone(), package_name.clone()));
         }
     }
 

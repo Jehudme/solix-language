@@ -4,20 +4,21 @@
 
 use crate::cli::RunArgs;
 use crate::diagnostics::render_diagnostics;
+use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use crate::telemetry::{
     ExecutionTelemetry, MemoryTelemetry, RunMetricsReport, TimingsTelemetry,
     capture_process_telemetry,
 };
 use anyhow::{Context, Result, bail};
-use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
+use solix_common::bytecode::BinaryProgram;
 use solix_common::project::SlxarcArchive;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
-use solix_compilation::manifest::manifest_to_source;
 use solix_compilation::pipeline::CompilationPipeline;
 use solix_runtime::native::builtins::{builtin_print, builtin_println};
 use solix_runtime::{RuntimeContext, RuntimeOptions, VirtualMachine};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Parses a human-readable memory size string (e.g., `"64MB"`, `"16KB"`, `"1048576"`) into bytes.
 fn parse_byte_size(size_str: &str) -> Result<usize> {
@@ -77,11 +78,15 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
     let heap_size = parse_byte_size(&args.heap_size)?;
 
+    let store_directory = resolve_package_store_dir(None);
+    let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
+
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(heap_size)
         .with_max_call_stack_depth(args.max_stack)
         .with_args(args.args)
         .with_safe_mode(args.safe)
+        .with_solver(solver.clone())
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
         .with_native_function("blt::io::println", builtin_println)
@@ -213,7 +218,8 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         let mut compilation_options = CompilationOptions::new()
             .with_package_metadata(first_stem, "0.1.0", "")
             .with_builtins(!args.no_builtins)
-            .with_inline_threshold(args.inline_threshold);
+            .with_inline_threshold(args.inline_threshold)
+            .with_solver(solver.clone());
 
         for source_path in &source_paths {
             let source_code = fs::read_to_string(source_path).with_context(|| {
@@ -223,15 +229,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 compilation_options.with_source(source_path.display().to_string(), source_code);
         }
 
-        // Auto-extract and mount dependency API headers from any positional library binaries (*.slxb)
+        // Mount preloaded binary programs into compilation_options as dependency binaries
         for binary_program in &loaded_binary_programs {
-            let manifest_json = extract_api_manifest(binary_program).with_context(
-                || "Failed to extract export manifest from dependency binary container",
-            )?;
-            let (api_filename, api_source) =
-                manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
-
-            compilation_options = compilation_options.with_source(api_filename, api_source);
+            compilation_options =
+                compilation_options.with_dependency_binary(binary_program.clone());
         }
 
         let mut pipeline = CompilationPipeline::standard();

@@ -225,6 +225,12 @@ def compile_solix_sources(
         if lib_file.name.endswith(".slxb"):
             cmd.extend(["-l", str(lib_file)])
 
+    # Pass explicit dependencies declared in manifest.toml [dependencies]
+    dependencies = manifest.get("dependencies", {})
+    if isinstance(dependencies, dict):
+        for dep_name, dep_version in sorted(dependencies.items()):
+            cmd.extend(["--deps", f"{dep_name}@{dep_version}"])
+
     print(f"  [solix] Compiling Solix sources for '{package_name}' ({profile})...")
     result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
