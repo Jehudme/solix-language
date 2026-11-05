@@ -1,6 +1,7 @@
 //! Foreign Function Interface (FFI) dynamic shared library bridge and C-ABI definitions.
 
 use crate::exceptions::RuntimeError;
+use crate::memory::BlockTag;
 use crate::value::Value;
 use crate::vm::engine::VirtualMachine;
 use std::ffi::{CStr, c_char, c_void};
@@ -122,7 +123,7 @@ impl SolixCValue {
 /// Magic identifier constant verifying a valid `SolixVmContext` structure.
 pub const SOLIX_VM_CONTEXT_MAGIC: u64 = 0x534F_4C49_5856_4D43; // "SOLIXVMC"
 
-/// Context structure passed to native C callbacks providing safe field accessor function pointers.
+/// Context structure passed to native C callbacks providing safe field and heap accessor function pointers.
 #[repr(C)]
 pub struct SolixVmContext {
     /// Magic verification tag (`SOLIX_VM_CONTEXT_MAGIC`).
@@ -133,6 +134,36 @@ pub struct SolixVmContext {
     pub get_field_i32: unsafe extern "C" fn(*mut c_void, u32, u32) -> i32,
     /// Function pointer to write a 32-bit integer field to an object handle.
     pub set_field_i32: unsafe extern "C" fn(*mut c_void, u32, u32, i32),
+
+    // --- New Host Callbacks Appended for Standard Library & Native Crates ---
+    /// Reads a guest `string`, `char[]`, or `int8[]` at `addr` into `out_buf` (up to `cap` bytes).
+    /// Returns the total byte/element length of the string or array.
+    pub read_bytes:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, addr: u32, out_buf: *mut u8, cap: u32) -> u32,
+
+    /// Allocates a new `BlockTag::String` on the guest heap from `(ptr, len)` and returns its `u32` address.
+    pub alloc_string: unsafe extern "C" fn(vm_ptr: *mut c_void, ptr: *const u8, len: u32) -> u32,
+
+    /// Allocates a new `char[]` (`BlockTag::ArrayRef`, elem_size=8, type_tag=12) from `(ptr, len)`
+    /// so each ASCII/UTF-8 byte is stored as a `char` element, returning its `u32` address.
+    pub alloc_chars: unsafe extern "C" fn(vm_ptr: *mut c_void, ptr: *const u8, len: u32) -> u32,
+
+    /// Allocates a new `int8[]` (`BlockTag::ArrayRef`, elem_size=8, type_tag=1) from `(ptr, len)`.
+    pub alloc_byte_array:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, ptr: *const u8, len: u32) -> u32,
+
+    /// Allocates a new `ArrayRef` of `len` elements with `type_tag` (e.g. 4 = int64, 10 = float64, 13 = string).
+    pub alloc_array: unsafe extern "C" fn(vm_ptr: *mut c_void, len: u32, type_tag: u8) -> u32,
+
+    /// Returns the element length of an `ArrayRef` or byte length of a `String`.
+    pub array_len: unsafe extern "C" fn(vm_ptr: *mut c_void, arr_addr: u32) -> u32,
+
+    /// Gets a 64-bit element (int64, float64 bits, or ref u32) at `index` in a guest `ArrayRef`.
+    pub array_get_u64: unsafe extern "C" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32) -> u64,
+
+    /// Sets a 64-bit element (int64, float64 bits, or ref u32) at `index` in a guest `ArrayRef`.
+    pub array_set_u64:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32, raw_val: u64),
 }
 
 /// Stable C-ABI native function pointer signature.
@@ -203,6 +234,14 @@ pub fn invoke_c_native(
         vm_ptr: vm_pointer,
         get_field_i32: solix_vm_get_field_i32,
         set_field_i32: solix_vm_set_field_i32,
+        read_bytes: solix_vm_read_bytes,
+        alloc_string: solix_vm_alloc_string,
+        alloc_chars: solix_vm_alloc_chars,
+        alloc_byte_array: solix_vm_alloc_byte_array,
+        alloc_array: solix_vm_alloc_array,
+        array_len: solix_vm_array_len,
+        array_get_u64: solix_vm_array_get_u64,
+        array_set_u64: solix_vm_array_set_u64,
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -454,4 +493,324 @@ pub unsafe extern "C" fn solix_vm_set_field_i32(
     let _ = vm
         .heap
         .write_u32(object_address + actual_offset, value as u32);
+}
+
+/// Safely resolves a `*mut c_void` context pointer into an optional `VirtualMachine` reference.
+unsafe fn resolve_vm<'a>(vm_context: *mut c_void) -> Option<&'a mut VirtualMachine> {
+    if vm_context.is_null() {
+        return None;
+    }
+    let actual_vm_ptr = {
+        let context_pointer = vm_context as *mut SolixVmContext;
+        if !context_pointer.is_null()
+            && unsafe { (*context_pointer).magic } == SOLIX_VM_CONTEXT_MAGIC
+        {
+            unsafe { (*context_pointer).vm_ptr }
+        } else {
+            vm_context
+        }
+    };
+    if actual_vm_ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *(actual_vm_ptr as *mut VirtualMachine) })
+    }
+}
+
+/// Reads bytes from a guest `string`, `char[]`, or `int8[]` into `out_buffer` (up to `capacity` bytes).
+/// Returns the total byte/element length of the string or array.
+///
+/// # Safety
+/// The caller must ensure `out_buffer` is valid for writing `capacity` bytes if non-null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_read_bytes(
+    vm_context: *mut c_void,
+    source_address: u32,
+    out_buffer: *mut u8,
+    capacity: u32,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    if source_address == 0 {
+        return 0;
+    }
+    let header_result = vm_instance.heap.read_header(source_address);
+    let header = match header_result {
+        Ok(valid_header) => valid_header,
+        Err(_) => return 0,
+    };
+
+    if header.tag == BlockTag::String {
+        let total_length = header.size;
+        if !out_buffer.is_null() && capacity > 0 {
+            let copy_length = (capacity as usize).min(total_length as usize);
+            let start_offset = source_address as usize;
+            let end_offset = start_offset + copy_length;
+            if end_offset <= vm_instance.heap.buffer.len() {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        vm_instance.heap.buffer[start_offset..end_offset].as_ptr(),
+                        out_buffer,
+                        copy_length,
+                    );
+                }
+            }
+        }
+        total_length
+    } else if header.tag == BlockTag::ArrayRef {
+        let total_length = vm_instance.heap.read_u32(source_address).unwrap_or(0);
+        let array_offset = source_address as usize;
+        let element_size = vm_instance
+            .heap
+            .buffer
+            .get(array_offset + 4)
+            .copied()
+            .unwrap_or(8)
+            .max(1) as usize;
+
+        if !out_buffer.is_null() && capacity > 0 {
+            let copy_count = (capacity as usize).min(total_length as usize);
+            for element_index in 0..copy_count {
+                let element_offset = array_offset + 8 + (element_index * element_size);
+                if element_offset < vm_instance.heap.buffer.len() {
+                    let byte_value = vm_instance.heap.buffer[element_offset];
+                    unsafe {
+                        *out_buffer.add(element_index) = byte_value;
+                    }
+                }
+            }
+        }
+        total_length
+    } else {
+        0
+    }
+}
+
+/// Allocates a new `BlockTag::String` on the guest heap from bytes `(source_pointer, byte_count)` and returns its `u32` address.
+///
+/// # Safety
+/// The caller must ensure `source_pointer` points to at least `byte_count` readable bytes if `byte_count > 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_alloc_string(
+    vm_context: *mut c_void,
+    source_pointer: *const u8,
+    byte_count: u32,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    let string_address = match vm_instance
+        .heap
+        .allocate(byte_count as usize, BlockTag::String)
+    {
+        Ok(allocated_address) => allocated_address,
+        Err(_) => return 0,
+    };
+    if !source_pointer.is_null() && byte_count > 0 {
+        let source_slice =
+            unsafe { std::slice::from_raw_parts(source_pointer, byte_count as usize) };
+        let _ = vm_instance.heap.write_bytes(string_address, source_slice);
+    }
+    string_address
+}
+
+/// Allocates a new `char[]` (`BlockTag::ArrayRef`, elem_size=8, type_tag=12) from bytes `(source_pointer, char_count)`
+/// so each byte/character is stored in an 8-byte array slot, returning its `u32` address.
+///
+/// # Safety
+/// The caller must ensure `source_pointer` points to at least `char_count` readable bytes if `char_count > 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_alloc_chars(
+    vm_context: *mut c_void,
+    source_pointer: *const u8,
+    char_count: u32,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    let payload_size = 8 + (char_count as usize) * 8;
+    let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
+        Ok(allocated_address) => allocated_address,
+        Err(_) => return 0,
+    };
+    let _ = vm_instance.heap.write_u32(array_address, char_count);
+    let _ = vm_instance.heap.write_u8(array_address + 4, 8);
+    let _ = vm_instance.heap.write_u8(array_address + 7, 12); // Type tag 12 = Char
+
+    if !source_pointer.is_null() && char_count > 0 {
+        let source_slice =
+            unsafe { std::slice::from_raw_parts(source_pointer, char_count as usize) };
+        for (character_index, &character_byte) in source_slice.iter().enumerate() {
+            let slot_address = array_address + 8 + (character_index as u32 * 8);
+            let _ = vm_instance
+                .heap
+                .write_u64(slot_address, character_byte as u64);
+        }
+    }
+    array_address
+}
+
+/// Allocates a new `int8[]` (`BlockTag::ArrayRef`, elem_size=8, type_tag=1) from bytes `(source_pointer, byte_count)`
+/// so each byte is stored in an 8-byte array slot, returning its `u32` address.
+///
+/// # Safety
+/// The caller must ensure `source_pointer` points to at least `byte_count` readable bytes if `byte_count > 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_alloc_byte_array(
+    vm_context: *mut c_void,
+    source_pointer: *const u8,
+    byte_count: u32,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    let payload_size = 8 + (byte_count as usize) * 8;
+    let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
+        Ok(allocated_address) => allocated_address,
+        Err(_) => return 0,
+    };
+    let _ = vm_instance.heap.write_u32(array_address, byte_count);
+    let _ = vm_instance.heap.write_u8(array_address + 4, 8);
+    let _ = vm_instance.heap.write_u8(array_address + 7, 1); // Type tag 1 = Int8
+
+    if !source_pointer.is_null() && byte_count > 0 {
+        let source_slice =
+            unsafe { std::slice::from_raw_parts(source_pointer, byte_count as usize) };
+        for (byte_index, &raw_byte) in source_slice.iter().enumerate() {
+            let slot_address = array_address + 8 + (byte_index as u32 * 8);
+            let _ = vm_instance
+                .heap
+                .write_u64(slot_address, (raw_byte as i8 as i64) as u64);
+        }
+    }
+    array_address
+}
+
+/// Allocates a new empty `ArrayRef` of `element_count` elements with `type_tag`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_alloc_array(
+    vm_context: *mut c_void,
+    element_count: u32,
+    type_tag: u8,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    let payload_size = 8 + (element_count as usize) * 8;
+    let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
+        Ok(allocated_address) => allocated_address,
+        Err(_) => return 0,
+    };
+    let _ = vm_instance.heap.write_u32(array_address, element_count);
+    let _ = vm_instance.heap.write_u8(array_address + 4, 8);
+    let _ = vm_instance.heap.write_u8(array_address + 7, type_tag);
+    array_address
+}
+
+/// Returns the element length of an `ArrayRef` or byte length of a `String`.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_array_len(vm_context: *mut c_void, array_address: u32) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    if array_address == 0 {
+        return 0;
+    }
+    let header_result = vm_instance.heap.read_header(array_address);
+    match header_result {
+        Ok(header) if header.tag == BlockTag::String => header.size,
+        _ => vm_instance.heap.read_u32(array_address).unwrap_or(0),
+    }
+}
+
+/// Gets a 64-bit element at `element_index` from an array on the guest heap.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_array_get_u64(
+    vm_context: *mut c_void,
+    array_address: u32,
+    element_index: u32,
+) -> u64 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    if array_address == 0 {
+        return 0;
+    }
+    let total_length = vm_instance.heap.read_u32(array_address).unwrap_or(0);
+    if element_index >= total_length {
+        return 0;
+    }
+    let element_size = vm_instance
+        .heap
+        .read_u8(array_address + 4)
+        .unwrap_or(8)
+        .max(1) as usize;
+    let slot_address = array_address + 8 + (element_index * element_size as u32);
+    match element_size {
+        1 => vm_instance.heap.read_u8(slot_address).unwrap_or(0) as u64,
+        2 => vm_instance.heap.read_u16(slot_address).unwrap_or(0) as u64,
+        4 => vm_instance.heap.read_u32(slot_address).unwrap_or(0) as u64,
+        _ => vm_instance.heap.read_u64(slot_address).unwrap_or(0),
+    }
+}
+
+/// Sets a 64-bit element at `element_index` into an array on the guest heap.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_array_set_u64(
+    vm_context: *mut c_void,
+    array_address: u32,
+    element_index: u32,
+    raw_value: u64,
+) {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return,
+    };
+    if array_address == 0 {
+        return;
+    }
+    let total_length = vm_instance.heap.read_u32(array_address).unwrap_or(0);
+    if element_index >= total_length {
+        return;
+    }
+    let element_size = vm_instance
+        .heap
+        .read_u8(array_address + 4)
+        .unwrap_or(8)
+        .max(1) as usize;
+    let slot_address = array_address + 8 + (element_index * element_size as u32);
+    match element_size {
+        1 => {
+            let _ = vm_instance.heap.write_u8(slot_address, raw_value as u8);
+        }
+        2 => {
+            let _ = vm_instance.heap.write_u16(slot_address, raw_value as u16);
+        }
+        4 => {
+            let _ = vm_instance.heap.write_u32(slot_address, raw_value as u32);
+        }
+        _ => {
+            let _ = vm_instance.heap.write_u64(slot_address, raw_value);
+        }
+    }
 }
