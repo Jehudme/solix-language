@@ -16,7 +16,7 @@ use crate::phases::emitter::static_layout::{
     StaticLayout, StaticVariableDecl, synthesize_module_init,
 };
 use crate::phases::lexing::TokenKind;
-use crate::phases::parser::statements::ProgramAst;
+use crate::phases::parser::statements::{ProgramAst, Statement};
 use crate::phases::parser::statements::declarations::{
     ClassDeclaration, ClassMember, ConstructorDeclaration, Declaration, DestructorDeclaration,
     MethodDeclaration, Modifier, OperatorDeclaration,
@@ -142,9 +142,20 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     function_ids.insert("@init".to_string(), 0);
     let mut next_func_id = 1u32;
 
+    let mut generic_invocations: HashMap<(String, String), Vec<String>> = HashMap::new();
+    for ast in context.ast.iter().flatten() {
+        collect_generic_calls_in_ast(ast, &context.sources, &mut generic_invocations);
+    }
+
     // Index function symbols to allocate deterministic function IDs
     for ast in context.ast.iter().flatten() {
-        index_function_symbols(ast, &context.sources, &mut function_ids, &mut next_func_id);
+        index_function_symbols(
+            ast,
+            &context.sources,
+            &mut function_ids,
+            &mut next_func_id,
+            &generic_invocations,
+        );
     }
 
     if let Some(artifacts) = &context.binding_artifacts {
@@ -243,6 +254,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 &mut pool,
                 &mut functions_by_source[source_id as usize],
                 &mut synthesized_lambdas,
+                &generic_invocations,
             )?;
         }
     }
@@ -846,11 +858,291 @@ fn collect_classes(declarations: &[Declaration]) -> Vec<&ClassDeclaration> {
     classes
 }
 
+fn collect_generic_calls_in_expression(
+    expression: &Expression,
+    sources: &[String],
+    invocations: &mut HashMap<(String, String), Vec<String>>,
+) {
+    match expression {
+        Expression::MethodCall {
+            callee,
+            generic_arguments,
+            arguments,
+            ..
+        } => {
+            if !generic_arguments.is_empty() {
+                let argument_strings: Vec<String> = generic_arguments
+                    .iter()
+                    .map(|argument| {
+                        get_span_text(
+                            argument.span(),
+                            &sources[argument.span().id as usize],
+                        )
+                        .to_string()
+                    })
+                    .collect();
+                let joined_arguments = argument_strings.join(", ");
+                match callee.as_ref() {
+                    Expression::MemberAccess {
+                        object,
+                        member_span,
+                        ..
+                    } => {
+                        let object_name =
+                            get_span_text(object.span(), &sources[object.span().id as usize]);
+                        let method_name =
+                            get_span_text(*member_span, &sources[member_span.id as usize]);
+                        let entry = invocations
+                            .entry((object_name.to_string(), method_name.to_string()))
+                            .or_default();
+                        if !entry.contains(&joined_arguments) {
+                            entry.push(joined_arguments);
+                        }
+                    }
+                    Expression::Identifier { span } => {
+                        let method_name = get_span_text(*span, &sources[span.id as usize]);
+                        let entry = invocations
+                            .entry((String::new(), method_name.to_string()))
+                            .or_default();
+                        if !entry.contains(&joined_arguments) {
+                            entry.push(joined_arguments);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            collect_generic_calls_in_expression(callee, sources, invocations);
+            for argument in arguments {
+                collect_generic_calls_in_expression(argument, sources, invocations);
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            collect_generic_calls_in_expression(left, sources, invocations);
+            collect_generic_calls_in_expression(right, sources, invocations);
+        }
+        Expression::Unary { operand, .. } => {
+            collect_generic_calls_in_expression(operand, sources, invocations);
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_generic_calls_in_expression(target, sources, invocations);
+            collect_generic_calls_in_expression(value, sources, invocations);
+        }
+        Expression::MemberAccess { object, .. } => {
+            collect_generic_calls_in_expression(object, sources, invocations);
+        }
+        Expression::ArrayAccess { array, index, .. } => {
+            collect_generic_calls_in_expression(array, sources, invocations);
+            collect_generic_calls_in_expression(index, sources, invocations);
+        }
+        Expression::ArrayCreation { size, .. } => {
+            collect_generic_calls_in_expression(size, sources, invocations);
+        }
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleCreation { elements, .. } => {
+            for element in elements {
+                collect_generic_calls_in_expression(element, sources, invocations);
+            }
+        }
+        Expression::NewInstance { arguments, .. } => {
+            for argument in arguments {
+                collect_generic_calls_in_expression(argument, sources, invocations);
+            }
+        }
+        Expression::Cast {
+            expression: inner, ..
+        }
+        | Expression::Instanceof {
+            expression: inner, ..
+        } => {
+            collect_generic_calls_in_expression(inner, sources, invocations);
+        }
+        Expression::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_generic_calls_in_expression(condition, sources, invocations);
+            collect_generic_calls_in_expression(then_branch, sources, invocations);
+            collect_generic_calls_in_expression(else_branch, sources, invocations);
+        }
+        Expression::Block {
+            statements, result, ..
+        } => {
+            for statement in statements {
+                collect_generic_calls_in_statement(statement, sources, invocations);
+            }
+            if let Some(result_expression) = result {
+                collect_generic_calls_in_expression(result_expression, sources, invocations);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_generic_calls_in_statement(
+    statement: &Statement,
+    sources: &[String],
+    invocations: &mut HashMap<(String, String), Vec<String>>,
+) {
+    match statement {
+        Statement::Block(block_statement) => {
+            for nested in &block_statement.statements {
+                collect_generic_calls_in_statement(nested, sources, invocations);
+            }
+        }
+        Statement::If(if_statement) => {
+            collect_generic_calls_in_expression(&if_statement.condition, sources, invocations);
+            collect_generic_calls_in_statement(&if_statement.then_branch, sources, invocations);
+            if let Some(ref else_branch) = if_statement.else_branch {
+                collect_generic_calls_in_statement(else_branch, sources, invocations);
+            }
+        }
+        Statement::While(while_statement) => {
+            collect_generic_calls_in_expression(&while_statement.condition, sources, invocations);
+            collect_generic_calls_in_statement(&while_statement.body, sources, invocations);
+        }
+        Statement::DoWhile(do_while_statement) => {
+            collect_generic_calls_in_statement(&do_while_statement.body, sources, invocations);
+            collect_generic_calls_in_expression(&do_while_statement.condition, sources, invocations);
+        }
+        Statement::For(for_statement) => {
+            if let Some(ref initializer) = for_statement.initializer {
+                collect_generic_calls_in_statement(initializer, sources, invocations);
+            }
+            if let Some(ref condition) = for_statement.condition {
+                collect_generic_calls_in_expression(condition, sources, invocations);
+            }
+            if let Some(ref update) = for_statement.update {
+                collect_generic_calls_in_expression(update, sources, invocations);
+            }
+            collect_generic_calls_in_statement(&for_statement.body, sources, invocations);
+        }
+        Statement::Switch(switch_statement) => {
+            collect_generic_calls_in_expression(&switch_statement.discriminant, sources, invocations);
+            for switch_case in &switch_statement.cases {
+                collect_generic_calls_in_expression(&switch_case.case_value, sources, invocations);
+                for case_statement in &switch_case.statements {
+                    collect_generic_calls_in_statement(case_statement, sources, invocations);
+                }
+            }
+        }
+        Statement::Try(try_statement) => {
+            for try_stmt in &try_statement.try_block.statements {
+                collect_generic_calls_in_statement(try_stmt, sources, invocations);
+            }
+            for catch_clause in &try_statement.catch_clauses {
+                for catch_stmt in &catch_clause.block.statements {
+                    collect_generic_calls_in_statement(catch_stmt, sources, invocations);
+                }
+            }
+            if let Some(ref finally_block) = try_statement.finally_block {
+                for finally_stmt in &finally_block.statements {
+                    collect_generic_calls_in_statement(finally_stmt, sources, invocations);
+                }
+            }
+        }
+        Statement::Throw(throw_statement) => {
+            collect_generic_calls_in_expression(&throw_statement.expression, sources, invocations);
+        }
+        Statement::Return(return_statement) => {
+            if let Some(ref value) = return_statement.value {
+                collect_generic_calls_in_expression(value, sources, invocations);
+            }
+        }
+        Statement::VariableDeclaration(variable_statement) => {
+            if let Some(ref initializer) = variable_statement.initializer {
+                collect_generic_calls_in_expression(initializer, sources, invocations);
+            }
+        }
+        Statement::Expression(expression_statement) => {
+            collect_generic_calls_in_expression(&expression_statement.expression, sources, invocations);
+        }
+        Statement::Assert(assert_statement) => {
+            collect_generic_calls_in_expression(&assert_statement.condition, sources, invocations);
+            if let Some(ref message) = assert_statement.message {
+                collect_generic_calls_in_expression(message, sources, invocations);
+            }
+        }
+        Statement::Exit(exit_statement) => {
+            collect_generic_calls_in_expression(&exit_statement.code, sources, invocations);
+        }
+        Statement::Declaration(declaration) => match declaration {
+            Declaration::Method(method_declaration) => {
+                if let Some(ref body) = method_declaration.body {
+                    for stmt in &body.statements {
+                        collect_generic_calls_in_statement(stmt, sources, invocations);
+                    }
+                }
+            }
+            Declaration::Class(class_declaration) => {
+                for member in &class_declaration.members {
+                    match member {
+                        ClassMember::Method(method_declaration) => {
+                            if let Some(ref body) = method_declaration.body {
+                                for stmt in &body.statements {
+                                    collect_generic_calls_in_statement(stmt, sources, invocations);
+                                }
+                            }
+                        }
+                        ClassMember::Constructor(constructor_declaration) => {
+                            for stmt in &constructor_declaration.body.statements {
+                                collect_generic_calls_in_statement(stmt, sources, invocations);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn collect_generic_calls_in_ast(
+    ast: &ProgramAst,
+    sources: &[String],
+    invocations: &mut HashMap<(String, String), Vec<String>>,
+) {
+    for declaration in &ast.declarations {
+        match declaration {
+            Declaration::Method(method_declaration) => {
+                if let Some(ref body) = method_declaration.body {
+                    for statement in &body.statements {
+                        collect_generic_calls_in_statement(statement, sources, invocations);
+                    }
+                }
+            }
+            Declaration::Class(class_declaration) => {
+                for member in &class_declaration.members {
+                    match member {
+                        ClassMember::Method(method_declaration) => {
+                            if let Some(ref body) = method_declaration.body {
+                                for statement in &body.statements {
+                                    collect_generic_calls_in_statement(statement, sources, invocations);
+                                }
+                            }
+                        }
+                        ClassMember::Constructor(constructor_declaration) => {
+                            for statement in &constructor_declaration.body.statements {
+                                collect_generic_calls_in_statement(statement, sources, invocations);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn index_function_symbols(
     ast: &ProgramAst,
     sources: &[String],
     function_ids: &mut HashMap<String, u32>,
     next_func_id: &mut u32,
+    generic_invocations: &HashMap<(String, String), Vec<String>>,
 ) {
     let src_idx = ast.source_id as usize;
     if src_idx >= sources.len() {
@@ -878,6 +1170,18 @@ fn index_function_symbols(
             if let Some(ref pkg) = pkg_prefix {
                 let full_pkg_name = format!("{pkg}.{name}");
                 function_ids.insert(full_pkg_name, func_id);
+            }
+            if !m.generic_params.is_empty() {
+                if let Some(specialization_args) =
+                    generic_invocations.get(&(String::new(), name.to_string()))
+                {
+                    for args_str in specialization_args {
+                        let specialized_sym = format!("{name}<{args_str}>");
+                        let spec_id = *next_func_id;
+                        *next_func_id += 1;
+                        function_ids.insert(specialized_sym.clone(), spec_id);
+                    }
+                }
             }
         }
     }
@@ -915,6 +1219,23 @@ fn index_function_symbols(
                         let full_pkg_name = format!("{pkg}.{full_sym}");
                         function_ids.insert(full_pkg_name_mangled, func_id);
                         function_ids.entry(full_pkg_name).or_insert(func_id);
+                    }
+                    if !m.generic_params.is_empty() {
+                        if let Some(specialization_args) = generic_invocations
+                            .get(&(cls_name.to_string(), method_name.to_string()))
+                        {
+                            for args_str in specialization_args {
+                                let specialized_sym =
+                                    format!("{cls_name}::{method_name}<{args_str}>");
+                                let spec_id = *next_func_id;
+                                *next_func_id += 1;
+                                function_ids.insert(specialized_sym.clone(), spec_id);
+                                function_ids.insert(
+                                    format!("{method_name}<{args_str}>"),
+                                    spec_id,
+                                );
+                            }
+                        }
                     }
                 }
                 ClassMember::Constructor(ctor) => {
@@ -1000,6 +1321,7 @@ fn compile_source_functions(
     pool: &mut ConstantPoolBuilder,
     output: &mut Vec<CompiledFunction>,
     synthesized_lambdas: &mut Vec<CompiledFunction>,
+    generic_invocations: &HashMap<(String, String), Vec<String>>,
 ) -> Result<(), EmissionError> {
     let src_idx = ast.source_id as usize;
     if src_idx >= sources.len() {
@@ -1028,6 +1350,31 @@ fn compile_source_functions(
                 synthesized_lambdas,
             )?;
             output.push(func);
+
+            if !m.generic_params.is_empty() {
+                if let Some(specialization_args) =
+                    generic_invocations.get(&(String::new(), name.clone()))
+                {
+                    for args_str in specialization_args {
+                        let specialized_sym = format!("{name}<{args_str}>");
+                        let func = compile_single_method(
+                            &specialized_sym,
+                            ast.source_id,
+                            m,
+                            false,
+                            sources,
+                            class_layouts,
+                            function_ids,
+                            enum_variants,
+                            static_layout,
+                            node_types,
+                            pool,
+                            synthesized_lambdas,
+                        )?;
+                        output.push(func);
+                    }
+                }
+            }
         }
     }
 
@@ -1070,6 +1417,32 @@ fn compile_source_functions(
                         synthesized_lambdas,
                     )?;
                     output.push(func);
+
+                    if !m.generic_params.is_empty() {
+                        if let Some(specialization_args) = generic_invocations
+                            .get(&(cls_name.to_string(), method_name.to_string()))
+                        {
+                            for args_str in specialization_args {
+                                let specialized_sym =
+                                    format!("{cls_name}::{method_name}<{args_str}>");
+                                let func = compile_single_method(
+                                    &specialized_sym,
+                                    ast.source_id,
+                                    m,
+                                    is_instance,
+                                    sources,
+                                    class_layouts,
+                                    function_ids,
+                                    enum_variants,
+                                    static_layout,
+                                    node_types,
+                                    pool,
+                                    synthesized_lambdas,
+                                )?;
+                                output.push(func);
+                            }
+                        }
+                    }
                 }
                 ClassMember::Constructor(ctor) => {
                     if ctor.modifiers.contains(&Modifier::Extern) {

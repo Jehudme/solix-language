@@ -344,12 +344,12 @@ To achieve **100% implementation of all 55+ suites in `TESTS.md`**:
 
 | DoD Requirement | Target Benchmark / Artifact | Verification Tool | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **Zero Dangling Pointers (`BUG-RT-01`)** | `reload_frame!()` after all destructor & native calls | `cargo test -p solix-tests` | [ ] Pending |
-| **Unwinding `try-finally` (`BUG-RT-02`)** | Uncaught exceptions run `finally` AND propagate to outer `catch` | `test_audit_regressions.rs` | [ ] Pending |
-| **Lossless 64-Bit `I64` (`BUG-RT-03`)** | `i64` values outside `i32` range preserved in tuples, arrays, closures | `test_audit_regressions.rs` | [ ] Pending |
-| **Compound `%=` & 64-Bit Ops (`BUG-COMP-01/02`)** | `%=` emits `ModI32`/`ModI64`; `int64` `+=`/`++` preserve 64-bit values | `test_audit_regressions.rs` | [ ] Pending |
-| **Default Parameters & `super.fn()` (`BUG-COMP-03/06`)** | Omitted default args injected; `super.method()` dispatches to base class | `test_audit_regressions.rs` | [ ] Pending |
-| **Underscore Literals (`BUG-PARSE-01`)** | `1_000`, `0xDEAD_BEEF`, `0b1111_0000` compile & execute cleanly | `test_audit_regressions.rs` | [ ] Pending |
-| **Variadic Templates (`Cases 55.5 & 55.6`)** | `sum_all<args...>` and `count_args<args...>` pass and marked `[IMPLEMENTED]` | `test_tuple_primitive.rs` | [ ] Pending |
-| **ExportManifest Interfaces & Enums (`BUG-COMP-05`)** | Interfaces, enums, and operators round-trip through `manifest_to_source` | `test_audit_regressions.rs` | [ ] Pending |
-| **Clippy & Formatting Clean** | Zero warnings across all workspace crates | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
+| **Zero Dangling Pointers (`BUG-RT-01`)** | `reload_frame!()` after all destructor & native calls | `cargo test -p solix-tests` | [x] Verified |
+| **Unwinding `try-finally` (`BUG-RT-02`)** | Uncaught exceptions run `finally` AND propagate to outer `catch` | `test_audit_regressions.rs` | [x] Verified |
+| **Lossless 64-Bit `I64` (`BUG-RT-03`)** | `i64` values outside `i32` range preserved in tuples, arrays, closures | `test_audit_regressions.rs` | [x] Verified |
+| **Compound `%=` & 64-Bit Ops (`BUG-COMP-01/02`)** | `%=` emits `ModI32`/`ModI64`; `int64` `+=`/`++` preserve 64-bit values | `test_audit_regressions.rs` | [x] Verified |
+| **Default Parameters & `super.fn()` (`BUG-COMP-03/06`)** | Omitted default args injected; `super.method()` dispatches to base class | `test_audit_regressions.rs` | [x] Verified |
+| **Underscore Literals (`BUG-PARSE-01`)** | `1_000`, `0xDEAD_BEEF`, `0b1111_0000` compile & execute cleanly | `test_audit_regressions.rs` | [x] Verified |
+| **Variadic Templates (`Cases 55.5 & 55.6`)** | `sum_all<args...>` and `count_args<args...>` pass and marked `[IMPLEMENTED]` | `test_tuple_primitive.rs` | [x] Verified |
+| **ExportManifest Interfaces & Enums (`BUG-COMP-05`)** | Interfaces, enums, and operators round-trip through `manifest_to_source` | `test_audit_regressions.rs` | [x] Verified |
+| **Clippy & Formatting Clean** | Zero warnings across all workspace crates | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Verified |

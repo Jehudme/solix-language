@@ -99,18 +99,16 @@ fn test_case_1_4_generic_container_slot_clearance_with_default() {
 #[test]
 fn test_case_1_5_generic_function_returning_default() {
     let code = r#"
-        class Helper<T> {
-            public T getDefault() {
+        public class Helpers {
+            public static T getDefault<T>() {
                 return default(T);
             }
         }
 
-        class Main {
+        public class Main {
             public static int32 main() {
-                Helper<int32> h1 = new Helper<int32>();
-                Helper<bool> h2 = new Helper<bool>();
-                int32 defInt = h1.getDefault();
-                bool defBool = h2.getDefault();
+                int32 defInt = Helpers.getDefault<int32>();
+                bool defBool = Helpers.getDefault<bool>();
                 if (defInt == 0 && defBool == false) {
                     return 0;
                 }

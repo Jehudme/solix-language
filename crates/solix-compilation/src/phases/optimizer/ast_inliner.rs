@@ -275,12 +275,13 @@ fn try_register_inlinable_method(
     sources: &[String],
     inlinable_functions: &mut HashMap<String, InlinableFunctionInfo>,
 ) {
-    // Prohibit virtual, override, native, abstract, or extern methods
+    // Prohibit virtual, override, native, abstract, extern, or generic methods
     if method.modifiers.contains(&Modifier::Virtual)
         || method.modifiers.contains(&Modifier::Override)
         || method.modifiers.contains(&Modifier::Native)
         || method.modifiers.contains(&Modifier::Abstract)
         || method.modifiers.contains(&Modifier::Extern)
+        || !method.generic_params.is_empty()
     {
         return;
     }

@@ -186,9 +186,21 @@ impl<'a> TypeCheckingVisitor<'a> {
                     | TokenKind::OperatorDivide
                     | TokenKind::OperatorModulo => {
                         // String concatenation
-                        if *operator == TokenKind::OperatorPlus
-                            && (left_type.to_string() == "std.string"
-                                || right_type.to_string() == "std.string")
+                        let is_string_left = matches!(
+                            &left_type,
+                            Type::Class { symbol_name, .. }
+                                if symbol_name == "std.string"
+                                    || symbol_name == "std::string"
+                                    || symbol_name == "string"
+                        );
+                        let is_string_right = matches!(
+                            &right_type,
+                            Type::Class { symbol_name, .. }
+                                if symbol_name == "std.string"
+                                    || symbol_name == "std::string"
+                                    || symbol_name == "string"
+                        );
+                        if *operator == TokenKind::OperatorPlus && (is_string_left || is_string_right)
                         {
                             Type::Class {
                                 symbol_name: "std.string".to_string(),
@@ -562,10 +574,18 @@ impl<'a> TypeCheckingVisitor<'a> {
 
                 let target_type = self.evaluate_expression_type(object);
 
-                // Array and tuple .length property
+                // Array, tuple, and string .length property
+                let is_string_target = matches!(
+                    &target_type,
+                    Type::Class { symbol_name, .. }
+                        if symbol_name == "std.string"
+                            || symbol_name == "std::string"
+                            || symbol_name == "string"
+                );
                 if (matches!(target_type, Type::Array { .. })
                     || matches!(target_type, Type::Tuple(_))
-                    || matches!(target_type, Type::Primitive(PrimitiveKind::TuplePrimitive)))
+                    || matches!(target_type, Type::Primitive(PrimitiveKind::TuplePrimitive))
+                    || is_string_target)
                     && member_name == "length"
                 {
                     if *is_scope_resolution {
@@ -574,6 +594,8 @@ impl<'a> TypeCheckingVisitor<'a> {
                                 member_name: member_name.to_string(),
                                 owner: if matches!(target_type, Type::Array { .. }) {
                                     "array".to_string()
+                                } else if is_string_target {
+                                    "string".to_string()
                                 } else {
                                     "tuple".to_string()
                                 },

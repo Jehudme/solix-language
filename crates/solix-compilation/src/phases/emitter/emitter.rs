@@ -442,6 +442,13 @@ impl<'a> Emitter<'a> {
                         || matches!(
                             self.query_type(object.span()),
                             Type::Primitive(PrimitiveKind::TuplePrimitive)
+                        )
+                        || matches!(
+                            self.query_type(object.span()),
+                            Type::Class { ref symbol_name, .. }
+                                if symbol_name == "std.string"
+                                    || symbol_name == "std::string"
+                                    || symbol_name == "string"
                         ))
                 {
                     let r_obj = self.emit_expression(object, None)?;
@@ -755,7 +762,7 @@ impl<'a> Emitter<'a> {
                 }
                 self.allocator.free_temp(dummy_dst);
                 for (idx, arg) in arguments.iter().enumerate() {
-                    if self.query_type(arg.span()).is_reference_type()
+                    if self.is_reference_expr(arg)
                         && !matches!(arg, Expression::Identifier { .. })
                     {
                         self.emit_instruction(
@@ -777,7 +784,7 @@ impl<'a> Emitter<'a> {
             Expression::MethodCall {
                 span,
                 callee,
-                generic_arguments: _,
+                generic_arguments,
                 arguments,
             } => {
                 if let Expression::MemberAccess {
@@ -789,12 +796,21 @@ impl<'a> Emitter<'a> {
                 {
                     let object_name = self.get_lexeme(object.span()).to_string();
                     let method_name = self.get_lexeme(*member_span).to_string();
-                    let symbol_full = format!("{object_name}::{method_name}");
+                    let generic_suffix = if !generic_arguments.is_empty() {
+                        let args_str: Vec<String> = generic_arguments
+                            .iter()
+                            .map(|argument| self.get_lexeme(argument.span()).to_string())
+                            .collect();
+                        format!("<{}>", args_str.join(", "))
+                    } else {
+                        String::new()
+                    };
+                    let symbol_full = format!("{object_name}::{method_name}{generic_suffix}");
                     let simple_object = object_name
                         .rsplit(['.', ':'])
                         .next()
                         .unwrap_or(&object_name);
-                    let symbol_simple = format!("{simple_object}::{method_name}");
+                    let symbol_simple = format!("{simple_object}::{method_name}{generic_suffix}");
 
                     let is_package_or_class_call =
                         matches!(object.as_ref(), Expression::Identifier { .. })
@@ -864,7 +880,7 @@ impl<'a> Emitter<'a> {
                             );
                         }
                         for (arg_index, argument) in arguments.iter().enumerate() {
-                            if self.query_type(argument.span()).is_reference_type()
+                            if self.is_reference_expr(argument)
                                 && !matches!(argument, Expression::Identifier { .. })
                             {
                                 self.emit_instruction(
@@ -933,7 +949,7 @@ impl<'a> Emitter<'a> {
                             );
                         }
                         for (arg_index, argument) in arguments.iter().enumerate() {
-                            if self.query_type(argument.span()).is_reference_type()
+                            if self.is_reference_expr(argument)
                                 && !matches!(argument, Expression::Identifier { .. })
                             {
                                 self.emit_instruction(
@@ -989,7 +1005,7 @@ impl<'a> Emitter<'a> {
                                 Some(*span),
                             );
                             for (idx, arg) in arguments.iter().enumerate() {
-                                if self.query_type(arg.span()).is_reference_type()
+                                if self.is_reference_expr(arg)
                                     && !matches!(arg, Expression::Identifier { .. })
                                 {
                                     self.emit_instruction(
@@ -1035,7 +1051,7 @@ impl<'a> Emitter<'a> {
                             Instruction::format_call(op, dst, slot, arg_base, total_args as u8),
                             Some(*span),
                         );
-                        if self.query_type(object.span()).is_reference_type()
+                        if self.is_reference_expr(object)
                             && !matches!(object.as_ref(), Expression::Identifier { .. })
                         {
                             self.emit_instruction(
@@ -1044,7 +1060,7 @@ impl<'a> Emitter<'a> {
                             );
                         }
                         for (idx, arg) in arguments.iter().enumerate() {
-                            if self.query_type(arg.span()).is_reference_type()
+                            if self.is_reference_expr(arg)
                                 && !matches!(arg, Expression::Identifier { .. })
                             {
                                 self.emit_instruction(
@@ -1065,17 +1081,34 @@ impl<'a> Emitter<'a> {
                 } else if let Expression::Identifier { span: id_span } = callee.as_ref() {
                     let func_name = self.get_lexeme(*id_span).to_string();
                     let is_local = self.allocator.lookup_local(&func_name).is_some();
+                    let generic_suffix = if !generic_arguments.is_empty() {
+                        let args_str: Vec<String> = generic_arguments
+                            .iter()
+                            .map(|argument| self.get_lexeme(argument.span()).to_string())
+                            .collect();
+                        format!("<{}>", args_str.join(", "))
+                    } else {
+                        String::new()
+                    };
+                    let specialized_name = format!("{func_name}{generic_suffix}");
                     let func_id_opt = self
                         .function_ids
                         .and_then(|ids| {
-                            ids.get(&func_name).or_else(|| {
-                                self.enclosing_class.as_ref().and_then(|cls| {
-                                    let simple = cls.rsplit(['.', ':']).next().unwrap_or(cls);
-                                    let qual1 = format!("{cls}::{func_name}");
-                                    let qual2 = format!("{simple}::{func_name}");
-                                    ids.get(&qual1).or_else(|| ids.get(&qual2))
+                            ids.get(&specialized_name)
+                                .or_else(|| ids.get(&func_name))
+                                .or_else(|| {
+                                    self.enclosing_class.as_ref().and_then(|cls| {
+                                        let simple = cls.rsplit(['.', ':']).next().unwrap_or(cls);
+                                        let qual1 = format!("{cls}::{specialized_name}");
+                                        let qual2 = format!("{simple}::{specialized_name}");
+                                        let qual3 = format!("{cls}::{func_name}");
+                                        let qual4 = format!("{simple}::{func_name}");
+                                        ids.get(&qual1)
+                                            .or_else(|| ids.get(&qual2))
+                                            .or_else(|| ids.get(&qual3))
+                                            .or_else(|| ids.get(&qual4))
+                                    })
                                 })
-                            })
                         })
                         .copied();
 
@@ -1102,7 +1135,7 @@ impl<'a> Emitter<'a> {
                             Some(*span),
                         );
                         for (idx, arg) in arguments.iter().enumerate() {
-                            if self.query_type(arg.span()).is_reference_type()
+                            if self.is_reference_expr(arg)
                                 && !matches!(arg, Expression::Identifier { .. })
                             {
                                 self.emit_instruction(
@@ -1152,7 +1185,7 @@ impl<'a> Emitter<'a> {
                             );
                         }
                         for (idx, arg) in arguments.iter().enumerate() {
-                            if self.query_type(arg.span()).is_reference_type()
+                            if self.is_reference_expr(arg)
                                 && !matches!(arg, Expression::Identifier { .. })
                             {
                                 self.emit_instruction(
@@ -1188,7 +1221,7 @@ impl<'a> Emitter<'a> {
                         Some(*span),
                     );
                     for (idx, arg) in arguments.iter().enumerate() {
-                        if self.query_type(arg.span()).is_reference_type()
+                        if self.is_reference_expr(arg)
                             && !matches!(arg, Expression::Identifier { .. })
                         {
                             self.emit_instruction(
@@ -2303,7 +2336,7 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                         self.emit_instruction(
-                            Instruction::format_a(OpCode::SetArray, 0, cur_val, r_arr, r_idx),
+                            Instruction::format_a(OpCode::SetArray, 0, r_arr, r_idx, cur_val),
                             Some(span),
                         );
                         if dst != cur_val {
@@ -2324,7 +2357,7 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                         self.emit_instruction(
-                            Instruction::format_a(OpCode::SetArray, 0, cur_val, r_arr, r_idx),
+                            Instruction::format_a(OpCode::SetArray, 0, r_arr, r_idx, cur_val),
                             Some(span),
                         );
                     }
@@ -2722,6 +2755,18 @@ impl<'a> Emitter<'a> {
             return t.clone();
         }
         Type::Primitive(PrimitiveKind::Int32)
+    }
+
+    #[must_use]
+    pub fn is_reference_expr(&self, expr: &Expression) -> bool {
+        match expr {
+            Expression::TupleCreation { .. }
+            | Expression::ArrayCreation { .. }
+            | Expression::ArrayLiteral { .. }
+            | Expression::NewInstance { .. }
+            | Expression::Lambda { .. } => true,
+            _ => self.query_type(expr.span()).is_reference_type(),
+        }
     }
 
     #[must_use]
