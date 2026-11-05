@@ -159,16 +159,20 @@ def copy_project_resources(resources_dir: Path, stage_res_dir: Path) -> None:
 def resolve_solix_binary() -> str:
     """Resolves the solix CLI executable path."""
     if "SOLIX_BIN" in os.environ and os.path.exists(os.environ["SOLIX_BIN"]):
-        return os.environ["SOLIX_BIN"]
+        candidate_bin = Path(os.environ["SOLIX_BIN"])
+        if candidate_bin.is_file() and candidate_bin.name in ("solix", "solix.exe"):
+            return str(candidate_bin)
 
-    # Search workspace targets
-    root_candidate = Path(__file__).resolve().parent.parent
-    for candidate in [
-        root_candidate / "target" / "release" / "solix",
-        root_candidate / "target" / "debug" / "solix",
-    ]:
-        if candidate.exists() and os.access(candidate, os.X_OK):
-            return str(candidate)
+    # Search workspace targets starting from toolbox location up through parent directories
+    current = Path(__file__).resolve().parent
+    while current != current.parent:
+        for candidate in [
+            current / "target" / "release" / "solix",
+            current / "target" / "debug" / "solix",
+        ]:
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        current = current.parent
 
     which_result = shutil.which("solix")
     if which_result:

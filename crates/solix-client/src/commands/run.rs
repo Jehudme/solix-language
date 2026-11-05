@@ -155,14 +155,28 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                         target_path.display()
                     )
                 })?;
+            let archive_manifest = loaded_archive.manifest.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Invalid archive container '{}': missing mandatory 'manifest.toml'",
+                    target_path.display()
+                )
+            })?;
             for native_lib in loaded_archive.native_libraries {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
-            if runtime_options.entry_point.is_none()
-                && let Some(ref manifest) = loaded_archive.manifest
-                && let Some(ref main_sym) = manifest.entrypoints.main
-            {
-                runtime_options = runtime_options.with_entry_point(main_sym);
+            if runtime_options.entry_point.is_none() {
+                let selected_entry = if args.test {
+                    archive_manifest
+                        .entrypoints
+                        .test
+                        .as_ref()
+                        .or(archive_manifest.entrypoints.main.as_ref())
+                } else {
+                    archive_manifest.entrypoints.main.as_ref()
+                };
+                if let Some(target_symbol) = selected_entry {
+                    runtime_options = runtime_options.with_entry_point(target_symbol);
+                }
             }
             loaded_binary_programs.extend(loaded_archive.binaries);
             loaded_binary_programs.extend(loaded_archive.secondary_binaries);

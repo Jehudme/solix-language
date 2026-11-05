@@ -41,6 +41,7 @@ impl HermeticCliWorkspace {
     }
 
     /// Reads content from a file at the given relative path within the workspace.
+    #[allow(dead_code)]
     pub fn read_file(&self, rel_path: &str) -> std::io::Result<String> {
         fs::read_to_string(self.file_path(rel_path))
     }

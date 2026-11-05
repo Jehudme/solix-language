@@ -11,12 +11,17 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+fn default_project_version() -> String {
+    "0.1.0".to_string()
+}
+
 /// User-editable project identity metadata declared in the `[info]` table of `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectInfo {
     /// Package or project canonical identifier name.
     pub name: String,
     /// Semantic version string (e.g., `"0.1.0"`).
+    #[serde(default = "default_project_version")]
     pub version: String,
     /// Brief description of the project purpose and functionality.
     #[serde(default)]

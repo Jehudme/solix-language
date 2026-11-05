@@ -5,7 +5,7 @@
 * **Milestone ID:** MS-019
 * **Target Version:** `v0.1.0-alpha.19`
 * **Milestone Branch:** `milestone/019-project-build-system-and-slxarc`
-* **Status:** ACTIVE
+* **Status:** COMPLETED
 * **Lead Architect:** @jehudme
 * **Target Delivery Date:** 2026-12-31
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
@@ -106,7 +106,7 @@ authors = ["Jehud Metellus"]
 
 [entrypoints]
 main = "Main::main"
-test = "TestRunner::main"
+test = "TestRunner::test"
 ```
 
 * **`[info]` Section:** Mapped directly into `CompilationOptions::with_package_metadata(name, version, description)` and serialized into the emitted `.slxb` container's header and `ExportManifest`.
@@ -365,11 +365,11 @@ When `solix info <file.slxarc>` is executed:
 
 | DoD Requirement | Target Benchmark / Artifact | Verification Tool | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **Minimal `manifest.toml`** | Contains only `[info]` and `[entrypoints]` | `crates/solix-common/src/project.rs` | [ ] Pending |
+| **Minimal `manifest.toml`** | Contains only `[info]` and `[entrypoints]` | `crates/solix-common/src/project.rs` | [x] Completed (`04010d0`) |
 | **Directory & Profile Compile** | `solix compile <dir> --profile <debug\|release\|test>` | `cargo test -p solix-client` | [x] Completed (`53b3041`) |
-| **Two-Tier Python Toolbox** | `solix_toolbox.py` (Tier 1 helpers + Tier 2 `auto_build`) | `templates/untitled-rust/scripts/` | [ ] Pending |
-| **Rust Native Bridge Support** | `untitled-rust` builds `cdylib` and runs in `.slxarc` | `build_and_archive_tests.rs` | [ ] Pending |
-| **Suite 49 Native FFI (49.1–49.9)**| All 9 positive & negative tests pass & marked `[IMPLEMENTED]` | `cargo test -p solix-tests` | [ ] Pending |
-| **`.slxarc` & `-l` Execution** | `solix run <file.slxarc>` and `solix run -l <lib>` | `cargo test -p solix-client` | [ ] Pending |
-| **`.slxarc` in `solix info`** | Metadata and contents inspected via `solix info` | `cargo test -p solix-client` | [ ] Pending |
-| **Clippy & Formatting** | Zero warnings across all crates | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
+| **Two-Tier Python Toolbox** | `solix_toolbox.py` (Tier 1 helpers + Tier 2 `auto_build`) | `templates/untitled-rust/scripts/` | [x] Completed (`d73e289`) |
+| **Rust Native Bridge Support** | `untitled-rust` builds `cdylib` and runs in `.slxarc` | `build_and_archive_tests.rs` | [x] Completed |
+| **Suite 49 Native FFI (49.1–49.9)**| All 9 positive & negative tests pass & marked `[IMPLEMENTED]` | `cargo test -p solix-tests` | [x] Completed (`d2817c8`) |
+| **`.slxarc` & `-l` Execution** | `solix run <file.slxarc>` and `solix run -l <lib>` | `cargo test -p solix-client` | [x] Completed (`42fff37`) |
+| **`.slxarc` in `solix info`** | Metadata and contents inspected via `solix info` | `cargo test -p solix-client` | [x] Completed (`42fff37`) |
+| **Clippy & Formatting** | Zero warnings across all crates | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Completed |

@@ -36,6 +36,30 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
 
     let profile = args.resolved_profile();
     let current_exe = std::env::current_exe().unwrap_or_else(|_| "solix".into());
+    let solix_bin = if let Ok(custom_bin) = std::env::var("SOLIX_BIN") {
+        std::path::PathBuf::from(custom_bin)
+    } else if current_exe
+        .file_name()
+        .is_some_and(|name| name == "solix" || name == "solix.exe")
+    {
+        current_exe
+    } else if let Some(parent_dir) = current_exe.parent() {
+        let sibling_candidate = parent_dir.join("solix");
+        if sibling_candidate.exists() {
+            sibling_candidate
+        } else if let Some(grandparent_dir) = parent_dir.parent() {
+            let ancestor_candidate = grandparent_dir.join("solix");
+            if ancestor_candidate.exists() {
+                ancestor_candidate
+            } else {
+                current_exe
+            }
+        } else {
+            current_exe
+        }
+    } else {
+        current_exe
+    };
 
     println!(
         "Building Solix project '{}' (profile: {profile})...",
@@ -48,7 +72,7 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         .arg("--profile")
         .arg(profile)
         .current_dir(&project_root)
-        .env("SOLIX_BIN", current_exe);
+        .env("SOLIX_BIN", solix_bin);
 
     let status = command.status().with_context(|| {
         format!(

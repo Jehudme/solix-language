@@ -150,6 +150,10 @@ pub struct RunArgs {
     #[arg(short, long)]
     pub entry: Option<String>,
 
+    /// Execute test entrypoint defined in archive manifest ([entrypoints].test)
+    #[arg(long)]
+    pub test: bool,
+
     /// Do not automatically include built-in standard library definitions (blt.io)
     #[arg(long)]
     pub no_builtins: bool,

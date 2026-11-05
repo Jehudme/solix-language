@@ -7,4 +7,4 @@ authors = ["Jehud Metellus"]
 
 [entrypoints]
 main = "Main::main"
-test = "TestRunner::main"
+test = "TestRunner::test"
