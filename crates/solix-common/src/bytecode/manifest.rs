@@ -142,6 +142,9 @@ pub struct ExportManifest {
     pub package_version: String,
     /// Human-readable package description.
     pub package_description: String,
+    /// Explicit package dependencies recorded during compilation.
+    #[serde(default)]
+    pub dependencies: Vec<crate::solver::DependencyRequirement>,
     /// Exported nominal classes and interfaces.
     pub exported_classes: Vec<ExportedClass>,
     /// Exported top-level functions.

@@ -5,6 +5,7 @@
 pub mod bytecode;
 pub mod diagnostics;
 pub mod project;
+pub mod solver;
 pub mod span;
 pub mod tokens;
 pub mod types;
@@ -21,6 +22,10 @@ pub use diagnostics::{
 pub use project::{
     LoadedSlxarc, ProjectEntryPoints, ProjectInfo, ProjectManifest, SlxarcArchive, SlxarcFileEntry,
     SlxarcInspection,
+};
+pub use solver::{
+    DependencyRequirement, InMemoryModuleSolver, ModuleSolver, PackageVersion, SolvedPackage,
+    SolverError,
 };
 pub use span::Span;
 pub use tokens::{KEYWORDS, Token, TokenKind, lookup_keyword};

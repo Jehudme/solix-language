@@ -401,6 +401,7 @@ fn test_export_manifest_json_extraction() {
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
+        dependencies: Vec::new(),
         exported_classes: vec![exported_class],
         exported_functions: vec![exported_func],
         exported_statics: vec![exported_static],
@@ -429,6 +430,7 @@ fn test_binary_program_manifest_round_trip() {
         package_name: "network".to_string(),
         package_version: "2.0.1".to_string(),
         package_description: "Networking library".to_string(),
+        dependencies: Vec::new(),
         exported_classes: Vec::new(),
         exported_functions: vec![ExportedFunction {
             symbol: "network::connect/1".to_string(),

@@ -1062,6 +1062,32 @@ pub enum BindingError {
         #[label("bitwise operator on non-integer")]
         span: SourceSpan,
     },
+
+    #[error("Incompatible dependency version for package '{name}': {reason}")]
+    #[diagnostic(
+        code(solix::binder::incompatible_dependency_version),
+        help(
+            "Ensure that all dependencies in the tree require compatible versions (same major, >= medium)."
+        )
+    )]
+    IncompatibleDependencyVersion {
+        name: String,
+        reason: String,
+        #[label("incompatible dependency version")]
+        span: SourceSpan,
+    },
+
+    #[error("External package '{name}' not found: {reason}")]
+    #[diagnostic(
+        code(solix::binder::external_package_not_found),
+        help("Install the package using 'solix install' or verify the package name.")
+    )]
+    ExternalPackageNotFound {
+        name: String,
+        reason: String,
+        #[label("package not found")]
+        span: SourceSpan,
+    },
 }
 
 impl BindingError {
@@ -1158,6 +1184,8 @@ impl BindingError {
             Self::ParameterDefaultValueMismatch { .. } => "E0286",
             Self::InvalidExpressionInConstantContext { .. } => "E0287",
             Self::BitwiseOperatorOnNonInteger { .. } => "E0288",
+            Self::IncompatibleDependencyVersion { .. } => "E0289",
+            Self::ExternalPackageNotFound { .. } => "E0290",
         }
     }
 
@@ -1252,7 +1280,9 @@ impl BindingError {
             | Self::ExternSymbolMissingSignature { span, .. }
             | Self::ParameterDefaultValueMismatch { span, .. }
             | Self::InvalidExpressionInConstantContext { span, .. }
-            | Self::BitwiseOperatorOnNonInteger { span, .. } => *span,
+            | Self::BitwiseOperatorOnNonInteger { span, .. }
+            | Self::IncompatibleDependencyVersion { span, .. }
+            | Self::ExternalPackageNotFound { span, .. } => *span,
         }
     }
 

@@ -53,6 +53,9 @@ pub struct ProjectManifest {
     /// Entry point symbol mappings.
     #[serde(default)]
     pub entrypoints: ProjectEntryPoints,
+    /// Explicit external dependencies mapped as `name => version` declared in `[dependencies]`.
+    #[serde(default)]
+    pub dependencies: std::collections::BTreeMap<String, String>,
 }
 
 impl ProjectManifest {
