@@ -412,6 +412,26 @@ impl SlxarcArchive {
                 })?;
                 secondary_binaries.push(binary);
             } else if entry_name.starts_with("lib/") && entry_name.ends_with(host_extension) {
+                let relative_parts: Vec<&str> = entry_name
+                    .strip_prefix("lib/")
+                    .unwrap_or("")
+                    .split('/')
+                    .collect();
+                let matches_platform = if relative_parts.len() > 1 {
+                    let subdirectory = relative_parts[0];
+                    let host_triple =
+                        format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+                    subdirectory == host_triple
+                        || subdirectory == std::env::consts::OS
+                        || subdirectory == "host"
+                } else {
+                    true
+                };
+
+                if !matches_platform {
+                    continue;
+                }
+
                 // Extract host native library to cache
                 let target_path = extract_cache_directory.join(
                     Path::new(&entry_name)

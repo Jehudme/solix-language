@@ -48,9 +48,6 @@ fn collect_slx_sources_recursively(
 ///
 /// # Errors
 /// Returns an error if file I/O fails or compilation encounters diagnostics.
-static COMPILE_INVOCATION_COUNTER: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
 pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let start_total = Instant::now();
 
@@ -125,24 +122,22 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     }
 
     // 7. Mount dependency library binaries or archives passed via `-l, --lib`
+    let mut temp_archive_directories: Vec<tempfile::TempDir> = Vec::new();
     for lib_path in &args.libs {
         if lib_path
             .extension()
             .is_some_and(|extension| extension == "slxarc")
         {
-            let invocation_id =
-                COMPILE_INVOCATION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let temp_cache_dir = std::env::temp_dir().join(format!(
-                "solix_compile_{}_{}_{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos(),
-                invocation_id
-            ));
+            let temp_dir = tempfile::Builder::new()
+                .prefix("solix_compile_")
+                .tempdir()
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "Failed to create temporary directory for archive extraction: {error}"
+                    )
+                })?;
             let loaded_archive =
-                solix_common::project::SlxarcArchive::extract_and_load(lib_path, &temp_cache_dir)
+                solix_common::project::SlxarcArchive::extract_and_load(lib_path, temp_dir.path())
                     .map_err(|load_error| {
                     anyhow::anyhow!(
                         "Failed to extract dependency archive '{}': {load_error}",
@@ -155,6 +150,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             for secondary_program in loaded_archive.secondary_binaries {
                 options = options.with_dependency_binary(secondary_program);
             }
+            temp_archive_directories.push(temp_dir);
         } else {
             let lib_bytes = fs::read(lib_path).with_context(|| {
                 format!("Failed to read dependency library '{}'", lib_path.display())

@@ -52,6 +52,17 @@ fn locate_workspace_root() -> PathBuf {
         .expect("Failed to locate repository workspace root")
 }
 
+/// Returns the platform-specific shared library filename for a Rust cdylib crate.
+fn host_cdylib_filename(base_name: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!("{base_name}.dll")
+    } else if cfg!(target_os = "macos") {
+        format!("lib{base_name}.dylib")
+    } else {
+        format!("lib{base_name}.so")
+    }
+}
+
 // ============================================================================
 // Test B.1: manifest.toml Parsing & Minimal Schema Enforcement
 // ============================================================================
@@ -280,11 +291,12 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
             .iter()
             .any(|item| item.path == "bin/untitled.slxb")
     );
+    let expected_cdylib_name = host_cdylib_filename("rust_bridge");
     assert!(
         debug_inspection
             .file_entries
             .iter()
-            .any(|item| item.path.starts_with("lib/librust_bridge"))
+            .any(|item| item.path.starts_with("lib/") && item.path.ends_with(&expected_cdylib_name))
     );
     assert!(
         debug_inspection
@@ -396,7 +408,7 @@ fn test_run_with_direct_native_library_flag() {
         .join("stage")
         .join("debug")
         .join("lib")
-        .join("librust_bridge.so");
+        .join(host_cdylib_filename("rust_bridge"));
     assert!(
         native_lib_path.exists(),
         "Native bridge library must exist at '{}'",
