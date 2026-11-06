@@ -9,7 +9,7 @@ public class Algorithms {
         int32 right_index = list.size() - 1;
         while (left_index < right_index) {
             T temporary = list.get(left_index);
-            list.set(left_index, list.get(right_index));
+            list.set(left_index, (T)list.get(right_index));
             list.set(right_index, temporary);
             left_index = left_index + 1;
             right_index = right_index - 1;
@@ -21,7 +21,7 @@ public class Algorithms {
             return;
         }
         T temporary = list.get(first_index);
-        list.set(first_index, list.get(second_index));
+        list.set(first_index, (T)list.get(second_index));
         list.set(second_index, temporary);
     }
 
@@ -46,7 +46,7 @@ public class Algorithms {
         }
         int32 copy_index = 0;
         while (copy_index < copy_count) {
-            destination.set(copy_index, source.get(copy_index));
+            destination.set(copy_index, (T)source.get(copy_index));
             copy_index = copy_index + 1;
         }
     }
