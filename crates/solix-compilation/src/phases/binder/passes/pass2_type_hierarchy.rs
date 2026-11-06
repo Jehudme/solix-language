@@ -368,7 +368,7 @@ pub fn execute_pass2_type_hierarchy(
                 {
                     entry.symbol_type = Type::FunctionPointer {
                         return_type: Box::new(return_type),
-                        parameter_types,
+                        parameter_types: parameter_types.clone(),
                     };
                 }
             }
@@ -1340,6 +1340,18 @@ pub fn execute_pass2_type_hierarchy(
                             {
                                 let old_id = *slot;
                                 *slot = method_id;
+                                let param_sig = parameter_types
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                class_layout
+                                    .method_slots
+                                    .insert(format!("{method_name}({param_sig})"), slot_idx);
+                                class_layout.method_slots.insert(
+                                    format!("{method_name}/{}", parameter_types.len()),
+                                    slot_idx,
+                                );
                                 class_layout
                                     .method_slots
                                     .insert(method_name.to_string(), slot_idx);
@@ -1547,7 +1559,7 @@ pub fn execute_pass2_type_hierarchy(
                         modifiers: operator_declaration.modifiers.clone(),
                         symbol_type: Type::FunctionPointer {
                             return_type: Box::new(return_type),
-                            parameter_types,
+                            parameter_types: parameter_types.clone(),
                         },
                         parent_symbol: Some(class_symbol_id),
                         members: Vec::new(),
@@ -1560,6 +1572,18 @@ pub fn execute_pass2_type_hierarchy(
 
                     let slot_idx = class_layout.vtable_methods.len();
                     class_layout.vtable_methods.push(operator_id);
+                    let param_sig = parameter_types
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    class_layout
+                        .method_slots
+                        .insert(format!("{operator_name}({param_sig})"), slot_idx);
+                    class_layout.method_slots.insert(
+                        format!("{operator_name}/{}", parameter_types.len()),
+                        slot_idx,
+                    );
                     class_layout.method_slots.insert(operator_name, slot_idx);
                 }
                 ClassMember::Enum(enum_declaration) => {

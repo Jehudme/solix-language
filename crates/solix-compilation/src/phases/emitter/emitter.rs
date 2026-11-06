@@ -2843,7 +2843,10 @@ impl<'a> Emitter<'a> {
             | Expression::ArrayLiteral { .. }
             | Expression::NewInstance { .. }
             | Expression::Lambda { .. } => true,
-            _ => self.query_type(expr.span()).is_reference_type(),
+            _ => {
+                let ty = self.query_type(expr.span());
+                ty.is_reference_type() || matches!(ty, Type::GenericParameter { .. })
+            }
         }
     }
 

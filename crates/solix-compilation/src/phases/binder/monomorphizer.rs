@@ -324,7 +324,7 @@ impl GenericBlueprintRegistry {
                         modifiers: method_decl.modifiers.clone(),
                         symbol_type: Type::FunctionPointer {
                             return_type: Box::new(return_type),
-                            parameter_types,
+                            parameter_types: parameter_types.clone(),
                         },
                         parent_symbol: Some(class_symbol_id),
                         members: Vec::new(),
@@ -339,6 +339,20 @@ impl GenericBlueprintRegistry {
                     if !method_decl.modifiers.contains(&Modifier::Static) {
                         let slot_idx = class_layout.vtable_methods.len();
                         class_layout.vtable_methods.push(method_id);
+                        class_layout.method_slots.insert(
+                            format!(
+                                "{method_name}({})",
+                                parameter_types
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            ),
+                            slot_idx,
+                        );
+                        class_layout
+                            .method_slots
+                            .insert(format!("{method_name}/{}", parameter_types.len()), slot_idx);
                         class_layout
                             .method_slots
                             .insert(method_name.to_string(), slot_idx);

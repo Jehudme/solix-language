@@ -477,7 +477,13 @@ impl<'a> Emitter<'a> {
 
         if let Some(val) = &return_stmt.value {
             let r_val = self.emit_expression(val, None)?;
-            if self.query_type(val.span()).is_reference_type() && self.is_borrowed_reference(val) {
+            if (self.query_type(val.span()).is_reference_type()
+                || matches!(
+                    self.query_type(val.span()),
+                    solix_common::types::Type::GenericParameter { .. }
+                ))
+                && self.is_borrowed_reference(val)
+            {
                 self.emit_instruction(
                     Instruction::format_a(OpCode::IncRef, 0, r_val, 0, 0),
                     Some(return_stmt.span),
