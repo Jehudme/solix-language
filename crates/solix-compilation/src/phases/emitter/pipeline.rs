@@ -409,6 +409,9 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         } else {
                             let mut fields = Vec::new();
                             let mut methods = Vec::new();
+                            // Track whether this class has any generic or variadic methods that
+                            // cannot be expressed as bodiless extern prototypes.
+                            let mut has_generic_methods = false;
 
                             let layout_opt = context.binding_artifacts.as_ref().and_then(|ba| {
                                 ba.layouts.values().find(|l| l.class_name == cls_name)
@@ -441,41 +444,75 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             offset,
                                         });
                                     }
-                                    ClassMember::Method(m) => {
-                                        let m_name = get_span_text(m.name_span, code).to_string();
-                                        let full_sym = format!("{cls_name}::{m_name}");
+                                    ClassMember::Method(method_declaration) => {
+                                        let method_name =
+                                            get_span_text(method_declaration.name_span, code)
+                                                .to_string();
+
+                                        // Skip private methods — they are implementation details
+                                        // and must not appear in the extern class header.
+                                        if method_declaration
+                                            .modifiers
+                                            .contains(&Modifier::Private)
+                                        {
+                                            continue;
+                                        }
+
+                                        // Skip destructor-named methods from extern headers;
+                                        // destructors are not callable from extern code.
+                                        if method_name.starts_with('~') {
+                                            continue;
+                                        }
+
+                                        // Generic or variadic methods cannot be expressed as
+                                        // bodiless extern prototypes — skip them from the class
+                                        // stub and emit the whole class source as a generic
+                                        // template so callers can use them via monomorphization.
+                                        let has_variadic_param = method_declaration
+                                            .parameters
+                                            .iter()
+                                            .any(|param| param.is_variadic);
+                                        if !method_declaration.generic_params.is_empty()
+                                            || has_variadic_param
+                                        {
+                                            has_generic_methods = true;
+                                            continue;
+                                        }
+
+                                        let full_sym = format!("{cls_name}::{method_name}");
                                         let ret_type = resolve_type_annotation(
                                             ast.source_id,
                                             code,
-                                            &m.return_type,
+                                            &method_declaration.return_type,
                                             sym_table,
                                         );
-                                        let params = m
+                                        let params = method_declaration
                                             .parameters
                                             .iter()
-                                            .map(|p| {
-                                                let p_name =
-                                                    get_span_text(p.name_span, code).to_string();
-                                                let p_type = resolve_type_annotation(
+                                            .map(|param| {
+                                                let param_name =
+                                                    get_span_text(param.name_span, code)
+                                                        .to_string();
+                                                let param_type = resolve_type_annotation(
                                                     ast.source_id,
                                                     code,
-                                                    &p.param_type,
+                                                    &param.param_type,
                                                     sym_table,
                                                 );
                                                 ExportedParameter {
-                                                    name: p_name,
-                                                    param_type: p_type,
+                                                    name: param_name,
+                                                    param_type,
                                                 }
                                             })
                                             .collect();
-                                        let mods = m
+                                        let mods = method_declaration
                                             .modifiers
                                             .iter()
                                             .filter_map(|&modifier| to_decl_modifier(modifier))
                                             .collect();
                                         methods.push(ExportedFunction {
                                             symbol: full_sym,
-                                            simple_name: m_name,
+                                            simple_name: method_name,
                                             modifiers: mods,
                                             parameters: params,
                                             return_type: ret_type,
@@ -522,17 +559,10 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                         });
                                     }
                                     ClassMember::Destructor(_) => {
-                                        let full_sym = format!("{cls_name}::~destructor");
-                                        methods.push(ExportedFunction {
-                                            symbol: full_sym,
-                                            simple_name: "destructor".to_string(),
-                                            modifiers: vec![DeclarationModifier::Public],
-                                            parameters: Vec::new(),
-                                            return_type: Type::Primitive(PrimitiveKind::Void),
-                                            is_constructor: false,
-                                            is_destructor: true,
-                                            is_operator: false,
-                                        });
+                                        // Destructors are implementation details and must not be
+                                        // exported into extern class headers — they are not
+                                        // callable from external code and would cause syntax
+                                        // errors if emitted as bodiless extern declarations.
                                     }
                                     ClassMember::Operator(operator_declaration) => {
                                         let operator_text =
@@ -618,6 +648,10 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         if m.modifiers.contains(&Modifier::Extern) {
                             continue;
                         }
+                        // Skip private top-level functions from the export manifest.
+                        if m.modifiers.contains(&Modifier::Private) {
+                            continue;
+                        }
                         let func_name = get_span_text(m.name_span, code).to_string();
                         let arity = m.parameters.len();
                         let full_sym = format!("{func_name}/{arity}");
@@ -683,6 +717,28 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         }
                         let iface_name =
                             get_span_text(interface_declaration.name_span, code).to_string();
+
+                        // Generic interfaces (e.g. IIterator<T>, IMap<K,V>) cannot be represented
+                        // as non-generic extern class stubs — emit their full source as a generic
+                        // template so downstream consumers can monomorphize them correctly.
+                        if !interface_declaration.generic_params.is_empty() {
+                            let template_source =
+                                get_span_text(interface_declaration.span, code).to_string();
+                            let parameter_names = interface_declaration
+                                .generic_params
+                                .iter()
+                                .map(|generic_param| {
+                                    get_span_text(generic_param.name_span, code).to_string()
+                                })
+                                .collect();
+                            generic_templates.push(ExportedGenericTemplate {
+                                name: iface_name,
+                                parameter_names,
+                                template_source,
+                            });
+                            continue;
+                        }
+
                         let mut methods = Vec::new();
                         for method_declaration in &interface_declaration.methods {
                             let func_name =

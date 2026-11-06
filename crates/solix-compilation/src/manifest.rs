@@ -126,14 +126,23 @@ pub fn manifest_to_source(manifest_json: &str) -> Result<(String, String), serde
             out.push_str(&format!("{} {};\n", field.field_type, field.name));
         }
 
-        // Methods / constructors / destructors
+        // Methods / constructors — destructors and private methods are skipped because:
+        // - Destructors cannot have an `extern` bodiless declaration with an access modifier.
+        // - Private methods are implementation details not callable from downstream code.
         for method in &cls.methods {
+            // Skip destructors — they are managed by the VM and cannot be declared extern.
+            if method.is_destructor {
+                continue;
+            }
+            // Skip private methods — they must not appear in public API headers.
+            if method.modifiers.contains(&DeclarationModifier::Private) {
+                continue;
+            }
+
             out.push_str("    ");
             append_modifiers(&mut out, &method.modifiers);
             if method.is_constructor {
                 out.push_str(&format!("{}(", cls.name));
-            } else if method.is_destructor {
-                out.push_str(&format!("~{}()", cls.name));
             } else if method.is_operator {
                 let operator_name = if method.simple_name.starts_with("operator") {
                     method.simple_name.clone()
@@ -145,17 +154,13 @@ pub fn manifest_to_source(manifest_json: &str) -> Result<(String, String), serde
                 out.push_str(&format!("{} {}(", method.return_type, method.simple_name));
             }
 
-            if !method.is_destructor {
-                for (param_index, param) in method.parameters.iter().enumerate() {
-                    if param_index > 0 {
-                        out.push_str(", ");
-                    }
-                    out.push_str(&format!("{} {}", param.param_type, param.name));
+            for (param_index, param) in method.parameters.iter().enumerate() {
+                if param_index > 0 {
+                    out.push_str(", ");
                 }
-                out.push_str(");\n");
-            } else {
-                out.push_str(";\n");
+                out.push_str(&format!("{} {}", param.param_type, param.name));
             }
+            out.push_str(");\n");
         }
 
         out.push_str("}\n\n");

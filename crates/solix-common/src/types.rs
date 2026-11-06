@@ -548,7 +548,16 @@ impl Display for Type {
                 symbol_name,
                 type_arguments,
             } => {
-                let normalized_name = symbol_name.replace('.', "::");
+                // Normalize the string primitive aliases to the canonical `string` keyword.
+                let normalized_name = if symbol_name == "std.string"
+                    || symbol_name == "std::string"
+                    || symbol_name == "solix.core.String"
+                    || symbol_name == "solix::core::String"
+                {
+                    "string".to_string()
+                } else {
+                    symbol_name.replace('.', "::")
+                };
                 write!(formatter, "{normalized_name}")?;
                 if !type_arguments.is_empty() {
                     write!(formatter, "<")?;
@@ -556,7 +565,18 @@ impl Display for Type {
                         if index > 0 {
                             write!(formatter, ", ")?;
                         }
-                        write!(formatter, "{argument}")?;
+                        // Format each argument and add a trailing space before `>` when the
+                        // argument itself ends with `>` to avoid the parser seeing `>>` as
+                        // the OperatorShiftRight token.
+                        let argument_text = format!("{argument}");
+                        write!(formatter, "{argument_text}")?;
+                    }
+                    // If the last argument's formatted text ends with `>`, emit a separating
+                    // space so the closing `>` does not form a `>>` shift-right token.
+                    let last_argument_text =
+                        format!("{}", type_arguments.last().expect("checked non-empty above"));
+                    if last_argument_text.ends_with('>') {
+                        write!(formatter, " ")?;
                     }
                     write!(formatter, ">")?;
                 }
@@ -602,7 +622,7 @@ impl Display for Type {
             Self::GenericParameter { name, .. } => write!(formatter, "{name}"),
             Self::Alias { alias_name, .. } => write!(formatter, "{alias_name}"),
             Self::Null => write!(formatter, "null"),
-            Self::Unresolved(name) => write!(formatter, "unresolved({name})"),
+            Self::Unresolved(name) => write!(formatter, "{name}"),
             Self::Error => write!(formatter, "<error-type>"),
         }
     }
