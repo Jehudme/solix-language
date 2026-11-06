@@ -1,0 +1,102 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.crypto.Hash;
+import solix.crypto.Base64;
+import solix.crypto.Hex;
+
+public class TestCrypto {
+    public static int32 run_all_tests() {
+        if (!TestCrypto::test_hash()) {
+            return 1;
+        }
+        if (!TestCrypto::test_base64()) {
+            return 2;
+        }
+        if (!TestCrypto::test_hex()) {
+            return 3;
+        }
+        return 0;
+    }
+
+    public static bool test_hash() {
+        // SHA-256 of "hello" = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+        String sha256_result = Hash::sha256_hex(new String("hello"));
+        if (!sha256_result.equals(new String("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"))) {
+            return false;
+        }
+
+        // SHA-1 of "hello" = aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d
+        String sha1_result = Hash::sha1_hex(new String("hello"));
+        if (!sha1_result.equals(new String("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"))) {
+            return false;
+        }
+
+        // MD5 of "hello" = 5d41402abc4b2a76b9719d911017c592
+        String md5_result = Hash::md5_hex(new String("hello"));
+        if (!md5_result.equals(new String("5d41402abc4b2a76b9719d911017c592"))) {
+            return false;
+        }
+
+        int8[] byte_array_alpha = new int8[4];
+        byte_array_alpha[0] = (int8)1;
+        byte_array_alpha[1] = (int8)2;
+        byte_array_alpha[2] = (int8)3;
+        byte_array_alpha[3] = (int8)4;
+
+        int8[] byte_array_beta = new int8[4];
+        byte_array_beta[0] = (int8)1;
+        byte_array_beta[1] = (int8)2;
+        byte_array_beta[2] = (int8)3;
+        byte_array_beta[3] = (int8)4;
+
+        if (!Hash::constant_time_equals(byte_array_alpha, byte_array_beta)) {
+            return false;
+        }
+
+        byte_array_beta[3] = (int8)99;
+        if (Hash::constant_time_equals(byte_array_alpha, byte_array_beta)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_base64() {
+        // Base64 of "Hello World" = SGVsbG8gV29ybGQ=
+        String encoded_base64 = Base64::encode_string(new String("Hello World"));
+        if (!encoded_base64.equals(new String("SGVsbG8gV29ybGQ="))) {
+            return false;
+        }
+
+        String decoded_base64 = Base64::decode_to_string(encoded_base64);
+        if (!decoded_base64.equals(new String("Hello World"))) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_hex() {
+        int8[] raw_sample_bytes = new int8[4];
+        raw_sample_bytes[0] = (int8)0xCA;
+        raw_sample_bytes[1] = (int8)0xFE;
+        raw_sample_bytes[2] = (int8)0xBA;
+        raw_sample_bytes[3] = (int8)0xBE;
+
+        String hex_encoded = Hex::encode(raw_sample_bytes);
+        if (!hex_encoded.to_lower().equals(new String("cafebabe"))) {
+            return false;
+        }
+
+        int8[] decoded_from_hex = Hex::decode(hex_encoded);
+        if (decoded_from_hex.length != 4) {
+            return false;
+        }
+        if (decoded_from_hex[0] != (int8)0xCA || decoded_from_hex[1] != (int8)0xFE) {
+            return false;
+        }
+
+        return true;
+    }
+}

@@ -655,7 +655,7 @@ impl<'a> Emitter<'a> {
                 instance_type,
                 arguments,
             } => {
-                let resolved_class_name = match self.query_type(*span).unwrap_alias() {
+                let mut resolved_class_name = match self.query_type(*span).unwrap_alias() {
                     Type::Class {
                         symbol_name,
                         type_arguments,
@@ -675,6 +675,15 @@ impl<'a> Emitter<'a> {
                     }
                     _ => self.get_lexeme(instance_type.span()).to_string(),
                 };
+                if resolved_class_name.contains("unresolved")
+                    && let Some(enclosing_class) = self.enclosing_class.as_deref()
+                    && let Some((enclosing_base, enclosing_args)) = enclosing_class.split_once('<')
+                    && let Some((instance_base, _)) = resolved_class_name.split_once('<')
+                    && instance_base.rsplit(['.', ':']).next()
+                        == enclosing_base.rsplit(['.', ':']).next()
+                {
+                    resolved_class_name = format!("{enclosing_base}<{enclosing_args}");
+                }
                 let simple = resolved_class_name
                     .rsplit(['.', ':'])
                     .next()

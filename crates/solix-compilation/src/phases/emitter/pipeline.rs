@@ -2286,7 +2286,11 @@ fn compile_monomorphized_class_functions(
                     .map(|p| get_span_text(p.param_type.span(), code))
                     .collect::<Vec<_>>()
                     .join(",");
-                let full_sym = format!("{mangled_name}::{method_name}({param_sig})");
+                let full_sym = m
+                    .resolved_symbol_id
+                    .and_then(|id| symbol_table.get_symbol(SymbolId(id)))
+                    .map(|symbol| symbol.fully_qualified_name.clone())
+                    .unwrap_or_else(|| format!("{mangled_name}::{method_name}({param_sig})"));
                 let is_instance = !m.modifiers.contains(&Modifier::Static);
                 let func = compile_single_method(
                     &full_sym,

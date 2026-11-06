@@ -1,0 +1,112 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.collections.List;
+import solix.io.MemoryStream;
+import solix.io.SeekOrigin;
+import solix.io.Path;
+import solix.io.File;
+import solix.io.Directory;
+
+public class TestIo {
+    public static int32 run_all_tests() {
+        if (!TestIo::test_memory_stream()) {
+            return 1;
+        }
+        if (!TestIo::test_path()) {
+            return 2;
+        }
+        if (!TestIo::test_file_and_directory()) {
+            return 3;
+        }
+        return 0;
+    }
+
+    public static bool test_memory_stream() {
+        MemoryStream memory_stream = new MemoryStream(64);
+        memory_stream.write_byte(65);
+        memory_stream.write_byte(66);
+        memory_stream.write_byte(67);
+
+        if (memory_stream.length() != 3L) {
+            return false;
+        }
+
+        memory_stream.seek(0L, SeekOrigin::BEGIN);
+        if (memory_stream.read_byte() != 65) {
+            return false;
+        }
+        if (memory_stream.read_byte() != 66) {
+            return false;
+        }
+        if (memory_stream.read_byte() != 67) {
+            return false;
+        }
+        if (memory_stream.read_byte() != -1) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_path() {
+        Path root_path = new Path("/var/log");
+        Path combined_path = root_path / new String("solix.log");
+
+        String combined_text = combined_path.to_string();
+        if (!combined_text.equals(new String("/var/log/solix.log"))) {
+            return false;
+        }
+
+        String directory_name = Path::get_directory_name(combined_text);
+        if (!directory_name.equals(new String("/var/log"))) {
+            return false;
+        }
+
+        String file_name = Path::get_file_name(combined_text);
+        if (!file_name.equals(new String("solix.log"))) {
+            return false;
+        }
+
+        String file_extension = Path::get_extension(combined_text);
+        if (!file_extension.equals(new String(".log"))) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_file_and_directory() {
+        String temporary_root = Path::get_temp_path();
+        String test_folder = Path::combine(temporary_root, new String("solix_test_dir_2026"));
+        String test_file = Path::combine(test_folder, new String("hello.txt"));
+
+        Directory::create_directory(test_folder);
+        if (!Directory::exists(test_folder)) {
+            return false;
+        }
+
+        File::write_all_text(test_file, new String("Solix Standard Library v2.0"));
+        if (!File::exists(test_file)) {
+            return false;
+        }
+
+        String content_read = File::read_all_text(test_file);
+        if (!content_read.equals(new String("Solix Standard Library v2.0"))) {
+            return false;
+        }
+
+        List<String> files_in_dir = Directory::list_files(test_folder);
+        if (files_in_dir.size() == 0) {
+            return false;
+        }
+
+        File::delete(test_file);
+        if (File::exists(test_file)) {
+            return false;
+        }
+
+        Directory::delete(test_folder);
+        return true;
+    }
+}

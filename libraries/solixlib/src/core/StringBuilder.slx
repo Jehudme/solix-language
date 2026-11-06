@@ -57,7 +57,18 @@ public class StringBuilder implements IStringable {
         if (text == null || text.data == null) {
             return this;
         }
-        return this.append(text.data);
+        string raw_text = text.data;
+        if (raw_text.length == 0) {
+            return this;
+        }
+        this.ensure_capacity(this.count + raw_text.length);
+        int32 copy_index = 0;
+        while (copy_index < raw_text.length) {
+            this.buffer[this.count + copy_index] = raw_text[copy_index];
+            copy_index = copy_index + 1;
+        }
+        this.count = this.count + raw_text.length;
+        return this;
     }
 
     public StringBuilder append(string text) {
@@ -96,19 +107,19 @@ public class StringBuilder implements IStringable {
     }
 
     public StringBuilder append_int(int32 value) {
-        return this.append(String::from_int32(value).data);
+        return this.append(String::from_int32(value));
     }
 
     public StringBuilder append_long(int64 value) {
-        return this.append(String::from_int64(value).data);
+        return this.append(String::from_int64(value));
     }
 
     public StringBuilder append_double(float64 value) {
-        return this.append(String::from_float64(value).data);
+        return this.append(String::from_float64(value));
     }
 
     public StringBuilder append_bool(bool value) {
-        return this.append(String::from_bool(value).data);
+        return this.append(String::from_bool(value));
     }
 
     public StringBuilder append_line(String text) {

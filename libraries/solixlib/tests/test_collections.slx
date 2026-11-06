@@ -1,0 +1,282 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.collections.List;
+import solix.collections.LinkedList;
+import solix.collections.HashMap;
+import solix.collections.HashSet;
+import solix.collections.TreeMap;
+import solix.collections.TreeSet;
+import solix.collections.PriorityQueue;
+import solix.collections.BitSet;
+import solix.collections.Algorithms;
+
+public class TestCollections {
+    public static int32 run_all_tests() {
+        if (!TestCollections::test_list()) {
+            return 1;
+        }
+        if (!TestCollections::test_linked_list()) {
+            return 2;
+        }
+        if (!TestCollections::test_hash_map()) {
+            return 3;
+        }
+        if (!TestCollections::test_hash_set()) {
+            return 4;
+        }
+        if (!TestCollections::test_tree_map()) {
+            return 5;
+        }
+        if (!TestCollections::test_tree_set()) {
+            return 6;
+        }
+        if (!TestCollections::test_priority_queue()) {
+            return 7;
+        }
+        if (!TestCollections::test_bit_set()) {
+            return 8;
+        }
+        if (!TestCollections::test_algorithms()) {
+            return 9;
+        }
+        return 0;
+    }
+
+    public static bool test_list() {
+        List<int32> number_list = new List<int32>();
+        number_list.add(10);
+        number_list.add(20);
+        number_list.add(30);
+
+        if (number_list.size() != 3) {
+            return false;
+        }
+        if (number_list.get(0) != 10 || number_list.get(1) != 20 || number_list.get(2) != 30) {
+            return false;
+        }
+
+        number_list.set(1, 25);
+        if (number_list.get(1) != 25) {
+            return false;
+        }
+
+        int32 removed_val = number_list.remove_at(0);
+        if (removed_val != 10 || number_list.size() != 2) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_linked_list() {
+        LinkedList<String> string_linked_list = new LinkedList<String>();
+        string_linked_list.add_last(new String("Second"));
+        string_linked_list.add_first(new String("First"));
+        string_linked_list.add_last(new String("Third"));
+
+        if (string_linked_list.size() != 3) {
+            return false;
+        }
+        if (!string_linked_list.peek_first().equals(new String("First"))) {
+            return false;
+        }
+        if (!string_linked_list.peek_last().equals(new String("Third"))) {
+            return false;
+        }
+
+        String popped_first = string_linked_list.remove_first();
+        if (!popped_first.equals(new String("First")) || string_linked_list.size() != 2) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_hash_map() {
+        HashMap<String, int32> age_map = new HashMap<String, int32>();
+        age_map.put(new String("Alice"), 25);
+        age_map.put(new String("Bob"), 30);
+        age_map.put(new String("Charlie"), 35);
+
+        if (age_map.size() != 3) {
+            return false;
+        }
+        if (!age_map.contains_key(new String("Bob"))) {
+            return false;
+        }
+        if (age_map.get(new String("Bob")) != 30) {
+            return false;
+        }
+
+        age_map.remove(new String("Bob"));
+        if (age_map.size() != 2) {
+            return false;
+        }
+        if (age_map.contains_key(new String("Bob"))) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_hash_set() {
+        HashSet<String> name_set = new HashSet<String>();
+        name_set.add(new String("Apple"));
+        name_set.add(new String("Banana"));
+        name_set.add(new String("Apple"));
+
+        if (name_set.size() != 2) {
+            return false;
+        }
+        if (!name_set.contains(new String("Banana"))) {
+            return false;
+        }
+
+        name_set.remove(new String("Banana"));
+        if (name_set.size() != 1) {
+            return false;
+        }
+        if (name_set.contains(new String("Banana"))) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_tree_map() {
+        TreeMap<int32, String> ordered_map = new TreeMap<int32, String>();
+        ordered_map.put(50, new String("Fifty"));
+        ordered_map.put(20, new String("Twenty"));
+        ordered_map.put(80, new String("Eighty"));
+        ordered_map.put(10, new String("Ten"));
+        ordered_map.put(30, new String("Thirty"));
+
+        if (ordered_map.size() != 5) {
+            return false;
+        }
+        if (!ordered_map.get(30).equals(new String("Thirty"))) {
+            return false;
+        }
+        if (ordered_map.first_key() != 10 || ordered_map.last_key() != 80) {
+            return false;
+        }
+
+        ordered_map.remove(20);
+        if (ordered_map.size() != 4) {
+            return false;
+        }
+        if (ordered_map.contains_key(20)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_tree_set() {
+        TreeSet<int32> sorted_set = new TreeSet<int32>();
+        sorted_set.add(40);
+        sorted_set.add(10);
+        sorted_set.add(30);
+        sorted_set.add(20);
+
+        if (sorted_set.size() != 4) {
+            return false;
+        }
+        if (sorted_set.first() != 10 || sorted_set.last() != 40) {
+            return false;
+        }
+
+        sorted_set.remove(30);
+        if (sorted_set.size() != 3) {
+            return false;
+        }
+        if (sorted_set.contains(30)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_priority_queue() {
+        PriorityQueue<int32> min_heap = new PriorityQueue<int32>();
+        min_heap.push(50);
+        min_heap.push(10);
+        min_heap.push(30);
+        min_heap.push(20);
+
+        if (min_heap.size() != 4) {
+            return false;
+        }
+        if (min_heap.peek() != 10) {
+            return false;
+        }
+        if (min_heap.pop() != 10) {
+            return false;
+        }
+        if (min_heap.pop() != 20) {
+            return false;
+        }
+        if (min_heap.pop() != 30) {
+            return false;
+        }
+        if (min_heap.pop() != 50) {
+            return false;
+        }
+        if (min_heap.size() != 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_bit_set() {
+        BitSet flags_bitset = new BitSet(128);
+        flags_bitset.set(5);
+        flags_bitset.set(64);
+        flags_bitset.set(100);
+
+        if (!flags_bitset.get(5) || !flags_bitset.get(64) || !flags_bitset.get(100)) {
+            return false;
+        }
+        if (flags_bitset.get(6) || flags_bitset.get(65)) {
+            return false;
+        }
+        if (flags_bitset.cardinality() != 3) {
+            return false;
+        }
+
+        flags_bitset.clear(64);
+        if (flags_bitset.get(64) || flags_bitset.cardinality() != 2) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_algorithms() {
+        List<int32> sort_list = new List<int32>();
+        sort_list.add(45);
+        sort_list.add(12);
+        sort_list.add(89);
+        sort_list.add(3);
+        sort_list.add(27);
+
+        Algorithms::sort_int32(sort_list);
+        if (sort_list.get(0) != 3 || sort_list.get(1) != 12 || sort_list.get(2) != 27 || sort_list.get(3) != 45 || sort_list.get(4) != 89) {
+            return false;
+        }
+
+        int32 search_index = Algorithms::binary_search_int32(sort_list, 27);
+        if (search_index != 2) {
+            return false;
+        }
+
+        Algorithms::reverse<int32>(sort_list);
+        if (sort_list.get(0) != 89 || sort_list.get(4) != 3) {
+            return false;
+        }
+
+        return true;
+    }
+}
