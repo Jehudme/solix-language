@@ -187,7 +187,18 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (prefix == null) {
             return false;
         }
-        return this.starts_with(prefix.data);
+        int32 prefix_length = prefix.data.length;
+        if (prefix_length > this.data.length) {
+            return false;
+        }
+        int32 compare_index = 0;
+        while (compare_index < prefix_length) {
+            if (this.data[compare_index] != prefix.data[compare_index]) {
+                return false;
+            }
+            compare_index = compare_index + 1;
+        }
+        return true;
     }
 
     public bool starts_with(string prefix) {
@@ -212,7 +223,19 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (suffix == null) {
             return false;
         }
-        return this.ends_with(suffix.data);
+        int32 suffix_length = suffix.data.length;
+        int32 start_index = this.data.length - suffix_length;
+        if (start_index < 0) {
+            return false;
+        }
+        int32 compare_index = 0;
+        while (compare_index < suffix_length) {
+            if (this.data[start_index + compare_index] != suffix.data[compare_index]) {
+                return false;
+            }
+            compare_index = compare_index + 1;
+        }
+        return true;
     }
 
     public bool ends_with(string suffix) {
@@ -239,7 +262,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (needle == null) {
             return false;
         }
-        return this.index_of(needle) >= 0;
+        return String::native_index_of(this.data, needle.data, 0) >= 0;
     }
 
     public bool contains(string needle) {

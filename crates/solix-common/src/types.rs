@@ -195,6 +195,27 @@ impl Type {
         }
     }
 
+    /// Returns whether this type is tracked by the GC reference-counting cascade.
+    ///
+    /// This differs from [`is_reference_type`] in that the primitive `string` type
+    /// (`std.string` / `BlockTag::String`) is a raw byte buffer managed by its own
+    /// internal allocator — it is **not** an ARC object and must **not** appear in
+    /// `reference_field_offsets` or be passed to `release_reference`.
+    #[must_use]
+    pub fn is_gc_managed_reference_type(&self) -> bool {
+        match self {
+            Self::Class { symbol_name, .. }
+                if symbol_name == "std.string"
+                    || symbol_name == "std::string"
+                    || symbol_name == "string" =>
+            {
+                false
+            }
+            Self::Alias { target_type, .. } => target_type.is_gc_managed_reference_type(),
+            other => other.is_reference_type(),
+        }
+    }
+
     /// Returns whether this type is a primitive value type.
     #[must_use]
     pub fn is_primitive(&self) -> bool {

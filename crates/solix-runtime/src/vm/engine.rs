@@ -207,8 +207,10 @@ impl VirtualMachine {
                         class_item.reference_field_offsets[offset_idx]
                     });
                 let field_addr = addr + field_offset as u32;
-                let child_addr = self.heap.read_u64(field_addr).unwrap_or(0) as u32;
-                if child_addr > 0 {
+                let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
+                    && child_addr > 0
+                {
                     self.release_reference(child_addr)?;
                 }
             }

@@ -96,19 +96,19 @@ public class StringBuilder implements IStringable {
     }
 
     public StringBuilder append_int(int32 value) {
-        return this.append(String::from_int32(value));
+        return this.append(String::from_int32(value).data);
     }
 
     public StringBuilder append_long(int64 value) {
-        return this.append(String::from_int64(value));
+        return this.append(String::from_int64(value).data);
     }
 
     public StringBuilder append_double(float64 value) {
-        return this.append(String::from_float64(value));
+        return this.append(String::from_float64(value).data);
     }
 
     public StringBuilder append_bool(bool value) {
-        return this.append(String::from_bool(value));
+        return this.append(String::from_bool(value).data);
     }
 
     public StringBuilder append_line(String text) {

@@ -279,39 +279,68 @@ impl<'a> TypeCheckingVisitor<'a> {
                     | TokenKind::OperatorLessEqual
                     | TokenKind::OperatorGreaterThan
                     | TokenKind::OperatorGreaterEqual => {
+                        let is_null_comparison = matches!(
+                            operator,
+                            TokenKind::OperatorEqual | TokenKind::OperatorNotEqual
+                        ) && (left_type == Type::Null
+                            || right_type == Type::Null
+                            || matches!(
+                                left.as_ref(),
+                                Expression::Literal {
+                                    value: LiteralValue::Null,
+                                    ..
+                                }
+                            )
+                            || matches!(
+                                right.as_ref(),
+                                Expression::Literal {
+                                    value: LiteralValue::Null,
+                                    ..
+                                }
+                            ));
+
                         // Check if left class implements operator == or != or < etc.
-                        if let Type::Class {
-                            ref symbol_name, ..
-                        } = left_type
-                        {
-                            let op_name = format!("operator_{}", operator.as_static_str());
-                            if let Some(class_id) = self
-                                .symbol_table
-                                .resolve_symbol(self.source_id, symbol_name)
-                                && let Some(class_entry) = self.symbol_table.get_symbol(class_id)
+                        if !is_null_comparison {
+                            if let Type::Class {
+                                ref symbol_name, ..
+                            } = left_type
                             {
-                                for &child_id in &class_entry.members {
-                                    if let Some(child_entry) =
-                                        self.symbol_table.get_symbol(child_id)
-                                        && child_entry.name == op_name
-                                        && let Type::FunctionPointer {
-                                            ref return_type, ..
-                                        } = child_entry.symbol_type
-                                    {
-                                        return *return_type.clone();
+                                let op_name = format!("operator_{}", operator.as_static_str());
+                                if let Some(class_id) = self
+                                    .symbol_table
+                                    .resolve_symbol(self.source_id, symbol_name)
+                                    && let Some(class_entry) =
+                                        self.symbol_table.get_symbol(class_id)
+                                {
+                                    for &child_id in &class_entry.members {
+                                        if let Some(child_entry) =
+                                            self.symbol_table.get_symbol(child_id)
+                                            && child_entry.name == op_name
+                                            && let Type::FunctionPointer {
+                                                ref return_type, ..
+                                            } = child_entry.symbol_type
+                                        {
+                                            return *return_type.clone();
+                                        }
                                     }
                                 }
                             }
                         }
 
                         // Check enum comparison compatibility
-                        if let (Type::Enum { symbol_name: s1 }, Type::Enum { symbol_name: s2 }) =
-                            (&left_type, &right_type)
-                            && s1 != s2
+                        if let (
+                            Type::Enum {
+                                symbol_name: left_enum_name,
+                            },
+                            Type::Enum {
+                                symbol_name: right_enum_name,
+                            },
+                        ) = (&left_type, &right_type)
+                            && left_enum_name != right_enum_name
                         {
                             self.errors.push(BindingError::TypeMismatch {
-                                expected: s1.clone(),
-                                found: s2.clone(),
+                                expected: left_enum_name.clone(),
+                                found: right_enum_name.clone(),
                                 span: right.span().to_source_span(),
                             });
                         }
@@ -833,14 +862,16 @@ impl<'a> TypeCheckingVisitor<'a> {
                                 .get(symbol_name)
                                 .or_else(|| self.blueprint_registry.blueprints.get(&clean_name))
                                 .or_else(|| {
-                                    let short_name = symbol_name.rsplit("::").next().unwrap_or(symbol_name);
+                                    let short_name =
+                                        symbol_name.rsplit("::").next().unwrap_or(symbol_name);
                                     self.blueprint_registry.blueprints.get(short_name)
                                 })
                             {
                                 for (param_name, arg_type) in
                                     blueprint.parameter_names.iter().zip(type_arguments)
                                 {
-                                    class_substitutions.insert(param_name.clone(), arg_type.clone());
+                                    class_substitutions
+                                        .insert(param_name.clone(), arg_type.clone());
                                 }
                             }
                         }
@@ -881,14 +912,20 @@ impl<'a> TypeCheckingVisitor<'a> {
                                             ref return_type,
                                         } = child_entry.symbol_type
                                     {
-                                        let effective_params: Vec<Type> = if class_substitutions.is_empty() {
-                                            parameter_types.clone()
-                                        } else {
-                                            parameter_types
-                                                .iter()
-                                                .map(|param_type| Self::substitute_type(param_type, &class_substitutions))
-                                                .collect()
-                                        };
+                                        let effective_params: Vec<Type> =
+                                            if class_substitutions.is_empty() {
+                                                parameter_types.clone()
+                                            } else {
+                                                parameter_types
+                                                    .iter()
+                                                    .map(|param_type| {
+                                                        Self::substitute_type(
+                                                            param_type,
+                                                            &class_substitutions,
+                                                        )
+                                                    })
+                                                    .collect()
+                                            };
                                         let effective_return = if class_substitutions.is_empty() {
                                             *return_type.clone()
                                         } else {
@@ -1788,8 +1825,9 @@ impl<'a> TypeCheckingVisitor<'a> {
                 .zip(evaluated_arg_types)
                 .enumerate()
                 .all(|(arg_index, (expected_type, actual_type))| {
-                    actual_type.is_assignable_to(expected_type, &|src, tgt| self.check_is_subtype(src, tgt))
-                        || actual_type == expected_type
+                    actual_type.is_assignable_to(expected_type, &|src, tgt| {
+                        self.check_is_subtype(src, tgt)
+                    }) || actual_type == expected_type
                         || is_literal_compatible_with_type(&arguments[arg_index], expected_type)
                 });
             if is_matched {
@@ -1815,8 +1853,14 @@ impl<'a> TypeCheckingVisitor<'a> {
                     substitutions.insert(param_name.clone(), resolved_type);
                 }
             } else {
-                for (parameter_type, argument_type) in parameter_types.iter().zip(evaluated_arg_types) {
-                    if !Self::deduce_template_argument(parameter_type, argument_type, &mut substitutions) {
+                for (parameter_type, argument_type) in
+                    parameter_types.iter().zip(evaluated_arg_types)
+                {
+                    if !Self::deduce_template_argument(
+                        parameter_type,
+                        argument_type,
+                        &mut substitutions,
+                    ) {
                         return None;
                     }
                 }
@@ -1944,13 +1988,20 @@ impl<'a> TypeCheckingVisitor<'a> {
                     type_arguments: concrete_type_arguments,
                 } = concrete_type
                 {
-                    if pattern_symbol_name.replace('.', "::") != concrete_symbol_name.replace('.', "::")
+                    if pattern_symbol_name.replace('.', "::")
+                        != concrete_symbol_name.replace('.', "::")
                         || pattern_type_arguments.len() != concrete_type_arguments.len()
                     {
                         return false;
                     }
-                    for (pattern_argument, concrete_argument) in pattern_type_arguments.iter().zip(concrete_type_arguments) {
-                        if !Self::deduce_template_argument(pattern_argument, concrete_argument, substitutions) {
+                    for (pattern_argument, concrete_argument) in
+                        pattern_type_arguments.iter().zip(concrete_type_arguments)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_argument,
+                            concrete_argument,
+                            substitutions,
+                        ) {
                             return false;
                         }
                     }
@@ -1968,13 +2019,20 @@ impl<'a> TypeCheckingVisitor<'a> {
                     type_arguments: concrete_type_arguments,
                 } = concrete_type
                 {
-                    if pattern_symbol_name.replace('.', "::") != concrete_symbol_name.replace('.', "::")
+                    if pattern_symbol_name.replace('.', "::")
+                        != concrete_symbol_name.replace('.', "::")
                         || pattern_type_arguments.len() != concrete_type_arguments.len()
                     {
                         return false;
                     }
-                    for (pattern_argument, concrete_argument) in pattern_type_arguments.iter().zip(concrete_type_arguments) {
-                        if !Self::deduce_template_argument(pattern_argument, concrete_argument, substitutions) {
+                    for (pattern_argument, concrete_argument) in
+                        pattern_type_arguments.iter().zip(concrete_type_arguments)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_argument,
+                            concrete_argument,
+                            substitutions,
+                        ) {
                             return false;
                         }
                     }
@@ -1995,11 +2053,21 @@ impl<'a> TypeCheckingVisitor<'a> {
                     if pattern_parameters.len() != concrete_parameters.len() {
                         return false;
                     }
-                    if !Self::deduce_template_argument(pattern_return, concrete_return, substitutions) {
+                    if !Self::deduce_template_argument(
+                        pattern_return,
+                        concrete_return,
+                        substitutions,
+                    ) {
                         return false;
                     }
-                    for (pattern_param, concrete_param) in pattern_parameters.iter().zip(concrete_parameters) {
-                        if !Self::deduce_template_argument(pattern_param, concrete_param, substitutions) {
+                    for (pattern_param, concrete_param) in
+                        pattern_parameters.iter().zip(concrete_parameters)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_param,
+                            concrete_param,
+                            substitutions,
+                        ) {
                             return false;
                         }
                     }

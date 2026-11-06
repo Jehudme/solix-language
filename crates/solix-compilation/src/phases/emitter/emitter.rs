@@ -719,6 +719,21 @@ impl<'a> Emitter<'a> {
                 }
 
                 let arity = arguments.len();
+                let arg_sig = arguments
+                    .iter()
+                    .map(|argument| self.query_type(argument.span()).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let ctor_sym_signature = if arg_sig.is_empty() {
+                    format!("{resolved_class_name}::constructor")
+                } else {
+                    format!("{resolved_class_name}::constructor({arg_sig})")
+                };
+                let ctor_sym_simple_signature = if arg_sig.is_empty() {
+                    format!("{simple}::constructor")
+                } else {
+                    format!("{simple}::constructor({arg_sig})")
+                };
                 let ctor_sym_arity = format!("{resolved_class_name}::constructor/{arity}");
                 let ctor_sym_simple_arity = format!("{simple}::constructor/{arity}");
                 let ctor_sym = format!("{resolved_class_name}::constructor");
@@ -726,7 +741,9 @@ impl<'a> Emitter<'a> {
                 let ctor_id = self
                     .function_ids
                     .and_then(|ids| {
-                        ids.get(&ctor_sym_arity)
+                        ids.get(&ctor_sym_signature)
+                            .or_else(|| ids.get(&ctor_sym_simple_signature))
+                            .or_else(|| ids.get(&ctor_sym_arity))
                             .or_else(|| ids.get(&ctor_sym_simple_arity))
                             .or_else(|| ids.get(&ctor_sym))
                             .or_else(|| ids.get(&ctor_sym_simple))
@@ -1647,65 +1664,105 @@ impl<'a> Emitter<'a> {
             return Ok(());
         }
 
-        let operand_type = self.query_type(left.span());
-        if let Type::Class {
-            ref symbol_name, ..
-        } = operand_type
-        {
-            let simple_cls = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
-            let op_sym = format!("{simple_cls}::operator_{}", operator.as_static_str());
-            let full_op_sym = format!("{symbol_name}::operator_{}", operator.as_static_str());
-            let func_id = self
-                .function_ids
-                .and_then(|ids| ids.get(&full_op_sym).or_else(|| ids.get(&op_sym)))
-                .copied();
-            if let Some(callee_id) = func_id {
-                let r_left = self.emit_expression(left, None)?;
-                let r_right = self.emit_expression(right, None)?;
-                let window_size = 2; // this, rhs
-                let arg_base = self.allocator.alloc_window(window_size)?;
-                self.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, arg_base, r_left, 0),
-                    Some(span),
-                );
-                self.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, arg_base + 1, r_right, 0),
-                    Some(span),
-                );
-                self.emit_instruction(
-                    Instruction::format_call(
-                        OpCode::CallDirect,
-                        dst,
-                        callee_id as u16,
-                        arg_base,
-                        window_size as u8,
-                    ),
-                    Some(span),
-                );
-                if self.query_type(left.span()).is_reference_type()
-                    && !matches!(left, Expression::Identifier { .. })
-                {
+        let left_type = self.query_type(left.span());
+        let right_type = self.query_type(right.span());
+        let is_null_comparison = matches!(
+            operator,
+            TokenKind::OperatorEqual | TokenKind::OperatorNotEqual
+        ) && (left_type == Type::Null
+            || right_type == Type::Null
+            || matches!(
+                left,
+                Expression::Literal {
+                    value: LiteralValue::Null,
+                    ..
+                }
+            )
+            || matches!(
+                right,
+                Expression::Literal {
+                    value: LiteralValue::Null,
+                    ..
+                }
+            ));
+
+        if !is_null_comparison {
+            if let Type::Class {
+                ref symbol_name, ..
+            } = left_type
+            {
+                let simple_cls = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+                let op_sym = format!("{simple_cls}::operator_{}", operator.as_static_str());
+                let full_op_sym = format!("{symbol_name}::operator_{}", operator.as_static_str());
+                let right_type_name = self.query_type(right.span()).to_string();
+                let right_simple_type = right_type_name
+                    .rsplit([':', '.'])
+                    .next()
+                    .unwrap_or(&right_type_name);
+                let operator_candidates = [
+                    format!("{full_op_sym}({right_type_name})"),
+                    format!("{full_op_sym}({right_simple_type})"),
+                    format!("{op_sym}({right_type_name})"),
+                    format!("{op_sym}({right_simple_type})"),
+                    full_op_sym.clone(),
+                    op_sym.clone(),
+                ];
+                let func_id = self
+                    .function_ids
+                    .and_then(|ids| {
+                        operator_candidates
+                            .iter()
+                            .find_map(|candidate| ids.get(candidate))
+                    })
+                    .copied();
+                if let Some(callee_id) = func_id {
+                    let register_left = self.emit_expression(left, None)?;
+                    let register_right = self.emit_expression(right, None)?;
+                    let window_size = 2; // this, rhs
+                    let arg_base = self.allocator.alloc_window(window_size)?;
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::DecRef, 0, r_left, 0, 0),
+                        Instruction::format_a(OpCode::Mov, 0, arg_base, register_left, 0),
                         Some(span),
                     );
-                }
-                if self.query_type(right.span()).is_reference_type()
-                    && !matches!(right, Expression::Identifier { .. })
-                {
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::DecRef, 0, r_right, 0, 0),
+                        Instruction::format_a(OpCode::Mov, 0, arg_base + 1, register_right, 0),
                         Some(span),
                     );
+                    self.emit_instruction(
+                        Instruction::format_call(
+                            OpCode::CallDirect,
+                            dst,
+                            callee_id as u16,
+                            arg_base,
+                            window_size as u8,
+                        ),
+                        Some(span),
+                    );
+                    if self.query_type(left.span()).is_reference_type()
+                        && !self.is_borrowed_reference(left)
+                    {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::DecRef, 0, register_left, 0, 0),
+                            Some(span),
+                        );
+                    }
+                    if self.query_type(right.span()).is_reference_type()
+                        && !self.is_borrowed_reference(right)
+                    {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::DecRef, 0, register_right, 0, 0),
+                            Some(span),
+                        );
+                    }
+                    self.allocator.free_window(arg_base, window_size);
+                    self.allocator.free_temp(register_left);
+                    self.allocator.free_temp(register_right);
+                    return Ok(());
                 }
-                self.allocator.free_window(arg_base, window_size);
-                self.allocator.free_temp(r_left);
-                self.allocator.free_temp(r_right);
-                return Ok(());
             }
         }
 
-        if matches!(operator, TokenKind::OperatorPlus) {
+        if !is_null_comparison && matches!(operator, TokenKind::OperatorPlus) {
             let left_type = self.query_type(left.span());
             let right_type = self.query_type(right.span());
             let is_string_type = |type_info: &Type| {
@@ -1742,7 +1799,7 @@ impl<'a> Emitter<'a> {
                     Some(span),
                 );
                 if self.query_type(left.span()).is_reference_type()
-                    && !matches!(left, Expression::Identifier { .. })
+                    && !self.is_borrowed_reference(left)
                 {
                     self.emit_instruction(
                         Instruction::format_a(OpCode::DecRef, 0, r_left, 0, 0),
@@ -1750,7 +1807,7 @@ impl<'a> Emitter<'a> {
                     );
                 }
                 if self.query_type(right.span()).is_reference_type()
-                    && !matches!(right, Expression::Identifier { .. })
+                    && !self.is_borrowed_reference(right)
                 {
                     self.emit_instruction(
                         Instruction::format_a(OpCode::DecRef, 0, r_right, 0, 0),
@@ -1764,42 +1821,48 @@ impl<'a> Emitter<'a> {
             }
         }
 
-        let r_left = self.emit_expression(left, None)?;
-        let r_right = self.emit_expression(right, None)?;
+        let register_left = self.emit_expression(left, None)?;
+        let register_right = self.emit_expression(right, None)?;
 
         let left_type = self.query_type(left.span());
         let right_type = self.query_type(right.span());
         let operand_type = if left_type.is_floating_point() || right_type.is_floating_point() {
             Type::Primitive(solix_common::types::PrimitiveKind::Float64)
+        } else if left_type == Type::Null {
+            right_type
         } else {
             left_type
         };
-        let opcode = self.select_binary_opcode(operator, &operand_type);
+        let opcode = if is_null_comparison {
+            match operator {
+                TokenKind::OperatorEqual => OpCode::EqRef,
+                TokenKind::OperatorNotEqual => OpCode::NeqRef,
+                _ => self.select_binary_opcode(operator, &operand_type),
+            }
+        } else {
+            self.select_binary_opcode(operator, &operand_type)
+        };
 
         self.emit_instruction(
-            Instruction::format_a(opcode, 0, dst, r_left, r_right),
+            Instruction::format_a(opcode, 0, dst, register_left, register_right),
             Some(span),
         );
 
-        if self.query_type(left.span()).is_reference_type()
-            && !matches!(left, Expression::Identifier { .. })
-        {
+        if self.query_type(left.span()).is_reference_type() && !self.is_borrowed_reference(left) {
             self.emit_instruction(
-                Instruction::format_a(OpCode::DecRef, 0, r_left, 0, 0),
+                Instruction::format_a(OpCode::DecRef, 0, register_left, 0, 0),
                 Some(span),
             );
         }
-        if self.query_type(right.span()).is_reference_type()
-            && !matches!(right, Expression::Identifier { .. })
-        {
+        if self.query_type(right.span()).is_reference_type() && !self.is_borrowed_reference(right) {
             self.emit_instruction(
-                Instruction::format_a(OpCode::DecRef, 0, r_right, 0, 0),
+                Instruction::format_a(OpCode::DecRef, 0, register_right, 0, 0),
                 Some(span),
             );
         }
 
-        self.allocator.free_temp(r_left);
-        self.allocator.free_temp(r_right);
+        self.allocator.free_temp(register_left);
+        self.allocator.free_temp(register_right);
         Ok(())
     }
 
@@ -3072,6 +3135,19 @@ impl<'a> Emitter<'a> {
             .collect::<Vec<_>>()
             .join(",");
         let mangled_name = format!("{method_name}({param_sig})");
+        let simple_param_sig = arg_types
+            .iter()
+            .map(|argument_type| {
+                let type_name = argument_type.to_string();
+                type_name
+                    .rsplit([':', '.'])
+                    .next()
+                    .unwrap_or(&type_name)
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let simple_mangled_name = format!("{method_name}({simple_param_sig})");
         let arity_name = format!("{method_name}/{}", arg_types.len());
 
         let obj_name = self.get_lexeme(object_span);
@@ -3084,6 +3160,7 @@ impl<'a> Emitter<'a> {
                 && let Some(&slot) = layout
                     .method_slots
                     .get(&mangled_name)
+                    .or_else(|| layout.method_slots.get(&simple_mangled_name))
                     .or_else(|| layout.method_slots.get(&arity_name))
                     .or_else(|| layout.method_slots.get(method_name))
             {
@@ -3106,6 +3183,7 @@ impl<'a> Emitter<'a> {
                 && let Some(&slot) = layout
                     .method_slots
                     .get(&mangled_name)
+                    .or_else(|| layout.method_slots.get(&simple_mangled_name))
                     .or_else(|| layout.method_slots.get(&arity_name))
                     .or_else(|| layout.method_slots.get(method_name))
             {

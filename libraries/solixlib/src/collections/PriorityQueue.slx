@@ -107,6 +107,10 @@ public class PriorityQueue<T> implements IReadOnlyCollection<T>, IIterable<T>, I
         this.sift_up(last_index);
     }
 
+    public void push(T item) {
+        this.enqueue(item);
+    }
+
     public T dequeue() {
         if (this.heap_elements.is_empty()) {
             throw new InvalidOperationException("PriorityQueue is empty");
@@ -119,6 +123,10 @@ public class PriorityQueue<T> implements IReadOnlyCollection<T>, IIterable<T>, I
             this.sift_down(0);
         }
         return root_item;
+    }
+
+    public T pop() {
+        return this.dequeue();
     }
 
     public T peek() {

@@ -283,13 +283,43 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     let mut sym_to_func = HashMap::<SymbolId, u32>::new();
     if let Some(artifacts) = &context.binding_artifacts {
         for entry in &artifacts.symbol_table.symbols {
-            if let Some(&func_id) = function_ids.get(&entry.fully_qualified_name) {
+            let signature = if let Type::FunctionPointer {
+                parameter_types, ..
+            } = &entry.symbol_type
+            {
+                Some(
+                    parameter_types
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+            } else {
+                None
+            };
+            let mangled_name = signature
+                .as_ref()
+                .map(|parameters| format!("{}({parameters})", entry.fully_qualified_name));
+            if let Some(func_id) = mangled_name
+                .as_ref()
+                .and_then(|name| function_ids.get(name))
+                .or_else(|| function_ids.get(&entry.fully_qualified_name))
+                .copied()
+            {
                 sym_to_func.insert(entry.id, func_id);
             } else if let Some(parent_id) = entry.parent_symbol
                 && let Some(parent) = artifacts.symbol_table.get_symbol(parent_id)
             {
                 let short_full = format!("{}::{}", parent.name, entry.name);
-                if let Some(&func_id) = function_ids.get(&short_full) {
+                let short_mangled = signature
+                    .as_ref()
+                    .map(|parameters| format!("{short_full}({parameters})"));
+                if let Some(func_id) = short_mangled
+                    .as_ref()
+                    .and_then(|name| function_ids.get(name))
+                    .or_else(|| function_ids.get(&short_full))
+                    .copied()
+                {
                     sym_to_func.insert(entry.id, func_id);
                 }
             }
@@ -1249,16 +1279,32 @@ fn index_function_symbols(
                         continue;
                     }
                     let arity = ctor.parameters.len();
+                    let param_sig = ctor
+                        .parameters
+                        .iter()
+                        .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym_mangled = if param_sig.is_empty() {
+                        format!("{cls_name}::constructor")
+                    } else {
+                        format!("{cls_name}::constructor({param_sig})")
+                    };
                     let full_sym_arity = format!("{cls_name}::constructor/{arity}");
                     let full_sym = format!("{cls_name}::constructor");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
-                    function_ids.insert(full_sym_arity, func_id);
-                    function_ids.entry(full_sym).or_insert(func_id);
+                    function_ids.insert(full_sym_mangled.clone(), func_id);
+                    function_ids
+                        .entry(full_sym_arity.clone())
+                        .or_insert(func_id);
+                    function_ids.entry(full_sym.clone()).or_insert(func_id);
                     if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/{arity}");
-                        let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
-                        function_ids.insert(full_pkg_name_arity, func_id);
+                        let full_pkg_name_mangled = format!("{pkg}.{full_sym_mangled}");
+                        let full_pkg_name_arity = format!("{pkg}.{full_sym_arity}");
+                        let full_pkg_name = format!("{pkg}.{full_sym}");
+                        function_ids.insert(full_pkg_name_mangled, func_id);
+                        function_ids.entry(full_pkg_name_arity).or_insert(func_id);
                         function_ids.entry(full_pkg_name).or_insert(func_id);
                     }
                 }
@@ -1274,13 +1320,31 @@ fn index_function_symbols(
                 }
                 ClassMember::Operator(op) => {
                     let op_str = op.operator_token.as_static_str();
-                    let full_sym = format!("{cls_name}::operator_{op_str}");
+                    let param_sig = op
+                        .parameters
+                        .iter()
+                        .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym = if param_sig.is_empty() {
+                        format!("{cls_name}::operator_{op_str}")
+                    } else {
+                        format!("{cls_name}::operator_{op_str}({param_sig})")
+                    };
+                    let unsuffixed_sym = format!("{cls_name}::operator_{op_str}");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym, func_id);
+                    function_ids.entry(unsuffixed_sym).or_insert(func_id);
                     if let Some(ref pkg) = pkg_prefix {
                         let full_pkg_name = format!("{pkg}.{cls_name}::operator_{op_str}");
-                        function_ids.insert(full_pkg_name, func_id);
+                        let full_pkg_name_mangled = if param_sig.is_empty() {
+                            full_pkg_name.clone()
+                        } else {
+                            format!("{full_pkg_name}({param_sig})")
+                        };
+                        function_ids.insert(full_pkg_name_mangled, func_id);
+                        function_ids.entry(full_pkg_name).or_insert(func_id);
                     }
                 }
                 _ => {}
@@ -1451,8 +1515,17 @@ fn compile_source_functions(
                     if ctor.modifiers.contains(&Modifier::Extern) {
                         continue;
                     }
-                    let arity = ctor.parameters.len();
-                    let full_sym = format!("{cls_name}::constructor/{arity}");
+                    let param_sig = ctor
+                        .parameters
+                        .iter()
+                        .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym = if param_sig.is_empty() {
+                        format!("{cls_name}::constructor")
+                    } else {
+                        format!("{cls_name}::constructor({param_sig})")
+                    };
                     let func = compile_constructor(
                         &full_sym,
                         ast.source_id,
@@ -2086,17 +2159,45 @@ fn index_monomorphized_class_symbols(
                 function_ids.insert(simple_sym_mangled, func_id);
                 function_ids.entry(full_sym).or_insert(func_id);
                 function_ids.entry(simple_sym).or_insert(func_id);
+                if let Some((generic_base, generic_args)) = simple_name.split_once('<') {
+                    let generic_suffix = format!("<{generic_args}");
+                    let generic_sym = format!("{generic_base}::{method_name}{generic_suffix}");
+                    let generic_arity = format!(
+                        "{generic_base}::{method_name}{generic_suffix}/{}",
+                        m.parameters.len()
+                    );
+                    function_ids.insert(generic_sym, func_id);
+                    function_ids.insert(generic_arity, func_id);
+                }
             }
             ClassMember::Constructor(ctor) => {
                 let arity = ctor.parameters.len();
+                let param_sig = ctor
+                    .parameters
+                    .iter()
+                    .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let full_sym_mangled = if param_sig.is_empty() {
+                    format!("{mangled_name}::constructor")
+                } else {
+                    format!("{mangled_name}::constructor({param_sig})")
+                };
+                let simple_sym_mangled = if param_sig.is_empty() {
+                    format!("{simple_name}::constructor")
+                } else {
+                    format!("{simple_name}::constructor({param_sig})")
+                };
                 let full_sym_arity = format!("{mangled_name}::constructor/{arity}");
                 let simple_sym_arity = format!("{simple_name}::constructor/{arity}");
                 let full_sym = format!("{mangled_name}::constructor");
                 let simple_sym = format!("{simple_name}::constructor");
                 let func_id = *next_func_id;
                 *next_func_id += 1;
-                function_ids.insert(full_sym_arity, func_id);
-                function_ids.insert(simple_sym_arity, func_id);
+                function_ids.insert(full_sym_mangled, func_id);
+                function_ids.insert(simple_sym_mangled, func_id);
+                function_ids.entry(full_sym_arity).or_insert(func_id);
+                function_ids.entry(simple_sym_arity).or_insert(func_id);
                 function_ids.entry(full_sym).or_insert(func_id);
                 function_ids.entry(simple_sym).or_insert(func_id);
             }
@@ -2110,12 +2211,32 @@ fn index_monomorphized_class_symbols(
             }
             ClassMember::Operator(op) => {
                 let op_str = op.operator_token.as_static_str();
-                let full_sym = format!("{mangled_name}::operator_{op_str}");
-                let simple_sym = format!("{simple_name}::operator_{op_str}");
+                let param_sig = op
+                    .parameters
+                    .iter()
+                    .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let full_sym = if param_sig.is_empty() {
+                    format!("{mangled_name}::operator_{op_str}")
+                } else {
+                    format!("{mangled_name}::operator_{op_str}({param_sig})")
+                };
+                let simple_sym = if param_sig.is_empty() {
+                    format!("{simple_name}::operator_{op_str}")
+                } else {
+                    format!("{simple_name}::operator_{op_str}({param_sig})")
+                };
                 let func_id = *next_func_id;
                 *next_func_id += 1;
                 function_ids.insert(full_sym, func_id);
                 function_ids.insert(simple_sym, func_id);
+                function_ids
+                    .entry(format!("{mangled_name}::operator_{op_str}"))
+                    .or_insert(func_id);
+                function_ids
+                    .entry(format!("{simple_name}::operator_{op_str}"))
+                    .or_insert(func_id);
             }
             _ => {}
         }

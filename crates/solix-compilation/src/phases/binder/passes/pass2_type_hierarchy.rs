@@ -924,6 +924,10 @@ pub fn execute_pass2_type_hierarchy(
 
                     let unwrapped_field_type = field_type.unwrap_alias();
                     let is_ref = unwrapped_field_type.is_reference_type();
+                    // `std.string` (BlockTag::String) is a raw byte buffer managed by its own
+                    // internal allocator — it is not an ARC object and must not appear in
+                    // `reference_field_offsets` or be passed to `release_reference`.
+                    let is_gc_managed_ref = unwrapped_field_type.is_gc_managed_reference_type();
                     let field_size = match unwrapped_field_type {
                         Type::Primitive(prim) => prim.byte_size(),
                         Type::Enum { .. } => 4,
@@ -942,7 +946,7 @@ pub fn execute_pass2_type_hierarchy(
                                 span: field_declaration.span.to_source_span(),
                             });
                         }
-                    } else if is_ref {
+                    } else if is_gc_managed_ref {
                         class_layout
                             .reference_field_offsets
                             .push(current_field_offset);
