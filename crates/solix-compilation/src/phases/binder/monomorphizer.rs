@@ -466,18 +466,66 @@ pub fn resolve_type_annotation_with_subs(
     symbol_table: &SymbolTable,
     substitutions: &HashMap<String, Type>,
 ) -> Type {
-    if let TypeAnnotation::Named { path, .. } = annotation
-        && path.len() == 1
-    {
-        let start = path[0].start as usize;
-        let end = path[0].end as usize;
-        if end <= source_text.len() {
-            let name = &source_text[start..end];
-            if let Some(concrete_type) = substitutions.get(name) {
-                return concrete_type.clone();
-            }
+    fn substitute(ty: Type, substitutions: &HashMap<String, Type>) -> Type {
+        match ty {
+            Type::GenericParameter { name, .. } | Type::Unresolved(name) => substitutions
+                .get(&name)
+                .cloned()
+                .unwrap_or(Type::Unresolved(name)),
+            Type::Class {
+                symbol_name,
+                type_arguments,
+            } => Type::Class {
+                symbol_name,
+                type_arguments: type_arguments
+                    .into_iter()
+                    .map(|arg| substitute(arg, substitutions))
+                    .collect(),
+            },
+            Type::Interface {
+                symbol_name,
+                type_arguments,
+            } => Type::Interface {
+                symbol_name,
+                type_arguments: type_arguments
+                    .into_iter()
+                    .map(|arg| substitute(arg, substitutions))
+                    .collect(),
+            },
+            Type::Array {
+                element_type,
+                depth,
+            } => Type::Array {
+                element_type: Box::new(substitute(*element_type, substitutions)),
+                depth,
+            },
+            Type::Tuple(elements) => Type::Tuple(
+                elements
+                    .into_iter()
+                    .map(|element| substitute(element, substitutions))
+                    .collect(),
+            ),
+            Type::FunctionPointer {
+                return_type,
+                parameter_types,
+            } => Type::FunctionPointer {
+                return_type: Box::new(substitute(*return_type, substitutions)),
+                parameter_types: parameter_types
+                    .into_iter()
+                    .map(|parameter| substitute(parameter, substitutions))
+                    .collect(),
+            },
+            Type::Alias {
+                alias_name,
+                target_type,
+            } => Type::Alias {
+                alias_name,
+                target_type: Box::new(substitute(*target_type, substitutions)),
+            },
+            other => other,
         }
     }
 
-    resolve_type_annotation(source_id, source_text, annotation, symbol_table)
+    let resolved = resolve_type_annotation(source_id, source_text, annotation, symbol_table);
+    substitute(resolved, substitutions)
 }

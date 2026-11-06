@@ -300,9 +300,12 @@ impl LoadedSharedLibrary {
             .rsplit(['.', ':'])
             .next()
             .unwrap_or(clean_symbol);
-
-        let candidates = [clean_symbol, &mangled, unqualified];
-        for candidate in &candidates {
+        let candidates = if clean_symbol.contains([':', '.']) {
+            vec![clean_symbol, &mangled]
+        } else {
+            vec![clean_symbol, &mangled, unqualified]
+        };
+        for candidate in candidates {
             let null_terminated = format!("{candidate}\0");
             unsafe {
                 if let Ok(symbol_handle) =

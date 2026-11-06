@@ -481,6 +481,7 @@ impl<'a> Emitter<'a> {
                 || matches!(
                     self.query_type(val.span()),
                     solix_common::types::Type::GenericParameter { .. }
+                        | solix_common::types::Type::Unresolved(_)
                 ))
                 && self.is_borrowed_reference(val)
             {

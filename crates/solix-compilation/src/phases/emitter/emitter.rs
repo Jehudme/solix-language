@@ -2845,7 +2845,8 @@ impl<'a> Emitter<'a> {
             | Expression::Lambda { .. } => true,
             _ => {
                 let ty = self.query_type(expr.span());
-                ty.is_reference_type() || matches!(ty, Type::GenericParameter { .. })
+                ty.is_reference_type()
+                    || matches!(ty, Type::GenericParameter { .. } | Type::Unresolved(_))
             }
         }
     }
@@ -3122,6 +3123,19 @@ impl<'a> Emitter<'a> {
             Type::Class { symbol_name, .. } => self.resolve_type_tag(symbol_name),
             Type::Interface { symbol_name, .. } => self.resolve_type_tag(symbol_name),
             Type::GenericParameter { .. } => {
+                if let Some(ref enclosing) = self.enclosing_class
+                    && let Some(pos) = enclosing.find('<')
+                {
+                    let inner = &enclosing[pos + 1..enclosing.len().saturating_sub(1)];
+                    return self.resolve_type_tag(inner.trim());
+                }
+                0x80
+            }
+            Type::Unresolved(name) => {
+                let direct_tag = self.resolve_type_tag(name);
+                if direct_tag != 0x80 {
+                    return direct_tag;
+                }
                 if let Some(ref enclosing) = self.enclosing_class
                     && let Some(pos) = enclosing.find('<')
                 {
