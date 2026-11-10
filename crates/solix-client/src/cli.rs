@@ -70,6 +70,14 @@ pub struct BuildArgs {
     #[arg(long, conflicts_with_all = ["debug", "release"])]
     pub test: bool,
 
+    /// Linking mode for dependencies and executable emission: dynamic (default) or static
+    #[arg(long, default_value = "dynamic")]
+    pub link: String,
+
+    /// Shorthand flag for static linking mode (--link static)
+    #[arg(long)]
+    pub r#static: bool,
+
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
@@ -87,6 +95,16 @@ impl BuildArgs {
             "debug"
         } else {
             &self.profile
+        }
+    }
+
+    /// Resolves the effective link mode considering the `--static` shorthand.
+    #[must_use]
+    pub fn resolved_link_mode(&self) -> solix_compilation::LinkMode {
+        if self.r#static || self.link.eq_ignore_ascii_case("static") {
+            solix_compilation::LinkMode::Static
+        } else {
+            solix_compilation::LinkMode::Dynamic
         }
     }
 }
@@ -154,9 +172,29 @@ pub struct CompileArgs {
     #[arg(long, default_value_t = 8)]
     pub inline_threshold: usize,
 
+    /// Linking mode for dependencies and executable emission: dynamic (default) or static
+    #[arg(long, default_value = "dynamic")]
+    pub link: String,
+
+    /// Shorthand flag for static linking mode (--link static)
+    #[arg(long)]
+    pub r#static: bool,
+
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
+}
+
+impl CompileArgs {
+    /// Resolves the effective link mode considering the `--static` shorthand.
+    #[must_use]
+    pub fn resolved_link_mode(&self) -> solix_compilation::LinkMode {
+        if self.r#static || self.link.eq_ignore_ascii_case("static") {
+            solix_compilation::LinkMode::Static
+        } else {
+            solix_compilation::LinkMode::Dynamic
+        }
+    }
 }
 
 /// Arguments for `solix run`.

@@ -78,6 +78,10 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         command.env("SOLIX_PKG_DIR", package_store_directory);
     }
 
+    if args.resolved_link_mode() == solix_compilation::LinkMode::Static {
+        command.env("SOLIX_LINK_MODE", "static");
+    }
+
     let status = command.status().with_context(|| {
         format!(
             "failed to execute python3 build script at '{}'",

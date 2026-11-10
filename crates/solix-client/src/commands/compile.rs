@@ -71,7 +71,8 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         bail!("No Solix source files (*.slx) found to compile");
     }
 
-    // 3. Resolve package name and output destination
+    // 3. Resolve package name, linking mode, and output destination
+    let link_mode = args.resolved_link_mode();
     let package_name = args.name.unwrap_or_else(|| {
         resolved_sources
             .first()
@@ -91,6 +92,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
 
     let mut options = CompilationOptions::new()
         .with_profile(profile)
+        .with_link_mode(link_mode)
         .with_package_metadata(
             &package_name,
             &args.version,

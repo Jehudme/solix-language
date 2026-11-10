@@ -98,6 +98,12 @@ pub fn bind_context(
     // Pass 3: Detailed Type Checking & Expression Traversal
     for (source_index, ast_option) in context.ast.iter().enumerate() {
         let source_id = source_index as u16;
+        if context.options.link_mode == crate::CompilationContext::LinkMode::Dynamic
+            && context.is_external_source(source_id)
+        {
+            continue;
+        }
+
         let source_text = context
             .sources
             .get(source_index)
@@ -137,6 +143,9 @@ pub fn bind_context(
     // Validate entry point(s)
     let mut main_methods = Vec::new();
     for (source_index, ast_option) in context.ast.iter().enumerate() {
+        if context.is_external_source(source_index as u16) {
+            continue;
+        }
         if let Some(program_ast) = ast_option {
             let source_id = source_index as u16;
             let source_text = context

@@ -852,14 +852,27 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
             break;
         }
     }
+
+    let is_static_mode = context.options.link_mode == crate::CompilationContext::LinkMode::Static;
+    super::reachability::apply_reachability_and_static_linking(
+        &mut program,
+        &context.options.dependency_binaries,
+        is_static_mode,
+    );
+
     program.package_name = context.options.package_name.clone();
     program.package_version = context.options.package_version.clone();
     program.package_description = context.options.package_description.clone();
 
-    let mut dependencies: Vec<solix_common::solver::DependencyRequirement> =
-        context.dependencies_map.values().cloned().collect();
-    dependencies
-        .sort_by(|requirement_a, requirement_b| requirement_a.name.cmp(&requirement_b.name));
+    let dependencies: Vec<solix_common::solver::DependencyRequirement> = if is_static_mode {
+        Vec::new()
+    } else {
+        let mut dynamic_dependencies: Vec<solix_common::solver::DependencyRequirement> =
+            context.dependencies_map.values().cloned().collect();
+        dynamic_dependencies
+            .sort_by(|requirement_a, requirement_b| requirement_a.name.cmp(&requirement_b.name));
+        dynamic_dependencies
+    };
 
     let (api_header, exported_ast_bytes) =
         crate::phases::export_api::generate_api_header_and_ast(context);

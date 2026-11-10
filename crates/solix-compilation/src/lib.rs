@@ -6,7 +6,7 @@ pub mod phases;
 pub mod pipeline;
 pub mod telemetry;
 
-pub use CompilationContext::{BuildProfile, CompilationOptions};
+pub use CompilationContext::{BuildProfile, CompilationOptions, LinkMode};
 pub use builtins::{BLT_IO_FILE_NAME, BLT_IO_SOURCE};
 pub use manifest::manifest_to_source;
 pub use phases::{
