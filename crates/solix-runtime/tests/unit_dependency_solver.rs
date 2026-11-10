@@ -48,6 +48,8 @@ fn create_math_binary(package_version: &str) -> BinaryProgram {
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        api_header: String::new(),
+        exported_ast_bytes: Vec::new(),
     };
 
     // Compiled function: math::add(r0, r1) -> r2 = r0 + r1; return r2;
@@ -82,6 +84,8 @@ fn create_app_binary_requiring(dependency_version: PackageVersion) -> BinaryProg
         exported_functions: Vec::new(),
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        api_header: String::new(),
+        exported_ast_bytes: Vec::new(),
     };
 
     let sym_idx = program

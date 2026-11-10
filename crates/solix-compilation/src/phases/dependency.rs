@@ -200,34 +200,81 @@ pub fn run_dependency_resolution(
         );
 
         if context.loaded_api_packages.insert(package_name.clone()) {
-            let manifest_json =
-                serde_json::to_string(&program.export_manifest).map_err(|serialize_error| {
-                    vec![CompilationDiagnostic::from(
-                        BindingError::ExternalPackageNotFound {
-                            name: package_name.clone(),
-                            reason: format!(
-                                "Failed to serialize export manifest: {serialize_error}"
-                            ),
-                            span: SourceSpan::from(0..0),
-                        },
-                    )]
-                })?;
-
-            let (source_name, source_code) =
-                manifest_to_source(&manifest_json).map_err(|synthesis_error| {
-                    vec![CompilationDiagnostic::from(
-                        BindingError::ExternalPackageNotFound {
-                            name: package_name.clone(),
-                            reason: format!("Failed to synthesize API source: {synthesis_error}"),
-                            span: SourceSpan::from(0..0),
-                        },
-                    )]
-                })?;
-
-            context.add_source(source_name, source_code);
+            ingest_package_api_source(
+                &package_name,
+                version,
+                &program,
+                SourceSpan::from(0..0),
+                context,
+            )?;
         }
     }
 
+    Ok(())
+}
+
+fn ingest_package_api_source(
+    package_name: &str,
+    version: PackageVersion,
+    program: &BinaryProgram,
+    import_span: SourceSpan,
+    context: &mut CompilationContext,
+) -> Result<(), Vec<CompilationDiagnostic>> {
+    let (source_name, source_code) = if !program.export_manifest.api_header.is_empty() {
+        (
+            format!("{package_name}@{version}.slx"),
+            program.export_manifest.api_header.clone(),
+        )
+    } else {
+        let manifest_json =
+            serde_json::to_string(&program.export_manifest).map_err(|serialize_error| {
+                vec![CompilationDiagnostic::from(
+                    BindingError::ExternalPackageNotFound {
+                        name: package_name.to_string(),
+                        reason: format!("Failed to serialize export manifest: {serialize_error}"),
+                        span: import_span,
+                    },
+                )]
+            })?;
+
+        manifest_to_source(&manifest_json).map_err(|synthesis_error| {
+            vec![CompilationDiagnostic::from(
+                BindingError::ExternalPackageNotFound {
+                    name: package_name.to_string(),
+                    reason: format!("Failed to synthesize API source: {synthesis_error}"),
+                    span: import_span,
+                },
+            )]
+        })?
+    };
+
+    let source_id = context.add_source(source_name, &source_code);
+    context.mark_external_source(source_id);
+
+    let (tokens, lex_errors) =
+        crate::phases::lexing::lexer::tokenize_source(source_id, &source_code);
+    if !lex_errors.is_empty() {
+        let diagnostics = lex_errors
+            .into_iter()
+            .map(|error| CompilationDiagnostic::from(error).with_source_id(source_id))
+            .collect();
+        return Err(diagnostics);
+    }
+    context.tokens[source_id as usize] = tokens;
+
+    let ast = crate::phases::parser::parse_source(
+        source_id,
+        &context.tokens[source_id as usize],
+        &source_code,
+    )
+    .map_err(|parse_errors| {
+        parse_errors
+            .into_iter()
+            .map(|error| CompilationDiagnostic::from(error).with_source_id(source_id))
+            .collect::<Vec<_>>()
+    })?;
+
+    context.ast[source_id as usize] = Some(ast);
     Ok(())
 }
 
@@ -314,54 +361,13 @@ pub fn resolve_extern_import(
 
     // Synthesize API, lex, and parse into context
     if context.loaded_api_packages.insert(package_name.to_string()) {
-        let manifest_json = serde_json::to_string(&solved_package.program.export_manifest)
-            .map_err(|serialize_error| {
-                vec![CompilationDiagnostic::from(
-                    BindingError::ExternalPackageNotFound {
-                        name: package_name.to_string(),
-                        reason: format!("Failed to serialize export manifest: {serialize_error}"),
-                        span: import_span.to_source_span(),
-                    },
-                )]
-            })?;
-
-        let (source_name, source_code) =
-            manifest_to_source(&manifest_json).map_err(|synthesis_error| {
-                vec![CompilationDiagnostic::from(
-                    BindingError::ExternalPackageNotFound {
-                        name: package_name.to_string(),
-                        reason: format!("Failed to synthesize API source: {synthesis_error}"),
-                        span: import_span.to_source_span(),
-                    },
-                )]
-            })?;
-
-        let source_id = context.add_source(source_name, &source_code);
-
-        let (tokens, lex_errors) =
-            crate::phases::lexing::lexer::tokenize_source(source_id, &source_code);
-        if !lex_errors.is_empty() {
-            let diagnostics = lex_errors
-                .into_iter()
-                .map(|err| CompilationDiagnostic::from(err).with_source_id(source_id))
-                .collect();
-            return Err(diagnostics);
-        }
-        context.tokens[source_id as usize] = tokens;
-
-        let ast = crate::phases::parser::parse_source(
-            source_id,
-            &context.tokens[source_id as usize],
-            &source_code,
-        )
-        .map_err(|parse_errors| {
-            parse_errors
-                .into_iter()
-                .map(|err| CompilationDiagnostic::from(err).with_source_id(source_id))
-                .collect::<Vec<_>>()
-        })?;
-
-        context.ast[source_id as usize] = Some(ast);
+        ingest_package_api_source(
+            package_name,
+            solved_package.version,
+            &solved_package.program,
+            import_span.to_source_span(),
+            context,
+        )?;
     }
 
     Ok(())
@@ -419,54 +425,13 @@ fn resolve_transitive_requirement(
     );
 
     if context.loaded_api_packages.insert(requirement.name.clone()) {
-        let manifest_json = serde_json::to_string(&solved_package.program.export_manifest)
-            .map_err(|serialize_error| {
-                vec![CompilationDiagnostic::from(
-                    BindingError::ExternalPackageNotFound {
-                        name: requirement.name.clone(),
-                        reason: format!("Failed to serialize export manifest: {serialize_error}"),
-                        span: import_span.to_source_span(),
-                    },
-                )]
-            })?;
-
-        let (source_name, source_code) =
-            manifest_to_source(&manifest_json).map_err(|synthesis_error| {
-                vec![CompilationDiagnostic::from(
-                    BindingError::ExternalPackageNotFound {
-                        name: requirement.name.clone(),
-                        reason: format!("Failed to synthesize API source: {synthesis_error}"),
-                        span: import_span.to_source_span(),
-                    },
-                )]
-            })?;
-
-        let source_id = context.add_source(source_name, &source_code);
-
-        let (tokens, lex_errors) =
-            crate::phases::lexing::lexer::tokenize_source(source_id, &source_code);
-        if !lex_errors.is_empty() {
-            let diagnostics = lex_errors
-                .into_iter()
-                .map(|err| CompilationDiagnostic::from(err).with_source_id(source_id))
-                .collect();
-            return Err(diagnostics);
-        }
-        context.tokens[source_id as usize] = tokens;
-
-        let ast = crate::phases::parser::parse_source(
-            source_id,
-            &context.tokens[source_id as usize],
-            &source_code,
-        )
-        .map_err(|parse_errors| {
-            parse_errors
-                .into_iter()
-                .map(|err| CompilationDiagnostic::from(err).with_source_id(source_id))
-                .collect::<Vec<_>>()
-        })?;
-
-        context.ast[source_id as usize] = Some(ast);
+        ingest_package_api_source(
+            &requirement.name,
+            solved_package.version,
+            &solved_package.program,
+            import_span.to_source_span(),
+            context,
+        )?;
     }
 
     Ok(())

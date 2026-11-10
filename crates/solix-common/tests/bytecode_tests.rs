@@ -409,6 +409,8 @@ fn test_export_manifest_json_extraction() {
         exported_functions: vec![exported_func],
         exported_statics: vec![exported_static],
         generic_templates: vec![generic_template],
+        api_header: String::new(),
+        exported_ast_bytes: Vec::new(),
     };
 
     let manifest_json = extract_api_manifest(&program).expect("json extraction succeeds");
@@ -451,6 +453,8 @@ fn test_binary_program_manifest_round_trip() {
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        api_header: String::new(),
+        exported_ast_bytes: Vec::new(),
     };
 
     let bytes = program.to_bytes();

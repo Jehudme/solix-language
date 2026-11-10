@@ -23,6 +23,30 @@ pub enum BuildProfile {
     Test,
 }
 
+/// Binary linking mode for compiled executables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkMode {
+    /// Deserializes external signatures and links dynamically via `OpCode::CallExtern`.
+    #[default]
+    Dynamic,
+    /// Merges reachable dependency functions into a single standalone binary.
+    Static,
+}
+
+impl std::str::FromStr for LinkMode {
+    type Err = String;
+
+    fn from_str(input_str: &str) -> Result<Self, Self::Err> {
+        match input_str.to_ascii_lowercase().as_str() {
+            "dynamic" => Ok(Self::Dynamic),
+            "static" => Ok(Self::Static),
+            other => Err(format!(
+                "Invalid link mode '{other}', expected 'dynamic' or 'static'"
+            )),
+        }
+    }
+}
+
 impl std::str::FromStr for BuildProfile {
     type Err = String;
 
@@ -75,6 +99,8 @@ pub struct CompilationOptions {
     pub dependency_specs: Vec<DependencyRequirement>,
     /// Pluggable module solver for fetching missing/transitive dependencies.
     pub solver: Option<Arc<dyn ModuleSolver>>,
+    /// Linking mode for dependencies and executable emission (`dynamic` or `static`).
+    pub link_mode: LinkMode,
 }
 
 impl Default for CompilationOptions {
@@ -100,7 +126,15 @@ impl CompilationOptions {
             dependency_binaries: Vec::new(),
             dependency_specs: Vec::new(),
             solver: None,
+            link_mode: LinkMode::Dynamic,
         }
+    }
+
+    /// Sets the binary linking mode (`dynamic` or `static`).
+    #[must_use]
+    pub fn with_link_mode(mut self, link_mode: LinkMode) -> Self {
+        self.link_mode = link_mode;
+        self
     }
 
     /// Sets the build profile, automatically configuring optimization passes.
@@ -232,6 +266,8 @@ pub struct CompilationContext {
     pub dependencies_map: HashMap<String, DependencyRequirement>,
     /// Set of package names whose API sources have already been synthesized and loaded into context.
     pub loaded_api_packages: HashSet<String>,
+    /// Set of source IDs originating from external dependency packages.
+    pub external_source_ids: HashSet<u16>,
     /// Pluggable module solver reference for resolving external modules.
     pub solver: Option<Arc<dyn ModuleSolver>>,
 }
@@ -290,8 +326,20 @@ impl CompilationContext {
             extensions: HashMap::new(),
             dependencies_map: HashMap::new(),
             loaded_api_packages: HashSet::new(),
+            external_source_ids: HashSet::new(),
             solver,
         }
+    }
+
+    /// Returns whether a given `source_id` originated from an external dependency.
+    #[must_use]
+    pub fn is_external_source(&self, source_id: u16) -> bool {
+        self.external_source_ids.contains(&source_id)
+    }
+
+    /// Marks a given `source_id` as originating from an external dependency.
+    pub fn mark_external_source(&mut self, source_id: u16) {
+        self.external_source_ids.insert(source_id);
     }
 
     /// Registers an additional source file dynamically, returning its assigned `source_id`.

@@ -170,6 +170,12 @@ pub struct ExportManifest {
     pub exported_statics: Vec<ExportedStatic>,
     /// Uninstantiated generic templates for downstream monomorphization.
     pub generic_templates: Vec<ExportedGenericTemplate>,
+    /// Compact generated Solix API declaration source (using `pkg::Class` syntax).
+    #[serde(default)]
+    pub api_header: String,
+    /// Pre-parsed AST bytes for instant dependency injection without re-parsing.
+    #[serde(default)]
+    pub exported_ast_bytes: Vec<u8>,
 }
 
 /// Extracts the public API manifest from a compiled binary program as a formatted JSON string.

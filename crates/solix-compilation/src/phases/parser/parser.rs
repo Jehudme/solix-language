@@ -254,6 +254,7 @@ struct ParserState<'tokens, 'source> {
     scope_depth: usize,
     inside_class: bool,
     inside_extern_class: bool,
+    inside_generic_class: bool,
     inside_interface: bool,
     enclosing_class_name: Option<String>,
     has_parsed_package: bool,
@@ -271,6 +272,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             scope_depth: 0,
             inside_class: false,
             inside_extern_class: false,
+            inside_generic_class: false,
             inside_interface: false,
             enclosing_class_name: None,
             has_parsed_package: false,
@@ -936,9 +938,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let previous_class_name = self.enclosing_class_name.replace(class_name);
         let previous_inside_class = self.inside_class;
         let previous_inside_extern = self.inside_extern_class;
+        let previous_inside_generic = self.inside_generic_class;
         let previous_destructors = self.destructors_in_class;
         self.inside_class = true;
         self.inside_extern_class = modifiers.contains(&Modifier::Extern);
+        self.inside_generic_class = !generic_params.is_empty();
         self.destructors_in_class = 0;
 
         let mut members = Vec::new();
@@ -958,6 +962,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         self.enclosing_class_name = previous_class_name;
         self.inside_class = previous_inside_class;
         self.inside_extern_class = previous_inside_extern;
+        self.inside_generic_class = previous_inside_generic;
         self.destructors_in_class = previous_destructors;
 
         Ok(ClassDeclaration {
@@ -1391,7 +1396,10 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     span: name_span.to_source_span(),
                 });
             }
-            if is_extern {
+            let has_variadic_param = parameters.iter().any(|param| param.is_variadic);
+            let is_generic_method =
+                !generic_params.is_empty() || has_variadic_param || self.inside_generic_class;
+            if is_extern && !is_generic_method && !modifiers.contains(&Modifier::Inline) {
                 self.record_error(ParsingError::ExternWithBody {
                     span: name_span.to_source_span(),
                 });
@@ -1462,7 +1470,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let is_extern = self.inside_extern_class || modifiers.contains(&Modifier::Extern);
         let body = if self.cursor.check(TokenKind::PunctuationOpenBrace) {
-            if is_extern {
+            let has_variadic_param = parameters.iter().any(|param| param.is_variadic);
+            if is_extern
+                && !has_variadic_param
+                && !self.inside_generic_class
+                && !modifiers.contains(&Modifier::Inline)
+            {
                 self.record_error(ParsingError::ExternWithBody {
                     span: name_span.to_source_span(),
                 });

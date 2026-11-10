@@ -3,12 +3,13 @@
 #![forbid(unsafe_code)]
 
 use crate::span::Span;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::sync::LazyLock;
 
 /// Token classification category representing every terminal symbol in the Solix grammar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum TokenKind {
     // ------------------------------------------------------------------------
     // Special & Unknown

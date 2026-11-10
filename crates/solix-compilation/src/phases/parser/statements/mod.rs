@@ -15,9 +15,10 @@ pub use modules::*;
 pub use types::*;
 
 use crate::phases::lexing::Span;
+use serde::{Deserialize, Serialize};
 
 /// High-level statement variants executable within blocks or compilation units.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Statement {
     /// Compound block statement.
     Block(BlockStatement),
@@ -79,7 +80,7 @@ impl Statement {
 }
 
 /// Root Abstract Syntax Tree container representing a complete parsed compilation unit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProgramAst {
     /// Identifier indexing the originating source file in `CompilationContext`.
     pub source_id: u16,

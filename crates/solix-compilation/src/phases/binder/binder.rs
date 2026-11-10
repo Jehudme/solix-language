@@ -56,6 +56,12 @@ pub fn bind_context(
     let sources_count = context.sources.len();
 
     let mut symbol_table = SymbolTable::with_sources_count(sources_count);
+    for dependency_name in context.dependencies_map.keys() {
+        crate::phases::binder::passes::pass1_symbol_discovery::register_known_package(
+            &mut symbol_table,
+            &dependency_name.replace('.', "::"),
+        );
+    }
     let mut blueprint_registry = GenericBlueprintRegistry::default();
     let mut layouts = HashMap::new();
     let mut node_types = HashMap::new();

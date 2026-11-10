@@ -6,9 +6,10 @@ use crate::phases::lexing::{Span, TokenKind};
 use crate::phases::parser::statements::control_flow::BlockStatement;
 use crate::phases::parser::statements::expressions::Expression;
 use crate::phases::parser::statements::types::TypeAnnotation;
+use serde::{Deserialize, Serialize};
 
 /// Visibility and behavioral declaration modifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Modifier {
     /// Public accessibility (`public`).
     Public,
@@ -63,7 +64,7 @@ impl Modifier {
 /// Generic type parameter definition with optional type bounds.
 ///
 /// Syntax: `<T>` or `<T : BaseType>`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenericParameter {
     /// Overall source coordinate span.
     pub span: Span,
@@ -76,7 +77,7 @@ pub struct GenericParameter {
 }
 
 /// Formal parameter declaration within a function, method, or constructor.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Parameter {
     /// Overall source coordinate span covering type, name, and optional default.
     pub span: Span,
@@ -91,7 +92,7 @@ pub struct Parameter {
 }
 
 /// Enumeration variant member (`Variant` or `Variant = 42`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnumVariant {
     /// Overall source coordinate span of the variant.
     pub span: Span,
@@ -102,7 +103,7 @@ pub struct EnumVariant {
 }
 
 /// Field member declared inside a class or struct.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldDeclaration {
     /// Overall source coordinate span from modifiers to `;`.
     pub span: Span,
@@ -121,7 +122,7 @@ pub struct FieldDeclaration {
 }
 
 /// Method or function declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MethodDeclaration {
     /// Overall source coordinate span from modifiers to closing `}` or `;`.
     pub span: Span,
@@ -144,7 +145,7 @@ pub struct MethodDeclaration {
 }
 
 /// Class constructor declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConstructorDeclaration {
     /// Overall source coordinate span.
     pub span: Span,
@@ -161,7 +162,7 @@ pub struct ConstructorDeclaration {
 }
 
 /// Class destructor / cleanup declaration (`~ClassName() { ... }`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DestructorDeclaration {
     /// Overall source coordinate span from `~` to `}`.
     pub span: Span,
@@ -172,7 +173,7 @@ pub struct DestructorDeclaration {
 }
 
 /// Operator overload method declaration (`operator +(...) -> RetType { ... }`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OperatorDeclaration {
     /// Overall source coordinate span.
     pub span: Span,
@@ -191,7 +192,7 @@ pub struct OperatorDeclaration {
 }
 
 /// Discrete member declared within a class body.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClassMember {
     /// Field declaration.
     Field(FieldDeclaration),
@@ -212,7 +213,7 @@ pub enum ClassMember {
 }
 
 /// Class type declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClassDeclaration {
     /// Overall source coordinate span from modifiers to closing `}`.
     pub span: Span,
@@ -235,7 +236,7 @@ pub struct ClassDeclaration {
 }
 
 /// Interface type declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterfaceDeclaration {
     /// Overall source coordinate span.
     pub span: Span,
@@ -256,7 +257,7 @@ pub struct InterfaceDeclaration {
 }
 
 /// Enumeration type declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnumDeclaration {
     /// Overall source coordinate span.
     pub span: Span,
@@ -273,7 +274,7 @@ pub struct EnumDeclaration {
 }
 
 /// High-level declaration variants permitted in Solix programs.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Declaration {
     /// Class type declaration.
     Class(ClassDeclaration),

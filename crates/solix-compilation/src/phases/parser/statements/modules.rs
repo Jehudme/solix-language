@@ -4,11 +4,12 @@
 
 use crate::phases::lexing::Span;
 use crate::phases::parser::statements::types::TypeAnnotation;
+use serde::{Deserialize, Serialize};
 
 /// Package declaration statement indicating the namespace of the compilation unit.
 ///
 /// Syntax: `package my.organization.pkg;`
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageStatement {
     /// Overall source coordinate span from `package` keyword to `;`.
     pub span: Span,
@@ -22,7 +23,7 @@ pub struct PackageStatement {
 /// - `import std.collections.List;`
 /// - `import std.math.*;`
 /// - `import std.io.File as SolixFile;`
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportStatement {
     /// Overall source coordinate span from `import` keyword to `;`.
     pub span: Span,
@@ -41,7 +42,7 @@ pub struct ImportStatement {
 /// Syntax:
 /// - `alias Byte = uint8;`
 /// - `alias StringMap<V> = Map<string, V>;`
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AliasStatement {
     /// Overall source coordinate span from `alias` keyword to `;`.
     pub span: Span,

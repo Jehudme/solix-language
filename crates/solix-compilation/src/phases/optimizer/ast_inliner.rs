@@ -52,26 +52,40 @@ impl CompilationPhase for AstInlinerPhase {
         let mut inlinable_functions: HashMap<String, InlinableFunctionInfo> = HashMap::new();
 
         let mut free_func_counts: HashMap<&str, usize> = HashMap::new();
-        for ast in context.ast.iter().flatten() {
+        for (source_index, ast_option) in context.ast.iter().enumerate() {
+            let source_id = source_index as u16;
+            if context.is_external_source(source_id) {
+                continue;
+            }
+            let ast = match ast_option {
+                Some(ast_ref) => ast_ref,
+                None => continue,
+            };
             for declaration in &ast.declarations {
-                if let Declaration::Method(method) = declaration {
-                    let name_src = method.name_span.id as usize;
-                    if name_src < context.sources.len() {
-                        let name = &context.sources[name_src]
-                            [method.name_span.start as usize..method.name_span.end as usize];
-                        *free_func_counts.entry(name).or_insert(0) += 1;
-                    }
+                if let Declaration::Method(method) = declaration
+                    && source_index < context.sources.len()
+                {
+                    let name = &context.sources[source_index]
+                        [method.name_span.start as usize..method.name_span.end as usize];
+                    *free_func_counts.entry(name).or_insert(0) += 1;
                 }
             }
         }
 
-        for ast in context.ast.iter().flatten() {
+        for (source_index, ast_option) in context.ast.iter().enumerate() {
+            let source_id = source_index as u16;
+            if context.is_external_source(source_id) {
+                continue;
+            }
+            let ast = match ast_option {
+                Some(ast_ref) => ast_ref,
+                None => continue,
+            };
             for declaration in &ast.declarations {
                 match declaration {
                     Declaration::Method(method) => {
-                        let name_src = method.name_span.id as usize;
-                        let method_name = if name_src < context.sources.len() {
-                            &context.sources[name_src]
+                        let method_name = if source_index < context.sources.len() {
+                            &context.sources[source_index]
                                 [method.name_span.start as usize..method.name_span.end as usize]
                         } else {
                             ""
@@ -89,33 +103,30 @@ impl CompilationPhase for AstInlinerPhase {
                     }
                     Declaration::Class(class_decl) => {
                         let is_generic_class = !class_decl.generic_params.is_empty();
-                        let class_name =
-                            if (class_decl.name_span.id as usize) < context.sources.len() {
-                                let source = &context.sources[class_decl.name_span.id as usize];
-                                &source[class_decl.name_span.start as usize
-                                    ..class_decl.name_span.end as usize]
-                            } else {
-                                ""
-                            };
+                        let class_name = if source_index < context.sources.len() {
+                            let source = &context.sources[source_index];
+                            &source[class_decl.name_span.start as usize
+                                ..class_decl.name_span.end as usize]
+                        } else {
+                            ""
+                        };
 
                         let mut method_counts: HashMap<&str, usize> = HashMap::new();
                         for member in &class_decl.members {
-                            if let ClassMember::Method(method) = member {
-                                let name_src = method.name_span.id as usize;
-                                if name_src < context.sources.len() {
-                                    let name = &context.sources[name_src][method.name_span.start
-                                        as usize
-                                        ..method.name_span.end as usize];
-                                    *method_counts.entry(name).or_insert(0) += 1;
-                                }
+                            if let ClassMember::Method(method) = member
+                                && source_index < context.sources.len()
+                            {
+                                let name = &context.sources[source_index][method.name_span.start
+                                    as usize
+                                    ..method.name_span.end as usize];
+                                *method_counts.entry(name).or_insert(0) += 1;
                             }
                         }
 
                         for member in &class_decl.members {
                             if let ClassMember::Method(method) = member {
-                                let name_src = method.name_span.id as usize;
-                                let method_name = if name_src < context.sources.len() {
-                                    &context.sources[name_src][method.name_span.start as usize
+                                let method_name = if source_index < context.sources.len() {
+                                    &context.sources[source_index][method.name_span.start as usize
                                         ..method.name_span.end as usize]
                                 } else {
                                     ""
@@ -153,6 +164,10 @@ impl CompilationPhase for AstInlinerPhase {
 
         let ast_count = context.ast.len();
         for ast_index in 0..ast_count {
+            let source_id = ast_index as u16;
+            if context.is_external_source(source_id) {
+                continue;
+            }
             if let Some(mut current_ast) = context.ast[ast_index].take() {
                 // Inline calls in root statements
                 for statement in &mut current_ast.root_statements {

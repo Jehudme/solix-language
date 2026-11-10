@@ -6,9 +6,10 @@ use crate::phases::lexing::{Span, TokenKind};
 use crate::phases::parser::statements::control_flow::BlockStatement;
 use crate::phases::parser::statements::declarations::Parameter;
 use crate::phases::parser::statements::types::TypeAnnotation;
+use serde::{Deserialize, Serialize};
 
 /// Evaluated literal constant value parsed from source code.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LiteralValue {
     /// 64-bit signed integer value.
     Int(i64),
@@ -27,7 +28,7 @@ pub enum LiteralValue {
 }
 
 /// Body representation for a lambda closure expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LambdaBody {
     /// Single expression body (e.g. `(x) => x + 1`).
     Expression(Box<Expression>),
@@ -36,7 +37,7 @@ pub enum LambdaBody {
 }
 
 /// Abstract Syntax Tree node representing a Solix expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expression {
     /// Literal constant value (numbers, strings, booleans, null).
     Literal {

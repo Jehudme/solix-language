@@ -43,10 +43,15 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         } else if args.api {
             let mut reconstructed_apis = String::new();
             for (name, program) in &inspection.binaries {
-                let manifest_json = extract_api_manifest(program)
-                    .with_context(|| format!("Failed to extract API manifest from '{name}'"))?;
-                let (_, api_source) = manifest_to_source(&manifest_json)
-                    .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+                let api_source = if !program.export_manifest.api_header.is_empty() {
+                    program.export_manifest.api_header.clone()
+                } else {
+                    let manifest_json = extract_api_manifest(program)
+                        .with_context(|| format!("Failed to extract API manifest from '{name}'"))?;
+                    let (_, fallback_source) = manifest_to_source(&manifest_json)
+                        .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+                    fallback_source
+                };
                 let _ = writeln!(reconstructed_apis, "// === Interface API for '{name}' ===");
                 reconstructed_apis.push_str(&api_source);
                 reconstructed_apis.push('\n');
@@ -112,11 +117,15 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
     let content = if args.disasm {
         disassemble_program(&program)
     } else if args.api {
-        let manifest_json = extract_api_manifest(&program)
-            .with_context(|| "Failed to extract API manifest from binary")?;
-        let (_, api_source) =
-            manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
-        api_source
+        if !program.export_manifest.api_header.is_empty() {
+            program.export_manifest.api_header.clone()
+        } else {
+            let manifest_json = extract_api_manifest(&program)
+                .with_context(|| "Failed to extract API manifest from binary")?;
+            let (_, api_source) =
+                manifest_to_source(&manifest_json).map_err(|error| anyhow::anyhow!("{error:?}"))?;
+            api_source
+        }
     } else if args.json {
         extract_api_manifest(&program)
             .with_context(|| "Failed to extract JSON manifest from binary")?

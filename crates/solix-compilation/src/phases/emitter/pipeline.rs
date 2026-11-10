@@ -387,9 +387,13 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         .map(|ba| &ba.symbol_table)
         .unwrap_or(&dummy_sym_table);
 
-    for (src_id, ast_opt) in context.ast.iter().enumerate() {
+    for (source_index, ast_opt) in context.ast.iter().enumerate() {
+        let source_id = source_index as u16;
+        if context.is_external_source(source_id) {
+            continue;
+        }
         if let Some(ast) = ast_opt {
-            let code = &context.sources[src_id];
+            let code = &context.sources[source_index];
             for decl in &ast.declarations {
                 match decl {
                     Declaration::Class(cls) => {
@@ -857,6 +861,9 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     dependencies
         .sort_by(|requirement_a, requirement_b| requirement_a.name.cmp(&requirement_b.name));
 
+    let (api_header, exported_ast_bytes) =
+        crate::phases::export_api::generate_api_header_and_ast(context);
+
     program.export_manifest = ExportManifest {
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
@@ -867,6 +874,8 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         exported_functions,
         exported_statics,
         generic_templates,
+        api_header,
+        exported_ast_bytes,
     };
 
     Ok(EmissionArtifacts {

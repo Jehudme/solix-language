@@ -36,6 +36,14 @@ impl CompilationPhase for LexerPhase {
 
         for source_index in 0..sources_count {
             let source_id = source_index as u16;
+            if context
+                .ast
+                .get(source_index)
+                .and_then(|ast_option| ast_option.as_ref())
+                .is_some()
+            {
+                continue;
+            }
             let source_text = &context.sources[source_index];
 
             match crate::phases::lexing::lex_source(source_id, source_text) {
@@ -43,9 +51,9 @@ impl CompilationPhase for LexerPhase {
                     context.tokens[source_index] = tokens;
                 }
                 Err(errors) => {
-                    for err in errors {
+                    for error in errors {
                         accumulated_diagnostics
-                            .push(CompilationDiagnostic::from(err).with_source_id(source_id));
+                            .push(CompilationDiagnostic::from(error).with_source_id(source_id));
                     }
                 }
             }
@@ -86,6 +94,14 @@ impl CompilationPhase for ParserPhase {
 
         for source_index in 0..sources_count {
             let source_id = source_index as u16;
+            if context
+                .ast
+                .get(source_index)
+                .and_then(|ast_option| ast_option.as_ref())
+                .is_some()
+            {
+                continue;
+            }
             let source_text = &context.sources[source_index];
             let tokens = context
                 .tokens
@@ -99,9 +115,9 @@ impl CompilationPhase for ParserPhase {
                 }
                 Err(errors) => {
                     context.ast[source_index] = None;
-                    for err in errors {
+                    for error in errors {
                         accumulated_diagnostics
-                            .push(CompilationDiagnostic::from(err).with_source_id(source_id));
+                            .push(CompilationDiagnostic::from(error).with_source_id(source_id));
                     }
                 }
             }
