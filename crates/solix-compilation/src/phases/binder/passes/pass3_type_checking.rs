@@ -300,28 +300,27 @@ impl<'a> TypeCheckingVisitor<'a> {
                             ));
 
                         // Check if left class implements operator == or != or < etc.
-                        if !is_null_comparison {
-                            if let Type::Class {
+                        if !is_null_comparison
+                            && let Type::Class {
                                 ref symbol_name, ..
                             } = left_type
+                        {
+                            let op_name = format!("operator_{}", operator.as_static_str());
+                            if let Some(class_id) = self
+                                .symbol_table
+                                .resolve_symbol(self.source_id, symbol_name)
+                                && let Some(class_entry) =
+                                    self.symbol_table.get_symbol(class_id)
                             {
-                                let op_name = format!("operator_{}", operator.as_static_str());
-                                if let Some(class_id) = self
-                                    .symbol_table
-                                    .resolve_symbol(self.source_id, symbol_name)
-                                    && let Some(class_entry) =
-                                        self.symbol_table.get_symbol(class_id)
-                                {
-                                    for &child_id in &class_entry.members {
-                                        if let Some(child_entry) =
-                                            self.symbol_table.get_symbol(child_id)
-                                            && child_entry.name == op_name
-                                            && let Type::FunctionPointer {
-                                                ref return_type, ..
-                                            } = child_entry.symbol_type
-                                        {
-                                            return *return_type.clone();
-                                        }
+                                for &child_id in &class_entry.members {
+                                    if let Some(child_entry) =
+                                        self.symbol_table.get_symbol(child_id)
+                                        && child_entry.name == op_name
+                                        && let Type::FunctionPointer {
+                                            ref return_type, ..
+                                        } = child_entry.symbol_type
+                                    {
+                                        return *return_type.clone();
                                     }
                                 }
                             }

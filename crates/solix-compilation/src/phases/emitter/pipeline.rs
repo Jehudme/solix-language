@@ -409,9 +409,6 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         } else {
                             let mut fields = Vec::new();
                             let mut methods = Vec::new();
-                            // Track whether this class has any generic or variadic methods that
-                            // cannot be expressed as bodiless extern prototypes.
-                            let mut has_generic_methods = false;
 
                             let layout_opt = context.binding_artifacts.as_ref().and_then(|ba| {
                                 ba.layouts.values().find(|l| l.class_name == cls_name)
@@ -475,7 +472,6 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                         if !method_declaration.generic_params.is_empty()
                                             || has_variadic_param
                                         {
-                                            has_generic_methods = true;
                                             continue;
                                         }
 

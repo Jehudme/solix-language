@@ -273,6 +273,6 @@ fn test_symbol_signature_string_canonical_format() {
 
     assert_eq!(
         symbol.to_signature_string(),
-        "solix::models::User find_user_by_email(int64, std::string, bool)"
+        "solix::models::User find_user_by_email(int64, string, bool)"
     );
 }

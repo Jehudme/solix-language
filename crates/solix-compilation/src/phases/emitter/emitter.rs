@@ -1695,79 +1695,78 @@ impl<'a> Emitter<'a> {
                 }
             ));
 
-        if !is_null_comparison {
-            if let Type::Class {
+        if !is_null_comparison
+            && let Type::Class {
                 ref symbol_name, ..
             } = left_type
-            {
-                let simple_cls = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
-                let op_sym = format!("{simple_cls}::operator_{}", operator.as_static_str());
-                let full_op_sym = format!("{symbol_name}::operator_{}", operator.as_static_str());
-                let right_type_name = self.query_type(right.span()).to_string();
-                let right_simple_type = right_type_name
-                    .rsplit([':', '.'])
-                    .next()
-                    .unwrap_or(&right_type_name);
-                let operator_candidates = [
-                    format!("{full_op_sym}({right_type_name})"),
-                    format!("{full_op_sym}({right_simple_type})"),
-                    format!("{op_sym}({right_type_name})"),
-                    format!("{op_sym}({right_simple_type})"),
-                    full_op_sym.clone(),
-                    op_sym.clone(),
-                ];
-                let func_id = self
-                    .function_ids
-                    .and_then(|ids| {
-                        operator_candidates
-                            .iter()
-                            .find_map(|candidate| ids.get(candidate))
-                    })
-                    .copied();
-                if let Some(callee_id) = func_id {
-                    let register_left = self.emit_expression(left, None)?;
-                    let register_right = self.emit_expression(right, None)?;
-                    let window_size = 2; // this, rhs
-                    let arg_base = self.allocator.alloc_window(window_size)?;
+        {
+            let simple_cls = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+            let op_sym = format!("{simple_cls}::operator_{}", operator.as_static_str());
+            let full_op_sym = format!("{symbol_name}::operator_{}", operator.as_static_str());
+            let right_type_name = self.query_type(right.span()).to_string();
+            let right_simple_type = right_type_name
+                .rsplit([':', '.'])
+                .next()
+                .unwrap_or(&right_type_name);
+            let operator_candidates = [
+                format!("{full_op_sym}({right_type_name})"),
+                format!("{full_op_sym}({right_simple_type})"),
+                format!("{op_sym}({right_type_name})"),
+                format!("{op_sym}({right_simple_type})"),
+                full_op_sym.clone(),
+                op_sym.clone(),
+            ];
+            let func_id = self
+                .function_ids
+                .and_then(|ids| {
+                    operator_candidates
+                        .iter()
+                        .find_map(|candidate| ids.get(candidate))
+                })
+                .copied();
+            if let Some(callee_id) = func_id {
+                let register_left = self.emit_expression(left, None)?;
+                let register_right = self.emit_expression(right, None)?;
+                let window_size = 2; // this, rhs
+                let arg_base = self.allocator.alloc_window(window_size)?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, arg_base, register_left, 0),
+                    Some(span),
+                );
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, arg_base + 1, register_right, 0),
+                    Some(span),
+                );
+                self.emit_instruction(
+                    Instruction::format_call(
+                        OpCode::CallDirect,
+                        dst,
+                        callee_id as u16,
+                        arg_base,
+                        window_size as u8,
+                    ),
+                    Some(span),
+                );
+                if self.query_type(left.span()).is_reference_type()
+                    && !self.is_borrowed_reference(left)
+                {
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, arg_base, register_left, 0),
+                        Instruction::format_a(OpCode::DecRef, 0, register_left, 0, 0),
                         Some(span),
                     );
-                    self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, arg_base + 1, register_right, 0),
-                        Some(span),
-                    );
-                    self.emit_instruction(
-                        Instruction::format_call(
-                            OpCode::CallDirect,
-                            dst,
-                            callee_id as u16,
-                            arg_base,
-                            window_size as u8,
-                        ),
-                        Some(span),
-                    );
-                    if self.query_type(left.span()).is_reference_type()
-                        && !self.is_borrowed_reference(left)
-                    {
-                        self.emit_instruction(
-                            Instruction::format_a(OpCode::DecRef, 0, register_left, 0, 0),
-                            Some(span),
-                        );
-                    }
-                    if self.query_type(right.span()).is_reference_type()
-                        && !self.is_borrowed_reference(right)
-                    {
-                        self.emit_instruction(
-                            Instruction::format_a(OpCode::DecRef, 0, register_right, 0, 0),
-                            Some(span),
-                        );
-                    }
-                    self.allocator.free_window(arg_base, window_size);
-                    self.allocator.free_temp(register_left);
-                    self.allocator.free_temp(register_right);
-                    return Ok(());
                 }
+                if self.query_type(right.span()).is_reference_type()
+                    && !self.is_borrowed_reference(right)
+                {
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::DecRef, 0, register_right, 0, 0),
+                        Some(span),
+                    );
+                }
+                self.allocator.free_window(arg_base, window_size);
+                self.allocator.free_temp(register_left);
+                self.allocator.free_temp(register_right);
+                return Ok(());
             }
         }
 
