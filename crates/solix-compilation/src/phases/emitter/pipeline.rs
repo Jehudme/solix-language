@@ -5,6 +5,9 @@
 use crate::CompilationContext::CompilationContext;
 use crate::phases::binder::SymbolId;
 use crate::phases::binder::layout::ClassLayout;
+use crate::phases::binder::passes::pass1_symbol_discovery::{
+    compute_effective_package, extract_namespace_path,
+};
 use crate::phases::binder::symbols::SymbolTable;
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::emitter::constant_pool::ConstantPoolBuilder;
@@ -448,9 +451,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
                                         // Skip private methods — they are implementation details
                                         // and must not appear in the extern class header.
-                                        if method_declaration
-                                            .modifiers
-                                            .contains(&Modifier::Private)
+                                        if method_declaration.modifiers.contains(&Modifier::Private)
                                         {
                                             continue;
                                         }
@@ -1238,39 +1239,50 @@ fn index_function_symbols(
     next_func_id: &mut u32,
     generic_invocations: &HashMap<(String, String), Vec<String>>,
 ) {
-    let src_idx = ast.source_id as usize;
-    if src_idx >= sources.len() {
+    let source_index = ast.source_id as usize;
+    if source_index >= sources.len() {
         return;
     }
-    let code = &sources[src_idx];
+    let source_code = &sources[source_index];
 
-    let pkg_prefix = ast.package.as_ref().map(|pkg| {
-        pkg.path
-            .iter()
-            .map(|s| get_span_text(*s, code))
-            .collect::<Vec<_>>()
-            .join(".")
-    });
+    let raw_file_package = ast
+        .package
+        .as_ref()
+        .map(|pkg| {
+            pkg.path
+                .iter()
+                .map(|span| get_span_text(*span, source_code))
+                .collect::<Vec<_>>()
+                .join("::")
+        })
+        .unwrap_or_default();
 
-    for decl in &ast.declarations {
-        if let Declaration::Method(m) = decl {
-            if m.modifiers.contains(&Modifier::Extern) {
+    for declaration in &ast.declarations {
+        if let Declaration::Method(method_declaration) = declaration {
+            if method_declaration.modifiers.contains(&Modifier::Extern) {
                 continue;
             }
-            let name = get_span_text(m.name_span, code);
+            let method_name = get_span_text(method_declaration.name_span, source_code);
+            let decl_namespace =
+                extract_namespace_path(&method_declaration.namespace_path, source_code);
+            let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
+
             let func_id = *next_func_id;
             *next_func_id += 1;
-            function_ids.insert(name.to_string(), func_id);
-            if let Some(ref pkg) = pkg_prefix {
-                let full_pkg_name = format!("{pkg}.{name}");
-                function_ids.insert(full_pkg_name, func_id);
+            function_ids.insert(method_name.to_string(), func_id);
+            if !effective_package.is_empty() {
+                let full_colon_name = format!("{effective_package}::{method_name}");
+                let full_dot_name =
+                    format!("{}.{method_name}", effective_package.replace("::", "."));
+                function_ids.insert(full_colon_name, func_id);
+                function_ids.insert(full_dot_name, func_id);
             }
-            if !m.generic_params.is_empty()
+            if !method_declaration.generic_params.is_empty()
                 && let Some(specialization_args) =
-                    generic_invocations.get(&(String::new(), name.to_string()))
+                    generic_invocations.get(&(String::new(), method_name.to_string()))
             {
                 for args_str in specialization_args {
-                    let specialized_sym = format!("{name}<{args_str}>");
+                    let specialized_sym = format!("{method_name}<{args_str}>");
                     let spec_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(specialized_sym.clone(), spec_id);
@@ -1279,71 +1291,109 @@ fn index_function_symbols(
         }
     }
 
-    for cls in collect_classes(&ast.declarations) {
-        if cls.modifiers.contains(&Modifier::Extern) {
+    for class_declaration in collect_classes(&ast.declarations) {
+        if class_declaration.modifiers.contains(&Modifier::Extern) {
             continue;
         }
-        let cls_name = get_span_text(cls.name_span, code);
-        for member in &cls.members {
+        let class_name = get_span_text(class_declaration.name_span, source_code);
+        let decl_namespace = extract_namespace_path(&class_declaration.namespace_path, source_code);
+        let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
+        let qualified_class_name = if effective_package.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{effective_package}::{class_name}")
+        };
+        let dot_class_name = if effective_package.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{}.{class_name}", effective_package.replace("::", "."))
+        };
+
+        for member in &class_declaration.members {
             match member {
-                ClassMember::Method(m) => {
-                    if m.modifiers.contains(&Modifier::Extern) {
+                ClassMember::Method(method_declaration) => {
+                    if method_declaration.modifiers.contains(&Modifier::Extern) {
                         continue;
                     }
-                    let method_name = get_span_text(m.name_span, code);
-                    let param_sig = m
+                    let method_name = get_span_text(method_declaration.name_span, source_code);
+                    let param_sig = method_declaration
                         .parameters
                         .iter()
-                        .map(|p| get_span_text(p.param_type.span(), code))
+                        .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
                         .collect::<Vec<_>>()
                         .join(",");
                     let full_sym_mangled = if param_sig.is_empty() {
-                        format!("{cls_name}::{method_name}")
+                        format!("{class_name}::{method_name}")
                     } else {
-                        format!("{cls_name}::{method_name}({param_sig})")
+                        format!("{class_name}::{method_name}({param_sig})")
                     };
-                    let full_sym = format!("{cls_name}::{method_name}");
+                    let full_sym = format!("{class_name}::{method_name}");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym_mangled.clone(), func_id);
                     function_ids.entry(full_sym.clone()).or_insert(func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name_mangled = format!("{pkg}.{full_sym_mangled}");
-                        let full_pkg_name = format!("{pkg}.{full_sym}");
-                        function_ids.insert(full_pkg_name_mangled, func_id);
-                        function_ids.entry(full_pkg_name).or_insert(func_id);
+
+                    if !effective_package.is_empty() {
+                        let qualified_sym_mangled = if param_sig.is_empty() {
+                            format!("{qualified_class_name}::{method_name}")
+                        } else {
+                            format!("{qualified_class_name}::{method_name}({param_sig})")
+                        };
+                        let qualified_sym = format!("{qualified_class_name}::{method_name}");
+                        function_ids.insert(qualified_sym_mangled, func_id);
+                        function_ids.entry(qualified_sym).or_insert(func_id);
+
+                        let dot_sym_mangled = if param_sig.is_empty() {
+                            format!("{dot_class_name}::{method_name}")
+                        } else {
+                            format!("{dot_class_name}::{method_name}({param_sig})")
+                        };
+                        let dot_sym = format!("{dot_class_name}::{method_name}");
+                        function_ids.insert(dot_sym_mangled, func_id);
+                        function_ids.entry(dot_sym).or_insert(func_id);
                     }
-                    if !m.generic_params.is_empty()
+
+                    if !method_declaration.generic_params.is_empty()
                         && let Some(specialization_args) = generic_invocations
-                            .get(&(cls_name.to_string(), method_name.to_string()))
+                            .get(&(class_name.to_string(), method_name.to_string()))
                     {
                         for args_str in specialization_args {
-                            let specialized_sym = format!("{cls_name}::{method_name}<{args_str}>");
+                            let specialized_sym =
+                                format!("{class_name}::{method_name}<{args_str}>");
                             let spec_id = *next_func_id;
                             *next_func_id += 1;
                             function_ids.insert(specialized_sym.clone(), spec_id);
                             function_ids.insert(format!("{method_name}<{args_str}>"), spec_id);
+                            if !effective_package.is_empty() {
+                                function_ids.insert(
+                                    format!("{qualified_class_name}::{method_name}<{args_str}>"),
+                                    spec_id,
+                                );
+                            }
                         }
                     }
                 }
-                ClassMember::Constructor(ctor) => {
-                    if ctor.modifiers.contains(&Modifier::Extern) {
+                ClassMember::Constructor(constructor_declaration) => {
+                    if constructor_declaration
+                        .modifiers
+                        .contains(&Modifier::Extern)
+                    {
                         continue;
                     }
-                    let arity = ctor.parameters.len();
-                    let param_sig = ctor
+                    let arity = constructor_declaration.parameters.len();
+                    let param_sig = constructor_declaration
                         .parameters
                         .iter()
-                        .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                        .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
                         .collect::<Vec<_>>()
                         .join(",");
                     let full_sym_mangled = if param_sig.is_empty() {
-                        format!("{cls_name}::constructor")
+                        format!("{class_name}::constructor")
                     } else {
-                        format!("{cls_name}::constructor({param_sig})")
+                        format!("{class_name}::constructor({param_sig})")
                     };
-                    let full_sym_arity = format!("{cls_name}::constructor/{arity}");
-                    let full_sym = format!("{cls_name}::constructor");
+                    let full_sym_arity = format!("{class_name}::constructor/{arity}");
+                    let full_sym = format!("{class_name}::constructor");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym_mangled.clone(), func_id);
@@ -1351,74 +1401,107 @@ fn index_function_symbols(
                         .entry(full_sym_arity.clone())
                         .or_insert(func_id);
                     function_ids.entry(full_sym.clone()).or_insert(func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name_mangled = format!("{pkg}.{full_sym_mangled}");
-                        let full_pkg_name_arity = format!("{pkg}.{full_sym_arity}");
-                        let full_pkg_name = format!("{pkg}.{full_sym}");
-                        function_ids.insert(full_pkg_name_mangled, func_id);
-                        function_ids.entry(full_pkg_name_arity).or_insert(func_id);
-                        function_ids.entry(full_pkg_name).or_insert(func_id);
+
+                    if !effective_package.is_empty() {
+                        let qualified_sym_mangled = if param_sig.is_empty() {
+                            format!("{qualified_class_name}::constructor")
+                        } else {
+                            format!("{qualified_class_name}::constructor({param_sig})")
+                        };
+                        let qualified_sym_arity =
+                            format!("{qualified_class_name}::constructor/{arity}");
+                        let qualified_sym = format!("{qualified_class_name}::constructor");
+                        function_ids.insert(qualified_sym_mangled, func_id);
+                        function_ids.entry(qualified_sym_arity).or_insert(func_id);
+                        function_ids.entry(qualified_sym).or_insert(func_id);
+
+                        let dot_sym_mangled = if param_sig.is_empty() {
+                            format!("{dot_class_name}::constructor")
+                        } else {
+                            format!("{dot_class_name}::constructor({param_sig})")
+                        };
+                        let dot_sym_arity = format!("{dot_class_name}::constructor/{arity}");
+                        let dot_sym = format!("{dot_class_name}::constructor");
+                        function_ids.insert(dot_sym_mangled, func_id);
+                        function_ids.entry(dot_sym_arity).or_insert(func_id);
+                        function_ids.entry(dot_sym).or_insert(func_id);
                     }
                 }
                 ClassMember::Destructor(_) => {
-                    let full_sym = format!("{cls_name}::~destructor");
+                    let full_sym = format!("{class_name}::~destructor");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym, func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name = format!("{pkg}.{cls_name}::~destructor");
-                        function_ids.insert(full_pkg_name, func_id);
+                    if !effective_package.is_empty() {
+                        let qualified_sym = format!("{qualified_class_name}::~destructor");
+                        let dot_sym = format!("{dot_class_name}::~destructor");
+                        function_ids.insert(qualified_sym, func_id);
+                        function_ids.insert(dot_sym, func_id);
                     }
                 }
-                ClassMember::Operator(op) => {
-                    let op_str = op.operator_token.as_static_str();
-                    let param_sig = op
+                ClassMember::Operator(operator_declaration) => {
+                    let op_str = operator_declaration.operator_token.as_static_str();
+                    let param_sig = operator_declaration
                         .parameters
                         .iter()
-                        .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                        .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
                         .collect::<Vec<_>>()
                         .join(",");
                     let full_sym = if param_sig.is_empty() {
-                        format!("{cls_name}::operator_{op_str}")
+                        format!("{class_name}::operator_{op_str}")
                     } else {
-                        format!("{cls_name}::operator_{op_str}({param_sig})")
+                        format!("{class_name}::operator_{op_str}({param_sig})")
                     };
-                    let unsuffixed_sym = format!("{cls_name}::operator_{op_str}");
+                    let unsuffixed_sym = format!("{class_name}::operator_{op_str}");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym, func_id);
                     function_ids.entry(unsuffixed_sym).or_insert(func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name = format!("{pkg}.{cls_name}::operator_{op_str}");
-                        let full_pkg_name_mangled = if param_sig.is_empty() {
-                            full_pkg_name.clone()
+                    if !effective_package.is_empty() {
+                        let qualified_sym = format!("{qualified_class_name}::operator_{op_str}");
+                        let qualified_sym_mangled = if param_sig.is_empty() {
+                            qualified_sym.clone()
                         } else {
-                            format!("{full_pkg_name}({param_sig})")
+                            format!("{qualified_sym}({param_sig})")
                         };
-                        function_ids.insert(full_pkg_name_mangled, func_id);
-                        function_ids.entry(full_pkg_name).or_insert(func_id);
+                        function_ids.insert(qualified_sym_mangled, func_id);
+                        function_ids.entry(qualified_sym).or_insert(func_id);
+
+                        let dot_sym = format!("{dot_class_name}::operator_{op_str}");
+                        let dot_sym_mangled = if param_sig.is_empty() {
+                            dot_sym.clone()
+                        } else {
+                            format!("{dot_sym}({param_sig})")
+                        };
+                        function_ids.insert(dot_sym_mangled, func_id);
+                        function_ids.entry(dot_sym).or_insert(func_id);
                     }
                 }
                 _ => {}
             }
         }
 
-        let has_explicit_ctor = cls
+        let has_explicit_ctor = class_declaration
             .members
             .iter()
-            .any(|m| matches!(m, ClassMember::Constructor(_)));
+            .any(|member| matches!(member, ClassMember::Constructor(_)));
         if !has_explicit_ctor {
-            let full_sym_arity = format!("{cls_name}::constructor/0");
-            let full_sym = format!("{cls_name}::constructor");
+            let full_sym_arity = format!("{class_name}::constructor/0");
+            let full_sym = format!("{class_name}::constructor");
             let func_id = *next_func_id;
             *next_func_id += 1;
             function_ids.insert(full_sym_arity, func_id);
             function_ids.entry(full_sym).or_insert(func_id);
-            if let Some(ref pkg) = pkg_prefix {
-                let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/0");
-                let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
-                function_ids.insert(full_pkg_name_arity, func_id);
-                function_ids.entry(full_pkg_name).or_insert(func_id);
+            if !effective_package.is_empty() {
+                let qualified_sym_arity = format!("{qualified_class_name}::constructor/0");
+                let qualified_sym = format!("{qualified_class_name}::constructor");
+                function_ids.insert(qualified_sym_arity, func_id);
+                function_ids.entry(qualified_sym).or_insert(func_id);
+
+                let dot_sym_arity = format!("{dot_class_name}::constructor/0");
+                let dot_sym = format!("{dot_class_name}::constructor");
+                function_ids.insert(dot_sym_arity, func_id);
+                function_ids.entry(dot_sym).or_insert(func_id);
             }
         }
     }

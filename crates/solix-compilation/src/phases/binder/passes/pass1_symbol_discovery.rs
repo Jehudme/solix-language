@@ -49,6 +49,44 @@ fn get_type_annotation_base_name<'a>(
     }
 }
 
+/// Extracts the namespace segments joined by `::` from a sequence of identifier spans.
+pub(crate) fn extract_namespace_path(namespace_path: &[Span], source_text: &str) -> String {
+    let segments: Vec<&str> = namespace_path
+        .iter()
+        .map(|span| {
+            let start = span.start as usize;
+            let end = span.end as usize;
+            if end <= source_text.len() {
+                &source_text[start..end]
+            } else {
+                ""
+            }
+        })
+        .collect();
+    segments.join("::")
+}
+
+/// Computes the effective package prefix combining a file package and declaration namespace.
+pub(crate) fn compute_effective_package(file_package: &str, declaration_namespace: &str) -> String {
+    if declaration_namespace.is_empty() {
+        file_package.to_string()
+    } else if file_package.is_empty()
+        || declaration_namespace == file_package
+        || declaration_namespace.starts_with(&format!("{file_package}::"))
+    {
+        declaration_namespace.to_string()
+    } else {
+        format!("{file_package}::{declaration_namespace}")
+    }
+}
+
+/// Registers a package name into the symbol table's known packages set.
+pub(crate) fn register_known_package(symbol_table: &mut SymbolTable, package_name: &str) {
+    if !package_name.is_empty() {
+        symbol_table.known_packages.insert(package_name.to_string());
+    }
+}
+
 /// Executes Pass 1 of semantic binding across all source programs in the compilation context.
 ///
 /// Discovers top-level packages, imports, classes, interfaces, enums, aliases, and generic blueprints.
@@ -93,6 +131,7 @@ pub fn execute_pass1_symbol_discovery(
                 })
                 .collect();
             package_prefix = segments.join("::");
+            register_known_package(symbol_table, &package_prefix);
         }
         if source_index < symbol_table.file_packages.len() {
             symbol_table.file_packages[source_index] = package_prefix.clone();
@@ -149,10 +188,15 @@ pub fn execute_pass1_symbol_discovery(
                 "alias"
             };
 
-            let fully_qualified_name = if package_prefix.is_empty() {
+            let decl_namespace =
+                extract_namespace_path(&alias_statement.namespace_path, source_text);
+            let effective_package = compute_effective_package(&package_prefix, &decl_namespace);
+            register_known_package(symbol_table, &effective_package);
+
+            let fully_qualified_name = if effective_package.is_empty() {
                 alias_name.to_string()
             } else {
-                format!("{package_prefix}::{alias_name}")
+                format!("{effective_package}::{alias_name}")
             };
 
             let target_type = resolve_type_annotation(
@@ -210,7 +254,7 @@ pub fn execute_pass1_symbol_discovery(
 
             raw_aliases.push(RawAliasInfo {
                 source_id,
-                package_prefix: package_prefix.clone(),
+                package_prefix: effective_package.clone(),
                 alias_name: alias_name.to_string(),
                 fully_qualified_name,
                 target_type_name,
@@ -232,10 +276,16 @@ pub fn execute_pass1_symbol_discovery(
                             "class"
                         };
 
-                    let fully_qualified_name = if package_prefix.is_empty() {
+                    let decl_namespace =
+                        extract_namespace_path(&class_declaration.namespace_path, source_text);
+                    let effective_package =
+                        compute_effective_package(&package_prefix, &decl_namespace);
+                    register_known_package(symbol_table, &effective_package);
+
+                    let fully_qualified_name = if effective_package.is_empty() {
                         class_name.to_string()
                     } else {
-                        format!("{package_prefix}::{class_name}")
+                        format!("{effective_package}::{class_name}")
                     };
 
                     // If generic, register as blueprint
@@ -256,7 +306,7 @@ pub fn execute_pass1_symbol_discovery(
 
                         let blueprint = GenericBlueprint {
                             source_id,
-                            package_prefix: package_prefix.clone(),
+                            package_prefix: effective_package.clone(),
                             name: class_name.to_string(),
                             fully_qualified_name: fully_qualified_name.clone(),
                             parameter_names,
@@ -429,10 +479,16 @@ pub fn execute_pass1_symbol_discovery(
                             "interface"
                         };
 
-                    let fully_qualified_name = if package_prefix.is_empty() {
+                    let decl_namespace =
+                        extract_namespace_path(&interface_declaration.namespace_path, source_text);
+                    let effective_package =
+                        compute_effective_package(&package_prefix, &decl_namespace);
+                    register_known_package(symbol_table, &effective_package);
+
+                    let fully_qualified_name = if effective_package.is_empty() {
                         interface_name.to_string()
                     } else {
-                        format!("{package_prefix}::{interface_name}")
+                        format!("{effective_package}::{interface_name}")
                     };
 
                     if symbol_table
@@ -474,10 +530,16 @@ pub fn execute_pass1_symbol_discovery(
                         "enum"
                     };
 
-                    let fully_qualified_name = if package_prefix.is_empty() {
+                    let decl_namespace =
+                        extract_namespace_path(&enum_declaration.namespace_path, source_text);
+                    let effective_package =
+                        compute_effective_package(&package_prefix, &decl_namespace);
+                    register_known_package(symbol_table, &effective_package);
+
+                    let fully_qualified_name = if effective_package.is_empty() {
                         enum_name.to_string()
                     } else {
-                        format!("{package_prefix}::{enum_name}")
+                        format!("{effective_package}::{enum_name}")
                     };
 
                     if symbol_table
@@ -511,7 +573,7 @@ pub fn execute_pass1_symbol_discovery(
 
                     // Register enum variants
                     let mut seen_variants = std::collections::HashSet::new();
-                    for (variant_idx, variant) in enum_declaration.variants.iter().enumerate() {
+                    for (variant_index, variant) in enum_declaration.variants.iter().enumerate() {
                         let variant_name = if variant.name_span.end as usize <= source_text.len() {
                             &source_text
                                 [variant.name_span.start as usize..variant.name_span.end as usize]
@@ -541,7 +603,7 @@ pub fn execute_pass1_symbol_discovery(
                             members: Vec::new(),
                             is_static: true,
                             is_const: true,
-                            slot_index: Some(variant_idx as u32),
+                            slot_index: Some(variant_index as u32),
                         };
                         let variant_id = symbol_table.insert_symbol(variant_symbol);
                         if let Some(parent_entry) = symbol_table.get_symbol_mut(enum_id) {
@@ -558,10 +620,16 @@ pub fn execute_pass1_symbol_discovery(
                             "function"
                         };
 
-                    let fully_qualified_name = if package_prefix.is_empty() {
+                    let decl_namespace =
+                        extract_namespace_path(&method_declaration.namespace_path, source_text);
+                    let effective_package =
+                        compute_effective_package(&package_prefix, &decl_namespace);
+                    register_known_package(symbol_table, &effective_package);
+
+                    let fully_qualified_name = if effective_package.is_empty() {
                         method_name.to_string()
                     } else {
-                        format!("{package_prefix}::{method_name}")
+                        format!("{effective_package}::{method_name}")
                     };
 
                     let return_type = resolve_type_annotation(
@@ -614,10 +682,17 @@ pub fn execute_pass1_symbol_discovery(
                         } else {
                             "global"
                         };
-                    let fully_qualified_name = if package_prefix.is_empty() {
+
+                    let decl_namespace =
+                        extract_namespace_path(&field_declaration.namespace_path, source_text);
+                    let effective_package =
+                        compute_effective_package(&package_prefix, &decl_namespace);
+                    register_known_package(symbol_table, &effective_package);
+
+                    let fully_qualified_name = if effective_package.is_empty() {
                         field_name.to_string()
                     } else {
-                        format!("{package_prefix}::{field_name}")
+                        format!("{effective_package}::{field_name}")
                     };
                     let field_type = resolve_type_annotation(
                         source_id,
@@ -769,17 +844,11 @@ pub fn execute_pass1_symbol_discovery(
             if import_entry.is_wildcard {
                 let path = &import_entry.path;
                 let is_std = path.starts_with("std") || path.starts_with("solix");
-                let is_known_pkg = symbol_table
-                    .file_packages
-                    .iter()
-                    .any(|pkg_name| pkg_name == path)
-                    || symbol_table.global_names.keys().any(|key| {
-                        if let Some((symbol_package, _)) = key.rsplit_once("::") {
-                            symbol_package == path
-                        } else {
-                            false
-                        }
-                    });
+                let is_known_pkg = symbol_table.known_packages.contains(path)
+                    || symbol_table
+                        .file_packages
+                        .iter()
+                        .any(|pkg_name| pkg_name == path);
                 if !is_std && !is_known_pkg {
                     accumulated_errors.push(BindingError::CannotResolveImport {
                         import_path: path.replace("::", "."),
@@ -792,24 +861,18 @@ pub fn execute_pass1_symbol_discovery(
                 if !is_resolved {
                     let parts: Vec<&str> = path.split("::").collect();
                     if parts.len() > 1 {
-                        let pkg = parts[..parts.len() - 1].join("::");
-                        let pkg_exists = symbol_table
-                            .file_packages
-                            .iter()
-                            .any(|pkg_name| pkg_name == &pkg)
-                            || symbol_table.global_names.keys().any(|key| {
-                                if let Some((symbol_package, _)) = key.rsplit_once("::") {
-                                    symbol_package == pkg
-                                } else {
-                                    false
-                                }
-                            });
+                        let package_name = parts[..parts.len() - 1].join("::");
+                        let pkg_exists = symbol_table.known_packages.contains(&package_name)
+                            || symbol_table
+                                .file_packages
+                                .iter()
+                                .any(|pkg_name| pkg_name == &package_name);
                         if pkg_exists {
                             accumulated_errors.push(BindingError::undefined_symbol(
                                 format!(
                                     "Symbol '{}' not found in package '{}'",
                                     import_entry.symbol_name,
-                                    pkg.replace("::", ".")
+                                    package_name.replace("::", ".")
                                 ),
                                 import_entry.span,
                             ));

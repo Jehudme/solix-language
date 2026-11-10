@@ -573,8 +573,10 @@ impl Display for Type {
                     }
                     // If the last argument's formatted text ends with `>`, emit a separating
                     // space so the closing `>` does not form a `>>` shift-right token.
-                    let last_argument_text =
-                        format!("{}", type_arguments.last().expect("checked non-empty above"));
+                    let last_argument_text = format!(
+                        "{}",
+                        type_arguments.last().expect("checked non-empty above")
+                    );
                     if last_argument_text.ends_with('>') {
                         write!(formatter, " ")?;
                     }

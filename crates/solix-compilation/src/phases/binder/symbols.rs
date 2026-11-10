@@ -6,7 +6,7 @@ use crate::phases::lexing::Span;
 use crate::phases::parser::statements::Modifier;
 use serde::{Deserialize, Serialize};
 use solix_common::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Unique sequential identifier indexing a symbol in the compiler's symbol table.
 #[derive(
@@ -147,6 +147,10 @@ pub struct SymbolTable {
     pub file_imports: Vec<Vec<ImportEntry>>,
     /// Active lexical scope stack for local variables and parameters.
     pub scope_stack: Vec<HashMap<String, SymbolId>>,
+    /// Known package namespaces populated during symbol discovery.
+    pub known_packages: HashSet<String>,
+    /// Optional active enclosing package context overriding `file_packages` (e.g. while checking a qualified class).
+    pub active_package: Option<String>,
 }
 
 impl SymbolTable {
@@ -170,6 +174,8 @@ impl SymbolTable {
             file_packages,
             file_imports,
             scope_stack: Vec::new(),
+            known_packages: HashSet::new(),
+            active_package: None,
         }
     }
 
@@ -267,8 +273,12 @@ impl SymbolTable {
             }
         }
 
-        // 3. Check current package
-        if let Some(package_prefix) = self.file_packages.get(source_index)
+        // 3. Check current package (or active enclosing package context)
+        let active_pkg = self
+            .active_package
+            .as_deref()
+            .or_else(|| self.file_packages.get(source_index).map(|pkg| pkg.as_str()));
+        if let Some(package_prefix) = active_pkg
             && !package_prefix.is_empty()
         {
             let package_qualified = format!("{package_prefix}::{identifier}");

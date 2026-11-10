@@ -45,6 +45,8 @@ pub struct ImportStatement {
 pub struct AliasStatement {
     /// Overall source coordinate span from `alias` keyword to `;`.
     pub span: Span,
+    /// Leading namespace qualification path segments (e.g. `["solix", "types"]` for `solix::types::StringMap`).
+    pub namespace_path: Vec<Span>,
     /// Coordinate span of the declared alias identifier name.
     pub name_span: Span,
     /// Optional generic type parameters defined on this alias.

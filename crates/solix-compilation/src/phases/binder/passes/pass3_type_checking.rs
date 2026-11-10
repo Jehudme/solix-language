@@ -4,6 +4,9 @@
 
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::monomorphizer::GenericBlueprintRegistry;
+use crate::phases::binder::passes::pass1_symbol_discovery::{
+    compute_effective_package, extract_namespace_path,
+};
 use crate::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::lexing::{Span, TokenKind};
@@ -309,8 +312,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                             if let Some(class_id) = self
                                 .symbol_table
                                 .resolve_symbol(self.source_id, symbol_name)
-                                && let Some(class_entry) =
-                                    self.symbol_table.get_symbol(class_id)
+                                && let Some(class_entry) = self.symbol_table.get_symbol(class_id)
                             {
                                 for &child_id in &class_entry.members {
                                     if let Some(child_entry) =
@@ -2141,9 +2143,31 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             "class"
         };
 
+        let file_package = self
+            .symbol_table
+            .file_packages
+            .get(self.source_id as usize)
+            .cloned()
+            .unwrap_or_default();
+        let decl_namespace = extract_namespace_path(&node.namespace_path, self.source_text);
+        let effective_package = compute_effective_package(&file_package, &decl_namespace);
+        let fully_qualified_name = if effective_package.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{effective_package}::{class_name}")
+        };
+
+        let previous_active_package = self.symbol_table.active_package.clone();
+        if !effective_package.is_empty() {
+            self.symbol_table.active_package = Some(effective_package);
+        }
+
         let previous_class = self.current_class;
         let previous_generic_names = self.current_class_generic_names.clone();
-        self.current_class = self.symbol_table.resolve_symbol(self.source_id, class_name);
+        self.current_class = self
+            .symbol_table
+            .lookup_global(&fully_qualified_name)
+            .or_else(|| self.symbol_table.resolve_symbol(self.source_id, class_name));
         self.current_class_generic_names = node
             .generic_params
             .iter()
@@ -2174,11 +2198,25 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
         }
 
+        self.symbol_table.active_package = previous_active_package;
         self.current_class = previous_class;
         self.current_class_generic_names = previous_generic_names;
     }
 
     fn visit_interface_declaration(&mut self, node: &InterfaceDeclaration) {
+        let file_package = self
+            .symbol_table
+            .file_packages
+            .get(self.source_id as usize)
+            .cloned()
+            .unwrap_or_default();
+        let decl_namespace = extract_namespace_path(&node.namespace_path, self.source_text);
+        let effective_package = compute_effective_package(&file_package, &decl_namespace);
+        let previous_active_package = self.symbol_table.active_package.clone();
+        if !effective_package.is_empty() {
+            self.symbol_table.active_package = Some(effective_package);
+        }
+
         let previous_generic_names = self.current_class_generic_names.clone();
         self.current_class_generic_names = node
             .generic_params
@@ -2197,6 +2235,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             self.visit_method_declaration(method);
         }
 
+        self.symbol_table.active_package = previous_active_package;
         self.current_class_generic_names = previous_generic_names;
     }
 

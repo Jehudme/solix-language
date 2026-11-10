@@ -469,7 +469,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let start_span = self.cursor.current_span();
         self.cursor.advance(); // consume 'alias'
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
         let mut generic_params = Vec::new();
 
         if self
@@ -510,6 +510,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(AliasStatement {
             span,
+            namespace_path,
             name_span,
             generic_params,
             target_type,
@@ -635,7 +636,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             span: op_decl.span.to_source_span(),
                         });
                     }
-                    let name_span = self.consume_identifier()?;
+                    let (namespace_path, name_span) = self.parse_qualified_name()?;
 
                     // Check for method declaration: ( or <
                     if self.cursor.check(TokenKind::PunctuationOpenParen)
@@ -653,8 +654,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             "free_function",
                             name_span,
                         );
-                        let method_decl =
-                            self.parse_method_declaration(modifiers, type_annot, name_span)?;
+                        let method_decl = self.parse_method_declaration(
+                            modifiers,
+                            type_annot,
+                            namespace_path,
+                            name_span,
+                        )?;
                         return Ok(TopLevelElement::Declaration(Declaration::Method(
                             method_decl,
                         )));
@@ -690,8 +695,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     }
 
                     if modifiers.contains(&Modifier::Extern) {
-                        for m in &modifiers {
-                            match m {
+                        for modifier in &modifiers {
+                            match modifier {
                                 Modifier::Native => {
                                     self.record_error(ParsingError::InvalidExternModifier {
                                         modifier: "native".to_string(),
@@ -721,6 +726,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     return Ok(TopLevelElement::Declaration(Declaration::Field(
                         FieldDeclaration {
                             span,
+                            namespace_path,
                             name_span,
                             modifiers,
                             field_type: type_annot,
@@ -886,7 +892,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
         let class_name = self.get_lexeme(name_span).to_string();
 
         let generic_params = self.parse_generic_params()?;
@@ -956,6 +962,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(ClassDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             generic_params,
@@ -1082,7 +1089,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             || self.cursor.check(TokenKind::OperatorLessThan)
             || self.cursor.check(TokenKind::PunctuationOpenBrace)
         {
-            let method = self.parse_method_declaration(member_modifiers, type_annot, name_span)?;
+            let method =
+                self.parse_method_declaration(member_modifiers, type_annot, Vec::new(), name_span)?;
             return Ok(ClassMember::Method(method));
         }
 
@@ -1120,6 +1128,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(ClassMember::Field(FieldDeclaration {
             span,
+            namespace_path: Vec::new(),
             name_span,
             modifiers: member_modifiers,
             field_type: type_annot,
@@ -1148,7 +1157,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
 
         let generic_params = self.parse_generic_params()?;
 
@@ -1205,7 +1214,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 continue;
             }
 
-            let method = self.parse_method_declaration(member_mods, return_type, method_name)?;
+            let method =
+                self.parse_method_declaration(member_mods, return_type, Vec::new(), method_name)?;
             if method.body.is_some() {
                 self.record_error(ParsingError::InterfaceMethodWithBody {
                     span: method.span.to_source_span(),
@@ -1220,6 +1230,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(InterfaceDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             generic_params,
@@ -1249,7 +1260,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
 
         if self
             .cursor
@@ -1300,6 +1311,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(EnumDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             variants,
@@ -1311,6 +1323,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         &mut self,
         modifiers: Vec<Modifier>,
         return_type: TypeAnnotation,
+        namespace_path: Vec<Span>,
         name_span: Span,
     ) -> Result<MethodDeclaration, ParsingError> {
         if self.inside_function() {
@@ -1395,6 +1408,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(MethodDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             return_type,
@@ -1778,8 +1792,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         self.record_error(ParsingError::MethodInsideMethod {
                             span: name_span.to_source_span(),
                         });
-                        let method =
-                            self.parse_method_declaration(Vec::new(), var_type, name_span)?;
+                        let method = self.parse_method_declaration(
+                            Vec::new(),
+                            var_type,
+                            Vec::new(),
+                            name_span,
+                        )?;
                         return Ok(vec![Statement::Block(method.body.unwrap_or(
                             BlockStatement {
                                 span: name_span,
@@ -4306,6 +4324,34 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 span: self.cursor.current_span().to_source_span(),
             })
         }
+    }
+
+    /// Parses a potentially namespace-qualified identifier sequence (`a::b::Name`).
+    ///
+    /// Returns `(namespace_path, name_span)` where `namespace_path` contains the leading
+    /// namespace segments and `name_span` points to the final declared identifier.
+    fn parse_qualified_name(&mut self) -> Result<(Vec<Span>, Span), ParsingError> {
+        let mut segments = Vec::new();
+        let first_segment = self.consume_identifier()?;
+        segments.push(first_segment);
+        while self
+            .cursor
+            .match_token(TokenKind::PunctuationDoubleColon)
+            .is_some()
+        {
+            let next_segment = self.consume_identifier()?;
+            segments.push(next_segment);
+        }
+        let name_span = match segments.pop() {
+            Some(last_span) => last_span,
+            None => {
+                return Err(ParsingError::ExpectedIdentifier {
+                    span: self.cursor.current_span().to_source_span(),
+                });
+            }
+        };
+        let namespace_path = segments;
+        Ok((namespace_path, name_span))
     }
 
     fn consume_semicolon(&mut self) -> Result<Token, ParsingError> {

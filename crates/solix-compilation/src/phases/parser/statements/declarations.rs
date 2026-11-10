@@ -106,6 +106,8 @@ pub struct EnumVariant {
 pub struct FieldDeclaration {
     /// Overall source coordinate span from modifiers to `;`.
     pub span: Span,
+    /// Leading namespace qualification path segments (e.g. `["solix", "math"]` for `solix::math::PI`).
+    pub namespace_path: Vec<Span>,
     /// Identifier coordinate span for the field name.
     pub name_span: Span,
     /// Access and storage modifiers.
@@ -123,6 +125,8 @@ pub struct FieldDeclaration {
 pub struct MethodDeclaration {
     /// Overall source coordinate span from modifiers to closing `}` or `;`.
     pub span: Span,
+    /// Leading namespace qualification path segments (e.g. `["solix", "math"]` for `solix::math::sin`).
+    pub namespace_path: Vec<Span>,
     /// Identifier coordinate span of the method name for LSP symbol search.
     pub name_span: Span,
     /// Access and execution modifiers (`public`, `static`, etc.).
@@ -212,6 +216,8 @@ pub enum ClassMember {
 pub struct ClassDeclaration {
     /// Overall source coordinate span from modifiers to closing `}`.
     pub span: Span,
+    /// Leading namespace qualification path segments (e.g. `["solix", "io"]` for `solix::io::Console`).
+    pub namespace_path: Vec<Span>,
     /// Identifier coordinate span for the class name.
     pub name_span: Span,
     /// Class modifiers (`public`, `abstract`, etc.).
@@ -233,6 +239,8 @@ pub struct ClassDeclaration {
 pub struct InterfaceDeclaration {
     /// Overall source coordinate span.
     pub span: Span,
+    /// Leading namespace qualification path segments (e.g. `["solix", "io"]` for `solix::io::IStream`).
+    pub namespace_path: Vec<Span>,
     /// Identifier coordinate span for the interface name.
     pub name_span: Span,
     /// Interface modifiers (`public`, etc.).
@@ -252,6 +260,8 @@ pub struct InterfaceDeclaration {
 pub struct EnumDeclaration {
     /// Overall source coordinate span.
     pub span: Span,
+    /// Leading namespace qualification path segments (e.g. `["solix", "io"]` for `solix::io::FileMode`).
+    pub namespace_path: Vec<Span>,
     /// Identifier coordinate span for the enum name.
     pub name_span: Span,
     /// Enum modifiers.
