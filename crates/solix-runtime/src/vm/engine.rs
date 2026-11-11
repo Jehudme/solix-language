@@ -67,6 +67,8 @@ pub struct VirtualMachine {
     pub native_calls_count: u64,
     /// Total count of dynamically quickened instructions.
     pub quickened_instructions_count: u64,
+    /// Optional thread-safe output sink for capturing guest standard output.
+    pub output_sink: Option<crate::options::OutputSink>,
 }
 
 impl VirtualMachine {
@@ -115,6 +117,7 @@ impl VirtualMachine {
         }
 
         let safe_mode = context.options.safe_mode;
+        let output_sink = context.options.output_sink.clone();
 
         Self {
             context,
@@ -136,6 +139,7 @@ impl VirtualMachine {
             peak_call_stack_depth: 0,
             native_calls_count: 0,
             quickened_instructions_count: 0,
+            output_sink,
         }
     }
 

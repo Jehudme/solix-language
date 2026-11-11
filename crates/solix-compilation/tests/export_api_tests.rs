@@ -118,6 +118,7 @@ fn test_export_manifest_local_only_invariant() {
         exported_functions: Vec::new(),
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        source_files: Vec::new(),
         api_header: "extern public class dep_lib::DepClass { public void dep_method(); }\n"
             .to_string(),
         exported_ast_bytes: Vec::new(),

@@ -8,10 +8,6 @@ license.workspace = true
 name = "solix_lsp"
 path = "src/lib.rs"
 
-[[bin]]
-name = "solix-lsp"
-path = "src/main.rs"
-
 [dependencies]
 solix-common.workspace = true
 solix-compilation.workspace = true

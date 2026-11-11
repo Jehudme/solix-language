@@ -178,13 +178,30 @@ export function registerSolixCommands(
                 const projectRoot = findProjectRoot(targetFilePath);
                 if (projectRoot) {
                     const packageName = readPackageName(projectRoot);
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --${activeBuildProfile} && "${solixBinaryPath}" run "build/${activeBuildProfile}/${packageName}.slxarc"`);
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --release && "${solixBinaryPath}" run "build/release/${packageName}.slxarc"`);
                 } else {
                     terminal.sendText(`"${solixBinaryPath}" run "${targetFilePath}"`);
                 }
             } else {
                 terminal.sendText(`"${solixBinaryPath}" run`);
             }
+        })
+    );
+
+    // 1b. solix.debugMain
+    extensionContext.subscriptions.push(
+        vscode.commands.registerCommand('solix.debugMain', async (documentArgument?: string | vscode.Uri) => {
+            await vscode.workspace.saveAll(false);
+            const targetUri = resolveTargetUri(documentArgument);
+            const targetPath = targetUri?.fsPath || vscode.window.activeTextEditor?.document.uri.fsPath;
+            await vscode.debug.startDebugging(undefined, {
+                type: 'solix',
+                name: 'Debug Solix Main',
+                request: 'launch',
+                program: targetPath,
+                stopOnEntry: false,
+                testMode: false
+            });
         })
     );
 
@@ -208,6 +225,23 @@ export function registerSolixCommands(
             } else {
                 terminal.sendText(`"${solixBinaryPath}" run --test`);
             }
+        })
+    );
+
+    // 2b. solix.debugTest
+    extensionContext.subscriptions.push(
+        vscode.commands.registerCommand('solix.debugTest', async (documentArgument?: string | vscode.Uri) => {
+            await vscode.workspace.saveAll(false);
+            const targetUri = resolveTargetUri(documentArgument);
+            const targetPath = targetUri?.fsPath || vscode.window.activeTextEditor?.document.uri.fsPath;
+            await vscode.debug.startDebugging(undefined, {
+                type: 'solix',
+                name: 'Debug Solix Test',
+                request: 'launch',
+                program: targetPath,
+                stopOnEntry: false,
+                testMode: true
+            });
         })
     );
 

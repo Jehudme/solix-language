@@ -44,6 +44,27 @@ pub struct RuntimeOptions {
     pub solver: Option<Arc<dyn ModuleSolver>>,
     /// Whether to verify cryptographic SHA-256 checksums on dependencies and native libraries (default true; false when --yolo).
     pub verify_checksums: bool,
+    /// Optional thread-safe output sink for capturing guest standard output.
+    pub output_sink: Option<OutputSink>,
+}
+
+/// Callback type for capturing guest standard output streams.
+pub type OutputCallback = Arc<dyn Fn(&str, bool) + Send + Sync>;
+
+/// Thread-safe sink for capturing guest standard output streams (e.g. for DAP events).
+#[derive(Clone)]
+pub struct OutputSink(pub OutputCallback);
+
+impl std::fmt::Debug for OutputSink {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "OutputSink(<closure>)")
+    }
+}
+
+impl PartialEq for OutputSink {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
 }
 
 impl PartialEq for RuntimeOptions {
@@ -82,6 +103,7 @@ impl Default for RuntimeOptions {
             native_functions: HashMap::new(),
             solver: None,
             verify_checksums: true,
+            output_sink: None,
         }
     }
 }

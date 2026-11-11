@@ -33,6 +33,10 @@ pub struct LoadedBinary {
     pub classes: Vec<CompiledClass>,
     /// Number of compiled functions provided by this binary.
     pub function_count: usize,
+    /// Whether this binary was compiled with the debug profile.
+    pub is_debug_profile: bool,
+    /// Canonical source files registered with this binary.
+    pub source_files: Vec<String>,
 }
 
 /// Pre-computed runtime metadata for a compiled function to eliminate per-call lookups.
@@ -46,6 +50,8 @@ pub struct FunctionRuntimeMeta {
     pub native_fn: Option<NativeCallback>,
     /// Whether this function has any reference registers that require ARC tracking.
     pub has_references: bool,
+    /// Whether this function has debug symbols (source map and/or local variables).
+    pub has_debug_symbols: bool,
 }
 
 /// Central virtual machine execution context coordinating memory, loaded binaries, and symbols.
@@ -128,6 +134,8 @@ impl RuntimeContext {
                 constant_pool: binary.constant_pool.clone(),
                 classes: binary.classes.clone(),
                 function_count: func_count,
+                is_debug_profile: binary.build_profile == "debug",
+                source_files: binary.source_files.clone(),
             };
 
             // Register static symbols
@@ -440,12 +448,17 @@ impl RuntimeContext {
             }
 
             let has_references = !func.reference_registers.is_empty();
+            let is_debug_profile = loaded_binaries
+                .get(binary_id)
+                .is_some_and(|binary| binary.is_debug_profile);
+            let has_debug_symbols = is_debug_profile && !func.source_map.is_empty();
 
             function_meta.push(FunctionRuntimeMeta {
                 binary_id,
                 func_id_offset,
                 native_fn,
                 has_references,
+                has_debug_symbols,
             });
         }
 

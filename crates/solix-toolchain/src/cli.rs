@@ -52,8 +52,27 @@ pub enum Commands {
     /// Starts the Solix Language Server Protocol (LSP) service
     Lsp(LspArgs),
 
+    /// Starts the Solix Debug Adapter Protocol (DAP) service
+    Dap(DapArgs),
+
     /// Formats Solix source files according to official style guidelines
     Fmt(FmtArgs),
+}
+
+/// Arguments for `solix dap`.
+#[derive(Debug, Args, Clone)]
+pub struct DapArgs {
+    /// Run debug adapter using standard input and output transport
+    #[arg(long, default_value_t = true)]
+    pub stdio: bool,
+
+    /// Optional TCP port to listen on for remote debugger connections
+    #[arg(long)]
+    pub port: Option<u16>,
+
+    /// Optional project root directory [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
 }
 
 /// Arguments for `solix lsp`.

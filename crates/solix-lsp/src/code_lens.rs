@@ -37,12 +37,33 @@ pub fn code_lenses(
                         }),
                         data: None,
                     });
+                    lenses.push(CodeLens {
+                        range,
+                        command: Some(Command {
+                            title: "🐞 Debug Main".to_string(),
+                            command: "solix.debugMain".to_string(),
+                            arguments: Some(vec![serde_json::json!(snapshot.uri.to_string())]),
+                        }),
+                        data: None,
+                    });
                 } else if name.starts_with("test") {
                     lenses.push(CodeLens {
                         range,
                         command: Some(Command {
                             title: "▶ Run Test".to_string(),
                             command: "solix.runTest".to_string(),
+                            arguments: Some(vec![
+                                serde_json::json!(snapshot.uri.to_string()),
+                                serde_json::json!(name),
+                            ]),
+                        }),
+                        data: None,
+                    });
+                    lenses.push(CodeLens {
+                        range,
+                        command: Some(Command {
+                            title: "🐞 Debug Test".to_string(),
+                            command: "solix.debugTest".to_string(),
                             arguments: Some(vec![
                                 serde_json::json!(snapshot.uri.to_string()),
                                 serde_json::json!(name),
@@ -91,6 +112,15 @@ pub fn code_lenses(
                                 command: Some(Command {
                                     title: "▶ Run Main".to_string(),
                                     command: "solix.runMain".to_string(),
+                                    arguments: Some(vec![serde_json::json!(snapshot.uri.to_string())]),
+                                }),
+                                data: None,
+                            });
+                            lenses.push(CodeLens {
+                                range: method_range,
+                                command: Some(Command {
+                                    title: "🐞 Debug Main".to_string(),
+                                    command: "solix.debugMain".to_string(),
                                     arguments: Some(vec![serde_json::json!(snapshot.uri.to_string())]),
                                 }),
                                 data: None,

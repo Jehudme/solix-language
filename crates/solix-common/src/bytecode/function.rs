@@ -32,6 +32,31 @@ pub struct SourceMapEntry {
     pub instruction_pc: u32,
     /// Source code token span corresponding to the instruction.
     pub span: Span,
+    /// 1-based source line number.
+    #[serde(default)]
+    pub line: u32,
+    /// 1-based source column number.
+    #[serde(default)]
+    pub column: u32,
+}
+
+/// Maps a virtual register within a compiled function to its source variable name and type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalVariableDebugInfo {
+    /// Virtual register index (`r0..rN`).
+    pub register: u16,
+    /// User-declared variable or parameter name.
+    pub name: String,
+    /// Static type name (e.g. `"int32"`, `"sample_workspace::Point"`).
+    pub type_name: String,
+    /// Static compiler `Type`.
+    pub var_type: crate::types::Type,
+    /// Inclusive starting bytecode PC where this variable enters scope.
+    pub start_pc: u32,
+    /// Exclusive ending bytecode PC where this variable exits scope.
+    pub end_pc: u32,
+    /// Whether this register is a function/method parameter (`r0` = `this` for instance methods).
+    pub is_parameter: bool,
 }
 
 /// Self-contained compiled function metadata and bytecode chunk.
@@ -55,6 +80,9 @@ pub struct CompiledFunction {
     pub exception_handlers: Vec<ExceptionHandlerEntry>,
     /// Instruction-to-source debug mapping.
     pub source_map: Vec<SourceMapEntry>,
+    /// Local variables and parameters debug information.
+    #[serde(default)]
+    pub local_variables: Vec<LocalVariableDebugInfo>,
 }
 
 impl CompiledFunction {
@@ -76,17 +104,31 @@ impl CompiledFunction {
             reference_registers: Vec::new(),
             exception_handlers: Vec::new(),
             source_map: Vec::new(),
+            local_variables: Vec::new(),
         }
     }
 
     /// Appends an instruction and records its optional source span in the source map.
     pub fn emit(&mut self, instruction: Instruction, span: Option<Span>) -> u32 {
+        self.emit_with_location(instruction, span, 0, 0)
+    }
+
+    /// Appends an instruction and records its source span, line, and column coordinates.
+    pub fn emit_with_location(
+        &mut self,
+        instruction: Instruction,
+        span: Option<Span>,
+        line: u32,
+        column: u32,
+    ) -> u32 {
         let pc = self.instructions.len() as u32;
         self.instructions.push(instruction);
-        if let Some(s) = span {
+        if let Some(source_span) = span {
             self.source_map.push(SourceMapEntry {
                 instruction_pc: pc,
-                span: s,
+                span: source_span,
+                line,
+                column,
             });
         }
         pc

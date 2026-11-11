@@ -434,6 +434,8 @@ fn apply_pc_relocation(
                 updated_source_map.push(SourceMapEntry {
                     instruction_pc: new_pc,
                     span: entry.span,
+                    line: entry.line,
+                    column: entry.column,
                 });
                 last_mapped_pc = Some(new_pc);
             }

@@ -30,4 +30,4 @@ pub use native::{
 };
 pub use options::{DEFAULT_HEAP_SIZE, DEFAULT_MAX_CALL_STACK_DEPTH, RuntimeOptions};
 pub use value::Value;
-pub use vm::{VirtualMachine, VmTelemetry};
+pub use vm::{DebugSignal, VirtualMachine, VmDebugHook, VmTelemetry};

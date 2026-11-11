@@ -28,13 +28,16 @@
     "activationEvents": [
         "onLanguage:solix",
         "onCommand:solix.runMain",
+        "onCommand:solix.debugMain",
         "onCommand:solix.runTest",
+        "onCommand:solix.debugTest",
         "onCommand:solix.buildProject",
         "onCommand:solix.syncPackages",
         "onCommand:solix.showDisassembly",
         "onCommand:solix.showSynthesizedApi",
         "onCommand:solix.selectProfile",
-        "onCommand:solix.restartServer"
+        "onCommand:solix.restartServer",
+        "onDebug"
     ],
     "main": "./dist/extension.js",
     "contributes": {
@@ -87,10 +90,22 @@
                 "icon": "$(play)"
             },
             {
+                "command": "solix.debugMain",
+                "title": "Debug Application (solix dap)",
+                "category": "Solix",
+                "icon": "$(debug-alt)"
+            },
+            {
                 "command": "solix.runTest",
                 "title": "Run Test Suite (solix run --test)",
                 "category": "Solix",
                 "icon": "$(beaker)"
+            },
+            {
+                "command": "solix.debugTest",
+                "title": "Debug Test Suite (solix dap --test)",
+                "category": "Solix",
+                "icon": "$(debug-alt)"
             },
             {
                 "command": "solix.buildProject",
@@ -132,17 +147,79 @@
                     "group": "navigation@1"
                 },
                 {
-                    "command": "solix.runTest",
+                    "command": "solix.debugMain",
                     "when": "resourceExtname == .slx",
                     "group": "navigation@2"
                 },
                 {
-                    "command": "solix.showDisassembly",
+                    "command": "solix.runTest",
                     "when": "resourceExtname == .slx",
                     "group": "navigation@3"
+                },
+                {
+                    "command": "solix.showDisassembly",
+                    "when": "resourceExtname == .slx",
+                    "group": "navigation@4"
                 }
             ]
         },
+        "breakpoints": [
+            {
+                "language": "solix"
+            }
+        ],
+        "debuggers": [
+            {
+                "type": "solix",
+                "label": "Solix Debugger",
+                "languages": [
+                    "solix"
+                ],
+                "configurationAttributes": {
+                    "launch": {
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "Path to .slx, .slxb, or .slxarc file to debug.",
+                                "default": "${workspaceFolder}"
+                            },
+                            "stopOnEntry": {
+                                "type": "boolean",
+                                "description": "Automatically stop after launching at the entry point.",
+                                "default": false
+                            },
+                            "args": {
+                                "type": "array",
+                                "description": "Command line arguments passed to the program.",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "default": []
+                            },
+                            "cwd": {
+                                "type": "string",
+                                "description": "Working directory of the target program.",
+                                "default": "${workspaceFolder}"
+                            },
+                            "testMode": {
+                                "type": "boolean",
+                                "description": "Debug the test suite runner instead of main.",
+                                "default": false
+                            }
+                        }
+                    }
+                },
+                "initialConfigurations": [
+                    {
+                        "type": "solix",
+                        "request": "launch",
+                        "name": "Debug Solix Program",
+                        "program": "${workspaceFolder}",
+                        "stopOnEntry": false
+                    }
+                ]
+            }
+        ],
         "taskDefinitions": [
             {
                 "type": "solix",
@@ -201,7 +278,8 @@
         "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
         "test:grammar": "vscode-tmgrammar-test -g syntaxes/solix.tmLanguage.json 'test/grammar/*.slx'",
         "test:client-rpc": "node test/client_rpc.test.mjs",
-        "test": "npm run test:grammar && npm run test:client-rpc",
+        "test:dap-rpc": "node test/dap_rpc.test.mjs",
+        "test": "npm run test:grammar && npm run test:client-rpc && npm run test:dap-rpc",
         "package": "vsce package --no-dependencies"
     },
     "dependencies": {

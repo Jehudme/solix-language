@@ -7,7 +7,6 @@ class Point {
     public int32 coordinate_x;
     public int32 coordinate_y;
 
-
     public Point(int32 initial_x, int32 initial_y) {
         this.coordinate_x = initial_x;
         this.coordinate_y = initial_y;

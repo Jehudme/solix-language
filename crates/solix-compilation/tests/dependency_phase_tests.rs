@@ -54,6 +54,7 @@ fn create_dummy_library_binary(
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        source_files: Vec::new(),
         api_header: String::new(),
         exported_ast_bytes: Vec::new(),
     };

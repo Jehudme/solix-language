@@ -56,6 +56,10 @@ pub enum RuntimeError {
     #[error("invalid field offset {offset} for object of instance size {object_size}")]
     InvalidFieldOffset { offset: usize, object_size: usize },
 
+    /// Invalid VTable access or missing vtable entry.
+    #[error("invalid vtable access for vtable ID {vtable_id}")]
+    InvalidVTableAccess { vtable_id: u32 },
+
     /// Static variable slot offset out of bounds.
     #[error("invalid static slot offset {offset} (total static partition size {total_static})")]
     InvalidStaticOffset { offset: u32, total_static: u32 },
@@ -204,6 +208,7 @@ impl RuntimeError {
             Self::InvalidInstruction { .. } => RuntimeErrorCode::InvalidInstruction,
             Self::InvalidOpCode { .. } => RuntimeErrorCode::InvalidOpCode,
             Self::InvalidFieldOffset { .. } => RuntimeErrorCode::InvalidFieldOffset,
+            Self::InvalidVTableAccess { .. } => RuntimeErrorCode::InvalidCast,
             Self::InvalidStaticOffset { .. } => RuntimeErrorCode::InvalidStaticOffset,
             Self::BinaryLoadError { .. } => RuntimeErrorCode::BinaryLoadError,
             Self::Exit { code } => {

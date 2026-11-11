@@ -842,6 +842,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     let mut program = BinaryProgram::new();
     program.functions = all_functions;
     program.classes = compiled_classes;
+    program.source_files = context.source_names.clone();
     program.static_space_size = static_layout.static_space_size;
     program.static_symbols_map = static_layout.static_symbols_map;
     program.constant_pool = constant_pool;
@@ -893,8 +894,39 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         exported_statics,
         generic_templates,
         api_header,
+        source_files: context.source_names.clone(),
         exported_ast_bytes,
     };
+
+    // Pre-calculate exact 1-based line and column coordinates for all source map entries
+    for compiled_function in &mut program.functions {
+        let source_index = compiled_function.source_id as usize;
+        if let Some(source_content) = context.sources.get(source_index) {
+            let mut line_starting_offsets = Vec::new();
+            line_starting_offsets.push(0);
+            for (byte_offset, character_byte) in source_content.bytes().enumerate() {
+                if character_byte == b'\n' {
+                    line_starting_offsets.push(byte_offset + 1);
+                }
+            }
+
+            for source_entry in &mut compiled_function.source_map {
+                let token_start_offset = source_entry.span.start as usize;
+                let found_line_index = match line_starting_offsets.binary_search(&token_start_offset) {
+                    Ok(exact_line) => exact_line,
+                    Err(insertion_point) => insertion_point.saturating_sub(1),
+                };
+                source_entry.line = (found_line_index + 1) as u32;
+                source_entry.column = (token_start_offset.saturating_sub(line_starting_offsets[found_line_index]) + 1) as u32;
+            }
+        }
+
+        for local_debug_entry in &mut compiled_function.local_variables {
+            if local_debug_entry.end_pc == u32::MAX {
+                local_debug_entry.end_pc = compiled_function.instructions.len() as u32;
+            }
+        }
+    }
 
     Ok(EmissionArtifacts {
         functions_by_source,
@@ -1826,12 +1858,35 @@ fn compile_single_method(
     let mut allocator = RegisterAllocator::new(param_count);
 
     if is_instance {
-        allocator.alloc_param("this")?;
+        let this_register = allocator.alloc_param("this")?;
+        let class_identifier = symbol.split("::").next().unwrap_or("Object");
+        func.local_variables.push(solix_common::bytecode::LocalVariableDebugInfo {
+            register: this_register,
+            name: "this".to_string(),
+            type_name: class_identifier.to_string(),
+            var_type: solix_common::types::Type::Class {
+                symbol_name: class_identifier.to_string(),
+                type_arguments: Vec::new(),
+            },
+            start_pc: 0,
+            end_pc: u32::MAX,
+            is_parameter: true,
+        });
     }
 
-    for param in &m.parameters {
-        let name = get_span_text(param.name_span, &sources[param.name_span.id as usize]);
-        allocator.alloc_param(name)?;
+    for parameter_decl in &m.parameters {
+        let param_name = get_span_text(parameter_decl.name_span, &sources[parameter_decl.name_span.id as usize]);
+        let param_register = allocator.alloc_param(param_name)?;
+        let param_type_string = get_span_text(parameter_decl.param_type.span(), &sources[parameter_decl.param_type.span().id as usize]);
+        func.local_variables.push(solix_common::bytecode::LocalVariableDebugInfo {
+            register: param_register,
+            name: param_name.to_string(),
+            type_name: param_type_string.to_string(),
+            var_type: solix_common::types::Type::Primitive(solix_common::types::PrimitiveKind::Void),
+            start_pc: 0,
+            end_pc: u32::MAX,
+            is_parameter: true,
+        });
     }
 
     allocator.enter_scope();

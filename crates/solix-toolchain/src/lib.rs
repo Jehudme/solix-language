@@ -12,11 +12,11 @@ pub mod solver;
 pub mod telemetry;
 
 pub use cli::{
-    BuildArgs, Cli, Commands, CompileArgs, FmtArgs, InfoArgs, InstallArgs, ListArgs, LspArgs,
+    BuildArgs, Cli, Commands, CompileArgs, DapArgs, FmtArgs, InfoArgs, InstallArgs, ListArgs, LspArgs,
     NewArgs, RunArgs, SyncArgs, UninstallArgs,
 };
 pub use commands::{
-    execute_build, execute_compile, execute_fmt, execute_info, execute_install, execute_list,
+    execute_build, execute_compile, execute_dap, execute_fmt, execute_info, execute_install, execute_list,
     execute_lsp, execute_new, execute_run, execute_sync, execute_uninstall,
 };
 pub use diagnostics::render_diagnostics;
@@ -69,6 +69,10 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
         }
         Commands::Lsp(args) => {
             execute_lsp(args)?;
+            Ok(0)
+        }
+        Commands::Dap(args) => {
+            execute_dap(args)?;
             Ok(0)
         }
         Commands::Fmt(args) => {

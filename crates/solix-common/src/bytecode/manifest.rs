@@ -179,6 +179,9 @@ pub struct ExportManifest {
     /// Compact generated Solix API declaration source (using `pkg::Class` syntax).
     #[serde(default)]
     pub api_header: String,
+    /// Canonical source file paths indexed by `source_id`.
+    #[serde(default)]
+    pub source_files: Vec<String>,
     /// Pre-parsed AST bytes for instant dependency injection without re-parsing.
     /// Skipped from JSON serialization in favour of BinaryProgram Section 7.
     #[serde(default, skip_serializing)]

@@ -11,6 +11,11 @@ import {
 } from 'vscode-languageclient/node';
 import { registerSolixCommands } from './commands';
 import { SolixTaskProvider } from './tasks';
+import {
+    SolixDebugAdapterDescriptorFactory,
+    SolixDebugConfigurationProvider,
+    SolixInlineValuesProvider
+} from './debug';
 
 let languageClient: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
@@ -288,6 +293,26 @@ export async function activate(extensionContext: vscode.ExtensionContext): Promi
         vscode.tasks.registerTaskProvider(
             SolixTaskProvider.taskType,
             new SolixTaskProvider(toolchainBinaryPath)
+        )
+    );
+
+    // Register debugger contributions
+    extensionContext.subscriptions.push(
+        vscode.debug.registerDebugAdapterDescriptorFactory(
+            'solix',
+            new SolixDebugAdapterDescriptorFactory(toolchainBinaryPath)
+        )
+    );
+    extensionContext.subscriptions.push(
+        vscode.debug.registerDebugConfigurationProvider(
+            'solix',
+            new SolixDebugConfigurationProvider(toolchainBinaryPath)
+        )
+    );
+    extensionContext.subscriptions.push(
+        vscode.languages.registerInlineValuesProvider(
+            'solix',
+            new SolixInlineValuesProvider()
         )
     );
 

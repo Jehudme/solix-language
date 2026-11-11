@@ -27,6 +27,9 @@ pub struct CompiledClass {
     pub destructor_id: Option<u32>,
     /// Explicit mapping of field byte offsets to their primitive or reference type tags.
     pub field_types: Vec<(usize, u8)>,
+    /// Explicit mapping of field byte offsets to their source name and type name `(byte_offset, field_name, field_type_name)`.
+    #[serde(default)]
+    pub field_names: Vec<(usize, String, String)>,
 }
 
 impl CompiledClass {
@@ -49,6 +52,7 @@ impl CompiledClass {
             itable: Vec::new(),
             destructor_id: None,
             field_types: Vec::new(),
+            field_names: Vec::new(),
         }
     }
 

@@ -10,11 +10,8 @@ The `solix lsp` subcommand starts the official Solix Language Server Protocol (L
 solix lsp [options]
 ```
 
-Or execute the standalone dedicated binary:
-
-```bash
-solix-lsp
-```
+> [!NOTE]
+> As of Milestone 030, all standalone executables are consolidated into the single unified `solix` executable (`solix lsp --stdio` and `solix dap --stdio`). Standalone invocation is unified under the `solix` command line interface.
 
 ---
 
@@ -90,7 +87,7 @@ The Solix Language Server supports 32 language intelligence features:
 12. **Inlay Hints**: Parameter names and RAII scope-exit destructor hints (`~dtor()`).
 13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
-15. **Code Lens**: Interactive `▶ Run Main` and `▶ Run Test` lenses executing contextual project builds and container runs.
+15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `🐞 Debug Main` for applications and `▶ Run Test` / `🐞 Debug Test` for test suites.
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).
 17. **Refactoring**: Safe symbol renaming across files.
 18. **Code Formatting**: 4-space indent formatter preserving inline comments, compound operators (`+=`, `-=`, `*=`, `/=`, `%=`), relational operators (`==`, `!=`, `<=`, `>=`), lambda arrows (`=>`), and mid-line blocks (`} else {`).

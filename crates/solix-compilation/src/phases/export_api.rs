@@ -118,6 +118,7 @@ pub fn generate_api_header(context: &CompilationContext) -> String {
         header_output.push_str(&format!("// {}\n", context.options.package_description));
     }
     header_output.push('\n');
+    let is_debug = context.options.profile == crate::CompilationContext::BuildProfile::Debug;
 
     for (source_index, ast_option) in context.ast.iter().enumerate() {
         let source_id = source_index as u16;
@@ -181,6 +182,7 @@ pub fn generate_api_header(context: &CompilationContext) -> String {
                         class_declaration,
                         &file_package,
                         source_code,
+                        is_debug,
                     );
                 }
                 Declaration::Interface(interface_declaration) => {
@@ -205,6 +207,7 @@ pub fn generate_api_header(context: &CompilationContext) -> String {
                         method_declaration,
                         &file_package,
                         source_code,
+                        is_debug,
                     );
                 }
                 Declaration::Field(field_declaration) => {
@@ -213,6 +216,7 @@ pub fn generate_api_header(context: &CompilationContext) -> String {
                         field_declaration,
                         &file_package,
                         source_code,
+                        is_debug,
                     );
                 }
                 _ => {}
@@ -228,15 +232,20 @@ fn emit_class_header(
     class_declaration: &ClassDeclaration,
     file_package: &str,
     source_code: &str,
+    is_debug: bool,
 ) {
-    if class_declaration.modifiers.contains(&Modifier::Extern)
-        || class_declaration.modifiers.contains(&Modifier::Private)
-        || class_declaration.modifiers.contains(&Modifier::Internal)
-    {
+    if class_declaration.modifiers.contains(&Modifier::Extern) {
         return;
     }
-    if !class_declaration.modifiers.contains(&Modifier::Public) {
-        return;
+    if !is_debug {
+        if class_declaration.modifiers.contains(&Modifier::Private)
+            || class_declaration.modifiers.contains(&Modifier::Internal)
+        {
+            return;
+        }
+        if !class_declaration.modifiers.contains(&Modifier::Public) {
+            return;
+        }
     }
 
     let decl_namespace = extract_namespace_path(&class_declaration.namespace_path, source_code);
@@ -307,7 +316,7 @@ fn emit_class_header(
                 output_buffer.push_str(&format!("{field_type_str} {field_name_str};\n"));
             }
             ClassMember::Method(method_declaration) => {
-                if method_declaration.modifiers.contains(&Modifier::Private) {
+                if !is_debug && method_declaration.modifiers.contains(&Modifier::Private) {
                     continue;
                 }
                 let method_name = get_span_text(method_declaration.name_span, source_code);
@@ -526,9 +535,10 @@ fn emit_top_level_method(
     method_declaration: &MethodDeclaration,
     file_package: &str,
     source_code: &str,
+    is_debug: bool,
 ) {
     if method_declaration.modifiers.contains(&Modifier::Extern)
-        || !method_declaration.modifiers.contains(&Modifier::Public)
+        || (!is_debug && !method_declaration.modifiers.contains(&Modifier::Public))
     {
         return;
     }
@@ -578,9 +588,10 @@ fn emit_top_level_field(
     field_declaration: &FieldDeclaration,
     file_package: &str,
     source_code: &str,
+    is_debug: bool,
 ) {
     if field_declaration.modifiers.contains(&Modifier::Extern)
-        || !field_declaration.modifiers.contains(&Modifier::Public)
+        || (!is_debug && !field_declaration.modifiers.contains(&Modifier::Public))
     {
         return;
     }

@@ -159,6 +159,9 @@ pub struct BinaryProgram {
     pub exported_ast_bytes: Vec<u8>,
     /// Full export manifest for dynamic linking and API reflection.
     pub export_manifest: ExportManifest,
+    /// Canonical source file paths indexed by `source_id`.
+    #[serde(default)]
+    pub source_files: Vec<String>,
 }
 
 impl Default for BinaryProgram {
@@ -190,6 +193,7 @@ impl BinaryProgram {
             native_library_checksums: std::collections::HashMap::new(),
             exported_ast_bytes: Vec::new(),
             export_manifest: ExportManifest::default(),
+            source_files: Vec::new(),
         }
     }
 
@@ -614,6 +618,8 @@ impl BinaryProgram {
                 source_map.push(SourceMapEntry {
                     instruction_pc,
                     span: Span { id, start, end },
+                    line: 0,
+                    column: 0,
                 });
             }
 
@@ -665,6 +671,7 @@ impl BinaryProgram {
             "debug".to_string()
         };
         let native_library_checksums = export_manifest.native_library_checksums.clone();
+        let source_files = export_manifest.source_files.clone();
 
         Ok(BinaryProgram {
             magic,
@@ -685,6 +692,7 @@ impl BinaryProgram {
             native_library_checksums,
             exported_ast_bytes,
             export_manifest,
+            source_files,
         })
     }
 }

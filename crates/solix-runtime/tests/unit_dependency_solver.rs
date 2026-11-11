@@ -50,6 +50,7 @@ fn create_math_binary(package_version: &str) -> BinaryProgram {
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        source_files: Vec::new(),
         api_header: String::new(),
         exported_ast_bytes: Vec::new(),
     };
@@ -89,6 +90,7 @@ fn create_app_binary_requiring(dependency_version: PackageVersion) -> BinaryProg
         exported_functions: Vec::new(),
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        source_files: Vec::new(),
         api_header: String::new(),
         exported_ast_bytes: Vec::new(),
     };

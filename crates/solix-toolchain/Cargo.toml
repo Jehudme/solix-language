@@ -16,6 +16,7 @@ solix-common.workspace = true
 solix-compilation.workspace = true
 solix-runtime.workspace = true
 solix-lsp.workspace = true
+solix-dap.workspace = true
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true

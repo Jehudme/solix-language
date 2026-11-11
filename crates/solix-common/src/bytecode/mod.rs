@@ -13,7 +13,9 @@ pub use binary::{
     BinaryProgram, ConstantPool, ConstantPoolValue, MAGIC, VERSION_MAJOR, VERSION_MINOR,
 };
 pub use class::CompiledClass;
-pub use function::{CompiledFunction, ExceptionHandlerEntry, SourceMapEntry};
+pub use function::{
+    CompiledFunction, ExceptionHandlerEntry, LocalVariableDebugInfo, SourceMapEntry,
+};
 pub use instruction::Instruction;
 pub use manifest::{
     DeclarationModifier, ExportManifest, ExportedClass, ExportedEnum, ExportedField,

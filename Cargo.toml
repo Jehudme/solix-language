@@ -6,7 +6,7 @@ members = [
     "crates/solix-runtime",
     "crates/solix-toolchain",
     "crates/solix-lsp",
-    "crates/solix-dbg",
+    "crates/solix-dap",
     "crates/solix-tests",
 ]
 exclude = [
@@ -26,6 +26,7 @@ solix-compilation = { path = "crates/solix-compilation" }
 solix-runtime = { path = "crates/solix-runtime" }
 solix-toolchain = { path = "crates/solix-toolchain" }
 solix-lsp = { path = "crates/solix-lsp" }
+solix-dap = { path = "crates/solix-dap" }
 
 # Error handling & logging
 thiserror = "2.0"

@@ -40,30 +40,53 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 
 | Command ID | Title | Description |
 | :--- | :--- | :--- |
-| `solix.runMain` | `Solix: Run Application (solix run)` | Runs `solix run` in an integrated VS Code terminal. Wired to `▶ Run Main` CodeLens. |
-| `solix.runTest` | `Solix: Run Test Suite (solix run --test)` | Runs test suite via `solix run --test`. Wired to `▶ Run Test` CodeLens. |
-| `solix.buildProject` | `Solix: Build Project (solix build)` | Builds the active workspace project into `.slxarc`. |
-| `solix.syncPackages` | `Solix: Sync Installed Packages (solix sync --all)` | Runs `solix sync --all` and refreshes language server indexes. |
-| `solix.showDisassembly` | `Solix: Inspect 64-Bit Register VM Disassembly` | Opens a side-by-side virtual read-only tab (`solix-disasm://...`) showing disassembled 64-bit VM bytecode. |
-| `solix.showSynthesizedApi` | `Solix: Inspect Exported Public API (.slx)` | Opens a side-by-side virtual read-only tab (`solix-api://...`) showing public `.slx` API headers. |
-| `solix.restartServer` | `Solix: Restart Language Server` | Cleanly restarts the LanguageClient and re-analyzes all buffers. |
+| `solix.runMain` | `Run Application (solix run)` | Runs `solix build --release && solix run` in an integrated VS Code terminal. Wired to `▶ Run Main` CodeLens. |
+| `solix.debugMain` | `Debug Application (solix dap)` | Starts interactive debugging session via `solix dap --stdio`. Wired to `🐞 Debug Main` CodeLens and editor title bar button. |
+| `solix.runTest` | `Run Test Suite (solix run --test)` | Runs test suite via `solix build --test && solix run --test`. Wired to `▶ Run Test` CodeLens. |
+| `solix.debugTest` | `Debug Test Suite (solix dap --test)` | Starts interactive debugging of test runner via `solix dap --stdio`. Wired to `🐞 Debug Test` CodeLens. |
+| `solix.buildProject` | `Build Project (solix build)` | Builds the active workspace project into `.slxarc`. |
+| `solix.syncPackages` | `Sync Installed Packages (solix sync --all)` | Runs `solix sync --all` and refreshes language server indexes. |
+| `solix.showDisassembly` | `Inspect 64-Bit Register VM Disassembly` | Opens a side-by-side virtual read-only tab (`solix-disasm://...`) showing disassembled 64-bit VM bytecode. |
+| `solix.showSynthesizedApi` | `Inspect Exported Public API (.slx)` | Opens a side-by-side virtual read-only tab (`solix-api://...`) showing public `.slx` API headers. |
+| `solix.restartServer` | `Restart Language Server` | Cleanly restarts the LanguageClient and re-analyzes all buffers. |
 
 ---
 
-## 3. Installation
+## 3. Interactive Debugging (DAP 2.0)
+
+The Solix extension features native zero-config `F5` interactive debugging powered by the integrated Solix Debug Adapter (`solix dap --stdio`).
+
+### Debugger Capabilities
+- **Breakpoints**: Source line breakpoints with automatic instruction snapping.
+- **Conditional Breakpoints**: Evaluates expressions in local frame context (e.g. `index == 10`).
+- **Hit-Conditional Breakpoints**: Triggers after $N$ hits (e.g. `>= 5`, `== 10`, `% 2 == 0`).
+- **Logpoints**: Evaluates `{variable}` interpolation templates and outputs directly to the Debug Console without pausing execution.
+- **Function Breakpoints**: Breaks on entry of named methods (`Point::distance_from_origin` or `main`).
+- **Call Stack Navigation**: Hierarchical stack frames showing file, line, and column.
+- **Variable Inspection & Mutation**: Three-tier scopes (Locals & Parameters, Static & Global Variables, VM Registers & Telemetry), object field expansion, and live in-place mutation.
+- **Inline Values Provider**: Displays variable values directly inline in the editor beside source statements while paused.
+- **Smart Stepping**: Automatically skips over release-compiled standard library internals while pausing seamlessly inside user callback closures.
+
+---
+
+## 4. Installation
 
 ### Option A: Install Pre-packaged `.vsix`
 To install the pre-built `.vsix` extension file directly into Visual Studio Code:
 
 ```bash
-code --install-extension editors/vscode/solix-0.1.0.vsix
+code --install-extension editors/vscode/solix-0.1.0.vsix --force
 ```
+
+> [!IMPORTANT]
+> If you are updating from an earlier version of the Solix extension, reload the VS Code window after installation (`Ctrl+Shift+P` / `Cmd+Shift+P` $\to$ `Developer: Reload Window`) to refresh registered commands and clear any cached extension state.
 
 Alternatively, inside Visual Studio Code:
 1. Open the Extensions view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
 2. Click the `...` (Views and More Actions) menu in the top-right corner.
 3. Select **Install from VSIX...**.
 4. Browse to `editors/vscode/solix-0.1.0.vsix` and click **Install**.
+5. Run `Developer: Reload Window` via the Command Palette.
 
 ### Option B: Development Mode (Run from Source)
 1. Open the `editors/vscode` folder in VS Code:
@@ -75,7 +98,7 @@ Alternatively, inside Visual Studio Code:
 
 ---
 
-## 4. Configuration Settings
+## 5. Configuration Settings
 
 The extension can be configured in your user or workspace `settings.json`:
 
@@ -98,7 +121,7 @@ The extension can be configured in your user or workspace `settings.json`:
 
 ---
 
-## 5. Automated Verification Suite
+## 6. Automated Verification Suite
 
 The extension features a 3-layer headless automated verification suite:
 
@@ -111,9 +134,12 @@ npm run test:grammar
 # Layer 2: Headless JSON-RPC integration test suite (Runs against real solix lsp server)
 npm run test:client-rpc
 
+# Layer 3: Headless DAP integration test suite (Runs against real solix dap server)
+npm run test:dap-rpc
+
 # Combined verification
 npm test
 
-# Layer 3: Distribution package validation
+# Distribution package validation
 npm run package
 ```

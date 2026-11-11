@@ -4,6 +4,7 @@
 
 pub mod build;
 pub mod compile;
+pub mod dap;
 pub mod fmt;
 pub mod info;
 pub mod lsp;
@@ -13,6 +14,7 @@ pub mod run;
 
 pub use build::execute_build;
 pub use compile::execute_compile;
+pub use dap::execute_dap;
 pub use fmt::execute_fmt;
 pub use info::execute_info;
 pub use lsp::execute_lsp;

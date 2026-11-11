@@ -1,4 +1,4 @@
-//! End-to-end stdio transport integration tests for `solix-lsp`.
+//! End-to-end stdio transport integration tests for `solix lsp`.
 
 #![forbid(unsafe_code)]
 
@@ -7,13 +7,15 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn test_stdio_lsp_server_handshake() {
-    let binary_path = env!("CARGO_BIN_EXE_solix-lsp");
+    let binary_path = env!("CARGO_BIN_EXE_solix");
 
     let mut child = Command::new(binary_path)
+        .arg("lsp")
+        .arg("--stdio")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("Failed to spawn solix-lsp binary");
+        .expect("Failed to spawn solix lsp process");
 
     let mut stdin = child.stdin.take().expect("Failed to open stdin");
     let stdout = child.stdout.take().expect("Failed to open stdout");
