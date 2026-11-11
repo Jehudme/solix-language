@@ -1,11 +1,12 @@
 package sample_workspace;
 
-import blt.io.println;
+extern import solix.io.println;
 
 /// Represents a 2D coordinate point with reference-counted heap allocation.
 class Point {
     public int32 coordinate_x;
     public int32 coordinate_y;
+
 
     public Point(int32 initial_x, int32 initial_y) {
         this.coordinate_x = initial_x;

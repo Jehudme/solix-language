@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import * as childProcess from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { LanguageClient } from 'vscode-languageclient/node';
 
 /**
@@ -15,16 +18,51 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
     ) {}
 
     public provideTextDocumentContent(documentUri: vscode.Uri): string {
-        const sourceFilePath = documentUri.path;
+        let sourceFilePath = documentUri.path;
+        if (sourceFilePath.endsWith('.slxdasm')) {
+            sourceFilePath = sourceFilePath.slice(0, -'.slxdasm'.length);
+        } else if (sourceFilePath.endsWith('.api.slx')) {
+            sourceFilePath = sourceFilePath.slice(0, -'.api.slx'.length);
+        }
+
+        // If the target is a Solix source file (.slx), compile it to a temporary binary container first
+        let inspectionTarget = sourceFilePath;
+        let temporaryBinaryPath: string | undefined;
+
         try {
+            if (sourceFilePath.endsWith('.slx')) {
+                const temporaryDirectory = os.tmpdir();
+                const randomSuffix = Math.floor(Math.random() * 1000000);
+                temporaryBinaryPath = path.join(temporaryDirectory, `solix_inspect_${randomSuffix}.slxb`);
+
+                try {
+                    childProcess.execFileSync(
+                        this.solixBinaryPath,
+                        ['compile', sourceFilePath, '-o', temporaryBinaryPath],
+                        { encoding: 'utf8', timeout: 8000 }
+                    );
+                    inspectionTarget = temporaryBinaryPath;
+                } catch (compilationError) {
+                    return `// Compilation Failed for inspection of ${sourceFilePath}:\n// ${String(compilationError)}`;
+                }
+            }
+
             const executionOutput = childProcess.execFileSync(
                 this.solixBinaryPath,
-                ['info', this.commandFlag, sourceFilePath],
+                ['info', this.commandFlag, inspectionTarget],
                 { encoding: 'utf8', timeout: 5000 }
             );
             return executionOutput;
         } catch (executionError) {
             return `// Failed to inspect ${this.commandFlag} for ${sourceFilePath}:\n// ${String(executionError)}`;
+        } finally {
+            if (temporaryBinaryPath && fs.existsSync(temporaryBinaryPath)) {
+                try {
+                    fs.unlinkSync(temporaryBinaryPath);
+                } catch {
+                    // Suppress temporary cleanup failure
+                }
+            }
         }
     }
 
@@ -148,12 +186,16 @@ export function registerSolixCommands(
     extensionContext.subscriptions.push(
         vscode.commands.registerCommand('solix.restartServer', async () => {
             vscode.window.showInformationMessage('Restarting Solix Language Server...');
-            if (languageClient.isRunning()) {
-                await languageClient.restart();
-            } else {
-                await languageClient.start();
+            try {
+                if (languageClient.isRunning()) {
+                    await languageClient.restart();
+                } else {
+                    await languageClient.start();
+                }
+                vscode.window.showInformationMessage('Solix Language Server restarted.');
+            } catch (restartError) {
+                vscode.window.showErrorMessage(`Failed to restart server: ${String(restartError)}`);
             }
-            vscode.window.showInformationMessage('Solix Language Server restarted.');
         })
     );
 }

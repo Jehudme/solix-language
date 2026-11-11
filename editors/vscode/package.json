@@ -26,9 +26,16 @@
         "register vm"
     ],
     "activationEvents": [
-        "onLanguage:solix"
+        "onLanguage:solix",
+        "onCommand:solix.runMain",
+        "onCommand:solix.runTest",
+        "onCommand:solix.buildProject",
+        "onCommand:solix.syncPackages",
+        "onCommand:solix.showDisassembly",
+        "onCommand:solix.showSynthesizedApi",
+        "onCommand:solix.restartServer"
     ],
-    "main": "./out/src/extension.js",
+    "main": "./dist/extension.js",
     "contributes": {
         "languages": [
             {
@@ -74,39 +81,39 @@
         "commands": [
             {
                 "command": "solix.runMain",
-                "title": "Solix: Run Application (solix run)",
+                "title": "Run Application (solix run)",
                 "category": "Solix",
                 "icon": "$(play)"
             },
             {
                 "command": "solix.runTest",
-                "title": "Solix: Run Test Suite (solix run --test)",
+                "title": "Run Test Suite (solix run --test)",
                 "category": "Solix",
                 "icon": "$(beaker)"
             },
             {
                 "command": "solix.buildProject",
-                "title": "Solix: Build Project (solix build)",
+                "title": "Build Project (solix build)",
                 "category": "Solix"
             },
             {
                 "command": "solix.syncPackages",
-                "title": "Solix: Sync Installed Packages (solix sync --all)",
+                "title": "Sync Installed Packages (solix sync --all)",
                 "category": "Solix"
             },
             {
                 "command": "solix.showDisassembly",
-                "title": "Solix: Inspect 64-Bit Register VM Disassembly",
+                "title": "Inspect 64-Bit Register VM Disassembly",
                 "category": "Solix"
             },
             {
                 "command": "solix.showSynthesizedApi",
-                "title": "Solix: Inspect Exported Public API (.slx)",
+                "title": "Inspect Exported Public API (.slx)",
                 "category": "Solix"
             },
             {
                 "command": "solix.restartServer",
-                "title": "Solix: Restart Language Server",
+                "title": "Restart Language Server",
                 "category": "Solix"
             }
         ],
@@ -117,7 +124,7 @@
                 "solix.lsp.path": {
                     "type": "string",
                     "default": "",
-                    "description": "Custom absolute path or executable name for solix or solix-lsp. If blank, automatically discovered from workspace target directories, ~/.cargo/bin, or PATH."
+                    "description": "Custom absolute path or executable name for solix or solix-lsp. If blank, automatically discovered from workspace target directories, ~/.local/bin, ~/.cargo/bin, or PATH."
                 },
                 "solix.lsp.arguments": {
                     "type": "array",
@@ -144,9 +151,10 @@
         }
     },
     "scripts": {
-        "vscode:prepublish": "npm run compile",
-        "compile": "tsc -p ./",
-        "watch": "tsc -w -p ./",
+        "vscode:prepublish": "npm run package-ext",
+        "package-ext": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+        "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+        "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
         "test:grammar": "vscode-tmgrammar-test -g syntaxes/solix.tmLanguage.json 'test/grammar/*.slx'",
         "test:client-rpc": "node test/client_rpc.test.mjs",
         "test": "npm run test:grammar && npm run test:client-rpc",
@@ -160,6 +168,7 @@
         "@types/vscode": "^1.85.0",
         "@vscode/test-electron": "^2.4.1",
         "@vscode/vsce": "^3.2.1",
+        "esbuild": "^0.28.2",
         "typescript": "^5.3.3",
         "vscode-tmgrammar-test": "^0.1.2"
     }
