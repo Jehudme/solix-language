@@ -258,6 +258,18 @@ fn ingest_package_api_source(
     let source_id = context.add_source(source_name, &source_code);
     context.mark_external_source(source_id);
 
+    if !program.export_manifest.exported_ast_bytes.is_empty() {
+        if let Ok(mut deserialized_ast) =
+            serde_json::from_slice::<crate::phases::parser::statements::ProgramAst>(
+                &program.export_manifest.exported_ast_bytes,
+            )
+        {
+            deserialized_ast.source_id = source_id;
+            context.ast[source_id as usize] = Some(deserialized_ast);
+            return Ok(());
+        }
+    }
+
     let (tokens, lex_errors) =
         crate::phases::lexing::lexer::tokenize_source(source_id, &source_code);
     if !lex_errors.is_empty() {
