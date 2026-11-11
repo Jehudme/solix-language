@@ -40,6 +40,9 @@ pub enum Commands {
     /// Installs a .slxb or .slxarc package into the local package store
     Install(InstallArgs),
 
+    /// Synchronizes and rebuilds installed packages from their source directories
+    Sync(SyncArgs),
+
     /// Uninstalls a package or package version from the local package store
     Uninstall(UninstallArgs),
 
@@ -81,6 +84,18 @@ pub struct BuildArgs {
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
+
+    /// Automatically install the built archive container into the local package store
+    #[arg(long, visible_alias = "sync")]
+    pub install: bool,
+
+    /// Force overwrite if package is already installed
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Bypass dependency cryptographic SHA-256 checksum verification
+    #[arg(long, visible_alias = "ignore-checksum")]
+    pub yolo: bool,
 }
 
 impl BuildArgs {
@@ -183,6 +198,18 @@ pub struct CompileArgs {
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
+
+    /// Automatically install the built archive container into the local package store
+    #[arg(long, visible_alias = "sync")]
+    pub install: bool,
+
+    /// Force overwrite if package is already installed
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Bypass dependency cryptographic SHA-256 checksum verification
+    #[arg(long, visible_alias = "ignore-checksum")]
+    pub yolo: bool,
 }
 
 impl CompileArgs {
@@ -255,14 +282,18 @@ pub struct RunArgs {
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
+
+    /// Bypass dependency and native library cryptographic SHA-256 checksum verification
+    #[arg(long, visible_alias = "ignore-checksum")]
+    pub yolo: bool,
 }
 
 /// Arguments for `solix info`.
 #[derive(Debug, Args, Clone)]
 pub struct InfoArgs {
-    /// Target binary container file (*.slxb)
+    /// Target binary container file (*.slxb), archive container (*.slxarc), or installed package name (<name> or <name>@<version>)
     #[arg(required = true)]
-    pub binary: PathBuf,
+    pub target: PathBuf,
 
     /// Output file destination for inspection data [default: stdout]
     #[arg(short, long)]
@@ -279,14 +310,79 @@ pub struct InfoArgs {
     /// Disassemble bytecode instructions
     #[arg(long)]
     pub disasm: bool,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
 }
 
 /// Arguments for `solix install`.
 #[derive(Debug, Args, Clone)]
 pub struct InstallArgs {
-    /// Path to a .slxb binary or .slxarc archive container to install into the package store
+    /// Path to a .slxb binary, .slxarc archive container, or project directory to install into the package store
     #[arg(required = true)]
     pub path: PathBuf,
+
+    /// Force overwrite if package is already installed
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Target build profile when installing from a project directory: debug, release (default), or test
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Shorthand flag for debug build profile
+    #[arg(long, conflicts_with_all = ["release", "test"])]
+    pub debug: bool,
+
+    /// Shorthand flag for release build profile
+    #[arg(long, conflicts_with_all = ["debug", "test"])]
+    pub release: bool,
+
+    /// Shorthand flag for test build profile
+    #[arg(long, conflicts_with_all = ["debug", "release"])]
+    pub test: bool,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
+}
+
+impl InstallArgs {
+    /// Resolves the effective build profile string considering shorthand flags.
+    #[must_use]
+    pub fn resolved_profile(&self) -> &str {
+        if self.debug {
+            "debug"
+        } else if self.test {
+            "test"
+        } else if self.release {
+            "release"
+        } else if let Some(ref prof) = self.profile {
+            prof.as_str()
+        } else {
+            "release"
+        }
+    }
+}
+
+/// Arguments for `solix sync`.
+#[derive(Debug, Args, Clone)]
+pub struct SyncArgs {
+    /// Package name to synchronize/rebuild from recorded source directory
+    pub package: Option<String>,
+
+    /// Synchronize all locally registered packages that have source project directories
+    #[arg(long)]
+    pub all: bool,
+
+    /// Target build profile override: debug, release, or test
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Force overwrite/reinstallation
+    #[arg(short, long)]
+    pub force: bool,
 
     /// Optional package store root directory override
     #[arg(long)]
@@ -308,6 +404,26 @@ pub struct UninstallArgs {
 /// Arguments for `solix list`.
 #[derive(Debug, Args, Clone)]
 pub struct ListArgs {
+    /// Filter packages matching substring in name or description
+    #[arg(short, long)]
+    pub filter: Option<String>,
+
+    /// Filter packages by build profile (debug, release, test)
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Filter packages by container kind (slxb, slxarc)
+    #[arg(short, long)]
+    pub kind: Option<String>,
+
+    /// Sort key for package listing: name (default), version, date, size, profile
+    #[arg(long, default_value = "name")]
+    pub sort: String,
+
+    /// Reverse sort order
+    #[arg(short, long)]
+    pub reverse: bool,
+
     /// Output package listing as machine-readable JSON
     #[arg(long)]
     pub json: bool,

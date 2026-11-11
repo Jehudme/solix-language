@@ -108,6 +108,14 @@ pub enum RuntimeError {
     /// Runtime package dependency resolution or version incompatibility failure.
     #[error("DependencyException: {reason}")]
     DependencyError { reason: String },
+
+    /// Native shared library checksum verification failure.
+    #[error("NativeLibraryChecksumMismatch: native library checksum verification failed for '{path}': expected {expected}, found {actual}")]
+    NativeLibraryChecksumMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Canonical numerical error codes emitted on abnormal VM termination.
@@ -162,6 +170,8 @@ pub enum RuntimeErrorCode {
     SharedLibraryError = 22,
     /// Dependency resolution or SemVer compatibility failure.
     DependencyError = 23,
+    /// Native shared library checksum verification failure.
+    NativeLibraryChecksumMismatch = 24,
 }
 
 impl RuntimeErrorCode {
@@ -212,6 +222,9 @@ impl RuntimeError {
             Self::InvalidEntryPointSignature { .. } => RuntimeErrorCode::InvalidEntryPointSignature,
             Self::SharedLibraryError { .. } => RuntimeErrorCode::SharedLibraryError,
             Self::DependencyError { .. } => RuntimeErrorCode::DependencyError,
+            Self::NativeLibraryChecksumMismatch { .. } => {
+                RuntimeErrorCode::NativeLibraryChecksumMismatch
+            }
         }
     }
 }

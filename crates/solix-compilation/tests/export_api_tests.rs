@@ -94,10 +94,10 @@ public class Console {
         !exported_ast_bytes.is_empty(),
         "Exported AST bytes must be populated"
     );
-    let deserialized_ast = serde_json::from_slice::<ProgramAst>(&exported_ast_bytes);
+    let deserialized_ast = bincode::deserialize::<ProgramAst>(&exported_ast_bytes);
     assert!(
         deserialized_ast.is_ok(),
-        "Exported AST bytes must deserialize cleanly into ProgramAst"
+        "Exported AST bytes must deserialize cleanly into ProgramAst via bincode"
     );
 }
 
@@ -110,6 +110,8 @@ fn test_export_manifest_local_only_invariant() {
         package_name: "dep_lib".to_string(),
         package_version: "1.0.0".to_string(),
         package_description: "External Dependency".to_string(),
+        build_profile: "debug".to_string(),
+        native_library_checksums: std::collections::HashMap::new(),
         dependencies: Vec::new(),
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),

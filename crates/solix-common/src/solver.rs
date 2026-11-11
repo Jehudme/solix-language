@@ -113,13 +113,16 @@ impl fmt::Display for PackageVersion {
     }
 }
 
-/// A named package dependency requirement (e.g. `raylib@1.2.0`).
+/// A named package dependency requirement (e.g. `raylib@1.2.0` or `solix@2.0.0#e3b0c4...`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DependencyRequirement {
     /// Package canonical identifier name.
     pub name: String,
     /// Required minimum compatible semantic version.
     pub version: PackageVersion,
+    /// Exact SHA-256 hex digest of the dependency `.slxb` binary at compile time.
+    #[serde(default)]
+    pub sha256: String,
 }
 
 impl DependencyRequirement {
@@ -128,10 +131,18 @@ impl DependencyRequirement {
         Self {
             name: name.into(),
             version,
+            sha256: String::new(),
         }
     }
 
-    /// Parses a requirement specification string formatted as `name@version`.
+    /// Associates an expected cryptographic SHA-256 checksum with this requirement.
+    #[must_use]
+    pub fn with_sha256(mut self, sha256: impl Into<String>) -> Self {
+        self.sha256 = sha256.into();
+        self
+    }
+
+    /// Parses a requirement specification string formatted as `name@version` or `name@version#sha256`.
     ///
     /// # Errors
     /// Returns a [`SolverError`] if the format is invalid or version parsing fails.
@@ -142,7 +153,7 @@ impl DependencyRequirement {
         if parts.len() != 2 {
             return Err(SolverError::InvalidVersionString {
                 raw: specification.to_string(),
-                reason: "Dependency specification must be formatted as 'name@version'".to_string(),
+                reason: "Dependency specification must be formatted as 'name@version' or 'name@version#sha256'".to_string(),
             });
         }
 
@@ -154,18 +165,29 @@ impl DependencyRequirement {
             });
         }
 
-        let parsed_version = PackageVersion::parse(parts[1].trim())?;
+        let (version_str, sha256_str) = if let Some((ver, sha)) = parts[1].split_once('#') {
+            (ver.trim(), sha.trim().to_string())
+        } else {
+            (parts[1].trim(), String::new())
+        };
+
+        let parsed_version = PackageVersion::parse(version_str)?;
 
         Ok(Self {
             name: package_name.to_string(),
             version: parsed_version,
+            sha256: sha256_str,
         })
     }
 }
 
 impl fmt::Display for DependencyRequirement {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}@{}", self.name, self.version)
+        if self.sha256.is_empty() {
+            write!(formatter, "{}@{}", self.name, self.version)
+        } else {
+            write!(formatter, "{}@{}#{}", self.name, self.version, self.sha256)
+        }
     }
 }
 

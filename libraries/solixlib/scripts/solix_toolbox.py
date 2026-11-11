@@ -7,6 +7,7 @@ Tier 2: High-level turnkey auto_build orchestrator.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -312,6 +313,26 @@ def auto_build(profile: str = "debug", project_root: Path | None = None) -> Path
         staging["stage_lib"],
         profile,
     )
+
+    # Record cryptographic checksums for native shared libraries
+    staged_manifest_file = staging["stage"] / "manifest.toml"
+    native_checksums: dict[str, str] = {}
+    if staging["stage_lib"].exists():
+        for root, _, files in os.walk(staging["stage_lib"]):
+            for file_name in files:
+                if file_name.endswith((".so", ".dll", ".dylib")):
+                    lib_file = Path(root) / file_name
+                    rel_path = str(lib_file.relative_to(staging["stage"])).replace("\\", "/")
+                    hasher = hashlib.sha256()
+                    hasher.update(lib_file.read_bytes())
+                    native_checksums[rel_path] = hasher.hexdigest()
+
+    if native_checksums and staged_manifest_file.exists():
+        manifest_text = staged_manifest_file.read_text(encoding="utf-8")
+        checksum_section = "\n[native_library_checksums]\n" + "\n".join(
+            f'"{key}" = "{digest}"' for key, digest in native_checksums.items()
+        ) + "\n"
+        staged_manifest_file.write_text(manifest_text + checksum_section, encoding="utf-8")
 
     # Package distributable .slxarc
     final_archive_path = staging["build"] / f"{package_name}.slxarc"

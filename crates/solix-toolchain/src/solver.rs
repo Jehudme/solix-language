@@ -2,11 +2,14 @@
 
 #![forbid(unsafe_code)]
 
+use crate::cache::{FilesystemPackageCache, resolve_packages_cache_dir};
 use solix_common::bytecode::BinaryProgram;
+use solix_common::cache::PackageCache;
 use solix_common::project::SlxarcArchive;
 use solix_common::solver::{ModuleSolver, PackageVersion, SolvedPackage, SolverError};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Resolves the canonical root directory of the installed packages store.
 ///
@@ -79,6 +82,7 @@ pub fn resolve_native_cache_dir(store_directory: &Path) -> PathBuf {
 pub struct ClientModuleSolver {
     store_directory: PathBuf,
     native_cache_directory: PathBuf,
+    package_cache: Arc<dyn PackageCache>,
 }
 
 impl Default for ClientModuleSolver {
@@ -93,9 +97,11 @@ impl ClientModuleSolver {
     pub fn new() -> Self {
         let store_directory = resolve_package_store_dir(None);
         let native_cache_directory = resolve_native_cache_dir(&store_directory);
+        let cache_root = resolve_packages_cache_dir(None);
         Self {
             store_directory,
             native_cache_directory,
+            package_cache: Arc::new(FilesystemPackageCache::with_root(cache_root)),
         }
     }
 
@@ -103,10 +109,22 @@ impl ClientModuleSolver {
     #[must_use]
     pub fn with_store_dir(store_directory: PathBuf) -> Self {
         let native_cache_directory = resolve_native_cache_dir(&store_directory);
+        let cache_root = store_directory
+            .parent()
+            .map(|parent_path| parent_path.join("cache").join("packages"))
+            .unwrap_or_else(|| resolve_packages_cache_dir(None));
         Self {
             store_directory,
             native_cache_directory,
+            package_cache: Arc::new(FilesystemPackageCache::with_root(cache_root)),
         }
+    }
+
+    /// Configures an explicit package extraction cache for this solver.
+    #[must_use]
+    pub fn with_package_cache(mut self, package_cache: Arc<dyn PackageCache>) -> Self {
+        self.package_cache = package_cache;
+        self
     }
 
     /// Returns the root path of the managed package store.
@@ -119,6 +137,12 @@ impl ClientModuleSolver {
     #[must_use]
     pub fn native_cache_directory(&self) -> &Path {
         &self.native_cache_directory
+    }
+
+    /// Returns a reference to the active package extraction cache.
+    #[must_use]
+    pub fn package_cache(&self) -> &Arc<dyn PackageCache> {
+        &self.package_cache
     }
 
     /// Scans the package store for all installed versions of `package_name`.
@@ -179,6 +203,28 @@ impl ClientModuleSolver {
                 .native_cache_directory
                 .join(format!("{package_name}-{version}"));
 
+            // 1. Check authenticated extraction cache first to avoid re-inflating archive
+            if let Ok(Some(cached_program)) =
+                self.package_cache
+                    .get_cached_binary(package_name, version, &slxarc_candidate)
+            {
+                let mut solved_package = SolvedPackage::new(package_name, version, cached_program);
+
+                let native_lib_dir = extraction_target.join("lib");
+                if native_lib_dir.exists() && native_lib_dir.is_dir() {
+                    if let Ok(entries) = fs::read_dir(&native_lib_dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_file() {
+                                solved_package = solved_package.with_native_library(path);
+                            }
+                        }
+                    }
+                    return Ok(solved_package);
+                }
+            }
+
+            // 2. Cache miss: extract archive from scratch
             let loaded_archive =
                 SlxarcArchive::extract_and_load(&slxarc_candidate, &extraction_target).map_err(
                     |error| SolverError::ExtractionError {
@@ -197,6 +243,16 @@ impl ClientModuleSolver {
                     ),
                 }
             })?;
+
+            // 3. Populate authenticated extraction cache
+            let primary_bytes = primary_program.to_bytes();
+            let _ = self.package_cache.put_cached_binary(
+                package_name,
+                version,
+                &slxarc_candidate,
+                &primary_program,
+                &primary_bytes,
+            );
 
             let mut solved_package = SolvedPackage::new(package_name, version, primary_program);
             for secondary in loaded_archive.secondary_binaries {

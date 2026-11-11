@@ -101,6 +101,8 @@ pub struct CompilationOptions {
     pub solver: Option<Arc<dyn ModuleSolver>>,
     /// Linking mode for dependencies and executable emission (`dynamic` or `static`).
     pub link_mode: LinkMode,
+    /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --yolo).
+    pub verify_checksums: bool,
 }
 
 impl Default for CompilationOptions {
@@ -127,7 +129,15 @@ impl CompilationOptions {
             dependency_specs: Vec::new(),
             solver: None,
             link_mode: LinkMode::Dynamic,
+            verify_checksums: true,
         }
+    }
+
+    /// Sets whether to enforce cryptographic checksum verification on dependencies.
+    #[must_use]
+    pub fn with_verify_checksums(mut self, verify: bool) -> Self {
+        self.verify_checksums = verify;
+        self
     }
 
     /// Sets the binary linking mode (`dynamic` or `static`).

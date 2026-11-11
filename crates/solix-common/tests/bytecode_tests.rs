@@ -403,6 +403,8 @@ fn test_export_manifest_json_extraction() {
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
+        build_profile: "debug".to_string(),
+        native_library_checksums: std::collections::HashMap::new(),
         dependencies: Vec::new(),
         exported_classes: vec![exported_class],
         exported_enums: Vec::new(),
@@ -435,6 +437,8 @@ fn test_binary_program_manifest_round_trip() {
         package_name: "network".to_string(),
         package_version: "2.0.1".to_string(),
         package_description: "Networking library".to_string(),
+        build_profile: "release".to_string(),
+        native_library_checksums: std::collections::HashMap::new(),
         dependencies: Vec::new(),
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),
@@ -462,6 +466,22 @@ fn test_binary_program_manifest_round_trip() {
         BinaryProgram::from_bytes(&bytes).expect("round-trip deserialization succeeds");
 
     assert_eq!(deserialized.package_name, "network");
+    assert_eq!(deserialized.build_profile, "release");
+    assert_eq!(program.compute_sha256(), deserialized.compute_sha256());
+    assert_eq!(program.compute_sha256().len(), 64);
+
+    program.exported_ast_bytes = vec![1, 2, 3, 4, 5, 42];
+    let bytes_with_ast = program.to_bytes();
+    let deserialized_with_ast =
+        BinaryProgram::from_bytes(&bytes_with_ast).expect("round-trip with ast");
+    assert_eq!(
+        deserialized_with_ast.exported_ast_bytes,
+        vec![1, 2, 3, 4, 5, 42]
+    );
+    assert_eq!(
+        deserialized_with_ast.export_manifest.exported_ast_bytes,
+        vec![1, 2, 3, 4, 5, 42]
+    );
     assert_eq!(deserialized.package_version, "2.0.1");
     assert_eq!(deserialized.package_description, "Networking library");
     assert_eq!(deserialized.export_manifest, program.export_manifest);

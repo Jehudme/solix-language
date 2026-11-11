@@ -977,17 +977,34 @@ version = "1.4.2"
     .expect("install v142");
     assert_eq!(run(install_v142).expect("install"), 0);
 
-    let run_scenario_4 = Cli::try_parse_from([
+    // Scenario 4a: Without --yolo, running app pinned to raylib@1.2.0 against raylib@1.4.2
+    // must fail cryptographic checksum verification (Milestone 026 security invariant).
+    let run_scenario_4_strict = Cli::try_parse_from([
         "solix",
         "run",
         app_bin.to_str().expect("valid path"),
         "--pkg-dir",
         pc_b_store_str,
     ])
-    .expect("parse run scenario 4");
+    .expect("parse run scenario 4 strict");
+    assert!(
+        run(run_scenario_4_strict).is_err(),
+        "Scenario 4 strict: Running without --yolo must fail checksum verification on upgraded package"
+    );
+
+    // Scenario 4b: With --yolo, checksum verification is bypassed, allowing SemVer compatible raylib@1.4.2 to run.
+    let run_scenario_4_yolo = Cli::try_parse_from([
+        "solix",
+        "run",
+        app_bin.to_str().expect("valid path"),
+        "--pkg-dir",
+        pc_b_store_str,
+        "--yolo",
+    ])
+    .expect("parse run scenario 4 yolo");
     assert_eq!(
-        run(run_scenario_4).expect("Scenario 4 must succeed"),
+        run(run_scenario_4_yolo).expect("Scenario 4 with --yolo must succeed"),
         77,
-        "Scenario 4: Executing app against installed raylib@1.4.2 must return 77"
+        "Scenario 4: Executing app against installed raylib@1.4.2 with --yolo must return 77"
     );
 }

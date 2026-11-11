@@ -156,6 +156,12 @@ pub struct ExportManifest {
     pub package_version: String,
     /// Human-readable package description.
     pub package_description: String,
+    /// Build profile recorded during compilation ("debug", "release", or "test").
+    #[serde(default)]
+    pub build_profile: String,
+    /// Cryptographic SHA-256 digests of bundled native shared libraries.
+    #[serde(default)]
+    pub native_library_checksums: std::collections::HashMap<String, String>,
     /// Explicit package dependencies recorded during compilation.
     #[serde(default)]
     pub dependencies: Vec<crate::solver::DependencyRequirement>,
@@ -174,7 +180,8 @@ pub struct ExportManifest {
     #[serde(default)]
     pub api_header: String,
     /// Pre-parsed AST bytes for instant dependency injection without re-parsing.
-    #[serde(default)]
+    /// Skipped from JSON serialization in favour of BinaryProgram Section 7.
+    #[serde(default, skip_serializing)]
     pub exported_ast_bytes: Vec<u8>,
 }
 

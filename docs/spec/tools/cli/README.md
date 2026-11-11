@@ -48,7 +48,8 @@ solix <subcommand> --help
 | [`build`](build.md) | Orchestrates building a project and packages it into an archive container (`.slxarc`) | [build.md](build.md) |
 | [`run`](run.md) | Executes `.slxb` binaries, `.slxarc` archives, or `.slx` source files on the 64-bit Register VM | [run.md](run.md) |
 | [`info`](info.md) | Inspects metadata, export manifests, disassembly, or synthesized APIs of `.slxb` or `.slxarc` | [info.md](info.md) |
-| [`install`](install.md) | Installs a `.slxb` binary or `.slxarc` archive into the local package store | [install.md](install.md) |
+| [`install`](install.md) | Installs a `.slxb` binary, `.slxarc` archive, or project directory into the local package store | [install.md](install.md) |
+| [`sync`](sync.md) | Synchronizes and rebuilds installed packages from their recorded source directories | [sync.md](sync.md) |
 | [`uninstall`](uninstall.md) | Removes an installed package or specific version from the local package store | [uninstall.md](uninstall.md) |
 | [`list`](list.md) | Lists all installed packages and versions in the local package store | [list.md](list.md) |
 

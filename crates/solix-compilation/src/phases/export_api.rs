@@ -613,7 +613,7 @@ pub fn generate_api_header_and_ast(context: &CompilationContext) -> (String, Vec
     }
 
     match crate::phases::parser::parse_source(0, &tokens, &api_header) {
-        Ok(program_ast) => match serde_json::to_vec(&program_ast) {
+        Ok(program_ast) => match bincode::serialize(&program_ast) {
             Ok(ast_bytes) => (api_header, ast_bytes),
             Err(_) => (api_header, Vec::new()),
         },

@@ -92,7 +92,14 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_native_function("blt::io::println", builtin_println)
         .with_native_function("blt::io::print", builtin_print)
         .with_native_function("Console::println", builtin_println)
-        .with_native_function("Console::print", builtin_print);
+        .with_native_function("Console::print", builtin_print)
+        .with_verify_checksums(!args.yolo);
+
+    if args.yolo {
+        eprintln!(
+            "warning: checksum verification bypassed (--yolo); running without cryptographic validation"
+        );
+    }
 
     // Set optional entry point override
     if let Some(entry) = &args.entry {

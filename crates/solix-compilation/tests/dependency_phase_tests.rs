@@ -28,6 +28,8 @@ fn create_dummy_library_binary(
         package_name: package_name.to_string(),
         package_version: package_version.to_string(),
         package_description: format!("Test package {package_name}"),
+        build_profile: "debug".to_string(),
+        native_library_checksums: std::collections::HashMap::new(),
         dependencies,
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),
@@ -63,10 +65,7 @@ fn test_dependency_resolution_phase_transitive_tree_resolution() {
     let math_v110 = create_dummy_library_binary("math", "1.1.0", Vec::new(), "add");
     let math_v130 = create_dummy_library_binary("math", "1.3.0", Vec::new(), "add");
 
-    let engine_req = DependencyRequirement {
-        name: "math".to_string(),
-        version: PackageVersion::new(1, 1, 0),
-    };
+    let engine_req = DependencyRequirement::new("math", PackageVersion::new(1, 1, 0));
     let engine_v100 =
         create_dummy_library_binary("engine", "1.0.0", vec![engine_req], "init_engine");
 
@@ -100,10 +99,7 @@ fn test_dependency_resolution_phase_transitive_tree_resolution() {
         }
     "#;
 
-    let app_dependency = DependencyRequirement {
-        name: "engine".to_string(),
-        version: PackageVersion::new(1, 0, 0),
-    };
+    let app_dependency = DependencyRequirement::new("engine", PackageVersion::new(1, 0, 0));
 
     let options = CompilationOptions::new()
         .with_source("main.slx", consumer_code)
@@ -145,16 +141,10 @@ fn test_dependency_resolution_phase_diamond_incompatible_conflict_fails() {
     let core_v100 = create_dummy_library_binary("core", "1.0.0", Vec::new(), "core_init");
     let core_v200 = create_dummy_library_binary("core", "2.0.0", Vec::new(), "core_init");
 
-    let lib_a_req = DependencyRequirement {
-        name: "core".to_string(),
-        version: PackageVersion::new(1, 0, 0),
-    };
+    let lib_a_req = DependencyRequirement::new("core", PackageVersion::new(1, 0, 0));
     let lib_a = create_dummy_library_binary("lib_a", "1.0.0", vec![lib_a_req], "do_a");
 
-    let lib_b_req = DependencyRequirement {
-        name: "core".to_string(),
-        version: PackageVersion::new(2, 0, 0),
-    };
+    let lib_b_req = DependencyRequirement::new("core", PackageVersion::new(2, 0, 0));
     let lib_b = create_dummy_library_binary("lib_b", "1.0.0", vec![lib_b_req], "do_b");
 
     let mut solver = InMemoryModuleSolver::new();
@@ -189,14 +179,8 @@ fn test_dependency_resolution_phase_diamond_incompatible_conflict_fails() {
 
     let options = CompilationOptions::new()
         .with_source("main.slx", consumer_code)
-        .with_dependency_spec(DependencyRequirement {
-            name: "lib_a".to_string(),
-            version: PackageVersion::new(1, 0, 0),
-        })
-        .with_dependency_spec(DependencyRequirement {
-            name: "lib_b".to_string(),
-            version: PackageVersion::new(1, 0, 0),
-        })
+        .with_dependency_spec(DependencyRequirement::new("lib_a", PackageVersion::new(1, 0, 0)))
+        .with_dependency_spec(DependencyRequirement::new("lib_b", PackageVersion::new(1, 0, 0)))
         .with_solver(Arc::new(solver));
 
     let mut context = CompilationContext::new(options);
@@ -230,10 +214,10 @@ fn test_dependency_resolution_phase_missing_package_fails() {
 
     let options = CompilationOptions::new()
         .with_source("main.slx", consumer_code)
-        .with_dependency_spec(DependencyRequirement {
-            name: "non_existent_package".to_string(),
-            version: PackageVersion::new(1, 0, 0),
-        })
+        .with_dependency_spec(DependencyRequirement::new(
+            "non_existent_package",
+            PackageVersion::new(1, 0, 0),
+        ))
         .with_solver(Arc::new(solver));
 
     let mut context = CompilationContext::new(options);

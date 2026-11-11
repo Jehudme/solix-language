@@ -877,10 +877,15 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     let (api_header, exported_ast_bytes) =
         crate::phases::export_api::generate_api_header_and_ast(context);
 
+    program.build_profile = context.options.profile.to_string();
+    program.exported_ast_bytes = exported_ast_bytes.clone();
+
     program.export_manifest = ExportManifest {
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
+        build_profile: program.build_profile.clone(),
+        native_library_checksums: program.native_library_checksums.clone(),
         dependencies,
         exported_classes,
         exported_enums,

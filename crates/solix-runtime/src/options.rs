@@ -42,6 +42,8 @@ pub struct RuntimeOptions {
     pub native_functions: HashMap<String, NativeFunction>,
     /// Optional pluggable module solver for auto-fetching dependencies on PC B.
     pub solver: Option<Arc<dyn ModuleSolver>>,
+    /// Whether to verify cryptographic SHA-256 checksums on dependencies and native libraries (default true; false when --yolo).
+    pub verify_checksums: bool,
 }
 
 impl PartialEq for RuntimeOptions {
@@ -56,6 +58,7 @@ impl PartialEq for RuntimeOptions {
             && self.safe_mode == other.safe_mode
             && self.sandboxed == other.sandboxed
             && self.native_functions == other.native_functions
+            && self.verify_checksums == other.verify_checksums
             && match (&self.solver, &other.solver) {
                 (Some(solver_a), Some(solver_b)) => Arc::ptr_eq(solver_a, solver_b),
                 (None, None) => true,
@@ -78,6 +81,7 @@ impl Default for RuntimeOptions {
             sandboxed: false,
             native_functions: HashMap::new(),
             solver: None,
+            verify_checksums: true,
         }
     }
 }
@@ -159,6 +163,13 @@ impl RuntimeOptions {
     ) -> Self {
         self.native_libraries
             .extend(paths.into_iter().map(|path| path.as_ref().to_path_buf()));
+        self
+    }
+
+    /// Configures whether to enforce cryptographic checksum validation.
+    #[must_use]
+    pub fn with_verify_checksums(mut self, verify: bool) -> Self {
+        self.verify_checksums = verify;
         self
     }
 

@@ -56,6 +56,9 @@ pub struct ProjectManifest {
     /// Explicit external dependencies mapped as `name => version` declared in `[dependencies]`.
     #[serde(default)]
     pub dependencies: std::collections::BTreeMap<String, String>,
+    /// Cryptographic SHA-256 digests of bundled native shared libraries.
+    #[serde(default)]
+    pub native_library_checksums: std::collections::HashMap<String, String>,
 }
 
 impl ProjectManifest {
@@ -472,6 +475,54 @@ impl SlxarcArchive {
 
                 native_libraries.push(target_path.clone());
                 extracted_files.push(target_path);
+            }
+        }
+
+        // Verify native library checksums against manifest and binary metadata
+        let empty_checksums = std::collections::HashMap::new();
+        let manifest_checksums = manifest_option
+            .as_ref()
+            .map(|manifest| &manifest.native_library_checksums)
+            .unwrap_or(&empty_checksums);
+        let binary_checksums = binaries
+            .first()
+            .map(|binary| &binary.native_library_checksums)
+            .unwrap_or(&empty_checksums);
+
+        for native_lib_path in &native_libraries {
+            let file_name = native_lib_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            let expected_checksum = manifest_checksums
+                .iter()
+                .chain(binary_checksums.iter())
+                .find_map(|(key, hash)| {
+                    if key.ends_with(file_name) || native_lib_path.to_string_lossy().ends_with(key)
+                    {
+                        Some(hash)
+                    } else {
+                        None
+                    }
+                });
+
+            if let Some(expected) = expected_checksum {
+                let actual = crate::hash::sha256_file(native_lib_path).map_err(|io_error| {
+                    EmissionError::ContainerSerializationFailed {
+                        reason: format!(
+                            "failed to hash extracted native library '{}': {io_error}",
+                            native_lib_path.display()
+                        ),
+                    }
+                })?;
+                if &actual != expected {
+                    return Err(EmissionError::ContainerSerializationFailed {
+                        reason: format!(
+                            "native library checksum verification failed for '{}': expected {expected}, found {actual}",
+                            native_lib_path.display()
+                        ),
+                    });
+                }
             }
         }
 

@@ -13,5 +13,5 @@ pub use build::execute_build;
 pub use compile::execute_compile;
 pub use info::execute_info;
 pub use new::execute_new;
-pub use pkg::{execute_install, execute_list, execute_uninstall};
+pub use pkg::{execute_install, execute_list, execute_sync, execute_uninstall};
 pub use run::execute_run;

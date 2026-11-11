@@ -96,6 +96,9 @@ fn test_solix_new_default_application() {
         link: "dynamic".to_string(),
         r#static: false,
         pkg_dir: None,
+        install: false,
+        force: false,
+        yolo: false,
     };
     let build_result = execute_build(build_arguments);
     assert!(

@@ -1089,6 +1089,24 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
+    #[error("Dependency checksum verification failed for '{name}@{version}': expected {expected_sha256}, found {actual_sha256}")]
+    #[diagnostic(
+        code(solix::binder::dependency_checksum_mismatch),
+        help(
+            "The resolved package artifact does not match the pinned compile-time SHA-256 digest.\n\
+             This indicates the package has been mutated, corrupted, or tampered with.\n\
+             To bypass checksum enforcement when testing modified dependencies, pass '--yolo'."
+        )
+    )]
+    DependencyChecksumMismatch {
+        name: String,
+        version: String,
+        expected_sha256: String,
+        actual_sha256: String,
+        #[label("dependency checksum mismatch")]
+        span: SourceSpan,
+    },
+
     #[error(
         "Generic type constraint violation: type '{actual}' does not satisfy constraint '{expected}' for parameter '{type_param}'"
     )]
@@ -1202,6 +1220,7 @@ impl BindingError {
             Self::BitwiseOperatorOnNonInteger { .. } => "E0288",
             Self::IncompatibleDependencyVersion { .. } => "E0289",
             Self::ExternalPackageNotFound { .. } => "E0290",
+            Self::DependencyChecksumMismatch { .. } => "E0291",
         }
     }
 
@@ -1299,6 +1318,7 @@ impl BindingError {
             | Self::BitwiseOperatorOnNonInteger { span, .. }
             | Self::IncompatibleDependencyVersion { span, .. }
             | Self::ExternalPackageNotFound { span, .. }
+            | Self::DependencyChecksumMismatch { span, .. }
             | Self::GenericTypeConstraintViolation { span, .. } => *span,
         }
     }

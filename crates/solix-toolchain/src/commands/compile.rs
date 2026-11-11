@@ -99,7 +99,8 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             args.description.as_deref().unwrap_or(""),
         )
         .with_builtins(!args.no_builtins)
-        .with_solver(solver);
+        .with_solver(solver)
+        .with_verify_checksums(!args.yolo);
 
     if args.inline_threshold != 8 {
         options = options.with_inline_threshold(args.inline_threshold);
@@ -316,6 +317,16 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         );
     } else {
         println!("Compiled '{}' -> {}", package_name, output_path.display());
+    }
+
+    if args.install {
+        crate::commands::pkg::install_package_artifact(
+            &output_path,
+            None,
+            args.force,
+            Some(&args.profile),
+            args.pkg_dir.as_deref(),
+        )?;
     }
 
     Ok(())

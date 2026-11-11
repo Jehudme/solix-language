@@ -94,5 +94,39 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         bail!("Build script terminated with non-zero exit code: {exit_code}");
     }
 
+    if args.install {
+        let manifest_data =
+            solix_common::project::ProjectManifest::from_file(project_root.join("manifest.toml"))
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let archive_candidate = project_root
+            .join("build")
+            .join(profile)
+            .join(format!("{}.slxarc", manifest_data.info.name));
+
+        let archive_path = if archive_candidate.exists() {
+            archive_candidate
+        } else {
+            let fallback_archive = project_root
+                .join("build")
+                .join(format!("{}.slxarc", manifest_data.info.name));
+            if fallback_archive.exists() {
+                fallback_archive
+            } else {
+                bail!(
+                    "Cannot install build output: archive not found at '{}'",
+                    archive_candidate.display()
+                );
+            }
+        };
+
+        crate::commands::pkg::install_package_artifact(
+            &archive_path,
+            Some(project_root),
+            args.force,
+            Some(profile),
+            args.pkg_dir.as_deref(),
+        )?;
+    }
+
     Ok(())
 }

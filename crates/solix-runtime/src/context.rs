@@ -348,6 +348,44 @@ impl RuntimeContext {
 
         let mut shared_libraries = Vec::new();
         for library_path in &options.native_libraries {
+            if options.verify_checksums {
+                let file_name = library_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("");
+                let expected_checksum = options.binaries.iter().find_map(|binary_program| {
+                    binary_program
+                        .native_library_checksums
+                        .iter()
+                        .find_map(|(path_key, hash)| {
+                            if path_key.ends_with(file_name)
+                                || library_path.to_string_lossy().ends_with(path_key)
+                            {
+                                Some(hash.clone())
+                            } else {
+                                None
+                            }
+                        })
+                });
+
+                if let Some(expected) = expected_checksum {
+                    let actual =
+                        solix_common::hash::sha256_file(library_path).map_err(|io_error| {
+                            RuntimeError::SharedLibraryError {
+                                path: library_path.display().to_string(),
+                                reason: io_error.to_string(),
+                            }
+                        })?;
+                    if actual != expected {
+                        return Err(RuntimeError::NativeLibraryChecksumMismatch {
+                            path: library_path.display().to_string(),
+                            expected,
+                            actual,
+                        });
+                    }
+                }
+            }
+
             let mut loader = crate::native::ffi::SharedLibraryLoader::new();
             loader.load_library(library_path)?;
             for (symbol, function_ptr) in loader.registered_functions {
@@ -653,7 +691,7 @@ fn verify_and_resolve_runtime_dependencies(
     }
 
     while let Some((requirement, requester_name)) = work_queue.pop_front() {
-        if let Some((existing_version, _)) = loaded_packages.get(&requirement.name) {
+        if let Some((existing_version, existing_idx)) = loaded_packages.get(&requirement.name) {
             if !existing_version.is_compatible_with(&requirement.version) {
                 return Err(RuntimeError::DependencyError {
                     reason: format!(
@@ -661,6 +699,26 @@ fn verify_and_resolve_runtime_dependencies(
                         requirement.name, requirement.version, existing_version
                     ),
                 });
+            }
+            if !requirement.sha256.is_empty()
+                && let Some(existing_binary) = options.binaries.get(*existing_idx)
+            {
+                let actual_sha256 = existing_binary.compute_sha256();
+                if requirement.sha256 != actual_sha256 {
+                    if options.verify_checksums {
+                        return Err(RuntimeError::DependencyError {
+                            reason: format!(
+                                "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
+                                requirement.name, requirement.version, requirement.sha256, actual_sha256
+                            ),
+                        });
+                    } else {
+                        eprintln!(
+                            "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                            requirement.name, requirement.version
+                        );
+                    }
+                }
             }
         } else if let Some(solver) = &options.solver {
             match solver.resolve_compatible(&requirement.name, requirement.version) {
@@ -675,6 +733,25 @@ fn verify_and_resolve_runtime_dependencies(
                                 requirement.name, solved_package.version, requirement.version
                             ),
                         });
+                    }
+
+                    if !requirement.sha256.is_empty() {
+                        let actual_sha256 = solved_package.program.compute_sha256();
+                        if requirement.sha256 != actual_sha256 {
+                            if options.verify_checksums {
+                                return Err(RuntimeError::DependencyError {
+                                    reason: format!(
+                                        "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
+                                        requirement.name, requirement.version, requirement.sha256, actual_sha256
+                                    ),
+                                });
+                            } else {
+                                eprintln!(
+                                    "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                                    requirement.name, requirement.version
+                                );
+                            }
+                        }
                     }
 
                     let new_index = options.binaries.len();

@@ -1,6 +1,6 @@
 # `solix list` — Local Package Inventory
 
-The `list` subcommand scans and reports all packages and versions installed in the local Solix package store.
+The `list` subcommand scans and reports all packages and versions installed in the local Solix package store (`$SOLIX_PKG_DIR/registry.json`), with rich filtering, multi-key sorting, and machine-readable output.
 
 ---
 
@@ -16,8 +16,13 @@ solix list [options]
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--json` | | Flag | `false` | Output the inventory as machine-readable JSON. |
-| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for the local package store. Can also be set via `SOLIX_PKG_DIR`. |
+| `--filter <query>` | `-f` | String | | Filters packages by matching substring in name or description. |
+| `--profile <prof>` | | String | | Filters packages by build profile (`debug`, `release`, `test`). |
+| `--kind <kind>` | `-k` | String | | Filters packages by container format (`slxb`, `slxarc`). |
+| `--sort <key>` | | String | `"name"` | Sort field: `name`, `version`, `date`, `size`, or `profile`. |
+| `--reverse` | `-r` | Flag | `false` | Reverses sort order. |
+| `--json` | | Flag | `false` | Output package inventory formatted as structured JSON. |
+| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for the local package store. |
 
 ---
 
@@ -25,22 +30,15 @@ solix list [options]
 
 ### 1. Human-Readable Table (Default)
 
-By default, `solix list` prints a formatted table listing each discovered package, its installed versions, package format (`.slxb` or `.slxarc`), and file location:
-
 ```text
-Installed Solix Packages:
---------------------------------------------------------------------------------
-Package              Version        Format     Location
---------------------------------------------------------------------------------
-raylib               1.0.0          slxarc     ~/.solix/packages/raylib/1.0.0/raylib.slxarc
-math_utils           0.2.1          slxb       ~/.solix/packages/math_utils/0.2.1/math_utils.slxb
---------------------------------------------------------------------------------
-Total: 2 package(s) installed.
+Installed Solix Packages (/home/user/.solix/packages):
+NAME             VERSION    KIND    PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE DIR
+---------------- ---------- ------- -------- ---------- -------------------- --------------- --------------------
+solix            2.0.0      slxarc  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
+raylib           1.2.0      slxarc  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
 ```
 
 ### 2. JSON Output (`--json`)
-
-When invoked with `--json`, `solix list` outputs structured JSON suitable for CI scripts and IDE tooling:
 
 ```bash
 solix list --json
@@ -49,25 +47,22 @@ solix list --json
 ```json
 [
   {
-    "name": "raylib",
-    "version": "1.0.0",
-    "format": "slxarc",
-    "path": "/home/user/.solix/packages/raylib/1.0.0/raylib.slxarc"
-  },
-  {
-    "name": "math_utils",
-    "version": "0.2.1",
-    "format": "slxb",
-    "path": "/home/user/.solix/packages/math_utils/0.2.1/math_utils.slxb"
+    "name": "solix",
+    "version": "2.0.0",
+    "kind": "slxarc",
+    "build_profile": "release",
+    "sha256": "46747ea15ac6f2f15d462438a63fb9ef71581361ab5facca844c97a488d24812",
+    "size_bytes": 698144,
+    "installed_at_unix_secs": 1762839894,
+    "installed_at_iso8601": "2026-11-11T05:44:54Z",
+    "source_project_dir": "/home/user/solixlib",
+    "artifact_path": "/home/user/.solix/packages/solix/2.0.0/solix.slxarc",
+    "native_libraries": {
+      "lib/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
+    },
+    "description": "Solix Standard Library",
+    "license": "Apache-2.0",
+    "authors": ["Solix Team"]
   }
 ]
 ```
-
----
-
-## Exit Codes
-
-| Exit Code | Classification | Meaning |
-|---|---|---|
-| `0` | Success | Package store successfully scanned and inventory displayed. |
-| `1` | Error | Package store directory inaccessible or unreadable. |

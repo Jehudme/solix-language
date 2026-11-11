@@ -96,6 +96,19 @@ math_matrix = "0.3.1"
 
 ---
 
+### 4. `[native_library_checksums]` Table (Generated / Optional)
+
+Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_toolbox.py` during packaging to ensure binary tamper resistance.
+
+```toml
+[native_library_checksums]
+"lib/libsolixlib_native.so" = "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
+```
+
+When loading native dynamic libraries into the virtual machine (`RuntimeContext::new` or `SlxarcArchive::extract_and_load`), the runtime validates that the extracted library's SHA-256 digest matches this pin. Any mismatch halts execution unless `--yolo` (`--ignore-checksum`) is passed.
+
+---
+
 ## Directory Conventions Around `manifest.toml`
 
 A standard Solix project structured around `manifest.toml`:

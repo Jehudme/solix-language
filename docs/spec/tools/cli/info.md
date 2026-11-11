@@ -1,13 +1,13 @@
 # `solix info` — Binary & Archive Container Inspection
 
-The `info` subcommand inspects compiled binary containers (`.slxb`) and archive packages (`.slxarc`), dumping container summaries, reconstructed Solix API interfaces, 64-bit Register VM disassemblies, or raw machine-readable JSON metadata.
+The `info` subcommand inspects compiled binary containers (`.slxb`), archive packages (`.slxarc`), or installed packages by name (`solix info <pkg_name>`), dumping container summaries, SHA-256 checksums, cache status, reconstructed Solix API interfaces, 64-bit Register VM disassemblies, or machine-readable JSON metadata.
 
 ---
 
 ## Synopsis
 
 ```bash
-solix info <binary> [options]
+solix info <target> [options]
 ```
 
 ---
@@ -16,7 +16,7 @@ solix info <binary> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<binary>` | Path | **Yes** | Path to target compiled binary container (`*.slxb`) or archive container (`*.slxarc`). |
+| `<target>` | Path or String | **Yes** | Path to target compiled binary (`*.slxb`), archive (`*.slxarc`), or registered package name (`<name>` or `<name>@<version>`). |
 
 ---
 
@@ -28,60 +28,56 @@ solix info <binary> [options]
 | `--json` | | Flag | `false` | Output container metadata and export manifest formatted as structured JSON. |
 | `--api` | | Flag | `false` | Print reconstructed Solix API interface source code (`.slx`) suitable for external consumption. |
 | `--disasm` | | Flag | `false` | Disassemble all bytecode instructions into human-readable 64-bit Register VM opcodes. |
+| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for the local package store when resolving installed package names. |
 
 ---
 
-## Container Type Semantics
+## Target Semantics
 
-### 1. Binary Container (`.slxb`) Inspection
+### 1. Installed Package Resolution by Name
+
+`<target>` can be an installed package identifier:
+- `solix info solix`: Resolves the highest installed SemVer version of `solix` from `$SOLIX_PKG_DIR/registry.json`.
+- `solix info solix@2.0.0`: Resolves the exact specified version.
+
+```bash
+solix info solix
+```
+
+Output:
+```text
+=== Solix Archive Container Inspection (.slxarc) ===
+Archive:      /home/user/.solix/packages/solix/2.0.0/solix.slxarc
+SHA-256:      46747ea15ac6f2f15d462438a63fb9ef71581361ab5facca844c97a488d24812
+Cache Status: Cached (verified SHA-256 match in ~/.solix/cache/)
+Package:      solix v2.0.0
+Description:  Solix Standard Library
+License:      Apache-2.0
+
+--- Entry Points ---
+  • main: Main::main
+  • test: TestRunner::test
+
+--- Native Shared Libraries (1) ---
+  • lib/libsolixlib_native.so [SHA-256: af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44]
+
+--- Contained Files (3) ---
+  • manifest.toml (size: 335B, compressed: 238B)
+  • bin/solix.slxb (size: 1568252B, compressed: 346873B)
+  • lib/libsolixlib_native.so (size: 936336B, compressed: 350746B)
+
+--- Compiled Binaries (1) ---
+  • bin/solix.slxb (profile: release, functions: 1872, classes: 134, static: 25B, SHA-256: 7251b9e23dfbb39087b5e6e8f4f37e9715b697e2f1d8cc395ac67cff6acd2b92)
+```
+
+### 2. Binary Container (`.slxb`) Inspection
 
 When inspecting a standalone `.slxb` container:
-
-- **Default (Summary)**: Displays package metadata (name, version, description), static storage size, total function count, class definitions, and method signatures.
-- **`--api`**: Extracts the embedded `ExportManifest`. If an `api_header` is present in the binary, it is emitted directly; otherwise, the interface is dynamically reconstructed via `manifest_to_source`.
-- **`--disasm`**: Disassembles all functions in the binary into 64-bit Register VM instructions, detailing register indices, constant pool references, branch offsets, and exception handler ranges.
-- **`--json`**: Emits the raw `ExportManifest` as formatted JSON containing classes, fields, vtable layouts, and function signatures.
+- Displays package metadata, build profile, static storage size, total function count, class definitions, and SHA-256 digest.
+- `--api`: Emits reconstructed public API interface source code.
+- `--disasm`: Disassembles virtual machine instructions.
+- `--json`: Emits raw JSON manifest.
 
 ```bash
-# View summary of a compiled binary
 solix info build/release/math_utils.slxb
-
-# Emit public API interface source
-solix info build/release/math_utils.slxb --api
-
-# Disassemble bytecode to a log file
-solix info build/release/math_utils.slxb --disasm -o target/disasm.txt
-
-# Extract export manifest as JSON
-solix info build/release/math_utils.slxb --json
 ```
-
-### 2. Archive Container (`.slxarc`) Inspection
-
-When inspecting a packaged `.slxarc` archive container:
-
-- **Default (Summary)**: Inspects the ZIP container, displaying:
-  - Package metadata from embedded `manifest.toml` (`[info]`, `[entrypoints]`).
-  - Inventory of all contained files with uncompressed and compressed byte counts.
-  - Native shared libraries (`natives/*.so`, `*.dll`, `*.dylib`).
-  - Compiled binaries (`bin/*.slxb`).
-- **`--api`**: Iterates across all contained `.slxb` binary files in the archive and emits reconstructed Solix API interface source blocks for each binary.
-- **`--disasm`**: Iterates across all contained `.slxb` binary files and prints full Register VM disassemblies for each unit.
-- **`--json`**: Emits an archive inspection object formatted as JSON containing archive path, manifest data, contained file entries, native library paths, and binary program descriptors.
-
-```bash
-# Inspect archive package structure
-solix info build/release/game_engine.slxarc
-
-# Output full archive structure and manifests as JSON
-solix info build/release/game_engine.slxarc --json
-```
-
----
-
-## Exit Codes
-
-| Exit Code | Classification | Meaning |
-|---|---|---|
-| `0` | Success | Inspection succeeded and output was printed or written. |
-| `1` | Error | Binary file missing, invalid magic header, container decode failure, or I/O error. |

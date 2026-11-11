@@ -93,6 +93,27 @@ pub fn run_dependency_resolution(
                 continue;
             }
 
+            let actual_sha256 = existing_program.compute_sha256();
+            if !requirement.sha256.is_empty() && requirement.sha256 != actual_sha256 {
+                if context.options.verify_checksums {
+                    accumulated_diagnostics.push(CompilationDiagnostic::from(
+                        BindingError::DependencyChecksumMismatch {
+                            name: requirement.name.clone(),
+                            version: requirement.version.to_string(),
+                            expected_sha256: requirement.sha256.clone(),
+                            actual_sha256,
+                            span: SourceSpan::from(0..0),
+                        },
+                    ));
+                    continue;
+                } else {
+                    eprintln!(
+                        "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                        requirement.name, requirement.version
+                    );
+                }
+            }
+
             if *existing_version < requirement.version {
                 if let Some(solver) = &context.solver {
                     match solver.resolve_compatible(&requirement.name, requirement.version) {
@@ -136,6 +157,28 @@ pub fn run_dependency_resolution(
                 Ok(solved_package) => {
                     let program = solved_package.program.clone();
                     let version = solved_package.version;
+
+                    let actual_sha256 = program.compute_sha256();
+                    if !requirement.sha256.is_empty() && requirement.sha256 != actual_sha256 {
+                        if context.options.verify_checksums {
+                            accumulated_diagnostics.push(CompilationDiagnostic::from(
+                                BindingError::DependencyChecksumMismatch {
+                                    name: requirement.name.clone(),
+                                    version: requirement.version.to_string(),
+                                    expected_sha256: requirement.sha256.clone(),
+                                    actual_sha256,
+                                    span: SourceSpan::from(0..0),
+                                },
+                            ));
+                            continue;
+                        } else {
+                            eprintln!(
+                                "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                                requirement.name, requirement.version
+                            );
+                        }
+                    }
+
                     solved_map.insert(requirement.name.clone(), (version, program.clone()));
                     for transitive in &program.export_manifest.dependencies {
                         work_queue.push_back((transitive.clone(), requirement.name.clone()));
@@ -190,12 +233,10 @@ pub fn run_dependency_resolution(
     sorted_packages.sort_by(|package_a, package_b| package_a.0.cmp(&package_b.0));
 
     for (package_name, version, program) in sorted_packages {
+        let package_sha256 = program.compute_sha256();
         context.dependencies_map.insert(
             package_name.clone(),
-            DependencyRequirement {
-                name: package_name.clone(),
-                version,
-            },
+            DependencyRequirement::new(package_name.clone(), version).with_sha256(package_sha256),
         );
 
         if context.loaded_api_packages.insert(package_name.clone()) {
@@ -257,15 +298,22 @@ fn ingest_package_api_source(
     let source_id = context.add_source(source_name, &source_code);
     context.mark_external_source(source_id);
 
-    if !program.export_manifest.exported_ast_bytes.is_empty()
-        && let Ok(mut deserialized_ast) =
+    if !program.export_manifest.exported_ast_bytes.is_empty() {
+        let deserialized_result = bincode::deserialize::<crate::phases::parser::statements::ProgramAst>(
+            &program.export_manifest.exported_ast_bytes,
+        )
+        .or_else(|_| {
             serde_json::from_slice::<crate::phases::parser::statements::ProgramAst>(
                 &program.export_manifest.exported_ast_bytes,
             )
-    {
-        deserialized_ast.source_id = source_id;
-        context.ast[source_id as usize] = Some(deserialized_ast);
-        return Ok(());
+        });
+
+        if let Ok(mut deserialized_ast) = deserialized_result {
+            deserialized_ast.source_id = source_id;
+            selectively_prune_ast(&mut deserialized_ast, package_name, context, &source_code);
+            context.ast[source_id as usize] = Some(deserialized_ast);
+            return Ok(());
+        }
     }
 
     let (tokens, lex_errors) =
@@ -368,12 +416,11 @@ pub fn resolve_extern_import(
     }
 
     // Record in dependencies_map
+    let package_sha256 = solved_package.program.compute_sha256();
     context.dependencies_map.insert(
         package_name.to_string(),
-        DependencyRequirement {
-            name: package_name.to_string(),
-            version: solved_package.version,
-        },
+        DependencyRequirement::new(package_name.to_string(), solved_package.version)
+            .with_sha256(package_sha256),
     );
 
     // Synthesize API, lex, and parse into context
@@ -411,6 +458,28 @@ fn resolve_transitive_requirement(
             )]
         })?;
 
+    if !requirement.sha256.is_empty() {
+        let actual_sha256 = solved_package.program.compute_sha256();
+        if requirement.sha256 != actual_sha256 {
+            if context.options.verify_checksums {
+                return Err(vec![CompilationDiagnostic::from(
+                    BindingError::DependencyChecksumMismatch {
+                        name: requirement.name.clone(),
+                        version: requirement.version.to_string(),
+                        expected_sha256: requirement.sha256.clone(),
+                        actual_sha256,
+                        span: import_span.to_source_span(),
+                    },
+                )]);
+            } else {
+                eprintln!(
+                    "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                    requirement.name, requirement.version
+                );
+            }
+        }
+    }
+
     // Check transitive sub-dependencies
     for child_requirement in &solved_package.program.export_manifest.dependencies {
         if let Some(existing) = context.dependencies_map.get(&child_requirement.name) {
@@ -433,12 +502,11 @@ fn resolve_transitive_requirement(
         }
     }
 
+    let package_sha256 = solved_package.program.compute_sha256();
     context.dependencies_map.insert(
         requirement.name.clone(),
-        DependencyRequirement {
-            name: requirement.name.clone(),
-            version: solved_package.version,
-        },
+        DependencyRequirement::new(requirement.name.clone(), solved_package.version)
+            .with_sha256(package_sha256),
     );
 
     if context.loaded_api_packages.insert(requirement.name.clone()) {
@@ -452,4 +520,323 @@ fn resolve_transitive_requirement(
     }
 
     Ok(())
+}
+
+fn get_span_slice(span: Span, source_text: &str) -> &str {
+    let start_offset = span.start as usize;
+    let end_offset = span.end as usize;
+    if start_offset <= end_offset && end_offset <= source_text.len() {
+        &source_text[start_offset..end_offset]
+    } else {
+        ""
+    }
+}
+
+fn collect_type_names(
+    annotation: &crate::phases::parser::statements::TypeAnnotation,
+    source_text: &str,
+    target_set: &mut std::collections::HashSet<String>,
+) {
+    use crate::phases::parser::statements::TypeAnnotation;
+    match annotation {
+        TypeAnnotation::Primitive { .. } => {}
+        TypeAnnotation::Named { path, .. } => {
+            if let Some(last_segment) = path.last() {
+                let simple_name = get_span_slice(*last_segment, source_text);
+                if !simple_name.is_empty() {
+                    target_set.insert(simple_name.to_string());
+                }
+            }
+            let segments: Vec<&str> = path
+                .iter()
+                .map(|span| get_span_slice(*span, source_text))
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            if !segments.is_empty() {
+                target_set.insert(segments.join("::"));
+            }
+        }
+        TypeAnnotation::Generic {
+            base, arguments, ..
+        } => {
+            collect_type_names(base, source_text, target_set);
+            for argument in arguments {
+                collect_type_names(argument, source_text, target_set);
+            }
+        }
+        TypeAnnotation::Array { element_type, .. } => {
+            collect_type_names(element_type, source_text, target_set);
+        }
+        TypeAnnotation::Tuple { elements, .. } => {
+            for element in elements {
+                collect_type_names(element, source_text, target_set);
+            }
+        }
+        TypeAnnotation::FunctionPointer {
+            return_type,
+            parameters,
+            ..
+        } => {
+            collect_type_names(return_type, source_text, target_set);
+            for parameter in parameters {
+                collect_type_names(parameter, source_text, target_set);
+            }
+        }
+    }
+}
+
+fn selectively_prune_ast(
+    ast: &mut crate::phases::parser::statements::ProgramAst,
+    package_name: &str,
+    context: &CompilationContext,
+    source_text: &str,
+) {
+    use crate::phases::parser::statements::{ClassMember, Declaration};
+
+    let mut has_root_wildcard = false;
+    let mut imported_namespaces = std::collections::HashSet::new();
+    let mut imported_symbols = std::collections::HashSet::new();
+    let mut has_any_extern_import = false;
+
+    for user_ast in context.ast.iter().flatten() {
+        if context.is_external_source(user_ast.source_id) {
+            continue;
+        }
+        for import_statement in &user_ast.imports {
+            if !import_statement.is_extern || import_statement.path.is_empty() {
+                continue;
+            }
+            let first_lexeme = context.get_lexeme(import_statement.path[0]);
+            if first_lexeme != package_name {
+                continue;
+            }
+            has_any_extern_import = true;
+            if import_statement.path.len() == 1 {
+                has_root_wildcard = true;
+                break;
+            }
+            if import_statement.is_wildcard {
+                let namespace_segments: Vec<String> = import_statement
+                    .path
+                    .iter()
+                    .map(|span| context.get_lexeme(*span).to_string())
+                    .collect();
+                imported_namespaces.insert(namespace_segments.join("::"));
+            } else {
+                let symbol_segments: Vec<String> = import_statement
+                    .path
+                    .iter()
+                    .map(|span| context.get_lexeme(*span).to_string())
+                    .collect();
+                imported_symbols.insert(symbol_segments.join("::"));
+                if let Some(last_segment) = symbol_segments.last() {
+                    imported_symbols.insert(last_segment.clone());
+                }
+            }
+        }
+    }
+
+    if !has_any_extern_import || has_root_wildcard {
+        return;
+    }
+
+    let mut needed_symbols = imported_symbols;
+    needed_symbols.insert("String".to_string());
+    needed_symbols.insert("IStringable".to_string());
+    needed_symbols.insert("Object".to_string());
+
+    loop {
+        let size_before = needed_symbols.len();
+
+        for declaration in &ast.declarations {
+            match declaration {
+                Declaration::Class(class_declaration) => {
+                    let class_name = get_span_slice(class_declaration.name_span, source_text);
+                    let namespace_segments: Vec<&str> = class_declaration
+                        .namespace_path
+                        .iter()
+                        .map(|span| get_span_slice(*span, source_text))
+                        .filter(|segment| !segment.is_empty())
+                        .collect();
+                    let namespace = namespace_segments.join("::");
+                    let qualified_name = if namespace.is_empty() {
+                        class_name.to_string()
+                    } else {
+                        format!("{namespace}::{class_name}")
+                    };
+
+                    let is_needed = needed_symbols.contains(class_name)
+                        || needed_symbols.contains(&qualified_name)
+                        || imported_namespaces.contains(&namespace)
+                        || namespace.starts_with(&format!("{package_name}::core"));
+
+                    if is_needed {
+                        if let Some(super_class) = &class_declaration.super_class {
+                            collect_type_names(super_class, source_text, &mut needed_symbols);
+                        }
+                        for interface_type in &class_declaration.interfaces {
+                            collect_type_names(interface_type, source_text, &mut needed_symbols);
+                        }
+                        for member in &class_declaration.members {
+                            match member {
+                                ClassMember::Field(field_declaration) => {
+                                    collect_type_names(
+                                        &field_declaration.field_type,
+                                        source_text,
+                                        &mut needed_symbols,
+                                    );
+                                }
+                                ClassMember::Method(method_declaration) => {
+                                    collect_type_names(
+                                        &method_declaration.return_type,
+                                        source_text,
+                                        &mut needed_symbols,
+                                    );
+                                    for parameter in &method_declaration.parameters {
+                                        collect_type_names(
+                                            &parameter.param_type,
+                                            source_text,
+                                            &mut needed_symbols,
+                                        );
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Declaration::Interface(interface_declaration) => {
+                    let iface_name = get_span_slice(interface_declaration.name_span, source_text);
+                    if needed_symbols.contains(iface_name) {
+                        for super_iface in &interface_declaration.super_interfaces {
+                            collect_type_names(super_iface, source_text, &mut needed_symbols);
+                        }
+                        for method_declaration in &interface_declaration.methods {
+                            collect_type_names(
+                                &method_declaration.return_type,
+                                source_text,
+                                &mut needed_symbols,
+                            );
+                            for parameter in &method_declaration.parameters {
+                                collect_type_names(
+                                    &parameter.param_type,
+                                    source_text,
+                                    &mut needed_symbols,
+                                );
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if needed_symbols.len() == size_before {
+            break;
+        }
+    }
+
+    ast.declarations.retain(|declaration| match declaration {
+        Declaration::Class(class_declaration) => {
+            let class_name = get_span_slice(class_declaration.name_span, source_text);
+            let namespace_segments: Vec<&str> = class_declaration
+                .namespace_path
+                .iter()
+                .map(|span| get_span_slice(*span, source_text))
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            let namespace = namespace_segments.join("::");
+            let qualified_name = if namespace.is_empty() {
+                class_name.to_string()
+            } else {
+                format!("{namespace}::{class_name}")
+            };
+
+            needed_symbols.contains(class_name)
+                || needed_symbols.contains(&qualified_name)
+                || imported_namespaces.contains(&namespace)
+                || namespace.starts_with(&format!("{package_name}::core"))
+        }
+        Declaration::Interface(interface_declaration) => {
+            let iface_name = get_span_slice(interface_declaration.name_span, source_text);
+            let namespace_segments: Vec<&str> = interface_declaration
+                .namespace_path
+                .iter()
+                .map(|span| get_span_slice(*span, source_text))
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            let namespace = namespace_segments.join("::");
+            let qualified_name = if namespace.is_empty() {
+                iface_name.to_string()
+            } else {
+                format!("{namespace}::{iface_name}")
+            };
+
+            needed_symbols.contains(iface_name)
+                || needed_symbols.contains(&qualified_name)
+                || imported_namespaces.contains(&namespace)
+                || namespace.starts_with(&format!("{package_name}::core"))
+        }
+        Declaration::Enum(enum_declaration) => {
+            let enum_name = get_span_slice(enum_declaration.name_span, source_text);
+            let namespace_segments: Vec<&str> = enum_declaration
+                .namespace_path
+                .iter()
+                .map(|span| get_span_slice(*span, source_text))
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            let namespace = namespace_segments.join("::");
+            let qualified_name = if namespace.is_empty() {
+                enum_name.to_string()
+            } else {
+                format!("{namespace}::{enum_name}")
+            };
+
+            needed_symbols.contains(enum_name)
+                || needed_symbols.contains(&qualified_name)
+                || imported_namespaces.contains(&namespace)
+                || namespace.starts_with(&format!("{package_name}::core"))
+        }
+        Declaration::Method(method_declaration) => {
+            let method_name = get_span_slice(method_declaration.name_span, source_text);
+            let namespace_segments: Vec<&str> = method_declaration
+                .namespace_path
+                .iter()
+                .map(|span| get_span_slice(*span, source_text))
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            let namespace = namespace_segments.join("::");
+            let qualified_name = if namespace.is_empty() {
+                method_name.to_string()
+            } else {
+                format!("{namespace}::{method_name}")
+            };
+
+            needed_symbols.contains(method_name)
+                || needed_symbols.contains(&qualified_name)
+                || imported_namespaces.contains(&namespace)
+                || namespace.starts_with(&format!("{package_name}::core"))
+        }
+        Declaration::Field(field_declaration) => {
+            let field_name = get_span_slice(field_declaration.name_span, source_text);
+            let namespace_segments: Vec<&str> = field_declaration
+                .namespace_path
+                .iter()
+                .map(|span| get_span_slice(*span, source_text))
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            let namespace = namespace_segments.join("::");
+            let qualified_name = if namespace.is_empty() {
+                field_name.to_string()
+            } else {
+                format!("{namespace}::{field_name}")
+            };
+
+            needed_symbols.contains(field_name)
+                || needed_symbols.contains(&qualified_name)
+                || imported_namespaces.contains(&namespace)
+                || namespace.starts_with(&format!("{package_name}::core"))
+        }
+        _ => true,
+    });
 }

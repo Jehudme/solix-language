@@ -3,7 +3,9 @@
 #![forbid(unsafe_code)]
 
 pub mod bytecode;
+pub mod cache;
 pub mod diagnostics;
+pub mod hash;
 pub mod project;
 pub mod solver;
 pub mod span;
@@ -16,7 +18,9 @@ pub use bytecode::{
     ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic, Instruction,
     OpCode, SourceMapEntry, extract_api_manifest,
 };
+pub use cache::{InMemoryPackageCache, NoopPackageCache, PackageCache};
 pub use diagnostics::EmissionError;
+pub use hash::{Sha256Hasher, format_hex_digest, sha256_bytes, sha256_file, sha256_hex};
 pub use project::{
     LoadedSlxarc, ProjectEntryPoints, ProjectInfo, ProjectManifest, SlxarcArchive, SlxarcFileEntry,
     SlxarcInspection,

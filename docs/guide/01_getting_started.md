@@ -301,45 +301,94 @@ solix info build/release/hello_solix.slxarc --json
 
 ---
 
-## Local Package Management
+## Local Package Management (`install`, `sync`, `list`, `uninstall`)
 
-Solix includes local package store management commands (`install`, `list`, `uninstall`) for sharing libraries across projects on your local machine.
+Solix includes local package store management commands (`install`, `sync`, `list`, `uninstall`) for sharing libraries across projects on your local machine with end-to-end cryptographic SHA-256 verification.
 
-The local package store resides at `~/.solix/packages/` (or `%USERPROFILE%\.solix\packages` on Windows).
+The local package store resides at `~/.solix/packages/` (or `%USERPROFILE%\.solix\packages` on Windows), managed by an automatic self-healing registry manifest at `registry.json`.
 
-### 1. Install a Package
+### 1. Install a Package (`solix install`)
+You can install precompiled `.slxb` binaries, `.slxarc` archives, or install directly from a project folder:
+
 ```bash
-# Install a library binary
-solix install build/release/math_utils.slxb
+# Install directly from a library project directory (builds and registers source folder)
+solix install ../libraries/solixlib --release
 
-# Install an archive container with native libraries
-solix install build/release/raylib_solix.slxarc
+# Automatically install on build or compile
+solix build --release --install
+solix compile src/math.slx --name math_utils --version 1.0.0 --install
+
+# Install precompiled containers
+solix install build/release/raylib.slxarc
+solix install build/release/math_utils.slxb
 ```
 
-### 2. List Installed Packages
+> [!NOTE]
+> Solix guards against accidental package overwrites. If `<name>@<version>` is already installed, `solix install` refuses to overwrite unless `--force` (`-f`) is explicitly provided.
+
+### 2. Synchronize Packages from Source (`solix sync`)
+When developing libraries locally, `solix sync` eliminates the manual rebuild-and-reinstall loop by rebuilding installed packages directly from their recorded source directories:
+
+```bash
+# Synchronize a specific package from its recorded source directory
+solix sync solixlib
+
+# Synchronize all registered packages that have source project directories
+solix sync --all
+```
+
+### 3. List Installed Packages (`solix list`)
+`solix list` displays an enriched inventory of installed packages with build profiles, sizes, installation timestamps, SHA-256 digests, and source directories:
+
 ```bash
 solix list
+
+# Filter and sort packages
+solix list --filter math
+solix list --profile release
+solix list --kind slxarc --sort size --reverse
+solix list --json
 ```
 
-Outputs a tabular inventory of installed packages:
+Output:
 ```text
-Installed Solix Packages:
---------------------------------------------------------------------------------
-Package              Version        Format     Location
---------------------------------------------------------------------------------
-math_utils           0.1.0          slxb       ~/.solix/packages/math_utils/0.1.0/math_utils.slxb
-raylib_solix         1.0.0          slxarc     ~/.solix/packages/raylib_solix/1.0.0/raylib_solix.slxarc
---------------------------------------------------------------------------------
-Total: 2 package(s) installed.
+Installed Solix Packages (/home/user/.solix/packages):
+NAME             VERSION    KIND    PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE DIR
+---------------- ---------- ------- -------- ---------- -------------------- --------------- --------------------
+solix            2.0.0      slxarc  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
+raylib           1.2.0      slxarc  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
 ```
 
-### 3. Uninstall a Package
+### 4. Inspect Packages & Modules (`solix info`)
+`solix info` inspects container artifacts or looks up installed modules directly by name:
+
+```bash
+# Look up installed package by name or name@version
+solix info solix
+solix info raylib@1.2.0
+
+# Disassemble bytecode or reconstruct interface source
+solix info solix --api
+solix info solix --disasm
+solix info solix --json
+```
+
+### 5. Uninstall a Package (`solix uninstall`)
 ```bash
 # Uninstall an exact version
 solix uninstall math_utils@0.1.0
 
 # Uninstall all versions of a package
 solix uninstall math_utils
+```
+
+### 6. Cryptographic Verification & YOLO Mode (`--yolo`)
+By default, the Solix toolchain cryptographically verifies that every resolved dependency and native shared library matches the exact SHA-256 digest recorded at compile time.
+
+To temporarily bypass checksum verification when hot-swapping or debugging experimental libraries:
+```bash
+solix run app.slxb --yolo
+# or: solix run app.slxb --ignore-checksum
 ```
 
 ---

@@ -2,35 +2,87 @@
 
 #![forbid(unsafe_code)]
 
+use crate::cache::FilesystemPackageCache;
 use crate::cli::InfoArgs;
-use anyhow::{Context, Result};
+use crate::registry::PackageRegistry;
+use crate::solver::resolve_package_store_dir;
+use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
+use solix_common::cache::PackageCache;
+use solix_common::hash::{sha256_file, sha256_hex};
 use solix_common::project::{SlxarcArchive, SlxarcInspection};
+use solix_common::solver::PackageVersion;
 use solix_compilation::manifest_to_source;
 use solix_compilation::phases::emitter::disassemble_program;
 use std::fmt::Write as FmtWrite;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Executes the `info` subcommand.
 ///
 /// # Errors
 /// Returns an error if reading the binary container, archive inspection, or output writing fails.
 pub fn execute_info(args: InfoArgs) -> Result<()> {
-    let is_archive = args
-        .binary
+    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+
+    // Resolve target: check filesystem first, then installed package registry
+    let target_path: PathBuf = if args.target.exists() {
+        args.target.clone()
+    } else {
+        let registry = PackageRegistry::load_or_sync(&store_directory)?;
+        let target_str = args.target.to_string_lossy();
+
+        let resolved_record = if target_str.contains('@') {
+            let mut parts = target_str.splitn(2, '@');
+            let package_name = parts.next().unwrap_or("");
+            let package_version = parts.next().unwrap_or("");
+            registry.get(package_name, Some(package_version))
+        } else {
+            registry.get(&target_str, None)
+        };
+
+        if let Some(record) = resolved_record {
+            record.artifact_path.clone()
+        } else {
+            bail!(
+                "Target '{}' was not found as a file or registered package in '{}'",
+                args.target.display(),
+                store_directory.display()
+            );
+        }
+    };
+
+    let is_archive = target_path
         .extension()
         .and_then(|extension| extension.to_str())
         .map(|ext_str| ext_str.eq_ignore_ascii_case("slxarc"))
         .unwrap_or(false);
 
     if is_archive {
-        let inspection = SlxarcArchive::inspect(&args.binary).with_context(|| {
+        let inspection = SlxarcArchive::inspect(&target_path).with_context(|| {
             format!(
                 "Failed to inspect .slxarc archive container from '{}'",
-                args.binary.display()
+                target_path.display()
             )
         })?;
+
+        let computed_sha256 = sha256_file(&target_path).unwrap_or_default();
+
+        // Check authenticated extraction cache status
+        let cache = FilesystemPackageCache::new();
+        let cache_status = if let Some(manifest) = &inspection.manifest {
+            if let Ok(parsed_version) = PackageVersion::parse(&manifest.info.version) {
+                match cache.get_cached_binary(&manifest.info.name, parsed_version, &target_path) {
+                    Ok(Some(_)) => "Cached (verified SHA-256 match in ~/.solix/cache/)".to_string(),
+                    Ok(None) => "Not cached (will extract on first compile)".to_string(),
+                    Err(cache_err) => format!("Cache invalid: {cache_err}"),
+                }
+            } else {
+                "Unknown".to_string()
+            }
+        } else {
+            "Unknown".to_string()
+        };
 
         let content = if args.disasm {
             let mut disassembly = String::new();
@@ -58,9 +110,18 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             }
             reconstructed_apis
         } else if args.json {
+            let native_checksums = inspection
+                .manifest
+                .as_ref()
+                .map(|manifest| manifest.native_library_checksums.clone())
+                .unwrap_or_default();
+
             let json_value = serde_json::json!({
-                "archive": args.binary.display().to_string(),
+                "archive": target_path.display().to_string(),
+                "sha256": computed_sha256,
+                "cache_status": cache_status,
                 "manifest": inspection.manifest,
+                "native_library_checksums": native_checksums,
                 "contained_files": inspection.file_entries.iter().map(|entry| {
                     serde_json::json!({
                         "path": entry.path,
@@ -74,6 +135,8 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
                         "path": name,
                         "package_name": program.package_name,
                         "package_version": program.package_version,
+                        "build_profile": program.build_profile,
+                        "sha256": program.compute_sha256(),
                         "functions_count": program.functions.len(),
                         "classes_count": program.classes.len(),
                         "static_space_size": program.static_space_size,
@@ -83,7 +146,12 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             });
             serde_json::to_string_pretty(&json_value)?
         } else {
-            format_slxarc_info_summary(&args.binary, &inspection)
+            format_slxarc_info_summary(
+                &target_path,
+                &inspection,
+                &computed_sha256,
+                &cache_status,
+            )
         };
 
         if let Some(out_path) = &args.output {
@@ -101,16 +169,17 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         return Ok(());
     }
 
-    let bytes = fs::read(&args.binary).with_context(|| {
+    let bytes = fs::read(&target_path).with_context(|| {
         format!(
             "Failed to read binary container from '{}'",
-            args.binary.display()
+            target_path.display()
         )
     })?;
+    let computed_sha256 = sha256_hex(&bytes);
     let program = BinaryProgram::from_bytes(&bytes).with_context(|| {
         format!(
             "Failed to decode binary container from '{}'",
-            args.binary.display()
+            target_path.display()
         )
     })?;
 
@@ -127,10 +196,23 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             api_source
         }
     } else if args.json {
-        extract_api_manifest(&program)
-            .with_context(|| "Failed to extract JSON manifest from binary")?
+        let json_value = serde_json::json!({
+            "target": target_path.display().to_string(),
+            "kind": "slxb",
+            "sha256": computed_sha256,
+            "package_name": program.package_name,
+            "package_version": program.package_version,
+            "build_profile": program.build_profile,
+            "description": program.package_description,
+            "static_space_size": program.static_space_size,
+            "functions_count": program.functions.len(),
+            "classes_count": program.classes.len(),
+            "native_library_checksums": program.native_library_checksums,
+            "export_manifest": program.export_manifest,
+        });
+        serde_json::to_string_pretty(&json_value)?
     } else {
-        format_info_summary(&program)
+        format_info_summary(&target_path, &program, &computed_sha256)
     };
 
     if let Some(out_path) = &args.output {
@@ -148,25 +230,32 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
     Ok(())
 }
 
-fn format_slxarc_info_summary(archive_path: &Path, inspection: &SlxarcInspection) -> String {
+fn format_slxarc_info_summary(
+    archive_path: &Path,
+    inspection: &SlxarcInspection,
+    sha256_digest: &str,
+    cache_status: &str,
+) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "=== Solix Archive Container Inspection (.slxarc) ===");
-    let _ = writeln!(out, "Archive:     {}", archive_path.display());
+    let _ = writeln!(out, "Archive:      {}", archive_path.display());
+    let _ = writeln!(out, "SHA-256:      {sha256_digest}");
+    let _ = writeln!(out, "Cache Status: {cache_status}");
 
     if let Some(manifest) = &inspection.manifest {
         let _ = writeln!(
             out,
-            "Package:     {} v{}",
+            "Package:      {} v{}",
             manifest.info.name, manifest.info.version
         );
         if let Some(description) = &manifest.info.description {
-            let _ = writeln!(out, "Description: {description}");
+            let _ = writeln!(out, "Description:  {description}");
         }
         if let Some(license) = &manifest.info.license {
-            let _ = writeln!(out, "License:     {license}");
+            let _ = writeln!(out, "License:      {license}");
         }
         if !manifest.info.authors.is_empty() {
-            let _ = writeln!(out, "Authors:     {}", manifest.info.authors.join(", "));
+            let _ = writeln!(out, "Authors:      {}", manifest.info.authors.join(", "));
         }
         let _ = writeln!(out, "\n--- Entry Points ---");
         let _ = writeln!(
@@ -179,8 +268,19 @@ fn format_slxarc_info_summary(archive_path: &Path, inspection: &SlxarcInspection
             "  • test: {}",
             manifest.entrypoints.test.as_deref().unwrap_or("<none>")
         );
+
+        if !manifest.native_library_checksums.is_empty() {
+            let _ = writeln!(
+                out,
+                "\n--- Native Shared Libraries ({}) ---",
+                manifest.native_library_checksums.len()
+            );
+            for (lib_path, digest) in &manifest.native_library_checksums {
+                let _ = writeln!(out, "  • {lib_path} [SHA-256: {digest}]");
+            }
+        }
     } else {
-        let _ = writeln!(out, "Manifest:    <none>");
+        let _ = writeln!(out, "Manifest:     <none>");
     }
 
     let _ = writeln!(
@@ -200,102 +300,125 @@ fn format_slxarc_info_summary(archive_path: &Path, inspection: &SlxarcInspection
         }
     }
 
-    if !inspection.binaries.is_empty() {
+    let _ = writeln!(
+        out,
+        "\n--- Compiled Binaries ({}) ---",
+        inspection.binaries.len()
+    );
+    for (name, program) in &inspection.binaries {
+        let profile_str = if !program.build_profile.is_empty() {
+            &program.build_profile
+        } else {
+            "unspecified"
+        };
         let _ = writeln!(
             out,
-            "\n--- Packaged Bytecode Binaries ({}) ---",
-            inspection.binaries.len()
+            "  • {} (profile: {}, functions: {}, classes: {}, static: {}B, SHA-256: {})",
+            name,
+            profile_str,
+            program.functions.len(),
+            program.classes.len(),
+            program.static_space_size,
+            program.compute_sha256()
         );
-        for (name, program) in &inspection.binaries {
-            let _ = writeln!(
-                out,
-                "  • {}: {} functions, {} classes, {} static vars",
-                name,
-                program.functions.len(),
-                program.classes.len(),
-                program.static_space_size
-            );
-        }
-    }
-
-    if !inspection.native_libraries.is_empty() {
-        let _ = writeln!(
-            out,
-            "\n--- Packaged Native Libraries ({}) ---",
-            inspection.native_libraries.len()
-        );
-        for native_lib in &inspection.native_libraries {
-            let _ = writeln!(out, "  • {native_lib}");
-        }
     }
 
     out
 }
 
-fn format_info_summary(program: &BinaryProgram) -> String {
+fn format_info_summary(
+    binary_path: &Path,
+    program: &BinaryProgram,
+    sha256_digest: &str,
+) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "=== Solix Binary Container Inspection ===");
-    let _ = writeln!(
-        out,
-        "Package:     {} v{}",
-        if program.package_name.is_empty() {
-            "<unnamed>"
-        } else {
-            &program.package_name
-        },
-        program.package_version
-    );
+    let _ = writeln!(out, "=== Solix Binary Container Inspection (.slxb) ===");
+    let _ = writeln!(out, "Binary:       {}", binary_path.display());
+    let _ = writeln!(out, "SHA-256:      {sha256_digest}");
+
+    let pkg_name = if program.package_name.is_empty() {
+        "<unnamed>"
+    } else {
+        &program.package_name
+    };
+    let pkg_ver = if program.package_version.is_empty() {
+        "0.1.0"
+    } else {
+        &program.package_version
+    };
+    let profile_str = if !program.build_profile.is_empty() {
+        &program.build_profile
+    } else {
+        "unspecified"
+    };
+
+    let _ = writeln!(out, "Package:      {pkg_name} v{pkg_ver}");
+    let _ = writeln!(out, "Profile:      {profile_str}");
     if !program.package_description.is_empty() {
-        let _ = writeln!(out, "Description: {}", program.package_description);
-    }
-    let _ = writeln!(out, "Functions:   {}", program.functions.len());
-    let _ = writeln!(out, "Classes:     {}", program.classes.len());
-    let _ = writeln!(out, "Static Vars: {}", program.static_space_size);
-    let _ = writeln!(out, "Constants:   {}", program.constant_pool.len());
-
-    let manifest = &program.export_manifest;
-    let _ = writeln!(out, "\n--- Export Manifest ---");
-    let _ = writeln!(
-        out,
-        "Exported Functions: {}",
-        manifest.exported_functions.len()
-    );
-    for func in &manifest.exported_functions {
-        let _ = writeln!(out, "  • {}", func.symbol);
+        let _ = writeln!(out, "Description:  {}", program.package_description);
     }
 
     let _ = writeln!(
         out,
-        "Exported Classes:   {}",
-        manifest.exported_classes.len()
+        "Static Space: {} bytes",
+        program.static_space_size
     );
-    for class_item in &manifest.exported_classes {
-        let _ = writeln!(out, "  • class {}", class_item.name);
-        for method in &class_item.methods {
-            let _ = writeln!(out, "      fn {}", method.simple_name);
+
+    if !program.native_library_checksums.is_empty() {
+        let _ = writeln!(
+            out,
+            "\n--- Native Shared Libraries ({}) ---",
+            program.native_library_checksums.len()
+        );
+        for (lib_path, digest) in &program.native_library_checksums {
+            let _ = writeln!(out, "  • {lib_path} [SHA-256: {digest}]");
         }
     }
 
-    let _ = writeln!(
-        out,
-        "Exported Statics:   {}",
-        manifest.exported_statics.len()
-    );
-    for static_item in &manifest.exported_statics {
+    let _ = writeln!(out, "\n--- Declared Classes ({}) ---", program.classes.len());
+    for class in &program.classes {
         let _ = writeln!(
             out,
-            "  • {} (slot: {})",
-            static_item.symbol, static_item.slot
+            "  • {} (instance_size: {}B, vtable_slots: {})",
+            class.symbol,
+            class.instance_size,
+            class.vtable.len()
         );
     }
 
     let _ = writeln!(
         out,
-        "Generic Templates:  {}",
-        manifest.generic_templates.len()
+        "\n--- Compiled Functions ({}) ---",
+        program.functions.len()
     );
-    for template in &manifest.generic_templates {
-        let _ = writeln!(out, "  • <template> {}", template.name);
+    for function in &program.functions {
+        let _ = writeln!(
+            out,
+            "  • {} (params: {}, registers: {}, instructions: {})",
+            function.symbol,
+            function.param_count,
+            function.num_registers,
+            function.instructions.len()
+        );
+    }
+
+    let _ = writeln!(
+        out,
+        "\n--- Export Manifest (Exported Symbols: {}) ---",
+        program.export_manifest.exported_functions.len()
+            + program.export_manifest.exported_classes.len()
+    );
+    for function in &program.export_manifest.exported_functions {
+        let _ = writeln!(
+            out,
+            "  • [func] {} (params: {}, return: {})",
+            function.symbol,
+            function.parameters.len(),
+            function.return_type
+        );
+    }
+    for class in &program.export_manifest.exported_classes {
+        let _ = writeln!(out, "  • [class] {}", class.symbol);
     }
 
     out

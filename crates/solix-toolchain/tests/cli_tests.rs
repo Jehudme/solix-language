@@ -756,7 +756,7 @@ fn test_cli_parse_flags_and_defaults() {
     let info_cli =
         Cli::try_parse_from(["solix", "info", "app.slxb", "-o", "info.txt", "--disasm"]).unwrap();
     if let Commands::Info(args) = info_cli.command {
-        assert_eq!(args.binary.to_str().unwrap(), "app.slxb");
+        assert_eq!(args.target.to_str().unwrap(), "app.slxb");
         assert!(args.output.is_some());
         assert!(args.disasm);
         assert!(!args.json);

@@ -3,19 +3,21 @@
 #![forbid(unsafe_code)]
 
 pub mod assets;
+pub mod cache;
 pub mod cli;
 pub mod commands;
 pub mod diagnostics;
+pub mod registry;
 pub mod solver;
 pub mod telemetry;
 
 pub use cli::{
     BuildArgs, Cli, Commands, CompileArgs, InfoArgs, InstallArgs, ListArgs, NewArgs, RunArgs,
-    UninstallArgs,
+    SyncArgs, UninstallArgs,
 };
 pub use commands::{
     execute_build, execute_compile, execute_info, execute_install, execute_list, execute_new,
-    execute_run, execute_uninstall,
+    execute_run, execute_sync, execute_uninstall,
 };
 pub use diagnostics::render_diagnostics;
 pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
@@ -51,6 +53,10 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
         }
         Commands::Install(args) => {
             execute_install(args)?;
+            Ok(0)
+        }
+        Commands::Sync(args) => {
+            execute_sync(args)?;
             Ok(0)
         }
         Commands::Uninstall(args) => {

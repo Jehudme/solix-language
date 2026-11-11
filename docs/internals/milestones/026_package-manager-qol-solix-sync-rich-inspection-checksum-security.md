@@ -5,7 +5,7 @@
 * **Milestone ID:** MS-026
 * **Target Version:** `v0.1.0-alpha.26`
 * **Milestone Branch:** `milestone/026-package-manager-sync-and-checksum-security`
-* **Status:** DRAFT (Awaiting Architect Approval)
+* **Status:** COMPLETED
 * **Lead Architect:** @jehudme
 * **Target Delivery Date:** 2026-12-31
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
@@ -270,42 +270,42 @@ To eliminate the **~15 ms semantic binding overhead**:
 ## 3. Phased Implementation Plan
 
 ### Phase 1: SHA-256 Hashing, Binary AST Container Section & Checksum Fields (`solix-common`)
-* [ ] `[P0]` **Task 1.1:** Implement self-contained SHA-256 calculation (`sha256_bytes`, `sha256_hex`, `sha256_file`) in `crates/solix-common/src/hash.rs` and `BinaryProgram::compute_sha256(&self) -> String`.
-* [ ] `[P0]` **Task 1.2:** Add `pub build_profile: String` to `ExportManifest` and `BinaryProgram`, and `pub sha256: String` to `DependencyRequirement`.
-* [ ] `[P0]` **Task 1.3:** Add `pub native_library_checksums: HashMap<String, String>` to `ExportManifest`, `BinaryProgram`, and `ProjectManifest`.
-* [ ] `[P0]` **Task 1.4:** Migrate `exported_ast_bytes` out of the JSON `ExportManifest` into Section 7 (`ExportedAst`) of `BinaryProgram`, replacing JSON array encoding with compact binary serialization (`bincode`).
+* [x] `[P0]` **Task 1.1:** Implement self-contained SHA-256 calculation (`sha256_bytes`, `sha256_hex`, `sha256_file`) in `crates/solix-common/src/hash.rs` and `BinaryProgram::compute_sha256(&self) -> String`.
+* [x] `[P0]` **Task 1.2:** Add `pub build_profile: String` to `ExportManifest` and `BinaryProgram`, and `pub sha256: String` to `DependencyRequirement`.
+* [x] `[P0]` **Task 1.3:** Add `pub native_library_checksums: HashMap<String, String>` to `ExportManifest`, `BinaryProgram`, and `ProjectManifest`.
+* [x] `[P0]` **Task 1.4:** Migrate `exported_ast_bytes` out of the JSON `ExportManifest` into Section 7 (`ExportedAst`) of `BinaryProgram`, replacing JSON array encoding with compact binary serialization (`bincode`).
 
 ### Phase 2: Authenticated `PackageCache` & Extracted Artifact Store (`solix-common` & `solix-toolchain`)
-* [ ] `[P0]` **Task 2.1:** Define `PackageCache` trait in `crates/solix-common/src/cache.rs` with `NoopPackageCache` and `InMemoryPackageCache`.
-* [ ] `[P0]` **Task 2.2:** Implement `FilesystemPackageCache` in `crates/solix-toolchain/src/cache.rs` managing `~/.solix/cache/packages/<name>-<version>/bin/<name>.slxb` with atomic temp-file staging and cryptographic `meta.json` validation.
-* [ ] `[P0]` **Task 2.3:** Integrate `PackageCache` into `ClientModuleSolver::load_package_from_dir`, bypassing `.slxarc` decompression when the cached `.slxb` matches the source archive's SHA-256.
+* [x] `[P0]` **Task 2.1:** Define `PackageCache` trait in `crates/solix-common/src/cache.rs` with `NoopPackageCache` and `InMemoryPackageCache`.
+* [x] `[P0]` **Task 2.2:** Implement `FilesystemPackageCache` in `crates/solix-toolchain/src/cache.rs` managing `~/.solix/cache/packages/<name>-<version>/bin/<name>.slxb` with atomic temp-file staging and cryptographic `meta.json` validation.
+* [x] `[P0]` **Task 2.3:** Integrate `PackageCache` into `ClientModuleSolver::load_package_from_dir`, bypassing `.slxarc` decompression when the cached `.slxb` matches the source archive's SHA-256.
 
 ### Phase 3: Selective AST Ingestion & Symbol Tree-Shaking (`solix-compilation`)
-* [ ] `[P0]` **Task 3.1:** In `DependencyResolutionPhase::ingest_package_api_source`, inspect requested `extern import` symbol paths and selectively prune non-transitive class/function declarations from the ingested AST.
-* [ ] `[P0]` **Task 3.2:** Benchmark `solix compile` on `extern import solix.io.Console;` to verify semantic binding latency drops from ~18 ms to < 3 ms.
+* [x] `[P0]` **Task 3.1:** In `DependencyResolutionPhase::ingest_package_api_source`, inspect requested `extern import` symbol paths and selectively prune non-transitive class/function declarations from the ingested AST.
+* [x] `[P0]` **Task 3.2:** Benchmark `solix compile` on `extern import solix.io.Console;` to verify semantic binding latency drops from ~18 ms to < 3 ms.
 
 ### Phase 4: Cross-Platform `PackageRegistry` (`registry.json`) & Safe `solix install` (`solix-toolchain`)
-* [ ] `[P0]` **Task 4.1:** Implement `PackageRegistry` (`crates/solix-toolchain/src/registry.rs`) reading/writing `$SOLIX_PKG_DIR/registry.json` with `installed_at`, `build_profile`, `sha256`, `size_bytes`, `native_libraries`, and `source_project_dir: Option<PathBuf>`.
-* [ ] `[P0]` **Task 4.2:** Enforce the overwrite guard in `solix install`: if `<name>@<version>` is already installed and `--force` (`-f`) is not set, return an error instructing the user to pass `--force`.
-* [ ] `[P0]` **Task 4.3:** Support `solix install <project_dir> [--profile <debug|release|test>] [--debug] [--release] [--test] [--force]`: builds the project folder with the requested profile, computes all checksums, warms the extract cache, and stores `source_project_dir` in `registry.json`.
+* [x] `[P0]` **Task 4.1:** Implement `PackageRegistry` (`crates/solix-toolchain/src/registry.rs`) reading/writing `$SOLIX_PKG_DIR/registry.json` with `installed_at`, `build_profile`, `sha256`, `size_bytes`, `native_libraries`, and `source_project_dir: Option<PathBuf>`.
+* [x] `[P0]` **Task 4.2:** Enforce the overwrite guard in `solix install`: if `<name>@<version>` is already installed and `--force` (`-f`) is not set, return an error instructing the user to pass `--force`.
+* [x] `[P0]` **Task 4.3:** Support `solix install <project_dir> [--profile <debug|release|test>] [--debug] [--release] [--test] [--force]`: builds the project folder with the requested profile, computes all checksums, warms the extract cache, and stores `source_project_dir` in `registry.json`.
 
 ### Phase 5: `solix sync` Command & `--install` / `--sync` Flags on `build` and `compile` (`solix-toolchain`)
-* [ ] `[P1]` **Task 5.1:** Add `--install` (alias `--sync`) to `solix build` and `solix compile`.
-* [ ] `[P1]` **Task 5.2:** Implement `solix sync [<name> | --all] [--profile <override>]` in `crates/solix-toolchain/src/commands/pkg.rs`, rebuilding each target package from its `source_project_dir` using its recorded `build_profile`, refreshing cached binaries, and updating `registry.json`.
+* [x] `[P1]` **Task 5.1:** Add `--install` (alias `--sync`) to `solix build` and `solix compile`.
+* [x] `[P1]` **Task 5.2:** Implement `solix sync [<name> | --all] [--profile <override>]` in `crates/solix-toolchain/src/commands/pkg.rs`, rebuilding each target package from its `source_project_dir` using its recorded `build_profile`, refreshing cached binaries, and updating `registry.json`.
 
 ### Phase 6: Upgraded `solix info` (Installed Modules) & `solix list` (Filter/Sort/Columns) (`solix-toolchain`)
-* [ ] `[P1]` **Task 6.1:** Update `solix info <target>` (`crates/solix-toolchain/src/commands/info.rs`) so `<target>` can be a file path OR an installed package name (`solix` or `solix@2.0.0`), displaying profile, SHA-256, native library checksums, cached extraction status, install timestamp, source folder path, dependencies, `--api`, `--disasm`, and `--json`.
-* [ ] `[P1]` **Task 6.2:** Upgrade `solix list` with `PROFILE`, `INSTALLED AT`, `SIZE`, `SHA256`, and `SOURCE` columns, plus `--filter <query>`, `--profile <profile>`, `--kind <slxb|slxarc>`, `--sort <name|version|date|size|profile>`, `--reverse`, and `--json`.
+* [x] `[P1]` **Task 6.1:** Update `solix info <target>` (`crates/solix-toolchain/src/commands/info.rs`) so `<target>` can be a file path OR an installed package name (`solix` or `solix@2.0.0`), displaying profile, SHA-256, native library checksums, cached extraction status, install timestamp, source folder path, dependencies, `--api`, `--disasm`, and `--json`.
+* [x] `[P1]` **Task 6.2:** Upgrade `solix list` with `PROFILE`, `INSTALLED AT`, `SIZE`, `SHA256`, and `SOURCE` columns, plus `--filter <query>`, `--profile <profile>`, `--kind <slxb|slxarc>`, `--sort <name|version|date|size|profile>`, `--reverse`, and `--json`.
 
 ### Phase 7: Exact Checksum Enforcement, Native Library Verification & `--yolo` Mode (`solix-compilation` & `solix-runtime`)
-* [ ] `[P0]` **Task 7.1:** Add `E0291` (`DependencyChecksumMismatch`) to `BindingError` and update `DependencyResolutionPhase` to verify pinned SHA-256 digests.
-* [ ] `[P0]` **Task 7.2:** Add `RuntimeError::NativeLibraryChecksumMismatch` and verify native shared library checksums in `SlxarcArchive::extract_and_load` and `RuntimeContext::new`.
-* [ ] `[P0]` **Task 7.3:** Add `--yolo` (alias `--ignore-checksum`) to `solix run` and `solix compile` (mapped to `CompilationOptions.verify_checksums` and `RuntimeOptions.verify_checksums`).
+* [x] `[P0]` **Task 7.1:** Add `E0291` (`DependencyChecksumMismatch`) to `BindingError` and update `DependencyResolutionPhase` to verify pinned SHA-256 digests.
+* [x] `[P0]` **Task 7.2:** Add `RuntimeError::NativeLibraryChecksumMismatch` and verify native shared library checksums in `SlxarcArchive::extract_and_load` and `RuntimeContext::new`.
+* [x] `[P0]` **Task 7.3:** Add `--yolo` (alias `--ignore-checksum`) to `solix run` and `solix compile` (mapped to `CompilationOptions.verify_checksums` and `RuntimeOptions.verify_checksums`).
 
 ### Phase 8: Exhaustive Tests, Latency Benchmarks & Pre-Merge Documentation Sync (`GL-0013`)
-* [ ] `[P0]` **Task 8.1:** Add integration tests in `crates/solix-toolchain/tests/` covering `solix install` collision protection (`--force`), `solix install <folder>`, `solix sync`, `solix build --sync`, `solix info <installed_pkg>`, `solix list --filter --sort`, checksum tamper detection (bytecode + native libraries), extract cache invalidation, and `--yolo` bypass.
-* [ ] `[P0]` **Task 8.2:** Execute compilation latency benchmarks on `extern import solix.io.Console;` to confirm total cold compilation latency drops below **10 ms** (from 112 ms).
-* [ ] `[P1]` **Task 8.3:** Run `git diff main...HEAD` and update `docs/wiki/commands/`, `docs/wiki/errors/`, `docs/spec/package-solver-and-linking.md`, and `docs/guide/01-getting-started-and-toolchain.md` per `GL-0013`.
+* [x] `[P0]` **Task 8.1:** Add integration tests in `crates/solix-toolchain/tests/` covering `solix install` collision protection (`--force`), `solix install <folder>`, `solix sync`, `solix build --sync`, `solix info <installed_pkg>`, `solix list --filter --sort`, checksum tamper detection (bytecode + native libraries), extract cache invalidation, and `--yolo` bypass.
+* [x] `[P0]` **Task 8.2:** Execute compilation latency benchmarks on `extern import solix.io.Console;` to confirm total cold compilation latency drops below **10 ms** (from 112 ms).
+* [x] `[P1]` **Task 8.3:** Run `git diff main...HEAD` and update `docs/wiki/commands/`, `docs/wiki/errors/`, `docs/spec/package-solver-and-linking.md`, and `docs/guide/01-getting-started-and-toolchain.md` per `GL-0013`.
 
 ---
 
@@ -313,15 +313,15 @@ To eliminate the **~15 ms semantic binding overhead**:
 
 | DoD Requirement | Target Benchmark / Artifact | Verification Command | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **`solix install` Overwrite Guard** | Refuses overwrite without `--force`; succeeds with `--force` | `cargo test -p solix-toolchain` | [ ] Pending |
-| **Direct Folder Install & Profile** | `solix install <dir> --release` builds & records `source_project_dir` | `cargo test -p solix-toolchain` | [ ] Pending |
-| **`solix sync` & `build --sync`** | Rebuilds installed package from `source_project_dir` with recorded profile | `cargo test -p solix-toolchain` | [ ] Pending |
-| **`solix info <installed_pkg>`** | Inspects installed modules by name/version (`--api`, `--disasm`, `--json`) | `cargo test -p solix-toolchain` | [ ] Pending |
-| **`solix list` Filter & Sort** | Shows profile, date, size, source; supports `--filter` & `--sort` | `cargo test -p solix-toolchain` | [ ] Pending |
-| **Authenticated Extract Cache** | Caches extracted `.slxb` in `~/.solix/cache/packages/`; re-verifies via SHA-256 | `cargo test -p solix-toolchain` | [ ] Pending |
-| **Binary AST Encoding Section** | `.slxb` container shrinks from > 6 MB to < 2 MB; eliminates JSON AST array | `cargo test -p solix-common -p solix-compilation` | [ ] Pending |
-| **Selective AST Ingestion** | Ingests only imported class slice (`Console`), pruning 95 unused classes | `cargo test -p solix-compilation` | [ ] Pending |
-| **Sub-10 ms Compilation Latency** | `extern import solix.io.Console;` compiles in < 10 ms (down from 112 ms) | `solix compile bench.slx --metrics-json` | [ ] Pending |
-| **SHA-256 Bytecode & Native Auth** | Rejects tampered `.slxb` and `.so` libraries; allows with `--yolo` | `cargo test -p solix-runtime -p solix-toolchain` | [ ] Pending |
-| **Documentation Sync (`GL-0013`)** | Wiki, Specs, and Guides updated for `sync`, `info`, `list`, `--yolo`, `E0291` | `git diff main...HEAD -- docs/` | [ ] Pending |
-| **Clippy & Formatting Clean** | Zero warnings across all crates | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
+| **`solix install` Overwrite Guard** | Refuses overwrite without `--force`; succeeds with `--force` | `cargo test -p solix-toolchain` | [x] Completed |
+| **Direct Folder Install & Profile** | `solix install <dir> --release` builds & records `source_project_dir` | `cargo test -p solix-toolchain` | [x] Completed |
+| **`solix sync` & `build --sync`** | Rebuilds installed package from `source_project_dir` with recorded profile | `cargo test -p solix-toolchain` | [x] Completed |
+| **`solix info <installed_pkg>`** | Inspects installed modules by name/version (`--api`, `--disasm`, `--json`) | `cargo test -p solix-toolchain` | [x] Completed |
+| **`solix list` Filter & Sort** | Shows profile, date, size, source; supports `--filter` & `--sort` | `cargo test -p solix-toolchain` | [x] Completed |
+| **Authenticated Extract Cache** | Caches extracted `.slxb` in `~/.solix/cache/packages/`; re-verifies via SHA-256 | `cargo test -p solix-toolchain` | [x] Completed |
+| **Binary AST Encoding Section** | `.slxb` container shrinks from > 6 MB to < 2 MB; eliminates JSON AST array | `cargo test -p solix-common -p solix-compilation` | [x] Completed |
+| **Selective AST Ingestion** | Ingests only imported class slice (`Console`), pruning 95 unused classes | `cargo test -p solix-compilation` | [x] Completed |
+| **Sub-10 ms Compilation Latency** | `extern import solix.io.Console;` compiles in < 10 ms (down from 112 ms) | `solix compile bench.slx --metrics-json` | [x] Completed |
+| **SHA-256 Bytecode & Native Auth** | Rejects tampered `.slxb` and `.so` libraries; allows with `--yolo` | `cargo test -p solix-runtime -p solix-toolchain` | [x] Completed |
+| **Documentation Sync (`GL-0013`)** | Wiki, Specs, and Guides updated for `sync`, `info`, `list`, `--yolo`, `E0291` | `git diff main...HEAD -- docs/` | [x] Completed |
+| **Clippy & Formatting Clean** | Zero warnings across all crates | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Completed |
