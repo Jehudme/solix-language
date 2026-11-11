@@ -408,7 +408,7 @@ fn test_run_with_direct_native_library_flag() {
         native_lib_path.display()
     );
 
-    // Write a separate, standalone Solix application that calls MathBridge.fast_add
+    // Write a separate, standalone Solix application that calls MathBridge::fast_add
     let independent_source = workspace
         .write_file(
             "independent_app.slx",
@@ -419,7 +419,7 @@ public class MathBridge {
 
 public class Main {
     public static int32 main() {
-        return MathBridge.fast_add(100, 200);
+        return MathBridge::fast_add(100, 200);
     }
 }
 "#,

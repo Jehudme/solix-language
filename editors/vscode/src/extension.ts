@@ -132,8 +132,6 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
                 const workspaceCandidates = [
                     path.join(currentDirectory, 'target', 'release', 'solix'),
                     path.join(currentDirectory, 'target', 'debug', 'solix'),
-                    path.join(currentDirectory, 'target', 'release', 'solix-lsp'),
-                    path.join(currentDirectory, 'target', 'debug', 'solix-lsp'),
                 ];
 
                 for (const candidate of workspaceCandidates) {
@@ -160,18 +158,12 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
         });
 
         for (const candidate of discoveredCandidates) {
-            const isToolchain = !candidate.endsWith('solix-lsp');
-            if (isToolchain) {
-                if (isLspCapableToolchain(candidate)) {
-                    serverLogChannel.appendLine(`Found verified LSP-capable build artifact: ${candidate}`);
-                    return { lspBinaryPath: candidate, isToolchain: true, toolchainBinaryPath: candidate };
-                } else {
-                    serverLogChannel.appendLine(`Skipping stale build artifact without 'lsp' subcommand: ${candidate}`);
-                    continue;
-                }
+            if (isLspCapableToolchain(candidate)) {
+                serverLogChannel.appendLine(`Found verified LSP-capable build artifact: ${candidate}`);
+                return { lspBinaryPath: candidate, isToolchain: true, toolchainBinaryPath: candidate };
+            } else {
+                serverLogChannel.appendLine(`Skipping stale build artifact without 'lsp' subcommand: ${candidate}`);
             }
-            serverLogChannel.appendLine(`Found dedicated LSP binary build artifact: ${candidate}`);
-            return { lspBinaryPath: candidate, isToolchain: false, toolchainBinaryPath };
         }
     }
 
@@ -183,12 +175,6 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
         return { lspBinaryPath: localBinSolix, isToolchain: true, toolchainBinaryPath: localBinSolix };
     }
 
-    const localBinLsp = path.join(homeDirectory, '.local', 'bin', 'solix-lsp');
-    if (fs.existsSync(localBinLsp)) {
-        serverLogChannel.appendLine(`Found ~/.local/bin Solix LSP: ${localBinLsp}`);
-        return { lspBinaryPath: localBinLsp, isToolchain: false, toolchainBinaryPath };
-    }
-
     // 4. User home cargo bin (~/.cargo/bin)
     const cargoBinSolix = path.join(homeDirectory, '.cargo', 'bin', 'solix');
     if (fs.existsSync(cargoBinSolix) && isLspCapableToolchain(cargoBinSolix)) {
@@ -196,20 +182,9 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
         return { lspBinaryPath: cargoBinSolix, isToolchain: true, toolchainBinaryPath: cargoBinSolix };
     }
 
-    const cargoBinLsp = path.join(homeDirectory, '.cargo', 'bin', 'solix-lsp');
-    if (fs.existsSync(cargoBinLsp)) {
-        serverLogChannel.appendLine(`Found ~/.cargo/bin Solix LSP: ${cargoBinLsp}`);
-        return { lspBinaryPath: cargoBinLsp, isToolchain: false, toolchainBinaryPath };
-    }
-
     // 5. Default system PATH fallback
-    if (isLspCapableToolchain('solix')) {
-        serverLogChannel.appendLine('Falling back to default system PATH resolution for verified "solix"');
-        return { lspBinaryPath: 'solix', isToolchain: true, toolchainBinaryPath: 'solix' };
-    }
-
-    serverLogChannel.appendLine('Falling back to "solix-lsp"');
-    return { lspBinaryPath: 'solix-lsp', isToolchain: false, toolchainBinaryPath };
+    serverLogChannel.appendLine('Falling back to default system PATH resolution for "solix"');
+    return { lspBinaryPath: 'solix', isToolchain: true, toolchainBinaryPath: 'solix' };
 }
 
 /**

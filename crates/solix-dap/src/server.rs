@@ -50,6 +50,7 @@ pub fn run_dap_server_blocking(
     port_number: Option<u16>,
     _project_directory: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    let is_tcp_terminal_mode = port_number.is_some();
     if let Some(port) = port_number {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         tracing::info!("Solix DAP listening on 127.0.0.1:{}", port);
@@ -58,14 +59,14 @@ pub fn run_dap_server_blocking(
             let reader = BufReader::new(socket_stream.try_clone()?);
             let writer = BufWriter::new(socket_stream);
             let mut dap_server = Server::new(reader, writer);
-            handle_client_session(&mut dap_server)?;
+            handle_client_session(&mut dap_server, is_tcp_terminal_mode)?;
         }
     } else {
         let stdin_stream = io::stdin();
         let reader = BufReader::new(stdin_stream.lock());
         let writer = BufWriter::new(io::stdout());
         let mut dap_server = Server::new(reader, writer);
-        handle_client_session(&mut dap_server)?;
+        handle_client_session(&mut dap_server, is_tcp_terminal_mode)?;
     }
 
     Ok(())
@@ -74,6 +75,7 @@ pub fn run_dap_server_blocking(
 /// Handles a complete DAP client session.
 fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
     server: &mut Server<ReaderType, WriterType>,
+    is_tcp_terminal_mode: bool,
 ) -> anyhow::Result<()> {
     let async_pause_requested = Arc::new(AtomicBool::new(false));
     let mut controller = DapController::new(async_pause_requested.clone());
@@ -122,7 +124,7 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                         launch_project_root = find_enclosing_project_root(&target_path);
                     }
 
-                    let runtime_options = match setup_runtime_for_target(&target_path, pending_console_outputs.clone()) {
+                    let runtime_options = match setup_runtime_for_target(&target_path, pending_console_outputs.clone(), is_tcp_terminal_mode) {
                         Ok(options) => options,
                         Err(setup_error) => {
                             server.respond(request.error(&setup_error.to_string()))?;
@@ -139,11 +141,10 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     };
                     let mut created_vm = VirtualMachine::new(runtime_context);
 
-                    // Execute static initializers
-                    for init_func_id in created_vm.context.init_function_ids.clone() {
-                        let _ = created_vm.push_frame(init_func_id, 0, &[]);
-                        let target_depth = created_vm.call_frames.len().saturating_sub(1);
-                        let _ = created_vm.run_loop(target_depth);
+                    // Centralize static initialization (BUG-04)
+                    if let Err(init_error) = created_vm.initialize_statics() {
+                        server.respond(request.error(&format!("Static initialization failed: {init_error}")))?;
+                        continue;
                     }
 
                     // Prepare entry point
@@ -949,32 +950,35 @@ fn find_enclosing_project_root(target_path: &Path) -> Option<PathBuf> {
 fn setup_runtime_for_target(
     target_path: &Path,
     pending_console_outputs: Arc<Mutex<Vec<String>>>,
+    is_tcp_terminal_mode: bool,
 ) -> anyhow::Result<RuntimeOptions> {
     let store_directory = resolve_package_store_dir(None);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
-
-    let output_queue = pending_console_outputs.clone();
-    let output_sink = OutputSink(Arc::new(move |message: &str, is_newline: bool| {
-        if let Ok(mut output_guard) = output_queue.lock() {
-            if is_newline {
-                output_guard.push(format!("{message}\n"));
-            } else {
-                output_guard.push(message.to_string());
-            }
-        }
-    }));
 
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(32 * 1024 * 1024)
         .with_max_call_stack_depth(1024)
         .with_solver(solver.clone())
-        .with_output_sink(output_sink)
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
         .with_native_function("blt::io::println", builtin_println)
         .with_native_function("blt::io::print", builtin_print)
         .with_native_function("Console::println", builtin_println)
         .with_native_function("Console::print", builtin_print);
+
+    if !is_tcp_terminal_mode {
+        let output_queue = pending_console_outputs.clone();
+        let output_sink = OutputSink(Arc::new(move |message: &str, is_newline: bool| {
+            if let Ok(mut output_guard) = output_queue.lock() {
+                if is_newline {
+                    output_guard.push(format!("{message}\n"));
+                } else {
+                    output_guard.push(message.to_string());
+                }
+            }
+        }));
+        runtime_options = runtime_options.with_output_sink(output_sink);
+    }
 
     let extension = target_path
         .extension()

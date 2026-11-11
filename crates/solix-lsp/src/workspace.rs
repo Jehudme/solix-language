@@ -18,10 +18,10 @@ use solix_compilation::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTa
 use solix_compilation::phases::lexing::lexer::tokenize_source;
 use solix_compilation::phases::parser::statements::declarations::ClassDeclaration;
 use solix_compilation::phases::parser::statements::ProgramAst;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tower_lsp::lsp_types::{Diagnostic, Url};
+use tower_lsp::lsp_types::{CompletionItemKind, Diagnostic, Url};
 
 /// In-memory editor buffer maintaining live unsaved document contents.
 #[derive(Debug, Clone)]
@@ -230,6 +230,16 @@ impl AnalysisSnapshot {
     }
 }
 
+/// Namespace and symbol index for import autocompletion within a package.
+#[derive(Debug, Clone, Default)]
+pub struct PackageNamespaceIndex {
+    /// All full package paths declared in this module (e.g. `"solix.io"`, `"solix.math"`).
+    pub namespaces: BTreeSet<String>,
+    /// Map from dot-separated namespace path (e.g. `"solix.io"`) to exported public symbols
+    /// `(symbol_name, CompletionItemKind, detail_signature)`.
+    pub symbols_by_namespace: HashMap<String, Vec<(String, CompletionItemKind, String)>>,
+}
+
 /// Workspace state manager coordinating document overlays, manifest resolution, and multi-file analysis.
 #[derive(Debug)]
 pub struct WorkspaceManager {
@@ -241,6 +251,8 @@ pub struct WorkspaceManager {
     workspace_root: std::sync::RwLock<Option<PathBuf>>,
     /// Pluggable module solver for package dependencies and standard library resolution.
     solver: Option<Arc<dyn ModuleSolver>>,
+    /// Cached package namespace export indexes for fast autocompletion.
+    package_export_index: std::sync::RwLock<HashMap<String, PackageNamespaceIndex>>,
 }
 
 impl WorkspaceManager {
@@ -256,7 +268,271 @@ impl WorkspaceManager {
             snapshots: DashMap::new(),
             workspace_root: std::sync::RwLock::new(workspace_root),
             solver: effective_solver,
+            package_export_index: std::sync::RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Returns the pluggable module solver if configured.
+    #[must_use]
+    pub fn solver(&self) -> Option<Arc<dyn ModuleSolver>> {
+        self.solver.clone()
+    }
+
+    /// Attempts to find and parse the `ProjectManifest` corresponding to a document URI.
+    #[must_use]
+    pub fn project_manifest_for_uri(&self, target_uri: &Url) -> Option<solix_common::project::ProjectManifest> {
+        let manifest_path = target_uri
+            .to_file_path()
+            .ok()
+            .and_then(|file_path| Self::find_project_manifest(&file_path))
+            .or_else(|| {
+                self.workspace_root()
+                    .and_then(|root_path| Self::find_project_manifest(&root_path))
+            })?;
+        solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
+    }
+
+    /// Resolves or returns the cached package namespace and symbol index for the given package name.
+    #[must_use]
+    pub fn resolve_package_index(&self, target_package_name: &str) -> PackageNamespaceIndex {
+        // Built-in package 'blt'
+        if target_package_name == "blt" {
+            let mut blt_index = PackageNamespaceIndex::default();
+            blt_index.namespaces.insert("blt.io".to_string());
+            blt_index.symbols_by_namespace.insert(
+                "blt.io".to_string(),
+                vec![
+                    (
+                        "print".to_string(),
+                        CompletionItemKind::FUNCTION,
+                        "void print(string message)".to_string(),
+                    ),
+                    (
+                        "println".to_string(),
+                        CompletionItemKind::FUNCTION,
+                        "void println(string message)".to_string(),
+                    ),
+                ],
+            );
+            return blt_index;
+        }
+
+        // Check read cache
+        if let Ok(guard) = self.package_export_index.read()
+            && let Some(cached_index) = guard.get(target_package_name)
+        {
+            return cached_index.clone();
+        }
+
+        let mut built_index = PackageNamespaceIndex::default();
+
+        // 1. Ingest from ModuleSolver if available
+        if let Some(solver) = &self.solver
+            && let Ok(solved_package) = solver.resolve_latest(target_package_name)
+        {
+            let manifest = &solved_package.program.export_manifest;
+
+                for exported_class in &manifest.exported_classes {
+                    if !exported_class.modifiers.contains(&solix_common::bytecode::manifest::DeclarationModifier::Public) {
+                        continue;
+                    }
+                    let (namespace_path, class_name) = split_symbol_namespace(&exported_class.symbol, target_package_name);
+                    insert_namespace_and_ancestors(&mut built_index.namespaces, &namespace_path);
+                    let item_kind = if exported_class.is_interface {
+                        CompletionItemKind::INTERFACE
+                    } else {
+                        CompletionItemKind::CLASS
+                    };
+                    let detail_string = if exported_class.is_interface {
+                        format!("interface {}", class_name)
+                    } else {
+                        format!("class {}", class_name)
+                    };
+                    built_index
+                        .symbols_by_namespace
+                        .entry(namespace_path)
+                        .or_default()
+                        .push((class_name, item_kind, detail_string));
+                }
+
+                for exported_function in &manifest.exported_functions {
+                    if !exported_function.modifiers.contains(&solix_common::bytecode::manifest::DeclarationModifier::Public) {
+                        continue;
+                    }
+                    if exported_function.is_constructor || exported_function.is_destructor || exported_function.is_operator {
+                        continue;
+                    }
+                    let cleaned_symbol = exported_function.symbol.split('/').next().unwrap_or(&exported_function.symbol);
+                    let (namespace_path, func_name) = split_symbol_namespace(cleaned_symbol, target_package_name);
+                    insert_namespace_and_ancestors(&mut built_index.namespaces, &namespace_path);
+                    let detail_string = format!("fn {}(...)", func_name);
+                    built_index
+                        .symbols_by_namespace
+                        .entry(namespace_path)
+                        .or_default()
+                        .push((func_name, CompletionItemKind::FUNCTION, detail_string));
+                }
+
+                for exported_enum in &manifest.exported_enums {
+                    if !exported_enum.modifiers.contains(&solix_common::bytecode::manifest::DeclarationModifier::Public) {
+                        continue;
+                    }
+                    let (namespace_path, enum_name) = split_symbol_namespace(&exported_enum.name, target_package_name);
+                    insert_namespace_and_ancestors(&mut built_index.namespaces, &namespace_path);
+                    let detail_string = format!("enum {}", enum_name);
+                    built_index
+                        .symbols_by_namespace
+                        .entry(namespace_path)
+                        .or_default()
+                        .push((enum_name, CompletionItemKind::ENUM, detail_string));
+                }
+
+                for exported_static in &manifest.exported_statics {
+                    if !exported_static.modifiers.contains(&solix_common::bytecode::manifest::DeclarationModifier::Public) {
+                        continue;
+                    }
+                    let (namespace_path, static_name) = split_symbol_namespace(&exported_static.symbol, target_package_name);
+                    insert_namespace_and_ancestors(&mut built_index.namespaces, &namespace_path);
+                    let detail_string = format!("static {}", static_name);
+                    built_index
+                        .symbols_by_namespace
+                        .entry(namespace_path)
+                        .or_default()
+                        .push((static_name, CompletionItemKind::VARIABLE, detail_string));
+                }
+
+                for template_item in &manifest.generic_templates {
+                    let (namespace_path, template_name) = split_symbol_namespace(&template_item.name, target_package_name);
+                    insert_namespace_and_ancestors(&mut built_index.namespaces, &namespace_path);
+                    let detail_string = format!("template class {}", template_name);
+                    built_index
+                        .symbols_by_namespace
+                        .entry(namespace_path)
+                        .or_default()
+                        .push((template_name, CompletionItemKind::CLASS, detail_string));
+                }
+        }
+
+        // 2. Ingest from active workspace snapshots
+        for snapshot in self.all_snapshots() {
+            if let Some(ast) = &snapshot.ast {
+                let package_path = if let Some(package_statement) = &ast.package {
+                    let mut segments = Vec::new();
+                    for span in &package_statement.path {
+                        let start_index = span.start as usize;
+                        let end_index = span.end as usize;
+                        if end_index <= snapshot.source_text.len() {
+                            segments.push(&snapshot.source_text[start_index..end_index]);
+                        }
+                    }
+                    segments.join(".")
+                } else {
+                    String::new()
+                };
+
+                let matches_package = package_path == target_package_name
+                    || package_path.starts_with(&format!("{target_package_name}."));
+
+                if matches_package && !package_path.is_empty() {
+                    insert_namespace_and_ancestors(&mut built_index.namespaces, &package_path);
+
+                    for declaration in &ast.declarations {
+                        match declaration {
+                            solix_compilation::phases::parser::statements::declarations::Declaration::Class(class_declaration) => {
+                                if class_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public) {
+                                    let class_name = get_span_text_workspace(&snapshot.source_text, class_declaration.name_span);
+                                    let detail_string = format!("class {}", class_name);
+                                    built_index
+                                        .symbols_by_namespace
+                                        .entry(package_path.clone())
+                                        .or_default()
+                                        .push((
+                                            class_name.to_string(),
+                                            CompletionItemKind::CLASS,
+                                            detail_string,
+                                        ));
+                                }
+                            }
+                            solix_compilation::phases::parser::statements::declarations::Declaration::Interface(interface_declaration) => {
+                                if interface_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public) {
+                                    let interface_name = get_span_text_workspace(&snapshot.source_text, interface_declaration.name_span);
+                                    let detail_string = format!("interface {}", interface_name);
+                                    built_index
+                                        .symbols_by_namespace
+                                        .entry(package_path.clone())
+                                        .or_default()
+                                        .push((
+                                            interface_name.to_string(),
+                                            CompletionItemKind::INTERFACE,
+                                            detail_string,
+                                        ));
+                                }
+                            }
+                            solix_compilation::phases::parser::statements::declarations::Declaration::Enum(enum_declaration) => {
+                                if enum_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public) {
+                                    let enum_name = get_span_text_workspace(&snapshot.source_text, enum_declaration.name_span);
+                                    let detail_string = format!("enum {}", enum_name);
+                                    built_index
+                                        .symbols_by_namespace
+                                        .entry(package_path.clone())
+                                        .or_default()
+                                        .push((
+                                            enum_name.to_string(),
+                                            CompletionItemKind::ENUM,
+                                            detail_string,
+                                        ));
+                                }
+                            }
+                            solix_compilation::phases::parser::statements::declarations::Declaration::Method(method_declaration) => {
+                                if method_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public) {
+                                    let method_name = get_span_text_workspace(&snapshot.source_text, method_declaration.name_span);
+                                    let detail_string = format!("fn {}(...)", method_name);
+                                    built_index
+                                        .symbols_by_namespace
+                                        .entry(package_path.clone())
+                                        .or_default()
+                                        .push((
+                                            method_name.to_string(),
+                                            CompletionItemKind::FUNCTION,
+                                            detail_string,
+                                        ));
+                                }
+                            }
+                            solix_compilation::phases::parser::statements::declarations::Declaration::Field(field_declaration)
+                                if field_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public) =>
+                            {
+                                let field_name = get_span_text_workspace(&snapshot.source_text, field_declaration.name_span);
+                                let detail_string = format!("field {}", field_name);
+                                built_index
+                                    .symbols_by_namespace
+                                    .entry(package_path.clone())
+                                    .or_default()
+                                    .push((
+                                        field_name.to_string(),
+                                        CompletionItemKind::VARIABLE,
+                                        detail_string,
+                                    ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        // Deduplicate symbols per namespace
+        for symbol_list in built_index.symbols_by_namespace.values_mut() {
+            let mut unique_names = std::collections::HashSet::new();
+            symbol_list.retain(|(name, _, _)| unique_names.insert(name.clone()));
+            symbol_list.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+
+        // Cache and return
+        if let Ok(mut guard) = self.package_export_index.write() {
+            guard.insert(target_package_name.to_string(), built_index.clone());
+        }
+
+        built_index
     }
 
     /// Sets or updates the active workspace root directory.
@@ -624,5 +900,38 @@ fn collect_slx_files_recursive(dir: &Path, result: &mut Vec<PathBuf>) {
         } else if path.is_file() && path.extension().is_some_and(|ext| ext == "slx") {
             result.push(path);
         }
+    }
+}
+
+fn split_symbol_namespace(raw_symbol: &str, fallback_package: &str) -> (String, String) {
+    if let Some(last_double_colon) = raw_symbol.rfind("::") {
+        let namespace_part = &raw_symbol[..last_double_colon];
+        let symbol_name = &raw_symbol[last_double_colon + 2..];
+        let dot_namespace = namespace_part.replace("::", ".");
+        (dot_namespace, symbol_name.to_string())
+    } else {
+        (fallback_package.to_string(), raw_symbol.to_string())
+    }
+}
+
+fn insert_namespace_and_ancestors(namespaces: &mut std::collections::BTreeSet<String>, full_namespace: &str) {
+    if full_namespace.is_empty() {
+        return;
+    }
+    namespaces.insert(full_namespace.to_string());
+    let segments: Vec<&str> = full_namespace.split('.').collect();
+    for length in 1..segments.len() {
+        let prefix = segments[..length].join(".");
+        namespaces.insert(prefix);
+    }
+}
+
+fn get_span_text_workspace(source: &str, span: Span) -> &str {
+    let start_index = span.start as usize;
+    let end_index = span.end as usize;
+    if start_index <= end_index && end_index <= source.len() {
+        &source[start_index..end_index]
+    } else {
+        ""
     }
 }

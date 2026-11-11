@@ -240,6 +240,10 @@ pub struct CompileArgs {
     #[arg(long, default_value_t = 8)]
     pub inline_threshold: usize,
 
+    /// Explicit entry point function symbol (e.g. main or sample_workspace::main)
+    #[arg(short = 'e', long = "entry")]
+    pub entry: Option<String>,
+
     /// Linking mode for dependencies and executable emission: dynamic (default) or static
     #[arg(long, default_value = "dynamic")]
     pub link: String,

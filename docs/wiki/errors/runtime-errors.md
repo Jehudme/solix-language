@@ -1,4 +1,4 @@
-# Runtime Execution Errors (`R0001` – `R0023`)
+# Runtime Execution Errors (`R0001` – `R0024`)
 
 This section documents runtime trap codes and execution faults emitted by the Solix Virtual Machine ([`crates/solix-runtime/src/exceptions/errors.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/exceptions/errors.rs)).
 
@@ -29,3 +29,4 @@ This section documents runtime trap codes and execution faults emitted by the So
 | **`R0021`** | 21 | `ExplicitExit` | Process halted via explicit `exit(code)` invocation |
 | **`R0022`** | 22 | `SharedLibraryError`| `dlopen` or `LoadLibrary` failed to link native extension in `natives/` |
 | **`R0023`** | 23 | `DependencyError` | Runtime dependency resolution or pinned SHA-256 verification failure |
+| **`R0024`** | 24 | `DuplicateSymbolDefinition` | Duplicate function, class, or static variable symbol collision across loaded modules |

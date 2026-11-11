@@ -77,3 +77,21 @@ When executing multi-binary programs, the VM optimizes cross-binary and dynamic 
 1. **`CallExtern` Quickening:** Upon first execution of a `CallExtern` instruction, the runtime resolves the destination symbol's absolute function index. It mutates the calling instruction in-place to `CallDirect`, eliminating future hash-table symbol lookups.
 2. **`AllocObjectExtern` Quickening:** Overwritten with `AllocObject` once the class VTable ID is resolved.
 3. **`GetStaticGlobal` Quickening:** Mutated to `GetStaticDirect` with the direct physical memory slot offset.
+
+---
+
+## 5. Modular Multi-Entrypoint Lifecycle & Symbol Hardening
+
+For host embeddings, game engines, and long-running interactive host processes, the Solix Virtual Machine supports a modular, reusable multi-entrypoint lifecycle:
+
+1. **Construction & One-Time Static Initialization:**
+   - `VirtualMachine::new_initialized(context)` constructs the VM, allocates interned string constants on the `VirtualHeap`, and executes all module `@init` functions once.
+   - Sets `statics_initialized = true`, populating global/static slots without executing `main()`.
+2. **Successive Entrypoint Invocations (`invoke_entry`):**
+   - `vm.invoke_entry(symbol, args)` validates that target function is `public` and all parameter/return types are primitive types, strings, or 1D primitive arrays.
+   - Executes the entry function while preserving existing `static_slots` and `VirtualHeap` state across calls.
+3. **Deterministic Shutdown & Resource Cleanup (`shutdown` & `Drop`):**
+   - Replaces all static slots containing reference values with `null` and decrements their ARC counters (invoking class destructors `~Class()` on global singleton instances).
+   - Frees interned string constants and verifies heap integrity.
+4. **Load-Time Duplicate Symbol Rejection (`R0024`):**
+   - When multiple `BinaryProgram` modules are loaded into `RuntimeContext::new`, any function, class, or static global with the same symbol defined in more than one module immediately triggers `RuntimeError::DuplicateSymbolDefinition` (`R0024`), excluding compiler built-ins (`blt::*`) and generic template instantiations.

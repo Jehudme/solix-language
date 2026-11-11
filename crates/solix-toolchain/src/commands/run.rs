@@ -216,6 +216,13 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 binary_path.display()
             )
         })?;
+        if runtime_options.entry_point.is_none()
+            && source_paths.is_empty()
+            && let Some(entry) = &program.entry_point
+            && !entry.is_empty()
+        {
+            runtime_options = runtime_options.with_entry_point(entry);
+        }
         loaded_binary_programs.push(program);
     }
 
@@ -232,6 +239,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             .with_builtins(!args.no_builtins)
             .with_inline_threshold(args.inline_threshold)
             .with_solver(solver.clone());
+
+        if let Some(entry) = &args.entry {
+            compilation_options = compilation_options.with_entry_point(Some(entry.clone()));
+        }
 
         for source_path in &source_paths {
             let source_code = fs::read_to_string(source_path).with_context(|| {
@@ -280,6 +291,12 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
     let mut vm = VirtualMachine::new(context);
     let binary_load_time_us = binary_load_timer.elapsed().as_micros() as u64;
+
+    let entry_id = vm.context.entry_point_function_id.ok_or_else(|| {
+        anyhow::anyhow!("Entry point not found in loaded binaries")
+    })?;
+    vm.validate_cli_entry_point(entry_id)
+        .map_err(|error| anyhow::anyhow!("Invalid entry point signature: {error}"))?;
 
     // Run virtual machine
     let run_result = vm.run();

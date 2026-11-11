@@ -201,15 +201,15 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         let main_function = deserialized_program
             .functions
             .iter()
-            .find(|candidate_func| candidate_func.symbol == "main")
+            .find(|candidate_func| candidate_func.symbol == "main" || candidate_func.symbol.ends_with("::main"))
             .expect("Find main function");
         assert!(!main_function.source_map.is_empty());
         assert!(!main_function.local_variables.is_empty());
         main_function
             .source_map
             .iter()
-            .find(|map_entry| map_entry.line == 46)
-            .expect("Find line 46 in main function source map")
+            .find(|map_entry| map_entry.line == 47)
+            .expect("Find line 47 in main function source map")
             .instruction_pc
     };
 
@@ -232,14 +232,14 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         .expect("Entry point function ID");
     let _ = virtual_machine.push_frame(main_function_id, 0, &[]);
 
-    // Configure DAP controller with exact breakpoint on line 46 inside main()
+    // Configure DAP controller with exact breakpoint on line 47 inside main()
     let async_pause_flag = Arc::new(AtomicBool::new(false));
     let mut controller = DapController::new(async_pause_flag);
 
     controller.line_breakpoints.push(BreakpointEntry {
         source_path: source_path.display().to_string(),
-        requested_line: 46,
-        verified_line: 46,
+        requested_line: 47,
+        verified_line: 47,
         instruction_pc: target_instruction_pc,
         function_id: Some(main_function_id),
         condition_expression: None,
@@ -270,7 +270,7 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
     )
     .expect("Resolve source location");
     assert!(stopped_file.ends_with("main.slx"));
-    assert_eq!(stopped_line, 46);
+    assert_eq!(stopped_line, 47);
 
     // Inspect locals in frame 0: origin_point and calculated_distance must be visible
     let frame_locals = virtual_machine.inspect_frame_locals(0);
@@ -309,7 +309,7 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         panic!("origin_point is not a Value::Ref");
     }
 
-    // Step over to line 47
+    // Step over to line 48
     controller.stepping_state = SteppingState::StepOver {
         start_call_depth: virtual_machine.call_frames.len(),
         start_file_path: stopped_file,
@@ -318,7 +318,7 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
 
     let step_signal = virtual_machine
         .run_debug(&mut controller)
-        .expect("Step over to line 47");
+        .expect("Step over to line 48");
     assert_eq!(step_signal, DebugSignal::Pause);
     assert_eq!(controller.last_pause_reason, "step");
 
@@ -332,14 +332,14 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         stepped_frame.pc,
     )
     .expect("Resolve source location after step");
-    assert_eq!(stepped_line, 47);
+    assert_eq!(stepped_line, 48);
 
     // After step over, static_result should now be visible and equal to 100
     let updated_locals = virtual_machine.inspect_frame_locals(0);
     let static_result_entry = updated_locals
         .iter()
         .find(|(var_name, _, _)| var_name == "static_result")
-        .expect("Locals must contain static_result after stepping line 46");
+        .expect("Locals must contain static_result after stepping line 47");
     assert_eq!(static_result_entry.2, Value::I32(100));
 }
 

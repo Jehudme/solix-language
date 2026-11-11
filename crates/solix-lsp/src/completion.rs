@@ -59,20 +59,38 @@ pub fn completions(
     let position = params.text_document_position.position;
     let offset = position_to_byte_offset(&snapshot.source_text, position);
     let line_prefix = get_line_prefix(&snapshot.source_text, offset);
+    let line_suffix = get_line_suffix(&snapshot.source_text, offset);
+    let has_trailing_semicolon = line_suffix.trim_start().starts_with(';');
 
     let mut items = Vec::new();
 
-    // Check trigger context
-    if line_prefix.ends_with('.') {
+    let trimmed_prefix = line_prefix.trim_start();
+    let import_keyword = if let Some(stripped) = trimmed_prefix.strip_prefix("extern import ") {
+        Some(("extern import ", stripped))
+    } else {
+        trimmed_prefix
+            .strip_prefix("import ")
+            .map(|stripped| ("import ", stripped))
+    };
+
+    if let Some((_, import_path_prefix)) = import_keyword {
+        handle_import_completion(
+            workspace,
+            snapshot,
+            import_path_prefix,
+            has_trailing_semicolon,
+            &mut items,
+        );
+    } else if line_prefix.ends_with('.') {
         // Dot (.) instance member access or type auto-rewrite
         let receiver = line_prefix.trim_end_matches('.').trim();
-        let receiver_token = receiver.split(|c: char| !c.is_alphanumeric() && c != '_').next_back().unwrap_or("");
+        let receiver_token = receiver.split(|character: char| !character.is_alphanumeric() && character != '_').next_back().unwrap_or("");
 
         handle_dot_completion(workspace, snapshot, receiver_token, position, &mut items);
     } else if line_prefix.ends_with("::") {
         // Scope resolution (::) static / enum access
         let receiver = line_prefix.trim_end_matches(':').trim();
-        let receiver_token = receiver.split(|c: char| !c.is_alphanumeric() && c != '_').next_back().unwrap_or("");
+        let receiver_token = receiver.split(|character: char| !character.is_alphanumeric() && character != '_').next_back().unwrap_or("");
 
         handle_scope_resolution_completion(snapshot, receiver_token, &mut items);
     } else {
@@ -433,6 +451,137 @@ fn get_line_prefix(source_text: &str, offset: usize) -> &str {
     let prefix = &source_text[..clamped];
     let last_newline = prefix.rfind('\n').map_or(0, |idx| idx + 1);
     &prefix[last_newline..]
+}
+
+fn get_line_suffix(source_text: &str, offset: usize) -> &str {
+    let clamped = offset.min(source_text.len());
+    let suffix = &source_text[clamped..];
+    let next_newline = suffix.find('\n').unwrap_or(suffix.len());
+    &suffix[..next_newline]
+}
+
+fn handle_import_completion(
+    workspace: &WorkspaceManager,
+    snapshot: &AnalysisSnapshot,
+    import_path_prefix: &str,
+    has_trailing_semicolon: bool,
+    items: &mut Vec<CompletionItem>,
+) {
+    let clean_path_prefix = import_path_prefix.trim_start();
+
+    if let Some(last_dot_index) = clean_path_prefix.rfind('.') {
+        // Inner segment or subpackage completion (e.g. "solix." or "solix.io." or "solix.io.C")
+        let parent_namespace = clean_path_prefix[..last_dot_index].trim();
+        let current_query = clean_path_prefix[last_dot_index + 1..].trim();
+
+        let root_package_name = parent_namespace
+            .split('.')
+            .next()
+            .unwrap_or(parent_namespace);
+        let package_index = workspace.resolve_package_index(root_package_name);
+
+        // 1. Suggest immediate child namespaces
+        let mut suggested_subpackages = std::collections::HashSet::new();
+        let child_prefix = format!("{parent_namespace}.");
+        for namespace_path in &package_index.namespaces {
+            if let Some(sub_path) = namespace_path.strip_prefix(&child_prefix) {
+                let immediate_child = sub_path.split('.').next().unwrap_or(sub_path);
+                if (current_query.is_empty() || immediate_child.starts_with(current_query))
+                    && suggested_subpackages.insert(immediate_child.to_string())
+                {
+                    items.push(CompletionItem {
+                        label: immediate_child.to_string(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some(format!("namespace {parent_namespace}.{immediate_child}")),
+                        insert_text: Some(immediate_child.to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        // 2. Suggest public symbols in parent_namespace
+        if let Some(symbol_list) = package_index.symbols_by_namespace.get(parent_namespace) {
+            for (symbol_name, symbol_kind, detail_signature) in symbol_list {
+                if current_query.is_empty() || symbol_name.starts_with(current_query) {
+                    let insertion_text = if has_trailing_semicolon {
+                        symbol_name.clone()
+                    } else {
+                        format!("{symbol_name};")
+                    };
+                    items.push(CompletionItem {
+                        label: symbol_name.clone(),
+                        kind: Some(*symbol_kind),
+                        detail: Some(detail_signature.clone()),
+                        insert_text: Some(insertion_text),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        // 3. Suggest wildcard '*'
+        if current_query.is_empty() || "*".starts_with(current_query) {
+            let wildcard_insertion = if has_trailing_semicolon {
+                "*".to_string()
+            } else {
+                "*;".to_string()
+            };
+            items.push(CompletionItem {
+                label: "*".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some(format!("Import all symbols from {parent_namespace}")),
+                insert_text: Some(wildcard_insertion),
+                ..Default::default()
+            });
+        }
+    } else {
+        // Root segment completion (e.g. "import " or "import sol")
+        let current_query = clean_path_prefix.trim();
+        let mut package_candidates = Vec::new();
+
+        if let Some(solver) = workspace.solver() {
+            package_candidates.extend(solver.list_packages());
+        }
+
+        package_candidates.push("blt".to_string());
+
+        for workspace_snapshot in workspace.all_snapshots() {
+            if let Some(ast) = &workspace_snapshot.ast
+                && let Some(package_statement) = &ast.package
+                && let Some(first_span) = package_statement.path.first()
+            {
+                let start_index = first_span.start as usize;
+                let end_index = first_span.end as usize;
+                if end_index <= workspace_snapshot.source_text.len() {
+                    package_candidates
+                        .push(workspace_snapshot.source_text[start_index..end_index].to_string());
+                }
+            }
+        }
+
+        if let Some(manifest) = workspace.project_manifest_for_uri(&snapshot.uri)
+            && !manifest.info.name.is_empty()
+        {
+            package_candidates.push(manifest.info.name);
+        }
+
+        let mut seen_packages = std::collections::HashSet::new();
+        package_candidates.retain(|candidate| seen_packages.insert(candidate.clone()));
+        package_candidates.sort();
+
+        for candidate_name in package_candidates {
+            if current_query.is_empty() || candidate_name.starts_with(current_query) {
+                items.push(CompletionItem {
+                    label: candidate_name.clone(),
+                    kind: Some(CompletionItemKind::MODULE),
+                    detail: Some(format!("Package {candidate_name}")),
+                    insert_text: Some(candidate_name),
+                    ..Default::default()
+                });
+            }
+        }
+    }
 }
 
 fn get_span_text(source: &str, span: Span) -> &str {

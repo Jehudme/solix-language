@@ -41,9 +41,10 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 | Command ID | Title | Description |
 | :--- | :--- | :--- |
 | `solix.runMain` | `Run Application (solix run)` | Runs `solix build --release && solix run` in an integrated VS Code terminal. Wired to `▶ Run Main` CodeLens. |
-| `solix.debugMain` | `Debug Application (solix dap)` | Starts interactive debugging session via `solix dap --stdio`. Wired to `🐞 Debug Main` CodeLens and editor title bar button. |
+| `solix.debugMain` | `Debug Application (solix dap)` | Starts interactive debugging session. Wired to `Debug Main` CodeLens and editor title bar button. |
 | `solix.runTest` | `Run Test Suite (solix run --test)` | Runs test suite via `solix build --test && solix run --test`. Wired to `▶ Run Test` CodeLens. |
-| `solix.debugTest` | `Debug Test Suite (solix dap --test)` | Starts interactive debugging of test runner via `solix dap --stdio`. Wired to `🐞 Debug Test` CodeLens. |
+| `solix.debugTest` | `Debug Test Suite (solix dap --test)` | Starts interactive debugging of test runner. Wired to `Debug Test` CodeLens. |
+| `solix.showReferences` | `Show References` | Opens VS Code reference peek view for symbol references at target location. |
 | `solix.buildProject` | `Build Project (solix build)` | Builds the active workspace project into `.slxarc`. |
 | `solix.syncPackages` | `Sync Installed Packages (solix sync --all)` | Runs `solix sync --all` and refreshes language server indexes. |
 | `solix.showDisassembly` | `Inspect 64-Bit Register VM Disassembly` | Opens a side-by-side virtual read-only tab (`solix-disasm://...`) showing disassembled 64-bit VM bytecode. |
@@ -54,12 +55,18 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 
 ## 3. Interactive Debugging (DAP 2.0)
 
-The Solix extension features native zero-config `F5` interactive debugging powered by the integrated Solix Debug Adapter (`solix dap --stdio`).
+The Solix extension features native zero-config `F5` interactive debugging powered by the integrated Solix Debug Adapter (`solix dap`).
 
-### Debugger Capabilities
+### 3.1 Integrated Terminal DAP Execution (`solix dap --port <port>`)
+When launching a debug session from VS Code, the extension spawns `solix dap --port <ephemeral_port>` inside a dedicated VS Code Integrated Terminal titled `"Solix Debug"`.
+* **Native Terminal I/O:** Guest standard input (`stdin`), standard output (`stdout`), and standard error (`stderr`) connect directly to the real terminal pseudo-teletype (PTY). Interactive CLI programs utilizing `Console::read_line()` or ANSI terminal escapes function without interception.
+* **TCP Protocol Channel:** Debug Adapter Protocol (DAP) JSON-RPC messages travel over a dedicated localhost TCP socket, decoupling debugger control from user terminal I/O.
+* **Headless / CI Mode:** Headless and automated integration tests retain support for standard I/O mode via `solix dap --stdio`.
+
+### 3.2 Debugger Capabilities
 - **Breakpoints**: Source line breakpoints with automatic instruction snapping.
 - **Conditional Breakpoints**: Evaluates expressions in local frame context (e.g. `index == 10`).
-- **Hit-Conditional Breakpoints**: Triggers after $N$ hits (e.g. `>= 5`, `== 10`, `% 2 == 0`).
+- **Hit-Conditional Breakpoints**: Triggers after hit thresholds (e.g. `>= 5`, `== 10`, `% 2 == 0`).
 - **Logpoints**: Evaluates `{variable}` interpolation templates and outputs directly to the Debug Console without pausing execution.
 - **Function Breakpoints**: Breaks on entry of named methods (`Point::distance_from_origin` or `main`).
 - **Call Stack Navigation**: Hierarchical stack frames showing file, line, and column.

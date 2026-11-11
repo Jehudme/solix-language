@@ -5,7 +5,7 @@
 * **Milestone ID:** MS-034
 * **Target Version:** `v1.0.0-rc.1` (Final Pre-v1.0 Stabilization Gate)
 * **Milestone Branch:** `milestone/034-final-v1-pre-release-audit-and-modular-runtime`
-* **Status:** DRAFT (Awaiting Architect Approval)
+* **Status:** COMPLETED
 * **Lead Architect:** @jehudme
 * **Target Delivery Date:** 2026-12-31
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
@@ -366,14 +366,14 @@ In `crates/solix-runtime/src/context.rs` (`RuntimeContext::new`):
 ```
 
 ### Phase 1: Bytecode Metadata & `ModuleSolver::list_packages()` (`solix-common` & `solix-compilation`)
-* [ ] `[P0]` **Task 1.1:** Add `fn list_packages(&self) -> Vec<String>` to `ModuleSolver`, `ClientModuleSolver`, and `InMemoryModuleSolver` in `crates/solix-common/src/solver.rs`.
-* [ ] `[P0]` **Task 1.2:** Add `is_public: bool`, `return_type: Type`, and `parameter_types: Vec<Type>` to `CompiledFunction` (`crates/solix-common/src/bytecode/function.rs`), and `entry_point: Option<String>` to `ExportManifest` and `BinaryProgram` (`manifest.rs`, `binary.rs`).
-* [ ] `[P0]` **Task 1.3:** Update `EmitterPhase` (`crates/solix-compilation/src/phases/emitter/pipeline.rs`) to populate `is_public`, `return_type`, and `parameter_types` on every emitted `CompiledFunction`, qualify top-level free functions with their file/declaration package prefix (`<pkg>::<name>` when in a non-empty package), and store `options.entry_point` into `program.entry_point`.
+* [x] `[P0]` **Task 1.1:** Add `fn list_packages(&self) -> Vec<String>` to `ModuleSolver`, `ClientModuleSolver`, and `InMemoryModuleSolver` in `crates/solix-common/src/solver.rs`.
+* [x] `[P0]` **Task 1.2:** Add `is_public: bool`, `return_type: Type`, and `parameter_types: Vec<Type>` to `CompiledFunction` (`crates/solix-common/src/bytecode/function.rs`), and `entry_point: Option<String>` to `ExportManifest` and `BinaryProgram` (`manifest.rs`, `binary.rs`).
+* [x] `[P0]` **Task 1.3:** Update `EmitterPhase` (`crates/solix-compilation/src/phases/emitter/pipeline.rs`) to populate `is_public`, `return_type`, and `parameter_types` on every emitted `CompiledFunction`, qualify top-level free functions with their file/declaration package prefix (`<pkg>::<name>` when in a non-empty package), and store `options.entry_point` into `program.entry_point`.
 
 ### Phase 2: Multi-Entrypoint VM Lifecycle & Load-Time Symbol Collision Hardening (`solix-runtime`)
-* [ ] `[P0]` **Task 2.1:** Add `RuntimeError::DuplicateSymbolDefinition` (`R0024`) to `crates/solix-runtime/src/exceptions/errors.rs` and `codes.rs`.
-* [ ] `[P0]` **Task 2.2:** In `RuntimeContext::new` (`crates/solix-runtime/src/context.rs`), enforce load-time duplicate symbol detection across all loaded binaries for functions, classes, and static globals (allowing identical monomorphized generic instantiations `<...>` to deduplicate cleanly while rejecting conflicting concrete definitions with `DuplicateSymbolDefinition`).
-* [ ] `[P0]` **Task 2.3:** Refactor `VirtualMachine` (`crates/solix-runtime/src/vm/engine.rs`):
+* [x] `[P0]` **Task 2.1:** Add `RuntimeError::DuplicateSymbolDefinition` (`R0024`) to `crates/solix-runtime/src/exceptions/errors.rs` and `codes.rs`.
+* [x] `[P0]` **Task 2.2:** In `RuntimeContext::new` (`crates/solix-runtime/src/context.rs`), enforce load-time duplicate symbol detection across all loaded binaries for functions, classes, and static globals (allowing identical monomorphized generic instantiations `<...>` to deduplicate cleanly while rejecting conflicting concrete definitions with `DuplicateSymbolDefinition`).
+* [x] `[P0]` **Task 2.3:** Refactor `VirtualMachine` (`crates/solix-runtime/src/vm/engine.rs`):
   - Add `statics_initialized: bool` and `is_shut_down: bool`.
   - Implement `pub fn initialize_statics(&mut self) -> Result<(), RuntimeError>` that runs all module `@init` functions once and preserves `self.static_slots`.
   - Implement `pub fn invoke_entry(&mut self, symbol: &str, args: &[Value]) -> Result<Value, RuntimeError>` that auto-initializes statics if needed, validates `is_public` and primitive parameter/return types, invokes `symbol` while preserving `self.static_slots` and `self.heap` across multiple calls, and returns the resulting `Value`.
@@ -381,42 +381,42 @@ In `crates/solix-runtime/src/context.rs` (`RuntimeContext::new`):
   - Implement `pub fn validate_cli_entry_point(&self, func_id: u32) -> Result<(), RuntimeError>` enforcing `public` visibility, `int32` (or `void`) return type, and `()` or `(char[] / string[])` parameters for CLI execution.
 
 ### Phase 3: CLI Entrypoint Contract, Toolbox Fixes & Template `::` Cleanup (`solix-toolchain`)
-* [ ] `[P0]` **Task 3.1:** Add `--entry <SYMBOL>` to `solix compile` (`crates/solix-toolchain/src/cli.rs` and `commands/compile.rs`) and wire it to `CompilationOptions::with_entry_point`.
-* [ ] `[P0]` **Task 3.2:** Update `crates/solix-toolchain/src/commands/run.rs` to resolve the target entrypoint using the strict 4-tier priority (`--entry` $\to$ `manifest.toml` `[entrypoints]` $\to$ `.slxb` `program.entry_point` $\to$ `"main"`) and call `vm.validate_cli_entry_point(entry_id)?` before executing.
-* [ ] `[P0]` **Task 3.3:** Fix `solix_toolbox.py` (in `crates/solix-toolchain/assets/scripts/solix_toolbox.py`, `assets/templates/untitled-rust/scripts/solix_toolbox.py`, and `libraries/solixlib/scripts/solix_toolbox.py`):
+* [x] `[P0]` **Task 3.1:** Add `--entry <SYMBOL>` to `solix compile` (`crates/solix-toolchain/src/cli.rs` and `commands/compile.rs`) and wire it to `CompilationOptions::with_entry_point`.
+* [x] `[P0]` **Task 3.2:** Update `crates/solix-toolchain/src/commands/run.rs` to resolve the target entrypoint using the strict 4-tier priority (`--entry` $\to$ `manifest.toml` `[entrypoints]` $\to$ `.slxb` `program.entry_point` $\to$ `"main"`) and call `vm.validate_cli_entry_point(entry_id)?` before executing.
+* [x] `[P0]` **Task 3.3:** Fix `solix_toolbox.py` (in `crates/solix-toolchain/assets/scripts/solix_toolbox.py`, `assets/templates/untitled-rust/scripts/solix_toolbox.py`, and `libraries/solixlib/scripts/solix_toolbox.py`):
   - Read `os.environ.get("SOLIX_LINK_MODE")` and pass `--link <mode>` to `solix compile` (`BUG-02`).
   - Pass `--entry <manifest_entry>` to `solix compile` (`BUG-03`).
-* [ ] `[P0]` **Task 3.4:** Fix all legacy `.` static method calls (`MathBridge.fast_add` $\to$ `MathBridge::fast_add`) in `assets/templates/untitled-rust/src/main.slx`, `tests/test_main.slx`, `assets/scripts/init_project.py`, and `crates/solix-toolchain/tests/build_and_archive_tests.rs` (`BUG-01`).
+* [x] `[P0]` **Task 3.4:** Fix all legacy `.` static method calls (`MathBridge.fast_add` $\to$ `MathBridge::fast_add`) in `assets/templates/untitled-rust/src/main.slx`, `tests/test_main.slx`, `assets/scripts/init_project.py`, and `crates/solix-toolchain/tests/build_and_archive_tests.rs` (`BUG-01`).
 
 ### Phase 4: Solver-Backed Import Autocompletion & Manifest-Aware CodeLens (`solix-lsp`)
-* [ ] `[P0]` **Task 4.1:** Implement `PackageNamespaceIndex` caching in `WorkspaceManager` (`crates/solix-lsp/src/workspace.rs`) backed by `ModuleSolver::list_packages()`, `ExportedModuleAst`, `blt`, and workspace snapshots.
-* [ ] `[P0]` **Task 4.2:** Implement `handle_import_completion` in `crates/solix-lsp/src/completion.rs`:
+* [x] `[P0]` **Task 4.1:** Implement `PackageNamespaceIndex` caching in `WorkspaceManager` (`crates/solix-lsp/src/workspace.rs`) backed by `ModuleSolver::list_packages()`, `ExportedModuleAst`, `blt`, and workspace snapshots.
+* [x] `[P0]` **Task 4.2:** Implement `handle_import_completion` in `crates/solix-lsp/src/completion.rs`:
   - First segment (`import <cursor>` or `extern import <cursor>`): suggests all packages from `solver.list_packages()`, `blt`, and workspace package roots.
   - Inner segments (`import solix.<cursor>` or `import solix.io.<cursor>`): suggests child subpackages (`io`, `math`, `core`, `collections`, etc.), public classes/interfaces/enums/functions in that namespace (`Console;`, `File;`, etc.), and wildcard `*;`.
-* [ ] `[P0]` **Task 4.3:** Update `crates/solix-lsp/src/code_lens.rs`:
+* [x] `[P0]` **Task 4.3:** Update `crates/solix-lsp/src/code_lens.rs`:
   - Remove `🐞` emoji (`"Debug Main"`, `"Debug Test"`).
   - Resolve project `[entrypoints].main` and `[entrypoints].test` from `manifest.toml` (falling back to `"main"` for standalone files) so Run/Debug CodeLenses appear on the exact configured entrypoint.
 
 ### Phase 5: Integrated Terminal DAP (`solix dap --port`) & VS Code Polish (`solix-dap` & `editors/vscode`)
-* [ ] `[P0]` **Task 5.1:** Update `crates/solix-dap/src/server.rs`:
+* [x] `[P0]` **Task 5.1:** Update `crates/solix-dap/src/server.rs`:
   - Use `vm.initialize_statics()` instead of manual init frame loops (`BUG-04`).
   - When running in TCP mode (`port.is_some()`), allow guest `stdin`/`stdout`/`stderr` to flow directly to the process's real terminal PTY instead of intercepting `stdout` into `pending_console_outputs`.
   - Resolve entrypoints using the same manifest/binary metadata rules as `solix run`.
-* [ ] `[P0]` **Task 5.2:** Update `editors/vscode/src/debug.ts`, `src/commands.ts`, and `src/extension.ts`:
+* [x] `[P0]` **Task 5.2:** Update `editors/vscode/src/debug.ts`, `src/commands.ts`, and `src/extension.ts`:
   - Launch `solix dap --port <ephemeral_port>` inside the VS Code Integrated Terminal (`Solix Debug Terminal`) and connect via `new vscode.DebugAdapterServer(port, '127.0.0.1')` so interactive `stdin` and `stdout` work natively in the terminal!
   - Register `solix.showReferences` in `src/commands.ts` (`BUG-06`).
   - Remove legacy `solix-lsp` binary search fallback in `src/extension.ts` (`BUG-05`) and remove `🐞` emoji from command labels.
 
 ### Phase 6: Rebuild `solixlib`, Exhaustive Conformance Suite & Pre-Merge Documentation Sync (`GL-0013`)
-* [ ] `[P0]` **Task 6.1:** Rebuild and sync `libraries/solixlib` (`solix build libraries/solixlib --release --sync`) so `solix@2.0.0.slxarc` includes the enriched `CompiledFunction` metadata (`is_public`, `return_type`, `parameter_types`).
-* [ ] `[P0]` **Task 6.2:** Add comprehensive unit and integration tests across `solix-runtime`, `solix-lsp`, `solix-dap`, `solix-toolchain`, and `editors/vscode`:
+* [x] `[P0]` **Task 6.1:** Rebuild and sync `libraries/solixlib` (`solix build libraries/solixlib --release --sync`) so `solix@2.0.0.slxarc` includes the enriched `CompiledFunction` metadata (`is_public`, `return_type`, `parameter_types`).
+* [x] `[P0]` **Task 6.2:** Add comprehensive unit and integration tests across `solix-runtime`, `solix-lsp`, `solix-dap`, `solix-toolchain`, and `editors/vscode`:
   1. `test_import_first_identifier_and_nested_namespace_completion` (`solix-lsp`).
-  2. `test_multiple_entrypoints_share_static_state_and_raii_shutdown` (`solix-runtime`).
+  2. `test_multiple_entrypoints_share_static_state_and_raII_shutdown` (`solix-runtime`).
   3. `test_non_public_or_non_primitive_entrypoint_rejected` (`solix-runtime`).
   4. `test_cli_entrypoint_resolution_priority_and_signature_enforcement` (`solix-toolchain`).
   5. `test_load_time_duplicate_symbol_definition_rejected` (`solix-runtime`).
   6. `test_dap_tcp_port_mode_and_terminal_io` (`solix-dap` & `editors/vscode`).
-* [ ] `[P1]` **Task 6.3:** Execute the `GL-0013` Pre-Merge Git-Diff Documentation Audit and update `docs/wiki/errors/runtime-errors.md` (`R0020`, `R0024`), `docs/spec/vm-isa-and-execution.md`, `docs/spec/package-solver-and-linking.md`, and `docs/guide/editors_vscode.md`.
+* [x] `[P1]` **Task 6.3:** Execute the `GL-0013` Pre-Merge Git-Diff Documentation Audit and update `docs/wiki/errors/runtime-errors.md` (`R0020`, `R0024`), `docs/spec/vm-isa-and-execution.md`, `docs/spec/package-solver-and-linking.md`, and `docs/guide/editors_vscode.md`.
 
 ---
 
@@ -424,10 +424,10 @@ In `crates/solix-runtime/src/context.rs` (`RuntimeContext::new`):
 
 | DoD Requirement | Target Benchmark / Artifact | Verification Command | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **Solver-Backed Import Completion** | `import ` suggests solver packages; `import solix.` suggests `io`, `math`, `core`; `import solix.io.` suggests `Console;` | `cargo test -p solix-lsp` | [ ] Pending |
-| **Integrated Terminal DAP** | `solix dap --port <port>` runs in VS Code Integrated Terminal with live `stdin`/`stdout` | `cargo test -p solix-dap && cd editors/vscode && npm test` | [ ] Pending |
-| **Emoji-Free CodeLens & UI** | CodeLens emits `"Debug Main"` & `"Debug Test"`; `solix.showReferences` registered | `cargo test -p solix-lsp && cd editors/vscode && npm test` | [ ] Pending |
-| **Modular Multi-Entrypoint VM** | Multiple entrypoints share `static_slots` in one `VirtualMachine` & run RAII destructors on `Drop` | `cargo test -p solix-runtime` | [ ] Pending |
-| **Strict CLI Entrypoint Contract** | Enforces `public int32 <sym>(char[]/string[])` & resolves `--entry` $\to$ `manifest.toml` $\to$ `.slxb` $\to$ `main` | `cargo test -p solix-toolchain` | [ ] Pending |
-| **Duplicate Symbol Rejection (`R0024`)** | Loading two binaries defining the same function/class/static fails with `DuplicateSymbolDefinition` | `cargo test -p solix-runtime` | [ ] Pending |
-| **Zero Warnings & Clean VSIX** | `cargo clippy --workspace --all-targets -- -D warnings` & `npm run package` pass with 0 warnings | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
+| **Solver-Backed Import Completion** | `import ` suggests solver packages; `import solix.` suggests `io`, `math`, `core`; `import solix.io.` suggests `Console;` | `cargo test -p solix-lsp` | [x] Complete (Verified) |
+| **Integrated Terminal DAP** | `solix dap --port <port>` runs in VS Code Integrated Terminal with live `stdin`/`stdout` | `cargo test -p solix-dap && cd editors/vscode && npm test` | [x] Complete (Verified) |
+| **Emoji-Free CodeLens & UI** | CodeLens emits `"Debug Main"` & `"Debug Test"`; `solix.showReferences` registered | `cargo test -p solix-lsp && cd editors/vscode && npm test` | [x] Complete (Verified) |
+| **Modular Multi-Entrypoint VM** | Multiple entrypoints share `static_slots` in one `VirtualMachine` & run RAII destructors on `Drop` | `cargo test -p solix-runtime` | [x] Complete (Verified) |
+| **Strict CLI Entrypoint Contract** | Enforces `public int32 <sym>(char[]/string[])` & resolves `--entry` $\to$ `manifest.toml` $\to$ `.slxb` $\to$ `main` | `cargo test -p solix-toolchain` | [x] Complete (Verified) |
+| **Duplicate Symbol Rejection (`R0024`)** | Loading two binaries defining the same function/class/static fails with `DuplicateSymbolDefinition` | `cargo test -p solix-runtime` | [x] Complete (Verified) |
+| **Zero Warnings & Clean VSIX** | `cargo clippy --workspace --all-targets -- -D warnings` & `npm run package` pass with 0 warnings | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Complete (Verified) |

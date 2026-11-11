@@ -702,25 +702,23 @@ impl ModuleSolver for ClientModuleSolver {
         if let Ok(read_dir) = fs::read_dir(&self.store_directory) {
             for entry_result in read_dir.flatten() {
                 let package_path = entry_result.path();
-                if package_path.is_dir() {
-                    if let Some(folder_name) = package_path.file_name().and_then(|name| name.to_str()) {
-                        if let Ok(version_read_dir) = fs::read_dir(&package_path) {
-                            let mut has_version = false;
-                            for version_entry_result in version_read_dir.flatten() {
-                                let version_candidate = version_entry_result.path();
-                                if version_candidate.is_dir() {
-                                    if let Some(candidate_name) = version_candidate.file_name().and_then(|name| name.to_str()) {
-                                        if PackageVersion::parse(candidate_name).is_ok() {
-                                            has_version = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            if has_version {
-                                package_names.push(folder_name.to_string());
-                            }
+                if package_path.is_dir()
+                    && let Some(folder_name) = package_path.file_name().and_then(|name| name.to_str())
+                    && let Ok(version_read_dir) = fs::read_dir(&package_path)
+                {
+                    let mut has_version = false;
+                    for version_entry_result in version_read_dir.flatten() {
+                        let version_candidate = version_entry_result.path();
+                        if version_candidate.is_dir()
+                            && let Some(candidate_name) = version_candidate.file_name().and_then(|name| name.to_str())
+                            && PackageVersion::parse(candidate_name).is_ok()
+                        {
+                            has_version = true;
+                            break;
                         }
+                    }
+                    if has_version {
+                        package_names.push(folder_name.to_string());
                     }
                 }
             }

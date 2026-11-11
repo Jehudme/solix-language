@@ -81,13 +81,13 @@ The Solix Language Server supports 32 language intelligence features:
 6. **Code Navigation**: Go-to Definition (`gd`), Type Definition (`gy`), Implementation (`gi`), and Find All References (`gr`).
 7. **Document Highlights**: Distinction between read usages and write/mutating usages.
 8. **Call & Type Hierarchies**: Incoming/outgoing call trees and subtype/supertype navigation.
-9. **Intelligent Completion**: Receiver-type-aware instance member completion on local variables and parameters, strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
+9. **Intelligent Completion**: Receiver-type-aware instance member completion on local variables and parameters, hierarchical solver-backed `import` and `extern import` completion discovering installed packages via `ModuleSolver::list_packages()` alongside subpackage trees and public symbols, strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
 10. **Rich Hover Cards**: Complete signature, `sizeof: XXB` instance byte size, struct field `+XB` offsets, and doc comments for functions, classes, fields, parameters, and local variables.
 11. **Signature Help**: Active parameter tracking with overload switching.
 12. **Inlay Hints**: Parameter names and RAII scope-exit destructor hints (`~dtor()`).
 13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
-15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `🐞 Debug Main` for applications and `▶ Run Test` / `🐞 Debug Test` for test suites.
+15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `Debug Main` for application entrypoints configured in `manifest.toml` (or `"main"` fallback) and `▶ Run Test` / `Debug Test` for test suites, plus reference count lenses linked to `solix.showReferences`.
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).
 17. **Refactoring**: Safe symbol renaming across files.
 18. **Code Formatting**: 4-space indent formatter preserving inline comments, compound operators (`+=`, `-=`, `*=`, `/=`, `%=`), relational operators (`==`, `!=`, `<=`, `>=`), lambda arrows (`=>`), and mid-line blocks (`} else {`).

@@ -221,6 +221,22 @@ def compile_solix_sources(
     if package_desc:
         cmd.extend(["--description", package_desc])
 
+    # Entry point from manifest
+    entrypoints = manifest.get("entrypoints", {})
+    if isinstance(entrypoints, dict):
+        selected_entry = (
+            entrypoints.get("test") or entrypoints.get("main")
+            if profile == "test"
+            else entrypoints.get("main")
+        )
+        if selected_entry:
+            cmd.extend(["--entry", str(selected_entry)])
+
+    # Support SOLIX_LINK_MODE environment variable
+    link_mode = os.environ.get("SOLIX_LINK_MODE")
+    if link_mode:
+        cmd.extend(["--link", link_mode])
+
     # Pass any dependency .slxb libraries in stage/lib
     for lib_file in stage_lib_dir.iterdir():
         if lib_file.name.endswith(".slxb"):

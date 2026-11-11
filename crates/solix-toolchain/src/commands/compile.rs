@@ -102,6 +102,10 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         .with_solver(solver)
         .with_verify_checksums(!args.yolo);
 
+    if let Some(entry_sym) = args.entry {
+        options = options.with_entry_point(Some(entry_sym));
+    }
+
     if args.inline_threshold != 8 {
         options = options.with_inline_threshold(args.inline_threshold);
     }

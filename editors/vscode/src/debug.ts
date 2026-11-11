@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
+import * as net from 'net';
 
 /**
  * Searches parent directories for manifest.toml to identify project roots.
@@ -46,26 +47,83 @@ function readPackageName(projectRoot: string): string {
     return path.basename(projectRoot);
 }
 
+function getAvailablePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.unref();
+        server.on('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+            const address = server.address();
+            if (address && typeof address === 'object') {
+                const port = address.port;
+                server.close(() => resolve(port));
+            } else {
+                server.close(() => reject(new Error('Failed to obtain ephemeral port')));
+            }
+        });
+    });
+}
+
+function waitForTcpPort(port: number, timeoutMs: number = 3000): Promise<void> {
+    const startTime = Date.now();
+    return new Promise((resolve, reject) => {
+        function attempt() {
+            const socket = net.createConnection({ host: '127.0.0.1', port }, () => {
+                socket.end();
+                resolve();
+            });
+            socket.on('error', () => {
+                socket.destroy();
+                if (Date.now() - startTime >= timeoutMs) {
+                    reject(new Error(`Timeout waiting for Solix DAP on port ${port}`));
+                } else {
+                    setTimeout(attempt, 25);
+                }
+            });
+        }
+        attempt();
+    });
+}
+
 /**
- * Spawns the Solix Debug Adapter via `solix dap --stdio`.
+ * Spawns the Solix Debug Adapter via Integrated Terminal TCP mode or headless stdio.
  */
 export class SolixDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
     constructor(private readonly solixBinaryPath: string) {}
 
-    public createDebugAdapterDescriptor(
-        _session: vscode.DebugSession,
+    public async createDebugAdapterDescriptor(
+        session: vscode.DebugSession,
         _executable: vscode.DebugAdapterExecutable | undefined
-    ): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        return new vscode.DebugAdapterExecutable(
-            this.solixBinaryPath,
-            ['dap', '--stdio'],
-            {
-                env: {
-                    ...process.env,
-                    RUST_BACKTRACE: '1'
+    ): Promise<vscode.DebugAdapterDescriptor> {
+        const useInternalConsole = session.configuration.console === 'internalConsole'
+            || process.env.SOLIX_HEADLESS_DAP === '1';
+
+        if (useInternalConsole) {
+            return new vscode.DebugAdapterExecutable(
+                this.solixBinaryPath,
+                ['dap', '--stdio'],
+                {
+                    env: {
+                        ...process.env,
+                        RUST_BACKTRACE: '1'
+                    }
                 }
-            }
-        );
+            );
+        }
+
+        const port = await getAvailablePort();
+        let terminal = vscode.window.terminals.find((term) => term.name === 'Solix Debug');
+        const cwd = session.configuration.cwd || undefined;
+        if (!terminal) {
+            terminal = vscode.window.createTerminal({
+                name: 'Solix Debug',
+                cwd
+            });
+        }
+        terminal.show(true);
+        terminal.sendText(`"${this.solixBinaryPath}" dap --port ${port}`);
+        await waitForTcpPort(port, 3000);
+        return new vscode.DebugAdapterServer(port, '127.0.0.1');
     }
 }
 

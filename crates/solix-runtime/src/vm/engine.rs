@@ -202,7 +202,7 @@ impl VirtualMachine {
         if !func.is_public {
             return Err(RuntimeError::InvalidEntryPointSignature {
                 symbol: func.symbol.clone(),
-                param_count: func.param_count as u16,
+                param_count: func.param_count,
                 reason: "CLI entry point function must have 'public' visibility".to_string(),
             });
         }
@@ -215,7 +215,7 @@ impl VirtualMachine {
         if !is_valid_return {
             return Err(RuntimeError::InvalidEntryPointSignature {
                 symbol: func.symbol.clone(),
-                param_count: func.param_count as u16,
+                param_count: func.param_count,
                 reason: format!(
                     "CLI entry point return type must be 'int32' or 'void', found '{:?}'",
                     func.return_type
@@ -262,7 +262,7 @@ impl VirtualMachine {
 
         Err(RuntimeError::InvalidEntryPointSignature {
             symbol: func.symbol.clone(),
-            param_count: func.param_count as u16,
+            param_count: func.param_count,
             reason: "CLI entry point parameters must be empty () or a single CLI string/char array (char[] args / string[] args)".to_string(),
         })
     }
@@ -288,7 +288,7 @@ impl VirtualMachine {
         if !func.is_public {
             return Err(RuntimeError::InvalidEntryPointSignature {
                 symbol: symbol.to_string(),
-                param_count: func.param_count as u16,
+                param_count: func.param_count,
                 reason: "Entry point function must have 'public' visibility".to_string(),
             });
         }
@@ -305,16 +305,13 @@ impl VirtualMachine {
                 Type::Class { symbol_name, .. } => {
                     symbol_name == "std.string" || symbol_name == "string"
                 }
-                Type::Array { element_type, depth } => {
-                    if *depth == 1 {
-                        matches!(
-                            &**element_type,
-                            Type::Primitive(_) | Type::Class { .. }
-                        )
-                    } else {
-                        false
-                    }
+                Type::Array { element_type, depth } if *depth == 1 => {
+                    matches!(
+                        &**element_type,
+                        Type::Primitive(_) | Type::Class { .. }
+                    )
                 }
+                Type::Array { .. } => false,
                 _ => false,
             }
         }
@@ -322,7 +319,7 @@ impl VirtualMachine {
         if !is_supported_entry_type(&func.return_type, true) {
             return Err(RuntimeError::InvalidEntryPointSignature {
                 symbol: symbol.to_string(),
-                param_count: func.param_count as u16,
+                param_count: func.param_count,
                 reason: format!(
                     "Return type '{:?}' is not a supported entry point primitive/string/array type",
                     func.return_type
@@ -334,7 +331,7 @@ impl VirtualMachine {
             if !is_supported_entry_type(param_type, false) {
                 return Err(RuntimeError::InvalidEntryPointSignature {
                     symbol: symbol.to_string(),
-                    param_count: func.param_count as u16,
+                    param_count: func.param_count,
                     reason: format!(
                         "Parameter type '{:?}' is not a supported entry point primitive/string/array type",
                         param_type
@@ -346,7 +343,7 @@ impl VirtualMachine {
         if args.len() != func.param_count as usize {
             return Err(RuntimeError::InvalidEntryPointSignature {
                 symbol: symbol.to_string(),
-                param_count: func.param_count as u16,
+                param_count: func.param_count,
                 reason: format!(
                     "Expected {} arguments, but received {}",
                     func.param_count,
@@ -846,7 +843,14 @@ impl VirtualMachine {
                 }
             }
 
-            self.shutdown()?;
+            for slot_idx in 0..self.static_slots.len() {
+                if let Value::Ref(addr) = self.static_slots[slot_idx]
+                    && addr > 0
+                {
+                    self.static_slots[slot_idx] = Value::Null;
+                    let _ = self.release_reference(addr);
+                }
+            }
 
             if let Some(code) = self.exit_code {
                 Ok(Value::I32(code))

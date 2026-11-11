@@ -380,4 +380,35 @@ export function registerSolixCommands(
             }
         })
     );
+
+    // 9. solix.showReferences (BUG-06)
+    extensionContext.subscriptions.push(
+        vscode.commands.registerCommand('solix.showReferences', async (uriStr?: string, position?: { line: number; character: number }) => {
+            const activeEditor = vscode.window.activeTextEditor;
+            const targetUri = uriStr ? vscode.Uri.parse(uriStr) : activeEditor?.document.uri;
+            if (!targetUri) {
+                return;
+            }
+
+            const targetPosition = position
+                ? new vscode.Position(position.line, position.character)
+                : activeEditor?.selection.active;
+            if (!targetPosition) {
+                return;
+            }
+
+            const locations = await vscode.commands.executeCommand<vscode.Location[]>(
+                'vscode.executeReferenceProvider',
+                targetUri,
+                targetPosition
+            );
+
+            await vscode.commands.executeCommand(
+                'editor.action.showReferences',
+                targetUri,
+                targetPosition,
+                locations ?? []
+            );
+        })
+    );
 }

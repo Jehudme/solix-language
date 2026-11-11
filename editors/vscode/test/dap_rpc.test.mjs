@@ -189,19 +189,19 @@ async function executeDapSession(targetProgramPath, testLabel) {
             stopOnEntry: false
         });
 
-        // 3. SetBreakpoints on line 46 of main.slx
+        // 3. SetBreakpoints on line 47 of main.slx
         const breakpointsResponse = await dapClient.sendRequest('setBreakpoints', {
             source: {
                 path: mainSourcePath,
                 name: 'main.slx'
             },
             breakpoints: [
-                { line: 46 }
+                { line: 47 }
             ]
         });
         assert.ok(breakpointsResponse.breakpoints.length > 0);
         assert.strictEqual(breakpointsResponse.breakpoints[0].verified, true);
-        assert.strictEqual(breakpointsResponse.breakpoints[0].line, 46);
+        assert.strictEqual(breakpointsResponse.breakpoints[0].line, 47);
 
         // 4. ConfigurationDone
         const stoppedEventPromise = dapClient.waitForEvent('stopped');
@@ -215,8 +215,8 @@ async function executeDapSession(targetProgramPath, testLabel) {
         const stackTraceResponse = await dapClient.sendRequest('stackTrace', { threadId: 1 });
         assert.ok(stackTraceResponse.stackFrames.length >= 1);
         const topFrame = stackTraceResponse.stackFrames[0];
-        assert.strictEqual(topFrame.name, 'main', 'Top frame must be main()');
-        assert.strictEqual(topFrame.line, 46, 'Top frame must be on line 46');
+        assert.ok(topFrame.name === 'main' || topFrame.name.endsWith('::main'), 'Top frame must be main function');
+        assert.strictEqual(topFrame.line, 47, 'Top frame must be on line 47');
         assert.ok(topFrame.source && topFrame.source.path, 'Top frame must have source path');
         assert.ok(topFrame.source.path.endsWith('main.slx'), 'Top frame path must point to main.slx');
         assert.ok(path.isAbsolute(topFrame.source.path), 'Top frame path must be canonical absolute path');
@@ -262,8 +262,8 @@ async function executeDapSession(targetProgramPath, testLabel) {
 
         const steppedStackTrace = await dapClient.sendRequest('stackTrace', { threadId: 1 });
         const steppedTopFrame = steppedStackTrace.stackFrames[0];
-        assert.strictEqual(steppedTopFrame.name, 'main');
-        assert.strictEqual(steppedTopFrame.line, 47, 'Stepped frame must be on line 47');
+        assert.ok(steppedTopFrame.name === 'main' || steppedTopFrame.name.endsWith('::main'), 'Stepped top frame must be main function');
+        assert.strictEqual(steppedTopFrame.line, 48, 'Stepped frame must be on line 48');
 
         // After step over, static_result should be 100
         const steppedScopes = await dapClient.sendRequest('scopes', { frameId: steppedTopFrame.id });
@@ -272,7 +272,7 @@ async function executeDapSession(targetProgramPath, testLabel) {
             variablesReference: steppedLocalsScope.variablesReference
         });
         const staticResult = steppedVariables.variables.find(variable => variable.name === 'static_result');
-        assert.ok(staticResult, 'static_result must be in locals after stepping line 46');
+        assert.ok(staticResult, 'static_result must be in locals after stepping line 47');
         assert.strictEqual(staticResult.value, '100');
 
         // 11. Evaluate Expression
