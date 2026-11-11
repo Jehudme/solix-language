@@ -35,30 +35,49 @@ All contributors and documentation authors **MUST** adhere to the following bind
 
 ## 3. Structural Specification & Schema
 
-### 3.1 Documentation Directory Taxonomy
+### 3.1 Tripartite Documentation Directory Taxonomy
 
-The `docs/` repository hierarchy is strictly partitioned by scope and target audience:
+The `docs/` repository hierarchy enforces a strict tripartite separation of concerns (`guide/` vs. `spec/` vs. `wiki/`):
 
 ```text
 docs/
-├── overview/               # High-level architecture, compiler pipeline, VM design, memory model
-│   ├── architecture.md     # System overview and crate dependency topology
-│   └── memory_model.md     # Automatic Reference Counting (ARC) and memory layout
-├── guides/                 # User-facing language tutorials and developer operational guides
-│   ├── 01_getting_started.md
-│   ├── 02_variables_and_types.md
-│   ├── 03_control_flow.md
-│   ├── 04_classes_and_oop.md
-│   ├── 05_memory_management_and_arc.md
-│   └── 06_error_handling.md
-├── wikipedia/              # Formal encyclopedia of language keywords, statements, and expressions
-│   ├── keywords/           # Individual keyword specifications (e.g., class, while, match)
-│   ├── statements/         # Statement syntax, semantics, and AST representations
-│   └── expressions/        # Expression syntax, evaluation order, and precedence
-├── internals/              # Core engineering standards and architectural blueprints
-│   ├── guidelines/         # Engineering guidelines suite (GL-0001 - GL-0011)
-│   ├── milestones/         # Phased delivery plans, blocker tracking, and DoD sign-offs
-│   └── specs/              # Subsystem specifications (statements, VM ISA, runtime, CLI)
+├── README.md               # Master Documentation Hub & Tripartite Navigation Index
+├── guide/                  # User Guides ("How to Use It" — task tutorials linking to spec & wiki)
+│   ├── README.md           # Learning Path & Guide Index
+│   ├── 01-getting-started-and-toolchain.md
+│   ├── 02-variables-primitives-and-strings.md
+│   ├── 03-control-flow-and-functions.md
+│   ├── 04-classes-oop-and-namespaces.md
+│   ├── 05-memory-management-arc-and-raii.md
+│   ├── 06-error-handling-and-assertions.md
+│   ├── 07-generics-and-variadic-templates.md
+│   ├── 08-packages-dependencies-and-linking.md
+│   ├── 09-native-rust-extensions.md
+│   └── 10-standard-library-tour.md
+├── spec/                   # Formal & Internal Specifications ("How It Works Under the Hood")
+│   ├── README.md           # Master Specifications Index
+│   ├── lexical-grammar.md
+│   ├── type-system-and-semantics.md
+│   ├── compilation-pipeline.md
+│   ├── binder-and-monomorphization.md
+│   ├── optimizer-and-inliner.md
+│   ├── vm-isa-and-execution.md
+│   ├── memory-model-and-arc.md
+│   ├── exception-unwinding.md
+│   ├── binary-formats-slxb-and-slxarc.md
+│   ├── package-solver-and-linking.md
+│   ├── native-ffi-abi.md
+│   ├── statements/         # Statement & Expression Compilation Mechanics with Bytecode
+│   └── solixlib/           # Standard Library v2.0.0 Formal Specifications
+├── wiki/                   # Atomic Reference Wiki ("Fast Dictionary Reference")
+│   ├── README.md           # Master Wiki Index
+│   ├── errors/             # E0000..E0350 compiler errors & R0001..R0023 runtime traps
+│   ├── primitives/         # All 14 built-in primitive types & aliases
+│   ├── commands/           # solix compile, build, run, new, install, list, info
+│   └── keywords/           # 45+ reserved keywords grouped by syntactic category
+├── internals/              # Core Engineering Standards, Milestones & Protocol Governance
+│   ├── guidelines/         # Engineering guidelines suite (GL-0001 - GL-0013)
+│   └── milestones/         # Phased delivery plans, blocker tracking, and DoD sign-offs
 └── archive/                # Historical, deprecated, or superseded specifications
 ```
 

@@ -29,6 +29,8 @@ All contributors **MUST** adhere to these guidelines across all crates (`crates/
 | **GL-0009** | [Test Engineering & Verification Matrices Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-test.md) | Unit Tests at Bottom of File & Dual Matrices | `FINAL` |
 | **GL-0010** | [Living Documentation & Drift Prevention Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-docs.md) | Zero-Drift, Rustdoc & CLI Sync | `FINAL` |
 | **GL-0011** | [Rust Language & Security Conventions Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/language-conventions.md) | No Single-Letter Names, Military Safety, Errors | `FINAL` |
+| **GL-0012** | [Tripartite Documentation Architecture Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-features-and-wiki.md) | Guides vs Specs vs Atomic Wiki Architecture | `FINAL` |
+| **GL-0013** | [Mandatory Pre-Merge Git-Diff Documentation Audit Protocol](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/documentation-update-protocol.md) | Pre-Merge Cross-Update Trigger Matrix & Anti-Drift | `FINAL` |
 
 ---
 
