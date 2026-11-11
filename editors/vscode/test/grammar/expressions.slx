@@ -1,0 +1,23 @@
+// SYNTAX TEST "source.solix"
+void test_expressions() {
+// <--- storage.type.primitive.solix
+    int32 hex_value = 0xDEAD_BEEF;
+//  ^^^^^ storage.type.primitive.solix
+//                    ^^^^^^^^^^^ constant.numeric.hex.solix
+
+    int32 binary_value = 0b1010_0101;
+//                       ^^^^^^^^^^^ constant.numeric.binary.solix
+
+    float64 float_value = 3.14159;
+//  ^^^^^^^ storage.type.primitive.solix
+//                        ^^^^^^^ constant.numeric.float.solix
+
+    bool flag_state = true;
+//  ^^^^ storage.type.primitive.solix
+//                    ^^^^ constant.language.solix
+
+    string message = "hello\nworld";
+//  ^^^^^^ storage.type.primitive.solix
+//                   ^^^^^^^^^^^^^^ string.quoted.double.solix
+//                         ^^ constant.character.escape.solix
+}

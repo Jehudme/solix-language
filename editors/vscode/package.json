@@ -1,0 +1,166 @@
+{
+    "name": "solix",
+    "displayName": "Solix",
+    "description": "Official language support for Solix v2.0 (Language Server, 108-token grammar, formatting, and task runner)",
+    "version": "0.1.0",
+    "publisher": "solix-lang",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/solix-language/solix"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Snippets",
+        "Formatters",
+        "Linters"
+    ],
+    "keywords": [
+        "solix",
+        "language server",
+        "lsp",
+        "formatter",
+        "register vm"
+    ],
+    "activationEvents": [
+        "onLanguage:solix"
+    ],
+    "main": "./out/src/extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "solix",
+                "aliases": [
+                    "Solix",
+                    "solix"
+                ],
+                "extensions": [
+                    ".slx"
+                ],
+                "configuration": "./language-configuration.json"
+            },
+            {
+                "id": "solix-disasm",
+                "aliases": [
+                    "Solix Disassembly",
+                    "solix-disasm"
+                ],
+                "extensions": [
+                    ".slxdasm"
+                ]
+            }
+        ],
+        "grammars": [
+            {
+                "language": "solix",
+                "scopeName": "source.solix",
+                "path": "./syntaxes/solix.tmLanguage.json"
+            },
+            {
+                "language": "solix-disasm",
+                "scopeName": "source.solix-disasm",
+                "path": "./syntaxes/solix-disasm.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "solix",
+                "path": "./snippets/solix.code-snippets"
+            }
+        ],
+        "commands": [
+            {
+                "command": "solix.runMain",
+                "title": "Solix: Run Application (solix run)",
+                "category": "Solix",
+                "icon": "$(play)"
+            },
+            {
+                "command": "solix.runTest",
+                "title": "Solix: Run Test Suite (solix run --test)",
+                "category": "Solix",
+                "icon": "$(beaker)"
+            },
+            {
+                "command": "solix.buildProject",
+                "title": "Solix: Build Project (solix build)",
+                "category": "Solix"
+            },
+            {
+                "command": "solix.syncPackages",
+                "title": "Solix: Sync Installed Packages (solix sync --all)",
+                "category": "Solix"
+            },
+            {
+                "command": "solix.showDisassembly",
+                "title": "Solix: Inspect 64-Bit Register VM Disassembly",
+                "category": "Solix"
+            },
+            {
+                "command": "solix.showSynthesizedApi",
+                "title": "Solix: Inspect Exported Public API (.slx)",
+                "category": "Solix"
+            },
+            {
+                "command": "solix.restartServer",
+                "title": "Solix: Restart Language Server",
+                "category": "Solix"
+            }
+        ],
+        "configuration": {
+            "type": "object",
+            "title": "Solix Configuration",
+            "properties": {
+                "solix.lsp.path": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Custom absolute path or executable name for solix or solix-lsp. If blank, automatically discovered from workspace target directories, ~/.cargo/bin, or PATH."
+                },
+                "solix.lsp.arguments": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        "lsp",
+                        "--stdio"
+                    ],
+                    "description": "Arguments passed when launching the Solix language server binary."
+                },
+                "solix.trace.server": {
+                    "type": "string",
+                    "enum": [
+                        "off",
+                        "messages",
+                        "verbose"
+                    ],
+                    "default": "off",
+                    "description": "Traces JSON-RPC communication between VS Code and the Solix Language Server."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -w -p ./",
+        "test:grammar": "vscode-tmgrammar-test -g syntaxes/solix.tmLanguage.json 'test/grammar/*.slx'",
+        "test:client-rpc": "node test/client_rpc.test.mjs",
+        "test": "npm run test:grammar && npm run test:client-rpc",
+        "package": "vsce package --no-dependencies"
+    },
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.0",
+        "@types/vscode": "^1.85.0",
+        "@vscode/test-electron": "^2.4.1",
+        "@vscode/vsce": "^3.2.1",
+        "typescript": "^5.3.3",
+        "vscode-tmgrammar-test": "^0.1.2"
+    }
+}

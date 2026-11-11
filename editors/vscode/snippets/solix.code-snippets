@@ -1,0 +1,142 @@
+{
+    "Solix Main Entry Point": {
+        "prefix": "main",
+        "body": [
+            "void main() {",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix v2.0 application entry point function"
+    },
+    "Solix Unit Test Function": {
+        "prefix": "test",
+        "body": [
+            "void test_${1:feature_name}() {",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix test suite case recognized by ▶ Run Test CodeLens"
+    },
+    "Class Declaration": {
+        "prefix": "class",
+        "body": [
+            "class ${1:ClassName} {",
+            "    public constructor() {",
+            "        $2",
+            "    }",
+            "",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix reference class declaration"
+    },
+    "Destructor Declaration": {
+        "prefix": "dtor",
+        "body": [
+            "public ~${1:ClassName}() {",
+            "    $0",
+            "}"
+        ],
+        "description": "Deterministic RAII scope-exit destructor"
+    },
+    "Interface Declaration": {
+        "prefix": "interface",
+        "body": [
+            "interface ${1:InterfaceName} {",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix interface declaration"
+    },
+    "Enum Declaration": {
+        "prefix": "enum",
+        "body": [
+            "enum ${1:EnumName} {",
+            "    ${2:VariantFirst},",
+            "    ${3:VariantSecond}",
+            "}"
+        ],
+        "description": "Solix enumeration declaration"
+    },
+    "Method Declaration": {
+        "prefix": "method",
+        "body": [
+            "public ${1:void} ${2:methodName}(${3:parameters}) {",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix class method declaration"
+    },
+    "Static Method Declaration": {
+        "prefix": "static",
+        "body": [
+            "public static ${1:void} ${2:functionName}(${3:parameters}) {",
+            "    $0",
+            "}"
+        ],
+        "description": "Solix static method accessed via ::"
+    },
+    "For Loop": {
+        "prefix": "for",
+        "body": [
+            "for (int32 iteration_index = 0; iteration_index < ${1:maximum_count}; iteration_index++) {",
+            "    $0",
+            "}"
+        ],
+        "description": "Standard indexed for loop"
+    },
+    "While Loop": {
+        "prefix": "while",
+        "body": [
+            "while (${1:condition_expression}) {",
+            "    $0",
+            "}"
+        ],
+        "description": "While loop block"
+    },
+    "If-Else Statement": {
+        "prefix": "if",
+        "body": [
+            "if (${1:condition_expression}) {",
+            "    $2",
+            "} else {",
+            "    $0",
+            "}"
+        ],
+        "description": "Conditional branching statement"
+    },
+    "Try-Catch-Finally Statement": {
+        "prefix": "try",
+        "body": [
+            "try {",
+            "    $1",
+            "} catch (${2:std.Exception} caught_error) {",
+            "    $3",
+            "} finally {",
+            "    $0",
+            "}"
+        ],
+        "description": "Exception handling try-catch-finally block"
+    },
+    "Package Declaration": {
+        "prefix": "package",
+        "body": [
+            "package ${1:namespace_path};"
+        ],
+        "description": "Module package namespace declaration"
+    },
+    "Extern Import": {
+        "prefix": "extern",
+        "body": [
+            "extern import ${1:package_name};"
+        ],
+        "description": "External package dependency import statement"
+    },
+    "Println Expression": {
+        "prefix": "println",
+        "body": [
+            "println(${1:output_message});"
+        ],
+        "description": "Standard console print line call"
+    }
+}
