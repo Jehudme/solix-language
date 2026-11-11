@@ -162,10 +162,74 @@ fn handle_dot_completion(
     if let Some(sem) = semantic {
         // Attempt to find receiver's evaluated type
         let mut receiver_type = None;
-        for symbol in &sem.symbol_table.symbols {
-            if symbol.name == receiver && !symbol.is_static {
-                receiver_type = Some(symbol.symbol_type.clone());
+
+        if receiver == "this" {
+            let target_offset = crate::diagnostics::position_to_byte_offset(&snapshot.source_text, position) as u32;
+            for symbol in &sem.symbol_table.symbols {
+                if symbol.source_id == snapshot.source_id
+                    && matches!(symbol.symbol_type, Type::Class { .. })
+                    && symbol.span.start <= target_offset
+                    && target_offset <= symbol.span.end
+                {
+                    for member_id in &symbol.members {
+                        if let Some(member) = sem.symbol_table.get_symbol(*member_id)
+                            && !member.is_static {
+                                items.push(make_symbol_completion_item(member));
+                            }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Check local symbols recorded in symbol table
+        for local_symbol in &sem.symbol_table.local_symbols {
+            if local_symbol.source_id == snapshot.source_id
+                && local_symbol.name == receiver
+            {
+                receiver_type = Some(local_symbol.symbol_type.clone());
                 break;
+            }
+        }
+
+        // Check declared instance symbols
+        if receiver_type.is_none() {
+            for symbol in &sem.symbol_table.symbols {
+                if symbol.name == receiver && !symbol.is_static {
+                    receiver_type = Some(symbol.symbol_type.clone());
+                    break;
+                }
+            }
+        }
+
+        // Fallback: search AST for local variable declaration if semantic pass was incomplete
+        if receiver_type.is_none()
+            && let Some(ref program_ast) = snapshot.ast
+        {
+            for declaration in &program_ast.declarations {
+                if let Declaration::Method(method_declaration) = declaration
+                    && let Some(ref method_body) = method_declaration.body
+                {
+                    for statement in &method_body.statements {
+                        if let solix_compilation::phases::parser::statements::Statement::VariableDeclaration(var_decl) = statement {
+                            let declared_var_name = if (var_decl.name_span.end as usize) <= snapshot.source_text.len() {
+                                &snapshot.source_text[var_decl.name_span.start as usize..var_decl.name_span.end as usize]
+                            } else {
+                                ""
+                            };
+                            if declared_var_name == receiver {
+                                let resolved_type = solix_compilation::phases::binder::type_resolver::resolve_type_annotation(
+                                    snapshot.source_id,
+                                    &snapshot.source_text,
+                                    &var_decl.var_type,
+                                    &sem.symbol_table,
+                                );
+                                receiver_type = Some(resolved_type);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -181,13 +245,6 @@ fn handle_dot_completion(
                             }
                     }
                     break;
-                }
-            }
-        } else {
-            // General instance methods across current classes
-            for symbol in &sem.symbol_table.symbols {
-                if matches!(symbol.symbol_type, Type::FunctionPointer { .. }) && !symbol.is_static {
-                    items.push(make_symbol_completion_item(symbol));
                 }
             }
         }

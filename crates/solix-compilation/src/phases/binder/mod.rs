@@ -15,5 +15,5 @@ pub use binder::{BindingArtifacts, BindingMetaData, bind, bind_context, bind_inc
 pub use call_normalizer::normalize_call_sites;
 pub use layout::ClassLayout;
 pub use monomorphizer::{GenericBlueprint, GenericBlueprintRegistry};
-pub use symbols::{ImportEntry, SymbolEntry, SymbolId, SymbolKind, SymbolTable};
+pub use symbols::{ImportEntry, LocalSymbolEntry, SymbolEntry, SymbolId, SymbolKind, SymbolTable};
 pub use type_resolver::resolve_type_annotation;

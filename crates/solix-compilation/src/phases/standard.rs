@@ -185,10 +185,16 @@ impl CompilationPhase for BinderPhase {
     fn run(&mut self, context: &mut CompilationContext) -> Result<(), Vec<CompilationDiagnostic>> {
         match crate::phases::binder::bind_context(context) {
             Ok(_) => Ok(()),
-            Err(errors) => Err(errors
-                .into_iter()
-                .map(CompilationDiagnostic::from)
-                .collect()),
+            Err(_) => {
+                let diagnostics = context
+                    .binding_errors
+                    .iter()
+                    .map(|(source_id, error)| {
+                        CompilationDiagnostic::from(error.clone()).with_source_id(*source_id)
+                    })
+                    .collect();
+                Err(diagnostics)
+            }
         }
     }
 }

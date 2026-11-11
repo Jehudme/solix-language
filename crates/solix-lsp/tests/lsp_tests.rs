@@ -717,3 +717,69 @@ fn test_feature_32_code_formatter_preserves_comments() {
     assert!(formatted.contains("    }"));
     assert!(formatted.contains('}'));
 }
+
+// -----------------------------------------------------------------------------
+// Milestone 029: Stabilization & Fix Verification Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_ms029_formatter_compound_operators_and_else_block() {
+    let unformatted_input = "void test_ops() {\nint32 total = 0;\ntotal += 10;\ntotal -= 2;\ntotal *= 3;\ntotal /= 2;\nif (total > 0) {\ntotal += 1;\n} else {\ntotal -= 1;\n}\n}\n";
+    let formatted_output = format_source(unformatted_input);
+
+    assert!(formatted_output.contains("total += 10;"), "Expected '+=' to remain intact: {formatted_output}");
+    assert!(formatted_output.contains("total -= 2;"), "Expected '-=' to remain intact: {formatted_output}");
+    assert!(formatted_output.contains("total *= 3;"), "Expected '*=' to remain intact: {formatted_output}");
+    assert!(formatted_output.contains("total /= 2;"), "Expected '/=' to remain intact: {formatted_output}");
+    assert!(formatted_output.contains("} else {"), "Expected '}} else {{' on single indented line: {formatted_output}");
+}
+
+#[test]
+fn test_ms029_local_var_dot_completion() {
+    let (workspace, test_uri) = create_test_workspace();
+    let sample_source = "class Point {\n    int32 coordinate_x;\n    int32 coordinate_y;\n    public int32 distance_from_origin() {\n        return 0;\n    }\n}\nvoid main() {\n    Point origin_point = new Point();\n    origin_point.\n}\n";
+
+    let snapshot = workspace.did_open(test_uri.clone(), 1, sample_source.to_string());
+    // Cursor right after 'origin_point.' on line 9 (0-indexed line 9, col 17)
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: test_uri },
+            position: Position { line: 9, character: 17 },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+    let completion_list = completions(&workspace, &snapshot, &completion_params);
+
+    let completion_labels: Vec<String> = completion_list.items.into_iter().map(|item| item.label).collect();
+    assert!(
+        completion_labels.contains(&"coordinate_x".to_string()),
+        "Expected 'coordinate_x' in completions, got: {:?}",
+        completion_labels
+    );
+    assert!(
+        completion_labels.contains(&"coordinate_y".to_string()),
+        "Expected 'coordinate_y' in completions, got: {:?}",
+        completion_labels
+    );
+    assert!(
+        completion_labels.contains(&"distance_from_origin".to_string()),
+        "Expected 'distance_from_origin' in completions, got: {:?}",
+        completion_labels
+    );
+}
+
+#[test]
+fn test_ms029_multifile_diagnostic_isolation() {
+    let (workspace, main_uri) = create_test_workspace();
+    let valid_main_source = "class Application {\n    public static void run() {}\n}\n";
+
+    let snapshot = workspace.did_open(main_uri, 1, valid_main_source.to_string());
+    assert_eq!(
+        snapshot.diagnostics.len(),
+        0,
+        "Expected 0 diagnostics on clean single-file main: {:?}",
+        snapshot.diagnostics
+    );
+}

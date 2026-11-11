@@ -99,8 +99,8 @@ pub fn execute_pass1_symbol_discovery(
     source_asts: &[Option<ProgramAst>],
     symbol_table: &mut SymbolTable,
     blueprint_registry: &mut GenericBlueprintRegistry,
-) -> Result<(), Vec<BindingError>> {
-    let mut accumulated_errors = Vec::new();
+) -> Result<(), Vec<(u16, BindingError)>> {
+    let mut accumulated_errors: Vec<(u16, BindingError)> = Vec::new();
     let mut raw_aliases = Vec::new();
 
     for (source_index, ast_option) in source_asts.iter().enumerate() {
@@ -229,10 +229,13 @@ pub fn execute_pass1_symbol_discovery(
                 .global_names
                 .contains_key(&fully_qualified_name)
             {
-                accumulated_errors.push(BindingError::DuplicateSymbol {
-                    symbol_name: fully_qualified_name.clone(),
-                    span: alias_statement.span.to_source_span(),
-                });
+                accumulated_errors.push((
+                    source_id,
+                    BindingError::DuplicateSymbol {
+                        symbol_name: fully_qualified_name.clone(),
+                        span: alias_statement.span.to_source_span(),
+                    },
+                ));
             } else {
                 symbol_table.insert_symbol(alias_symbol);
             }
@@ -320,10 +323,13 @@ pub fn execute_pass1_symbol_discovery(
                         .global_names
                         .contains_key(&fully_qualified_name)
                     {
-                        accumulated_errors.push(BindingError::DuplicateSymbol {
-                            symbol_name: fully_qualified_name,
-                            span: class_declaration.span.to_source_span(),
-                        });
+                        accumulated_errors.push((
+                            source_id,
+                            BindingError::DuplicateSymbol {
+                                symbol_name: fully_qualified_name,
+                                span: class_declaration.span.to_source_span(),
+                            },
+                        ));
                         continue;
                     }
 
@@ -496,10 +502,13 @@ pub fn execute_pass1_symbol_discovery(
                         .global_names
                         .contains_key(&fully_qualified_name)
                     {
-                        accumulated_errors.push(BindingError::DuplicateSymbol {
-                            symbol_name: fully_qualified_name,
-                            span: interface_declaration.span.to_source_span(),
-                        });
+                        accumulated_errors.push((
+                            source_id,
+                            BindingError::DuplicateSymbol {
+                                symbol_name: fully_qualified_name,
+                                span: interface_declaration.span.to_source_span(),
+                            },
+                        ));
                         continue;
                     }
 
@@ -547,10 +556,13 @@ pub fn execute_pass1_symbol_discovery(
                         .global_names
                         .contains_key(&fully_qualified_name)
                     {
-                        accumulated_errors.push(BindingError::DuplicateSymbol {
-                            symbol_name: fully_qualified_name,
-                            span: enum_declaration.span.to_source_span(),
-                        });
+                        accumulated_errors.push((
+                            source_id,
+                            BindingError::DuplicateSymbol {
+                                symbol_name: fully_qualified_name,
+                                span: enum_declaration.span.to_source_span(),
+                            },
+                        ));
                         continue;
                     }
 
@@ -583,10 +595,13 @@ pub fn execute_pass1_symbol_discovery(
                         };
 
                         if !seen_variants.insert(variant_name.to_string()) {
-                            accumulated_errors.push(BindingError::DuplicateSymbol {
-                                symbol_name: format!("{fully_qualified_name}::{variant_name}"),
-                                span: variant.span.to_source_span(),
-                            });
+                            accumulated_errors.push((
+                                source_id,
+                                BindingError::DuplicateSymbol {
+                                    symbol_name: format!("{fully_qualified_name}::{variant_name}"),
+                                    span: variant.span.to_source_span(),
+                                },
+                            ));
                             continue;
                         }
 
@@ -788,10 +803,13 @@ pub fn execute_pass1_symbol_discovery(
                 || blueprint_registry.has_blueprint(&target_dot);
 
             if !is_resolved {
-                accumulated_errors.push(BindingError::UnresolvedAliasTarget {
-                    target_name: target.clone(),
-                    span: alias.span.to_source_span(),
-                });
+                accumulated_errors.push((
+                    alias.source_id,
+                    BindingError::UnresolvedAliasTarget {
+                        target_name: target.clone(),
+                        span: alias.span.to_source_span(),
+                    },
+                ));
             }
         }
 
@@ -804,10 +822,13 @@ pub fn execute_pass1_symbol_discovery(
                 break;
             }
             if visited.contains(next) {
-                accumulated_errors.push(BindingError::CircularAlias {
-                    alias_name: alias.alias_name.clone(),
-                    span: alias.span.to_source_span(),
-                });
+                accumulated_errors.push((
+                    alias.source_id,
+                    BindingError::CircularAlias {
+                        alias_name: alias.alias_name.clone(),
+                        span: alias.span.to_source_span(),
+                    },
+                ));
                 break;
             }
             visited.insert(next.clone());
@@ -851,10 +872,13 @@ pub fn execute_pass1_symbol_discovery(
                         .iter()
                         .any(|pkg_name| pkg_name == path);
                 if !is_std && !is_known_pkg {
-                    accumulated_errors.push(BindingError::CannotResolveImport {
-                        import_path: path.replace("::", "."),
-                        span: import_entry.span.to_source_span(),
-                    });
+                    accumulated_errors.push((
+                        import_entry.source_id,
+                        BindingError::CannotResolveImport {
+                            import_path: path.replace("::", "."),
+                            span: import_entry.span.to_source_span(),
+                        },
+                    ));
                 }
             } else {
                 let path = &import_entry.path;
@@ -869,25 +893,34 @@ pub fn execute_pass1_symbol_discovery(
                                 .iter()
                                 .any(|pkg_name| pkg_name == &package_name);
                         if pkg_exists {
-                            accumulated_errors.push(BindingError::undefined_symbol(
-                                format!(
-                                    "Symbol '{}' not found in package '{}'",
-                                    import_entry.symbol_name,
-                                    package_name.replace("::", ".")
+                            accumulated_errors.push((
+                                import_entry.source_id,
+                                BindingError::undefined_symbol(
+                                    format!(
+                                        "Symbol '{}' not found in package '{}'",
+                                        import_entry.symbol_name,
+                                        package_name.replace("::", ".")
+                                    ),
+                                    import_entry.span,
                                 ),
-                                import_entry.span,
                             ));
                         } else {
-                            accumulated_errors.push(BindingError::CannotResolveImport {
-                                import_path: path.replace("::", "."),
-                                span: import_entry.span.to_source_span(),
-                            });
+                            accumulated_errors.push((
+                                import_entry.source_id,
+                                BindingError::CannotResolveImport {
+                                    import_path: path.replace("::", "."),
+                                    span: import_entry.span.to_source_span(),
+                                },
+                            ));
                         }
                     } else {
-                        accumulated_errors.push(BindingError::CannotResolveImport {
-                            import_path: path.replace("::", "."),
-                            span: import_entry.span.to_source_span(),
-                        });
+                        accumulated_errors.push((
+                            import_entry.source_id,
+                            BindingError::CannotResolveImport {
+                                import_path: path.replace("::", "."),
+                                span: import_entry.span.to_source_span(),
+                            },
+                        ));
                     }
                 }
             }

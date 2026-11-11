@@ -7,7 +7,7 @@ use crate::phases::binder::monomorphizer::GenericBlueprintRegistry;
 use crate::phases::binder::passes::pass1_symbol_discovery::{
     compute_effective_package, extract_namespace_path,
 };
-use crate::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
+use crate::phases::binder::symbols::{LocalSymbolEntry, SymbolEntry, SymbolId, SymbolTable};
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::lexing::{Span, TokenKind};
 use crate::phases::parser::statements::Statement;
@@ -2380,7 +2380,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 source_id: self.source_id,
                 span: parameter.span,
                 modifiers: Vec::new(),
-                symbol_type: param_type,
+                symbol_type: param_type.clone(),
                 parent_symbol: None,
                 members: Vec::new(),
                 is_static: false,
@@ -2399,6 +2399,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
+            self.symbol_table.record_local_symbol(LocalSymbolEntry {
+                name: param_name.to_string(),
+                symbol_type: param_type.clone(),
+                decl_span: parameter.name_span,
+                scope_span: node.span,
+                source_id: self.source_id,
+                is_const: false,
+                symbol_id: param_id,
+            });
+            self.resolved_symbols.insert(parameter.name_span, param_id);
+            self.node_types.insert(parameter.name_span, param_type);
         }
 
         if let Some(body) = &node.body {
@@ -2470,7 +2481,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 source_id: self.source_id,
                 span: parameter.span,
                 modifiers: Vec::new(),
-                symbol_type: param_type,
+                symbol_type: param_type.clone(),
                 parent_symbol: None,
                 members: Vec::new(),
                 is_static: false,
@@ -2489,6 +2500,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
+            self.symbol_table.record_local_symbol(LocalSymbolEntry {
+                name: param_name.to_string(),
+                symbol_type: param_type.clone(),
+                decl_span: parameter.name_span,
+                scope_span: node.span,
+                source_id: self.source_id,
+                is_const: false,
+                symbol_id: param_id,
+            });
+            self.resolved_symbols.insert(parameter.name_span, param_id);
+            self.node_types.insert(parameter.name_span, param_type);
         }
 
         if let Some(super_args) = &node.super_call_args {
@@ -2616,7 +2638,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 source_id: self.source_id,
                 span: parameter.span,
                 modifiers: Vec::new(),
-                symbol_type: param_type,
+                symbol_type: param_type.clone(),
                 parent_symbol: self.current_class,
                 members: Vec::new(),
                 is_static: false,
@@ -2635,6 +2657,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
+            self.symbol_table.record_local_symbol(LocalSymbolEntry {
+                name: param_name.to_string(),
+                symbol_type: param_type.clone(),
+                decl_span: parameter.name_span,
+                scope_span: node.span,
+                source_id: self.source_id,
+                is_const: false,
+                symbol_id: param_id,
+            });
+            self.resolved_symbols.insert(parameter.name_span, param_id);
+            self.node_types.insert(parameter.name_span, param_type);
         }
 
         for statement in &node.body.statements {
@@ -2794,6 +2827,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
         };
         let var_id = self.symbol_table.insert_symbol(var_symbol);
         self.symbol_table.declare_local(var_name, var_id);
+        self.symbol_table.record_local_symbol(LocalSymbolEntry {
+            name: var_name.to_string(),
+            symbol_type: declared_type.clone(),
+            decl_span: node.name_span,
+            scope_span: node.span,
+            source_id: self.source_id,
+            is_const,
+            symbol_id: var_id,
+        });
+        self.resolved_symbols.insert(node.name_span, var_id);
+        self.node_types.insert(node.name_span, declared_type.clone());
         self.node_types.insert(node.span, declared_type);
     }
 
@@ -3011,7 +3055,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             source_id: self.source_id,
             span: node.variable_name,
             modifiers: Vec::new(),
-            symbol_type: exception_type,
+            symbol_type: exception_type.clone(),
             parent_symbol: None,
             members: Vec::new(),
             is_static: false,
@@ -3021,6 +3065,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
         let exception_id = self.symbol_table.insert_symbol(exception_symbol);
         self.symbol_table
             .declare_local(exception_name, exception_id);
+        self.symbol_table.record_local_symbol(LocalSymbolEntry {
+            name: exception_name.to_string(),
+            symbol_type: exception_type.clone(),
+            decl_span: node.variable_name,
+            scope_span: node.block.span,
+            source_id: self.source_id,
+            is_const: false,
+            symbol_id: exception_id,
+        });
+        self.resolved_symbols.insert(node.variable_name, exception_id);
+        self.node_types.insert(node.variable_name, exception_type);
 
         for statement in &node.block.statements {
             self.visit_statement(statement);

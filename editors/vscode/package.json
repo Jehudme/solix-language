@@ -33,6 +33,7 @@
         "onCommand:solix.syncPackages",
         "onCommand:solix.showDisassembly",
         "onCommand:solix.showSynthesizedApi",
+        "onCommand:solix.selectProfile",
         "onCommand:solix.restartServer"
     ],
     "main": "./dist/extension.js",
@@ -104,11 +105,17 @@
             {
                 "command": "solix.showDisassembly",
                 "title": "Inspect 64-Bit Register VM Disassembly",
-                "category": "Solix"
+                "category": "Solix",
+                "icon": "$(file-code)"
             },
             {
                 "command": "solix.showSynthesizedApi",
                 "title": "Inspect Exported Public API (.slx)",
+                "category": "Solix"
+            },
+            {
+                "command": "solix.selectProfile",
+                "title": "Select Active Build Profile",
                 "category": "Solix"
             },
             {
@@ -117,6 +124,25 @@
                 "category": "Solix"
             }
         ],
+        "menus": {
+            "editor/title": [
+                {
+                    "command": "solix.runMain",
+                    "when": "resourceExtname == .slx",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "solix.runTest",
+                    "when": "resourceExtname == .slx",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "solix.showDisassembly",
+                    "when": "resourceExtname == .slx",
+                    "group": "navigation@3"
+                }
+            ]
+        },
         "taskDefinitions": [
             {
                 "type": "solix",

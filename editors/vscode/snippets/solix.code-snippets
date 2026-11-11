@@ -21,7 +21,7 @@
         "prefix": "class",
         "body": [
             "class ${1:ClassName} {",
-            "    public constructor() {",
+            "    public ${1:ClassName}() {",
             "        $2",
             "    }",
             "",
@@ -33,7 +33,7 @@
     "Destructor Declaration": {
         "prefix": "dtor",
         "body": [
-            "public ~${1:ClassName}() {",
+            "~${1:ClassName}() {",
             "    $0",
             "}"
         ],
@@ -110,7 +110,7 @@
         "body": [
             "try {",
             "    $1",
-            "} catch (${2:std.Exception} caught_error) {",
+            "} catch (${2:Exception} caught_error) {",
             "    $3",
             "} finally {",
             "    $0",

@@ -78,22 +78,22 @@ The Solix Language Server supports 32 language intelligence features:
 
 1. **Protocol & Lifecycle**: LSP 3.17 initialization, shutdown, exit handshake.
 2. **Document Overlay**: Live in-memory buffer synchronization (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`).
-3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.toml` discovery.
+3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.toml` discovery and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
 4. **Resilient Compilation**: AST and semantic cache retention during partial typing or syntax errors.
-5. **Push Diagnostics**: Real-time error and warning squiggles linked to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
+5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` to prevent multi-file cross-boundary offset panics, linked to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
 6. **Code Navigation**: Go-to Definition (`gd`), Type Definition (`gy`), Implementation (`gi`), and Find All References (`gr`).
 7. **Document Highlights**: Distinction between read usages and write/mutating usages.
 8. **Call & Type Hierarchies**: Incoming/outgoing call trees and subtype/supertype navigation.
-9. **Intelligent Completion**: Strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
-10. **Rich Hover Cards**: Complete signature, `sizeof: XXB` instance byte size, struct field `+XB` offsets, and doc comments.
+9. **Intelligent Completion**: Receiver-type-aware instance member completion on local variables and parameters, strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
+10. **Rich Hover Cards**: Complete signature, `sizeof: XXB` instance byte size, struct field `+XB` offsets, and doc comments for functions, classes, fields, parameters, and local variables.
 11. **Signature Help**: Active parameter tracking with overload switching.
 12. **Inlay Hints**: Parameter names and RAII scope-exit destructor hints (`~dtor()`).
 13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
-15. **Code Lens**: Interactive `▶ Run Main` and `▶ Run Test` lenses.
+15. **Code Lens**: Interactive `▶ Run Main` and `▶ Run Test` lenses executing contextual project builds and container runs.
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).
 17. **Refactoring**: Safe symbol renaming across files.
-18. **Code Formatting**: 4-space indent formatter preserving inline comments.
+18. **Code Formatting**: 4-space indent formatter preserving inline comments, compound operators (`+=`, `-=`, `*=`, `/=`, `%=`), relational operators (`==`, `!=`, `<=`, `>=`), lambda arrows (`=>`), and mid-line blocks (`} else {`).
 
 ---
 

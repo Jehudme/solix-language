@@ -11,8 +11,8 @@ pub fn render_diagnostics(
     sources: &[String],
     diagnostics: &[CompilationDiagnostic],
 ) {
-    for diag in diagnostics {
-        let (file_name, file_src) = if let Some(source_id) = diag.source_id()
+    for diagnostic in diagnostics {
+        let (file_name, file_src) = if let Some(source_id) = diagnostic.source_id()
             && let Some(name) = source_names.get(source_id as usize)
             && let Some(src) = sources.get(source_id as usize)
         {
@@ -33,11 +33,11 @@ pub fn render_diagnostics(
         };
 
         if !file_name.is_empty() {
-            let report = Report::new(diag.clone())
+            let report = Report::new(diagnostic.clone())
                 .with_source_code(NamedSource::new(file_name, file_src.to_string()));
             eprintln!("{report:?}");
         } else {
-            let report = Report::new(diag.clone());
+            let report = Report::new(diagnostic.clone());
             eprintln!("{report:?}");
         }
     }

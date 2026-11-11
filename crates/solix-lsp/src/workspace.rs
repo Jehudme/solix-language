@@ -16,7 +16,6 @@ use solix_compilation::phases::binder::binder::bind_context;
 use solix_compilation::phases::binder::layout::ClassLayout;
 use solix_compilation::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
 use solix_compilation::phases::lexing::lexer::tokenize_source;
-use solix_compilation::phases::parser::parse_context_resilient;
 use solix_compilation::phases::parser::statements::declarations::ClassDeclaration;
 use solix_compilation::phases::parser::statements::ProgramAst;
 use std::collections::HashMap;
@@ -97,7 +96,18 @@ impl AnalysisSnapshot {
                 return Some(symbol_entry.clone());
             }
 
-        // 2. Check declared symbols whose name or span contains the offset (smallest matching span)
+        // 2. Check local variable and parameter declarations
+        for local_entry in &semantic.symbol_table.local_symbols {
+            if local_entry.source_id == self.source_id
+                && local_entry.decl_span.start <= target_offset
+                && target_offset <= local_entry.decl_span.end
+                && let Some(entry) = semantic.symbol_table.get_symbol(local_entry.symbol_id)
+            {
+                return Some(entry.clone());
+            }
+        }
+
+        // 3. Check declared symbols whose name or span contains the offset (smallest matching span)
         let mut best_declared_match: Option<SymbolEntry> = None;
         for symbol_entry in &semantic.symbol_table.symbols {
             if symbol_entry.source_id == self.source_id
@@ -237,11 +247,15 @@ impl WorkspaceManager {
     /// Initializes a new workspace manager with optional workspace root and module solver.
     #[must_use]
     pub fn new(workspace_root: Option<PathBuf>, solver: Option<Arc<dyn ModuleSolver>>) -> Self {
+        let effective_solver: Option<Arc<dyn ModuleSolver>> = solver.or_else(|| {
+            let store_directory = solix_common::solver::resolve_package_store_dir(None);
+            Some(Arc::new(solix_common::solver::ClientModuleSolver::with_store_dir(store_directory)) as Arc<dyn ModuleSolver>)
+        });
         Self {
             documents: DashMap::new(),
             snapshots: DashMap::new(),
             workspace_root: std::sync::RwLock::new(workspace_root),
-            solver,
+            solver: effective_solver,
         }
     }
 
@@ -360,7 +374,7 @@ impl WorkspaceManager {
                     .and_then(|root| Self::find_project_manifest(&root))
             });
 
-        let (sources_map, target_source_name) = if let Some(manifest) = manifest_path {
+        let (sources_map, target_source_name) = if let Some(ref manifest) = manifest_path {
             let project_root = manifest.parent().unwrap_or_else(|| Path::new("."));
             let discovered_files = Self::discover_project_sources(project_root);
             let mut map = HashMap::new();
@@ -404,11 +418,26 @@ impl WorkspaceManager {
             (map, target_name)
         };
 
+        let mut dependency_specs = Vec::new();
+        if let Some(ref manifest_file_path) = manifest_path
+            && let Ok(project_manifest) = solix_common::project::ProjectManifest::from_file(manifest_file_path)
+        {
+            for (dependency_name, version_string) in project_manifest.dependencies {
+                if let Ok(parsed_version) = solix_common::solver::PackageVersion::parse(&version_string) {
+                    dependency_specs.push(solix_common::solver::DependencyRequirement::new(
+                        dependency_name,
+                        parsed_version,
+                    ));
+                }
+            }
+        }
+
         // Construct CompilationContext
         let mut options = CompilationOptions {
             profile: BuildProfile::Debug,
             include_builtins: true,
             codes: sources_map,
+            dependency_specs,
             ..Default::default()
         };
         if let Some(solver) = &self.solver {
@@ -416,6 +445,9 @@ impl WorkspaceManager {
         }
 
         let mut context = CompilationContext::new(options);
+
+        // Pre-run dependency resolution phase to ingest manifest dependencies
+        let _ = solix_compilation::phases::dependency::run_dependency_resolution(&mut context);
 
         // Stage 1: Tokenize all sources
         let mut accumulated_diagnostics = Vec::new();
@@ -439,20 +471,85 @@ impl WorkspaceManager {
             context.tokens[source_index] = tokens;
         }
 
-        // Stage 2: Resilient parsing
-        let parse_errors = parse_context_resilient(&mut context);
+        // Stage 2: Resilient parsing per source
+        let current_sources_count = context.sources.len();
+        if context.ast.len() < current_sources_count {
+            context.ast.resize_with(current_sources_count, || None);
+        }
+
+        let mut target_parse_errors = Vec::new();
+        for source_index in 0..current_sources_count {
+            let source_id = source_index as u16;
+            let source_text = &context.sources[source_index];
+            let tokens: &[Token] = context
+                .tokens
+                .get(source_index)
+                .map(|tok_vec| tok_vec.as_slice())
+                .unwrap_or(&[]);
+
+            let (parsed_ast, parse_errors) = solix_compilation::phases::parser::parse_source_resilient(
+                source_id,
+                tokens,
+                source_text,
+            );
+            context.ast[source_index] = Some(parsed_ast);
+            if source_id == target_source_id {
+                target_parse_errors = parse_errors;
+            }
+        }
+
         let target_source_text = context.sources[target_source_id as usize].clone();
-        for error in &parse_errors {
+        for error in &target_parse_errors {
             let error_span = error.source_span();
             if error_span.offset() < target_source_text.len() {
                 accumulated_diagnostics.push(parsing_error_to_diagnostic(&target_source_text, error));
             }
         }
 
+        // Stage 2.5: Resilient extern import and standard library auto-resolution
+        let mut resolved_packages = std::collections::HashSet::new();
+        let mut ast_cursor = 0;
+        while ast_cursor < context.ast.len() {
+            let mut new_extern_imports = Vec::new();
+            if let Some(ast) = &context.ast[ast_cursor] {
+                for import_statement in &ast.imports {
+                    let first_segment = if let Some(first_seg_span) = import_statement.path.first() {
+                        let span = *first_seg_span;
+                        let text = &context.sources[ast_cursor];
+                        if (span.end as usize) <= text.len() {
+                            text[span.start as usize..span.end as usize].to_string()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    let should_resolve = (import_statement.is_extern || first_segment == "solix")
+                        && !first_segment.is_empty()
+                        && !context.loaded_api_packages.contains(&first_segment)
+                        && resolved_packages.insert(first_segment.clone());
+
+                    if should_resolve {
+                        new_extern_imports.push((first_segment, import_statement.span));
+                    }
+                }
+            }
+            ast_cursor += 1;
+
+            for (package_name, import_span) in new_extern_imports {
+                let _ = solix_compilation::phases::dependency::resolve_extern_import(
+                    &package_name,
+                    import_span,
+                    &mut context,
+                );
+            }
+        }
+
         // Stage 3: Semantic binding
-        let bind_result = bind_context(&mut context);
-        if let Err(bind_errors) = bind_result {
-            for error in &bind_errors {
+        let _ = bind_context(&mut context);
+        for (source_id, error) in &context.binding_errors {
+            if *source_id == target_source_id {
                 accumulated_diagnostics.push(binding_error_to_diagnostic(&target_source_text, error));
             }
         }

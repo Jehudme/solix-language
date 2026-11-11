@@ -60,7 +60,11 @@ export class SolixTaskProvider implements vscode.TaskProvider {
         scope: vscode.WorkspaceFolder | vscode.TaskScope
     ): vscode.Task {
         const allArguments = [subcommand, ...extraArguments];
-        const execution = new vscode.ProcessExecution(this.solixBinaryPath, allArguments);
+        const executionOptions: vscode.ProcessExecutionOptions = {};
+        if (typeof scope === 'object' && 'uri' in scope) {
+            executionOptions.cwd = scope.uri.fsPath;
+        }
+        const execution = new vscode.ProcessExecution(this.solixBinaryPath, allArguments, executionOptions);
 
         const taskName = `solix ${allArguments.join(' ')}`;
         return new vscode.Task(

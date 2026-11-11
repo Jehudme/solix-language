@@ -23,11 +23,12 @@ solix fmt [files...] [options]
 ## 3. Formatting Rules
 
 1. **Indentation**: Exactly 4 spaces per indentation level. Tabs are automatically converted to spaces.
-2. **Braces**: Opening braces `{` follow standard Solix syntax formatting; closing braces `}` align with the declaration or enclosing statement level.
-3. **Trailing Whitespace**: All trailing whitespace at the end of lines is stripped.
-4. **Consecutive Spaces**: Redundant consecutive spaces outside string literals and comments are collapsed to a single space.
-5. **Comments Preservation**: Inline comments (`//`) and multiline doc comments (`///` and `/** */`) are preserved verbatim with matching block indentation.
-6. **Trailing Newline**: Files are guaranteed to terminate with exactly one trailing newline `\n`.
+2. **Braces**: Opening braces `{` follow standard Solix syntax formatting; closing braces `}` align with the declaration or enclosing statement level. Mid-line blocks (such as `} else {`, `} else if (...) {`, `} catch (...) {`, and `} finally {`) adjust indentation appropriately without splitting.
+3. **Compound & Relational Operators**: Compound assignment operators (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), relational/equality operators (`==`, `!=`, `<=`, `>=`), and lambda arrows (`=>`) are kept intact with standardized surrounding spacing.
+4. **Trailing Whitespace**: All trailing whitespace at the end of lines is stripped.
+5. **Consecutive Spaces**: Redundant consecutive spaces outside string literals and comments are collapsed to a single space.
+6. **Comments Preservation**: Inline comments (`//`) and multiline doc comments (`///` and `/** */`) are preserved verbatim with matching block indentation.
+7. **Trailing Newline**: Files are guaranteed to terminate with exactly one trailing newline `\n`.
 
 ---
 

@@ -67,6 +67,29 @@ fn find_base_method(
 ///
 /// Resolves superclasses, detects cyclic inheritance, constructs VTables, validates interface conformance,
 /// and computes class memory layouts.
+/// Internal diagnostic collector tracking error occurrences per originating source file.
+struct HierarchyErrorCollector {
+    current_source_id: u16,
+    errors: Vec<(u16, BindingError)>,
+}
+
+impl HierarchyErrorCollector {
+    fn new() -> Self {
+        Self {
+            current_source_id: 0,
+            errors: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, error: BindingError) {
+        self.errors.push((self.current_source_id, error));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
 ///
 /// # Errors
 /// Returns an accumulated list of [`BindingError`]s if cyclic inheritance, invalid base types, or
@@ -77,8 +100,8 @@ pub fn execute_pass2_type_hierarchy(
     symbol_table: &mut SymbolTable,
     layouts: &mut HashMap<SymbolId, ClassLayout>,
     next_vtable_id: &mut u32,
-) -> Result<(), Vec<BindingError>> {
-    let mut accumulated_errors = Vec::new();
+) -> Result<(), Vec<(u16, BindingError)>> {
+    let mut accumulated_errors = HierarchyErrorCollector::new();
 
     // Map: class SymbolId -> super class SymbolId
     let mut class_inheritance_edges: HashMap<SymbolId, SymbolId> = HashMap::new();
@@ -88,6 +111,7 @@ pub fn execute_pass2_type_hierarchy(
     // 1. Resolve base classes and interfaces
     for (source_index, ast_option) in source_asts.iter().enumerate() {
         let source_id = source_index as u16;
+        accumulated_errors.current_source_id = source_id;
         let source_text = source_texts
             .get(source_index)
             .map(|text| text.as_str())
@@ -783,6 +807,7 @@ pub fn execute_pass2_type_hierarchy(
                     .map(|entry| entry.span)
                     .unwrap_or_default();
 
+                accumulated_errors.current_source_id = span.id;
                 accumulated_errors.push(BindingError::CyclicInheritance {
                     class_name,
                     span: span.to_source_span(),
@@ -796,6 +821,7 @@ pub fn execute_pass2_type_hierarchy(
 
     // Transitively inherit methods from super-interfaces into interface symbols
     for (iface_name, &(source_file_id, iface_decl)) in &interface_by_name {
+        accumulated_errors.current_source_id = source_file_id;
         if let Some(iface_id) = symbol_table.resolve_symbol(source_file_id, iface_name) {
             let mut visited_interfaces = HashSet::new();
             visited_interfaces.insert(iface_name.clone());
@@ -904,6 +930,7 @@ pub fn execute_pass2_type_hierarchy(
 
     for class_symbol_id in sorted_class_ids {
         let (source_id, class_declaration) = class_ast_map[&class_symbol_id];
+        accumulated_errors.current_source_id = source_id;
         let source_text = source_texts
             .get(source_id as usize)
             .map(|text| text.as_str())
@@ -1980,7 +2007,7 @@ pub fn execute_pass2_type_hierarchy(
     }
 
     if !accumulated_errors.is_empty() {
-        return Err(accumulated_errors);
+        return Err(accumulated_errors.errors);
     }
 
     Ok(())

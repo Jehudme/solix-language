@@ -18,7 +18,10 @@ pub use bytecode::{
     ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic, Instruction,
     OpCode, SourceMapEntry, extract_api_manifest,
 };
-pub use cache::{InMemoryPackageCache, NoopPackageCache, PackageCache};
+pub use cache::{
+    CachedPackageMeta, FilesystemPackageCache, InMemoryPackageCache, NoopPackageCache, PackageCache,
+    resolve_packages_cache_dir,
+};
 pub use diagnostics::EmissionError;
 pub use hash::{Sha256Hasher, format_hex_digest, sha256_bytes, sha256_file, sha256_hex};
 pub use project::{
@@ -26,8 +29,8 @@ pub use project::{
     SlxarcInspection,
 };
 pub use solver::{
-    DependencyRequirement, InMemoryModuleSolver, ModuleSolver, PackageVersion, SolvedPackage,
-    SolverError,
+    ClientModuleSolver, DependencyRequirement, InMemoryModuleSolver, ModuleSolver, PackageVersion,
+    SolvedPackage, SolverError, resolve_native_cache_dir, resolve_package_store_dir,
 };
 pub use span::Span;
 pub use tokens::{KEYWORDS, Token, TokenKind, lookup_keyword};

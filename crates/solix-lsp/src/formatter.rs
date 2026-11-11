@@ -97,14 +97,19 @@ pub fn format_source(source: &str) -> String {
         formatted_lines.push(format!("{}{formatted_content}", INDENT_SPACES.repeat(indent_level)));
 
         // Adjust indent level for trailing opening braces
-        let open_count = trimmed.chars().filter(|&c| c == '{').count();
-        let close_count = trimmed.chars().filter(|&c| c == '}').count();
+        let open_count = trimmed.chars().filter(|&character| character == '{').count();
+        let close_count = trimmed.chars().filter(|&character| character == '}').count();
 
-        if open_count > close_count {
-            if !starts_with_closing_brace {
-                indent_level += open_count - close_count;
+        if starts_with_closing_brace {
+            let remaining_close = close_count.saturating_sub(1);
+            if open_count > remaining_close {
+                indent_level += open_count - remaining_close;
+            } else if remaining_close > open_count {
+                indent_level = indent_level.saturating_sub(remaining_close - open_count);
             }
-        } else if close_count > open_count && !starts_with_closing_brace {
+        } else if open_count > close_count {
+            indent_level += open_count - close_count;
+        } else if close_count > open_count {
             indent_level = indent_level.saturating_sub(close_count - open_count);
         }
     }
@@ -218,17 +223,116 @@ fn format_line_content(line: &str) -> String {
             continue;
         }
 
-        // Assignment '=' operator spacing
-        if current == '=' && index + 1 < chars.len() && chars[index + 1] != '=' && previous_char != '=' && previous_char != '!' && previous_char != '<' && previous_char != '>' {
+        // Lambda arrow '=>'
+        if current == '=' && index + 1 < chars.len() && chars[index + 1] == '>' {
+            if !result.ends_with(' ') && !result.is_empty() {
+                result.push(' ');
+            }
+            result.push_str("=>");
+            index += 2;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] != ';' && chars[index] != '\n' {
+                result.push(' ');
+            }
+            previous_char = ' ';
+            continue;
+        }
+
+        // Equality operator '=='
+        if current == '=' && index + 1 < chars.len() && chars[index + 1] == '=' {
+            if !result.ends_with(' ') && !result.is_empty() {
+                result.push(' ');
+            }
+            result.push_str("==");
+            index += 2;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] != ';' && chars[index] != '\n' {
+                result.push(' ');
+            }
+            previous_char = ' ';
+            continue;
+        }
+
+        // Relational compound operators '!=', '<=', '>='
+        if (current == '!' || current == '<' || current == '>')
+            && index + 1 < chars.len()
+            && chars[index + 1] == '='
+        {
+            let operator_string = format!("{current}=");
+            if !result.ends_with(' ') && !result.is_empty() {
+                result.push(' ');
+            }
+            result.push_str(&operator_string);
+            index += 2;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] != ';' && chars[index] != '\n' {
+                result.push(' ');
+            }
+            previous_char = ' ';
+            continue;
+        }
+
+        // Shift compound assignment '<<=', '>>='
+        if (current == '<' && index + 2 < chars.len() && chars[index + 1] == '<' && chars[index + 2] == '=')
+            || (current == '>' && index + 2 < chars.len() && chars[index + 1] == '>' && chars[index + 2] == '=')
+        {
+            let operator_string = format!("{current}{current}=");
+            if !result.ends_with(' ') && !result.is_empty() {
+                result.push(' ');
+            }
+            result.push_str(&operator_string);
+            index += 3;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] != ';' && chars[index] != '\n' {
+                result.push(' ');
+            }
+            previous_char = ' ';
+            continue;
+        }
+
+        // Arithmetic & bitwise compound assignments '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^='
+        if matches!(current, '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^')
+            && index + 1 < chars.len()
+            && chars[index + 1] == '='
+        {
+            let operator_string = format!("{current}=");
+            if !result.ends_with(' ') && !result.is_empty() {
+                result.push(' ');
+            }
+            result.push_str(&operator_string);
+            index += 2;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] != ';' && chars[index] != '\n' {
+                result.push(' ');
+            }
+            previous_char = ' ';
+            continue;
+        }
+
+        // Standard assignment '=' operator spacing
+        if current == '=' {
             if !result.ends_with(' ') && !result.is_empty() {
                 result.push(' ');
             }
             result.push('=');
-            if index + 1 < chars.len() && chars[index + 1] != ' ' {
+            index += 1;
+            while index < chars.len() && chars[index] == ' ' {
+                index += 1;
+            }
+            if index < chars.len() && chars[index] != ';' && chars[index] != '\n' {
                 result.push(' ');
             }
             previous_char = ' ';
-            index += 1;
             continue;
         }
 

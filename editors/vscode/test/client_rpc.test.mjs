@@ -177,8 +177,56 @@ async function runClientRpcSuite() {
         }
         console.log('  ✓ Formatting returned standardized 4-space edits.');
 
-        // Step 7: Clean Shutdown
-        console.log('Step 6: Sending shutdown request...');
+        // Step 7: Local Variable Dot Completion
+        console.log('Step 6: Requesting local variable dot completion (origin_point.)...');
+        const localVarSource = [
+            'class Point {',
+            '    int32 coordinate_x;',
+            '    int32 coordinate_y;',
+            '    public int32 distance() { return 0; }',
+            '}',
+            'void main() {',
+            '    Point origin_point = new Point();',
+            '    origin_point.',
+            '}',
+            '',
+        ].join('\n');
+
+        connection.sendNotification('textDocument/didChange', {
+            textDocument: { uri: documentUri, version: 4 },
+            contentChanges: [{ text: localVarSource }],
+        });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+
+        const localDotResult = await connection.sendRequest('textDocument/completion', {
+            textDocument: { uri: documentUri },
+            position: { line: 7, character: 17 }, // After origin_point.
+        });
+
+        const localItems = localDotResult.items || localDotResult;
+        const localLabels = localItems.map((entryItem) => entryItem.label);
+        if (!localLabels.includes('coordinate_x') || !localLabels.includes('coordinate_y') || !localLabels.includes('distance')) {
+            throw new Error(`Expected Point members in dot completion, got: ${JSON.stringify(localLabels)}`);
+        }
+        console.log('  ✓ Local variable dot completion returned receiver members only.');
+
+        // Step 8: CodeLens Request
+        console.log('Step 7: Requesting textDocument/codeLens for main()...');
+        const codeLensResult = await connection.sendRequest('textDocument/codeLens', {
+            textDocument: { uri: documentUri },
+        });
+
+        if (!Array.isArray(codeLensResult) || codeLensResult.length === 0) {
+            throw new Error('Expected at least one CodeLens for main() entrypoint');
+        }
+        const hasRunMain = codeLensResult.some((lens) => lens.command && lens.command.command === 'solix.runMain');
+        if (!hasRunMain) {
+            throw new Error(`Expected 'solix.runMain' CodeLens, got: ${JSON.stringify(codeLensResult)}`);
+        }
+        console.log('  ✓ CodeLens correctly emitted solix.runMain action.');
+
+        // Step 9: Clean Shutdown
+        console.log('Step 8: Sending shutdown request...');
         await connection.sendRequest('shutdown');
         connection.sendNotification('exit');
 

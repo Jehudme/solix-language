@@ -146,12 +146,13 @@ Errors and warnings captured by `solix::Diagnostic` are transformed into LSP dia
 
 - **Coordinates**: Converted from 1-indexed compiler source positions to LSP 0-indexed positions.
 - **Spans**: Utilizes accurate start and end token coordinates (`end_line`, `end_column`).
+- **Diagnostic Isolation**: Diagnostics generated across multi-file compilation pipelines and imported dependencies are strictly filtered by originating `source_id`. Diagnostics whose `source_id` does not match the active document are prevented from leaking across file boundaries, eliminating invalid character offset spans (`OutOfBounds`).
 
 ---
 
 ## 5. Navigation & Spatial AST Indexing
 
-The Language Server populates a spatial interval index (`SpatialAstIndex`) mapping source coordinate intervals `(line, column) -> Node*` across all parsed compilation units.
+The Language Server populates a spatial interval index (`SpatialAstIndex`) mapping source coordinate intervals `(line, column) -> Node*` across all parsed compilation units, complemented by a flattened `local_symbols` registry for parameter and variable scope tracking.
 
 ### 5.1 Definition & Type-Definition Resolution (`textDocument/definition`, `textDocument/typeDefinition`)
 - **Single- & Multi-File Resolution**: When navigating definitions across distinct source units (e.g. `Main.slx` calling a method in `Helper.slx`), target nodes are resolved to their originating file URI via `node->source` and context-registered AST sources.
@@ -159,7 +160,7 @@ The Language Server populates a spatial interval index (`SpatialAstIndex`) mappi
 - **Fallbacks**: If AST nodes lack exact source pointers, the server queries registered compilation unit paths to construct well-formed `file://` URIs.
 
 ### 5.2 Hover Tooltips (`textDocument/hover`)
-- Hover requests inspect AST nodes at target line/column coordinates and render Markdown-formatted symbol representations, method signatures, and type structures.
+- Hover requests inspect AST nodes and `local_symbols` at target line/column coordinates and render Markdown-formatted symbol representations, method signatures, parameter metadata, and type structures.
 - Whitespace and unmapped token spans safely resolve to `null` responses.
 
 ---

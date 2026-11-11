@@ -278,6 +278,8 @@ pub struct CompilationContext {
     pub loaded_api_packages: HashSet<String>,
     /// Set of source IDs originating from external dependency packages.
     pub external_source_ids: HashSet<u16>,
+    /// Accumulated binding diagnostics annotated with their originating `source_id`.
+    pub binding_errors: Vec<(u16, crate::diagnostics::BindingError)>,
     /// Pluggable module solver reference for resolving external modules.
     pub solver: Option<Arc<dyn ModuleSolver>>,
 }
@@ -337,6 +339,7 @@ impl CompilationContext {
             dependencies_map: HashMap::new(),
             loaded_api_packages: HashSet::new(),
             external_source_ids: HashSet::new(),
+            binding_errors: Vec::new(),
             solver,
         }
     }
