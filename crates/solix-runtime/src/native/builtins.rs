@@ -48,7 +48,11 @@ pub fn builtin_print(vm: &mut VirtualMachine, args: &[Value]) -> Result<Value, R
         parts.push(format_vm_value(vm, arg));
     }
     let text = parts.join(" ");
-    print!("{text}");
+    if let Some(sink_handler) = &vm.output_sink {
+        (sink_handler.0)(&text, false);
+    } else {
+        print!("{text}");
+    }
     if let Some(last) = vm.stdout.last_mut() {
         last.push_str(&text);
     } else {
@@ -64,7 +68,11 @@ pub fn builtin_println(vm: &mut VirtualMachine, args: &[Value]) -> Result<Value,
         parts.push(format_vm_value(vm, arg));
     }
     let line = parts.join(" ");
-    println!("{line}");
+    if let Some(sink_handler) = &vm.output_sink {
+        (sink_handler.0)(&line, true);
+    } else {
+        println!("{line}");
+    }
     vm.stdout.push(line);
     Ok(Value::Null)
 }

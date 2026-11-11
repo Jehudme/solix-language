@@ -41,7 +41,7 @@ function readPackageName(projectRoot: string): string {
     const manifestPath = path.join(projectRoot, 'manifest.toml');
     try {
         const manifestContent = fs.readFileSync(manifestPath, 'utf8');
-        const nameMatch = manifestContent.match(/\[package\][^[]*?name\s*=\s*["']([^"']+)["']/s);
+        const nameMatch = manifestContent.match(/(?:\[info\]|\[package\])[^[]*?name\s*=\s*["']([^"']+)["']/s);
         if (nameMatch && nameMatch[1]) {
             return nameMatch[1].trim();
         }

@@ -3,12 +3,14 @@
  *
  * Verifies that `solix dap --stdio` handles full DAP sessions:
  * initialize -> launch -> setBreakpoints -> configurationDone -> hit breakpoint ->
- * stackTrace -> scopes -> variables -> evaluate -> continue -> terminated/exited.
+ * stackTrace -> scopes -> variables -> expand fields -> step -> evaluate -> continue -> terminated/exited.
+ * Tests both direct .slx source execution and compiled .slxarc archive container execution.
  */
 
 import * as childProcess from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as assert from 'assert';
 import { fileURLToPath } from 'url';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +36,7 @@ class DapClient {
         this.sequenceNumber = 1;
         this.pendingRequests = new Map();
         this.eventListeners = [];
+        this.collectedOutputMessages = [];
         this.buffer = '';
 
         this.process.stdout.on('data', (chunk) => {
@@ -66,7 +69,6 @@ class DapClient {
 
             try {
                 const parsedMessage = JSON.parse(messageBody);
-                console.log('DEBUG MSG:', JSON.stringify(parsedMessage));
                 this.handleMessage(parsedMessage);
             } catch (jsonError) {
                 console.error('Failed to parse DAP JSON-RPC body:', jsonError, messageBody);
@@ -82,6 +84,9 @@ class DapClient {
                 pendingCallback(message);
             }
         } else if (message.type === 'event') {
+            if (message.event === 'output' && message.body && message.body.output) {
+                this.collectedOutputMessages.push(message.body.output);
+            }
             for (const listener of this.eventListeners) {
                 listener(message);
             }
@@ -145,11 +150,13 @@ class DapClient {
     }
 }
 
-async function runDapSuite() {
-    console.log('=== Running Solix Headless DAP Client Integration Suite ===');
+async function executeDapSession(targetProgramPath, testLabel) {
+    console.log(`\n--- Running Session: ${testLabel} ---`);
+    console.log(`Target Program: ${targetProgramPath}`);
 
     const solixBinary = locateSolixBinary();
-    console.log(`Spawning DAP server: ${solixBinary} dap --stdio`);
+    const workspaceRoot = path.resolve(currentDir, '../sample_workspace');
+    const mainSourcePath = path.resolve(workspaceRoot, 'src/main.slx');
 
     const dapProcess = childProcess.spawn(solixBinary, ['dap', '--stdio'], {
         stdio: ['pipe', 'pipe', 'inherit'],
@@ -163,7 +170,6 @@ async function runDapSuite() {
 
     try {
         // 1. Initialize
-        console.log('Step 1: Sending initialize request...');
         const initPromise = dapClient.sendRequest('initialize', {
             adapterID: 'solix',
             clientID: 'vscode-headless-test',
@@ -171,97 +177,150 @@ async function runDapSuite() {
             columnsStartAt1: true,
             supportsVariableType: true
         });
-
         const initializedEventPromise = dapClient.waitForEvent('initialized');
         const capabilities = await initPromise;
-        console.log('Initialize response received. Capabilities:', Object.keys(capabilities).length);
+        assert.ok(capabilities.supportsConfigurationDoneRequest);
         await initializedEventPromise;
-        console.log('Initialized event received.');
 
         // 2. Launch
-        console.log('Step 2: Sending launch request...');
-        const sampleSourcePath = path.resolve(currentDir, '../sample_workspace/src/main.slx');
         await dapClient.sendRequest('launch', {
-            program: sampleSourcePath,
+            program: targetProgramPath,
+            cwd: workspaceRoot,
             stopOnEntry: false
         });
-        console.log('Launch response received.');
 
-        // 3. SetBreakpoints at line 46
-        console.log('Step 3: Setting breakpoint at line 46...');
+        // 3. SetBreakpoints on line 46 of main.slx
         const breakpointsResponse = await dapClient.sendRequest('setBreakpoints', {
             source: {
-                path: sampleSourcePath,
+                path: mainSourcePath,
                 name: 'main.slx'
             },
             breakpoints: [
                 { line: 46 }
             ]
         });
-        console.log('Breakpoints set response:', JSON.stringify(breakpointsResponse.breakpoints));
+        assert.ok(breakpointsResponse.breakpoints.length > 0);
+        assert.strictEqual(breakpointsResponse.breakpoints[0].verified, true);
+        assert.strictEqual(breakpointsResponse.breakpoints[0].line, 46);
 
         // 4. ConfigurationDone
-        console.log('Step 4: Sending configurationDone...');
         const stoppedEventPromise = dapClient.waitForEvent('stopped');
         await dapClient.sendRequest('configurationDone');
 
-        // 5. Wait for Stopped event at breakpoint
-        console.log('Step 5: Waiting for stopped event...');
+        // 5. Stopped Event at Breakpoint
         const stoppedEventBody = await stoppedEventPromise;
-        console.log('Stopped event received! Reason:', stoppedEventBody.reason);
+        assert.strictEqual(stoppedEventBody.reason, 'breakpoint');
 
         // 6. StackTrace
-        console.log('Step 6: Requesting stackTrace...');
-        const stackTraceResponse = await dapClient.sendRequest('stackTrace', {
-            threadId: 1
-        });
-        console.log(`Call stack frames count: ${stackTraceResponse.stackFrames.length}`);
+        const stackTraceResponse = await dapClient.sendRequest('stackTrace', { threadId: 1 });
+        assert.ok(stackTraceResponse.stackFrames.length >= 1);
         const topFrame = stackTraceResponse.stackFrames[0];
-        console.log(`Top frame: ${topFrame.name} at line ${topFrame.line}`);
+        assert.strictEqual(topFrame.name, 'main', 'Top frame must be main()');
+        assert.strictEqual(topFrame.line, 46, 'Top frame must be on line 46');
+        assert.ok(topFrame.source && topFrame.source.path, 'Top frame must have source path');
+        assert.ok(topFrame.source.path.endsWith('main.slx'), 'Top frame path must point to main.slx');
+        assert.ok(path.isAbsolute(topFrame.source.path), 'Top frame path must be canonical absolute path');
 
         // 7. Scopes
-        console.log('Step 7: Requesting scopes...');
-        const scopesResponse = await dapClient.sendRequest('scopes', {
-            frameId: topFrame.id
-        });
-        console.log(`Scopes returned: ${scopesResponse.scopes.map(s => s.name).join(', ')}`);
-        const localsScope = scopesResponse.scopes[0];
+        const scopesResponse = await dapClient.sendRequest('scopes', { frameId: topFrame.id });
+        assert.ok(scopesResponse.scopes.length >= 2);
+        const localsScope = scopesResponse.scopes.find(scope => scope.name === 'Locals & Parameters');
+        assert.ok(localsScope, 'Locals & Parameters scope must be present');
+        assert.ok(localsScope.variablesReference > 0);
 
-        // 8. Variables
-        console.log('Step 8: Requesting variables for Locals scope...');
+        // 8. Variables (Locals)
         const variablesResponse = await dapClient.sendRequest('variables', {
             variablesReference: localsScope.variablesReference
         });
-        console.log(`Locals variables: ${variablesResponse.variables.map(v => `${v.name}=${v.value}`).join(', ')}`);
+        const originPoint = variablesResponse.variables.find(variable => variable.name === 'origin_point');
+        assert.ok(originPoint, 'origin_point must be in locals');
+        assert.match(originPoint.value, /^Point@0x[0-9A-Fa-f]+/, 'origin_point value must format as Point@0x...');
+        assert.strictEqual(originPoint.type, 'Point');
+        assert.ok(originPoint.variablesReference > 0, 'origin_point must have child variablesReference');
 
-        // 9. Evaluate expression
-        console.log('Step 9: Evaluating expression "10 + 20"...');
-        const evaluateResponse = await dapClient.sendRequest('evaluate', {
-            expression: '10 + 20',
-            frameId: topFrame.id
+        const calculatedDistance = variablesResponse.variables.find(variable => variable.name === 'calculated_distance');
+        assert.ok(calculatedDistance, 'calculated_distance must be in locals');
+        assert.strictEqual(calculatedDistance.value, '30');
+        assert.strictEqual(calculatedDistance.type, 'int32');
+
+        // 9. Inspect object fields of origin_point
+        const fieldsResponse = await dapClient.sendRequest('variables', {
+            variablesReference: originPoint.variablesReference
         });
-        console.log(`Evaluation result: ${evaluateResponse.result}`);
-        if (evaluateResponse.result !== '30') {
-            throw new Error(`Expected evaluation result '30', got '${evaluateResponse.result}'`);
-        }
+        const coordX = fieldsResponse.variables.find(field => field.name === 'coordinate_x');
+        const coordY = fieldsResponse.variables.find(field => field.name === 'coordinate_y');
+        assert.ok(coordX, 'coordinate_x must be in origin_point fields');
+        assert.ok(coordY, 'coordinate_y must be in origin_point fields');
+        assert.strictEqual(coordX.value, '10');
+        assert.strictEqual(coordY.value, '20');
 
-        // 10. Continue to completion
-        console.log('Step 10: Continuing execution to completion...');
+        // 10. Step Over (Next) to line 47
+        const stepOverStoppedPromise = dapClient.waitForEvent('stopped');
+        await dapClient.sendRequest('next', { threadId: 1 });
+        const stepOverBody = await stepOverStoppedPromise;
+        assert.strictEqual(stepOverBody.reason, 'step');
+
+        const steppedStackTrace = await dapClient.sendRequest('stackTrace', { threadId: 1 });
+        const steppedTopFrame = steppedStackTrace.stackFrames[0];
+        assert.strictEqual(steppedTopFrame.name, 'main');
+        assert.strictEqual(steppedTopFrame.line, 47, 'Stepped frame must be on line 47');
+
+        // After step over, static_result should be 100
+        const steppedScopes = await dapClient.sendRequest('scopes', { frameId: steppedTopFrame.id });
+        const steppedLocalsScope = steppedScopes.scopes.find(scope => scope.name === 'Locals & Parameters');
+        const steppedVariables = await dapClient.sendRequest('variables', {
+            variablesReference: steppedLocalsScope.variablesReference
+        });
+        const staticResult = steppedVariables.variables.find(variable => variable.name === 'static_result');
+        assert.ok(staticResult, 'static_result must be in locals after stepping line 46');
+        assert.strictEqual(staticResult.value, '100');
+
+        // 11. Evaluate Expression
+        const evaluateResponse = await dapClient.sendRequest('evaluate', {
+            expression: '15 + 25',
+            frameId: steppedTopFrame.id
+        });
+        assert.strictEqual(evaluateResponse.result, '40');
+
+        // 12. Continue to Completion
         const terminatedPromise = dapClient.waitForEvent('terminated');
         const exitedPromise = dapClient.waitForEvent('exited');
         await dapClient.sendRequest('continue', { threadId: 1 });
 
         await terminatedPromise;
-        await exitedPromise;
-        console.log('Program terminated and exited gracefully with code 0.');
+        const exitedBody = await exitedPromise;
+        assert.strictEqual(exitedBody.exitCode, 0);
 
-        console.log('=== All Solix Headless DAP Tests Passed Cleanly! ===');
+        // 13. Verify Output Events
+        const allOutputs = dapClient.collectedOutputMessages.join('');
+        assert.ok(allOutputs.includes('Calculated distance from origin: 30'), 'Must capture distance println output');
+        assert.ok(allOutputs.includes('Static addition result: 100'), 'Must capture static result println output');
+
+        console.log(`[PASS] ${testLabel} completed with 100% strict assertions verified!`);
     } finally {
         dapProcess.kill();
     }
 }
 
-runDapSuite().catch((error) => {
-    console.error('DAP Test Suite Failed:', error);
+async function runFullDapSuite() {
+    console.log('=== Running Solix Headless Industrial DAP E2E Conformance Suite ===');
+
+    const workspaceRoot = path.resolve(currentDir, '../sample_workspace');
+    const sourceFilePath = path.resolve(workspaceRoot, 'src/main.slx');
+    const archiveFilePath = path.resolve(workspaceRoot, 'build/debug/sample_workspace.slxarc');
+
+    // Run Suite A: Direct .slx Single Source File Session
+    await executeDapSession(sourceFilePath, 'Direct Source File (.slx) DAP Session');
+
+    // Run Suite B: Precompiled Archive Container (.slxarc) Session
+    if (fs.existsSync(archiveFilePath)) {
+        await executeDapSession(archiveFilePath, 'Precompiled Archive Container (.slxarc) DAP Session');
+    }
+
+    console.log('\n=== ALL INDUSTRIAL DAP E2E CONFORMANCE TESTS PASSED CLEANLY! ===\n');
+}
+
+runFullDapSuite().catch((error) => {
+    console.error('Industrial DAP E2E Suite Failed:', error);
     process.exit(1);
 });

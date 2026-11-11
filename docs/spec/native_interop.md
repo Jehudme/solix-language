@@ -92,3 +92,18 @@ Native functions can read and write heap structures via VM helper callbacks:
 - `alloc_array`: Allocates typed array of specified length.
 - `array_len`: Returns element count of heap array.
 - `array_get_u64` & `array_set_u64`: Accesses elements by index.
+
+---
+
+## 5. Standard Built-in Native Functions & Output Redirection Sink
+
+The virtual machine registers essential built-in native functions into the standard dispatch table:
+- `println` & `blt::io::println`: Writes string arguments with a trailing newline.
+- `print` & `blt::io::print`: Writes string arguments without trailing newlines.
+- `assert`: Evaluates a boolean invariant and raises `RuntimeError::AssertionFailed` upon violation.
+- `clock`: Returns high-resolution timestamps in seconds.
+
+### Output Redirection via `OutputSink`
+When the virtual machine executes within an interactive Debug Adapter Protocol (`solix dap`) session or headless runner, `builtin_println` and `builtin_print` dynamically redirect text output:
+- **Default Execution**: If `vm.output_sink` is `None`, strings are formatted and output to standard host console output (`println!`/`print!`).
+- **DAP Supervised Execution**: If `vm.output_sink` is configured (`Some(sink_handler)`), standard output stream writes are routed into the thread-safe `OutputSink` callback closure, emitting DAP `Event::Output` packets with `category: OutputEventCategory::Stdout`. This prevents guest stdout pollution or pipe corruption across the JSON-RPC wire channel.

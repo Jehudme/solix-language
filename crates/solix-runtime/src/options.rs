@@ -236,4 +236,11 @@ impl RuntimeOptions {
         self.solver = Some(solver);
         self
     }
+
+    /// Configures the thread-safe output sink for capturing guest standard output streams.
+    #[must_use]
+    pub fn with_output_sink(mut self, sink: OutputSink) -> Self {
+        self.output_sink = Some(sink);
+        self
+    }
 }

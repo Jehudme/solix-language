@@ -127,15 +127,22 @@ impl VmDebugHook for DapController {
         // 3. Check line breakpoints
         if !is_at_last_hit {
             for line_breakpoint in &mut self.line_breakpoints {
-                let matches_file = current_file_path.ends_with(&line_breakpoint.source_path)
-                    || line_breakpoint.source_path.ends_with(&current_file_path);
-                let matches_function = match line_breakpoint.function_id {
-                    Some(breakpoint_function_id) => breakpoint_function_id == function_id,
-                    None => true,
+                let Some(breakpoint_function_id) = line_breakpoint.function_id else {
+                    continue;
                 };
+                if breakpoint_function_id != function_id {
+                    continue;
+                }
+
+                let normalized_current = current_file_path.replace('\\', "/");
+                let normalized_breakpoint = line_breakpoint.source_path.replace('\\', "/");
+                let matches_file = normalized_current == normalized_breakpoint
+                    || normalized_current.ends_with(&normalized_breakpoint)
+                    || normalized_breakpoint.ends_with(&normalized_current);
+
                 let matches_line = instruction_pc == line_breakpoint.instruction_pc;
 
-                if matches_file && matches_function && matches_line {
+                if matches_file && matches_line {
                     line_breakpoint.current_hit_count += 1;
 
                     // Test hit count condition if specified

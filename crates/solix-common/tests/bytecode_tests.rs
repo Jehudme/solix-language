@@ -4,7 +4,7 @@ use solix_common::bytecode::{
     BinaryProgram, CompiledClass, CompiledFunction, ConstantPool, ConstantPoolValue,
     DeclarationModifier, ExceptionHandlerEntry, ExportManifest, ExportedClass, ExportedField,
     ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic, Instruction,
-    MAGIC, OpCode, VERSION_MAJOR, extract_api_manifest,
+    LocalVariableDebugInfo, MAGIC, OpCode, SourceMapEntry, VERSION_MAJOR, extract_api_manifest,
 };
 use solix_common::diagnostics::EmissionError;
 use solix_common::span::Span;
@@ -487,4 +487,85 @@ fn test_binary_program_manifest_round_trip() {
     assert_eq!(deserialized.package_version, "2.0.1");
     assert_eq!(deserialized.package_description, "Networking library");
     assert_eq!(deserialized.export_manifest, program.export_manifest);
+}
+
+#[test]
+fn test_debug_metadata_lossless_roundtrip() {
+    let mut program = BinaryProgram::new();
+    program.package_name = "sample".to_string();
+    program.build_profile = "debug".to_string();
+    program.source_files = vec!["src/main.slx".to_string()];
+    program.export_manifest.source_files = vec!["src/main.slx".to_string()];
+    program.export_manifest.build_profile = "debug".to_string();
+
+    let mut sample_class = CompiledClass::new("sample::Point", 1, None, 24);
+    sample_class.field_names = vec![
+        (8, "coordinate_x".to_string(), "int32".to_string()),
+        (12, "coordinate_y".to_string(), "int32".to_string()),
+    ];
+    program.classes.push(sample_class);
+
+    let mut sample_function = CompiledFunction::new("sample::Point::distance", 0, 1, 4);
+    sample_function.source_map = vec![
+        SourceMapEntry {
+            instruction_pc: 0,
+            span: Span { id: 0, start: 10, end: 20 },
+            line: 46,
+            column: 5,
+        },
+        SourceMapEntry {
+            instruction_pc: 1,
+            span: Span { id: 0, start: 25, end: 35 },
+            line: 47,
+            column: 9,
+        },
+    ];
+    sample_function.local_variables = vec![
+        LocalVariableDebugInfo {
+            register: 0,
+            name: "this".to_string(),
+            type_name: "Point".to_string(),
+            var_type: Type::Primitive(PrimitiveKind::Void),
+            start_pc: 0,
+            end_pc: 2,
+            is_parameter: true,
+        },
+        LocalVariableDebugInfo {
+            register: 1,
+            name: "distance_result".to_string(),
+            type_name: "int32".to_string(),
+            var_type: Type::Primitive(PrimitiveKind::Void),
+            start_pc: 0,
+            end_pc: 2,
+            is_parameter: false,
+        },
+    ];
+    program.functions.push(sample_function);
+
+    let serialized_bytes = program.to_bytes();
+    let deserialized_program = BinaryProgram::from_bytes(&serialized_bytes)
+        .expect("round-trip deserialization succeeds");
+
+    assert_eq!(deserialized_program.classes.len(), 1);
+    assert_eq!(
+        deserialized_program.classes[0].field_names,
+        vec![
+            (8, "coordinate_x".to_string(), "int32".to_string()),
+            (12, "coordinate_y".to_string(), "int32".to_string()),
+        ]
+    );
+
+    assert_eq!(deserialized_program.functions.len(), 1);
+    let deserialized_function = &deserialized_program.functions[0];
+    assert_eq!(deserialized_function.source_map.len(), 2);
+    assert_eq!(deserialized_function.source_map[0].line, 46);
+    assert_eq!(deserialized_function.source_map[0].column, 5);
+    assert_eq!(deserialized_function.source_map[1].line, 47);
+    assert_eq!(deserialized_function.source_map[1].column, 9);
+
+    assert_eq!(deserialized_function.local_variables.len(), 2);
+    assert_eq!(deserialized_function.local_variables[0].name, "this");
+    assert!(deserialized_function.local_variables[0].is_parameter);
+    assert_eq!(deserialized_function.local_variables[1].name, "distance_result");
+    assert_eq!(deserialized_function.local_variables[1].type_name, "int32");
 }

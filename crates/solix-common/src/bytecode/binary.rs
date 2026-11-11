@@ -3,7 +3,9 @@
 #![forbid(unsafe_code)]
 
 use crate::bytecode::class::CompiledClass;
-use crate::bytecode::function::{CompiledFunction, ExceptionHandlerEntry, SourceMapEntry};
+use crate::bytecode::function::{
+    CompiledFunction, ExceptionHandlerEntry, LocalVariableDebugInfo, SourceMapEntry,
+};
 use crate::bytecode::instruction::Instruction;
 use crate::bytecode::manifest::ExportManifest;
 use crate::diagnostics::EmissionError;
@@ -315,6 +317,14 @@ impl BinaryProgram {
                 buffer.extend_from_slice(&(offset as u64).to_le_bytes());
                 buffer.push(tag);
             }
+
+            // Field names (offset, name, type_name)
+            buffer.extend_from_slice(&(cls.field_names.len() as u32).to_le_bytes());
+            for (field_offset, field_name, field_type_name) in &cls.field_names {
+                buffer.extend_from_slice(&(*field_offset as u64).to_le_bytes());
+                write_string(&mut buffer, field_name);
+                write_string(&mut buffer, field_type_name);
+            }
         }
 
         // 5. Functions
@@ -372,6 +382,19 @@ impl BinaryProgram {
                 buffer.extend_from_slice(&entry.span.id.to_le_bytes());
                 buffer.extend_from_slice(&entry.span.start.to_le_bytes());
                 buffer.extend_from_slice(&entry.span.end.to_le_bytes());
+                buffer.extend_from_slice(&entry.line.to_le_bytes());
+                buffer.extend_from_slice(&entry.column.to_le_bytes());
+            }
+
+            // Local variables
+            buffer.extend_from_slice(&(func.local_variables.len() as u32).to_le_bytes());
+            for var_entry in &func.local_variables {
+                buffer.extend_from_slice(&var_entry.register.to_le_bytes());
+                write_string(&mut buffer, &var_entry.name);
+                write_string(&mut buffer, &var_entry.type_name);
+                buffer.extend_from_slice(&var_entry.start_pc.to_le_bytes());
+                buffer.extend_from_slice(&var_entry.end_pc.to_le_bytes());
+                buffer.push(if var_entry.is_parameter { 1 } else { 0 });
             }
         }
 
@@ -543,6 +566,16 @@ impl BinaryProgram {
             }
             class.field_types = field_types;
 
+            let field_names_len = reader.read_u32("Classes")? as usize;
+            let mut field_names = Vec::with_capacity(field_names_len);
+            for _ in 0..field_names_len {
+                let offset = reader.read_u64("Classes")? as usize;
+                let name = reader.read_string("Classes")?;
+                let type_name = reader.read_string("Classes")?;
+                field_names.push((offset, name, type_name));
+            }
+            class.field_names = field_names;
+
             classes.push(class);
         }
 
@@ -615,11 +648,33 @@ impl BinaryProgram {
                 let id = reader.read_u16("Functions")?;
                 let start = reader.read_u32("Functions")?;
                 let end = reader.read_u32("Functions")?;
+                let line = reader.read_u32("Functions")?;
+                let column = reader.read_u32("Functions")?;
                 source_map.push(SourceMapEntry {
                     instruction_pc,
                     span: Span { id, start, end },
-                    line: 0,
-                    column: 0,
+                    line,
+                    column,
+                });
+            }
+
+            let local_vars_len = reader.read_u32("Functions")? as usize;
+            let mut local_variables = Vec::with_capacity(local_vars_len);
+            for _ in 0..local_vars_len {
+                let register = reader.read_u16("Functions")?;
+                let name = reader.read_string("Functions")?;
+                let type_name = reader.read_string("Functions")?;
+                let start_pc = reader.read_u32("Functions")?;
+                let end_pc = reader.read_u32("Functions")?;
+                let is_parameter = reader.read_u8("Functions")? == 1;
+                local_variables.push(LocalVariableDebugInfo {
+                    register,
+                    name,
+                    type_name,
+                    var_type: crate::types::Type::Primitive(crate::types::PrimitiveKind::Void),
+                    start_pc,
+                    end_pc,
+                    is_parameter,
                 });
             }
 
@@ -629,6 +684,7 @@ impl BinaryProgram {
             func.reference_registers = reference_registers;
             func.exception_handlers = exception_handlers;
             func.source_map = source_map;
+            func.local_variables = local_variables;
             functions.push(func);
         }
 

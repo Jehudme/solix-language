@@ -2,17 +2,24 @@
 
 #![forbid(unsafe_code)]
 
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use solix_common::bytecode::BinaryProgram;
+use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_compilation::pipeline::CompilationPipeline;
 use solix_dap::controller::DapController;
 use solix_dap::evaluator::{
     check_hit_condition, evaluate_expression_in_frame, interpolate_log_template,
 };
 use solix_dap::state::{
-    SteppingState, VariableReferenceManager, VariableScopeType,
+    BreakpointEntry, SteppingState, VariableReferenceManager, VariableScopeType,
 };
+use solix_runtime::native::builtins::{builtin_print, builtin_println};
 use solix_runtime::value::Value;
+use solix_runtime::vm::debug::DebugSignal;
 use solix_runtime::{RuntimeContext, RuntimeOptions, VirtualMachine};
 
 #[test]
@@ -147,3 +154,192 @@ fn test_controller_stepping_state_transitions() {
         _ => panic!("Expected StepOver state"),
     }
 }
+
+#[test]
+fn test_exact_breakpoint_resolution_and_locals_inspection() {
+    let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../editors/vscode/sample_workspace/src/main.slx");
+    let source_content = fs::read_to_string(&source_path)
+        .expect("Read sample_workspace/src/main.slx");
+
+    let compilation_options = CompilationOptions::new()
+        .with_profile(solix_compilation::BuildProfile::Debug)
+        .with_package_metadata("sample_workspace", "0.1.0", "")
+        .with_builtins(true)
+        .with_source(source_path.display().to_string(), source_content);
+
+    let mut pipeline = CompilationPipeline::standard();
+    let mut compilation_context = CompilationContext::new(compilation_options);
+    pipeline
+        .execute(&mut compilation_context)
+        .expect("Compile main.slx");
+
+    let artifacts = compilation_context
+        .emission_artifacts
+        .take()
+        .expect("Emission artifacts");
+
+    // Lossless serialization roundtrip through SLXB binary format
+    let serialized_bytes = artifacts.program.to_bytes();
+    let deserialized_program =
+        BinaryProgram::from_bytes(&serialized_bytes).expect("Deserialize BinaryProgram");
+
+    // Verify metadata survived binary serialization
+    assert_eq!(deserialized_program.build_profile, "debug");
+    assert!(!deserialized_program.classes.is_empty());
+
+    let point_class = deserialized_program
+        .classes
+        .iter()
+        .find(|candidate_class| candidate_class.symbol == "Point")
+        .expect("Find Point class");
+    assert_eq!(point_class.field_names.len(), 2);
+    assert_eq!(point_class.field_names[0].1, "coordinate_x");
+    assert_eq!(point_class.field_names[1].1, "coordinate_y");
+
+    let target_instruction_pc = {
+        let main_function = deserialized_program
+            .functions
+            .iter()
+            .find(|candidate_func| candidate_func.symbol == "main")
+            .expect("Find main function");
+        assert!(!main_function.source_map.is_empty());
+        assert!(!main_function.local_variables.is_empty());
+        main_function
+            .source_map
+            .iter()
+            .find(|map_entry| map_entry.line == 46)
+            .expect("Find line 46 in main function source map")
+            .instruction_pc
+    };
+
+    // Configure runtime
+    let runtime_options = RuntimeOptions::new()
+        .with_heap_size(16 * 1024 * 1024)
+        .with_native_function("println", builtin_println)
+        .with_native_function("print", builtin_print)
+        .with_native_function("blt::io::println", builtin_println)
+        .with_native_function("blt::io::print", builtin_print)
+        .with_binary(deserialized_program);
+
+    let runtime_context = RuntimeContext::new(runtime_options).expect("RuntimeContext creation");
+    let mut virtual_machine = VirtualMachine::new(runtime_context);
+
+    // Prepare main entry frame
+    let main_function_id = virtual_machine
+        .context
+        .entry_point_function_id
+        .expect("Entry point function ID");
+    let _ = virtual_machine.push_frame(main_function_id, 0, &[]);
+
+    // Configure DAP controller with exact breakpoint on line 46 inside main()
+    let async_pause_flag = Arc::new(AtomicBool::new(false));
+    let mut controller = DapController::new(async_pause_flag);
+
+    controller.line_breakpoints.push(BreakpointEntry {
+        source_path: source_path.display().to_string(),
+        requested_line: 46,
+        verified_line: 46,
+        instruction_pc: target_instruction_pc,
+        function_id: Some(main_function_id),
+        condition_expression: None,
+        hit_condition_expression: None,
+        log_message_template: None,
+        current_hit_count: 0,
+    });
+
+    // Run until breakpoint
+    let execution_signal = virtual_machine
+        .run_debug(&mut controller)
+        .expect("Run debug until breakpoint");
+
+    assert_eq!(execution_signal, DebugSignal::Pause);
+    assert_eq!(controller.last_pause_reason, "breakpoint");
+
+    // Verify it paused inside main(), NOT in Point::distance_from_origin
+    let active_frame = virtual_machine
+        .call_frames
+        .last()
+        .expect("Active call frame");
+    assert_eq!(active_frame.function_id, main_function_id);
+
+    let (stopped_file, stopped_line) = DapController::resolve_source_location(
+        &virtual_machine,
+        active_frame.function_id,
+        active_frame.pc,
+    )
+    .expect("Resolve source location");
+    assert!(stopped_file.ends_with("main.slx"));
+    assert_eq!(stopped_line, 46);
+
+    // Inspect locals in frame 0: origin_point and calculated_distance must be visible
+    let frame_locals = virtual_machine.inspect_frame_locals(0);
+    assert!(!frame_locals.is_empty(), "Frame locals must not be empty");
+
+    let origin_point_entry = frame_locals
+        .iter()
+        .find(|(var_name, _, _)| var_name == "origin_point")
+        .expect("Locals must contain origin_point");
+    let calculated_distance_entry = frame_locals
+        .iter()
+        .find(|(var_name, _, _)| var_name == "calculated_distance")
+        .expect("Locals must contain calculated_distance");
+
+    assert_eq!(calculated_distance_entry.2, Value::I32(30));
+
+    // Inspect fields of origin_point: coordinate_x = 10, coordinate_y = 20
+    if let Value::Ref(point_heap_address) = origin_point_entry.2 {
+        assert!(point_heap_address > 0);
+        let object_fields = virtual_machine
+            .inspect_object_fields(point_heap_address)
+            .expect("Inspect object fields");
+
+        let coord_x_field = object_fields
+            .iter()
+            .find(|(field_name, _, _)| field_name == "coordinate_x")
+            .expect("Find coordinate_x");
+        let coord_y_field = object_fields
+            .iter()
+            .find(|(field_name, _, _)| field_name == "coordinate_y")
+            .expect("Find coordinate_y");
+
+        assert_eq!(coord_x_field.2, Value::I32(10));
+        assert_eq!(coord_y_field.2, Value::I32(20));
+    } else {
+        panic!("origin_point is not a Value::Ref");
+    }
+
+    // Step over to line 47
+    controller.stepping_state = SteppingState::StepOver {
+        start_call_depth: virtual_machine.call_frames.len(),
+        start_file_path: stopped_file,
+        start_line_number: stopped_line,
+    };
+
+    let step_signal = virtual_machine
+        .run_debug(&mut controller)
+        .expect("Step over to line 47");
+    assert_eq!(step_signal, DebugSignal::Pause);
+    assert_eq!(controller.last_pause_reason, "step");
+
+    let stepped_frame = virtual_machine
+        .call_frames
+        .last()
+        .expect("Stepped call frame");
+    let (_, stepped_line) = DapController::resolve_source_location(
+        &virtual_machine,
+        stepped_frame.function_id,
+        stepped_frame.pc,
+    )
+    .expect("Resolve source location after step");
+    assert_eq!(stepped_line, 47);
+
+    // After step over, static_result should now be visible and equal to 100
+    let updated_locals = virtual_machine.inspect_frame_locals(0);
+    let static_result_entry = updated_locals
+        .iter()
+        .find(|(var_name, _, _)| var_name == "static_result")
+        .expect("Locals must contain static_result after stepping line 46");
+    assert_eq!(static_result_entry.2, Value::I32(100));
+}
+

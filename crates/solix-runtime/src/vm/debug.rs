@@ -179,6 +179,49 @@ impl VirtualMachine {
         Ok(field_results)
     }
 
+    /// Inspects the elements of an array allocated on the heap.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if the address does not point to a valid heap array.
+    pub fn inspect_array_elements(
+        &self,
+        array_address: u32,
+    ) -> Result<Vec<(String, String, Value)>, RuntimeError> {
+        let mut results = Vec::new();
+        if array_address == 0 {
+            return Ok(results);
+        }
+        let header = self.heap.read_header(array_address)?;
+        if header.tag != crate::memory::BlockTag::ArrayRef {
+            return Ok(results);
+        }
+        let element_count = self.heap.read_u32(array_address)? as usize;
+        let element_type_tag = self.heap.read_u32(array_address + 4)?;
+        for element_index in 0..element_count.min(256) {
+            let element_offset = array_address + 8 + (element_index * 8) as u32;
+            let element_value = match element_type_tag {
+                1..=5 => Value::I32(self.heap.read_u32(element_offset)? as i32),
+                6 | 7 => Value::I64(self.heap.read_u64(element_offset)? as i64),
+                8 | 9 => Value::F64(f64::from_bits(self.heap.read_u64(element_offset)?)),
+                10 => Value::Bool(self.heap.read_u8(element_offset)? != 0),
+                _ => {
+                    let heap_reference = self.heap.read_u32(element_offset)?;
+                    if heap_reference == 0 {
+                        Value::Null
+                    } else {
+                        Value::Ref(heap_reference)
+                    }
+                }
+            };
+            results.push((
+                format!("[{element_index}]"),
+                element_value.type_name().to_string(),
+                element_value,
+            ));
+        }
+        Ok(results)
+    }
+
     /// Mutates the value of a register within an active call frame.
     ///
     /// # Errors

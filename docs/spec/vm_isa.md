@@ -194,3 +194,7 @@ The virtual machine supports zero-overhead interactive debugging via the `VmDebu
 - **Hook Dispatch**: `VirtualMachine::run_debug(&mut hook)` checks `metadata.has_debug_symbols` per call frame. For functions compiled under `BuildProfile::Debug` with source maps, the hook's `before_instruction`, `on_exception_thrown`, and `on_uncaught_exception` methods are invoked.
 - **Monomorphic Inner Loop**: Instructions execute through monomorphized `run_fast_step` to prevent dynamic dispatch overhead in tight instruction execution cycles.
 - **Output Redirection**: Guest output streams (`println`, `print`) are intercepted non-destructively through thread-safe `OutputSink` callbacks for DAP stdio integration without process stream pollution.
+- **Interactive Heap & Frame Introspection**:
+  - `VirtualMachine::inspect_frame_locals(frame_index)`: inspects all active named parameters and local variables in a call frame using `LocalVariableDebugInfo`.
+  - `VirtualMachine::inspect_object_fields(heap_address)`: inspects all declared fields of an object using `CompiledClass.field_names` looked up from `vtable_lookup`.
+  - `VirtualMachine::inspect_array_elements(heap_address)`: inspects indexed elements of a heap-allocated array (`BlockTag::ArrayRef`), extracting elemental types and runtime values for DAP debugger visualization.
