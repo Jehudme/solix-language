@@ -400,6 +400,7 @@ fn test_export_manifest_json_extraction() {
     };
 
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
@@ -435,6 +436,7 @@ fn test_binary_program_manifest_round_trip() {
     program.package_description = "Networking library".to_string();
 
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: "network".to_string(),
         package_version: "2.0.1".to_string(),
         package_description: "Networking library".to_string(),

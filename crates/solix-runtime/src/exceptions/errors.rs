@@ -100,10 +100,21 @@ pub enum RuntimeError {
     },
 
     /// Invalid entry point method signature.
-    #[error(
-        "invalid entry point signature: {symbol} has {param_count} parameters (expected 0 or 1)"
-    )]
-    InvalidEntryPointSignature { symbol: String, param_count: u16 },
+    #[error("invalid entry point signature in '{symbol}': {reason}")]
+    InvalidEntryPointSignature {
+        symbol: String,
+        param_count: u16,
+        reason: String,
+    },
+
+    /// Duplicate symbol definition across loaded modules.
+    #[error("DuplicateSymbolDefinition: cannot define {kind} '{symbol}' in module '{second_module}': already defined in module '{first_module}'")]
+    DuplicateSymbolDefinition {
+        kind: String,
+        symbol: String,
+        first_module: String,
+        second_module: String,
+    },
 
     /// Native shared library loading or symbol resolution failure.
     #[error("SharedLibraryException: Failed to load library '{path}': {reason}")]
@@ -174,8 +185,10 @@ pub enum RuntimeErrorCode {
     SharedLibraryError = 22,
     /// Dependency resolution or SemVer compatibility failure.
     DependencyError = 23,
+    /// Duplicate symbol definition across loaded modules.
+    DuplicateSymbolDefinition = 24,
     /// Native shared library checksum verification failure.
-    NativeLibraryChecksumMismatch = 24,
+    NativeLibraryChecksumMismatch = 25,
 }
 
 impl RuntimeErrorCode {
@@ -227,6 +240,9 @@ impl RuntimeError {
             Self::InvalidEntryPointSignature { .. } => RuntimeErrorCode::InvalidEntryPointSignature,
             Self::SharedLibraryError { .. } => RuntimeErrorCode::SharedLibraryError,
             Self::DependencyError { .. } => RuntimeErrorCode::DependencyError,
+            Self::DuplicateSymbolDefinition { .. } => {
+                RuntimeErrorCode::DuplicateSymbolDefinition
+            }
             Self::NativeLibraryChecksumMismatch { .. } => {
                 RuntimeErrorCode::NativeLibraryChecksumMismatch
             }

@@ -186,6 +186,9 @@ pub struct ExportManifest {
     /// Skipped from JSON serialization in favour of BinaryProgram Section 7.
     #[serde(default, skip_serializing)]
     pub exported_ast_bytes: Vec<u8>,
+    /// Optional default entrypoint symbol embedded in the binary manifest.
+    #[serde(default)]
+    pub entry_point: Option<String>,
 }
 
 /// Extracts the public API manifest from a compiled binary program as a formatted JSON string.

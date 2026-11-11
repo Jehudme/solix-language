@@ -99,6 +99,8 @@ pub struct CompilationOptions {
     pub dependency_specs: Vec<DependencyRequirement>,
     /// Pluggable module solver for fetching missing/transitive dependencies.
     pub solver: Option<Arc<dyn ModuleSolver>>,
+    /// Optional explicit entry point symbol (e.g. from `--entry <symbol>`).
+    pub entry_point: Option<String>,
     /// Linking mode for dependencies and executable emission (`dynamic` or `static`).
     pub link_mode: LinkMode,
     /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --yolo).
@@ -128,9 +130,17 @@ impl CompilationOptions {
             dependency_binaries: Vec::new(),
             dependency_specs: Vec::new(),
             solver: None,
+            entry_point: None,
             link_mode: LinkMode::Dynamic,
             verify_checksums: true,
         }
+    }
+
+    /// Sets the explicit entry point symbol for the output binary.
+    #[must_use]
+    pub fn with_entry_point(mut self, entry_point: Option<String>) -> Self {
+        self.entry_point = entry_point;
+        self
     }
 
     /// Sets whether to enforce cryptographic checksum verification on dependencies.

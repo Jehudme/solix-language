@@ -2,6 +2,7 @@ package sample_workspace;
 
 import blt.io.println;
 
+
 /// Represents a 2D coordinate point with reference-counted heap allocation.
 class Point {
     public int32 coordinate_x;
@@ -45,10 +46,4 @@ void main() {
 
     int32 static_result = MathHelper::add(50, 50);
     println("Static addition result: 100");
-    println("Static addition result: 100");
-    println("Static addition result: 100");
-    println("Static addition result: 100");
-    println("Static addition result: 100");
-    println("Static addition result: 100");
-
 }

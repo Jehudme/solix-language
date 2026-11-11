@@ -846,11 +846,26 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     program.static_space_size = static_layout.static_space_size;
     program.static_symbols_map = static_layout.static_symbols_map;
     program.constant_pool = constant_pool;
-    for (function_index, function) in program.functions.iter().enumerate() {
-        if function.symbol == "main" || function.symbol.ends_with("::main") {
-            program.entry_point_id = Some(function_index as u32);
-            program.entry_point_symbol = Some(function.symbol.clone());
-            break;
+    program.entry_point = context.options.entry_point.clone();
+    if let Some(target_entry) = &context.options.entry_point {
+        for (function_index, function) in program.functions.iter().enumerate() {
+            if function.symbol == *target_entry
+                || function.symbol.ends_with(&format!("::{target_entry}"))
+                || target_entry.ends_with(&format!("::{}", function.symbol))
+            {
+                program.entry_point_id = Some(function_index as u32);
+                program.entry_point_symbol = Some(function.symbol.clone());
+                break;
+            }
+        }
+    }
+    if program.entry_point_id.is_none() {
+        for (function_index, function) in program.functions.iter().enumerate() {
+            if function.symbol == "main" || function.symbol.ends_with("::main") {
+                program.entry_point_id = Some(function_index as u32);
+                program.entry_point_symbol = Some(function.symbol.clone());
+                break;
+            }
         }
     }
 
@@ -882,6 +897,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     program.exported_ast_bytes = exported_ast_bytes.clone();
 
     program.export_manifest = ExportManifest {
+        entry_point: program.entry_point.clone(),
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
@@ -1345,6 +1361,10 @@ fn index_function_symbols(
                     let spec_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(specialized_sym.clone(), spec_id);
+                    if !effective_package.is_empty() {
+                        let full_spec = format!("{effective_package}::{method_name}<{args_str}>");
+                        function_ids.insert(full_spec, spec_id);
+                    }
                 }
             }
         }
@@ -1593,14 +1613,33 @@ fn compile_source_functions(
     }
     let code = &sources[src_idx];
 
+    let raw_file_package = ast
+        .package
+        .as_ref()
+        .map(|pkg| {
+            pkg.path
+                .iter()
+                .map(|span| get_span_text(*span, code))
+                .collect::<Vec<_>>()
+                .join("::")
+        })
+        .unwrap_or_default();
+
     for decl in &ast.declarations {
         if let Declaration::Method(m) = decl {
             if m.modifiers.contains(&Modifier::Extern) {
                 continue;
             }
             let name = get_span_text(m.name_span, code).to_string();
+            let decl_namespace = extract_namespace_path(&m.namespace_path, code);
+            let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
+            let symbol_name = if effective_package.is_empty() {
+                name.clone()
+            } else {
+                format!("{effective_package}::{name}")
+            };
             let func = compile_single_method(
-                &name,
+                &symbol_name,
                 ast.source_id,
                 m,
                 false,
@@ -1620,7 +1659,11 @@ fn compile_source_functions(
                     generic_invocations.get(&(String::new(), name.clone()))
             {
                 for args_str in specialization_args {
-                    let specialized_sym = format!("{name}<{args_str}>");
+                    let specialized_sym = if effective_package.is_empty() {
+                        format!("{name}<{args_str}>")
+                    } else {
+                        format!("{effective_package}::{name}<{args_str}>")
+                    };
                     let func = compile_single_method(
                         &specialized_sym,
                         ast.source_id,
@@ -1800,6 +1843,9 @@ fn compile_source_functions(
     if !ast.root_statements.is_empty() {
         let entry_sym = format!("<entry_{}>", ast.source_id);
         let mut func = CompiledFunction::new(entry_sym, ast.source_id, 0, 0);
+        func.is_public = false;
+        func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+        func.parameter_types = Vec::new();
         let mut allocator = RegisterAllocator::new(0);
         allocator.enter_scope();
 
@@ -1837,6 +1883,122 @@ fn compile_source_functions(
     Ok(())
 }
 
+fn resolve_annotation_type(
+    annotation: &TypeAnnotation,
+    node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
+    sources: &[String],
+) -> solix_common::types::Type {
+    if let Some(resolved_type) = node_types.get(&annotation.span()) {
+        return resolved_type.clone();
+    }
+    match annotation {
+        TypeAnnotation::Primitive { kind, .. } => {
+            let primitive_kind = match kind {
+                TokenKind::PrimitiveVoid => PrimitiveKind::Void,
+                TokenKind::PrimitiveBool => PrimitiveKind::Bool,
+                TokenKind::PrimitiveChar => PrimitiveKind::Char,
+                TokenKind::PrimitiveInt8 => PrimitiveKind::Int8,
+                TokenKind::PrimitiveInt16 => PrimitiveKind::Int16,
+                TokenKind::PrimitiveInt32 => PrimitiveKind::Int32,
+                TokenKind::PrimitiveInt64 => PrimitiveKind::Int64,
+                TokenKind::PrimitiveUint8 => PrimitiveKind::UInt8,
+                TokenKind::PrimitiveUint16 => PrimitiveKind::UInt16,
+                TokenKind::PrimitiveUint32 => PrimitiveKind::UInt32,
+                TokenKind::PrimitiveUint64 => PrimitiveKind::UInt64,
+                TokenKind::PrimitiveFloat32 => PrimitiveKind::Float32,
+                TokenKind::PrimitiveFloat64 => PrimitiveKind::Float64,
+                _ => PrimitiveKind::Void,
+            };
+            solix_common::types::Type::Primitive(primitive_kind)
+        }
+        TypeAnnotation::Named { path, span } => {
+            let source_index = span.id as usize;
+            let code_content = if source_index < sources.len() {
+                &sources[source_index]
+            } else {
+                ""
+            };
+            let segments: Vec<&str> = path
+                .iter()
+                .map(|path_span| get_span_text(*path_span, code_content))
+                .collect();
+            let symbol_name = segments.join("::");
+            match symbol_name.as_str() {
+                "string" | "std.string" | "std::string" => solix_common::types::Type::Class {
+                    symbol_name: "std.string".to_string(),
+                    type_arguments: Vec::new(),
+                },
+                "void" => solix_common::types::Type::Primitive(PrimitiveKind::Void),
+                "bool" => solix_common::types::Type::Primitive(PrimitiveKind::Bool),
+                "char" => solix_common::types::Type::Primitive(PrimitiveKind::Char),
+                "int8" => solix_common::types::Type::Primitive(PrimitiveKind::Int8),
+                "int16" => solix_common::types::Type::Primitive(PrimitiveKind::Int16),
+                "int32" => solix_common::types::Type::Primitive(PrimitiveKind::Int32),
+                "int64" => solix_common::types::Type::Primitive(PrimitiveKind::Int64),
+                "uint8" => solix_common::types::Type::Primitive(PrimitiveKind::UInt8),
+                "uint16" => solix_common::types::Type::Primitive(PrimitiveKind::UInt16),
+                "uint32" => solix_common::types::Type::Primitive(PrimitiveKind::UInt32),
+                "uint64" => solix_common::types::Type::Primitive(PrimitiveKind::UInt64),
+                "float32" => solix_common::types::Type::Primitive(PrimitiveKind::Float32),
+                "float64" => solix_common::types::Type::Primitive(PrimitiveKind::Float64),
+                _ => solix_common::types::Type::Class {
+                    symbol_name,
+                    type_arguments: Vec::new(),
+                },
+            }
+        }
+        TypeAnnotation::Array { element_type, .. } => {
+            let inner_type = resolve_annotation_type(element_type, node_types, sources);
+            solix_common::types::Type::Array {
+                element_type: Box::new(inner_type),
+                depth: 1,
+            }
+        }
+        TypeAnnotation::Generic {
+            base,
+            arguments,
+            ..
+        } => {
+            let base_type = resolve_annotation_type(base, node_types, sources);
+            let argument_types = arguments
+                .iter()
+                .map(|argument_node| resolve_annotation_type(argument_node, node_types, sources))
+                .collect();
+            match base_type {
+                solix_common::types::Type::Class { symbol_name, .. } => {
+                    solix_common::types::Type::Class {
+                        symbol_name,
+                        type_arguments: argument_types,
+                    }
+                }
+                other_type => other_type,
+            }
+        }
+        TypeAnnotation::Tuple { elements, .. } => {
+            let element_types = elements
+                .iter()
+                .map(|element_node| resolve_annotation_type(element_node, node_types, sources))
+                .collect();
+            solix_common::types::Type::Tuple(element_types)
+        }
+        TypeAnnotation::FunctionPointer {
+            return_type,
+            parameters,
+            ..
+        } => {
+            let ret_type = resolve_annotation_type(return_type, node_types, sources);
+            let parameter_types = parameters
+                .iter()
+                .map(|parameter_node| resolve_annotation_type(parameter_node, node_types, sources))
+                .collect();
+            solix_common::types::Type::FunctionPointer {
+                return_type: Box::new(ret_type),
+                parameter_types,
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_single_method(
     symbol: &str,
@@ -1855,6 +2017,19 @@ fn compile_single_method(
     let param_offset = if is_instance { 1 } else { 0 };
     let param_count = (param_offset + m.parameters.len()) as u16;
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = m.modifiers.contains(&Modifier::Public)
+        || (!m.modifiers.contains(&Modifier::Private)
+            && !m.modifiers.contains(&Modifier::Internal)
+            && !m.modifiers.contains(&Modifier::Protected));
+    func.return_type = resolve_annotation_type(&m.return_type, node_types, sources);
+    for parameter_decl in &m.parameters {
+        let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
+            semantic_type.clone()
+        } else {
+            resolve_annotation_type(&parameter_decl.param_type, node_types, sources)
+        };
+        func.parameter_types.push(param_type);
+    }
     let mut allocator = RegisterAllocator::new(param_count);
 
     if is_instance {
@@ -1967,6 +2142,19 @@ fn compile_constructor(
 ) -> Result<CompiledFunction, EmissionError> {
     let param_count = (1 + ctor.parameters.len()) as u16; // this is r0
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = ctor.modifiers.contains(&Modifier::Public)
+        || (!ctor.modifiers.contains(&Modifier::Private)
+            && !ctor.modifiers.contains(&Modifier::Internal)
+            && !ctor.modifiers.contains(&Modifier::Protected));
+    func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+    for parameter_decl in &ctor.parameters {
+        let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
+            semantic_type.clone()
+        } else {
+            resolve_annotation_type(&parameter_decl.param_type, node_types, sources)
+        };
+        func.parameter_types.push(param_type);
+    }
     let mut allocator = RegisterAllocator::new(param_count);
 
     allocator.alloc_param("this")?;
@@ -2071,6 +2259,12 @@ fn compile_default_constructor(
     synthesized_lambdas: &mut Vec<CompiledFunction>,
 ) -> Result<CompiledFunction, EmissionError> {
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, 1, 0);
+    func.is_public = cls.modifiers.contains(&Modifier::Public)
+        || (!cls.modifiers.contains(&Modifier::Private)
+            && !cls.modifiers.contains(&Modifier::Internal)
+            && !cls.modifiers.contains(&Modifier::Protected));
+    func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+    func.parameter_types = Vec::new();
     let mut allocator = RegisterAllocator::new(1);
     allocator.alloc_param("this")?;
     allocator.enter_scope();
@@ -2181,6 +2375,9 @@ fn compile_destructor(
 ) -> Result<CompiledFunction, EmissionError> {
     let param_count = 1; // this is r0
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = false;
+    func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+    func.parameter_types = Vec::new();
     let mut allocator = RegisterAllocator::new(param_count);
 
     allocator.alloc_param("this")?;
@@ -2272,6 +2469,19 @@ fn compile_operator(
 ) -> Result<CompiledFunction, EmissionError> {
     let param_count = (1 + op.parameters.len()) as u16;
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = op.modifiers.contains(&Modifier::Public)
+        || (!op.modifiers.contains(&Modifier::Private)
+            && !op.modifiers.contains(&Modifier::Internal)
+            && !op.modifiers.contains(&Modifier::Protected));
+    func.return_type = resolve_annotation_type(&op.return_type, node_types, sources);
+    for parameter_decl in &op.parameters {
+        let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
+            semantic_type.clone()
+        } else {
+            resolve_annotation_type(&parameter_decl.param_type, node_types, sources)
+        };
+        func.parameter_types.push(param_type);
+    }
     let mut allocator = RegisterAllocator::new(param_count);
 
     allocator.alloc_param("this")?;

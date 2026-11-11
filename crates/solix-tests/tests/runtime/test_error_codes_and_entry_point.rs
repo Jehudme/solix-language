@@ -151,9 +151,20 @@ fn test_runtime_error_code_mapping_and_as_i32() {
             RuntimeError::InvalidEntryPointSignature {
                 symbol: "main".into(),
                 param_count: 3,
+                reason: "invalid parameter count".into(),
             },
             RuntimeErrorCode::InvalidEntryPointSignature,
             20,
+        ),
+        (
+            RuntimeError::DuplicateSymbolDefinition {
+                kind: "function".into(),
+                symbol: "test".into(),
+                first_module: "a".into(),
+                second_module: "b".into(),
+            },
+            RuntimeErrorCode::DuplicateSymbolDefinition,
+            24,
         ),
         (
             RuntimeError::Exit { code: 42 },

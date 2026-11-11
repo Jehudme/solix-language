@@ -9,6 +9,7 @@ use crate::memory::{BlockTag, VirtualHeap};
 use crate::native::NativeRegistry;
 use crate::value::Value;
 use solix_common::bytecode::Instruction;
+use solix_common::types::{PrimitiveKind, Type};
 use std::collections::HashSet;
 
 /// Telemetry metrics recorded across virtual machine execution.
@@ -49,6 +50,10 @@ pub struct VirtualMachine {
     pub call_frames: Vec<CallFrame>,
     /// Termination flag set when an `Exit` opcode is dispatched or program halts.
     pub halted: bool,
+    /// Whether module-level `@init` static initializers have completed execution.
+    pub statics_initialized: bool,
+    /// Whether the virtual machine has executed shutdown cleanup.
+    pub is_shut_down: bool,
     /// Process exit status code, if explicitly terminated via `exit(code)`.
     pub exit_code: Option<i32>,
     /// Return value produced by the top-level entry point function.
@@ -130,6 +135,8 @@ impl VirtualMachine {
             register_stack: vec![Value::Null; 65536],
             call_frames: Vec::with_capacity(64),
             halted: false,
+            statics_initialized: false,
+            is_shut_down: false,
             exit_code: None,
             last_return_value: Value::Null,
             safe_mode,
@@ -141,6 +148,240 @@ impl VirtualMachine {
             quickened_instructions_count: 0,
             output_sink,
         }
+    }
+
+    /// Constructs and initializes a `VirtualMachine`, executing all static `@init` initializers.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if static initialization fails.
+    pub fn new_initialized(context: RuntimeContext) -> Result<Self, RuntimeError> {
+        let mut virtual_machine = Self::new(context);
+        virtual_machine.initialize_statics()?;
+        Ok(virtual_machine)
+    }
+
+    /// Executes all module `@init` static initializer functions once.
+    /// Subsequent calls are no-ops.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if an `@init` function fails or traps.
+    pub fn initialize_statics(&mut self) -> Result<(), RuntimeError> {
+        if self.statics_initialized {
+            return Ok(());
+        }
+
+        let init_ids = self.context.init_function_ids.clone();
+        for init_id in init_ids {
+            self.push_frame(init_id, 0, &[])?;
+            let target_depth = self.call_frames.len().saturating_sub(1);
+            self.run_loop(target_depth)?;
+            if self.halted {
+                break;
+            }
+        }
+
+        self.statics_initialized = true;
+        Ok(())
+    }
+
+    /// Validates the CLI entry point signature contract for `solix run`.
+    ///
+    /// Requires `public` visibility, `int32` or `void` return type, and either
+    /// `()` (0 parameters) or `(char[] args)` / `(string[] args)` / `(char[][] args)` (1 parameter).
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::InvalidEntryPointSignature` if any constraint is violated.
+    pub fn validate_cli_entry_point(&self, func_id: u32) -> Result<(), RuntimeError> {
+        let func = self.context.get_function(func_id).ok_or_else(|| {
+            RuntimeError::EntryPointNotFound {
+                symbol: format!("#{func_id}"),
+            }
+        })?;
+
+        // Must be public
+        if !func.is_public {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: func.symbol.clone(),
+                param_count: func.param_count as u16,
+                reason: "CLI entry point function must have 'public' visibility".to_string(),
+            });
+        }
+
+        // Return type must be int32 or void
+        let is_valid_return = matches!(
+            func.return_type,
+            Type::Primitive(PrimitiveKind::Int32 | PrimitiveKind::Void)
+        );
+        if !is_valid_return {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: func.symbol.clone(),
+                param_count: func.param_count as u16,
+                reason: format!(
+                    "CLI entry point return type must be 'int32' or 'void', found '{:?}'",
+                    func.return_type
+                ),
+            });
+        }
+
+        // Parameters must be empty () or single string/char array
+        if func.param_count == 0 {
+            return Ok(());
+        }
+
+        if func.param_count == 1 {
+            if func.parameter_types.is_empty() {
+                return Ok(());
+            }
+            let param_type = func
+                .parameter_types
+                .first()
+                .cloned()
+                .unwrap_or(Type::Primitive(PrimitiveKind::Void));
+            let is_valid_cli_param = match &param_type {
+                Type::Array { element_type, depth } => {
+                    if *depth == 1 {
+                        matches!(&**element_type, Type::Primitive(PrimitiveKind::Char))
+                            || matches!(
+                                &**element_type,
+                                Type::Class { symbol_name, .. }
+                                    if symbol_name == "std.string" || symbol_name == "string"
+                            )
+                    } else if *depth == 2 {
+                        matches!(&**element_type, Type::Primitive(PrimitiveKind::Char))
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if is_valid_cli_param {
+                return Ok(());
+            }
+        }
+
+        Err(RuntimeError::InvalidEntryPointSignature {
+            symbol: func.symbol.clone(),
+            param_count: func.param_count as u16,
+            reason: "CLI entry point parameters must be empty () or a single CLI string/char array (char[] args / string[] args)".to_string(),
+        })
+    }
+
+    /// Invokes an arbitrary public entry point function by symbol with primitive arguments,
+    /// sharing static slots and heap across multiple successive invocations.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if the function is not found, is private, has non-primitive
+    /// parameters/return type, or encounters a runtime exception during execution.
+    pub fn invoke_entry(&mut self, symbol: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+        if !self.statics_initialized {
+            self.initialize_statics()?;
+        }
+
+        let func_id = self.context.resolve_entry_function_id(symbol)?;
+        let func = self.context.get_function(func_id).ok_or_else(|| {
+            RuntimeError::EntryPointNotFound {
+                symbol: symbol.to_string(),
+            }
+        })?;
+
+        if !func.is_public {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: symbol.to_string(),
+                param_count: func.param_count as u16,
+                reason: "Entry point function must have 'public' visibility".to_string(),
+            });
+        }
+
+        fn is_supported_entry_type(entry_type: &Type, is_return: bool) -> bool {
+            match entry_type {
+                Type::Primitive(prim) => {
+                    if *prim == PrimitiveKind::Void {
+                        is_return
+                    } else {
+                        true
+                    }
+                }
+                Type::Class { symbol_name, .. } => {
+                    symbol_name == "std.string" || symbol_name == "string"
+                }
+                Type::Array { element_type, depth } => {
+                    if *depth == 1 {
+                        matches!(
+                            &**element_type,
+                            Type::Primitive(_) | Type::Class { .. }
+                        )
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            }
+        }
+
+        if !is_supported_entry_type(&func.return_type, true) {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: symbol.to_string(),
+                param_count: func.param_count as u16,
+                reason: format!(
+                    "Return type '{:?}' is not a supported entry point primitive/string/array type",
+                    func.return_type
+                ),
+            });
+        }
+
+        for param_type in &func.parameter_types {
+            if !is_supported_entry_type(param_type, false) {
+                return Err(RuntimeError::InvalidEntryPointSignature {
+                    symbol: symbol.to_string(),
+                    param_count: func.param_count as u16,
+                    reason: format!(
+                        "Parameter type '{:?}' is not a supported entry point primitive/string/array type",
+                        param_type
+                    ),
+                });
+            }
+        }
+
+        if args.len() != func.param_count as usize {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: symbol.to_string(),
+                param_count: func.param_count as u16,
+                reason: format!(
+                    "Expected {} arguments, but received {}",
+                    func.param_count,
+                    args.len()
+                ),
+            });
+        }
+
+        self.push_frame(func_id, 0, args)?;
+        let target_depth = self.call_frames.len().saturating_sub(1);
+        self.run_loop(target_depth)?;
+
+        Ok(self.last_return_value)
+    }
+
+    /// Releases static slot object references (invoking destructors) and cleans up heap constants.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if a destructor fails during execution.
+    pub fn shutdown(&mut self) -> Result<(), RuntimeError> {
+        if self.is_shut_down {
+            return Ok(());
+        }
+        self.is_shut_down = true;
+
+        for slot_idx in 0..self.static_slots.len() {
+            if let Value::Ref(addr) = self.static_slots[slot_idx]
+                && addr > 0
+            {
+                self.static_slots[slot_idx] = Value::Null;
+                let _ = self.release_reference(addr);
+            }
+        }
+
+        Ok(())
     }
 
     /// Releases a reference to the heap block at `addr`, executing its destructor and cascading drops if `ref_count` hits 0.
@@ -547,15 +788,7 @@ impl VirtualMachine {
         let execution_start = std::time::Instant::now();
         let execution_result = (|| -> Result<Value, RuntimeError> {
             // 1. Static synthesis initialization: execute all @init functions
-            let init_ids = self.context.init_function_ids.clone();
-            for init_id in init_ids {
-                self.push_frame(init_id, 0, &[])?;
-                let target_depth = self.call_frames.len() - 1;
-                self.run_loop(target_depth)?;
-                if self.halted {
-                    break;
-                }
-            }
+            self.initialize_statics()?;
 
             if self.halted {
                 return Ok(self.exit_code.map_or(self.last_return_value, Value::I32));
@@ -573,19 +806,13 @@ impl VirtualMachine {
                 }
             })?;
 
+            self.validate_cli_entry_point(entry_id)?;
+
             let entry_func = self.context.get_function(entry_id).ok_or_else(|| {
                 RuntimeError::EntryPointNotFound {
                     symbol: format!("#{entry_id}"),
                 }
             })?;
-
-            // Entry point signature validation: parameter count must be 0 or 1
-            if entry_func.param_count > 1 {
-                return Err(RuntimeError::InvalidEntryPointSignature {
-                    symbol: entry_func.symbol.clone(),
-                    param_count: entry_func.param_count,
-                });
-            }
 
             let mut entry_args = Vec::new();
             if entry_func.param_count == 1 {
@@ -619,14 +846,7 @@ impl VirtualMachine {
                 }
             }
 
-            for slot_idx in 0..self.static_slots.len() {
-                if let Value::Ref(addr) = self.static_slots[slot_idx]
-                    && addr > 0
-                {
-                    self.static_slots[slot_idx] = Value::Null;
-                    let _ = self.release_reference(addr);
-                }
-            }
+            self.shutdown()?;
 
             if let Some(code) = self.exit_code {
                 Ok(Value::I32(code))
@@ -710,5 +930,11 @@ impl VirtualMachine {
         self.context
             .patch_instruction(function_id, instruction_pc, new_instruction);
         self.quickened_instructions_count += 1;
+    }
+}
+
+impl Drop for VirtualMachine {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
     }
 }

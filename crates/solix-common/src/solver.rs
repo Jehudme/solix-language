@@ -6,6 +6,7 @@ use crate::bytecode::binary::BinaryProgram;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Parsed semantic version following the Solix `Major.Medium.Minor` format.
@@ -280,6 +281,11 @@ pub trait ModuleSolver: Send + Sync + fmt::Debug {
 
     /// Finds and loads the absolute highest installed version of `package_name`.
     fn resolve_latest(&self, package_name: &str) -> Result<SolvedPackage, SolverError>;
+
+    /// Returns a sorted list of all available top-level package names in the solver store.
+    fn list_packages(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// An in-memory [`ModuleSolver`] implementation used for hermetic compiler and runtime testing.
@@ -364,6 +370,12 @@ impl ModuleSolver for InMemoryModuleSolver {
         sorted_entries.sort_by_key(|entry| entry.version);
         let winning_entry = sorted_entries.last().expect("non-empty collection");
         Ok(winning_entry.clone())
+    }
+
+    fn list_packages(&self) -> Vec<String> {
+        let mut package_names: Vec<String> = self.packages.keys().cloned().collect();
+        package_names.sort();
+        package_names
     }
 }
 
@@ -683,5 +695,38 @@ impl ModuleSolver for ClientModuleSolver {
             .expect("discovered versions non-empty");
 
         self.load_package_from_dir(package_name, *winning_version, winning_dir)
+    }
+
+    fn list_packages(&self) -> Vec<String> {
+        let mut package_names = Vec::new();
+        if let Ok(read_dir) = fs::read_dir(&self.store_directory) {
+            for entry_result in read_dir.flatten() {
+                let package_path = entry_result.path();
+                if package_path.is_dir() {
+                    if let Some(folder_name) = package_path.file_name().and_then(|name| name.to_str()) {
+                        if let Ok(version_read_dir) = fs::read_dir(&package_path) {
+                            let mut has_version = false;
+                            for version_entry_result in version_read_dir.flatten() {
+                                let version_candidate = version_entry_result.path();
+                                if version_candidate.is_dir() {
+                                    if let Some(candidate_name) = version_candidate.file_name().and_then(|name| name.to_str()) {
+                                        if PackageVersion::parse(candidate_name).is_ok() {
+                                            has_version = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if has_version {
+                                package_names.push(folder_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        package_names.sort();
+        package_names.dedup();
+        package_names
     }
 }

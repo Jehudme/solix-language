@@ -25,6 +25,7 @@ fn create_dummy_library_binary(
     program.package_version = package_version.to_string();
     program.package_description = format!("Test package {package_name}");
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: package_name.to_string(),
         package_version: package_version.to_string(),
         package_description: format!("Test package {package_name}"),

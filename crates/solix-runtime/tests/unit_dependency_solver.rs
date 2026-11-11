@@ -21,6 +21,7 @@ fn create_math_binary(package_version: &str) -> BinaryProgram {
     program.package_name = "math".to_string();
     program.package_version = package_version.to_string();
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: "math".to_string(),
         package_version: package_version.to_string(),
         package_description: "Math Library".to_string(),
@@ -75,6 +76,7 @@ fn create_app_binary_requiring(dependency_version: PackageVersion) -> BinaryProg
     program.entry_point_id = Some(0);
     program.entry_point_symbol = Some("main".to_string());
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: "app".to_string(),
         package_version: "1.0.0".to_string(),
         package_description: "Application".to_string(),

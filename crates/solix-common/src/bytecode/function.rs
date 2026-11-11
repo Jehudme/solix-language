@@ -59,6 +59,10 @@ pub struct LocalVariableDebugInfo {
     pub is_parameter: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Self-contained compiled function metadata and bytecode chunk.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompiledFunction {
@@ -83,6 +87,15 @@ pub struct CompiledFunction {
     /// Local variables and parameters debug information.
     #[serde(default)]
     pub local_variables: Vec<LocalVariableDebugInfo>,
+    /// Whether this function or method was declared `public`.
+    #[serde(default = "default_true")]
+    pub is_public: bool,
+    /// Declared return type of this function/method.
+    #[serde(default)]
+    pub return_type: crate::types::Type,
+    /// Declared parameter types of this function/method (excluding implicit `this`).
+    #[serde(default)]
+    pub parameter_types: Vec<crate::types::Type>,
 }
 
 impl CompiledFunction {
@@ -105,6 +118,9 @@ impl CompiledFunction {
             exception_handlers: Vec::new(),
             source_map: Vec::new(),
             local_variables: Vec::new(),
+            is_public: true,
+            return_type: crate::types::Type::default(),
+            parameter_types: Vec::new(),
         }
     }
 

@@ -147,6 +147,9 @@ pub struct BinaryProgram {
     pub classes: Vec<CompiledClass>,
     /// Vector of compiled functions and instruction chunks.
     pub functions: Vec<CompiledFunction>,
+    /// Optional default entrypoint symbol embedded in the binary container.
+    #[serde(default)]
+    pub entry_point: Option<String>,
     /// Package name for modular libraries.
     pub package_name: String,
     /// Semantic version string.
@@ -188,6 +191,7 @@ impl BinaryProgram {
             constant_pool: ConstantPool::new(),
             classes: Vec::new(),
             functions: Vec::new(),
+            entry_point: None,
             package_name: String::new(),
             package_version: "0.1.0".to_string(),
             package_description: String::new(),
@@ -396,6 +400,16 @@ impl BinaryProgram {
                 buffer.extend_from_slice(&var_entry.end_pc.to_le_bytes());
                 buffer.push(if var_entry.is_parameter { 1 } else { 0 });
             }
+
+            // Function visibility & signature
+            buffer.push(if func.is_public { 1 } else { 0 });
+            let return_type_json = serde_json::to_string(&func.return_type).unwrap_or_default();
+            write_string(&mut buffer, &return_type_json);
+            buffer.extend_from_slice(&(func.parameter_types.len() as u32).to_le_bytes());
+            for parameter_type in &func.parameter_types {
+                let parameter_type_json = serde_json::to_string(parameter_type).unwrap_or_default();
+                write_string(&mut buffer, &parameter_type_json);
+            }
         }
 
         // 6. Metadata and Export Manifest
@@ -404,6 +418,9 @@ impl BinaryProgram {
         write_string(&mut buffer, &self.package_description);
 
         let mut manifest_to_serialize = self.export_manifest.clone();
+        if manifest_to_serialize.entry_point.is_none() {
+            manifest_to_serialize.entry_point = self.entry_point.clone();
+        }
         if manifest_to_serialize.build_profile.is_empty() {
             manifest_to_serialize.build_profile = self.build_profile.clone();
         }
@@ -678,6 +695,17 @@ impl BinaryProgram {
                 });
             }
 
+            let is_public = reader.read_u8("Functions")? == 1;
+            let return_type_str = reader.read_string("Functions")?;
+            let return_type = serde_json::from_str(&return_type_str).unwrap_or_default();
+            let parameter_types_len = reader.read_u32("Functions")? as usize;
+            let mut parameter_types = Vec::with_capacity(parameter_types_len);
+            for _ in 0..parameter_types_len {
+                let param_type_str = reader.read_string("Functions")?;
+                let param_type = serde_json::from_str(&param_type_str).unwrap_or_default();
+                parameter_types.push(param_type);
+            }
+
             let mut func = CompiledFunction::new(symbol, source_id, param_count, num_registers);
             func.static_base_offset = static_base_offset;
             func.instructions = instructions;
@@ -685,6 +713,9 @@ impl BinaryProgram {
             func.exception_handlers = exception_handlers;
             func.source_map = source_map;
             func.local_variables = local_variables;
+            func.is_public = is_public;
+            func.return_type = return_type;
+            func.parameter_types = parameter_types;
             functions.push(func);
         }
 
@@ -741,6 +772,7 @@ impl BinaryProgram {
             constant_pool,
             classes,
             functions,
+            entry_point: export_manifest.entry_point.clone(),
             package_name,
             package_version,
             package_description,

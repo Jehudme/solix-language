@@ -174,6 +174,12 @@ pub enum Type {
     Error,
 }
 
+impl Default for Type {
+    fn default() -> Self {
+        Self::Primitive(PrimitiveKind::Void)
+    }
+}
+
 impl Type {
     /// Returns whether this type represents an automatic reference counting (ARC) managed reference.
     #[must_use]

@@ -114,11 +114,98 @@ impl RuntimeContext {
         let mut all_classes = Vec::new();
         let mut init_function_ids = Vec::new();
 
+        let mut defined_functions: HashMap<String, String> = HashMap::new();
+        let mut defined_classes: HashMap<String, String> = HashMap::new();
+        let mut defined_statics: HashMap<String, String> = HashMap::new();
+
+        let generic_template_names: std::collections::HashSet<String> = options
+            .binaries
+            .iter()
+            .flat_map(|binary_item| {
+                binary_item
+                    .export_manifest
+                    .generic_templates
+                    .iter()
+                    .map(|template_item| template_item.name.clone())
+            })
+            .collect();
+
         let mut current_static_offset: u32 = 0;
         let mut current_function_offset: u32 = 0;
         let mut current_vtable_offset: u32 = 0;
 
         for (binary_idx, binary) in options.binaries.iter().enumerate() {
+            let binary_label = if binary.package_name.is_empty() {
+                format!("binary#{binary_idx}")
+            } else {
+                format!("{}@{}", binary.package_name, binary.package_version)
+            };
+
+            // Check duplicate static symbols across modules
+            for (static_symbol, _) in &binary.static_symbols_map {
+                if let Some(first_module) = defined_statics.get(static_symbol) {
+                    if first_module != &binary_label {
+                        return Err(RuntimeError::DuplicateSymbolDefinition {
+                            kind: "static variable".to_string(),
+                            symbol: static_symbol.clone(),
+                            first_module: first_module.clone(),
+                            second_module: binary_label.clone(),
+                        });
+                    }
+                } else {
+                    defined_statics.insert(static_symbol.clone(), binary_label.clone());
+                }
+            }
+
+            // Check duplicate classes across modules
+            for class in &binary.classes {
+                let is_generic_instantiation = class.symbol.contains('<') && class.symbol.contains('>');
+                let is_generic_template = generic_template_names.iter().any(|template_name| {
+                    &class.symbol == template_name
+                        || class.symbol.ends_with(&format!("::{template_name}"))
+                        || template_name.ends_with(&format!("::{}", class.symbol))
+                });
+                if !is_generic_instantiation && !is_generic_template {
+                    if let Some(first_module) = defined_classes.get(&class.symbol) {
+                        if first_module != &binary_label {
+                            return Err(RuntimeError::DuplicateSymbolDefinition {
+                                kind: "class".to_string(),
+                                symbol: class.symbol.clone(),
+                                first_module: first_module.clone(),
+                                second_module: binary_label.clone(),
+                            });
+                        }
+                    } else {
+                        defined_classes.insert(class.symbol.clone(), binary_label.clone());
+                    }
+                }
+            }
+
+            // Check duplicate functions across modules
+            for func in &binary.functions {
+                let is_synthetic = func.symbol.starts_with('@')
+                    || func.symbol.starts_with("__static_init")
+                    || func.symbol.starts_with("<entry_")
+                    || func.symbol.starts_with("<lambda_");
+                let is_generic_instantiation = func.symbol.contains('<') && func.symbol.contains('>');
+                let is_generic_template = generic_template_names.contains(&func.symbol)
+                    || generic_template_names.iter().any(|template_name| func.symbol.starts_with(template_name));
+                if !is_synthetic && !is_generic_instantiation && !is_generic_template {
+                    if let Some(first_module) = defined_functions.get(&func.symbol) {
+                        if first_module != &binary_label {
+                            return Err(RuntimeError::DuplicateSymbolDefinition {
+                                kind: "function".to_string(),
+                                symbol: func.symbol.clone(),
+                                first_module: first_module.clone(),
+                                second_module: binary_label.clone(),
+                            });
+                        }
+                    } else {
+                        defined_functions.insert(func.symbol.clone(), binary_label.clone());
+                    }
+                }
+            }
+
             let func_offset = current_function_offset;
             let stat_offset = current_static_offset;
             let vtable_offset = current_vtable_offset;
@@ -505,6 +592,84 @@ impl RuntimeContext {
         self.vtable_lookup
             .get(vtable_id as usize)
             .and_then(Option::as_ref)
+    }
+
+    /// Resolves a function's global ID for entry point invocation using exact, package-qualified,
+    /// and unqualified fallback lookups.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::EntryPointNotFound` if the symbol cannot be resolved.
+    pub fn resolve_entry_function_id(&self, symbol: &str) -> Result<u32, RuntimeError> {
+        // 1. Exact match in symbol_to_function_id
+        if let Some(&func_id) = self.symbol_to_function_id.get(symbol) {
+            return Ok(func_id);
+        }
+
+        // Clean symbol without arity/parameters
+        let clean_symbol = symbol.split('(').next().unwrap_or(symbol);
+        if let Some(&func_id) = self.symbol_to_function_id.get(clean_symbol) {
+            return Ok(func_id);
+        }
+
+        let primary_pkg = self
+            .options
+            .binaries
+            .first()
+            .map(|primary_binary| primary_binary.package_name.as_str())
+            .unwrap_or("");
+
+        // 2. If symbol does not contain "::" (e.g. "main"), probe <pkg>::<symbol> and Main::<symbol>
+        if !symbol.contains("::") {
+            if !primary_pkg.is_empty() {
+                let pkg_qualified = format!("{primary_pkg}::{clean_symbol}");
+                if let Some(&func_id) = self.symbol_to_function_id.get(&pkg_qualified) {
+                    return Ok(func_id);
+                }
+            }
+            let main_class_qualified = format!("Main::{clean_symbol}");
+            if let Some(&func_id) = self.symbol_to_function_id.get(&main_class_qualified) {
+                return Ok(func_id);
+            }
+            if !primary_pkg.is_empty() {
+                let pkg_main_qualified = format!("{primary_pkg}::Main::{clean_symbol}");
+                if let Some(&func_id) = self.symbol_to_function_id.get(&pkg_main_qualified) {
+                    return Ok(func_id);
+                }
+            }
+        } else {
+            // 3. If symbol is "<pkg>::<fn_name>" (e.g., "sample_workspace::main"), check if primary package is "<pkg>"
+            if !primary_pkg.is_empty()
+                && (symbol.starts_with(primary_pkg) || clean_symbol.starts_with(primary_pkg))
+            {
+                let suffix = clean_symbol
+                    .strip_prefix(primary_pkg)
+                    .unwrap_or(clean_symbol);
+                let fn_name = suffix.strip_prefix("::").unwrap_or(suffix);
+                if let Some(&func_id) = self.symbol_to_function_id.get(fn_name) {
+                    return Ok(func_id);
+                }
+                let pkg_main_qualified = format!("{primary_pkg}::Main::{fn_name}");
+                if let Some(&func_id) = self.symbol_to_function_id.get(&pkg_main_qualified) {
+                    return Ok(func_id);
+                }
+            }
+        }
+
+        // Suffix scan fallback
+        for (candidate_sym, &func_id) in &self.symbol_to_function_id {
+            let candidate_clean = candidate_sym.split('(').next().unwrap_or(candidate_sym);
+            if candidate_clean == symbol
+                || candidate_clean == clean_symbol
+                || candidate_clean.ends_with(&format!("::{clean_symbol}"))
+                || clean_symbol.ends_with(&format!("::{candidate_clean}"))
+            {
+                return Ok(func_id);
+            }
+        }
+
+        Err(RuntimeError::EntryPointNotFound {
+            symbol: symbol.to_string(),
+        })
     }
 
     /// Resolves the global entry point function ID.

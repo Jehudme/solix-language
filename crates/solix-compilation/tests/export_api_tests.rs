@@ -107,6 +107,7 @@ fn test_export_manifest_local_only_invariant() {
     dependency_program.package_name = "dep_lib".to_string();
     dependency_program.package_version = "1.0.0".to_string();
     dependency_program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: "dep_lib".to_string(),
         package_version: "1.0.0".to_string(),
         package_description: "External Dependency".to_string(),
