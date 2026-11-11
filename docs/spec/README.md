@@ -6,43 +6,83 @@ Per [`GL-0012`](file:///home/jehud/Projects/solix-language/docs/internals/guidel
 
 ---
 
-## 1. Core Language & Compiler Architecture Specifications
+## 1. Core Language & Architecture Specifications
 
-* [**Lexical Grammar & Tokenization**](file:///home/jehud/Projects/solix-language/docs/spec/lexical-grammar.md): UTF-8 encoding, comments, string escapes, number literals (hex, binary, underscore separators), and complete 108 token dictionary.
-* [**Type System, Hierarchy & Semantics**](file:///home/jehud/Projects/solix-language/docs/spec/type-system-and-semantics.md): Primitive types, reference classes, structural tuples, function pointers, nominal subtyping, and operator overloading rules.
-* [**Compilation Pipeline & Linking Passes**](file:///home/jehud/Projects/solix-language/docs/spec/compilation-pipeline.md): Comprehensive 8-phase pipeline (`DependencyResolutionPhase` $\to$ `LexerPhase` $\to$ `ParserPhase` $\to$ `BinderPhase` $\to$ `ApiAndAstExportPhase` $\to$ `AstInlinerPhase` $\to$ `EmitterPhase` $\to$ `BytecodeOptimizerPhase`), dual static/dynamic linking, and reachability Dead Code Elimination (DCE).
-* [**Binder, VTables, ITables & Monomorphization**](file:///home/jehud/Projects/solix-language/docs/spec/binder-and-monomorphization.md): Three-pass semantic analysis, symbol table layout, class hierarchy construction, vtable/itable offsets, and template instantiation.
-* [**Optimizer, Inliner & Superinstructions**](file:///home/jehud/Projects/solix-language/docs/spec/optimizer-and-inliner.md): AST function and method inlining, constant folding, bytecode peephole optimization, and superinstruction fusing.
-* [**64-Bit Register VM ISA & Opcode Matrix**](file:///home/jehud/Projects/solix-language/docs/spec/vm-isa-and-execution.md): Register execution model, Instruction Formats A/B/Call, sliding register window ABI, and full 256-opcode instruction set architecture.
-* [**Deterministic Memory Model, VirtualHeap & ARC**](file:///home/jehud/Projects/solix-language/docs/spec/memory-model-and-arc.md): Segregated free-list memory allocator, 24-byte `BlockHeader`, field alignment, strong/weak reference counting, and deterministic RAII destructors.
-* [**Zero-Cost Exception Handling & Unwinding**](file:///home/jehud/Projects/solix-language/docs/spec/exception-unwinding.md): Table-driven `ExceptionHandlerEntry` structures, try/catch/finally unwinding, and stack frame restoration.
-* [**Binary Formats (`.slxb` & `.slxarc`)**](file:///home/jehud/Projects/solix-language/docs/spec/binary-formats-slxb-and-slxarc.md): Bytecode container specification, magic header (`b"SLXB"`), section tables, `ExportManifest`, pre-parsed AST, and compressed `.slxarc` archive layout.
-* [**Package Solver, SemVer & Dual-Mode Linking**](file:///home/jehud/Projects/solix-language/docs/spec/package-solver-and-linking.md): Pluggable `ModuleSolver` trait, SemVer 2.0 compatibility rules, `extern import` resolution, in-place dynamic call quickening, and static LTO.
-* [**Native C-FFI ABI & Dynamic Extensions**](file:///home/jehud/Projects/solix-language/docs/spec/native-ffi-abi.md): `SolixCValue`, `SolixVmContext`, `#[repr(C)]` plugin bridge, and dynamic shared library loading via `libloading`.
+* [**Lexical Grammar & Tokenization**](lexical.md): UTF-8 encoding, comments, string escapes, number literals (hex, binary, underscore separators), and complete token dictionary.
+* [**Type System, Hierarchy & Semantics**](types.md): Primitive types, reference classes, structural tuples, function pointers, nominal subtyping, and operator overloading rules.
+* [**Diagnostics & Error Reporting**](diagnostics.md): Canonical error formatting, line and column spans, diagnostic severity levels, and category codes.
+* [**64-Bit Register VM ISA & Opcode Matrix**](vm_isa.md): Register execution model, Instruction Formats A/B/C/Call, sliding register window ABI, and opcode taxonomy.
+* [**Native Interoperability & C-FFI ABI**](native_interop.md): C-ABI bridge, plugin loader, data layout conversions, and dynamic shared library integration.
 
 ---
 
-## 2. Statement & Expression Compilation Specifications ([`statements/`](file:///home/jehud/Projects/solix-language/docs/spec/statements/README.md))
+## 2. Statement & Expression Compilation Specifications ([`statements/`](statements/README.md))
 
-Detailed specifications defining the AST representations, binder type rules, and 64-bit Register VM lowering for every language construct:
+Detailed specifications defining the AST representations, binder type rules, and 64-bit Register VM lowering for all 44 language constructs:
 
-* [**Modules, Imports & Qualified Namespaces**](file:///home/jehud/Projects/solix-language/docs/spec/statements/modules.md): `package`, `import`, `extern import`, `alias`, and qualified `::` declarations.
-* [**Declarations & OOP Members**](file:///home/jehud/Projects/solix-language/docs/spec/statements/declarations.md): `class`, `interface`, `enum`, constructors, `~destructors`, methods, fields, and operator overloads.
-* [**Generics & Variadic Templates**](file:///home/jehud/Projects/solix-language/docs/spec/statements/generics-and-variadics.md): Type parameter bounds (`<T : Bound>`), variadic packs (`<args...>`), tuple lowering, and monomorphization blueprints.
-* [**Control Flow Statements**](file:///home/jehud/Projects/solix-language/docs/spec/statements/control-flow.md): `if`/`else`, `while`, `do`/`while`, `for`, `switch`/`case`, `break`, `continue`, and `return`.
-* [**Exceptions & Runtime Intrinsics**](file:///home/jehud/Projects/solix-language/docs/spec/statements/exceptions-and-intrinsics.md): `try`/`catch`/`finally`, `throw`, `assert`, `exit`, and `print`/`println`.
-* [**Expressions & Operators**](file:///home/jehud/Projects/solix-language/docs/spec/statements/expressions.md): Binary/unary operators, ternary operator, casts (`cast(e, T)` & `(T)e`), `instanceof`, `sizeof`, `default`, `new`, indexing `[]`, and closures `=>`.
+### 2.1. Compilation Units & Modules ([`statements/modules/`](statements/modules/package_statement.md))
+* [`package_statement.md`](statements/modules/package_statement.md) — Namespace boundaries & compilation unit isolation
+* [`import_statement.md`](statements/modules/import_statement.md) — Selective & wildcard symbol imports
+* [`alias_statement.md`](statements/modules/alias_statement.md) — Type synonyms & generic alias substitutions
+
+### 2.2. Declarations ([`statements/declarations/`](statements/declarations/class_declaration.md))
+* [`class_declaration.md`](statements/declarations/class_declaration.md) — Reference types, single inheritance, and VTables
+* [`interface_declaration.md`](statements/declarations/interface_declaration.md) — Abstract contracts & multiple interface conformance
+* [`enum_declaration.md`](statements/declarations/enum_declaration.md) — Strongly typed discrete enumerations
+* [`field_declaration.md`](statements/declarations/field_declaration.md) — Static, instance, and `weak` cycle-breaking fields
+* [`constructor_declaration.md`](statements/declarations/constructor_declaration.md) — Initializer lists, `super()` chaining, and heap allocation
+* [`destructors.md`](statements/declarations/destructors.md) — Deterministic RAII cleanup, subclass-to-base inheritance chaining, and exception stack unwinding
+* [`method_declaration.md`](statements/declarations/method_declaration.md) — Static, virtual, and abstract member functions
+* [`operator_declaration.md`](statements/declarations/operator_declaration.md) — Operator overloading for `+`, `-`, `*`, `/`, `=`
+* [`generic_declaration.md`](statements/declarations/generic_declaration.md) — Template metaprogramming, classes, methods, and monomorphization
+* [`tuple_primitive.md`](statements/declarations/tuple_primitive.md) — First-class `tuple` primitive, variadic packs `<args...>`, and deterministic RAII cleanup
+
+### 2.3. Control Flow ([`statements/control_flow/`](statements/control_flow/while_statement.md))
+* [`block_statement.md`](statements/control_flow/block_statement.md) — Lexical scope boundaries & ARC scope-exit cleanup
+* [`variable_declaration.md`](statements/control_flow/variable_declaration.md) — Register allocation, primitives vs. reference types
+* [`expression_statement.md`](statements/control_flow/expression_statement.md) — Side-effect evaluation & temporary reference `DEC_REF`
+* [`if_statement.md`](statements/control_flow/if_statement.md) — Boolean predicate branching & short-circuit jumps
+* [`while_statement.md`](statements/control_flow/while_statement.md) — Pre-test loop iteration & loop context labels
+* [`do_while_statement.md`](statements/control_flow/do_while_statement.md) — Post-test single-pass guarantee
+* [`for_statement.md`](statements/control_flow/for_statement.md) — Induction variable scoping, step expressions, and iteration
+* [`switch_statement.md`](statements/control_flow/switch_statement.md) — Multi-way jump tables, case matching, and fall-through
+* [`break_statement.md`](statements/control_flow/break_statement.md) — Non-local escape & intermediate block ARC unwinding
+* [`continue_statement.md`](statements/control_flow/continue_statement.md) — Iteration advancement & intermediate block cleanup
+* [`return_statement.md`](statements/control_flow/return_statement.md) — Frame termination, return values, receiver/parameter cleanup
+* [`throw_statement.md`](statements/control_flow/throw_statement.md) — Exception hierarchy enforcement & zero-cost unwinding
+* [`try_catch_finally_statement.md`](statements/control_flow/try_catch_finally_statement.md) — Exception matching tables, parameter binding, `finally` guarantees
+* [`intrinsics.md`](statements/control_flow/intrinsics.md) — Language intrinsics `assert` invariant validation and `exit` process termination
+
+### 2.4. Expressions ([`statements/expressions/`](statements/expressions/assignment_expression.md))
+* 16 granular expression specifications including [`assignment_expression.md`](statements/expressions/assignment_expression.md), [`binary_expression.md`](statements/expressions/binary_expression.md), [`cast_expression.md`](statements/expressions/cast_expression.md), [`instanceof_expression.md`](statements/expressions/instanceof_expression.md), [`lambda_expression.md`](statements/expressions/lambda_expression.md), and [`new_instance_expression.md`](statements/expressions/new_instance_expression.md).
 
 ---
 
-## 3. Standard Library v2.0 Specifications ([`solixlib/`](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/README.md))
+## 3. Standard Library Component Specifications ([`libraries/solixlib/`](libraries/solixlib/string.md))
 
-Normative contracts for all 7 standard library packages in `libraries/solixlib/`:
+Normative contracts for all 17 components of the standard library:
 
-* [**Core (`solix.core`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/core.md): Standard interfaces, primitive wrappers, `String`, `StringBuilder`, `Optional<T>`, `Result<T, E>`, and standard exception hierarchy.
-* [**Collections (`solix.collections`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/collections.md): Generic data structures (`List`, `LinkedList`, `Deque`, `Queue`, `Stack`, `CircularBuffer`, `HashMap`, `TreeMap`, `BitSet`) and generic `Algorithms`.
-* [**I/O & File System (`solix.io`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/io.md): `Console`, streams (`IStream`, `MemoryStream`, `FileStream`), stream readers/writers, `Path`, `File`, and `Dir`.
-* [**Mathematics & Randomness (`solix.math`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/math.md): Transcendental functions, numeric bounds, and deterministic `xoshiro256**` PRNG (`Random`).
-* [**Time & Date (`solix.time`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/time.md): Monotonic `Instant`, wall-clock `DateTime`, `Duration`, and high-resolution `Stopwatch`.
-* [**System & Process (`solix.system`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/system.md): `Environment` variables, process arguments, exit codes, and process spawning (`Process`).
-* [**Cryptography & Encoding (`solix.crypto`)**](file:///home/jehud/Projects/solix-language/docs/spec/solixlib/crypto.md): SHA-256, SHA-1, MD5, Base64 encoding/decoding, and Hex utilities.
+* [`string.md`](libraries/solixlib/string.md) — `String`, `StringBuilder`, UTF-8 manipulation, formatting
+* [`list.md`](libraries/solixlib/list.md) — Resizable `List<T>` dynamic array container
+* [`map.md`](libraries/solixlib/map.md) — Hash-bucket `Map<K, V>` associative container
+* [`set.md`](libraries/solixlib/set.md) — Hash-based `Set<T>` unique element set
+* [`streams.md`](libraries/solixlib/streams.md) — Abstract streams, byte streams, memory buffers
+* [`filesystem.md`](libraries/solixlib/filesystem.md) — `File`, `Directory`, `Path`, filesystem operations
+* [`crypto.md`](libraries/solixlib/crypto.md) — Cryptographic hashes (SHA-256, MD5) and secure random numbers
+* [`time.md`](libraries/solixlib/time.md) — Timestamps, duration, clock intervals, calendar dates
+* [`math.md`](libraries/solixlib/math.md) — Trigonometric functions, exponentials, roots, constants
+* [`console.md`](libraries/solixlib/console.md) — Console I/O, terminal styling, color formatting
+* [`environment.md`](libraries/solixlib/environment.md) — Environment variables, command-line arguments, process info
+* [`exceptions.md`](libraries/solixlib/exceptions.md) — Standard exception hierarchy, stack traces, unwinding
+* [`linear_collections.md`](libraries/solixlib/linear_collections.md) — Stack, Queue, Deque, linear buffers
+* [`collections_core.md`](libraries/solixlib/collections_core.md) — Collection interfaces, iterators, enumeration contracts
+* [`primitives.md`](libraries/solixlib/primitives.md) — Primitive boxing wrappers, parsing, bit-level inspection
+* [`resource.md`](libraries/solixlib/resource.md) — Embedded asset extraction from `.slxarc` containers
+* [`scaffolding.md`](libraries/solixlib/scaffolding.md) — Project templates, boilerplate scaffolding, test harnesses
+
+---
+
+## 4. CLI Toolchain & Language Server Specifications ([`tools/`](tools/cli/README.md))
+
+* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): [`build.md`](tools/cli/build.md), [`compile.md`](tools/cli/compile.md), [`manifest.md`](tools/cli/manifest.md), [`new.md`](tools/cli/new.md), [`pack.md`](tools/cli/pack.md), [`package.md`](tools/cli/package.md), [`run.md`](tools/cli/run.md)
+* [**Language Server Specifications (`tools/lsp/`)**](tools/lsp/protocol.md): [`protocol.md`](tools/lsp/protocol.md), [`navigation.md`](tools/lsp/navigation.md), [`intelligence.md`](tools/lsp/intelligence.md)
