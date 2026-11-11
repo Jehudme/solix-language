@@ -43,7 +43,7 @@ miette = { version = "7.4", features = ["fancy"] }
 
 # Language Server Protocol & Async
 tower-lsp = "0.20"
-tokio = { version = "1.40", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 
 # Compiler & Lexer utilities
 compact_str = { version = "0.8", features = ["serde"] }
