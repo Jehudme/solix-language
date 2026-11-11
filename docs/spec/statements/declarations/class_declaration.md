@@ -14,10 +14,11 @@ Class instances are allocated on the heap as reference-counted objects managed b
 An instance has an 8-byte header followed by contiguous field offsets:
 ```text
 +-------------------------------------------------------------+
-| Header: uint32_t ref_count (ARC) | uint32_t vtable_id       |
+| Header (8 bytes): [ size: u32 ] | [ tag: 4b | ref: 28b ]    |
 +-------------------------------------------------------------+
-| Field 0 (Superclass fields...)                              |
-| Field 1 (Declared fields...)                                |
+| Address + 0:  u64 VTable ID                                 |
+| Address + 8:  Field 0 (Superclass fields...)                |
+| Address + 16: Field 1 (Declared fields...)                  |
 +-------------------------------------------------------------+
 ```
 

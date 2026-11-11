@@ -15,20 +15,13 @@ int32[] primes = [2, 3, 5];
 ```
 
 ```bytecode
-// Compiled VM Bytecode
-LoadI32 r0, 3
-ALLOC_STATIC 4              // Allocate array of length 3
-DUP
+// Compiled Register VM Bytecode
+NewArrayRef r0, array_i32_class_id, 3 // Allocate array of length 3 into r0
 LoadI32 r1, 2
-LoadI32 r2, 0
-SET_ARRAY                   // arr[0] = 2
-DUP
-LoadI32 r3, 3
-LoadI32 r4, 1
-SET_ARRAY                   // arr[1] = 3
-DUP
-LoadI32 r5, 5
-LoadI32 r6, 2
-SET_ARRAY                   // arr[2] = 5
-Mov r1, r6                 // primes = array pointer
+SetArrayElement r0, 0, r1            // arr[0] = 2
+LoadI32 r2, 3
+SetArrayElement r0, 1, r2            // arr[1] = 3
+LoadI32 r3, 5
+SetArrayElement r0, 2, r3            // arr[2] = 5
+Mov r4, r0                           // primes = array pointer
 ```

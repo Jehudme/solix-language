@@ -82,9 +82,9 @@ Tuples are tracked by the Automatic Reference Counting (ARC) allocator with tag 
 +-------------------------------------------------------------+
 | Header: Length (4B) | Tag + RefCount (4B)                   |
 +-------------------------------------------------------------+
-| Element Type Tags: uint32_t types[count]                    |
+| Element Type Tags: u32 types[count]                    |
 +-------------------------------------------------------------+
-| Values Payload (8-byte aligned): uint64_t values[count]     |
+| Values Payload (8-byte aligned): u64 values[count]     |
 +-------------------------------------------------------------+
 ```
 

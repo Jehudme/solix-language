@@ -208,7 +208,7 @@ Solix manifests support declarative pre-compile and post-compile lifecycle comma
 ```json
 {
   "pre_compile": [
-    "cmake -B native/build -S native"
+    "cargo build --release --manifest-path native/Cargo.toml"
   ],
   "post_compile": [
     "echo \"Build finished!\""
@@ -217,7 +217,7 @@ Solix manifests support declarative pre-compile and post-compile lifecycle comma
     "release": {
       "pre_compile": [
         "python3 scripts/build_native.py",
-        "cmake --build native/build --config Release"
+        "cargo test --manifest-path native/Cargo.toml"
       ],
       "post_compile": [
         "strip lib/libplugin.so"

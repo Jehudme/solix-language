@@ -22,7 +22,7 @@ Unlike lambdas with captures, pure function pointers require zero runtime heap m
 ## 2. Compilation & Runtime Mechanics (With Real Bytecode)
 
 ### Assignment and Invocation
-When referencing a static method as a function pointer, the compiler emits `PUSH_CONST_I32 <target_ip>` containing the resolved bytecode address of the function.
+When referencing a static method as a function pointer, the compiler emits `LoadFnPtr r<dst>, <func_id>` containing the resolved bytecode address of the function.
 
 Invocation uses the standard `CALL` instruction, popping the arguments and target address from the stack.
 
@@ -44,16 +44,14 @@ public class Main {
 ```
 
 ```bytecode
-// Compiled VM Bytecode for Main.main()
-PUSH_CONST_I32 <MathUtils.doubleVal_ip>  // Address of target static method
-Mov r0, r7                             // Store into function pointer variable 'op'
+// Compiled Register VM Bytecode for Main.main()
+LoadFnPtr r0, math_utils_double_val_id // Function ID of target static method
+Mov r1, r0                             // Store into function pointer variable 'op'
 
 // Invocation
-LoadI32 r0, 21                       // Push argument 1
-// (Register r0 holds local variable)                             // Load target IP from 'op'
-LoadI32 r1, 1                        // Argument count
-CALL                                    // Invoke function at target address
-Ret r0
+LoadI32 r2, 21                         // Push argument 21
+CallDirect r3, r1, r2, 1               // Dispatches indirect call via function pointer in r1
+Ret r3
 ```
 
 ---

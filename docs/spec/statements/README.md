@@ -29,7 +29,7 @@ Each document focuses strictly on the architecture and mechanics of the construc
 ### Part III: Control Flow & Execution Statements (`control_flow/`)
 - [`block_statement.md`](control_flow/block_statement.md) — Lexical scope boundaries & ARC scope-exit cleanup
 - [`variable_declaration.md`](control_flow/variable_declaration.md) — Frame slotting, primitives vs. reference types
-- [`expression_statement.md`](control_flow/expression_statement.md) — Side-effect evaluation & temporary reference `DEC_REF` / `POP`
+- [`expression_statement.md`](control_flow/expression_statement.md) — Side-effect evaluation & temporary reference `DecRef`
 - [`if_statement.md`](control_flow/if_statement.md) — Boolean predicate branching & short-circuit jumps
 - [`while_statement.md`](control_flow/while_statement.md) — Pre-test loop iteration & loop context labels
 - [`do_while_statement.md`](control_flow/do_while_statement.md) — Post-test single-pass guarantee

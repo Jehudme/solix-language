@@ -19,15 +19,11 @@ Object target = null;
 ```
 
 ```bytecode
-// Compiled VM Bytecode
+// Compiled Register VM Bytecode
 LoadI32 r0, 42
-Mov r1, r0
-PUSH_CONST_F64 3.14
-Mov r2, r0
-PUSH_TRUE
-Mov r3, r0
-LoadConst r1, 0         // Static string pool index
-Mov r4, r1
-PUSH_NULL
-Mov r5, r1
+Mov r1, r0                             // r1 = 42
+LoadF64 r2, const_idx_pi               // r2 = 3.14
+LoadBool r3, 1                         // r3 = true
+LoadConst r4, const_idx_text           // r4 = "text"
+LoadNull r5                            // r5 = null
 ```

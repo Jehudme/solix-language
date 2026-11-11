@@ -240,7 +240,7 @@ Defined Profiles:
 
 ## CPack Multi-OS Packaging & Bundling
 
-In addition to user-level project package management (`solix install/uninstall`), Solix integrates CMake's **CPack** to build native release packages and standalone bundles for Linux, macOS, and Windows:
+In addition to user-level project package management (`solix install/uninstall`), Solix utilizes the native `.slxarc` archiver to build native release packages and standalone bundles for Linux, macOS, and Windows:
 
 ### Target Generators
 - **Linux**:

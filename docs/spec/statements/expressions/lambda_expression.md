@@ -51,18 +51,14 @@ int32 result = adder(23);
 LoadI32 r0, 100                      // Local variable offset = 100
 Mov r0, r0
 
-// Pack closure environment
-// (Register r0 holds local variable)                             // Load offset to capture
-LoadI32 r1, 1                        // 1 capture variable
-PUSH_CONST_I32 <__lambda_0_ip>          // Synthetic lambda code address
-PACK_CLOSURE                            // Allocates heap closure object with captures
-Mov r1, r1                             // Store closure handle into 'adder'
+// Pack closure environment into r1
+// r0 holds local variable `offset` to capture
+NewClosure r1, lambda_0_fn_id, r0, 1   // Allocates heap closure object with 1 capture
+Mov r2, r1                             // Store closure handle into 'adder'
 
 // Invocation
-LoadI32 r2, 23                       // Push argument 'n'
-// (Register r1 holds local variable)                             // Load callable closure handle
-LoadI32 r3, 1                        // Argument count
-CALL                                    // Dispatches callable; unpacks environment into frame
+LoadI32 r3, 23                         // Push argument 'number'
+CallDirect r4, r2, r3, 1               // Dispatches callable closure handle in r2
 ```
 
 ---

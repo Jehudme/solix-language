@@ -25,9 +25,8 @@ This guide walks you through building the toolchain, scaffolding a new project, 
 
 | Tool | Minimum Version | Purpose |
 |---|---|---|
-| CMake | 3.20 | Build configuration and target generation |
-| C++ Compiler | Rust 2021 Edition (rustc 1.80+) | Language engine compilation |
-| Git | Recent version | Fetching dependencies |
+| Rust / Cargo | 1.80+ (Edition 2024 compatible) | Toolchain, compiler, and CLI compilation |
+| Git | Recent version | Repository version control |
 
 ### Clone and Build
 

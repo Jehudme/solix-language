@@ -13,7 +13,7 @@ When `condition` evaluates to `true`, the assertion completes silently with zero
 
 ### `exit`
 The `exit` statement immediately terminates process execution with an integer exit code:
-- `exit(code);` — Evaluates integer expression `code` and invokes the operating system process exit routine (`std::exit`), immediately halting the VM.
+- `exit(code);` — Evaluates integer expression `code` and invokes the host system process termination routine (`std::process::exit`), immediately halting the VM.
 
 Both statements are statically type-checked by the compiler binder:
 - The assertion condition must be type `bool`.
@@ -56,7 +56,7 @@ Ret r0
 When compiling `exit(code);`:
 1. The integer expression `code` is compiled onto the operand stack.
 2. The compiler emits `OpCode::EXIT` (`0x89`).
-3. At runtime, the VM pops the integer value from the stack and calls the platform exit routine `std::exit(code)`.
+3. At runtime, the VM pops the integer value from the stack and calls the host system exit routine `std::process::exit(code)`.
 
 #### Bytecode Disassembly Example
 ```solix

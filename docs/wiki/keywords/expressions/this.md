@@ -25,7 +25,7 @@ ThisMethodCall : 'this' '.' Identifier '(' [ ArgumentList ] ')'
 
 ## 3. Semantics & Compiler Rules
 
-- **Local Slot 0**: In the Solix virtual machine call frame layout, `this` is assigned to local variable slot 0 (`GET_LOCAL 0`).
+- **Local Slot 0**: In the Solix virtual machine call frame layout, `this` is assigned to local variable slot 0 (`r0`).
 - **Disambiguation**: Used to distinguish instance fields from local variables or method parameters of the same name (e.g., `this.count = count;`).
 - **Receiver Object**: When calling an instance method `speak()`, writing `this.speak()` or `speak()` evaluates `this` as the receiver address pushed before arguments.
 - Any attempt to use `this` in a static context or outside a class produces the compiler error: `'this' cannot be used in a static context`.

@@ -30,12 +30,12 @@ solixlib/
 │       └── core/
 │           └── Internal.slx     # Core internal package declaration
 ├── scripts/
-│   └── build_native.py          # Multi-platform Zig/CMake cross-compilation script
+│   └── build_native.py          # Multi-platform Zig/Cargo cross-compilation script
 │
 └── native/                      # 100% Pure C/C++ Companion Project
-    ├── CMakeLists.txt           # Companion CMake project building solixlib_native
+    ├── CargoLists.txt           # Companion Cargo project building solixlib_native
     └── src/
-        └── register.cpp         # solix_register_natives registration hook
+        └── lib.rs         # solix_register_natives registration hook
 ```
 
 ---
@@ -81,13 +81,13 @@ solixlib/
 
 ---
 
-## 4. Native Companion Shared Library (`solixlib/native/CMakeLists.txt`)
+## 4. Native Companion Shared Library (`solixlib/native/CargoLists.txt`)
 
-The native companion library (`solixlib_native`) is built via CMake and configured to deposit its compiled binaries directly into `solixlib/lib/`:
+The native companion library (`solixlib_native`) is built via Cargo and configured to deposit its compiled binaries directly into `solixlib/lib/`:
 
-```cmake
+```cargo
 add_library(solixlib_native SHARED
-    src/register.cpp
+    src/lib.rs
 )
 
 target_include_directories(solixlib_native PRIVATE
@@ -108,11 +108,11 @@ set_target_properties(solixlib_native PROPERTIES
 )
 ```
 
-The native hook in `solixlib/native/src/register.cpp` exports the standard registration function:
+The native hook in `solixlib/native/src/lib.rs` exports the standard registration function:
 
 ```cpp
 #include "solix/native.h"
-#include "solix/native_registry.hpp"
+#include "solix native ffi"
 
 extern "C" SOLIX_EXPORT void solix_register_natives(solix::NativeRegistry &registry) {
     (void)registry;
@@ -125,9 +125,9 @@ extern "C" SOLIX_EXPORT void solix_register_natives(solix::NativeRegistry &regis
 ## 5. Build and Installation Lifecycle
 
 ### Step 1: Compile Native Companion
-- **Host Development Build**: Building the Solix engine automatically compiles `solixlib_native` for the host platform via CMake:
+- **Host Development Build**: Building the Solix engine automatically compiles `solixlib_native` for the host platform via Cargo:
   ```bash
-  cmake --build build
+  cargo --build build
   ```
   This compiles `solixlib_native` and places it in `solixlib/lib/`.
 - **Multi-Platform Cross-Compilation**: During release packaging or standalone cross-compilation:

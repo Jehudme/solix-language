@@ -1,4 +1,4 @@
-# Formal Specification: Compilation Pipeline, Dual-Mode Linking & Dead-Code Elimination
+verify that all feature wiki keword a# Formal Specification: Compilation Pipeline, Dual-Mode Linking & Dead-Code Elimination
 
 ## Document Metadata
 

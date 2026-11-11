@@ -51,4 +51,4 @@ Solix uses compile-time **monomorphization**: each unique specialization of a te
 ### Bytecode Efficiency
 Because Solix monomorphizes templates at compile time:
 - Primitive instantiations (`Box<int32>`, `Box<float64>`) avoid any object boxing or dynamic type tag inspection.
-- Operations on `T` (such as field accesses or arithmetic) compile directly into primitive instructions (`ADD_I64`, `SET_PROPERTY`).
+- Operations on `T` (such as field accesses or arithmetic) compile directly into primitive instructions (`AddI64`, `SET_PROPERTY`).

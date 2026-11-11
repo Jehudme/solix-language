@@ -37,7 +37,7 @@ NativeMethod
 ### Basic Usage
 
 ```solix
-package solix.systems;
+package solix.io;
 
 // These methods are implemented in the runtime's native layer.
 public class Console {

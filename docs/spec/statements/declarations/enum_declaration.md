@@ -18,6 +18,6 @@ Status s = Status.ACTIVE;
 
 ```bytecode
 // Compiled VM Bytecode
-PUSH_CONST_I64 1            // Status.ACTIVE is ordinal 1
+LoadI64 r0, 1               // Status.ACTIVE is ordinal 1
 Mov r1, r7                 // Stored into 's' (value type, 0 ARC)
 ```

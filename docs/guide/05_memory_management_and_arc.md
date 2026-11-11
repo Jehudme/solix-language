@@ -31,40 +31,48 @@ The Solix **Binder (Pass 2)** is responsible for injecting `INC_REF` and `DEC_RE
 
 ---
 
-## Object Header Layout
+## Object Header Layout & Byte-Addressed Heap
 
-Each heap-allocated object begins at a **header word** immediately before its first field. The header is a 64-bit integer (`uint64_t`) whose two halves encode:
+Solix allocates heap objects within a contiguous byte-addressed virtual heap (`VirtualHeap`). Every dynamically allocated heap block is preceded by an 8-byte packed header positioned immediately before the base object address:
 
+```text
+Byte offset [Address - 8 .. Address - 5]:  [ size (u32 allocation size or element count) ]
+Byte offset [Address - 4 .. Address - 1]:  [ BlockTag (4 bits) | ref_count (28 bits)     ]
+Byte offset [Address + 0 .. Address + 7]:  [ VTable ID (64-bit virtual method table ID)   ]
+Byte offset [Address + 8 ..            ]:  [ Object Fields (naturally aligned)           ]
 ```
- 63                    32 31                     0
-┌─────────────────────────┬─────────────────────────┐
-│        vtable_id        │       ref_count         │
-│       (high 32 bits)    │       (low 32 bits)     │
-└─────────────────────────┴─────────────────────────┘
-```
 
-| Bits | Field | Description |
-|------|-------|-------------|
-| 0–31 | `ref_count` | Number of live references to this object |
-| 32–63 | `vtable_id` | Identifier used by `CALL_VIRTUAL` to dispatch virtual methods |
+| Header Field | Size | Description |
+|---|---|---|
+| `size` | 32 bits | Payload capacity in bytes (or element count for arrays) |
+| `tag` | 4 bits | Strongly typed `BlockTag` (`Object`, `ObjectPod`, `ArrayRef`, `String`, etc.) |
+| `ref_count` | 28 bits | Active reference counter (maximum 268,435,455 live references) |
 
-Immediately after the header word, the object's fields are laid out in declaration order, one 64-bit word per field.
+### Natural Field Alignment
+Instance fields start at `Address + 8` (after the 8-byte VTable ID) and are packed contiguously adhering to natural alignment rules:
+- 1-byte types (`bool`, `char`, `int8`, `uint8`): 1-byte alignment
+- 2-byte types (`int16`, `uint16`): 2-byte alignment
+- 4-byte types (`int32`, `uint32`, `float32`, `enum`): 4-byte alignment
+- 8-byte types (`int64`, `uint64`, `float64`, object references, arrays): 8-byte alignment
+
+Padding bytes are inserted automatically if a field's offset does not align with its boundary.
 
 **Example — `Rectangle` (two `float64` fields):**
-
+```text
+Address - 8 : [ size: 24 bytes ]
+Address - 4 : [ BlockTag::Object (4 bits) | ref_count (28 bits) ]
+Address + 0 : VTable ID (8 bytes)
+Address + 8 : width (8-byte float64)
+Address + 16: height (8-byte float64)
 ```
-Address N-1 : [vtable_id | ref_count]   ← header
-Address N   : width  (float64)
-Address N+1 : height (float64)
-```
 
-The GC address returned by `new` points to `N` (the first field), not to the header. The runtime accesses the header at `address - 1`.
+The object address returned by `new` points to `Address + 0`. The runtime inspects the header at `Address - 8`.
 
 ---
 
-## INC\_REF and DEC\_REF
+## IncRef and DecRef
 
-These are VM opcodes emitted by the Assembler based on binding information.
+Reference counting is handled by dedicated VM opcodes (`IncRef` and `DecRef`) emitted at compile time.
 
 ### `INC_REF`
 

@@ -1,194 +1,151 @@
-# Native C/C++ Plugins and Shared Libraries
+# Native Rust & C Extensions (`native`)
 
-Solix allows developers to interface directly with compiled native C and C++ shared libraries (`.dll` on Windows, `.so` on Linux, and `.dylib` on macOS). Through native interoperability, you can implement high-performance numeric computations, bind existing C libraries, or interact with operating system hardware interfaces.
+Solix provides high-throughput Foreign Function Interface (FFI) interoperability with compiled native shared libraries (`.so` on Linux, `.dylib` on macOS, and `.dll` on Windows). Native extensions enable compute-intensive algorithms, OS hardware bindings, and zero-overhead native integration.
 
 ---
 
 ## 1. Declaring Native Methods in Solix
 
-In Solix, native methods are declared using the `native` keyword. Like abstract methods, native methods terminate with a semicolon and do not have an inline body:
+Native methods are declared using the `native` modifier. Like abstract methods, native methods omit the method body:
 
 ```solix
-public class MathLib {
+package my_project;
+
+public class MathBridge {
     // Static native method
     public static native int32 fast_add(int32 value_a, int32 value_b);
     public static native int32 fast_multiply(int32 value_a, int32 value_b);
 }
-
-public class Counter {
-    public int32 value;
-
-    // Instance native method operating on 'this'
-    public native int32 increment();
-}
 ```
 
----
-
-## 2. The Native C++ Function Signature
-
-Every native function callable by the Solix Virtual Machine must conform to the `NativeFunctionPtr` C-ABI signature:
-
-```cpp
-#include <solix/native.h>
-#include <solix/runtime.hpp>
-
-uint64_t my_native_function(solix::RuntimeContext &vm, uint64_t self, uint64_t *args, size_t argc);
-```
-
-### Parameter Breakdown:
-- **`vm` (`solix::RuntimeContext &`)**: Reference to the executing virtual machine. Gives you direct access to the VM heap, memory allocation, and runtime options.
-- **`self` (`uint64_t`)**: 
-  - For `static` methods: always `0`.
-  - For instance methods: the 32-bit heap `Address` of the calling object (`this`), zero-extended to 64 bits.
-- **`args` (`uint64_t *`)**: Array of 64-bit machine words containing the arguments in left-to-right order (`args[0]`, `args[1]`, etc.).
-- **`argc` (`size_t`)**: The count of arguments passed to the call.
-
----
-
-## 3. Authoring a Native Plugin in C++
-
-Here is a complete C++ plugin file (`math_plugin.cpp`):
-
-```cpp
-#include <solix/native.h>
-#include <solix/runtime.hpp>
-#include <solix/native_registry.hpp>
-
-// 1. Static addition
-static uint64_t native_fast_add(solix::RuntimeContext &vm, uint64_t self, uint64_t *args, size_t argc) {
-    (void)vm;
-    (void)self;
-    (void)argc;
-    int32_t a = static_cast<int32_t>(args[0]);
-    int32_t b = static_cast<int32_t>(args[1]);
-    return static_cast<uint64_t>(a + b);
-}
-
-// 2. Instance method modifying object field
-static uint64_t native_counter_increment(solix::RuntimeContext &vm, uint64_t self, uint64_t *args, size_t argc) {
-    (void)args;
-    (void)argc;
-    solix::Address obj = static_cast<solix::Address>(self);
-
-    // In Solix, field 0 is reserved for vtable_id; the first user field is at offset 1
-    uint64_t current_val = vm.memory.read_u64(obj, 1);
-    current_val += 1;
-    vm.memory.write_u64(obj, 1, current_val);
-
-    return current_val;
-}
-
-// 3. Batch Registration Hook exported to the Solix runtime
-extern "C" SOLIX_EXPORT void solix_register_natives(solix::NativeRegistry &registry) {
-    registry.register_function("MathLib_fast_add", native_fast_add);
-    registry.register_function("Counter_increment", native_counter_increment);
-}
-```
-
-### Direct Export Fallback (Alternative to `solix_register_natives`)
-If you prefer not to write a registration hook, you can directly export any C function conforming to `NativeFunctionPtr`. Solix dynamically discovers exported symbols matching the method name:
-
-```cpp
-extern "C" SOLIX_EXPORT uint64_t fast_multiply(solix::RuntimeContext &vm, uint64_t self, uint64_t *args, size_t argc) {
-    return args[0] * args[1];
-}
-```
-
----
-
-## 4. Compiling the Shared Library
-
-You can compile your native plugin using any standard C++ compiler or CMake:
-
-### Using GCC / Clang on Linux:
-```bash
-clang++ -shared -fPIC -std=c++17 math_plugin.cpp -I/path/to/solix/include -o libmath_plugin.so
-```
-
-### Using Apple Clang on macOS:
-```bash
-clang++ -shared -fPIC -std=c++17 math_plugin.cpp -I/path/to/solix/include -o libmath_plugin.dylib
-```
-
-### Using MSVC / Clang on Windows:
-```bash
-clang++ -shared -std=c++17 math_plugin.cpp -I/path/to/solix/include -o math_plugin.dll
-```
-
-### Minimal `CMakeLists.txt` for Plugin Projects:
-```cmake
-cmake_minimum_required(VERSION 3.20)
-project(my_solix_plugin CXX)
-
-set(CMAKE_CXX_STANDARD 17)
-
-add_library(math_plugin SHARED math_plugin.cpp)
-target_include_directories(math_plugin PRIVATE /path/to/solix/core/include)
-```
-
----
-
-## 5. Using the Plugin in Solix
-
-Solix makes loading and running your native plugin effortless:
-
-### Method A: Zero-Config Auto-Discovery (Recommended)
-Place your compiled `.dll`, `.so`, or `.dylib` in:
-- A `lib/` directory inside your project (`my_project/lib/math_plugin.so`).
-- Or right next to your compiled `.slxb` bytecode file.
-
-When you run `solix run`, Solix automatically discovers and loads all native libraries found in `lib/`:
-```bash
-solix run
-```
-
-### Method B: Manifest Declaration (`manifest.toml`)
-Explicitly register your libraries in your project manifest:
-```json
-{
-  "name": "my_app",
-  "version": "1.0.0",
-  "native_libraries": [
-    "lib/math_plugin.so"
-  ]
-}
-```
-
-### Method C: Command-Line Flag (`-L, --native-lib`)
-Pass one or more libraries directly on the command line when running standalone bytecode:
-```bash
-solix run app.slxb -L ./lib/math_plugin.so
-```
-
----
-
-## 6. End-to-End Example
-
-### Project Structure
-```text
-calculator/
-├── manifest.toml
-├── lib/
-│   └── libmath_plugin.so    # Compiled C++ plugin
-└── src/
-    └── main.slx             # Solix code
-```
-
-### `src/main.slx`
+Calls to static native methods use Solix's canonical scope resolution syntax:
 ```solix
-public class MathLib {
-    public static native int32 fast_add(int32 a, int32 b);
-}
+int32 result = MathBridge::fast_add(15, 27);
+```
 
-static int32 main() {
-    int32 sum = MathLib.fast_add(100, 250);
-    return sum == 350 ? 0 : 1;
+---
+
+## 2. Stable C-ABI: `SolixCValue`
+
+Values are passed across the native boundary using the 16-byte aligned `SolixCValue` structure:
+
+```rust
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SolixCValue {
+    pub tag: u32,     // 0=Null, 1=Bool, 2=I32, 3=I64, 4=F64, 5=Ref, 6=FnPtr
+    pub flags: u32,   // Reserved flags / padding
+    pub payload: u64, // Raw 64-bit value bits or heap reference address
 }
 ```
 
-### Run
+### Native Function Signature
+All native bridge functions conform to the `NativeCFunctionPtr` signature:
+
+```rust
+pub type NativeCFunctionPtr = unsafe extern "C" fn(
+    vm_context: *mut std::ffi::c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue;
+```
+
+---
+
+## 3. Authoring a Native Extension in Rust
+
+Every new Solix project created via `solix new` provides an out-of-the-box native bridge workspace in `natives/rust_bridge/`:
+
+### 3.1. `natives/rust_bridge/Cargo.toml`
+```toml
+[package]
+name = "rust_bridge"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+```
+
+### 3.2. `natives/rust_bridge/src/lib.rs`
+```rust
+//! Rust native bridge extension crate for Solix.
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SolixCValue {
+    pub tag: u32,
+    pub flags: u32,
+    pub payload: u64,
+}
+
+pub type NativeCFunctionPtr = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    *const SolixCValue,
+    u32,
+    *mut SolixCValue,
+) -> SolixCValue;
+
+pub type RegisterNativeCallback = unsafe extern "C" fn(
+    *mut std::ffi::c_void,
+    *const std::ffi::c_char,
+    NativeCFunctionPtr,
+);
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn MathBridge_fast_add(
+    _vm_context: *mut std::ffi::c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue {
+            tag: 0,
+            flags: 0,
+            payload: 0,
+        };
+    }
+    let value_a = unsafe { (*args.add(0)).payload as i32 };
+    let value_b = unsafe { (*args.add(1)).payload as i32 };
+    SolixCValue {
+        tag: 2, // I32
+        flags: 0,
+        payload: ((value_a + value_b) as i64) as u64,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_register_natives(
+    collector_context: *mut std::ffi::c_void,
+    register_callback: RegisterNativeCallback,
+) {
+    let add_symbol = c"MathBridge::fast_add";
+    unsafe {
+        register_callback(
+            collector_context,
+            add_symbol.as_ptr(),
+            MathBridge_fast_add,
+        );
+    }
+}
+```
+
+---
+
+## 4. Building and Packaging Native Libraries
+
+Native extensions are compiled directly with Cargo:
+
 ```bash
-solix run
+# Compile native companion library
+cargo build --release --manifest-path natives/rust_bridge/Cargo.toml
+
+# Build and package the Solix project with its companion library
+solix build --profile release
 ```
-Solix automatically discovers `lib/libmath_plugin.so`, binds `MathLib.fast_add`, and executes at raw C speed!
+
+During `solix build`, the build orchestrator (`scripts/build.py`) builds all native crates under `natives/`, copies the produced shared objects into `lib/`, and embeds them into the resulting `.slxarc` package.

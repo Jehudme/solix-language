@@ -6,7 +6,7 @@ An `IfStatement` provides conditional branching based on the evaluation of a boo
 
 In Solix:
 - The condition must be strictly of type `bool`. Numeric zero/non-zero truthiness is rejected.
-- The compiler lowers the if-statement using conditional jump instructions (`JUMP_IF_FALSE`) with forward jump target patching.
+- The compiler lowers the if-statement using conditional jump instructions (`JumpIfFalse`) with forward jump target patching.
 
 ---
 

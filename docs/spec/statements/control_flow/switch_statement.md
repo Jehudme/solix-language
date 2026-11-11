@@ -23,26 +23,19 @@ switch (cmd) {
 
 ```bytecode
 // Compiled VM Bytecode
-// (Register r1 holds local variable)                 // Load cmd onto stack
-DUP
-LoadI32 r0, 1
-EQ_I64
-JUMP_IF_TRUE <case_1_ip>
+// r0 holds switch condition variable `command`
+LoadI32 r1, 1                // Case constant 1
+EqI32 r2, r0, r1             // Check match: command == 1
+JumpIfTrue r2, <case_1_offset> // Jump to case 1 body
+Jump <default_offset>        // Jump to default body
 
-// Default Jump
-Jump <default_ip>
+// Case 1 Body:
+CallDirect r3, run_fn_id, r0, 0
+Jump <switch_exit_offset>
 
-// Case 1 Body
-<case_1_ip>:
-POP                         // Pop duplicated selector
-CALL run()
-Jump <switch_exit_ip>
-
-// Default Body
-<default_ip>:
-POP
-CALL stop()
-Jump <switch_exit_ip>
+// Default Body:
+CallDirect r3, stop_fn_id, r0, 0
+Jump <switch_exit_offset>
 
 <switch_exit_ip>:
 ```

@@ -2,50 +2,68 @@
 
 ## 1. Overview & Purpose
 
-A `BlockStatement` groups zero or more statements inside a pair of curly braces `{ ... }`. It is the fundamental building block of program structure and variable lifetime in Solix.
+A `BlockStatement` (`{ ... }`) establishes a new lexical scope for variable declarations. It groups a sequence of zero or more statements into a single executable unit.
 
-In Solix, a block does three critical jobs:
-1. **Creates a Lexical Scope**: Any variable declared inside the block exists only until the closing brace `}`. Outer scopes cannot see it.
-2. **Enables Variable Shadowing**: An inner block can declare a variable with the same name as an outer variable, temporarily masking the outer one until the inner block ends.
-3. **Guarantees ARC Cleanup & Exception Safety**: Solix uses Automatic Reference Counting (ARC). When a block ends—whether by falling through normally, hitting an early `return`/`break`, or throwing an exception—the compiler automatically emits `DEC_REF` cleanup for every local reference object declared in that block in reverse declaration order.
+Variables declared within a block are only visible inside that block and its nested blocks. When execution exits the block—either normally or abruptly via `return`, `break`, `continue`, or `throw`—any active reference-counted variables declared in the block are immediately decremented via Automatic Reference Counting (ARC).
 
 ---
 
 ## 2. Compilation & Runtime Mechanics (With Real Bytecode)
 
 ### How It Compiles
-When the compiler encounters `{ ... }`, it pushes a new `SymbolTable` scope. At the end of the block, it emits:
-1. **Normal Cleanup**: Emits `GET_LOCAL <slot>` + `DEC_REF` in reverse order for all reference variables.
-2. **Skip Jump**: An unconditional `JUMP` past the exception cleanup segment.
-3. **Exception Cleanup Segment**: An unwinding landing pad that inner throws jump to, which also decrements the same variables and then branches to the enclosing cleanup or outer frame (`JMP_TO_OUTER_CLEANUP`).
+When the compiler encounters `{ ... }`, it opens a new lexical scope. At the end of the block, it emits:
+1. **Normal Scope Cleanup**: Emits `DecRef r<reg>` in reverse order of declaration for all active reference variables.
+2. **Zero-Cost Unwinding**: Any exception thrown within the block uses the static function exception table (`ExceptionHandlerEntry`) to identify and decrement reference registers active in the block without requiring inline landing pads.
 
 ### Bytecode Disassembly Example
 ```solix
 // Solix Code
 {
     int32 x_coord = 42;
-    String msg = new String("hello");
+    String message = new String("hello");
 }
 ```
 
 ```bytecode
-// Compiled VM Bytecode
+// Compiled Register VM Bytecode
 LoadI32 r0, 42
-Mov r1, r0                 // Slot 1: x = 42
+Mov r1, r0                 // r1 = 42 (x_coord)
 
-LoadConst r1, 0         // "hello"
-CALL String.new(String)     // Slot 2: msg (ref_count = 1)
-Mov r2, r1
+LoadConst r2, 0            // Constant string pool index for "hello"
+CallDirect r3, string_new_fn_id, r2, 1 // r3 = new String("hello") (ref_count = 1)
 
 // --- Normal Scope Exit ---
-// (Register r2 holds local variable)                 // Load msg
-DEC_REF                     // Decrement msg (ref_count 1 -> 0, freed!)
-Jump <skip_exception_ip>
-
-// --- Exception Cleanup Segment (<cleanup_ip>) ---
-// (Register r2 holds local variable)                 // If exception occurred, clean up msg here too
-DEC_REF
-Jump <outer_cleanup_ip>     // Unwind to parent block
-
-// --- Normal Continuation (<skip_exception_ip>) ---
+DecRef r3                  // Decrement message (ref_count 1 -> 0, immediately freed!)
 ```
+
+---
+
+## 3. Syntax & Grammar
+
+```
+BlockStatement
+    : '{' Statement* '}'
+    ;
+```
+
+---
+
+## 4. Semantic Rules & Scope
+
+- **Shadowing**: A variable declared inside a block may not redeclare a variable with the same name in the same scope. Shadowing outer-scope variables is permitted.
+- **Lifetime**: The lifetime of variables declared in the block ends at the closing brace `}`.
+
+---
+
+## 5. ARC & Memory Management
+
+The compiler precisely tracks register allocation and reference lifetimes:
+- Primitives (`int32`, `float64`, `bool`, etc.) require zero teardown.
+- Reference types (`String`, class instances, arrays) have `DecRef` emitted in LIFO order upon exiting the block.
+
+---
+
+## 6. Diagnostic Errors & Common Pitfalls
+
+- **E0202 (Duplicate Variable)**: Declaring two variables with the same name in the same block.
+- **E0201 (Unresolved Identifier)**: Attempting to access a variable outside its declaring block.

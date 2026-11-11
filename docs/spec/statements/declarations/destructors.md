@@ -35,13 +35,10 @@ PUSH_INT 10
 MUL
 PUSH_INT 2
 ADD
-SET_GLOBAL 0
+SetStatic r1, 0
 // --- Automatic Super Destructor Chaining ---
-// (Register r0 holds local variable)                   // Push 'this'
-CALL <BaseResource.~BaseResource IP>
-POP                           // Discard return null
-PUSH_NULL
-Ret r0
+CallDirect r2, base_resource_destructor_id, r0, 1 // Super destructor call
+RetVoid
 ```
 
 ### Deterministic Lifetime & Exception Unwinding

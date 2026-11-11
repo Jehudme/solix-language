@@ -249,82 +249,67 @@ When packaging an application with `solix pack`:
 
 ---
 
-## Compiling Native Companion Libraries with CMake Lifecycle Hooks
+## Compiling Native Companion Libraries with Lifecycle Hooks
 
-When a Solix project or library relies on native C/C++ companion libraries, you can automate the native build process directly within `solix build` and `solix pack` using the declarative `pre_compile` lifecycle hook.
+When a Solix project or library relies on native companion libraries (authored in Rust or C), you can automate the native compilation directly within `solix build` and `solix pack` using the declarative `pre_compile` lifecycle hook.
 
-### 1. Project Directory Layout with CMake
-```
+### 1. Project Directory Layout with Cargo
+```text
 my_native_app/
 ├── manifest.toml
-├── native/
-│   ├── CMakeLists.txt
-│   └── src/
-│       └── plugin.cpp
+├── natives/
+│   └── rust_bridge/
+│       ├── Cargo.toml
+│       └── src/lib.rs
 ├── src/
 │   └── main.slx
+├── lib/
+│   └── librust_bridge.so
 └── resources/
-    └── config.json
+    └── config.txt
 ```
 
 ### 2. Manifest Configuration
 
-In `manifest.toml`, declare `pre_compile` commands to configure and compile the native library before Solix processes bytecode:
+In `manifest.toml`, declare `pre_compile` commands to build the native crate before Solix emits bytecode:
 
-```json
-{
-  "project": "my_native_app",
-  "version": "1.0.0",
+```toml
+[package]
+name = "my_native_app"
+version = "0.1.0"
+entry = "src/main.slx"
 
-  "pre_compile": [
-    "cmake -B native/build -S native",
-    "cmake --build native/build --config Release"
-  ],
+[lifecycle]
+pre_compile = [
+    "cargo build --release --manifest-path natives/rust_bridge/Cargo.toml"
+]
 
-  "dependencies": [
-    {
-      "type": "project",
-      "path": "../crypto_driver",
-      "profile": "release"
-    },
-    {
-      "type": "source",
-      "path": "src/main.slx"
-    }
-  ],
-
-  "profiles": {
-    "release": {
-      "output_directory": "build/release",
-      "exe_filename": "out.slxb",
-      "compilation": {
-        "entry_point": "main"
-      }
-    }
-  }
-}
+[dependencies]
+solixlib = { path = "../solixlib" }
 ```
 
-In `native/CMakeLists.txt`, set the library output directory to `${CMAKE_CURRENT_SOURCE_DIR}/../lib` so that compiled shared libraries (`.so`, `.dll`, or `.dylib`) land directly in `lib/`:
+In `natives/rust_bridge/Cargo.toml`, set crate type to dynamic library (`cdylib`):
 
-```cmake
-cmake_minimum_required(VERSION 3.15)
-project(native_companion CXX)
+```toml
+[package]
+name = "rust_bridge"
+version = "0.1.0"
+edition = "2024"
 
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../lib)
-
-add_library(native_plugin SHARED src/plugin.cpp)
+[lib]
+crate-type = ["cdylib"]
 ```
+
+The build runner deposits the compiled `.so`, `.dll`, or `.dylib` directly into `lib/`.
 
 ### 3. Topological Dependency Pre-Compile Ordering
-If your application depends on a dependent project that also uses CMake (e.g. `crypto_driver` with `"profile": "release"`):
-1. **Topological Discovery**: Solix resolves `crypto_driver` with profile `"release"`.
-2. **Dependency Pre-Compile**: `crypto_driver`'s pre-compile commands execute first inside `crypto_driver`'s directory, compiling its native library into `crypto_driver/lib/`.
-3. **Application Pre-Compile**: The application's `pre_compile` commands execute next in `my_native_app/`.
-4. **Bytecode Compilation**: Solix compiler compiles bytecode.
-5. **Transitive Staging**: Solix stages all `.so`/`.dll`/`.dylib` files from `crypto_driver/lib/` and `my_native_app/lib/` into `build/release/lib/`.
-6. **Packaging**: `solix pack` packages bytecode, native libraries, and resources into the final `.slxarc` bundle.
+If your application depends on a library package that also provides native companion libraries:
+1. **Topological Discovery**: Solix resolves dependencies in topological order.
+2. **Dependency Pre-Compile**: Dependent library pre-compile commands execute first inside the dependency directory, compiling its native artifacts into its local `lib/`.
+3. **Application Pre-Compile**: The application pre-compile commands execute next in `my_native_app/`.
+4. **Bytecode Compilation**: Solix compiles source code into `.slxb`.
+5. **Transitive Staging**: Solix stages all `.so`/`.dll`/`.dylib` files from dependency `lib/` and application `lib/` into the build directory.
+6. **Packaging**: `solix pack` packages bytecode, staged native libraries, and resources into the final `.slxarc` bundle.
 
 ---
 
@@ -376,10 +361,10 @@ my_native_project/
 │   ├── libmy_native.so        # Linux ELF shared object
 │   ├── my_native.dll          # Windows PE DLL
 │   └── libmy_native.dylib     # macOS Mach-O dynamic library
-├── native/                    # 100% C/C++ source code
-│   ├── CMakeLists.txt         # Standard CMake configuration for local host development
-│   └── src/
-│       └── register.cpp       # Exports solix_register_natives hook
+├── natives/                   # Native Rust companion crate
+│   └── rust_bridge/
+│       ├── Cargo.toml
+│       └── src/lib.rs         # Exports solix_register_natives hook
 └── scripts/
     └── build_native.py        # Cross-compilation driver script using Zig
 ```

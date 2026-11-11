@@ -19,7 +19,7 @@ public class Console { ... }
 ## 2. API Reference
 
 ### 2.1 Standard Output (`print`, `println`)
-Prints primitive values and character arrays to standard output (`std::cout`).
+Prints primitive values and character arrays to standard output (`std::io::stdout()`).
 
 | Method | Description |
 |---|---|
@@ -48,7 +48,7 @@ Emits formatted diagnostic text wrapped in standard ANSI escape codes.
 | `static void success(char[] val)` / `success(int32 val)` | Green (`\033[32m`) | `stdout` | Prints success message. |
 
 ### 2.3 Standard Input (`input_*`)
-Reads and parses input from standard input (`std::cin`).
+Reads and parses input from standard input (`std::io::stdin()`).
 
 | Method | Return Type | Description |
 |---|---|---|

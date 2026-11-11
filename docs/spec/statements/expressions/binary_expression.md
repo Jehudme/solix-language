@@ -2,7 +2,7 @@
 
 ## 1. Overview & Purpose
 
-A `BinaryExpression` combines two operands using an infix operator (arithmetic, relational, logical, bitwise). Solix executes typed ALU opcodes (`ADD_I64`, `ADD_F64`, `EQ_I64`, etc.) and short-circuits `&&` and `||`.
+A `BinaryExpression` combines two operands using an infix operator (arithmetic, relational, logical, bitwise). Solix executes typed ALU opcodes (`AddI64`, `AddF64`, `EqI64`, etc.) and short-circuits `&&` and `||`.
 
 ---
 
@@ -15,9 +15,9 @@ int32 sum = a + b;
 ```
 
 ```bytecode
-// Compiled VM Bytecode
-// (Register r1 holds local variable)                 // Load a
-// (Register r2 holds local variable)                 // Load b
-ADD_I64                     // Pops 2, pushes sum
-Mov r3, r7                 // sum
+// Compiled Register VM Bytecode
+// r0 holds local variable value_a
+// r1 holds local variable value_b
+AddI64 r2, r0, r1                     // r2 = value_a + value_b
+Mov r3, r2                            // sum = r2
 ```

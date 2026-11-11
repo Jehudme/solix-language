@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `solix.math` module provides cross-platform mathematical operations, IEEE 754 constants, transcendental functions, geometric computations, and a high-performance pseudo-random number generator (`Random`) backed by standard C++ `<cmath>` and Mersenne Twister `std::mt19937_64`.
+The `solix.math` module provides cross-platform mathematical operations, IEEE 754 constants, transcendental functions, geometric computations, and a high-performance pseudo-random number generator (`Random`) backed by standard C++ `<cmath>` and the high-performance `xoshiro256**` PRNG.
 
 ---
 

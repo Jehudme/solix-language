@@ -14,7 +14,7 @@ By leveraging Solix's native companion libraries, lifecycle hooks (`pre_compile`
 flowchart TD
     API["Official raylib_api.json\n(619 funcs, 35 structs, 21 enums)"] --> Gen["scripts/generate_bindings.py\n(Pre-compile Generator)"]
     Gen --> SolixCode["Solix Sources\n• Raylib.slx (Static API)\n• types/*.slx (Vector2, Color, etc.)\n• enums/*.slx (Keys, Colors, etc.)"]
-    Gen --> NativeGlue["C++ Bridge Glue\n• generated_raylib.cpp\n• register.cpp\n(ABI unpackers & callers)"]
+    Gen --> NativeGlue["Native C/Rust Bridge Glue\n• generated_raylib.c\n• register.c\n(ABI unpackers & callers)"]
     NativeGlue --> ZigBuild["scripts/build_native.py\n(Zig Cross-Compiler)"]
     ZigBuild --> Binaries["Native Companion Libraries\n• libsolix_raylib.so (Linux)\n• solix_raylib.dll (Windows)\n• libsolix_raylib.dylib (macOS)"]
     SolixCode --> Pack["solix pack\n(Portable Packaging)"]
@@ -88,14 +88,14 @@ The JSON root contains 6 top-level arrays:
 
 ## 3. Type Mapping & Marshaling Architecture
 
-Solix operates with an ARC (Automatic Reference Counting) byte-addressed heap, passing primitive words (`uint64_t`) and heap object pointers across the native boundary.
+Solix operates with an ARC (Automatic Reference Counting) byte-addressed heap, passing primitive words (`SolixCValue`) and heap object pointers across the native boundary.
 
 ### Type Translation Table
 
-| Raylib C Type | Solix Type | C++ Marshaling from Solix (`args[index]`) | C++ Return to Solix (`uint64_t`) |
+| Raylib C Type | Solix Type | C++ Marshaling from Solix (`args[index]`) | C++ Return to Solix (`SolixCValue`) |
 |---|---|---|---|
-| `int`, `int32_t` | `int32` | `static_cast<int32_t>(args[index])` | `static_cast<uint64_t>(ret)` |
-| `unsigned int` | `uint32` | `static_cast<uint32_t>(args[index])` | `static_cast<uint64_t>(ret)` |
+| `int`, `i32` | `int32` | `static_cast<i32>(args[index])` | `static_cast<SolixCValue>(ret)` |
+| `unsigned int` | `uint32` | `static_cast<ui32>(args[index])` | `static_cast<SolixCValue>(ret)` |
 | `float` | `float32` | `bit_cast_from_u64<float>(args[index])` | `bit_cast_to_u64<float>(ret)` |
 | `double` | `float64` | `bit_cast_from_u64<double>(args[index])` | `bit_cast_to_u64<double>(ret)` |
 | `bool` | `bool` | `args[index] != 0` | `ret ? 1 : 0` |
@@ -124,7 +124,7 @@ The library will be structured as a standard, canonical Solix package:
 
 ```
 solix-raylib/
-├── manifest.json                  # Solix package manifest with profiles & hooks
+├── manifest.toml                  # Solix package manifest with profiles & hooks
 ├── api/
 │   └── raylib_api.json            # Official vendored Raylib API specification
 ├── scripts/
@@ -150,15 +150,15 @@ solix-raylib/
 │   │   ├── raymath.h              # Raylib Math C header
 │   │   └── rlgl.h                 # OpenGL abstraction C header
 │   └── src/
-│       ├── generated_raylib.cpp   # 100% auto-generated C++ FFI bridge functions
-│       ├── custom_glue.cpp        # Manual helpers / special callbacks
-│       └── register.cpp           # solix_register_natives entry point
+│       ├── generated_raylib.c   # 100% auto-generated C++ FFI bridge functions
+│       ├── custom_glue.c        # Manual helpers / special callbacks
+│       └── register.c           # solix_register_natives entry point
 └── examples/
     ├── 01_basic_window/
-    │   ├── manifest.json
+    │   ├── manifest.toml
     │   └── src/main.slx
     └── 02_bouncing_ball/
-        ├── manifest.json
+        ├── manifest.toml
         └── src/main.slx
 ```
 
@@ -178,10 +178,10 @@ sequenceDiagram
 
     Note over Gen: Phase 2 & 3: Code Generation Engine
     Gen->>Repo: Emit Solix types, enums & Raylib.slx
-    Gen->>Repo: Emit generated_raylib.cpp & register.cpp
+    Gen->>Repo: Emit generated_raylib.c & register.c
 
     Note over Zig: Phase 4: Native Toolchain
-    Zig->>Repo: Zig cc compiles raylib.c + generated_raylib.cpp -> .so, .dll, .dylib
+    Zig->>Repo: Zig cc compiles raylib.c + generated_raylib.c -> .so, .dll, .dylib
 
     Note over Solix: Phase 5: Verification & Packaging
     Solix->>Repo: solix build && solix run examples/01_basic_window
@@ -189,7 +189,7 @@ sequenceDiagram
 ```
 
 ### Phase 1: Project Scaffolding & API Ingestion
-- Initialize project structure with `manifest.json`.
+- Initialize project structure with `manifest.toml`.
 - Fetch and vendor `raylib_api.json` from `https://raw.githubusercontent.com/raysan5/raylib/master/tools/rlparser/output/raylib_api.json`.
 - Vendor Raylib C header (`raylib.h`) and implementation source (`raylib.c` amalgamation).
 
@@ -224,7 +224,7 @@ sequenceDiagram
   - Linux x86_64: `libsolix_raylib.so` (X11 / Wayland / DRM OpenGL)
   - Windows x86_64: `solix_raylib.dll` (GDI32 / WinMM / OpenGL32)
   - macOS ARM64 / x86_64: `libsolix_raylib.dylib` (Cocoa / IOKit / CoreVideo)
-- Configure `manifest.json` with `pre_compile` hooks for zero-step builds.
+- Configure `manifest.toml` with `pre_compile` hooks for zero-step builds.
 
 ### Phase 6: Packaging, Registry Distribution & Sample Games
 - Package library via `solix pack -o solix_raylib.slxarc`.

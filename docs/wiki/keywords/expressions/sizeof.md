@@ -27,7 +27,7 @@ SizeOfExpression : 'sizeof' '(' ( TypeIdentifier | Expression ) ')'
   - Array references evaluate to 8 bytes (the pointer size).
   - Class types evaluate to `(instance_size * 8)` bytes, reflecting the vtable header word plus all instance fields (including inherited fields).
   - Enums evaluate to 4 bytes.
-  - The compiler folds these expressions into `PUSH_CONST_I32 <bytes>`.
+  - The compiler folds these expressions into `LoadI32 r<dst>, <bytes>`.
 - **Dynamic Instance Sizing**:
   - When given an object reference expression, the compiler emits `SIZEOF` (opcode 90).
   - At runtime, the VM checks the block header at `heap[ref - 1]` to retrieve the allocated block size in words, multiplies by 8, and pushes the byte count.
