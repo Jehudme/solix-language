@@ -220,6 +220,13 @@ fn ingest_package_api_source(
     import_span: SourceSpan,
     context: &mut CompilationContext,
 ) -> Result<(), Vec<CompilationDiagnostic>> {
+    let has_binary = context.options.dependency_binaries.iter().any(|existing| {
+        !existing.package_name.is_empty() && existing.package_name == program.package_name
+    });
+    if !has_binary {
+        context.options.dependency_binaries.push(program.clone());
+    }
+
     let (source_name, source_code) = if !program.export_manifest.api_header.is_empty() {
         (
             format!("{package_name}@{version}.slx"),

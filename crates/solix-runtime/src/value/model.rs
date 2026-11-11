@@ -60,10 +60,36 @@ impl Value {
         }
     }
 
+    /// Evaluates equality between two values with support for mixed primitive/reference types.
+    #[must_use]
+    pub fn is_equal_to(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Null, Self::Null) => true,
+            (Self::Ref(target_address), Self::Null) | (Self::Null, Self::Ref(target_address)) => {
+                *target_address == 0
+            }
+            (Self::Ref(first_address), Self::Ref(second_address)) => {
+                first_address == second_address
+            }
+            (Self::I32(first_int), Self::I32(second_int)) => first_int == second_int,
+            (Self::I64(first_long), Self::I64(second_long)) => first_long == second_long,
+            (Self::I32(first_int), Self::I64(second_long)) => {
+                (*first_int as i64) == *second_long || (*first_int as u32 as i64) == *second_long
+            }
+            (Self::I64(first_long), Self::I32(second_int)) => {
+                *first_long == (*second_int as i64) || *first_long == (*second_int as u32 as i64)
+            }
+            (Self::Bool(first_bool), Self::Bool(second_bool)) => first_bool == second_bool,
+            (Self::F64(first_float), Self::F64(second_float)) => first_float == second_float,
+            (Self::FnPtr(first_fn), Self::FnPtr(second_fn)) => first_fn == second_fn,
+            _ => false,
+        }
+    }
+
     /// Extracts a boolean value or returns a `TypeMismatch` error.
     pub fn as_bool(&self) -> Result<bool, RuntimeError> {
         match self {
-            Self::Bool(b) => Ok(*b),
+            Self::Bool(boolean_value) => Ok(*boolean_value),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "bool".to_string(),
                 found: self.type_name().to_string(),
@@ -74,8 +100,8 @@ impl Value {
     /// Extracts a 32-bit signed integer or returns a `TypeMismatch` error.
     pub fn as_i32(&self) -> Result<i32, RuntimeError> {
         match self {
-            Self::I32(n) => Ok(*n),
-            Self::I64(n) => Ok(*n as i32),
+            Self::I32(primitive_number) => Ok(*primitive_number),
+            Self::I64(primitive_number) => Ok(*primitive_number as i32),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "int32".to_string(),
                 found: self.type_name().to_string(),

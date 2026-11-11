@@ -1879,7 +1879,7 @@ fn compile_single_method(
             func.emit(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
         } else {
             func.emit(
-                Instruction::format_a(OpCode::ReturnValue, 0, 0, dst, 0),
+                Instruction::format_a(OpCode::ReturnValue, 0, dst, 0, 0),
                 None,
             );
         }

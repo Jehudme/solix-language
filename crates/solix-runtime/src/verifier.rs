@@ -21,16 +21,23 @@ pub fn verify_program(
     all_functions: &[CompiledFunction],
     total_static_space: u32,
 ) -> Result<(), RuntimeError> {
-    for func in all_functions {
+    for (global_function_index, func) in all_functions.iter().enumerate() {
         let register_count = func.num_registers;
         let instruction_count = func.instructions.len();
 
         let owning_binary_pool_len = loaded_binaries
             .iter()
             .find(|binary_unit| {
-                (func.static_base_offset >= binary_unit.static_base_offset)
-                    && (func.static_base_offset
-                        <= binary_unit.static_base_offset + binary_unit.static_space_size)
+                let start_index = binary_unit.function_id_offset as usize;
+                let end_index = start_index + binary_unit.function_count;
+                global_function_index >= start_index && global_function_index < end_index
+            })
+            .or_else(|| {
+                loaded_binaries.iter().find(|binary_unit| {
+                    (func.static_base_offset >= binary_unit.static_base_offset)
+                        && (func.static_base_offset
+                            <= binary_unit.static_base_offset + binary_unit.static_space_size)
+                })
             })
             .map_or(0, |binary_unit| binary_unit.constant_pool.values.len());
 

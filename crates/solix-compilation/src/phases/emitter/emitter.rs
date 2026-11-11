@@ -315,7 +315,7 @@ impl<'a> Emitter<'a> {
             Expression::Cast {
                 span,
                 expression,
-                target_type: _,
+                target_type,
             } => {
                 let dst = self.resolve_dst(target_reg)?;
                 let src = self.emit_expression(expression, None)?;
@@ -339,6 +339,9 @@ impl<'a> Emitter<'a> {
                     );
                 } else if let Type::Class {
                     ref symbol_name, ..
+                }
+                | Type::Interface {
+                    ref symbol_name, ..
                 } = result_type
                 {
                     let vtable_id = self
@@ -350,6 +353,28 @@ impl<'a> Emitter<'a> {
                         Instruction::format_a(OpCode::CastCheck, 0, dst, src, vtable_id),
                         Some(*span),
                     );
+                } else if matches!(
+                    result_type,
+                    Type::GenericParameter { .. } | Type::Unresolved(_)
+                ) {
+                    let type_lexeme = self.get_lexeme(target_type.span());
+                    let generic_substitutions = self.get_enclosing_generic_substitutions();
+                    let resolved_name = generic_substitutions
+                        .get(type_lexeme)
+                        .map(|name| name.as_str())
+                        .unwrap_or(type_lexeme);
+                    let type_tag = self.resolve_type_tag(resolved_name);
+                    if type_tag != 0x80 && type_tag > 0 {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::CastCheck, type_tag, dst, src, 0),
+                            Some(*span),
+                        );
+                    } else {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::Mov, 0, dst, src, 0),
+                            Some(*span),
+                        );
+                    }
                 } else {
                     let type_tag = self.resolve_type_tag_for_type(&result_type);
                     self.emit_instruction(
@@ -512,7 +537,7 @@ impl<'a> Emitter<'a> {
 
             Expression::ArrayCreation {
                 span,
-                element_type: _,
+                element_type,
                 size,
             } => {
                 let r_size = self.emit_expression(size, None)?;
@@ -521,16 +546,32 @@ impl<'a> Emitter<'a> {
                 let array_type = self.query_type(*span);
                 let type_tag = match array_type {
                     Type::Array {
-                        element_type,
-                        depth,
+                        element_type: ref array_element_type,
+                        depth: 1,
                     } => {
-                        if depth > 1 {
-                            0x80
+                        let inner_tag = self.resolve_type_tag_for_type(array_element_type);
+                        if inner_tag == 0x80 {
+                            let element_lexeme = self.get_lexeme(element_type.span());
+                            let generic_substitutions = self.get_enclosing_generic_substitutions();
+                            let resolved_name = generic_substitutions
+                                .get(element_lexeme)
+                                .map(|name| name.as_str())
+                                .unwrap_or(element_lexeme);
+                            self.resolve_type_tag(resolved_name)
                         } else {
-                            self.resolve_type_tag_for_type(&element_type)
+                            inner_tag
                         }
                     }
-                    _ => 0x80,
+                    Type::Array { depth, .. } if depth > 1 => 0x80,
+                    _ => {
+                        let element_lexeme = self.get_lexeme(element_type.span());
+                        let generic_substitutions = self.get_enclosing_generic_substitutions();
+                        let resolved_name = generic_substitutions
+                            .get(element_lexeme)
+                            .map(|name| name.as_str())
+                            .unwrap_or(element_lexeme);
+                        self.resolve_type_tag(resolved_name)
+                    }
                 };
                 self.emit_instruction(
                     Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_size, elem_size),
@@ -675,6 +716,29 @@ impl<'a> Emitter<'a> {
                     }
                     _ => self.get_lexeme(instance_type.span()).to_string(),
                 };
+                let generic_substitutions = self.get_enclosing_generic_substitutions();
+                if !generic_substitutions.is_empty() {
+                    if let Some(substituted_name) = generic_substitutions.get(&resolved_class_name)
+                    {
+                        resolved_class_name = substituted_name.clone();
+                    } else if resolved_class_name.contains('<')
+                        && let Some((base_name, args_part)) = resolved_class_name.split_once('<')
+                        && let Some(args_string) = args_part.strip_suffix('>')
+                    {
+                        let substituted_arguments: Vec<String> = args_string
+                            .split(',')
+                            .map(|argument| {
+                                let trimmed_argument = argument.trim();
+                                generic_substitutions
+                                    .get(trimmed_argument)
+                                    .cloned()
+                                    .unwrap_or_else(|| trimmed_argument.to_string())
+                            })
+                            .collect();
+                        resolved_class_name =
+                            format!("{base_name}<{}>", substituted_arguments.join(", "));
+                    }
+                }
                 if resolved_class_name.contains("unresolved")
                     && let Some(enclosing_class) = self.enclosing_class.as_deref()
                     && let Some((enclosing_base, enclosing_args)) = enclosing_class.split_once('<')
@@ -788,8 +852,7 @@ impl<'a> Emitter<'a> {
                 }
                 self.allocator.free_temp(dummy_dst);
                 for (idx, arg) in arguments.iter().enumerate() {
-                    if self.is_reference_expr(arg) && !matches!(arg, Expression::Identifier { .. })
-                    {
+                    if self.is_reference_expr(arg) && !self.is_borrowed_reference(arg) {
                         self.emit_instruction(
                             Instruction::format_a(
                                 OpCode::DecRef,
@@ -903,7 +966,7 @@ impl<'a> Emitter<'a> {
                         }
                         for (arg_index, argument) in arguments.iter().enumerate() {
                             if self.is_reference_expr(argument)
-                                && !matches!(argument, Expression::Identifier { .. })
+                                && !self.is_borrowed_reference(argument)
                             {
                                 self.emit_instruction(
                                     Instruction::format_a(
@@ -932,10 +995,41 @@ impl<'a> Emitter<'a> {
 
                     if is_static_fn {
                         // Static method call Type::method(args) or Type.method(args)
+                        let argument_signatures = arguments
+                            .iter()
+                            .map(|argument| self.query_type(argument.span()).to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let argument_simple_signatures = arguments
+                            .iter()
+                            .map(|argument| {
+                                let type_name = self.query_type(argument.span()).to_string();
+                                type_name
+                                    .rsplit([':', '.'])
+                                    .next()
+                                    .unwrap_or(&type_name)
+                                    .to_string()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+
+                        let candidate_full_typed = format!("{symbol_full}({argument_signatures})");
+                        let candidate_full_simple_typed =
+                            format!("{symbol_full}({argument_simple_signatures})");
+                        let candidate_simple_typed =
+                            format!("{symbol_simple}({argument_signatures})");
+                        let candidate_simple_simple_typed =
+                            format!("{symbol_simple}({argument_simple_signatures})");
+
                         let func_id_opt = self
                             .function_ids
                             .and_then(|ids| {
-                                ids.get(&symbol_full).or_else(|| ids.get(&symbol_simple))
+                                ids.get(&candidate_full_typed)
+                                    .or_else(|| ids.get(&candidate_full_simple_typed))
+                                    .or_else(|| ids.get(&candidate_simple_typed))
+                                    .or_else(|| ids.get(&candidate_simple_simple_typed))
+                                    .or_else(|| ids.get(&symbol_full))
+                                    .or_else(|| ids.get(&symbol_simple))
                             })
                             .copied();
 
@@ -972,7 +1066,7 @@ impl<'a> Emitter<'a> {
                         }
                         for (arg_index, argument) in arguments.iter().enumerate() {
                             if self.is_reference_expr(argument)
-                                && !matches!(argument, Expression::Identifier { .. })
+                                && !self.is_borrowed_reference(argument)
                             {
                                 self.emit_instruction(
                                     Instruction::format_a(
@@ -1027,9 +1121,7 @@ impl<'a> Emitter<'a> {
                                 Some(*span),
                             );
                             for (idx, arg) in arguments.iter().enumerate() {
-                                if self.is_reference_expr(arg)
-                                    && !matches!(arg, Expression::Identifier { .. })
-                                {
+                                if self.is_reference_expr(arg) && !self.is_borrowed_reference(arg) {
                                     self.emit_instruction(
                                         Instruction::format_a(
                                             OpCode::DecRef,
@@ -1073,18 +1165,14 @@ impl<'a> Emitter<'a> {
                             Instruction::format_call(op, dst, slot, arg_base, total_args as u8),
                             Some(*span),
                         );
-                        if self.is_reference_expr(object)
-                            && !matches!(object.as_ref(), Expression::Identifier { .. })
-                        {
+                        if self.is_reference_expr(object) && !self.is_borrowed_reference(object) {
                             self.emit_instruction(
                                 Instruction::format_a(OpCode::DecRef, 0, arg_base, 0, 0),
                                 Some(*span),
                             );
                         }
                         for (idx, arg) in arguments.iter().enumerate() {
-                            if self.is_reference_expr(arg)
-                                && !matches!(arg, Expression::Identifier { .. })
-                            {
+                            if self.is_reference_expr(arg) && !self.is_borrowed_reference(arg) {
                                 self.emit_instruction(
                                     Instruction::format_a(
                                         OpCode::DecRef,
@@ -1157,9 +1245,7 @@ impl<'a> Emitter<'a> {
                             Some(*span),
                         );
                         for (idx, arg) in arguments.iter().enumerate() {
-                            if self.is_reference_expr(arg)
-                                && !matches!(arg, Expression::Identifier { .. })
-                            {
+                            if self.is_reference_expr(arg) && !self.is_borrowed_reference(arg) {
                                 self.emit_instruction(
                                     Instruction::format_a(
                                         OpCode::DecRef,
@@ -1207,9 +1293,7 @@ impl<'a> Emitter<'a> {
                             );
                         }
                         for (idx, arg) in arguments.iter().enumerate() {
-                            if self.is_reference_expr(arg)
-                                && !matches!(arg, Expression::Identifier { .. })
-                            {
+                            if self.is_reference_expr(arg) && !self.is_borrowed_reference(arg) {
                                 self.emit_instruction(
                                     Instruction::format_a(
                                         OpCode::DecRef,
@@ -1243,9 +1327,7 @@ impl<'a> Emitter<'a> {
                         Some(*span),
                     );
                     for (idx, arg) in arguments.iter().enumerate() {
-                        if self.is_reference_expr(arg)
-                            && !matches!(arg, Expression::Identifier { .. })
-                        {
+                        if self.is_reference_expr(arg) && !self.is_borrowed_reference(arg) {
                             self.emit_instruction(
                                 Instruction::format_a(
                                     OpCode::DecRef,
@@ -1700,22 +1782,54 @@ impl<'a> Emitter<'a> {
                 ref symbol_name, ..
             } = left_type
         {
-            let simple_cls = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
-            let op_sym = format!("{simple_cls}::operator_{}", operator.as_static_str());
-            let full_op_sym = format!("{symbol_name}::operator_{}", operator.as_static_str());
+            let simple_class_name = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+            let dot_class_name = symbol_name.replace("::", ".");
+            let colon_class_name = symbol_name.replace('.', "::");
+            let operator_symbol = operator.as_static_str();
             let right_type_name = self.query_type(right.span()).to_string();
             let right_simple_type = right_type_name
                 .rsplit([':', '.'])
                 .next()
                 .unwrap_or(&right_type_name);
-            let operator_candidates = [
-                format!("{full_op_sym}({right_type_name})"),
-                format!("{full_op_sym}({right_simple_type})"),
-                format!("{op_sym}({right_type_name})"),
-                format!("{op_sym}({right_simple_type})"),
-                full_op_sym.clone(),
-                op_sym.clone(),
-            ];
+            let right_alt_type = if right_simple_type == "string" {
+                "String"
+            } else if right_simple_type == "String" {
+                "string"
+            } else {
+                right_simple_type
+            };
+
+            let mut operator_candidates = Vec::new();
+            for class_prefix in [
+                &colon_class_name,
+                &dot_class_name,
+                symbol_name,
+                &simple_class_name.to_string(),
+            ] {
+                for argument_type in [
+                    &right_type_name,
+                    &right_simple_type.to_string(),
+                    &right_alt_type.to_string(),
+                ] {
+                    let candidate =
+                        format!("{class_prefix}::operator_{operator_symbol}({argument_type})");
+                    if !operator_candidates.contains(&candidate) {
+                        operator_candidates.push(candidate);
+                    }
+                }
+            }
+            // Unsuffixed fallback only if no typed overload matches
+            for class_prefix in [
+                &colon_class_name,
+                &dot_class_name,
+                symbol_name,
+                &simple_class_name.to_string(),
+            ] {
+                let candidate = format!("{class_prefix}::operator_{operator_symbol}");
+                if !operator_candidates.contains(&candidate) {
+                    operator_candidates.push(candidate);
+                }
+            }
             let func_id = self
                 .function_ids
                 .and_then(|ids| {
@@ -2800,23 +2914,37 @@ impl<'a> Emitter<'a> {
         else_branch: &Expression,
         span: Span,
     ) -> Result<(), EmissionError> {
-        let r_cond = self.emit_expression(condition, None)?;
+        let condition_register = self.emit_expression(condition, None)?;
         let jump_false_pc = self.emit_instruction(
-            Instruction::format_c(OpCode::JumpIfFalse, 0, r_cond, 0),
+            Instruction::format_c(OpCode::JumpIfFalse, 0, condition_register, 0),
             Some(span),
         );
-        self.allocator.free_temp(r_cond);
+        self.allocator.free_temp(condition_register);
+
+        let is_reference_result = self.query_type(span).is_reference_type();
 
         self.emit_expression(then_branch, Some(dst))?;
+        if is_reference_result && self.is_borrowed_reference(then_branch) {
+            self.emit_instruction(
+                Instruction::format_a(OpCode::IncRef, 0, dst, 0, 0),
+                Some(then_branch.span()),
+            );
+        }
         let jump_exit_pc =
             self.emit_instruction(Instruction::format_c(OpCode::Jump, 0, 0, 0), Some(span));
 
         let else_start_pc = self.function.instructions.len() as i32;
         let false_offset = else_start_pc - jump_false_pc as i32;
         self.function.instructions[jump_false_pc as usize] =
-            Instruction::format_c(OpCode::JumpIfFalse, 0, r_cond, false_offset);
+            Instruction::format_c(OpCode::JumpIfFalse, 0, condition_register, false_offset);
 
         self.emit_expression(else_branch, Some(dst))?;
+        if is_reference_result && self.is_borrowed_reference(else_branch) {
+            self.emit_instruction(
+                Instruction::format_a(OpCode::IncRef, 0, dst, 0, 0),
+                Some(else_branch.span()),
+            );
+        }
 
         let exit_pc = self.function.instructions.len() as i32;
         let exit_offset = exit_pc - jump_exit_pc as i32;
@@ -2910,15 +3038,20 @@ impl<'a> Emitter<'a> {
             type_arguments,
         } = obj_type
         {
-            let mangled = if !type_arguments.is_empty() && !symbol_name.contains('<') {
-                format!(
-                    "{symbol_name}<{}>",
-                    type_arguments
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+            let generic_substitutions = self.get_enclosing_generic_substitutions();
+            let resolved_arguments: Vec<String> = type_arguments
+                .iter()
+                .map(|type_argument| {
+                    let argument_string = type_argument.to_string();
+                    generic_substitutions
+                        .get(&argument_string)
+                        .cloned()
+                        .unwrap_or(argument_string)
+                })
+                .collect();
+
+            let mangled = if !resolved_arguments.is_empty() && !symbol_name.contains('<') {
+                format!("{symbol_name}<{}>", resolved_arguments.join(", "))
             } else {
                 symbol_name.clone()
             };
@@ -2926,15 +3059,8 @@ impl<'a> Emitter<'a> {
                 .rsplit(['.', ':'])
                 .next()
                 .unwrap_or(&symbol_name);
-            let simple_mangled = if !type_arguments.is_empty() && !simple_base.contains('<') {
-                format!(
-                    "{simple_base}<{}>",
-                    type_arguments
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+            let simple_mangled = if !resolved_arguments.is_empty() && !simple_base.contains('<') {
+                format!("{simple_base}<{}>", resolved_arguments.join(", "))
             } else {
                 simple_base.to_string()
             };
@@ -2972,13 +3098,43 @@ impl<'a> Emitter<'a> {
         }
 
         let obj_type = self.query_type(object_span);
-        if let Type::Class { symbol_name, .. } = obj_type {
-            let simple = symbol_name
+        if let Type::Class {
+            symbol_name,
+            type_arguments,
+        } = obj_type
+        {
+            let generic_substitutions = self.get_enclosing_generic_substitutions();
+            let resolved_arguments: Vec<String> = type_arguments
+                .iter()
+                .map(|argument_type| {
+                    let argument_string = argument_type.to_string();
+                    generic_substitutions
+                        .get(&argument_string)
+                        .cloned()
+                        .unwrap_or(argument_string)
+                })
+                .collect();
+
+            let mangled = if !resolved_arguments.is_empty() && !symbol_name.contains('<') {
+                format!("{symbol_name}<{}>", resolved_arguments.join(", "))
+            } else {
+                symbol_name.clone()
+            };
+            let simple_base = symbol_name
                 .rsplit(['.', ':'])
                 .next()
                 .unwrap_or(&symbol_name);
+            let simple_mangled = if !resolved_arguments.is_empty() && !simple_base.contains('<') {
+                format!("{simple_base}<{}>", resolved_arguments.join(", "))
+            } else {
+                simple_base.to_string()
+            };
             if let Some(layouts) = self.class_layouts
-                && let Some(layout) = layouts.get(&symbol_name).or_else(|| layouts.get(simple))
+                && let Some(layout) = layouts
+                    .get(&mangled)
+                    .or_else(|| layouts.get(&simple_mangled))
+                    .or_else(|| layouts.get(&symbol_name))
+                    .or_else(|| layouts.get(simple_base))
                 && let Some(&offset) = layout.field_offsets.get(member_name)
             {
                 return layout.weak_field_offsets.contains(&offset);
@@ -3008,15 +3164,20 @@ impl<'a> Emitter<'a> {
             type_arguments,
         } = obj_type
         {
-            let mangled = if !type_arguments.is_empty() && !symbol_name.contains('<') {
-                format!(
-                    "{symbol_name}<{}>",
-                    type_arguments
-                        .iter()
-                        .map(|arg_type| arg_type.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+            let generic_substitutions = self.get_enclosing_generic_substitutions();
+            let resolved_arguments: Vec<String> = type_arguments
+                .iter()
+                .map(|arg_type| {
+                    let argument_string = arg_type.to_string();
+                    generic_substitutions
+                        .get(&argument_string)
+                        .cloned()
+                        .unwrap_or(argument_string)
+                })
+                .collect();
+
+            let mangled = if !resolved_arguments.is_empty() && !symbol_name.contains('<') {
+                format!("{symbol_name}<{}>", resolved_arguments.join(", "))
             } else {
                 symbol_name.clone()
             };
@@ -3024,15 +3185,8 @@ impl<'a> Emitter<'a> {
                 .rsplit(['.', ':'])
                 .next()
                 .unwrap_or(&symbol_name);
-            let simple_mangled = if !type_arguments.is_empty() && !simple_base.contains('<') {
-                format!(
-                    "{simple_base}<{}>",
-                    type_arguments
-                        .iter()
-                        .map(|arg_type| arg_type.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+            let simple_mangled = if !resolved_arguments.is_empty() && !simple_base.contains('<') {
+                format!("{simple_base}<{}>", resolved_arguments.join(", "))
             } else {
                 simple_base.to_string()
             };
@@ -3100,6 +3254,32 @@ impl<'a> Emitter<'a> {
                 0x80
             }
         }
+    }
+
+    fn get_enclosing_generic_substitutions(&self) -> HashMap<String, String> {
+        let mut substitutions = HashMap::new();
+        if let Some(enclosing_class_name) = self.enclosing_class.as_deref()
+            && let Some((_base_name, args_part)) = enclosing_class_name.split_once('<')
+            && let Some(args_string) = args_part.strip_suffix('>')
+        {
+            let concrete_arguments: Vec<&str> = args_string
+                .split(',')
+                .map(|argument| argument.trim())
+                .collect();
+            if concrete_arguments.len() == 1 {
+                substitutions.insert("T".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("K".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("V".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("E".to_string(), concrete_arguments[0].to_string());
+            } else if concrete_arguments.len() == 2 {
+                substitutions.insert("K".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("V".to_string(), concrete_arguments[1].to_string());
+                substitutions.insert("T".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("U".to_string(), concrete_arguments[1].to_string());
+                substitutions.insert("E".to_string(), concrete_arguments[1].to_string());
+            }
+        }
+        substitutions
     }
 
     fn resolve_type_tag_for_type(&self, ty: &Type) -> u8 {

@@ -551,8 +551,7 @@ impl Display for Type {
                 // Normalize the string primitive aliases to the canonical `string` keyword.
                 let normalized_name = if symbol_name == "std.string"
                     || symbol_name == "std::string"
-                    || symbol_name == "solix.core.String"
-                    || symbol_name == "solix::core::String"
+                    || symbol_name == "string"
                 {
                     "string".to_string()
                 } else {

@@ -98,9 +98,7 @@ pub fn bind_context(
     // Pass 3: Detailed Type Checking & Expression Traversal
     for (source_index, ast_option) in context.ast.iter().enumerate() {
         let source_id = source_index as u16;
-        if context.options.link_mode == crate::CompilationContext::LinkMode::Dynamic
-            && context.is_external_source(source_id)
-        {
+        if context.is_external_source(source_id) {
             continue;
         }
 

@@ -89,13 +89,28 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         if (this.key_equality_fn != null) {
             return this.key_equality_fn(first_key, second_key);
         }
-        return first_key == second_key;
+        if (first_key == second_key) {
+            return true;
+        }
+        if (first_key == null || second_key == null) {
+            return false;
+        }
+        if (first_key instanceof String && second_key instanceof String) {
+            return ((String)first_key).equals((String)second_key);
+        }
+        return false;
     }
 
     private int32 calculate_hash(K lookup_key) {
+        if (lookup_key == null) {
+            return 0;
+        }
         if (this.custom_hasher != null) {
             int32 custom_hash = this.custom_hasher(lookup_key);
             return custom_hash & 0x7FFFFFFF;
+        }
+        if (lookup_key instanceof String) {
+            return ((String)lookup_key).hash_code() & 0x7FFFFFFF;
         }
         int32 default_hash = Primitives::hash_any<K>(lookup_key);
         return default_hash & 0x7FFFFFFF;

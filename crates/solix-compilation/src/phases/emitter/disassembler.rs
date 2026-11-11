@@ -287,7 +287,8 @@ pub fn disassemble_program(program: &BinaryProgram) -> String {
     }
 
     let _ = writeln!(output, ".functions ({} total):", program.functions.len());
-    for func in &program.functions {
+    for (function_index, func) in program.functions.iter().enumerate() {
+        let _ = writeln!(output, "; Function #{function_index}");
         let disassembled = disassemble_function(func, &program.constant_pool);
         let _ = writeln!(output, "{disassembled}");
     }

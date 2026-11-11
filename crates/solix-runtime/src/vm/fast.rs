@@ -502,10 +502,14 @@ impl VirtualMachine {
                 // 0x30 .. 0x47: Comparisons
                 // =============================================================
                 OpCode::EqI32 => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let first_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let second_val = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let is_equal = match (first_val, second_val) {
+                        (Value::I32(first_num), Value::I32(second_num)) => first_num == second_num,
+                        _ => first_val.is_equal_to(&second_val),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
                     }
                 }
 
@@ -559,18 +563,28 @@ impl VirtualMachine {
                 }
 
                 OpCode::EqRef => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_ref()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_ref()?;
+                    let first_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let second_val = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let is_equal = match (first_val, second_val) {
+                        (Value::Ref(first_addr), Value::Ref(second_addr)) => {
+                            first_addr == second_addr
+                        }
+                        _ => first_val.is_equal_to(&second_val),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
                     }
                 }
 
                 OpCode::NeqI32 => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i32()?;
+                    let first_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let second_val = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let is_equal = match (first_val, second_val) {
+                        (Value::I32(first_num), Value::I32(second_num)) => first_num == second_num,
+                        _ => first_val.is_equal_to(&second_val),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
                     }
                 }
 
@@ -624,10 +638,16 @@ impl VirtualMachine {
                 }
 
                 OpCode::NeqRef => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_ref()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_ref()?;
+                    let first_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let second_val = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let is_equal = match (first_val, second_val) {
+                        (Value::Ref(first_addr), Value::Ref(second_addr)) => {
+                            first_addr == second_addr
+                        }
+                        _ => first_val.is_equal_to(&second_val),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
+                        *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
                     }
                 }
 
@@ -1423,6 +1443,13 @@ impl VirtualMachine {
                     let receiver = unsafe { *reg_base.add(inst.src1() as usize) };
                     let obj_addr = receiver.as_ref()?;
                     if obj_addr == 0 {
+                        eprintln!(
+                            "DEBUG GetField obj_addr==0: func={:?}, pc={}",
+                            self.call_frames
+                                .last()
+                                .map(|target_frame| target_frame.function_id),
+                            pc
+                        );
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let offset = inst.src2() as usize;
@@ -1752,6 +1779,13 @@ impl VirtualMachine {
                     let arr_val = unsafe { *reg_base.add(inst.src1() as usize) };
                     let arr_addr = arr_val.as_ref()?;
                     if arr_addr == 0 {
+                        eprintln!(
+                            "DEBUG GetArray arr_addr==0: func={:?}, pc={}",
+                            self.call_frames
+                                .last()
+                                .map(|target_frame| target_frame.function_id),
+                            pc
+                        );
                         return Err(RuntimeError::NullReferenceAccess);
                     }
                     let index_i64 = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
@@ -2177,7 +2211,7 @@ impl VirtualMachine {
                             5..=8 => matches!(val, Value::I32(_) | Value::I64(_)),
                             9..=10 => matches!(val, Value::F64(_)),
                             11 => matches!(val, Value::Bool(_)),
-                            12 => matches!(val, Value::I32(_)),
+                            12 => matches!(val, Value::I32(_) | Value::I64(_)),
                             13 => {
                                 if let Value::Ref(target_addr) = val {
                                     self.heap.read_header(target_addr).is_ok_and(|header_info| {
@@ -2195,8 +2229,41 @@ impl VirtualMachine {
                                 to: format!("type tag #{tag}"),
                             });
                         }
+                        let converted_value = match (tag, val) {
+                            (4 | 8, Value::I32(primitive_number)) => {
+                                Value::I64(primitive_number as i64)
+                            }
+                            (1, Value::I32(primitive_number)) => {
+                                Value::I32(primitive_number as i8 as i32)
+                            }
+                            (2, Value::I32(primitive_number)) => {
+                                Value::I32(primitive_number as i16 as i32)
+                            }
+                            (5, Value::I32(primitive_number)) => {
+                                Value::I32(primitive_number as u8 as i32)
+                            }
+                            (6, Value::I32(primitive_number)) => {
+                                Value::I32(primitive_number as u16 as i32)
+                            }
+                            (1, Value::I64(primitive_number)) => {
+                                Value::I32(primitive_number as i8 as i32)
+                            }
+                            (2, Value::I64(primitive_number)) => {
+                                Value::I32(primitive_number as i16 as i32)
+                            }
+                            (5, Value::I64(primitive_number)) => {
+                                Value::I32(primitive_number as u8 as i32)
+                            }
+                            (6, Value::I64(primitive_number)) => {
+                                Value::I32(primitive_number as u16 as i32)
+                            }
+                            (3 | 7 | 12, Value::I64(primitive_number)) => {
+                                Value::I32(primitive_number as i32)
+                            }
+                            _ => val,
+                        };
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = val;
+                            *reg_base.add(inst.dst() as usize) = converted_value;
                         }
                         finish_instruction!();
                         continue;
@@ -2323,20 +2390,28 @@ impl VirtualMachine {
                 }
 
                 OpCode::JumpIfEqI32 => {
-                    let offset = inst.src2() as i16 as i32;
-                    let val_a = unsafe { *reg_base.add(inst.dst() as usize) }.as_i32()?;
-                    let val_b = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    if val_a == val_b {
-                        pc = ((pc as i32 - 1) + offset) as usize;
+                    let target_offset = inst.src2() as i16 as i32;
+                    let first_val = unsafe { *reg_base.add(inst.dst() as usize) };
+                    let second_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let is_equal = match (first_val, second_val) {
+                        (Value::I32(first_num), Value::I32(second_num)) => first_num == second_num,
+                        _ => first_val.is_equal_to(&second_val),
+                    };
+                    if is_equal {
+                        pc = ((pc as i32 - 1) + target_offset) as usize;
                     }
                 }
 
                 OpCode::JumpIfNeqI32 => {
-                    let offset = inst.src2() as i16 as i32;
-                    let val_a = unsafe { *reg_base.add(inst.dst() as usize) }.as_i32()?;
-                    let val_b = unsafe { *reg_base.add(inst.src1() as usize) }.as_i32()?;
-                    if val_a != val_b {
-                        pc = ((pc as i32 - 1) + offset) as usize;
+                    let target_offset = inst.src2() as i16 as i32;
+                    let first_val = unsafe { *reg_base.add(inst.dst() as usize) };
+                    let second_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let is_equal = match (first_val, second_val) {
+                        (Value::I32(first_num), Value::I32(second_num)) => first_num == second_num,
+                        _ => first_val.is_equal_to(&second_val),
+                    };
+                    if !is_equal {
+                        pc = ((pc as i32 - 1) + target_offset) as usize;
                     }
                 }
 
