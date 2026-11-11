@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use solix_client::{BuildArgs, Cli, Commands, NewArgs, execute_build, run};
+use solix_toolchain::{BuildArgs, Cli, Commands, NewArgs, execute_build, run};
 use std::fs;
 use tempfile::tempdir;
 

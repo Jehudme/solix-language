@@ -2,7 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::{BindingError, PrimitiveKind, Span, Type};
+use solix_common::{PrimitiveKind, Span, Type};
+use solix_compilation::BindingError;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::phases::binder::bind;
 use solix_compilation::phases::binder::symbols::{SymbolEntry, SymbolId};

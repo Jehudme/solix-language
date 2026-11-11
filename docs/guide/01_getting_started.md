@@ -49,7 +49,7 @@ After compilation finishes, the unified CLI executable is located at:
 You can install the executable system-wide or add `target/release` to your `PATH`:
 
 ```bash
-cargo install --path crates/solix-client
+cargo install --path crates/solix-toolchain
 ```
 
 Verify the installation:

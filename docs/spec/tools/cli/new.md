@@ -47,7 +47,7 @@ Executing `solix new my_app`:
 ```text
 my_app/
 ├── manifest.toml             # Configuration, metadata, and dependencies
-├── .gitignore                # Ignores /cache/, /build/, /target/, *.slxb, *.slxarc
+├── .gitignore                # Ignores /build/, /target/, *.slxb, *.slxarc
 ├── src/
 │   └── main.slx              # Starter application source
 ├── tests/

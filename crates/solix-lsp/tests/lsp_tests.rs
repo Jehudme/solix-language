@@ -2,7 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::{BindingError, LexingError, ParsingError, Span, Token, TokenKind};
+use solix_common::{Span, Token, TokenKind};
+use solix_compilation::{BindingError, LexingError, ParsingError};
 use solix_lsp::{
     binding_error_to_diagnostic, byte_offset_to_position, lexing_error_to_diagnostic,
     parsing_error_to_diagnostic, span_to_range,

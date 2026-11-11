@@ -6,7 +6,7 @@ use crate::phases::lexing::tokens::{Span, Token};
 use crate::phases::parser::statements::ProgramAst;
 use solix_common::bytecode::BinaryProgram;
 use solix_common::solver::{DependencyRequirement, ModuleSolver};
-use solix_common::{LexingError, ParsingError};
+use crate::diagnostics::{CompilationDiagnostic, LexingError, ParsingError};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -428,8 +428,8 @@ impl CompilationContext {
     /// Executes the compilation pipeline (either configured in options or the default standard pipeline).
     ///
     /// # Errors
-    /// Returns accumulated [`solix_common::CompilationDiagnostic`]s if any phase fails and halts.
-    pub fn execute(&mut self) -> Result<(), Vec<solix_common::CompilationDiagnostic>> {
+    /// Returns accumulated [`CompilationDiagnostic`]s if any phase fails and halts.
+    pub fn execute(&mut self) -> Result<(), Vec<CompilationDiagnostic>> {
         let mut pipeline = self.options.pipeline.take().unwrap_or_default();
         let result = pipeline.execute(self);
         self.options.pipeline = Some(pipeline);
@@ -439,11 +439,11 @@ impl CompilationContext {
     /// Executes a specific compilation pipeline against this context.
     ///
     /// # Errors
-    /// Returns accumulated [`solix_common::CompilationDiagnostic`]s if any phase fails and halts.
+    /// Returns accumulated [`CompilationDiagnostic`]s if any phase fails and halts.
     pub fn execute_pipeline(
         &mut self,
         pipeline: &mut crate::pipeline::CompilationPipeline,
-    ) -> Result<(), Vec<solix_common::CompilationDiagnostic>> {
+    ) -> Result<(), Vec<CompilationDiagnostic>> {
         pipeline.execute(self)
     }
 

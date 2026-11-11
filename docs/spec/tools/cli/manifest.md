@@ -103,7 +103,7 @@ A standard Solix project structured around `manifest.toml`:
 ```text
 my_project/
 ├── manifest.toml             # Authoritative configuration descriptor
-├── .gitignore                # Ignores /cache/, /build/, *.slxb, *.slxarc
+├── .gitignore                # Ignores /build/, /target/, *.slxb, *.slxarc
 ├── src/
 │   └── main.slx              # Application source code
 ├── tests/

@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::span::Span;
+use solix_common::span::Span;
 use miette::{Diagnostic, SourceSpan};
 
 /// Structured diagnostic errors emitted during semantic binding and type resolution.

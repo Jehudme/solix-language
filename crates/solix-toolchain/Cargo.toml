@@ -1,5 +1,5 @@
 [package]
-name = "solix-client"
+name = "solix-toolchain"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

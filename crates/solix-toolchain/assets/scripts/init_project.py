@@ -64,9 +64,7 @@ def generate_project(
 
     # 1. Write .gitignore
     gitignore_content = "\n".join([
-        "/cache/",
         "/build/",
-        "/target/",
         "*.slxb",
         "*.slxarc",
         "",

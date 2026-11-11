@@ -2,7 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::{BindingError, LexingError, ParsingError, Span};
+use solix_common::Span;
+use solix_compilation::{BindingError, LexingError, ParsingError};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 /// Converts a 0-based byte offset within a source string into an LSP 0-based [`Position`].

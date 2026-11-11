@@ -90,7 +90,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Scaffolding & Build Automation",
-        "pattern": r"^scripts/(init_project|solix_toolbox)\.py",
+        "pattern": r"^crates/solix-toolchain/assets/scripts/(init_project|solix_toolbox)\.py",
         "required_docs": [
             "docs/spec/tools/cli/new.md",
             "docs/spec/tools/cli/manifest.md",

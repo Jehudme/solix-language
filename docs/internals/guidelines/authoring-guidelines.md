@@ -77,7 +77,7 @@ Every guideline document **MUST** adhere to the following schema:
 5. **`## 4. Production-Ready Template`:**
    * A complete, copy-pasteable template with bracketed placeholders and guidance comments.
 6. **`## 5. Concrete Production Example`:**
-   * A realistic, comprehensive example specifically contextualized to real Solix components (`solix-compilation`, `solix-runtime`, `solix-common`, `solix-client`, `solix-lsp`, `solix-dbg`, VM stack frames, ARC memory management, AST lowering, opcode dispatch).
+   * A realistic, comprehensive example specifically contextualized to real Solix components (`solix-compilation`, `solix-runtime`, `solix-common`, `solix-toolchain`, `solix-lsp`, `solix-dbg`, VM stack frames, ARC memory management, AST lowering, opcode dispatch).
 7. **`## 6. Anti-Patterns & Counter-Examples (What NOT to Do)`:**
    * Itemized failure modes detailing flawed code/behavior, the specific operational catastrophe it causes, and the corrected pattern.
 8. **`## 7. Verification & Compliance Checklist`:**

@@ -58,7 +58,7 @@ When `git diff main...HEAD` reveals modifications in any left-hand subsystem, th
 
 | Modified Subsystem / Path | Inspect & Update in `docs/wiki/` | Inspect & Update in `docs/spec/` | Inspect & Update in `docs/guide/` & `docs/architecture/` |
 | :--- | :--- | :--- | :--- |
-| **CLI Arguments & Flags**<br>`crates/solix-client/src/cli.rs`<br>`crates/solix-client/src/commands/` | `docs/wiki/commands/*.md` | `docs/spec/tools/cli/*.md` (`new.md`, `compile.md`, `build.md`, `run.md`, `info.md`, `install.md`, `uninstall.md`, `list.md`, `manifest.md`) | `docs/guide/01_getting_started.md` |
+| **CLI Arguments & Flags**<br>`crates/solix-toolchain/src/cli.rs`<br>`crates/solix-toolchain/src/commands/` | `docs/wiki/commands/*.md` | `docs/spec/tools/cli/*.md` (`new.md`, `compile.md`, `build.md`, `run.md`, `info.md`, `install.md`, `uninstall.md`, `list.md`, `manifest.md`) | `docs/guide/01_getting_started.md` |
 | **Lexer & Tokens**<br>`crates/solix-compilation/src/lexer/`<br>`crates/solix-compilation/src/tokens/` | `docs/wiki/keywords/`<br>`docs/wiki/primitives/`<br>`docs/wiki/errors/lexer-errors.md` | `docs/spec/lexical.md` | `docs/guide/02_basic_syntax.md` |
 | **Parser & AST Nodes**<br>`crates/solix-compilation/src/parser/`<br>`crates/solix-compilation/src/ast/` | `docs/wiki/errors/parser-errors.md` (`E0101`–`E0200`) | `docs/spec/statements/*.md`<br>`docs/spec/expressions/*.md`<br>`docs/spec/declarations/*.md` | Relevant guides in `docs/guide/02..07` |
 | **Type Binder & Semantics**<br>`crates/solix-compilation/src/binder/` | `docs/wiki/errors/binder-errors.md` (`E0201`–`E0290`) | `docs/spec/types.md`<br>`docs/spec/declarations/*.md` | `docs/architecture/binder_passes.md`<br>`docs/guide/04_oop_in_solix.md` |
@@ -66,7 +66,7 @@ When `git diff main...HEAD` reveals modifications in any left-hand subsystem, th
 | **Register VM & Opcodes**<br>`crates/solix-runtime/src/vm/`<br>`crates/solix-common/src/bytecode.rs` | `docs/wiki/errors/runtime-errors.md` (`R0001`–`R0023`) | `docs/spec/vm_isa.md` | `docs/architecture/memory_model.md`<br>`docs/architecture/arc_internals.md`<br>`docs/architecture/exception_unwinding.md`<br>`docs/guide/05_memory_management_arc.md` |
 | **Native Interop & FFI**<br>`crates/solix-runtime/src/native/` | N/A | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
-| **Project Manifest & Scaffolding**<br>`scripts/init_project.py`<br>`scripts/solix_toolbox.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
+| **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/init_project.py`<br>`crates/solix-toolchain/assets/scripts/solix_toolbox.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
 
 ---
 
@@ -92,7 +92,7 @@ git diff main...HEAD --name-only
 Review the list of changed files in `crates/` and `libraries/`.
 
 ### Step 2: Trigger Evaluation
-Match each modified file against Section 3's Trigger Matrix. For example, if `crates/solix-client/src/cli.rs` was modified:
+Match each modified file against Section 3's Trigger Matrix. For example, if `crates/solix-toolchain/src/cli.rs` was modified:
 - Ensure `docs/spec/tools/cli/` has up-to-date specs for all added/modified flags.
 - Ensure `docs/wiki/commands/` reflects all added/modified flags.
 - Ensure `docs/guide/01_getting_started.md` documents the practical developer usage.

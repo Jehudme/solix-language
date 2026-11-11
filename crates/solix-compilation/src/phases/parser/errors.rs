@@ -2,4 +2,4 @@
 
 #![forbid(unsafe_code)]
 
-pub use solix_common::ParsingError;
+pub use crate::ParsingError;

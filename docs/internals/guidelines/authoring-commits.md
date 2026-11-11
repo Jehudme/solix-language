@@ -2,7 +2,7 @@
 
 ## Document Metadata
 * **Guideline ID:** GL-0001
-* **Scope:** Universal / Workspace-Wide (`solix-common`, `solix-compilation`, `solix-runtime`, `solix-client`, `solix-lsp`, `solix-dbg`, `docs`, `ci`)
+* **Scope:** Universal / Workspace-Wide (`solix-common`, `solix-compilation`, `solix-runtime`, `solix-toolchain`, `solix-lsp`, `solix-dbg`, `docs`, `ci`)
 * **Status:** Final Implementation Standard
 * **Audience:** Core Systems Engineers, Compiler Architects, Runtime Engineers, Release Maintainers
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary & Purpose
 
-The Solix language ecosystem is composed of tightly coordinated workspace crates in Rust: the AST compiler (`solix-compilation`), the deterministic bytecode virtual machine (`solix-runtime`), shared ISA and diagnostic primitives (`solix-common`), the unified CLI toolchain (`solix-client`), the Language Server Protocol implementation (`solix-lsp`), and debugging tools (`solix-dbg`). The integrity of automated package publishing, versioning, and change auditing depends directly upon deterministic, machine-parseable Git commit histories.
+The Solix language ecosystem is composed of tightly coordinated workspace crates in Rust: the AST compiler (`solix-compilation`), the deterministic bytecode virtual machine (`solix-runtime`), shared ISA and diagnostic primitives (`solix-common`), the unified CLI toolchain (`solix-toolchain`), the Language Server Protocol implementation (`solix-lsp`), and debugging tools (`solix-dbg`). The integrity of automated package publishing, versioning, and change auditing depends directly upon deterministic, machine-parseable Git commit histories.
 
 This specification mandates adherence to the **Conventional Commits v1.0.0** standard coupled with automated release pipelines. By formalizing commit grammar, the engineering team guarantees:
 1. Automated semantic version bumps (Major, Minor, Patch) according to **SemVer 2.0.0**.
@@ -79,7 +79,7 @@ All contributors **MUST** comply with the following normative rules:
 | `(compiler)` | `solix-compilation` AST compiler | `crates/solix-compilation/` |
 | `(runtime)` | `solix-runtime` bytecode VM | `crates/solix-runtime/` |
 | `(common)` | `solix-common` shared ISA & diagnostics | `crates/solix-common/` |
-| `(client)` | `solix-client` unified CLI toolchain | `crates/solix-client/` |
+| `(toolchain)` / `(client)` | `solix-toolchain` unified CLI toolchain | `crates/solix-toolchain/` |
 | `(lsp)` | `solix-lsp` Language Server Protocol | `crates/solix-lsp/` |
 | `(dbg)` | `solix-dbg` debugger & inspector | `crates/solix-dbg/` |
 | `(specs)` | Architectural & language specifications | `docs/internals/specs/` |

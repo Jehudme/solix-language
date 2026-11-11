@@ -1060,23 +1060,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solix-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "miette",
- "serde",
- "serde_json",
- "solix-common",
- "solix-compilation",
- "solix-runtime",
- "tempfile",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "solix-common"
 version = "0.1.0"
 dependencies = [
@@ -1154,6 +1137,23 @@ dependencies = [
  "solix-compilation",
  "solix-runtime",
  "tempfile",
+]
+
+[[package]]
+name = "solix-toolchain"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "miette",
+ "serde",
+ "serde_json",
+ "solix-common",
+ "solix-compilation",
+ "solix-runtime",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

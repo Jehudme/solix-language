@@ -7,8 +7,8 @@ mod common;
 
 use clap::Parser;
 use common::HermeticCliWorkspace;
-use solix_client::cli::Cli;
-use solix_client::run;
+use solix_toolchain::cli::Cli;
+use solix_toolchain::run;
 use solix_common::project::{ProjectManifest, SlxarcArchive};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,14 +42,10 @@ fn copy_project_tree(source_directory: &Path, destination_directory: &Path) -> s
     Ok(())
 }
 
-/// Locates the root repository directory from the current test environment.
-fn locate_workspace_root() -> PathBuf {
+/// Locates the untitled-rust project template inside the crate assets.
+fn locate_template_source() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .and_then(|parent_path| parent_path.parent())
-        .map(|root_path| root_path.to_path_buf())
-        .expect("Failed to locate repository workspace root")
+    manifest_dir.join("assets").join("templates").join("untitled-rust")
 }
 
 /// Returns the platform-specific shared library filename for a Rust cdylib crate.
@@ -242,9 +238,7 @@ public class Main {
 #[test]
 fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
-    let template_source = locate_workspace_root()
-        .join("templates")
-        .join("untitled-rust");
+    let template_source = locate_template_source();
     let project_root = workspace.root_path().join("untitled-rust");
 
     copy_project_tree(&template_source, &project_root).expect("Failed to copy template tree");
@@ -385,9 +379,7 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
 #[test]
 fn test_run_with_direct_native_library_flag() {
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
-    let template_source = locate_workspace_root()
-        .join("templates")
-        .join("untitled-rust");
+    let template_source = locate_template_source();
     let project_root = workspace.root_path().join("template_native_build");
 
     copy_project_tree(&template_source, &project_root).expect("Failed to copy template tree");
@@ -402,9 +394,10 @@ fn test_run_with_direct_native_library_flag() {
     .expect("Failed to parse build CLI");
     assert_eq!(run(build_cli).expect("Build must succeed"), 0);
 
-    // Locate the emitted native cdylib in cache/stage/debug/lib
+    // Locate the emitted native cdylib in build/.cache/stage/debug/lib
     let native_lib_path = project_root
-        .join("cache")
+        .join("build")
+        .join(".cache")
         .join("stage")
         .join("debug")
         .join("lib")
@@ -509,9 +502,7 @@ public class Main {
 #[test]
 fn test_info_command_on_slxarc_archive() {
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
-    let template_source = locate_workspace_root()
-        .join("templates")
-        .join("untitled-rust");
+    let template_source = locate_template_source();
     let project_root = workspace.root_path().join("info_test_project");
 
     copy_project_tree(&template_source, &project_root).expect("Failed to copy template tree");
@@ -741,9 +732,7 @@ public class Math {
     assert_eq!(run(install_math).expect("install math"), 0);
 
     // 2. Setup project from template
-    let template_source = locate_workspace_root()
-        .join("templates")
-        .join("untitled-rust");
+    let template_source = locate_template_source();
     let project_root = workspace.root_path().join("deps_project");
     copy_project_tree(&template_source, &project_root).expect("copy template");
 

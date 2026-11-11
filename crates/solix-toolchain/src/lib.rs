@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod assets;
 pub mod cli;
 pub mod commands;
 pub mod diagnostics;

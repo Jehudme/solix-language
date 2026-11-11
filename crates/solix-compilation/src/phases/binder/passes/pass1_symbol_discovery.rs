@@ -9,7 +9,8 @@ use crate::phases::lexing::Span;
 use crate::phases::parser::statements::ProgramAst;
 use crate::phases::parser::statements::declarations::{ClassMember, Declaration, Modifier};
 use crate::phases::parser::statements::types::TypeAnnotation;
-use solix_common::{BindingError, PrimitiveKind, Type};
+use crate::BindingError;
+use solix_common::{PrimitiveKind, Type};
 use std::collections::{HashMap, HashSet};
 
 struct RawAliasInfo {

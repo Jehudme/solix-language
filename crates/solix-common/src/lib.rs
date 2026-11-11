@@ -16,9 +16,7 @@ pub use bytecode::{
     ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic, Instruction,
     OpCode, SourceMapEntry, extract_api_manifest,
 };
-pub use diagnostics::{
-    BindingError, CompilationDiagnostic, EmissionError, LexingError, ParsingError,
-};
+pub use diagnostics::EmissionError;
 pub use project::{
     LoadedSlxarc, ProjectEntryPoints, ProjectInfo, ProjectManifest, SlxarcArchive, SlxarcFileEntry,
     SlxarcInspection,

@@ -8,7 +8,8 @@ use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::parser::statements::declarations::{ClassDeclaration, ClassMember, Modifier};
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::statements::{Expression, LambdaBody, Statement};
-use solix_common::{BindingError, PrimitiveKind, Type};
+use crate::BindingError;
+use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 
 /// Registered AST blueprint for a generic type or method.

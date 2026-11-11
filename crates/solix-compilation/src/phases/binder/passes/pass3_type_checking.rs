@@ -16,7 +16,8 @@ use crate::phases::parser::statements::declarations::*;
 use crate::phases::parser::statements::expressions::*;
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::visitor::AstVisitor;
-use solix_common::{BindingError, PrimitiveKind, Type};
+use crate::BindingError;
+use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 
 /// Semantic type checking and expression evaluation visitor traversing the parsed AST.

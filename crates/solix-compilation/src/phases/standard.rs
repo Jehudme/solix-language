@@ -4,7 +4,7 @@
 
 use super::phase::CompilationPhase;
 use crate::CompilationContext::CompilationContext;
-use solix_common::CompilationDiagnostic;
+use crate::CompilationDiagnostic;
 
 pub use super::dependency::DependencyResolutionPhase;
 pub use super::optimizer::{AstInlinerPhase, BytecodeOptimizerPhase};

@@ -6,8 +6,8 @@ mod common;
 
 use clap::Parser;
 use common::HermeticCliWorkspace;
-use solix_client::cli::{Cli, Commands};
-use solix_client::run;
+use solix_toolchain::cli::{Cli, Commands};
+use solix_toolchain::run;
 
 #[test]
 fn test_hermetic_workspace_initialization() {
@@ -1215,7 +1215,7 @@ class Fib {
 
 #[test]
 fn test_process_telemetry_capture() {
-    let telemetry = solix_client::capture_process_telemetry();
+    let telemetry = solix_toolchain::capture_process_telemetry();
     #[cfg(target_os = "linux")]
     {
         assert!(

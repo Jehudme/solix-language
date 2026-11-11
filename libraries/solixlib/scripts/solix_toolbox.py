@@ -37,7 +37,7 @@ def load_manifest(project_root: Path) -> dict:
 
 def prepare_staging_dirs(project_root: Path, profile: str) -> dict[str, Path]:
     """Prepares and cleans the ephemeral staging and output directories."""
-    cache_dir = project_root / "cache"
+    cache_dir = project_root / "build" / ".cache"
     natives_cache_dir = cache_dir / "natives" / profile
     stage_dir = cache_dir / "stage" / profile
     build_dir = project_root / "build" / profile

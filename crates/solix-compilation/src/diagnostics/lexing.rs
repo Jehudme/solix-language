@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::tokens::Token;
+use solix_common::tokens::Token;
 use miette::{Diagnostic, SourceSpan};
 
 /// Structured error emitted during lexical tokenization when an unknown or illegal token is encountered.
@@ -175,8 +175,8 @@ impl LexingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::span::Span;
-    use crate::tokens::TokenKind;
+    use solix_common::span::Span;
+    use solix_common::tokens::TokenKind;
 
     #[test]
     fn test_positive_lexing_error_constructors() {

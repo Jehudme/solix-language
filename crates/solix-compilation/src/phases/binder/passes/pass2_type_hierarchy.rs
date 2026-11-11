@@ -13,7 +13,8 @@ use crate::phases::parser::statements::declarations::{
     ClassDeclaration, ClassMember, Declaration, InterfaceDeclaration, Modifier,
 };
 use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
-use solix_common::{BindingError, PrimitiveKind, TokenKind, Type};
+use crate::BindingError;
+use solix_common::{PrimitiveKind, TokenKind, Type};
 use std::collections::{HashMap, HashSet};
 
 fn evaluate_integer_constant(expr: &Expression) -> Option<i64> {

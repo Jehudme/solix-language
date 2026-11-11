@@ -43,7 +43,7 @@ flowchart TD
     A["solix build [path]"] --> B["Validate manifest.toml & scripts/build.py"]
     B --> C["Resolve Profile (debug / release / test) & Link Mode"]
     C --> D["Invoke python3 scripts/build.py --profile <profile>"]
-    D --> E["tb.prepare_staging_dirs()<br>(cache/stage/<profile>/)"]
+    D --> E["tb.prepare_staging_dirs()<br>(build/.cache/stage/<profile>/)"]
     E --> F["tb.compile_rust_project()<br>(natives/ cdylib -> stage/lib/)"]
     F --> G["tb.stage_resources()<br>(resources/ -> stage/resources/)"]
     G --> H["tb.compile_solix_sources()<br>(solix compile src/ -> stage/bin/<name>.slxb)"]
@@ -55,21 +55,21 @@ flowchart TD
 During the build lifecycle, artifacts are assembled deterministically:
 
 ```text
-cache/
-├── cargo/                    # Cargo target directory for native bridge crates
-└── stage/
-    └── <profile>/
-        ├── manifest.toml     # Packaged copy of project manifest
-        ├── bin/
-        │   └── <name>.slxb   # Compiled Solix application bytecode
-        ├── lib/
-        │   ├── <name>_bridge.so  # Native shared library (.so / .dll / .dylib)
-        │   └── (dependencies)
-        └── resources/        # Bundled data assets
+build/
+├── .cache/
+│   ├── cargo/                # Cargo target directory for native bridge crates
+│   └── stage/
+│       └── <profile>/
+│           ├── manifest.toml # Packaged copy of project manifest
+│           ├── bin/
+│           │   └── <name>.slxb # Compiled Solix application bytecode
+│           ├── lib/
+│           │   ├── <name>_bridge.so # Native shared library (.so / .dll / .dylib)
+│           │   └── (dependencies)
+│           └── resources/    # Bundled data assets
+└── <profile>/
+    └── <name>.slxarc         # Final distribution archive
 ```
-
-The final distribution container is written to:
-- **`build/<profile>/<name>.slxarc`**
 
 ---
 

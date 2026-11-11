@@ -37,7 +37,7 @@ def load_manifest(project_root: Path) -> dict:
 
 def prepare_staging_dirs(project_root: Path, profile: str) -> dict[str, Path]:
     """Prepares and cleans the ephemeral staging and output directories."""
-    cache_dir = project_root / "cache"
+    cache_dir = project_root / "build" / ".cache"
     natives_cache_dir = cache_dir / "natives" / profile
     stage_dir = cache_dir / "stage" / profile
     build_dir = project_root / "build" / profile
@@ -319,39 +319,6 @@ def auto_build(profile: str = "debug", project_root: Path | None = None) -> Path
 
     print(f"=== Build Completed Successfully: {final_archive_path} ===")
     return final_archive_path
-
-
-def init_project(
-    target_path: Path | str,
-    name: str | None = None,
-    version: str = "0.1.0",
-    description: str = "A Solix project",
-    license_id: str = "Apache-2.0",
-    authors: list[str] | None = None,
-    main_entry: str = "Main::main",
-    test_entry: str = "TestRunner::test",
-    is_library: bool = False,
-    no_native: bool = False,
-    dependencies: list[str] | None = None,
-    force: bool = False,
-) -> Path:
-    """Convenience wrapper delegating to init_project.generate_project."""
-    import init_project as project_generator
-
-    return project_generator.generate_project(
-        target_path=Path(target_path),
-        name=name,
-        version=version,
-        description=description,
-        license_id=license_id,
-        authors=authors,
-        main_entry=main_entry,
-        test_entry=test_entry,
-        is_library=is_library,
-        no_native=no_native,
-        dependencies=dependencies,
-        force=force,
-    )
 
 
 if __name__ == "__main__":

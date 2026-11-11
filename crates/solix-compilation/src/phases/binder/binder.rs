@@ -12,7 +12,8 @@ use crate::phases::binder::symbols::{SymbolId, SymbolTable};
 use crate::phases::lexing::Span;
 use crate::phases::parser::statements::declarations::ClassDeclaration;
 use crate::phases::parser::visitor::AstVisitor;
-use solix_common::{BindingError, PrimitiveKind, Type};
+use crate::BindingError;
+use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

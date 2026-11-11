@@ -7,8 +7,8 @@ mod common;
 
 use clap::Parser;
 use common::HermeticCliWorkspace;
-use solix_client::cli::Cli;
-use solix_client::run;
+use solix_toolchain::cli::Cli;
+use solix_toolchain::run;
 use solix_common::bytecode::BinaryProgram;
 use solix_common::project::SlxarcArchive;
 use std::fs;

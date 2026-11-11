@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
-use solix_common::CompilationDiagnostic;
+use crate::CompilationDiagnostic;
 use std::fmt::Debug;
 
 /// Flow control decision returned by lifecycle hooks to guide pipeline execution.

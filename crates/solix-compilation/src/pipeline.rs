@@ -9,7 +9,7 @@ use crate::phases::standard::{
     LexerPhase, ParserPhase,
 };
 use crate::telemetry::{CompilerTelemetry, PhaseMetric};
-use solix_common::CompilationDiagnostic;
+use crate::CompilationDiagnostic;
 
 /// Sequential pipeline holding an ordered sequence of compilation phases.
 #[derive(Debug)]

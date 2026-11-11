@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use miette::{NamedSource, Report};
-use solix_common::CompilationDiagnostic;
+use solix_compilation::CompilationDiagnostic;
 
 /// Formats and renders a list of [`CompilationDiagnostic`]s to standard error.
 pub fn render_diagnostics(

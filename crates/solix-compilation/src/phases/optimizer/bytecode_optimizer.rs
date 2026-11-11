@@ -8,7 +8,7 @@
 
 use crate::CompilationContext::CompilationContext;
 use crate::phases::phase::CompilationPhase;
-use solix_common::CompilationDiagnostic;
+use crate::CompilationDiagnostic;
 use solix_common::bytecode::{CompiledFunction, Instruction, OpCode, SourceMapEntry};
 use std::collections::HashSet;
 

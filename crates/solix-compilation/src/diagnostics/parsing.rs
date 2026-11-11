@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::span::Span;
+use solix_common::span::Span;
 use miette::{Diagnostic, SourceSpan};
 
 /// Diagnostic error emitted when a syntactic violation or malformed AST construct is encountered.

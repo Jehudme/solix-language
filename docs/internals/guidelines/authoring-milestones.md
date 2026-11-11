@@ -145,7 +145,7 @@ Engineers authoring milestone files (`docs/internals/milestones/XXX-[name].md`) 
 * `crates/solix-common`: [Scope description]
 * `crates/solix-compilation`: [Scope description]
 * `crates/solix-runtime`: [Scope description]
-* `crates/solix-client`: [Scope description]
+* `crates/solix-toolchain`: [Scope description]
 * `crates/solix-lsp`: [Scope description]
 * `crates/solix-dbg`: [Scope description]
 * `docs/`: [Scope description]
@@ -215,7 +215,7 @@ source span tracking, comprehensive error recovery via synchronization tokens, a
 
 * `crates/solix-common`: Token definitions, source spans, diagnostic error codes.
 * `crates/solix-compilation`: Lexer, token stream cursor, recursive-descent parser, AST node definitions.
-* `crates/solix-client`: CLI syntax check command (`solix check`).
+* `crates/solix-toolchain`: CLI syntax check command (`solix check`).
 * `docs/internals/specs`: Statement and expression grammar BNF definitions.
 
 ## 3. Prioritized Deliverables & Task Matrix

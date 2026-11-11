@@ -11,9 +11,8 @@ use crate::manifest::manifest_to_source;
 use crate::phases::lexing::Span;
 use crate::phases::phase::CompilationPhase;
 use miette::SourceSpan;
-use solix_common::CompilationDiagnostic;
+use crate::diagnostics::{BindingError, CompilationDiagnostic};
 use solix_common::bytecode::BinaryProgram;
-use solix_common::diagnostics::binding::BindingError;
 use solix_common::solver::{DependencyRequirement, PackageVersion, SolverError};
 use std::collections::{HashMap, VecDeque};
 

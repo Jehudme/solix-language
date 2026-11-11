@@ -4,13 +4,11 @@
 #![forbid(unsafe_code)]
 
 use solix_common::bytecode::{BinaryProgram, ExportManifest};
-use solix_common::diagnostics::BindingError;
 use solix_common::project::ProjectManifest;
 use solix_common::solver::{
     DependencyRequirement, InMemoryModuleSolver, ModuleSolver, PackageVersion, SolvedPackage,
     SolverError,
 };
-use solix_common::span::Span;
 
 // ============================================================================
 // 1. PackageVersion Parsing & Display Tests
@@ -232,25 +230,4 @@ math_utils = "2.0.0"
     );
 }
 
-// ============================================================================
-// 6. Binding Diagnostics Codes E0289 and E0290 Tests
-// ============================================================================
 
-#[test]
-fn test_binding_diagnostics_dependency_codes() {
-    let dummy_span = Span::new(1, 10, 20);
-
-    let version_conflict_error = BindingError::IncompatibleDependencyVersion {
-        name: "raylib".to_string(),
-        reason: "Major version mismatch between 1.0.0 and 2.0.0".to_string(),
-        span: dummy_span.to_source_span(),
-    };
-    assert_eq!(version_conflict_error.error_code(), "E0289");
-
-    let package_not_found_error = BindingError::ExternalPackageNotFound {
-        name: "unknown_lib".to_string(),
-        reason: "Package not installed".to_string(),
-        span: dummy_span.to_source_span(),
-    };
-    assert_eq!(package_not_found_error.error_code(), "E0290");
-}

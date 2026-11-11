@@ -43,7 +43,7 @@ All test suites and automated test executions **MUST** adhere to the following b
    * **Concise Test Snippets Inlined Directly in `.rs`:** For short, targeted test cases spanning only a couple of lines (e.g., 1–5 lines testing an isolated token, operator lookahead, escape sequence, or specific negative error condition), engineers **SHOULD** write the test snippet inlined directly in the test file (`tests/*.rs`) using raw string literals. Creating a standalone `.slx` file for every single-line snippet is discouraged as it causes file system bloat and test fragmentation.
    * Storing massive multi-page language programs as raw string literals inside Rust source files remains strictly prohibited.
    * Fixtures are executed by automated runner scripts in `tests/` that call the public compiler and runtime entrypoints (`compile_source()`, `parse()`, `type_check()`, `execute()`).
-3. **Tier 3: End-to-End Toolchain Integration (`crates/solix-client/tests/`):**
+3. **Tier 3: End-to-End Toolchain Integration (`crates/solix-toolchain/tests/`):**
    * Multi-crate workflows, file generation, CLI flags (`--emit-asm`, `--opt-level`), and binary packaging tests **MUST** reside in `tests/` directories.
 
 ### 2.2 Dual Test Requirement & Negative Error Testing

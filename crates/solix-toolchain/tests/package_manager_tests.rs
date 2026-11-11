@@ -7,9 +7,9 @@ mod common;
 
 use clap::Parser;
 use common::HermeticCliWorkspace;
-use solix_client::cli::Cli;
-use solix_client::run;
-use solix_client::solver::ClientModuleSolver;
+use solix_toolchain::cli::Cli;
+use solix_toolchain::run;
+use solix_toolchain::solver::ClientModuleSolver;
 use solix_common::project::SlxarcArchive;
 use solix_common::solver::{ModuleSolver, PackageVersion, SolverError};
 use std::fs;

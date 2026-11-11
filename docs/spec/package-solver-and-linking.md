@@ -45,7 +45,7 @@ pub trait ModuleSolver: Send + Sync + std::fmt::Debug {
 ```
 
 ### 2.1 Concrete Solvers
-* **`ClientModuleSolver` (`solix-client` / `solix-toolchain`):** Scans the local filesystem package store (`~/.solix/packages/`), reads version directories, extracts archives, and loads `.slxb` containers.
+* **`ClientModuleSolver` (`solix-toolchain`):** Scans the local filesystem package store (`~/.solix/packages/`), reads version directories, extracts archives, and loads `.slxb` containers.
 * **`InMemoryModuleSolver` (`solix-common`):** In-memory dictionary solver used for fast, hermetic compiler unit tests without filesystem I/O.
 
 ---

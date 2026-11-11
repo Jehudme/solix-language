@@ -12,7 +12,8 @@ use crate::phases::parser::statements::declarations::{
 use crate::phases::parser::statements::expressions::Expression;
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::phase::CompilationPhase;
-use solix_common::{CompilationDiagnostic, Type};
+use crate::CompilationDiagnostic;
+use solix_common::Type;
 use std::collections::HashMap;
 
 /// Maximum recursion depth allowed during AST inlining expansion to prevent code blowup.
