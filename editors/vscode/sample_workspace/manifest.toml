@@ -1,0 +1,12 @@
+[info]
+name = "sample_workspace"
+version = "0.1.0"
+description = "Sample Solix project for interactive VS Code testing"
+license = "Apache-2.0"
+authors = ["Solix Team"]
+
+[entrypoints]
+main = "main"
+test = "test_addition"
+
+[dependencies]
