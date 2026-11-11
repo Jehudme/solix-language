@@ -297,7 +297,7 @@ float_suffix   ::= 'f' | 'F'
 A character literal represents a single `char` value and is delimited by single quotes (`'`).
 
 ```solix
-char a = 'A';
+char letter = 'A';
 char nl = '\n';
 char nul = '\0';
 ```

@@ -95,16 +95,16 @@ int64 → float64                (explicit cast required)
 ### Widening at Assignments and Call Sites
 
 Widening occurs automatically at:
-- Variable assignments: `int64 x = someInt32Value;`
+- Variable assignments: `int64 wider_val = someInt32Value;`
 - Method argument passing: a parameter of type `int64` accepts an `int32` argument.
 - Return statements: a method returning `float64` may return a `float32` expression.
 
 ```solix
 int32 value_a = 100;
-int64 b = a;      // implicit widening: CONV_I64 emitted
+int64 value_b = value_a;      // implicit widening: CONV_I64 emitted
 
-float32 f = 1.5f;
-float64 d = f;    // implicit widening: CONV_F64 emitted
+float32 float_val = 1.5f;
+float64 double_val = float_val;    // implicit widening: CONV_F64 emitted
 ```
 
 ---
@@ -443,17 +443,17 @@ int32(*)(int32, int32) add = [](int32 value_a, int32 value_b) => a + b;
 
 // Capturing local variables by value
 int32 factor = 5;
-int32(*)(int32) mult = [factor](int32 coord_x) => x * factor;
+int32(*)(int32) mult = `[factor](int32 coord_x) => coord_x * factor;`
 
 // Multi-line block body with explicit return type
-int32(*)(int32, int32) compute = [factor](int32 value_a, int32 value_b) : int32 {
+int32(*)(int32, int32) compute = `[factor](int32 value_a, int32 value_b) : int32 {`
     int32 sum = a + b;
     return sum * factor;
 };
 
 // Capturing `this` in instance methods
 public int32(*)(int32) getHandler() {
-    return [this](int32 coord_x) => x + this.offset;
+    return `[this](int32 coord_x) => coord_x + this.offset;`
 }
 ```
 

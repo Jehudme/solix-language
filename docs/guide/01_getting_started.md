@@ -58,14 +58,14 @@ solix <subcommand> [options] [arguments...]
 
 | Subcommand | Function | Reference |
 |---|---|---|
-| `new` | Scaffolds a new project with directory structure and manifest | [docs/spec/cli/new.md](../spec/cli/new.md) |
-| `build` | Builds project artifacts from `manifest.toml` profiles | [docs/spec/cli/build.md](../spec/cli/build.md) |
-| `run` | Executes compiled bytecode binaries on the Solix VM | [docs/spec/cli/run.md](../spec/cli/run.md) |
-| `compile` | Directly compiles source files into bytecode | [docs/spec/cli/compile.md](../spec/cli/compile.md) |
-| `install` | Installs a local project into `$SOLIX_HOME` | [docs/spec/cli/package.md](../spec/cli/package.md) |
-| `uninstall` | Uninstalls an installed project by name and version | [docs/spec/cli/package.md](../spec/cli/package.md) |
-| `list` | Lists all installed projects in tabular format | [docs/spec/cli/package.md](../spec/cli/package.md) |
-| `details` | Shows comprehensive metadata for an installed project | [docs/spec/cli/package.md](../spec/cli/package.md) |
+| `new` | Scaffolds a new project with directory structure and manifest | [docs/spec/cli/new.md](../spec/tools/cli/new.md) |
+| `build` | Builds project artifacts from `manifest.toml` profiles | [docs/spec/cli/build.md](../spec/tools/cli/build.md) |
+| `run` | Executes compiled bytecode binaries on the Solix VM | [docs/spec/cli/run.md](../spec/tools/cli/run.md) |
+| `compile` | Directly compiles source files into bytecode | [docs/spec/cli/compile.md](../spec/tools/cli/compile.md) |
+| `install` | Installs a local project into `$SOLIX_HOME` | [docs/spec/cli/package.md](../spec/tools/cli/package.md) |
+| `uninstall` | Uninstalls an installed project by name and version | [docs/spec/cli/package.md](../spec/tools/cli/package.md) |
+| `list` | Lists all installed projects in tabular format | [docs/spec/cli/package.md](../spec/tools/cli/package.md) |
+| `details` | Shows comprehensive metadata for an installed project | [docs/spec/cli/package.md](../spec/tools/cli/package.md) |
 
 ---
 

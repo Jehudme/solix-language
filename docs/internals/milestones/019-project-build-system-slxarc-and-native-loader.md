@@ -237,7 +237,7 @@ templates/untitled-rust/
 ```
 
 * **`natives/rust_bridge/src/lib.rs`:** Exports `#[no_mangle] pub extern "C" fn solix_register_natives(...)` registering `MathBridge::fast_add`, and direct fallback symbols using the Solix C-ABI FFI convention.
-* **`src/main.slx`:** Declares `public class MathBridge { public static native int32 fast_add(int32 a, int32 b); }` and invokes it from `Main::main()`.
+* **`src/main.slx`:** Declares `public class MathBridge { public static native int32 fast_add(int32 value_a, int32 value_b); }` and invokes it from `Main::main()`.
 * **`tests/test_main.slx`:** Declares `TestRunner::main()` asserting that `MathBridge::fast_add(15, 27) == 42`.
 
 ---

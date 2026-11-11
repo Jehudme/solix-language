@@ -93,7 +93,7 @@ while counter < 10 {
     counter = counter + 1;
 }
 ```
-*Verifying Test:* [`tests/fixtures/control_flow/while_basic.slx`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/tests/fixtures/control_flow/while_basic.slx)
+*Verifying Test:* [`tests/fixtures/control_flow/while_basic.slx`](crates/solix-compilation/tests/fixtures/parser/while_basic.slx)
 ````
 
 ### 3.3 Archival Header Specification
@@ -104,7 +104,7 @@ When moving superseded documents to `docs/archive/`, authors **MUST** prepend th
 > [!CAUTION] ARCHIVED DOCUMENT
 > This document was officially superseded on **YYYY-MM-DD**. It is preserved exclusively 
 > for historical reference and compiler archaeology. It no longer represents active language semantics.
-> **Current Authoritative Standard:** [Current Specification Name](file:///path/to/current.md)
+> **Current Authoritative Standard:** [Current Specification Name](`path/to/current.md`)
 ```
 
 ---

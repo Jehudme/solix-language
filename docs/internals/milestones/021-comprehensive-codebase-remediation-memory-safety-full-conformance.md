@@ -35,7 +35,7 @@ Following the forensic codebase audit (`docs/internals/codebase-forensic-audit-a
    * Fixes `OpCode::ArrayLength` on `BlockTag::String` constants, narrow-stride array accesses, multi-binary relocation for `CastCheck`/`CallInterface`/`TupleInstanceof`, and destructor exception propagation.
 2. **Phase 2: Compiler & Emitter Miscompilation Fixes (`BUG-COMP-01` – `BUG-COMP-12`):**
    * Fixes `%=` (`OperatorModuloAssign`) miscompiling as `+=`, and adds 64-bit `AddI64`/`SubI64`/`MulI64`/`DivI64`/`ModI64` compound assignments and `++`/`--` increments.
-   * Implements call-site default parameter injection (`void foo(int32 a, int32 b = 10)`).
+   * Implements call-site default parameter injection (`void foo(int32 value_a, int32 value_b = 10)`).
    * Fixes `BytecodeOptimizerPhase` register read/write analysis for `CallExtern`, `ConvIToF`, `ConvFToI`, `LoadI64`, `LoadF64`, `LoadBool`, and `AllocObjectExtern`.
    * Exports `Declaration::Interface`, `Declaration::Enum` (with explicit values), and `ClassMember::Operator` in `ExportManifest` and `manifest_to_source`.
    * Implements `super.method(...)` binding and emission, string concatenation (`+`), generic method body monomorphization (`default(T)` / `sizeof(T)`), and generic parameter bound checking (`<T : IPrintable>`).
@@ -257,7 +257,7 @@ To achieve **100% implementation of all 55+ suites in `TESTS.md`**:
   ```solix
   int32 sum_all<args...>(int32 first, args...) {
       int32 total = first;
-      for (int32 i = 0; i < args.length; i++) {
+      for (int32 index = 0; i < args.length; i++) {
           total = total + (int32)args[i];
       }
       return total;
