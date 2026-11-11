@@ -1,57 +1,31 @@
-# Solix Developer Guides & Tutorials
+# Developer Guides — Index
 
-Welcome to the Solix user guides. These guides provide a structured, task-oriented path for learning and building real-world applications with Solix v2.0.
-
-Per [`GL-0012`](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-features-and-wiki.md), user guides focus on **practical application and idioms**. For formal semantics, refer to the [Formal Specifications](file:///home/jehud/Projects/solix-language/docs/spec/README.md); for quick syntax lookups, refer to the [Atomic Wiki](file:///home/jehud/Projects/solix-language/docs/wiki/README.md).
+Welcome to the Solix developer guides. These documents are written for developers building applications, libraries, and native extensions in Solix. They cover core language mechanics, type semantics, memory architecture, package distribution, tooling, and ecosystem integration.
 
 ---
 
-## Recommended Learning Path
+## Guides Directory
 
-```text
-  01. Getting Started & Toolchain
-                 │
-                 ▼
-  02. Variables, Primitives & Strings
-                 │
-                 ▼
-  03. Control Flow & Functions
-                 │
-                 ▼
-  04. Classes, OOP & Namespaces
-                 │
-                 ▼
-  05. Memory Management, ARC & RAII
-                 │
-                 ▼
-  06. Error Handling & Assertions
-                 │
-                 ▼
-  07. Generics & Variadics
-                 │
-                 ▼
-  08. Packages, Dependencies & Linking
-                 │
-                 ▼
-  09. Native Rust Extensions
-                 │
-                 ▼
-  10. Standard Library Tour
-```
+| # | Guide | Primary Topics |
+|---|---|---|
+| 1 | [`01_getting_started.md`](01_getting_started.md) | Installation, Cargo build, `solix new`, `solix build`, `solix run`, `manifest.toml` |
+| 2 | [`02_variables_and_types.md`](02_variables_and_types.md) | All 13 primitive types, declarations, `const` immutability, arrays, `String`, `null` semantics |
+| 3 | [`03_control_flow.md`](03_control_flow.md) | `if/else`, `while`, `do-while`, `for`, `switch`, `break`, `continue`, `return` |
+| 4 | [`04_classes_and_oop.md`](04_classes_and_oop.md) | Classes, constructors, destructors (`~ClassName()`), inheritance, interfaces, `virtual`/`override`, operators |
+| 5 | [`05_memory_management_and_arc.md`](05_memory_management_and_arc.md) | ARC, 8-byte headers, strong/weak references, cycle breaking, deterministic LIFO destruction |
+| 6 | [`06_error_handling.md`](06_error_handling.md) | Exception hierarchy, `try/catch/finally`, zero-cost table unwinding, custom exceptions |
+| 7 | [`07_functions_and_lambdas.md`](07_functions_and_lambdas.md) | Static methods, function pointers `ret(*)(params)`, lambdas `=>`, closures, ARC captures |
+| 8 | [`08_generics_and_templates.md`](08_generics_and_templates.md) | Generic classes, multiple type parameters, deduction, monomorphization pipeline |
+| 9 | [`09_native_plugins.md`](09_native_plugins.md) | Writing native Rust and C extensions, ABI conventions, dynamic loader (`.so`/`.dll`/`.dylib`) |
+| 10 | [`packaging_and_resources.md`](packaging_and_resources.md) | Single-file `.slxarc` project archives, manifest specification, native discovery, `Resource` API |
+| 11 | [`editors_vscode.md`](editors_vscode.md) | Visual Studio Code syntax highlighting, Language Server Protocol (`solix-lsp`), configuration |
+| 12 | [`release.md`](release.md) | Automated build pipelines, cross-compilation, packaging, and release automation |
+| 13 | [`solix_raylib_plan.md`](solix_raylib_plan.md) | Multi-platform Raylib bindings, automated code generator from API JSON, companion compilation |
 
 ---
 
-## Guide Directory
+## Technical Specifications & Architecture
 
-| # | Guide Title | Core Concepts Covered |
-| :--- | :--- | :--- |
-| **01** | [**Getting Started & Toolchain**](file:///home/jehud/Projects/solix-language/docs/guide/01-getting-started-and-toolchain.md) | Installing Solix, `solix new`, `build`, `run`, CLI workflows, project structure (`manifest.toml`). |
-| **02** | [**Variables, Primitives & Strings**](file:///home/jehud/Projects/solix-language/docs/guide/02-variables-primitives-and-strings.md) | Explicit typing, integer signedness, float precision, `char`, `bool`, arrays, tuples, primitive `string` vs `solix.core.String`. |
-| **03** | [**Control Flow & Functions**](file:///home/jehud/Projects/solix-language/docs/guide/03-control-flow-and-functions.md) | `if`/`else`, `while`, `do`/`while`, `for`, `switch`/`case`, free functions, default parameters, function pointers, and lambdas. |
-| **04** | [**Classes, OOP & Namespaces**](file:///home/jehud/Projects/solix-language/docs/guide/04-classes-oop-and-namespaces.md) | Classes, single inheritance, interfaces, abstract classes, operator overloading, static members via `::`, and qualified declarations. |
-| **05** | [**Memory Management, ARC & RAII**](file:///home/jehud/Projects/solix-language/docs/guide/05-memory-management-arc-and-raii.md) | Deterministic ARC, strong vs weak references, breaking reference cycles, and scope-based destructors (`~ClassName()`). |
-| **06** | [**Error Handling & Assertions**](file:///home/jehud/Projects/solix-language/docs/guide/06-error-handling-and-assertions.md) | Structured `try`/`catch`/`finally`, custom exception classes, rethrowing, defensive `assert()`, and process termination (`exit()`). |
-| **07** | [**Generics & Variadic Templates**](file:///home/jehud/Projects/solix-language/docs/guide/07-generics-and-variadic-templates.md) | Parameterized classes and methods, interface bounds (`<T : Bound>`), variadic templates (`<args...>`), and monomorphization. |
-| **08** | [**Packages, Dependencies & Linking**](file:///home/jehud/Projects/solix-language/docs/guide/08-packages-dependencies-and-linking.md) | Multi-file packages, `extern import`, version resolution via `ModuleSolver`, `.slxb` bytecode, and `.slxarc` archives. |
-| **09** | [**Native Rust Extensions**](file:///home/jehud/Projects/solix-language/docs/guide/09-native-rust-extensions.md) | Writing native shared libraries in Rust (`cdylib`), using `SolixVmContext` and `SolixCValue`, and bundling in `natives/`. |
-| **10** | [**Standard Library Tour (`solixlib`)**](file:///home/jehud/Projects/solix-language/docs/guide/10-standard-library-tour.md) | Practical recipes covering collections, file I/O, streams, cryptography, date/time, and process execution. |
+- [Architecture Deep Dives](../architecture/README.md) — Compiler pipeline, 64-bit Register VM, byte-addressed heap, and binder passes
+- [Language Specifications](../spec/README.md) — Comprehensive grammar, statement, expression, and standard library specifications
+- [Solix Wiki](../wiki/README.md) — Keyword reference, diagnostics catalog, and primitive guides
