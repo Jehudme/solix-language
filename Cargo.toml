@@ -25,6 +25,7 @@ solix-common = { path = "crates/solix-common" }
 solix-compilation = { path = "crates/solix-compilation" }
 solix-runtime = { path = "crates/solix-runtime" }
 solix-toolchain = { path = "crates/solix-toolchain" }
+solix-lsp = { path = "crates/solix-lsp" }
 
 # Error handling & logging
 thiserror = "2.0"

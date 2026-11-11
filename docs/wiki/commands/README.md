@@ -16,6 +16,8 @@ The Solix toolchain provides a unified command-line executable (`solix`) for pro
 | `install` | Installs `.slxb` or `.slxarc` into local store | [Package Commands](file:///home/jehud/Projects/solix-language/docs/wiki/commands/package-commands.md#2-solix-install) | [`docs/spec/tools/cli/install.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/install.md) |
 | `uninstall` | Removes packages or versions from local store | [Package Commands](file:///home/jehud/Projects/solix-language/docs/wiki/commands/package-commands.md#3-solix-uninstall) | [`docs/spec/tools/cli/uninstall.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/uninstall.md) |
 | `list` | Lists installed packages and versions | [Package Commands](file:///home/jehud/Projects/solix-language/docs/wiki/commands/package-commands.md#4-solix-list) | [`docs/spec/tools/cli/list.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/list.md) |
+| `lsp` | Starts the 32-feature Solix Language Server | [LSP Reference](file:///home/jehud/Projects/solix-language/docs/wiki/commands/lsp.md) | [`docs/spec/tools/lsp/protocol.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/lsp/protocol.md) |
+| `fmt` | Formats Solix source code to specification | [Formatter Reference](file:///home/jehud/Projects/solix-language/docs/wiki/commands/fmt.md) | [`docs/spec/tools/lsp/protocol.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/lsp/protocol.md) |
 
 ---
 
@@ -24,3 +26,5 @@ The Solix toolchain provides a unified command-line executable (`solix`) for pro
 * [**`compile` & `build`**](file:///home/jehud/Projects/solix-language/docs/wiki/commands/compile-and-build.md): Standalone file compilation, optimization profiles, and project archive build orchestration (`manifest.toml`).
 * [**`run` & `info`**](file:///home/jehud/Projects/solix-language/docs/wiki/commands/run-and-info.md): Executing bytecode containers, instant source execution, guest argument passing, and container inspection/disassembly.
 * [**Package Management Commands**](file:///home/jehud/Projects/solix-language/docs/wiki/commands/package-commands.md): `solix new`, `solix install`, `solix uninstall`, and `solix list`.
+* [**Language Server (`lsp`)**](file:///home/jehud/Projects/solix-language/docs/wiki/commands/lsp.md): Official LSP 3.17 stdio server integration with editor engines.
+* [**Code Formatter (`fmt`)**](file:///home/jehud/Projects/solix-language/docs/wiki/commands/fmt.md): Standardized 4-space indentation and formatting checker.

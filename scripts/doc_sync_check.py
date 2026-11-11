@@ -97,6 +97,15 @@ TRIGGER_MATRIX = [
             "docs/guide/01_getting_started.md",
         ],
     },
+    {
+        "name": "LSP & Formatting Subsystem",
+        "pattern": r"^(crates/solix-lsp/|crates/solix-toolchain/src/commands/(lsp|fmt)\.rs)",
+        "required_docs": [
+            "docs/wiki/commands/lsp.md",
+            "docs/wiki/commands/fmt.md",
+            "docs/spec/tools/lsp/protocol.md",
+        ],
+    },
 ]
 
 # Regex for detecting single-letter variable declarations in Solix/Rust code blocks

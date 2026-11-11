@@ -100,6 +100,43 @@ pub fn parse_source(
     Ok(ast)
 }
 
+/// Parses a token stream from a single source file in resilient mode, always returning the parsed AST.
+#[must_use]
+pub fn parse_source_resilient(
+    source_id: u16,
+    tokens: &[Token],
+    source_text: &str,
+) -> (ProgramAst, Vec<ParsingError>) {
+    let mut state = ParserState::new(source_id, tokens, source_text);
+    let ast = state.parse_program();
+    (ast, state.errors)
+}
+
+/// Parses all sources in the compilation context in resilient mode, always populating `context.ast`.
+pub fn parse_context_resilient(context: &mut CompilationContext) -> Vec<ParsingError> {
+    let mut accumulated_errors = Vec::new();
+    let sources_count = context.sources.len();
+    if context.ast.len() < sources_count {
+        context.ast.resize_with(sources_count, || None);
+    }
+
+    for source_index in 0..sources_count {
+        let source_id = source_index as u16;
+        let source_text = &context.sources[source_index];
+        let tokens: &[Token] = context
+            .tokens
+            .get(source_index)
+            .map(|tok_vec| tok_vec.as_slice())
+            .unwrap_or(&[]);
+
+        let (ast, errors) = parse_source_resilient(source_id, tokens, source_text);
+        context.ast[source_index] = Some(ast);
+        accumulated_errors.extend(errors);
+    }
+
+    accumulated_errors
+}
+
 /// Token stream cursor providing checked lookahead and consumption.
 struct TokenCursor<'tokens> {
     tokens: &'tokens [Token],
@@ -296,6 +333,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
     }
 
     fn synchronize(&mut self) {
+        if self.cursor.check(TokenKind::PunctuationCloseBrace) {
+            return;
+        }
         self.cursor.advance();
         while !self.cursor.is_at_end() {
             if matches!(self.cursor.previous(), Some(prev) if prev.kind == TokenKind::PunctuationSemicolon)
@@ -1916,9 +1956,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
         }
 
-        let close_brace = self.consume_close_brace()?;
+        let close_brace_span = if self.cursor.check(TokenKind::PunctuationCloseBrace) {
+            self.cursor.advance().copied().unwrap_or_default().span
+        } else {
+            self.record_error(ParsingError::ExpectedCloseBrace {
+                span: self.cursor.current_span().to_source_span(),
+            });
+            self.cursor.current_span()
+        };
         self.scope_depth -= 1;
-        let span = open_brace.combine(close_brace.span);
+        let span = open_brace.combine(close_brace_span);
 
         Ok(BlockStatement { span, statements })
     }
@@ -2996,6 +3043,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                 }
                 let close_paren = self.consume_close_paren()?;
@@ -3042,6 +3092,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                 }
                 let close_paren = self.consume_close_paren()?;
@@ -3052,9 +3105,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     generic_arguments,
                     arguments,
                 };
-            } else if self.cursor.match_token(TokenKind::PunctuationDot).is_some() {
+            } else if let Some(dot_token) = self.cursor.match_token(TokenKind::PunctuationDot) {
+                let dot_span = dot_token.span;
                 // Member access
-                let member_span = self.consume_identifier()?;
+                let member_span = match self.consume_identifier() {
+                    Ok(ident_span) => ident_span,
+                    Err(parsing_error) => {
+                        self.errors.push(parsing_error);
+                        Span::new(dot_span.id, dot_span.end, dot_span.end)
+                    }
+                };
                 let span = expression.span().combine(member_span);
                 expression = Expression::MemberAccess {
                     span,
@@ -3062,13 +3122,19 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     member_span,
                     is_scope_resolution: false,
                 };
-            } else if self
+            } else if let Some(colon_token) = self
                 .cursor
                 .match_token(TokenKind::PunctuationDoubleColon)
-                .is_some()
             {
+                let colon_span = colon_token.span;
                 // Static member access
-                let member_span = self.consume_identifier()?;
+                let member_span = match self.consume_identifier() {
+                    Ok(ident_span) => ident_span,
+                    Err(parsing_error) => {
+                        self.errors.push(parsing_error);
+                        Span::new(colon_span.id, colon_span.end, colon_span.end)
+                    }
+                };
                 let span = expression.span().combine(member_span);
                 expression = Expression::MemberAccess {
                     span,
@@ -3339,6 +3405,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                 }
                 let close_bracket = self.consume_close_bracket()?;
@@ -3358,6 +3427,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -3422,6 +3494,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -3562,6 +3637,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -3841,6 +3919,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                     if self
                         .cursor
@@ -3891,6 +3972,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }

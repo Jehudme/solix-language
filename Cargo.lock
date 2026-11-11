@@ -1118,6 +1118,9 @@ dependencies = [
 name = "solix-lsp"
 version = "0.1.0"
 dependencies = [
+ "dashmap",
+ "serde",
+ "serde_json",
  "solix-common",
  "solix-compilation",
  "tempfile",
@@ -1125,6 +1128,7 @@ dependencies = [
  "tower-lsp",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -1160,8 +1164,10 @@ dependencies = [
  "serde_json",
  "solix-common",
  "solix-compilation",
+ "solix-lsp",
  "solix-runtime",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

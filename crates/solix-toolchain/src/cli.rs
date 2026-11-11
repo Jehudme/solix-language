@@ -48,6 +48,40 @@ pub enum Commands {
 
     /// Lists all installed packages in the local package store
     List(ListArgs),
+
+    /// Starts the Solix Language Server Protocol (LSP) service
+    Lsp(LspArgs),
+
+    /// Formats Solix source files according to official style guidelines
+    Fmt(FmtArgs),
+}
+
+/// Arguments for `solix lsp`.
+#[derive(Debug, Args, Clone)]
+pub struct LspArgs {
+    /// Run language server using standard input and output transport
+    #[arg(long, default_value_t = true)]
+    pub stdio: bool,
+
+    /// Optional project root directory [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Optional package store root directory override
+    #[arg(long)]
+    pub pkg_dir: Option<PathBuf>,
+}
+
+/// Arguments for `solix fmt`.
+#[derive(Debug, Args, Clone)]
+pub struct FmtArgs {
+    /// Solix source files or directories to format [default: current directory]
+    #[arg(default_value = ".")]
+    pub files: Vec<PathBuf>,
+
+    /// Check if files are formatted without writing changes to disk (exits with code 1 if unformatted)
+    #[arg(long)]
+    pub check: bool,
 }
 
 /// Arguments for `solix build`.

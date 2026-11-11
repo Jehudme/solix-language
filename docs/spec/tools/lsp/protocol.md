@@ -27,11 +27,44 @@ Content-Length: <byte_length>\r\n
        {
          "capabilities": {
            "textDocumentSync": 1,
-           "hoverProvider": false,
-           "definitionProvider": false,
+           "hoverProvider": true,
+           "definitionProvider": true,
+           "typeDefinitionProvider": true,
+           "implementationProvider": true,
+           "referencesProvider": true,
+           "documentHighlightProvider": true,
+           "documentSymbolProvider": true,
+           "workspaceSymbolProvider": true,
+           "callHierarchyProvider": true,
+           "typeHierarchyProvider": true,
+           "codeActionProvider": true,
+           "codeLensProvider": {
+             "resolveProvider": false
+           },
+           "documentFormattingProvider": true,
+           "documentRangeFormattingProvider": true,
+           "renameProvider": {
+             "prepareProvider": true
+           },
+           "foldingRangeProvider": true,
+           "selectionRangeProvider": true,
+           "inlayHintProvider": true,
+           "documentLinkProvider": {
+             "resolveProvider": false
+           },
+           "signatureHelpProvider": {
+             "triggerCharacters": ["(", ","]
+           },
            "completionProvider": {
-             "resolveProvider": false,
-             "triggerCharacters": [".", "::"]
+             "resolveProvider": true,
+             "triggerCharacters": [".", ":"]
+           },
+           "semanticTokensProvider": {
+             "legend": {
+               "tokenTypes": [],
+               "tokenModifiers": []
+             },
+             "full": true
            }
          },
          "serverInfo": {

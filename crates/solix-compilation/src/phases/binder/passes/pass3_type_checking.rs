@@ -1170,6 +1170,17 @@ impl<'a> TypeCheckingVisitor<'a> {
 
                 if let Type::Class {
                     ref symbol_name,
+                    ..
+                } = resolved_type
+                    && let Some(class_id) = self
+                        .symbol_table
+                        .resolve_symbol(self.source_id, symbol_name)
+                {
+                    self.resolved_symbols.insert(instance_type.span(), class_id);
+                }
+
+                if let Type::Class {
+                    ref symbol_name,
                     ref type_arguments,
                 } = resolved_type
                     && let Some(class_id) = self
@@ -2656,6 +2667,12 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             &node.var_type,
             self.symbol_table,
         );
+
+        if let Type::Class { ref symbol_name, .. } = declared_type
+            && let Some(class_id) = self.symbol_table.resolve_symbol(self.source_id, symbol_name)
+        {
+            self.resolved_symbols.insert(node.var_type.span(), class_id);
+        }
 
         if let TypeAnnotation::Named { path, .. } = &node.var_type {
             let segments: Vec<&str> = path
