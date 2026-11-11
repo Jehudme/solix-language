@@ -1,79 +1,103 @@
-# `solix compile` — Source Code Compilation
+# `solix compile` — Source File Compilation
 
-The `compile` subcommand drives the Solix front-end pipeline (Lexer, Parser, Binder, and Assembler) to translate one or more `.slx` source files into executable bytecode binaries (`.slxb`) or text assembly listings. With execution flags or when paired with the runtime, it can also directly execute compiled bytecode or dispatch `.slxarc` package bundles.
+The `compile` subcommand compiles one or more Solix source files (`*.slx`) into an executable binary container (`*.slxb`), performing lexing, parsing, multi-pass type binding, semantic analysis, optimization, and 64-bit Register VM bytecode emission.
 
 ---
 
 ## Synopsis
 
 ```bash
-solix compile <files>... [options]
+solix compile <sources...> [options]
 ```
 
 ---
 
-## Arguments
+## Positional Arguments
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<files>...` | Positional Path(s) | **Yes** | One or more paths to `.slx` source files to compile. Must exist on disk. |
+| `<sources...>` | Paths | **Yes** | One or more `.slx` source file paths or directories containing Solix source code. |
 
 ---
 
 ## Options & Flags
 
-### Output Artifacts
-
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--output` | `-o` | Path | `out.slxb` | Target path for the generated binary bytecode file. Parent directories are created automatically if they do not exist. |
-| `--asm` | `-a` | Path | `""` (Disabled) | Optional path to emit human-readable disassembly text. |
-| `--entry` | `-e` | String | `main` | Name of the top-level or static method serving as the program entry point. |
+| `--output <file>` | `-o` | Path | `<name>.slxb` | Destination file path for the compiled `.slxb` binary container. |
+| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Package dependency requirements (e.g. `-d raylib@1.0.0`). |
+| `--lib <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxarc` archives whose API interfaces should be extracted and linked. |
+| `--name <name>` | `-n` | String | (Derived from sources) | Package or module identifier name. |
+| `--version <semver>` | `-V` | String | `"0.1.0"` | Semantic version string embedded into binary container metadata. |
+| `--description <desc>` | | String | `""` | Human-readable package description. |
+| `--profile <mode>` | | String | `"release"` | Target compilation profile: `debug`, `release`, or `test`. |
+| `--emit-api <file.slx>` | | Path | None | Synthesizes and writes the public interface API declarations to a `.slx` file. |
+| `--no-builtins` | | Flag | `false` | Omits automatic ingestion of built-in standard library definitions (`blt.io`). |
+| `--check` | | Flag | `false` | Executes lexical, grammatical, and semantic binder checks without emitting bytecode. |
+| `--time` | | Flag | `false` | Prints wall-clock elapsed duration for each compiler pipeline phase. |
+| `--metrics` | | Flag | `false` | Prints compiler throughput metrics and detailed phase duration breakdown. |
+| `--metrics-json` | | Flag | `false` | Outputs compiler metrics and phase telemetry formatted as machine-readable JSON. |
+| `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for `AstInlinerPhase` function inlining. |
+| `--link <mode>` | | String | `"dynamic"` | Linking mode for dependencies and emission: `dynamic` (default) or `static`. |
+| `--static` | | Flag | `false` | Shorthand for static linking mode (`--link static`), merging dependencies into a single self-contained binary. |
+| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 
-### Diagnostic & Logging Options
+---
 
-| Option | Type | Allowed Values | Default | Description |
-|---|---|---|---|---|
-| `--log-level` | String | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERR`, `CRITICAL`, `OFF` | `INFO` | Minimum severity level for compiler log output. |
-| `--flush-level` | String | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERR`, `CRITICAL`, `OFF` | `ERR` | Threshold level triggering an immediate flush of log buffers. |
-| `--sink-type` | String | `STDOUT`, `STDERR`, `BASIC_FILE`, `CONSOLE_AND_FILE` | `STDOUT` | Destination sink for compiler logs. |
-| `--log-pattern` | String | Format String | (Default spdlog pattern) | Custom log formatting pattern. |
-| `--log-file` | Path | File Path | `""` | File path for log writes when `sink-type` is `BASIC_FILE` or `CONSOLE_AND_FILE`. |
-| `--flush-every` | Integer | Seconds | `0` | Periodic log flush interval in seconds (0 to disable periodic flush). |
-| `--multithreaded` | Flag | Boolean | `false` | Enables multithreaded parallel lexing and parsing. |
+## Compiler Pipeline Architecture
+
+When `solix compile` executes, sources pass through the unified compiler pipeline:
+
+```mermaid
+flowchart LR
+    A["Source Files (*.slx)"] --> B["LexerPhase<br>(Token Stream)"]
+    B --> C["ParserPhase<br>(AST Construction)"]
+    C --> D["Dependency & API Solver<br>(External Manifests)"]
+    D --> E["Binder Passes 1-3<br>(Symbols, Types, Monomorphization)"]
+    E --> F["AstInlinerPhase<br>(Threshold <= 8)"]
+    F --> G["Register Emitter<br>(64-Bit Register VM)"]
+    G --> H["Binary Container (*.slxb)"]
+```
+
+---
+
+## Linking Modes
+
+### Dynamic Linking (`--link dynamic`, Default)
+External symbols from packages declared via `--deps` or `--lib` are resolved as external references. The emitted `.slxb` container records external module and symbol dependencies, resolving them dynamically at runtime via the `ClientModuleSolver`.
+
+### Static Linking (`--link static` or `--static`)
+External symbols and classes from dependencies are fully merged into the output `.slxb` container, followed by Dead-Code Elimination (DCE). The resulting container has zero runtime package store dependencies.
 
 ---
 
 ## Exit Codes
 
-| Code | Condition |
-|---|---|
-| `0` | Compilation succeeded; binary bytecode written to output destination. |
-| `1` | Compilation failed due to missing files, syntax errors, or semantic binding errors. Any partially written output file is automatically removed. |
+| Exit Code | Classification | Meaning |
+|---|---|---|
+| `0` | Success | Compilation completed and `.slxb` container emitted. |
+| `1` | Error | Lexical, syntactic, binder type error, or file resolution failure. |
 
 ---
 
 ## Examples
 
-### 1. Basic Compilation to Default Target
+### 1. Basic Compilation
 ```bash
-solix compile main.slx
-# Produces out.slxb in current working directory
+solix compile src/main.slx -o bin/app.slxb
 ```
 
-### 2. Custom Output Path and Disassembly
+### 2. Multi-File Compilation with Dependencies
 ```bash
-solix compile src/app.slx -o bin/app.slxb -a bin/app.s
-# Compiles src/app.slx, writes bytecode to bin/app.slxb, and outputs assembly to bin/app.s
+solix compile src/app.slx src/utils.slx -d raylib@1.0.0 -o bin/game.slxb
 ```
 
-### 3. Multi-File Compilation with Custom Entry Point
+### 3. Syntax and Type Check Only
 ```bash
-solix compile math.slx main.slx -e start -o bin/math_app.slxb
-# Compiles both files with 'start' as the entry point method
+solix compile src/main.slx --check
 ```
 
-### 4. Detailed Diagnostic Trace to File
+### 4. Static Linking with Performance Telemetry
 ```bash
-solix compile main.slx --log-level TRACE --sink-type BASIC_FILE --log-file compiler.log
+solix compile src/main.slx -d math_utils@0.2.0 --static --metrics
 ```

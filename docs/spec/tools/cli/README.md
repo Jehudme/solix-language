@@ -1,6 +1,6 @@
 # Solix CLI & Toolchain Specification
 
-The Solix toolchain provides a unified command-line executable (`solix`, aliased as `solix_launcher`) designed for building, compiling, executing, scaffolding, and managing Solix projects and local packages across Linux, macOS, and Windows.
+The Solix toolchain provides a unified command-line executable (`solix`) designed for compiling, building, executing, scaffolding, inspecting, and managing Solix projects and packages across Linux, macOS, and Windows.
 
 ---
 
@@ -20,8 +20,8 @@ The Solix toolchain provides a unified command-line executable (`solix`, aliased
 The Solix CLI is designed around three core principles:
 
 1. **Subcommand Modularity**: Every task is encapsulated in a dedicated, self-contained subcommand with clear option validation, deterministic error handling, and structured diagnostics.
-2. **Deterministic Artifact Placement**: Source code compilation and project builds emit output binaries into explicit, predictable locations without implicit system mutations.
-3. **Isolated Package Management**: Package operations (`install`, `uninstall`, `list`, `details`) operate within an isolated, cross-platform user storage location (`SOLIX_HOME`) governed by a single authoritative manifest (`installed.json`) and deterministic SHA-256 package identifiers.
+2. **Deterministic Artifact Placement**: Source code compilation and project builds emit output binaries into explicit, predictable locations (`build/<profile>/<name>.slxarc` or `<name>.slxb`) without implicit system mutations.
+3. **Isolated Package Management**: Package operations (`install`, `uninstall`, `list`) operate within an isolated, cross-platform user storage location (`~/.solix/packages`) governed by semantic versioning.
 
 ---
 
@@ -43,17 +43,14 @@ solix <subcommand> --help
 
 | Subcommand | Description | Specification Link |
 |---|---|---|
-| [`compile`](compile.md) | Compiles one or more `.slx` source files into bytecode (`.slxb`) or executes | [compile.md](compile.md) |
-| [`run`](run.md) | Executes compiled bytecode (`.slxb`), Solix project, or package bundle (`.slxarc`) | [run.md](run.md) |
-| [`build`](build.md) | Builds project artifacts from `manifest.toml` profiles and dependencies | [build.md](build.md) |
-| [`pack`](pack.md) | Packages project or installed application into an archive (`.slxarc`) | [pack.md](pack.md) |
-| [`create`](new.md) / [`new`](new.md) | Scaffolds a new Solix project (`app`, `library`, `plugin`) with standard structure | [new.md](new.md) |
-| [`install`](package.md#solix-install) | Installs a local Solix project or package bundle into the package repository | [package.md#solix-install](package.md#solix-install) |
-| [`archive`](package.md#solix-archive) | Builds and exports a clean, prepared project distribution directory | [package.md#solix-archive](package.md#solix-archive) |
-| [`uninstall`](package.md#solix-uninstall) | Removes an installed project by name and version | [package.md#solix-uninstall](package.md#solix-uninstall) |
-| [`list`](package.md#solix-list) | Lists installed projects with TYPE column, filtering, and sorting | [package.md#solix-list](package.md#solix-list) |
-| [`details`](package.md#solix-details) | Displays project metadata, scripting query tags, or inspects `.slxarc` bundles | [package.md#solix-details](package.md#solix-details) |
-| `version` | Displays toolchain version string (also via `-v` / `--version`) | [README.md](#global-invocation-syntax) |
+| [`new`](new.md) | Scaffolds a new Solix project workspace with build automation, test harness, and native bridge | [new.md](new.md) |
+| [`compile`](compile.md) | Compiles `.slx` source files into an executable binary container (`.slxb`) | [compile.md](compile.md) |
+| [`build`](build.md) | Orchestrates building a project and packages it into an archive container (`.slxarc`) | [build.md](build.md) |
+| [`run`](run.md) | Executes `.slxb` binaries, `.slxarc` archives, or `.slx` source files on the 64-bit Register VM | [run.md](run.md) |
+| [`info`](info.md) | Inspects metadata, export manifests, disassembly, or synthesized APIs of `.slxb` or `.slxarc` | [info.md](info.md) |
+| [`install`](install.md) | Installs a `.slxb` binary or `.slxarc` archive into the local package store | [install.md](install.md) |
+| [`uninstall`](uninstall.md) | Removes an installed package or specific version from the local package store | [uninstall.md](uninstall.md) |
+| [`list`](list.md) | Lists all installed packages and versions in the local package store | [list.md](list.md) |
 
 ---
 
@@ -61,10 +58,9 @@ solix <subcommand> --help
 
 | Variable | Description | Default Value |
 |---|---|---|
-| `SOLIX_HOME` | Root directory for local package installations and registry metadata | Windows: `%LOCALAPPDATA%\solix`<br>macOS: `~/Library/Application Support/solix`<br>Linux: `~/.solix` (or `$XDG_DATA_HOME/solix`) |
+| `SOLIX_PKG_DIR` | Root directory for local package installations | Linux/macOS: `~/.solix/packages`<br>Windows: `%USERPROFILE%\.solix\packages` |
 | `SOLIX_RESOURCE_ROOT` | Root directory for bundled application resources | Auto-configured when executing `.slxarc` archives; falls back to `<cwd>/resources` |
-
-When `SOLIX_HOME` is defined, the package manager redirects all registry writes (`$SOLIX_HOME/installed.json`) and installed package directories (`$SOLIX_HOME/installed/<id>/`) to that folder. This provides full test isolation and sandbox reproducibility.
+| `SOLIX_BIN` | Explicit override path to the `solix` executable for build scripts | Current executable path or `PATH` discovery |
 
 ---
 
@@ -73,17 +69,19 @@ When `SOLIX_HOME` is defined, the package manager redirects all registry writes 
 | Exit Code | Classification | Meaning |
 |---|---|---|
 | `0` | Success | Command completed successfully with no errors |
-| `1` | Error | Syntax error, semantic error, file not found, collision conflict, or unhandled runtime fault |
-| `N` (`N > 1`) | User / Application Exit | Non-zero exit code explicitly returned by the Solix program's `main()` method |
+| `1` | Error | Syntax error, semantic error, file not found, or unhandled runtime fault |
+| `N` (`N > 1`) | Application Exit | Non-zero exit code explicitly returned by the Solix program's `main()` method |
 
 ---
 
 ## Detailed Subcommand Specifications
 
-- [**compile Subcommand**](compile.md): Single/multi-file compiler, assembly dumping, log level controls.
-- [**run Subcommand**](run.md): VM runtime execution, `.slxarc` bundle ingestion, memory limits, program argument passing.
-- [**build Subcommand**](build.md): Profile-driven multi-file building, dependency resolution.
-- [**pack Subcommand**](pack.md): Single-file distribution archive (`.slxarc`) generation, resource bundling, native library packaging.
-- [**new Subcommand**](new.md): Project scaffolding, custom templates, collision protection.
-- [**package Management (`install`, `uninstall`, `list`, `details`)**](package.md): Local project lifecycle, deterministic SHA-256 IDs, registry inspection.
-- [**Project Manifest (`manifest.json`) Specification**](manifest.md): Complete schema documentation for project manifests.
+- [**`new` Subcommand**](new.md): Project scaffolding, applications, libraries (`--lib`), and pure Solix projects (`--no-native`).
+- [**`compile` Subcommand**](compile.md): Multi-file compilation, static linking (`--static`), syntax checking (`--check`), and performance telemetry.
+- [**`build` Subcommand**](build.md): Profile-driven (`--release`, `--debug`, `--test`) build orchestration and `.slxarc` archive generation.
+- [**`run` Subcommand**](run.md): VM runtime execution, direct `.slx` execution, `.slxarc` bundle ingestion, and guest argument passing.
+- [**`info` Subcommand**](info.md): Disassembly (`--disasm`), API reconstruction (`--api`), and JSON manifest extraction (`--json`).
+- [**`install` Subcommand**](install.md): Installing `.slxb` and `.slxarc` packages into the local store.
+- [**`uninstall` Subcommand**](uninstall.md): Removing packages and versions from the local store.
+- [**`list` Subcommand**](list.md): Listing installed packages with tabular and `--json` formatting.
+- [**Project Manifest (`manifest.toml`) Specification**](manifest.md): Complete schema documentation for project manifests.

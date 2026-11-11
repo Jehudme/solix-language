@@ -62,18 +62,18 @@ package solix.example;
 import solix.io.Console;
 
 public class StringUtils {
-    public static bool isPalindrome(string s) {
-        if (s == null || s.length() == 0) {
+    public static bool isPalindrome(string text_input) {
+        if (text_input == null || text_input.length() == 0) {
             return true;
         }
-        int32 lo = 0;
-        int32 hi = s.length() - 1;
-        while (lo < hi) {
-            if (s.charAt(lo) != s.charAt(hi)) {
+        int32 low_idx = 0;
+        int32 high_idx = text_input.length() - 1;
+        while (low_idx < high_idx) {
+            if (text_input.charAt(low_idx) != text_input.charAt(high_idx)) {
                 return false;
             }
-            lo = lo + 1;
-            hi = hi - 1;
+            low_idx = low_idx + 1;
+            high_idx = high_idx - 1;
         }
         return true;
     }

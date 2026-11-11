@@ -1,23 +1,22 @@
-# `solix create` (alias: `solix new`) — Project Scaffolding
+# `solix new` — Project Scaffolding
 
-The `create` subcommand (also available via backward-compatible alias `new`) creates and initializes a new Solix project structure with pre-configured build profiles (`debug`, `release`, `test`), a starter source file, standard library dependency, and a complete `manifest.json` manifest.
+The `new` subcommand creates and initializes a complete Solix project workspace configured with `manifest.toml`, Python build automation scripts, starter Solix source files, an automated test harness, and an optional Rust native bridge (`cdylib`) extension crate.
 
 ---
 
 ## Synopsis
 
 ```bash
-solix create <path> [options]
 solix new <path> [options]
 ```
 
 ---
 
-## Arguments
+## Positional Arguments
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<path>` | Positional Path | **Yes** | Destination folder for the project. Created if it does not exist. |
+| `<path>` | Path | **Yes** | Destination directory path for the new project. Created if it does not exist. |
 
 ---
 
@@ -25,101 +24,114 @@ solix new <path> [options]
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--name` | `-n` | String | (Target folder basename) | Package / project name. |
-| `--version` | `-v` | String | `0.1.0` | Initial semantic version. |
-| `--author` | `-a` | String | `""` | Author name or email. |
-| `--description` | `-d` | String | `""` | Human-readable project description. |
-| `--license` | `-l` | String | `""` | License identifier (e.g. `MIT`, `Apache-2.0`). |
-| `--tag` | `-t` | String | `[]` | Project tag/keyword (can be specified multiple times). |
-| `--type` | `-T` | String | `app` | Project type: `app` (executable application), `library` (reusable library), or `plugin` (native extension module). |
-| `--entry` | `-e` | String | `main` | Default entry point method name in starter source. |
-| `--template` | | Path | `""` | Path to a custom template folder to copy from disk. |
-| `--force` | `-f` | Flag | `false` | Proceed and overwrite if target directory exists and is not empty. |
+| `--name <name>` | | String | Target directory name | Project and package identifier name. |
+| `--version <version>` | | String | `"0.1.0"` | Initial semantic version for the package. |
+| `--description <desc>` | | String | `"A Solix project"` | Human-readable package description. |
+| `--license <id>` | | String | `"Apache-2.0"` | SPDX license identifier. |
+| `--author <name>` | | String (Repeated) | `[]` | Author attribution name (can be specified multiple times). |
+| `--main <symbol>` | | String | `"Main::main"` | Canonical application entry point symbol. |
+| `--test <symbol>` | | String | `"TestRunner::test"` | Canonical test runner entry point symbol. |
+| `--lib` | | Flag | `false` | Scaffolds a reusable library project instead of an executable application. |
+| `--no-native` | | Flag | `false` | Omits the Rust native `cdylib` extension crate bridge in `natives/`. |
+| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Declares an external package dependency (e.g. `-d raylib@1.0.0`). |
+| `--force` | | Flag | `false` | Overwrites existing `manifest.toml` if the directory already contains a project. |
 
 ---
 
-## Scaffolding Modes
+## Generated Project Layout
 
-### 1. In-Memory Self-Contained Scaffolding (Default)
+### 1. Application Project (Default)
 
-When `--template` is omitted, the CLI scaffolds an isolated, self-contained project according to `--type`:
+Executing `solix new my_app`:
 
-#### Application (`-T app`, default)
-```
-<project_root>/
-├── manifest.json          # Manifest with "type": "app", profiles & dependencies
-└── src/
-    └── main.slx           # Starter source printing Hello, World! with main()
-```
-
-#### Library (`-T library`)
-```
-<project_root>/
-├── manifest.json          # Manifest with "type": "library", profiles & dependencies
-└── src/
-    └── lib.slx            # Starter library module
-```
-
-#### Plugin (`-T plugin`)
-```
-<project_root>/
-├── manifest.json          # Manifest with "type": "plugin", profiles & dependencies
-└── src/
-    └── plugin.slx         # Starter plugin module
+```text
+my_app/
+├── manifest.toml             # Configuration, metadata, and dependencies
+├── .gitignore                # Ignores /cache/, /build/, /target/, *.slxb, *.slxarc
+├── src/
+│   └── main.slx              # Starter application source
+├── tests/
+│   └── test_main.slx         # Automated test entrypoint
+├── resources/                # Application assets directory
+├── lib/                      # Staging directory for native shared libraries
+├── natives/
+│   └── my_app_bridge/        # Rust cdylib bridge extension
+│       ├── Cargo.toml
+│       └── src/lib.rs        # SolixCValue FFI and native callback exports
+└── scripts/
+    ├── build.py              # Build automation script
+    └── solix_toolbox.py      # Turnkey build orchestration primitives
 ```
 
-### 2. Custom Template Directory Mode
+#### Generated `src/main.slx`
+```solix
+class Main {
+    public static int32 main() {
+        return 0;
+    }
+}
+```
 
-When `--template <path>` is supplied:
-1. Validates that the template folder exists.
-2. Recursively copies all directories and files into the destination.
-3. If the template contains a `manifest.toml`, automatically injects the specified project name, version, author, description, license, tags, and entry point.
+#### Generated `tests/test_main.slx`
+```solix
+class TestRunner {
+    public static int32 test() {
+        return 0;
+    }
+}
+```
+
+### 2. Library Project (`--lib`)
+
+Executing `solix new my_lib --lib`:
+
+Generates `src/lib.slx` with package declaration instead of `src/main.slx`:
+
+```solix
+package my_lib;
+
+public class MyLib {
+    public static int32 version() {
+        return 1;
+    }
+}
+```
+
+### 3. Pure Solix Project (`--no-native`)
+
+Executing `solix new my_tool --no-native`:
+Omits the Rust `Cargo.toml` and native bridge crate inside `natives/`, creating an empty `natives/.gitkeep`.
 
 ---
 
 ## Collision Protection Rules
 
-1. If the destination path exists as a regular file, the command aborts with an error.
-2. If the destination directory exists and is **not empty**, the command aborts unless `--force` (`-f`) is specified.
-3. If `--force` is set, existing files are preserved or overwritten without deleting unspecified files.
+1. If the target directory already contains a `manifest.toml`, `solix new` halts with an error unless `--force` is supplied.
+2. When `--force` is specified, existing files are preserved unless explicitly rewritten by the scaffolding engine.
 
 ---
 
 ## Exit Codes
 
-| Code | Condition |
-|---|---|
-| `0` | Project successfully initialized. |
-| `1` | Invalid destination, non-empty directory collision, non-existent template path, or filesystem error. |
+| Exit Code | Classification | Meaning |
+|---|---|---|
+| `0` | Success | Project workspace successfully initialized. |
+| `1` | Error | Target directory conflict (without `--force`) or filesystem permission failure. |
 
 ---
 
 ## Examples
 
-### 1. Create Default Project
+### Scaffolding an Application with Dependencies
 ```bash
-solix new my_app
-# Generates my_app/manifest.toml and my_app/src/main.slx
+solix new game_app \
+  --description "2D Arcade Game in Solix" \
+  --author "Alice Dev <alice@example.com>" \
+  --deps "raylib@1.0.0" \
+  --deps "math_matrix@0.2.0"
 ```
 
-### 2. Create Library with Custom Metadata
+### Scaffolding a Pure Library
 ```bash
-solix new math_utils \
-  -n "solix-math" \
-  -v "1.0.0" \
-  -a "Solix Team <dev@solix.org>" \
-  -d "Optimized math primitives" \
-  -l "MIT" \
-  -t math -t fast \
-  -e run
-```
-
-### 3. Overwrite Existing Non-Empty Folder
-```bash
-solix new ./existing_dir --force
-```
-
-### 4. Scaffold from Custom Template
-```bash
-solix new api_service --template /path/to/my_service_template
+solix new json_parser --lib --no-native
 ```

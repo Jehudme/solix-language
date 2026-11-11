@@ -9,7 +9,7 @@ This document specifies the layout, build pipeline, and package lifecycle of the
 The Solix standard library (`solixlib`) is intentionally **decoupled** from the compiler and VM launcher executable (`solix`). Unlike traditional languages that bundle hardcoded stdlib sources or link them statically into the CLI runner:
 
 1. **Strict Codebase Separation**: The pure Solix code and the companion C/C++ native code reside cleanly within the project (`solixlib/src/` and `solixlib/native/`), with pre-compiled shared objects placed directly in `solixlib/lib/`.
-2. **First-Class Package**: The standard library is a standard Solix project governed by [`solixlib/manifest.json`](manifest.toml).
+2. **First-Class Package**: The standard library is a standard Solix project governed by [`manifest.toml`](../../tools/cli/manifest.md).
 3. **Deterministic SemVer Versioning**: Projects declare dependencies on specific stdlib versions (e.g. `0.1.0`), preventing breaking runtime changes across compiler upgrades.
 4. **Opt-In (`no_std` Ready)**: Embedded or minimal applications can omit standard library dependencies entirely.
 5. **Dogfooding**: The standard library exercises the Solix package manager, project dependency resolution, multi-pass type binder, and dynamic shared library auto-discovery.

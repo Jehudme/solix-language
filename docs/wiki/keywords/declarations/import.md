@@ -76,8 +76,8 @@ public class DataStore {
     public void dumpAll() {
         List keys = store.keys();
         for (int32 index = 0; index < keys.size(); index = index + 1) {
-            string k = (string) keys.get(index);
-            Console::println(k + " => " + get(k));
+            string key_item = (string) keys.get(index);
+            Console::println(key_item + " => " + get(key_item));
         }
     }
 }

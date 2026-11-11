@@ -35,38 +35,347 @@ All documentation authors **MUST** adhere to the following normative invariants:
 3. **Zero Legacy Artifact Rule:**
    * Documentation **MUST NEVER** reference obsolete Solix v1.x concepts (`solix.json`, `.slxbin`, stack VM opcodes `PUSH_CONST`, dot-access for static members `Math.add`, or generic error tags `[E_BIND]`).
    * All documents **MUST** reflect modern Solix v2.0 reality: register-based 64-bit VM, scope resolution `::`, `manifest.toml`, `.slxb` / `.slxarc`, and granular error codes (`E0000`–`E0290`, `R0001`–`R0023`).
-4. **Code Verification Mandate:**
-   * All Solix code snippets across guides and wiki articles **MUST** be verified against the active compiler test suite or written to be fully valid, compilable Solix code.
+4. **Code Verification Mandate & Single-Letter Variable Prohibition (GL-0011):**
+   * All Solix and Rust code snippets across guides, specs, and wiki articles **MUST** be valid, compilable code.
+   * Single-letter variable names (`x`, `y`, `i`, `n`, `s`, `v`, `e`, etc.) are **STRICTLY FORBIDDEN** across all documentation and examples. Use descriptive, self-documenting identifiers (e.g., `coord_x`, `coord_y`, `index`, `element`, `item_count`, `error_value`).
 
 ---
 
-## 3. Structural Specification by Document Tier
+## 3. Concrete Authoring Templates
 
-### 3.1 User Guides (`docs/guide/`)
-* **Focus:** Pragmatic, step-by-step developer onboarding and operational usage.
-* **Format:**
-  * Title and metadata.
-  * Conceptual introduction with real-world Solix code examples.
-  * Practical usage patterns, best practices, and common pitfalls.
-  * Cross-references: "Deep Dive Specifications" (`docs/spec/`) and "Language Reference" (`docs/wiki/`).
+Authors **MUST** copy and adapt these standard markdown templates when creating or updating documentation.
 
-### 3.2 Formal Specifications (`docs/spec/`)
-* **Focus:** Deep technical precision for compiler engineers, toolchain maintainers, and runtime developers.
-* **Format:**
-  * Formal syntax and EBNF grammar productions.
-  * AST data structure definitions in Rust (`solix-compilation`).
-  * Semantic type-checking and binding invariants (`BinderPass1`, `Pass2`, `Pass3`).
-  * Bytecode lowering rules showing exact 64-bit Register VM opcodes (`Format A`, `Format B`, `Format Call`).
-  * Runtime behavior and memory management implications (`VirtualHeap`, ARC, deterministic destructors).
+---
 
-### 3.3 Atomic Wiki (`docs/wiki/`)
-* **Focus:** Rapid dictionary-style lookup for IDE tooltips, error explanations, and quick syntax reminders.
-* **Format for Error Codes (`docs/wiki/errors/`):**
-  * Diagnostic Code (`EXXXX` or `RXXXX`), Category, and Human-Readable Title.
-  * Exact Root Cause & Compiler Invariant.
-  * Erroneous Code Example (with error highlight).
-  * Corrected Code Example.
-  * Related Diagnostics and Specification Cross-Link.
+### 3.1 Wiki Keyword Template (`docs/wiki/keywords/<category>/<keyword>.md`)
+
+Every keyword article **MUST** follow this exact 6-section structure:
+
+````markdown
+# Keyword: `<keyword_name>`
+
+| Field | Detail |
+| :--- | :--- |
+| **Keyword** | `<keyword_name>` |
+| **Category** | Control Flow / Declaration / Expression / Modifier |
+| **Introduced** | Solix v1.0 / v2.0 |
+| **Related** | [`<related_keyword>`](<link_to_related>) |
+
+---
+
+## 1. Overview
+[Brief 1-2 paragraph conceptual explanation of what the keyword represents, its purpose, and scope of use in Solix.]
+
+---
+
+## 2. Syntax & Grammar
+[Formal syntactic production or EBNF snippet indicating where the keyword appears.]
+
+```solix
+<syntactic_form>
+```
+
+---
+
+## 3. Formal Compiler Invariants
+* **Parsing Invariant:** [Restrictions on where this keyword may appear]
+* **Binding & Type Invariant:** [Type checking rules enforced by BinderPasses]
+* **Scope Invariant:** [Visibility, lifetime, or shadowing constraints]
+
+---
+
+## 4. Correct Usage Example
+
+```solix
+class ExampleClass {
+    public static int32 compute_total(int32 base_value, int32 multiplier_factor) {
+        // Descriptive, multi-letter identifiers only (GL-0011)
+        int32 total_result = base_value * multiplier_factor;
+        return total_result;
+    }
+}
+```
+
+---
+
+## 5. Invalid Usage & Diagnostic Errors
+
+### Anti-Pattern: [Brief description of mistake]
+```solix
+// [Demonstrate incorrect code with error annotation]
+```
+* **Diagnostic Code:** [`E0XXX`](file:///home/jehud/Projects/solix-language/docs/wiki/errors/binder-errors.md#e0xxx)
+* **Compiler Remediation:** [Explain how to fix the error]
+
+---
+
+## 6. Related Specifications & Features
+* Formal Spec: [`docs/spec/statements/<spec>.md`](file:///home/jehud/Projects/solix-language/docs/spec/statements/<spec>.md)
+* User Guide: [`docs/guide/<guide>.md`](file:///home/jehud/Projects/solix-language/docs/guide/<guide>.md)
+````
+
+---
+
+### 3.2 Wiki Diagnostic Error Template (`docs/wiki/errors/<category>-errors.md`)
+
+Error codes in wiki error dictionaries **MUST** follow this standard schema:
+
+````markdown
+### `<EXXXX>`: `<Error Title>`
+
+* **Diagnostic Code:** `E0XXX` (Compile-Time) or `R00XX` (Runtime)
+* **Subsystem:** Lexer / Parser / Binder / Emitter / VM Runtime
+* **Severity:** Fatal Error / Warning / Recoverable
+
+#### Root Cause & Compiler Invariant
+[Explain the exact semantic invariant that was violated and why the compiler rejected the construct.]
+
+#### Erroneous Code Example
+```solix
+// ❌ FAILS with E0XXX: <error message>
+class BadSample {
+    public static void execute() {
+        int32 count_value = "invalid_string_literal";
+    }
+}
+```
+
+#### Corrected Code Example
+```solix
+// ✅ PASSES: Valid typed initialization
+class GoodSample {
+    public static void execute() {
+        int32 count_value = 42;
+    }
+}
+```
+
+#### Related Diagnostics & Formal Specification
+* Related: [`E0YYY`](#e0yyy)
+* Formal Specification: [`docs/spec/<spec_path>.md`](file:///home/jehud/Projects/solix-language/docs/spec/<spec_path>.md)
+````
+
+---
+
+### 3.3 Wiki Primitive Template (`docs/wiki/primitives/<primitive>.md`)
+
+Every primitive type reference page **MUST** follow this structure:
+
+````markdown
+# Primitive Type: `<type_name>`
+
+| Property | Value |
+| :--- | :--- |
+| **Type Identifier** | `<type_name>` |
+| **Classification** | Signed Integer / Unsigned Integer / Floating Point / Boolean / Character |
+| **Storage Width** | N bits (N bytes) |
+| **Register Storage** | `u64` raw bit pattern in 64-bit VM register |
+| **Value Range** | `<min_value>` to `<max_value>` |
+| **Default Value** | `<default_literal>` |
+
+---
+
+## 1. Overview
+[Detailed description of the primitive, IEEE 754 compliance, two's complement representation, or boolean logic role.]
+
+---
+
+## 2. Literal Syntax & Formatting
+```solix
+<type_name> decimal_value = 100;
+<type_name> hex_value = 0x64;
+```
+
+---
+
+## 3. Allowed Type Conversions
+| Target Type | Conversion Mode | Semantics |
+| :--- | :--- | :--- |
+| `<wider_type>` | Implicit / Explicit | Value-preserving widening |
+| `<narrower_type>` | Explicit Cast Required | Bit truncation |
+
+---
+
+## 4. Usage Example
+
+```solix
+class PrimitiveExample {
+    public static <type_name> process_sample(<type_name> input_value) {
+        return input_value;
+    }
+}
+```
+
+---
+
+## 5. Related Specifications
+* Formal Spec: [`docs/spec/types.md`](file:///home/jehud/Projects/solix-language/docs/spec/types.md)
+````
+
+---
+
+### 3.4 Wiki CLI Command Template (`docs/wiki/commands/<category>.md`)
+
+Command reference entries **MUST** document commands using this format:
+
+````markdown
+## `solix <subcommand>`
+
+[High-level summary of what the subcommand does.]
+
+### Synopsis
+```bash
+solix <subcommand> [arguments...] [options]
+```
+
+### Positional Arguments
+| Argument | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `<arg>` | Path / String | Yes / No | [Description] |
+
+### Key Options & Flags
+* `-o, --output <path>`: [Description and default]
+* `--profile <mode>`: [Description and default]
+
+### Practical Examples
+```bash
+# Common invocation 1
+solix <subcommand> target
+
+# Common invocation 2 with flags
+solix <subcommand> target --flag
+```
+
+### Related Specifications
+* Formal Spec: [`docs/spec/tools/cli/<subcommand>.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/<subcommand>.md)
+````
+
+---
+
+### 3.5 Formal Language Specification Template (`docs/spec/<subsystem>/<feature>.md`)
+
+Authoritative specification documents **MUST** follow this comprehensive engineering schema:
+
+````markdown
+# `<Feature Name>` — Formal Language Specification
+
+## Document Metadata
+* **Specification ID:** SPEC-XXXX
+* **Scope:** Language Grammar, Type Binder, Codegen Lowering, VM ISA
+* **Status:** Normative Standard
+
+---
+
+## 1. Syntax & EBNF Grammar
+
+```ebnf
+ProductionRule ::= Keyword Identifier ( ":" Type )? ";" ;
+```
+
+---
+
+## 2. AST Representation (`solix-compilation`)
+
+```rust
+// In crates/solix-compilation/src/ast/nodes.rs
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureNode {
+    pub span: TextSpan,
+    pub identifier: SymbolIndex,
+    pub target_type: Option<TypeSignature>,
+}
+```
+
+---
+
+## 3. Semantic Rules & Compiler Invariants
+1. **Pass 1 (Symbol Registration):** [Invariant]
+2. **Pass 2 (Hierarchy & Type Resolution):** [Invariant]
+3. **Pass 3 (Body Type-Checking):** [Invariant]
+
+---
+
+## 4. Bytecode Lowering & VM ISA (64-Bit Register VM)
+
+The construct lowers into the following register instructions:
+
+```text
+LoadConstImm64  r0, <constant_index>
+AddI64          r2, r0, r1
+ReturnVal       r2
+```
+
+---
+
+## 5. Memory Model & ARC Invariants
+* **Header Allocation:** [Object header layout]
+* **Retain/Release Pairs:** [ARC increments and decrements]
+* **Destructor Invariants:** [Deterministic cleanup on scope exit]
+
+---
+
+## 6. Verification Test Cases
+* Positive Conformance: `crates/solix-compilation/tests/features/<feature>_tests.rs`
+* Diagnostic Verification: `crates/solix-compilation/tests/diagnostics/e0xxx_tests.rs`
+````
+
+---
+
+### 3.6 User Guide Template (`docs/guide/<guide_name>.md`)
+
+User guides **MUST** provide a tutorial learning path:
+
+````markdown
+# <Guide Title>
+
+[Introductory paragraph explaining what the reader will learn and build.]
+
+---
+
+## Table of Contents
+1. [Prerequisites](#prerequisites)
+2. [Core Concepts](#core-concepts)
+3. [Step-by-Step Walkthrough](#step-by-step-walkthrough)
+4. [Common Pitfalls & Best Practices](#common-pitfalls--best-practices)
+5. [Summary & Next Steps](#summary--next-steps)
+
+---
+
+## Prerequisites
+| Prerequisite | Minimum Version | Notes |
+| :--- | :--- | :--- |
+| Solix CLI | 2.0+ | `solix --version` |
+
+---
+
+## Core Concepts
+[Conceptual explanation with diagram or architecture overview.]
+
+---
+
+## Step-by-Step Walkthrough
+[Hands-on instructions with verified, compilable Solix snippets.]
+
+```solix
+class GuideExample {
+    public static int32 main() {
+        return 0;
+    }
+}
+```
+
+---
+
+## Common Pitfalls & Best Practices
+* **Pitfall:** [Description of common beginner mistake]
+  * **Solution:** [How to avoid or fix it]
+
+---
+
+## Summary & Next Steps
+* [Next Guide Link](<path_to_next_guide>)
+* [Deep Dive Specification Link](<path_to_spec>)
+````
 
 ---
 

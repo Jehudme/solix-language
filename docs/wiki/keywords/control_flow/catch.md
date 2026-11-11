@@ -43,11 +43,11 @@ import solix.io.Console;
 import solix.core.Exception;
 
 public class SafeParse {
-    public static int32 parseIntSafe(string s) {
+    public static int32 parseIntSafe(string input_text) {
         try {
-            return parseInt(s);
+            return parseInt(input_text);
         } catch (Exception error) {
-            Console::println("Parse error: " + e.getMessage());
+            Console::println("Parse error: " + error.getMessage());
             return -1;
         }
     }

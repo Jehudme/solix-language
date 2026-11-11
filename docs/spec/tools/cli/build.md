@@ -1,13 +1,13 @@
-# `solix build` — Project Manifest Build
+# `solix build` — Project Manifest & Container Build
 
-The `build` subcommand reads a project's manifest file (`manifest.toml`), resolves declared dependencies, applies profile configurations (`debug`, `release`, `test`), and compiles the project into final artifacts.
+The `build` subcommand orchestrates project building and packaging according to `manifest.toml`. It executes project build automation (`scripts/build.py`), compiles Rust native bridge extension crates, stages resources, compiles Solix source files, and produces a distributable archive container (`build/<profile>/<name>.slxarc`).
 
 ---
 
 ## Synopsis
 
 ```bash
-solix build [target] [options]
+solix build [path] [options]
 ```
 
 ---
@@ -16,7 +16,7 @@ solix build [target] [options]
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `target` | Path or Identifier | `manifest.toml` | Path to project directory, direct path to `manifest.toml`, or installed package identifier (`name@version`). If omitted, defaults to `manifest.toml` in current working directory. |
+| `[path]` | Path | `.` (Current Directory) | Project root directory containing `manifest.toml` and `scripts/build.py`. |
 
 ---
 
@@ -24,134 +24,82 @@ solix build [target] [options]
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--profile` | `-p` | String | `debug` | Build profile name defined in `manifest.toml` (e.g., `debug`, `release`, `test`). |
-
-> [!NOTE]
-> The legacy `-m` / `--manifest` option has been replaced by the optional positional `target` argument to match `solix run` ergonomics.
-
----
-
-## Dependency Specification in `manifest.toml`
-
-Project dependencies combine the package name and SemVer version requirement into a single composite string (`name@version`) using either the `"package"` or `"name"` key:
-
-```json
-{
-  "project": "my_application",
-  "version": "1.0.0",
-  "dependencies": [
-    {
-      "type": "source",
-      "path": "src/main.slx"
-    },
-    {
-      "type": "project",
-      "package": "solixlib@0.1.0"
-    }
-  ]
-}
-```
-
-For local dependencies not yet installed in `$SOLIX_HOME`, a relative or absolute `"path"` can still be specified:
-
-```json
-{
-  "type": "project",
-  "path": "../my_local_lib"
-}
-```
+| `--profile <mode>` | | String | `"debug"` | Target build profile: `debug`, `release`, or `test`. |
+| `--debug` | | Flag | `false` | Shorthand for debug build profile (`--profile debug`). |
+| `--release` | | Flag | `false` | Shorthand for release build profile (`--profile release`). |
+| `--test` | | Flag | `false` | Shorthand for test build profile (`--profile test`), including `tests/` sources in the compilation. |
+| `--link <mode>` | | String | `"dynamic"` | Linking mode for dependencies and emission: `dynamic` (default) or `static`. |
+| `--static` | | Flag | `false` | Shorthand for static linking mode (`--link static`). |
+| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 
 ---
 
-## Build Pipeline Lifecycle
+## Build Automation Pipeline
 
-When `solix build` is executed:
+When `solix build` is invoked:
 
 ```mermaid
 flowchart TD
-    A["Resolve Target & Parse manifest.toml Profiles"] --> B["Resolve Dependency Graph & Target Profiles"]
-    B --> C["Topological Dependency Pre-Compile Hooks<br>(Deepest dependencies first, in dependency roots)"]
-    C --> D["Root Project Pre-Compile Hooks<br>(manifest.json pre_compile)"]
-    D --> E["Active Profile Pre-Compile Hooks<br>(profiles[P].pre_compile)"]
-    E --> F["Pre-Compilation Source Ingestion<br>(All project and profile sources)"]
-    F --> G["Invoke Compiler Pipeline & Emit out.slxb"]
-    G --> H["Transitive Native Library & Resource Staging"]
-    H --> I["Active Profile Post-Compile Hooks<br>(profiles[P].post_compile)"]
-    I --> J["Root Project Post-Compile Hooks<br>(manifest.json post_compile)"]
+    A["solix build [path]"] --> B["Validate manifest.toml & scripts/build.py"]
+    B --> C["Resolve Profile (debug / release / test) & Link Mode"]
+    C --> D["Invoke python3 scripts/build.py --profile <profile>"]
+    D --> E["tb.prepare_staging_dirs()<br>(cache/stage/<profile>/)"]
+    E --> F["tb.compile_rust_project()<br>(natives/ cdylib -> stage/lib/)"]
+    F --> G["tb.stage_resources()<br>(resources/ -> stage/resources/)"]
+    G --> H["tb.compile_solix_sources()<br>(solix compile src/ -> stage/bin/<name>.slxb)"]
+    H --> I["tb.package_slxarc()<br>(stage/ -> build/<profile>/<name>.slxarc)"]
 ```
 
-1. **Target & Manifest Discovery**:
-   - If `target` is of the form `name@version` and no local file matches, locates the package in `$SOLIX_HOME` via `PackageManager`.
-   - If `target` is a directory, infers `target/manifest.toml`.
-   - If `target` is omitted, defaults to `./manifest.toml`.
-   - Determines project root path from the manifest location.
-2. **Profile Validation**:
-   - Ensures `profiles` exists and contains the requested profile object.
-   - Extracts output paths (`output_directory`, `exe_filename`, `asm_filename`).
-   - Relative paths are resolved against the project root.
-3. **Dependency Graph & Profile Resolution**:
-   - Recursively walks `type: "project"` and `type: "library"` dependencies.
-   - Evaluates `"profile"` selector on each dependency: explicit request (fails if missing), inheritance from active profile, or fallback to `"debug"` or first defined profile.
-   - Recursively discovers dependencies defined within each dependency candidate's selected profile (`compilation.additional_dependencies`).
-   - SemVer resolution resolves compatible versions and rejects incompatible major versions.
-4. **Topological Dependency Pre-Compile Execution**:
-   - Executes pre-compile commands (`pre_compile` / `precompile`) for all resolved dependencies in topological order (deepest dependencies first) within their respective project root directories.
-5. **Root Project & Active Profile Pre-Compile Execution**:
-   - Executes root-level `pre_compile` commands sequentially in `project_root`.
-   - Executes active profile's `pre_compile` commands sequentially in `project_root`.
-   - If any command exits with a non-zero exit code, compilation immediately aborts with error code `1`.
-6. **Pre-Compilation Source Ingestion**:
-   - Ingests all top-level and profile-specific `type: "source"` dependencies across all resolved project candidates.
-7. **Compilation & Artifact Emission**:
-   - Executes compiler pipeline with configured entry point and log levels.
-   - Emits bytecode binary to the configured profile output directory.
-8. **Transitive Native Library & Resource Staging**:
-   - Automatically collects native dynamic libraries (`.so`, `.dll`, `.dylib`) from the root project and all transitive dependency libraries, staging them into `<output_directory>/lib/`.
-   - Automatically collects and merges static assets from `resources/` across all transitive dependencies and the root project into `<output_directory>/resources/`. Root project assets override dependency assets on collision.
-9. **Post-Compile Lifecycle Execution**:
-   - Executes active profile's `post_compile` commands sequentially in `project_root`.
-   - Executes root-level `post_compile` commands sequentially in `project_root`.
-   - If any command exits with a non-zero exit code, the build terminates with error code `1`.
+### Staged Artifact Directory Structure
+
+During the build lifecycle, artifacts are assembled deterministically:
+
+```text
+cache/
+├── cargo/                    # Cargo target directory for native bridge crates
+└── stage/
+    └── <profile>/
+        ├── manifest.toml     # Packaged copy of project manifest
+        ├── bin/
+        │   └── <name>.slxb   # Compiled Solix application bytecode
+        ├── lib/
+        │   ├── <name>_bridge.so  # Native shared library (.so / .dll / .dylib)
+        │   └── (dependencies)
+        └── resources/        # Bundled data assets
+```
+
+The final distribution container is written to:
+- **`build/<profile>/<name>.slxarc`**
 
 ---
 
 ## Exit Codes
 
-| Code | Condition |
-|---|---|
-| `0` | Project built successfully; artifacts written to profile directory. |
-| `1` | Missing manifest file, JSON parse error, invalid profile, unresolved dependencies, incompatible major SemVer collision, missing dependency sources, or compiler error. |
+| Exit Code | Classification | Meaning |
+|---|---|---|
+| `0` | Success | Project built and `.slxarc` archive successfully created. |
+| `1` | Error | Missing `manifest.toml`, missing `scripts/build.py`, native cargo compilation error, or Solix compilation error. |
 
 ---
 
 ## Examples
 
-### 1. Build Default Profile in Current Directory
+### 1. Default Debug Build
 ```bash
 solix build
-# Builds 'debug' profile from ./manifest.toml into build/debug/out.slxb
 ```
 
-### 2. Build Release Profile
+### 2. Optimized Release Build
 ```bash
-solix build -p release
-# Builds 'release' profile into build/release/out.slxb
+solix build --release
 ```
 
-### 3. Build Project from Directory Path
+### 3. Test Build
 ```bash
-solix build ../other_project
-# Locates ../other_project/manifest.toml and builds artifacts relative to that project
+solix build --test
 ```
 
-### 4. Build Project from Direct Manifest Path
+### 4. Build Project in Another Directory with Static Linking
 ```bash
-solix build ../other_project/manifest.toml
-# Directly specifies the manifest file to build
-```
-
-### 5. Build Installed Package by Identifier
-```bash
-solix build solixlib@0.1.0
-# Locates installed solixlib version 0.1.0 in $SOLIX_HOME and builds its artifacts
+solix build ../game_project --release --static
 ```

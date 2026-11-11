@@ -1,158 +1,108 @@
-# `solix run` — Bytecode & Project Execution
+# `solix run` — Virtual Machine Execution
 
-The `run` subcommand executes compiled Solix bytecode (`.slxb` or `.slxb`) directly on the Solix Virtual Machine (VM), or automatically builds and runs a Solix project (either from a local directory or installed in `$SOLIX_HOME`) using a user-selected profile.
+The `run` subcommand executes Solix bytecode binary containers (`*.slxb`), application archive packages (`*.slxarc`), or compiles and runs raw source files (`*.slx`) on-the-fly in the 64-bit Register Virtual Machine.
 
 ---
 
 ## Synopsis
 
 ```bash
-# 1. Execute standalone bytecode binary or single-file package bundle
-solix run <file.slxb | package.slxarc> [options] [args...]
-
-# 2. Execute uninstalled project from directory
-solix run [<project_dir>] [-P <profile>] [options] [args...]
-
-# 3. Execute installed project from $SOLIX_HOME
-solix run -n <package> -v <version> [-P <profile>] [options] [args...]
-# or shorthand positional syntax:
-solix run <package>@<version> [-P <profile>] [options] [args...]
+solix run <binaries...> [options] [-- [guest_args...]]
 ```
 
 ---
 
-## Arguments & Options
+## Positional Arguments
 
-### Positional Arguments
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `[target]` | Path / String | No | Target to run. Can be a compiled bytecode file (`.slxb`/`.slxb`), a project directory containing `manifest.toml`, or an installed package specifier (`<name>@<version>`). If omitted and in a directory with `manifest.toml`, runs the current project. |
-| `[args...]` | Strings | No | Optional arguments passed directly to the executing Solix program. |
+| `<binaries...>` | Paths | **Yes** | One or more `.slxb` binary containers, `.slxarc` archives, or `.slx` source files to execute. |
 
-### Options & Flags
+---
+
+## Options & Flags
+
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--profile` | `-P` | String | `debug` | Build profile to build and execute (e.g. `debug`, `release`). |
-| `--package` | `-n` | String | `""` | Name of installed package in `$SOLIX_HOME`. |
-| `--version` | `-v` | String | `""` | Version of installed package (required when `--package` is used). |
-| `--project` | | Path | `""` | Explicit path to project directory or `manifest.toml`. |
-| `--native-lib` | `-L` | Path | `[]` | Path to native shared library (`.dll`, `.so`, `.dylib`). Can be specified multiple times. |
-| `--stack` | `-s` | Integer | `1048576` (1 MWord) | Call stack capacity in 64-bit machine words. |
-| `--heap` | `-p` | Integer | `16777216` (16 MWords) | Flat object heap capacity in 64-bit machine words. |
+| `--lib <path>` | `-l` | Path (Repeated) | `[]` | Additional library files or native shared libraries to load (`*.slxb`, `*.slxarc`, `*.so`, `*.dll`, `*.dylib`). |
+| `--entry <symbol>` | `-e` | String | None | Overrides default entry point symbol (e.g. `Main::main`). |
+| `--test` | | Flag | `false` | Executes the test entry point defined in archive `manifest.toml` (`[entrypoints].test`). |
+| `--no-builtins` | | Flag | `false` | Omits automatic registration of standard I/O built-in native functions. |
+| `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for AST inlining when compiling `.slx` sources. |
+| `--heap-size <size>` | | String | `"32MB"` | Virtual heap allocation capacity limit (e.g., `"16MB"`, `"64MB"`, `"1GB"`). |
+| `--max-stack <depth>` | | Integer | `1024` | Maximum call stack frame depth limit. |
+| `--verbose` | `-v` | Flag | `false` | Prints VM execution statistics and memory report upon process completion. |
+| `--safe` | | Flag | `false` | Executes in safe mode with defensive invariant validation and strict bounds checking. |
+| `--metrics` | | Flag | `false` | Prints runtime execution telemetry and memory allocation statistics. |
+| `--metrics-json` | | Flag | `false` | Outputs execution telemetry formatted as machine-readable JSON. |
+| `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
+| `-- [guest_args...]` | | Strings | `[]` | Arguments passed directly to the guest application entry point. |
 
 ---
 
-## Native Shared Library Loading & Auto-Discovery
+## Execution Modes
 
-When running standalone bytecode or a Solix project, the runtime automatically discovers and binds native C/C++ shared libraries (`.dll` on Windows, `.so` on Linux, `.dylib` on macOS):
+### 1. Direct Source Execution (`*.slx`)
 
-1. **Zero-Config Auto-Discovery**:
-   - For projects: automatically scans and loads any shared library found in the project's `./lib/` directory or in the output directory containing the generated `.slxb`.
-   - For standalone bytecode: automatically scans and loads any shared library located in the same directory as the `.slxb` or in a co-located `./lib/` subdirectory.
-2. **Manifest Configuration**:
-   - Ingests `"native_libraries": [...]` declared at the root of `manifest.toml` or within `profiles.<name>.runtime.native_libraries`.
-3. **CLI Overrides (`-L, --native-lib`)**:
-   - Additional shared libraries can be explicitly passed at runtime via `-L <path>` or `--native-lib <path>`. All specified libraries are loaded into memory and registered before program execution begins.
+When given `.slx` source files, `solix run` compiles them on-the-fly in memory without writing `.slxb` to disk, resolving dependencies and executing immediately:
+
+```bash
+solix run src/main.slx
+```
+
+### 2. Standalone Binary Container (`*.slxb`)
+
+When given a compiled `.slxb` container, the VM decodes the binary, initializes the register execution context, and invokes the entry point (`Main::main` by default, or overridden by `-e`):
+
+```bash
+solix run bin/app.slxb
+```
+
+### 3. Archive Container (`*.slxarc`)
+
+When given an archive container, the runtime:
+1. Inspects embedded `manifest.toml`.
+2. Automatically stages and loads bundled native shared libraries (`natives/*.so`).
+3. Sets `SOLIX_RESOURCE_ROOT` to the archive resources directory.
+4. Selects the target entry point:
+   - Default: `[entrypoints].main` (e.g. `Main::main`)
+   - With `--test`: `[entrypoints].test` (e.g. `TestRunner::test`)
+5. Invokes the entry point in the VM.
+
+```bash
+# Run application
+solix run build/release/my_app.slxarc
+
+# Run test suite
+solix run --test build/debug/my_app.slxarc
+```
 
 ---
 
-## Single-File Package Bundle (`.slxarc`) Execution
+## Passing Guest Arguments
 
-When invoking `solix run <app.slxarc>`:
+All arguments placed after `--` are passed directly into the guest Solix program:
 
-1. **Format Detection**: Detects `.slxarc` extension or standard ZIP container magic signature (`PK\x03\x04`).
-2. **Extraction & Content-Hashed Cache**:
-   - Extracts bundle contents into a content-hashed cache directory (`$TMPDIR/solix_pac/<app_name>_<hash>/`).
-   - If the bundle has already been extracted and unmodified, skips extraction and launches immediately.
-3. **Native Dynamic Libraries**: Automatically scans `<unpacked>/lib/` and registers all platform shared libraries (`.so`, `.dll`, `.dylib`) before execution.
-4. **Application Resources**: Mounts `<unpacked>/resources/` as the active application resource root, accessible via `solix.io.filesystem.Resource` and the `res://` virtual path scheme.
-5. **Entry Point Execution**: Executes `<unpacked>/bytecode.slxb` with any provided command-line arguments.
-
-## Project Execution Lifecycle
-
-When running a project (uninstalled directory or installed package):
-
-```mermaid
-flowchart TD
-    A["solix run Invoked"] --> B{"Target Type?"}
-    B -->|"Bytecode File (.slxb)"| C["Direct VM Execution"]
-    B -->|"Project Directory / manifest.toml"| D["Locate & Parse manifest.toml"]
-    B -->|"Installed Package (name + version)"| E["Lookup in $SOLIX_HOME via PackageManager"]
-    E --> D
-    D --> F["Validate Profile (-P / --profile)"]
-    F --> G["Build Project Artifact"]
-    G --> H["Ingest Profile Runtime Settings (heap, stack, arguments)"]
-    H --> I["Apply CLI Overrides (--stack, --heap, args)"]
-    I --> J["Execute on Solix VM"]
-    J --> K["Propagate Exit Code"]
+```bash
+solix run build/release/my_app.slxarc -- --port 8080 --host 0.0.0.0
 ```
-
-1. **Target Identification**:
-   - If `--package` and `--version` (or `<name>@<version>`) are provided, resolves the installed project from `$SOLIX_HOME`.
-   - If a directory is provided (or current directory has `manifest.toml`), treats it as an uninstalled project.
-   - If an existing file is provided, executes the bytecode binary directly.
-2. **Pre-Execution Build**:
-   - Reuses the modular build pipeline (`DependencyManager` + Compiler) to build the requested `--profile` before invoking the VM.
-3. **Runtime Configuration Ingestion**:
-   - Reads `profiles.<profile>.runtime` from `manifest.toml`. If `stack_size`, `heap_size`, or default `arguments` are configured in the manifest, they are applied unless overridden by CLI flags.
-4. **Execution & Exit Code**:
-   - Executes the bytecode on the VM and propagates the exit code returned by `main()`.
 
 ---
 
-## Execution Guards & Diagnostics
+## Exit Codes & Process Propagation
 
-1. **Library & Plugin Execution Rejection**:
-   - Libraries (`"type": "library"`) and plugins (`"type": "plugin"`) do not possess an executable `main()` entry point. Attempting to run an installed library, project folder, or `.slxarc` bundle of type library will cleanly terminate with exit code `1`:
-     ```
-     Cannot run '<name>' because it is a library (libraries do not contain an executable entry point).
-     ```
-2. **Pre-Built Profile Warning**:
-   - If `-P` or `--profile` is specified when executing a pre-built package, installed application, or standalone `.slxb` / `.slxarc`, the option is ignored with a diagnostic warning:
-     ```
-     Warning: Option --profile is ignored when running a pre-built package or binary.
-     ```
+The VM propagates the return code of the Solix entry point method directly to the operating system shell:
 
----
-
-## Exit Codes & Fault Handling
-
-| Exit Code | Condition |
-|---|---|
-| `0` | Bytecode executed successfully and the entry method returned 0. |
-| `1` | Missing file/project, manifest error, invalid profile, attempting to run a library, compilation failure, unhandled runtime exception, or memory exhaustion. |
-| `N` (`N > 0`) | The entry method returned non-zero integer `N`, which is propagated directly to the host shell. |
-
----
-
-## Examples
-
-### 1. Execute Compiled Bytecode Binary
-```bash
-solix run build/debug/out.slxb arg1 arg2
+```solix
+class Main {
+    public static int32 main() {
+        return 42; // Process exits with code 42
+    }
+}
 ```
 
-### 2. Run Local Project (Default Debug Profile)
-```bash
-solix run ./my_app
-# or inside project folder:
-solix run .
-```
-
-### 3. Run Local Project with Release Profile
-```bash
-solix run ./my_app -P release
-```
-
-### 4. Run Installed Project by Name and Version
-```bash
-solix run -n math_utils -v 1.2.0 -P release
-# or shorthand syntax:
-solix run math_utils@1.2.0 -P release
-```
-
-### 5. Run with Custom Memory Limits
-```bash
-solix run ./my_app -s 2097152 -p 33554432
-```
-
+| Exit Code | Classification | Meaning |
+|---|---|---|
+| `0` | Success | Program executed cleanly and entry point returned 0. |
+| `N` (`N > 0`) | Guest Exit | Non-zero exit code explicitly returned by the program entry point. |
+| `1` | VM / Runtime Fault | Unhandled exception, memory limit exceeded, or container loading error. |

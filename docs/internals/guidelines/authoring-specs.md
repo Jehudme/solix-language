@@ -64,12 +64,16 @@ docs/internals/specs/
 │   ├── execution_loop.md       # Opcode dispatch loop, instruction pointer, and stack frames
 │   ├── arc_memory_model.md     # Reference counting, object headers, and destructor invocation
 │   └── exception_unwinding.md  # Unwinding tables, catch search, and finally execution
-└── cli/                        # CLI toolchain commands and arguments
+└── tools/cli/                  # CLI toolchain commands and arguments
+    ├── new.md                  # 'solix new' project scaffolding
     ├── compile.md              # 'solix compile' command and options
-    ├── run.md                  # 'solix run' command and options
     ├── build.md                # 'solix build' command and options
-    ├── pack.md                 # 'solix pack' command and options
-    └── lsp.md                  # 'solix lsp' command and options
+    ├── run.md                  # 'solix run' command and options
+    ├── info.md                 # 'solix info' command and options
+    ├── install.md              # 'solix install' command and options
+    ├── uninstall.md            # 'solix uninstall' command and options
+    ├── list.md                 # 'solix list' command and options
+    └── manifest.md             # 'manifest.toml' specification
 ```
 
 ### 3.2 Opcode Specification Schema

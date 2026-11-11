@@ -4,29 +4,86 @@
 
 ## 1. `solix run`
 
-Executes compiled `.slxb` binaries or `.slxarc` project archives:
+Executes compiled `.slxb` binaries, packaged `.slxarc` archives, or executes `.slx` source files on-the-fly:
 
 ```bash
-solix run <target.slxb | target.slxarc> [args...]
+solix run <binaries...> [options] [-- [guest_args...]]
 ```
 
-### Key Flags
-* `--test`: Runs unit test fixtures embedded within the archive.
-* `--yolo, --ignore-checksum`: Skips runtime dependency and native shared library SHA-256 verification.
-* `--heap-size <bytes>`: Configures initial VirtualHeap allocation capacity.
+### Key Options & Flags
+* `<binaries...>`: One or more target binary files (`.slxb`), project archives (`.slxarc`), or raw source files (`.slx`).
+* `-l, --lib <path>`: External library binary or native shared object (`.so`, `.dll`, `.dylib`) to link (can be repeated).
+* `-e, --entry <symbol>`: Overrides application entry point method [default: `Main::main`].
+* `--test`: Executes test entry point defined in archive `manifest.toml` (`[entrypoints].test`).
+* `--no-builtins`: Disables automatic registration of built-in standard I/O native methods.
+* `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
+* `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`].
+* `--max-stack <depth>`: Maximum call stack frame depth [default: `1024`].
+* `-v, --verbose`: Prints VM execution summary and heap statistics upon completion.
+* `--safe`: Executes in defensive safe mode with bounds checking and invariant assertions.
+* `--metrics`: Prints runtime execution telemetry and memory allocation profiling.
+* `--metrics-json`: Emits runtime telemetry formatted as machine-readable JSON.
+* `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
+* `-- [guest_args...]`: Trailing arguments passed directly to the guest Solix entry point.
+
+### Practical Examples
+```bash
+# Run a source file directly on-the-fly (no intermediate .slxb file needed)
+solix run src/main.slx
+
+# Execute a compiled binary container
+solix run bin/app.slxb
+
+# Execute a packaged project archive container
+solix run build/release/my_game.slxarc
+
+# Execute project unit tests packaged within the archive
+solix run --test build/debug/my_game.slxarc
+
+# Pass command-line arguments to the guest Solix program
+solix run bin/app.slxb -- --port 8080 --host 0.0.0.0
+
+# Execute with expanded virtual heap capacity and verbose diagnostics
+solix run bin/app.slxb --heap-size 128MB -v
+```
 
 ---
 
 ## 2. `solix info`
 
-Inspects compiled container metadata, binary sections, and disassembly:
+Inspects binary container (`.slxb`) or archive container (`.slxarc`) metadata, export manifests, disassemblies, and reconstructed APIs:
 
 ```bash
-solix info <target_path | package_name[@version]> [flags]
+solix info <binary> [options]
 ```
 
-### Key Flags
+### Key Options & Flags
+* `<binary>`: Path to compiled binary container (`*.slxb`) or archive container (`*.slxarc`).
+* `-o, --output <file>`: Destination file path for inspection data [default: `stdout`].
 * `--disasm`: Disassembles all functions into human-readable 64-bit Register VM opcodes.
-* `--api`: Emits synthesized public external API signatures (`manifest_to_source`).
-* `--json`: Emits binary metadata, classes, vtables, and instructions as structured JSON.
-* `--sections`: Lists all binary container sections and byte lengths.
+* `--api`: Emits reconstructed Solix public API interface declarations (`.slx`).
+* `--json`: Emits container metadata, sections, classes, and manifests as structured JSON.
+
+### Practical Examples
+```bash
+# View summary of a binary container (classes, methods, static size)
+solix info bin/app.slxb
+
+# Inspect an archive package (manifest, files, native libraries, binaries)
+solix info build/release/my_game.slxarc
+
+# Print reconstructed Solix API interface for a library
+solix info ~/.solix/packages/math_utils/1.0.0/math_utils.slxb --api
+
+# Disassemble bytecode to inspect low-level 64-bit Register VM instructions
+solix info bin/app.slxb --disasm
+
+# Export full binary container manifest as machine-readable JSON
+solix info bin/app.slxb --json -o target/manifest.json
+```
+
+---
+
+## Related Specifications
+* Formal Spec: [`docs/spec/tools/cli/run.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/run.md)
+* Formal Spec: [`docs/spec/tools/cli/info.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/info.md)

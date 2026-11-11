@@ -37,12 +37,12 @@ Subscript access outside `[0, length - 1]` throws an `IndexOutOfBoundsException`
 Elements extracted from a tuple can be inspected and cast dynamically:
 - **`instanceof`**: Evaluates whether an element matches a primitive type or class/interface hierarchy.
   ```solix
-  if (t[0] instanceof int32) { ... }
-  if (t[1] instanceof Worker) { ... }
+  if (tuple_val[0] instanceof int32) { ... }
+  if (tuple_val[1] instanceof Worker) { ... }
   ```
 - **Explicit Cast**: Coerces the element into the specified target type with runtime validation. Incompatible casts throw a `TypeCastException`.
   ```solix
-  string s = (string)t[1];
+  string text_val = (string)tuple_val[1];
   ```
 
 ---

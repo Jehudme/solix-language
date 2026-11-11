@@ -105,7 +105,7 @@ Renders rich markdown documentation and type signature tooltips when hovering ov
 ### Supported Constructs & Formats
 - **Methods**: Displays complete method signatures including access modifiers, qualifiers (`static`, `inline`, `native`, `virtual`, `override`, `abstract`), return type, method name, and all parameters with types, reference modifiers, and names:
   ```solix
-  public virtual void doWork(int32 n, string& label)
+  public virtual void doWork(int32 job_count, string& label)
   ```
 - **Constructors & `new` Instances**: Displays constructor signature including access modifier and parameter types/names:
   ```solix

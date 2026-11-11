@@ -41,7 +41,7 @@ package solix.io;
 
 // These methods are implemented in the runtime's native layer.
 public class Console {
-    public static native void println(string s);
+    public static native void println(string text_msg);
     public static native void println(int32 val);
     public static native void println(float64 val);
     public static native void println(bool val);

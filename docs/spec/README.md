@@ -84,5 +84,5 @@ Normative contracts for all 17 components of the standard library:
 
 ## 4. CLI Toolchain & Language Server Specifications ([`tools/`](tools/cli/README.md))
 
-* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): [`build.md`](tools/cli/build.md), [`compile.md`](tools/cli/compile.md), [`manifest.md`](tools/cli/manifest.md), [`new.md`](tools/cli/new.md), [`pack.md`](tools/cli/pack.md), [`package.md`](tools/cli/package.md), [`run.md`](tools/cli/run.md)
+* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): [`build.md`](tools/cli/build.md), [`compile.md`](tools/cli/compile.md), [`info.md`](tools/cli/info.md), [`install.md`](tools/cli/install.md), [`list.md`](tools/cli/list.md), [`manifest.md`](tools/cli/manifest.md), [`new.md`](tools/cli/new.md), [`run.md`](tools/cli/run.md), [`uninstall.md`](tools/cli/uninstall.md)
 * [**Language Server Specifications (`tools/lsp/`)**](tools/lsp/protocol.md): [`protocol.md`](tools/lsp/protocol.md), [`navigation.md`](tools/lsp/navigation.md), [`intelligence.md`](tools/lsp/intelligence.md)

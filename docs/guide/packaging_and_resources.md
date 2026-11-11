@@ -148,8 +148,8 @@ class App {
 
         // Read all lines into a List<String>
         List<String> lines = Resource.read_all_lines(new String("templates/items.txt"));
-        for (int32 i = 0; i < lines.size(); i = i + 1) {
-            Console::println(lines.get(i));
+        for (int32 line_index = 0; line_index < lines.size(); line_index = line_index + 1) {
+            Console::println(lines.get(line_index));
         }
 
         // Resolve absolute path to a resource
