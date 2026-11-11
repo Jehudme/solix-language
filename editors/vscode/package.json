@@ -117,6 +117,24 @@
                 "category": "Solix"
             }
         ],
+        "taskDefinitions": [
+            {
+                "type": "solix",
+                "required": [
+                    "command"
+                ],
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The Solix subcommand to execute (e.g. build, run)"
+                    },
+                    "profile": {
+                        "type": "string",
+                        "description": "Build profile to target (debug, release, test)"
+                    }
+                }
+            }
+        ],
         "configuration": {
             "type": "object",
             "title": "Solix Configuration",

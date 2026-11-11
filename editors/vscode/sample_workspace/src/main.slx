@@ -1,6 +1,6 @@
 package sample_workspace;
 
-extern import solix.io.println;
+import blt.io.println;
 
 /// Represents a 2D coordinate point with reference-counted heap allocation.
 class Point {

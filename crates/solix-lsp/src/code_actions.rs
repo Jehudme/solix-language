@@ -162,6 +162,21 @@ pub fn code_actions(
             }));
         }
 
+    if let Some(requested_kinds) = &params.context.only {
+        actions.retain(|action| match action {
+            CodeActionOrCommand::CodeAction(code_action) => {
+                if let Some(action_kind) = &code_action.kind {
+                    requested_kinds
+                        .iter()
+                        .any(|requested_kind| action_kind.as_str().starts_with(requested_kind.as_str()))
+                } else {
+                    true
+                }
+            }
+            CodeActionOrCommand::Command(_) => true,
+        });
+    }
+
     actions
 }
 

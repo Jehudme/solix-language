@@ -91,7 +91,7 @@ The Solix Language Server supports 32 language intelligence features:
 13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
 15. **Code Lens**: Interactive `▶ Run Main` and `▶ Run Test` lenses.
-16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), and `E0284` (add `override`).
+16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).
 17. **Refactoring**: Safe symbol renaming across files.
 18. **Code Formatting**: 4-space indent formatter preserving inline comments.
 
