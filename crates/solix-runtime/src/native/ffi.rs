@@ -176,6 +176,10 @@ pub struct SolixVmContext {
     /// Writes a 64-bit field to an object at a field index or direct byte offset.
     pub write_field_u64:
         unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),
+
+    /// Looks up a registered class VTable ID by qualified or simple name. Returns 0 if not found.
+    pub get_class_vtable_id:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,
 }
 
 /// Stable C-ABI native function pointer signature.
@@ -257,6 +261,7 @@ pub fn invoke_c_native(
         alloc_object: solix_vm_alloc_object,
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -934,4 +939,34 @@ pub unsafe extern "C" fn solix_vm_write_field_u64(
     let _ = vm_instance
         .heap
         .write_u64(object_address + actual_offset, raw_value);
+}
+
+/// Looks up a registered class VTable ID by qualified or simple name. Returns 0 if not found.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext` and `name_ptr` points to a valid null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_get_class_vtable_id(
+    vm_context: *mut c_void,
+    name_ptr: *const c_char,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    if name_ptr.is_null() {
+        return 0;
+    }
+    let class_name = match unsafe { CStr::from_ptr(name_ptr) }.to_str() {
+        Ok(valid_name) => valid_name,
+        Err(_) => return 0,
+    };
+    for class_descriptor in &vm_instance.context.all_classes {
+        if class_descriptor.symbol == class_name
+            || class_descriptor.symbol.ends_with(&format!("::{class_name}"))
+        {
+            return class_descriptor.vtable_id;
+        }
+    }
+    0
 }

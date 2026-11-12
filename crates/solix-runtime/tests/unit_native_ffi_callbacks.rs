@@ -5,8 +5,9 @@ use solix_runtime::context::RuntimeContext;
 use solix_runtime::native::ffi::{
     SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, solix_vm_alloc_array, solix_vm_alloc_byte_array,
     solix_vm_alloc_chars, solix_vm_alloc_object, solix_vm_alloc_string, solix_vm_array_get_u64,
-    solix_vm_array_len, solix_vm_array_set_u64, solix_vm_get_field_i32, solix_vm_read_bytes,
-    solix_vm_read_field_u64, solix_vm_set_field_i32, solix_vm_write_field_u64,
+    solix_vm_array_len, solix_vm_array_set_u64, solix_vm_get_class_vtable_id,
+    solix_vm_get_field_i32, solix_vm_read_bytes, solix_vm_read_field_u64, solix_vm_set_field_i32,
+    solix_vm_write_field_u64,
 };
 use solix_runtime::options::RuntimeOptions;
 use solix_runtime::vm::VirtualMachine;
@@ -35,6 +36,7 @@ fn test_ffi_string_allocation_and_read() {
         alloc_object: solix_vm_alloc_object,
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -83,6 +85,7 @@ fn test_ffi_char_and_byte_arrays() {
         alloc_object: solix_vm_alloc_object,
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -158,6 +161,7 @@ fn test_ffi_generic_array_manipulation() {
         alloc_object: solix_vm_alloc_object,
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -225,6 +229,7 @@ fn test_ffi_object_allocation_and_u64_fields() {
         alloc_object: solix_vm_alloc_object,
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -259,4 +264,57 @@ fn test_ffi_object_allocation_and_u64_fields() {
         unsafe { (context_wrapper.read_field_u64)(context_ptr, object_address, 3) },
         2048
     );
+}
+
+#[test]
+fn test_ffi_get_class_vtable_id_lookup() {
+    let mut binary_program = BinaryProgram::new();
+    binary_program
+        .classes
+        .push(solix_common::CompiledClass::new("models::Vector2", 105, None, 16));
+    binary_program
+        .classes
+        .push(solix_common::CompiledClass::new("Color", 106, None, 16));
+
+    let options = RuntimeOptions::new().with_binary(binary_program);
+    let context = RuntimeContext::new(options).expect("failed to construct context");
+    let mut virtual_machine = VirtualMachine::new(context);
+
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+    let mut context_wrapper = SolixVmContext {
+        magic: SOLIX_VM_CONTEXT_MAGIC,
+        vm_ptr: vm_pointer,
+        get_field_i32: solix_vm_get_field_i32,
+        set_field_i32: solix_vm_set_field_i32,
+        read_bytes: solix_vm_read_bytes,
+        alloc_string: solix_vm_alloc_string,
+        alloc_chars: solix_vm_alloc_chars,
+        alloc_byte_array: solix_vm_alloc_byte_array,
+        alloc_array: solix_vm_alloc_array,
+        array_len: solix_vm_array_len,
+        array_get_u64: solix_vm_array_get_u64,
+        array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
+    };
+    let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
+
+    let vector2_vtable =
+        unsafe { (context_wrapper.get_class_vtable_id)(context_ptr, c"Vector2".as_ptr()) };
+    assert_eq!(vector2_vtable, 105);
+
+    let full_symbol_vtable =
+        unsafe { (context_wrapper.get_class_vtable_id)(context_ptr, c"models::Vector2".as_ptr()) };
+    assert_eq!(full_symbol_vtable, 105);
+
+    let color_vtable =
+        unsafe { (context_wrapper.get_class_vtable_id)(context_ptr, c"Color".as_ptr()) };
+    assert_eq!(color_vtable, 106);
+
+    let unknown_vtable = unsafe {
+        (context_wrapper.get_class_vtable_id)(context_ptr, c"NonExistentClass".as_ptr())
+    };
+    assert_eq!(unknown_vtable, 0);
 }

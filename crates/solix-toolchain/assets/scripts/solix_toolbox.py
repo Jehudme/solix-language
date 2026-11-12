@@ -17,9 +17,36 @@ import tomllib
 import zipfile
 
 
+SUPPORTED_RELEASE_TARGETS = [
+    ("x86_64-unknown-linux-gnu", ".so"),
+    ("aarch64-unknown-linux-gnu", ".so"),
+    ("x86_64-pc-windows-gnu", ".dll"),
+    ("x86_64-apple-darwin", ".dylib"),
+    ("aarch64-apple-darwin", ".dylib"),
+]
+
+
 # ============================================================================
 # Tier 1: Composable Toolbox Primitives
 # ============================================================================
+
+def get_host_target_triple() -> str:
+    """Resolves the current machine's Rust target triple via rustc."""
+    try:
+        proc_result = subprocess.run(
+            ["rustc", "-vV"], capture_output=True, text=True, check=True
+        )
+        for line in proc_result.stdout.splitlines():
+            if line.startswith("host:"):
+                return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    if sys.platform == "win32":
+        return "x86_64-pc-windows-gnu"
+    if sys.platform == "darwin":
+        return "x86_64-apple-darwin"
+    return "x86_64-unknown-linux-gnu"
+
 
 def load_manifest(project_root: Path) -> dict:
     """Parses manifest.toml from the project root directory."""
@@ -91,43 +118,121 @@ def compile_rust_project(
     stage_lib_dir: Path,
     profile: str,
 ) -> list[Path]:
-    """Compiles a Rust cdylib project via cargo build and copies output to stage/lib."""
+    """Compiles a Rust cdylib project and stages output shared libraries."""
     target_dir = cache_dir / "cargo"
-    cmd = [
-        "cargo",
-        "build",
-        "--manifest-path",
-        str(project_dir / "Cargo.toml"),
-        "--target-dir",
-        str(target_dir),
-    ]
+    host_target = get_host_target_triple()
 
-    is_release = (profile == "release")
-    if is_release:
-        cmd.append("--release")
+    cargo_env = os.environ.copy()
+    home_cargo_bin = str(Path.home() / ".cargo" / "bin")
+    current_path = cargo_env.get("PATH", "")
+    if home_cargo_bin not in current_path:
+        cargo_env["PATH"] = f"{home_cargo_bin}:{current_path}"
 
-    print(f"  [cargo] Building native Rust project '{project_dir.name}' ({profile})...")
-    result = subprocess.run(cmd, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f"Cargo build failed for '{project_dir.name}' with code {result.returncode}")
+    if sys.platform.startswith("linux"):
+        cargo_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + cargo_env.get("RUSTFLAGS", "")
 
-    artifact_dir = target_dir / ("release" if is_release else "debug")
+    emitted_libraries: list[Path] = []
 
-    # Match platform shared library extension
-    if sys.platform == "win32":
-        extensions = [".dll"]
-    elif sys.platform == "darwin":
-        extensions = [".dylib"]
-    else:
-        extensions = [".so"]
+    if profile != "release":
+        # Debug/Test: Compile only for the host machine
+        cmd = [
+            "cargo",
+            "build",
+            "--manifest-path",
+            str(project_dir / "Cargo.toml"),
+            "--target-dir",
+            str(target_dir),
+        ]
+        print(f"  [cargo] Building native Rust project '{project_dir.name}' ({profile})...")
+        result = subprocess.run(cmd, env=cargo_env, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"Cargo build failed for '{project_dir.name}' with code {result.returncode}")
 
-    emitted_libraries = []
-    for file_path in artifact_dir.iterdir():
-        if file_path.is_file() and any(file_path.name.endswith(ext) for ext in extensions):
-            # Exclude Cargo build script artifacts and dylib deps if any
-            dest_path = stage_lib_dir / file_path.name
-            shutil.copy2(file_path, dest_path)
-            emitted_libraries.append(dest_path)
+        artifact_dir = target_dir / "debug"
+        if sys.platform == "win32":
+            extensions = [".dll"]
+        elif sys.platform == "darwin":
+            extensions = [".dylib"]
+        else:
+            extensions = [".so"]
+
+        if artifact_dir.exists():
+            for file_path in artifact_dir.iterdir():
+                if file_path.is_file() and any(file_path.name.endswith(ext) for ext in extensions):
+                    dest_path = stage_lib_dir / file_path.name
+                    shutil.copy2(file_path, dest_path)
+                    emitted_libraries.append(dest_path)
+        return emitted_libraries
+
+    # Release mode: Multi-platform cross-compilation via cargo zigbuild
+    has_cargo_zigbuild = bool(shutil.which("cargo-zigbuild", path=cargo_env["PATH"]))
+    successful_targets = 0
+
+    for target_triple, target_ext in SUPPORTED_RELEASE_TARGETS:
+        is_host = (target_triple == host_target)
+        target_stage_dir = stage_lib_dir / target_triple
+        target_stage_dir.mkdir(parents=True, exist_ok=True)
+
+        if has_cargo_zigbuild:
+            cmd = [
+                "cargo",
+                "zigbuild",
+                "--manifest-path",
+                str(project_dir / "Cargo.toml"),
+                "--target-dir",
+                str(target_dir),
+                "--release",
+                "--target",
+                target_triple,
+            ]
+        else:
+            if not is_host:
+                print(f"  [warning] Skipping cross-target '{target_triple}': cargo-zigbuild not installed")
+                continue
+            cmd = [
+                "cargo",
+                "build",
+                "--manifest-path",
+                str(project_dir / "Cargo.toml"),
+                "--target-dir",
+                str(target_dir),
+                "--release",
+            ]
+
+        print(f"  [cargo] Building target '{target_triple}' ({profile})...")
+        result = subprocess.run(cmd, env=cargo_env, capture_output=True, text=True, check=False)
+
+        if result.returncode != 0:
+            error_output = result.stderr or result.stdout or ""
+            if "can't find crate for `std`" in error_output or "can't find crate for std" in error_output:
+                print(f"  [warning] Cross-compilation skipped for '{target_triple}': rust standard library not installed")
+            else:
+                lines = error_output.strip().splitlines()
+                last_line = lines[-1] if lines else "build failed"
+                print(f"  [warning] Target '{target_triple}' compilation failed: {last_line}")
+            continue
+
+        successful_targets += 1
+        artifact_dir = (
+            target_dir / target_triple / "release"
+            if has_cargo_zigbuild
+            else target_dir / "release"
+        )
+
+        if artifact_dir.exists():
+            for file_path in artifact_dir.iterdir():
+                if file_path.is_file() and file_path.name.endswith(target_ext):
+                    dest_target_path = target_stage_dir / file_path.name
+                    shutil.copy2(file_path, dest_target_path)
+                    emitted_libraries.append(dest_target_path)
+
+                    if is_host:
+                        dest_host_path = stage_lib_dir / file_path.name
+                        shutil.copy2(file_path, dest_host_path)
+                        emitted_libraries.append(dest_host_path)
+
+    if successful_targets == 0:
+        raise RuntimeError(f"All target builds failed for native project '{project_dir.name}'")
 
     return emitted_libraries
 
@@ -164,7 +269,6 @@ def resolve_solix_binary() -> str:
         if candidate_bin.is_file() and candidate_bin.name in ("solix", "solix.exe"):
             return str(candidate_bin)
 
-    # Search workspace targets starting from toolbox location up through parent directories
     current = Path(__file__).resolve().parent
     while current != current.parent:
         for candidate in [
@@ -221,7 +325,6 @@ def compile_solix_sources(
     if package_desc:
         cmd.extend(["--description", package_desc])
 
-    # Entry point from manifest
     entrypoints = manifest.get("entrypoints", {})
     if isinstance(entrypoints, dict):
         selected_entry = (
@@ -232,17 +335,14 @@ def compile_solix_sources(
         if selected_entry:
             cmd.extend(["--entry", str(selected_entry)])
 
-    # Support SOLIX_LINK_MODE environment variable
     link_mode = os.environ.get("SOLIX_LINK_MODE")
     if link_mode:
         cmd.extend(["--link", link_mode])
 
-    # Pass any dependency .slxb libraries in stage/lib
     for lib_file in stage_lib_dir.iterdir():
         if lib_file.name.endswith(".slxb"):
             cmd.extend(["-l", str(lib_file)])
 
-    # Pass explicit dependencies declared in manifest.toml [dependencies]
     dependencies = manifest.get("dependencies", {})
     if isinstance(dependencies, dict):
         for dep_name, dep_version in sorted(dependencies.items()):
@@ -267,11 +367,11 @@ def package_slxarc(stage_dir: Path, output_slxarc: Path) -> Path:
     output_slxarc.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(output_slxarc, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for root, dirs, files in os.walk(stage_dir):
-            dirs.sort()
-            files.sort()
-            for file_name in files:
-                file_path = Path(root) / file_name
+        for root_path, dirnames, filenames in os.walk(stage_dir):
+            dirnames.sort()
+            filenames.sort()
+            for file_name in filenames:
+                file_path = Path(root_path) / file_name
                 archive_rel_path = file_path.relative_to(stage_dir)
                 zip_file.write(file_path, arcname=str(archive_rel_path).replace("\\", "/"))
 
@@ -291,7 +391,8 @@ def auto_build(profile: str = "debug", project_root: Path | None = None) -> Path
     3. Auto-detects & compiles all Rust cdylib projects in natives/
     4. Copies lib/ and resources/
     5. Compiles Solix sources into cache/stage/<profile>/bin/<name>.slxb
-    6. Packages build/<profile>/<name>.slxarc
+    6. Records cryptographic checksums in staged manifest.toml
+    7. Packages build/<profile>/<name>.slxarc
     """
     if project_root is None:
         project_root = Path.cwd()
@@ -334,10 +435,10 @@ def auto_build(profile: str = "debug", project_root: Path | None = None) -> Path
     staged_manifest_file = staging["stage"] / "manifest.toml"
     native_checksums: dict[str, str] = {}
     if staging["stage_lib"].exists():
-        for root, _, files in os.walk(staging["stage_lib"]):
-            for file_name in files:
+        for root_path, _, filenames in os.walk(staging["stage_lib"]):
+            for file_name in filenames:
                 if file_name.endswith((".so", ".dll", ".dylib")):
-                    lib_file = Path(root) / file_name
+                    lib_file = Path(root_path) / file_name
                     rel_path = str(lib_file.relative_to(staging["stage"])).replace("\\", "/")
                     hasher = hashlib.sha256()
                     hasher.update(lib_file.read_bytes())
@@ -346,7 +447,7 @@ def auto_build(profile: str = "debug", project_root: Path | None = None) -> Path
     if native_checksums and staged_manifest_file.exists():
         manifest_text = staged_manifest_file.read_text(encoding="utf-8")
         checksum_section = "\n[native_library_checksums]\n" + "\n".join(
-            f'"{key}" = "{digest}"' for key, digest in native_checksums.items()
+            f'"{key}" = "{digest}"' for key, digest in sorted(native_checksums.items())
         ) + "\n"
         staged_manifest_file.write_text(manifest_text + checksum_section, encoding="utf-8")
 

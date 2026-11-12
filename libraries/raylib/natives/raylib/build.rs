@@ -7,6 +7,8 @@ fn find_libraylib(cache_directory: &Path) -> Option<PathBuf> {
         cache_directory.join("_deps").join("raylib-build").join("raylib").join("libraylib.a"),
         cache_directory.join("raylib").join("libraylib.a"),
         cache_directory.join("libraylib.a"),
+        cache_directory.join("host").join("raylib").join("libraylib.a"),
+        cache_directory.join("host").join("_deps").join("raylib-build").join("raylib").join("libraylib.a"),
     ];
 
     for candidate in &candidate_paths {
@@ -18,49 +20,73 @@ fn find_libraylib(cache_directory: &Path) -> Option<PathBuf> {
 }
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let project_root = manifest_dir
+    let manifest_directory = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let project_root = manifest_directory
         .parent()
-        .expect("natives dir")
+        .expect("natives directory")
         .parent()
-        .expect("raylib root dir")
+        .expect("raylib root directory")
         .to_path_buf();
 
-    let cmake_cache_dir = project_root.join("build").join(".cache").join("cmake");
+    let host_cache_directory = project_root
+        .join("build")
+        .join(".cache")
+        .join("cmake")
+        .join("host");
 
-    if find_libraylib(&cmake_cache_dir).is_none() {
-        let configure_status = Command::new("cmake")
-            .arg("-B")
-            .arg(&cmake_cache_dir)
-            .arg("-S")
-            .arg(&project_root)
-            .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
-            .arg("-DBUILD_EXAMPLES=OFF")
-            .arg("-DBUILD_SHARED_LIBS=OFF")
-            .status()
-            .expect("Failed to execute cmake configure");
+    let target_cache_directory = if let Ok(target_triple) = env::var("TARGET") {
+        project_root
+            .join("build")
+            .join(".cache")
+            .join("cmake")
+            .join(target_triple)
+    } else {
+        host_cache_directory.clone()
+    };
 
-        if !configure_status.success() {
-            panic!("cmake configure failed with status: {:?}", configure_status);
+    let library_file_option = if let Ok(custom_lib_directory) = env::var("RAYLIB_LIB_DIR") {
+        find_libraylib(Path::new(&custom_lib_directory))
+    } else {
+        find_libraylib(&target_cache_directory).or_else(|| find_libraylib(&host_cache_directory))
+    };
+
+    let final_library_file = match library_file_option {
+        Some(found_library_path) => found_library_path,
+        None => {
+            let configure_status = Command::new("cmake")
+                .arg("-B")
+                .arg(&host_cache_directory)
+                .arg("-S")
+                .arg(&manifest_directory)
+                .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
+                .arg("-DBUILD_EXAMPLES=OFF")
+                .arg("-DBUILD_SHARED_LIBS=OFF")
+                .status()
+                .expect("Failed to execute cmake configure");
+
+            if !configure_status.success() {
+                panic!("cmake configure failed with status: {:?}", configure_status);
+            }
+
+            let build_status = Command::new("cmake")
+                .arg("--build")
+                .arg(&host_cache_directory)
+                .arg("--target")
+                .arg("raylib")
+                .status()
+                .expect("Failed to execute cmake build");
+
+            if !build_status.success() {
+                panic!("cmake build failed with status: {:?}", build_status);
+            }
+
+            find_libraylib(&host_cache_directory).expect("libraylib.a must exist after cmake build")
         }
+    };
 
-        let build_status = Command::new("cmake")
-            .arg("--build")
-            .arg(&cmake_cache_dir)
-            .arg("--target")
-            .arg("raylib")
-            .status()
-            .expect("Failed to execute cmake build");
+    let search_directory = final_library_file.parent().expect("library directory");
 
-        if !build_status.success() {
-            panic!("cmake build failed with status: {:?}", build_status);
-        }
-    }
-
-    let library_file = find_libraylib(&cmake_cache_dir).expect("libraylib.a must exist after cmake build");
-    let search_dir = library_file.parent().expect("library directory");
-
-    println!("cargo:rustc-link-search=native={}", search_dir.display());
+    println!("cargo:rustc-link-search=native={}", search_directory.display());
     println!("cargo:rustc-link-lib=static=raylib");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();

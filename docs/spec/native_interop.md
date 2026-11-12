@@ -93,6 +93,7 @@ Native functions can read and write heap structures via VM helper callbacks:
 - `array_len`: Returns element count of heap array.
 - `array_get_u64` & `array_set_u64`: Accesses elements by index.
 - `alloc_object`: Allocates a generic or vtable-associated heap object instance with dynamic field slots.
+- `get_class_vtable_id`: Resolves the unique virtual table index for a class by name (`*const c_char`), enabling typed object instantiation via `alloc_object`.
 - `read_field_u64`: Reads a 64-bit field slot from a heap object using resolved field index or direct byte offset.
 - `write_field_u64`: Writes a 64-bit word directly to a heap object's field slot.
 

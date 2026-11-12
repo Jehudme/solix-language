@@ -1,19 +1,9 @@
-//! Auto-generated 1-to-1 Rust native bridge extension for Solix Raylib bindings.
-//! Generated from official raylib_api.json specification.
+//! Auto-generated 1-to-1 Rust native bridge extension for Solix C-API bindings.
+//! Schema-driven codegen: zero hardcoded engine types.
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals, unused_variables, dead_code, unused_imports, unused_mut, clippy::all)]
 
 use std::ffi::{c_char, c_int, c_longlong, c_short, c_uint, c_ulonglong, c_ushort, c_void, CStr};
-
-// ===========================================================================
-// Upstream Raylib Callback Function Signatures
-// ===========================================================================
-pub type TraceLogCallback = Option<unsafe extern "C" fn(log_level: c_int, text: *const c_char, args: *mut c_void)>;
-pub type LoadFileDataCallback = Option<unsafe extern "C" fn(file_name: *const c_char, data_size: *mut c_int) -> *mut u8>;
-pub type SaveFileDataCallback = Option<unsafe extern "C" fn(file_name: *const c_char, data: *const c_void, data_size: c_int) -> bool>;
-pub type LoadFileTextCallback = Option<unsafe extern "C" fn(file_name: *const c_char) -> *mut c_char>;
-pub type SaveFileTextCallback = Option<unsafe extern "C" fn(file_name: *const c_char, text: *const c_char) -> bool>;
-pub type AudioCallback = Option<unsafe extern "C" fn(buffer_data: *mut c_void, frames: c_uint)>;
 
 /// Stable C-ABI tagged value passed across native shared library boundaries.
 #[repr(C)]
@@ -51,7 +41,7 @@ impl SolixCValue {
     }
 }
 
-/// Context structure passed to native C callbacks providing safe field and heap accessor function pointers.
+/// Context structure passed to native callbacks providing safe field and heap accessor function pointers.
 #[repr(C)]
 pub struct SolixVmContext {
     pub magic: u64,
@@ -69,6 +59,7 @@ pub struct SolixVmContext {
     pub alloc_object: unsafe extern "C" fn(vm_ptr: *mut c_void, class_vtable_id: u32, field_count: u32) -> u32,
     pub read_field_u64: unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32) -> u64,
     pub write_field_u64: unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),
+    pub get_class_vtable_id: unsafe extern "C" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,
 }
 
 pub type NativeCFunctionPtr = unsafe extern "C" fn(
@@ -85,13 +76,23 @@ pub type RegisterNativeCallback = unsafe extern "C" fn(
 );
 
 // ===========================================================================
-// Raylib C ABI Struct Definitions
+// Upstream Callback Function Signatures
 // ===========================================================================
+pub type TraceLogCallback = Option<unsafe extern "C" fn(log_level: c_int, text: *const c_char, args: *mut c_void)>;
+pub type LoadFileDataCallback = Option<unsafe extern "C" fn(file_name: *const c_char, data_size: *mut c_int) -> *mut u8>;
+pub type SaveFileDataCallback = Option<unsafe extern "C" fn(file_name: *const c_char, data: *mut c_void, data_size: c_int) -> bool>;
+pub type LoadFileTextCallback = Option<unsafe extern "C" fn(file_name: *const c_char) -> *const c_char>;
+pub type SaveFileTextCallback = Option<unsafe extern "C" fn(file_name: *const c_char, text: *const c_char) -> bool>;
+pub type AudioCallback = Option<unsafe extern "C" fn(buffer_data: *mut c_void, frames: c_uint)>;
+
+// ===========================================================================
+// C ABI Struct Definitions & Aliases
+// ===========================================================================
+pub type C_Quaternion = C_Vector4;
 pub type C_Texture2D = C_Texture;
 pub type C_TextureCubemap = C_Texture;
 pub type C_RenderTexture2D = C_RenderTexture;
 pub type C_Camera = C_Camera3D;
-pub type C_Quaternion = C_Vector4;
 pub type C_ModelAnimPose = *mut C_Transform;
 
 #[repr(C)]
@@ -278,7 +279,7 @@ pub struct C_Font {
     pub baseSize: c_int,
     pub glyphCount: c_int,
     pub glyphPadding: c_int,
-    pub texture: C_Texture2D,
+    pub texture: C_Texture,
     pub recs: *mut C_Rectangle,
     pub glyphs: *mut C_GlyphInfo,
 }
@@ -363,7 +364,7 @@ impl Default for C_Shader {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct C_MaterialMap {
-    pub texture: C_Texture2D,
+    pub texture: C_Texture,
     pub color: C_Color,
     pub value: f32,
 }
@@ -392,7 +393,7 @@ impl Default for C_Material {
 #[derive(Clone, Copy)]
 pub struct C_Transform {
     pub translation: C_Vector3,
-    pub rotation: C_Quaternion,
+    pub rotation: C_Vector4,
     pub scale: C_Vector3,
 }
 
@@ -420,7 +421,7 @@ impl Default for C_BoneInfo {
 pub struct C_ModelSkeleton {
     pub boneCount: c_uint,
     pub bones: *mut C_BoneInfo,
-    pub bindPose: *mut C_Transform,
+    pub bindPose: C_ModelAnimPose,
 }
 
 impl Default for C_ModelSkeleton {
@@ -439,7 +440,7 @@ pub struct C_Model {
     pub materials: *mut C_Material,
     pub meshMaterial: *mut c_int,
     pub skeleton: C_ModelSkeleton,
-    pub currentPose: *mut C_Transform,
+    pub currentPose: C_ModelAnimPose,
     pub boneMatrices: *mut C_Matrix,
 }
 
@@ -455,7 +456,7 @@ pub struct C_ModelAnimation {
     pub name: [c_char; 32],
     pub boneCount: c_uint,
     pub keyframeCount: c_int,
-    pub keyframePoses: *mut *mut C_Transform,
+    pub keyframePoses: *mut c_void,
 }
 
 impl Default for C_ModelAnimation {
@@ -647,7 +648,7 @@ impl Default for C_AutomationEventList {
 }
 
 // ===========================================================================
-// Dynamic Struct Unpack, Pack & Writeback Helpers
+// Struct Unpack, Pack & Writeback Helpers
 // ===========================================================================
 
 unsafe fn writeback_vector2(vm_context: *mut c_void, addr: u32, val: &C_Vector2) {
@@ -659,7 +660,9 @@ unsafe fn writeback_vector2(vm_context: *mut c_void, addr: u32, val: &C_Vector2)
 
 unsafe fn pack_vector2(vm_context: *mut c_void, val: C_Vector2) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"Vector2";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_vector2(vm_context, addr, &val);
     }
@@ -685,7 +688,9 @@ unsafe fn writeback_vector3(vm_context: *mut c_void, addr: u32, val: &C_Vector3)
 
 unsafe fn pack_vector3(vm_context: *mut c_void, val: C_Vector3) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"Vector3";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_vector3(vm_context, addr, &val);
     }
@@ -713,7 +718,9 @@ unsafe fn writeback_vector4(vm_context: *mut c_void, addr: u32, val: &C_Vector4)
 
 unsafe fn pack_vector4(vm_context: *mut c_void, val: C_Vector4) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 4);
+    let class_name_str = c"Vector4";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 4);
     if addr > 0 {
         writeback_vector4(vm_context, addr, &val);
     }
@@ -754,7 +761,9 @@ unsafe fn writeback_matrix(vm_context: *mut c_void, addr: u32, val: &C_Matrix) {
 
 unsafe fn pack_matrix(vm_context: *mut c_void, val: C_Matrix) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 16);
+    let class_name_str = c"Matrix";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 16);
     if addr > 0 {
         writeback_matrix(vm_context, addr, &val);
     }
@@ -795,7 +804,9 @@ unsafe fn writeback_color(vm_context: *mut c_void, addr: u32, val: &C_Color) {
 
 unsafe fn pack_color(vm_context: *mut c_void, val: C_Color) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 4);
+    let class_name_str = c"Color";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 4);
     if addr > 0 {
         writeback_color(vm_context, addr, &val);
     }
@@ -824,7 +835,9 @@ unsafe fn writeback_rectangle(vm_context: *mut c_void, addr: u32, val: &C_Rectan
 
 unsafe fn pack_rectangle(vm_context: *mut c_void, val: C_Rectangle) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 4);
+    let class_name_str = c"Rectangle";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 4);
     if addr > 0 {
         writeback_rectangle(vm_context, addr, &val);
     }
@@ -854,7 +867,9 @@ unsafe fn writeback_image(vm_context: *mut c_void, addr: u32, val: &C_Image) {
 
 unsafe fn pack_image(vm_context: *mut c_void, val: C_Image) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"Image";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_image(vm_context, addr, &val);
     }
@@ -865,7 +880,7 @@ unsafe fn unpack_image(vm_context: *mut c_void, addr: u32) -> C_Image {
     if addr == 0 { return C_Image::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Image::default();
-    result.data = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as *mut c_void;
+    result.data = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as usize as *mut c_void;
     result.width = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_int;
     result.height = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_int;
     result.mipmaps = ((*context_ptr).get_field_i32)(vm_context, addr, 3) as c_int;
@@ -885,7 +900,9 @@ unsafe fn writeback_texture(vm_context: *mut c_void, addr: u32, val: &C_Texture)
 
 unsafe fn pack_texture(vm_context: *mut c_void, val: C_Texture) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"Texture";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_texture(vm_context, addr, &val);
     }
@@ -916,7 +933,9 @@ unsafe fn writeback_render_texture(vm_context: *mut c_void, addr: u32, val: &C_R
 
 unsafe fn pack_render_texture(vm_context: *mut c_void, val: C_RenderTexture) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"RenderTexture";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_render_texture(vm_context, addr, &val);
     }
@@ -947,7 +966,9 @@ unsafe fn writeback_n_patch_info(vm_context: *mut c_void, addr: u32, val: &C_NPa
 
 unsafe fn pack_n_patch_info(vm_context: *mut c_void, val: C_NPatchInfo) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 6);
+    let class_name_str = c"NPatchInfo";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 6);
     if addr > 0 {
         writeback_n_patch_info(vm_context, addr, &val);
     }
@@ -980,7 +1001,9 @@ unsafe fn writeback_glyph_info(vm_context: *mut c_void, addr: u32, val: &C_Glyph
 
 unsafe fn pack_glyph_info(vm_context: *mut c_void, val: C_GlyphInfo) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"GlyphInfo";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_glyph_info(vm_context, addr, &val);
     }
@@ -1013,7 +1036,9 @@ unsafe fn writeback_font(vm_context: *mut c_void, addr: u32, val: &C_Font) {
 
 unsafe fn pack_font(vm_context: *mut c_void, val: C_Font) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 6);
+    let class_name_str = c"Font";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 6);
     if addr > 0 {
         writeback_font(vm_context, addr, &val);
     }
@@ -1028,8 +1053,8 @@ unsafe fn unpack_font(vm_context: *mut c_void, addr: u32) -> C_Font {
     result.glyphCount = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_int;
     result.glyphPadding = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_int;
     result.texture = unpack_texture(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
-    result.recs = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as *mut C_Rectangle;
-    result.glyphs = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as *mut C_GlyphInfo;
+    result.recs = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as usize as *mut C_Rectangle;
+    result.glyphs = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as usize as *mut C_GlyphInfo;
     result
 }
 
@@ -1048,7 +1073,9 @@ unsafe fn writeback_camera3d(vm_context: *mut c_void, addr: u32, val: &C_Camera3
 
 unsafe fn pack_camera3d(vm_context: *mut c_void, val: C_Camera3D) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"Camera3D";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_camera3d(vm_context, addr, &val);
     }
@@ -1080,7 +1107,9 @@ unsafe fn writeback_camera2d(vm_context: *mut c_void, addr: u32, val: &C_Camera2
 
 unsafe fn pack_camera2d(vm_context: *mut c_void, val: C_Camera2D) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 4);
+    let class_name_str = c"Camera2D";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 4);
     if addr > 0 {
         writeback_camera2d(vm_context, addr, &val);
     }
@@ -1121,7 +1150,9 @@ unsafe fn writeback_mesh(vm_context: *mut c_void, addr: u32, val: &C_Mesh) {
 
 unsafe fn pack_mesh(vm_context: *mut c_void, val: C_Mesh) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 16);
+    let class_name_str = c"Mesh";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 16);
     if addr > 0 {
         writeback_mesh(vm_context, addr, &val);
     }
@@ -1134,20 +1165,20 @@ unsafe fn unpack_mesh(vm_context: *mut c_void, addr: u32) -> C_Mesh {
     let mut result = C_Mesh::default();
     result.vertexCount = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_int;
     result.triangleCount = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_int;
-    result.vertices = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as *mut f32;
-    result.texcoords = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as *mut f32;
-    result.texcoords2 = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as *mut f32;
-    result.normals = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as *mut f32;
-    result.tangents = ((*context_ptr).read_field_u64)(vm_context, addr, 6) as *mut f32;
-    result.colors = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as *mut u8;
-    result.indices = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as *mut c_ushort;
+    result.vertices = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as usize as *mut f32;
+    result.texcoords = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as usize as *mut f32;
+    result.texcoords2 = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as usize as *mut f32;
+    result.normals = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as usize as *mut f32;
+    result.tangents = ((*context_ptr).read_field_u64)(vm_context, addr, 6) as usize as *mut f32;
+    result.colors = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as usize as *mut u8;
+    result.indices = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as usize as *mut c_ushort;
     result.boneCount = ((*context_ptr).get_field_i32)(vm_context, addr, 9) as c_int;
-    result.boneIndices = ((*context_ptr).read_field_u64)(vm_context, addr, 10) as *mut u8;
-    result.boneWeights = ((*context_ptr).read_field_u64)(vm_context, addr, 11) as *mut f32;
-    result.animVertices = ((*context_ptr).read_field_u64)(vm_context, addr, 12) as *mut f32;
-    result.animNormals = ((*context_ptr).read_field_u64)(vm_context, addr, 13) as *mut f32;
+    result.boneIndices = ((*context_ptr).read_field_u64)(vm_context, addr, 10) as usize as *mut u8;
+    result.boneWeights = ((*context_ptr).read_field_u64)(vm_context, addr, 11) as usize as *mut f32;
+    result.animVertices = ((*context_ptr).read_field_u64)(vm_context, addr, 12) as usize as *mut f32;
+    result.animNormals = ((*context_ptr).read_field_u64)(vm_context, addr, 13) as usize as *mut f32;
     result.vaoId = ((*context_ptr).get_field_i32)(vm_context, addr, 14) as c_uint;
-    result.vboId = ((*context_ptr).read_field_u64)(vm_context, addr, 15) as *mut c_uint;
+    result.vboId = ((*context_ptr).read_field_u64)(vm_context, addr, 15) as usize as *mut c_uint;
     result
 }
 
@@ -1160,7 +1191,9 @@ unsafe fn writeback_shader(vm_context: *mut c_void, addr: u32, val: &C_Shader) {
 
 unsafe fn pack_shader(vm_context: *mut c_void, val: C_Shader) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"Shader";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_shader(vm_context, addr, &val);
     }
@@ -1172,7 +1205,7 @@ unsafe fn unpack_shader(vm_context: *mut c_void, addr: u32) -> C_Shader {
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Shader::default();
     result.id = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_uint;
-    result.locs = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as *mut c_int;
+    result.locs = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as usize as *mut c_int;
     result
 }
 
@@ -1188,7 +1221,9 @@ unsafe fn writeback_material_map(vm_context: *mut c_void, addr: u32, val: &C_Mat
 
 unsafe fn pack_material_map(vm_context: *mut c_void, val: C_MaterialMap) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"MaterialMap";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_material_map(vm_context, addr, &val);
     }
@@ -1211,11 +1246,18 @@ unsafe fn writeback_material(vm_context: *mut c_void, addr: u32, val: &C_Materia
     let child_0 = pack_shader(vm_context, val.shader);
     ((*context_ptr).write_field_u64)(vm_context, addr, 0, child_0 as u64);
     ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.maps as usize as u64);
+    let arr_addr_2 = ((*context_ptr).alloc_array)(vm_context, 4, 0);
+    for elem_idx in 0..4u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, val.params[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, arr_addr_2 as u64);
 }
 
 unsafe fn pack_material(vm_context: *mut c_void, val: C_Material) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"Material";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_material(vm_context, addr, &val);
     }
@@ -1227,7 +1269,15 @@ unsafe fn unpack_material(vm_context: *mut c_void, addr: u32) -> C_Material {
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Material::default();
     result.shader = unpack_shader(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
-    result.maps = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as *mut C_MaterialMap;
+    result.maps = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as usize as *mut C_MaterialMap;
+    let arr_addr_2 = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32;
+    if arr_addr_2 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_2).min(4);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            result.params[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
     result
 }
 
@@ -1244,7 +1294,9 @@ unsafe fn writeback_transform(vm_context: *mut c_void, addr: u32, val: &C_Transf
 
 unsafe fn pack_transform(vm_context: *mut c_void, val: C_Transform) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"Transform";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_transform(vm_context, addr, &val);
     }
@@ -1264,12 +1316,20 @@ unsafe fn unpack_transform(vm_context: *mut c_void, addr: u32) -> C_Transform {
 unsafe fn writeback_bone_info(vm_context: *mut c_void, addr: u32, val: &C_BoneInfo) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
+    let mut str_len_0 = 0usize;
+    while str_len_0 < 32 && val.name[str_len_0] != 0 {
+        str_len_0 += 1;
+    }
+    let str_addr_0 = ((*context_ptr).alloc_string)(vm_context, val.name.as_ptr() as *const u8, str_len_0 as u32);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, str_addr_0 as u64);
     ((*context_ptr).set_field_i32)(vm_context, addr, 1, val.parent as i32);
 }
 
 unsafe fn pack_bone_info(vm_context: *mut c_void, val: C_BoneInfo) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"BoneInfo";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_bone_info(vm_context, addr, &val);
     }
@@ -1280,6 +1340,11 @@ unsafe fn unpack_bone_info(vm_context: *mut c_void, addr: u32) -> C_BoneInfo {
     if addr == 0 { return C_BoneInfo::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_BoneInfo::default();
+    let str_addr_0 = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32;
+    if str_addr_0 > 0 {
+        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr_0, result.name.as_mut_ptr() as *mut u8, (32 - 1) as u32) as usize;
+        result.name[read_len] = 0;
+    }
     result.parent = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_int;
     result
 }
@@ -1289,11 +1354,14 @@ unsafe fn writeback_model_skeleton(vm_context: *mut c_void, addr: u32, val: &C_M
     let context_ptr = vm_context as *mut SolixVmContext;
     ((*context_ptr).set_field_i32)(vm_context, addr, 0, val.boneCount as i32);
     ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.bones as usize as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.bindPose as usize as u64);
 }
 
 unsafe fn pack_model_skeleton(vm_context: *mut c_void, val: C_ModelSkeleton) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"ModelSkeleton";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_model_skeleton(vm_context, addr, &val);
     }
@@ -1305,7 +1373,8 @@ unsafe fn unpack_model_skeleton(vm_context: *mut c_void, addr: u32) -> C_ModelSk
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_ModelSkeleton::default();
     result.boneCount = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_uint;
-    result.bones = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as *mut C_BoneInfo;
+    result.bones = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as usize as *mut C_BoneInfo;
+    result.bindPose = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as usize as C_ModelAnimPose;
     result
 }
 
@@ -1321,12 +1390,15 @@ unsafe fn writeback_model(vm_context: *mut c_void, addr: u32, val: &C_Model) {
     ((*context_ptr).write_field_u64)(vm_context, addr, 5, val.meshMaterial as usize as u64);
     let child_6 = pack_model_skeleton(vm_context, val.skeleton);
     ((*context_ptr).write_field_u64)(vm_context, addr, 6, child_6 as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 7, val.currentPose as usize as u64);
     ((*context_ptr).write_field_u64)(vm_context, addr, 8, val.boneMatrices as usize as u64);
 }
 
 unsafe fn pack_model(vm_context: *mut c_void, val: C_Model) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 9);
+    let class_name_str = c"Model";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 9);
     if addr > 0 {
         writeback_model(vm_context, addr, &val);
     }
@@ -1340,17 +1412,24 @@ unsafe fn unpack_model(vm_context: *mut c_void, addr: u32) -> C_Model {
     result.transform = unpack_matrix(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
     result.meshCount = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_int;
     result.materialCount = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_int;
-    result.meshes = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as *mut C_Mesh;
-    result.materials = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as *mut C_Material;
-    result.meshMaterial = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as *mut c_int;
+    result.meshes = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as usize as *mut C_Mesh;
+    result.materials = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as usize as *mut C_Material;
+    result.meshMaterial = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as usize as *mut c_int;
     result.skeleton = unpack_model_skeleton(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32);
-    result.boneMatrices = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as *mut C_Matrix;
+    result.currentPose = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as usize as C_ModelAnimPose;
+    result.boneMatrices = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as usize as *mut C_Matrix;
     result
 }
 
 unsafe fn writeback_model_animation(vm_context: *mut c_void, addr: u32, val: &C_ModelAnimation) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
+    let mut str_len_0 = 0usize;
+    while str_len_0 < 32 && val.name[str_len_0] != 0 {
+        str_len_0 += 1;
+    }
+    let str_addr_0 = ((*context_ptr).alloc_string)(vm_context, val.name.as_ptr() as *const u8, str_len_0 as u32);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, str_addr_0 as u64);
     ((*context_ptr).set_field_i32)(vm_context, addr, 1, val.boneCount as i32);
     ((*context_ptr).set_field_i32)(vm_context, addr, 2, val.keyframeCount as i32);
     ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.keyframePoses as usize as u64);
@@ -1358,7 +1437,9 @@ unsafe fn writeback_model_animation(vm_context: *mut c_void, addr: u32, val: &C_
 
 unsafe fn pack_model_animation(vm_context: *mut c_void, val: C_ModelAnimation) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 4);
+    let class_name_str = c"ModelAnimation";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 4);
     if addr > 0 {
         writeback_model_animation(vm_context, addr, &val);
     }
@@ -1369,9 +1450,14 @@ unsafe fn unpack_model_animation(vm_context: *mut c_void, addr: u32) -> C_ModelA
     if addr == 0 { return C_ModelAnimation::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_ModelAnimation::default();
+    let str_addr_0 = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32;
+    if str_addr_0 > 0 {
+        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr_0, result.name.as_mut_ptr() as *mut u8, (32 - 1) as u32) as usize;
+        result.name[read_len] = 0;
+    }
     result.boneCount = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_uint;
     result.keyframeCount = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_int;
-    result.keyframePoses = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as *mut *mut C_Transform;
+    result.keyframePoses = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as usize as *mut c_void;
     result
 }
 
@@ -1386,7 +1472,9 @@ unsafe fn writeback_ray(vm_context: *mut c_void, addr: u32, val: &C_Ray) {
 
 unsafe fn pack_ray(vm_context: *mut c_void, val: C_Ray) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"Ray";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_ray(vm_context, addr, &val);
     }
@@ -1415,7 +1503,9 @@ unsafe fn writeback_ray_collision(vm_context: *mut c_void, addr: u32, val: &C_Ra
 
 unsafe fn pack_ray_collision(vm_context: *mut c_void, val: C_RayCollision) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 4);
+    let class_name_str = c"RayCollision";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 4);
     if addr > 0 {
         writeback_ray_collision(vm_context, addr, &val);
     }
@@ -1444,7 +1534,9 @@ unsafe fn writeback_bounding_box(vm_context: *mut c_void, addr: u32, val: &C_Bou
 
 unsafe fn pack_bounding_box(vm_context: *mut c_void, val: C_BoundingBox) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"BoundingBox";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_bounding_box(vm_context, addr, &val);
     }
@@ -1472,7 +1564,9 @@ unsafe fn writeback_wave(vm_context: *mut c_void, addr: u32, val: &C_Wave) {
 
 unsafe fn pack_wave(vm_context: *mut c_void, val: C_Wave) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"Wave";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_wave(vm_context, addr, &val);
     }
@@ -1487,7 +1581,7 @@ unsafe fn unpack_wave(vm_context: *mut c_void, addr: u32) -> C_Wave {
     result.sampleRate = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_uint;
     result.sampleSize = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_uint;
     result.channels = ((*context_ptr).get_field_i32)(vm_context, addr, 3) as c_uint;
-    result.data = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as *mut c_void;
+    result.data = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as usize as *mut c_void;
     result
 }
 
@@ -1503,7 +1597,9 @@ unsafe fn writeback_audio_stream(vm_context: *mut c_void, addr: u32, val: &C_Aud
 
 unsafe fn pack_audio_stream(vm_context: *mut c_void, val: C_AudioStream) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"AudioStream";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_audio_stream(vm_context, addr, &val);
     }
@@ -1514,8 +1610,8 @@ unsafe fn unpack_audio_stream(vm_context: *mut c_void, addr: u32) -> C_AudioStre
     if addr == 0 { return C_AudioStream::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_AudioStream::default();
-    result.buffer = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as *mut c_void;
-    result.processor = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as *mut c_void;
+    result.buffer = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as usize as *mut c_void;
+    result.processor = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as usize as *mut c_void;
     result.sampleRate = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_uint;
     result.sampleSize = ((*context_ptr).get_field_i32)(vm_context, addr, 3) as c_uint;
     result.channels = ((*context_ptr).get_field_i32)(vm_context, addr, 4) as c_uint;
@@ -1532,7 +1628,9 @@ unsafe fn writeback_sound(vm_context: *mut c_void, addr: u32, val: &C_Sound) {
 
 unsafe fn pack_sound(vm_context: *mut c_void, val: C_Sound) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"Sound";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_sound(vm_context, addr, &val);
     }
@@ -1561,7 +1659,9 @@ unsafe fn writeback_music(vm_context: *mut c_void, addr: u32, val: &C_Music) {
 
 unsafe fn pack_music(vm_context: *mut c_void, val: C_Music) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 5);
+    let class_name_str = c"Music";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 5);
     if addr > 0 {
         writeback_music(vm_context, addr, &val);
     }
@@ -1576,7 +1676,7 @@ unsafe fn unpack_music(vm_context: *mut c_void, addr: u32) -> C_Music {
     result.frameCount = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_uint;
     result.looping = ((*context_ptr).get_field_i32)(vm_context, addr, 2) != 0;
     result.ctxType = ((*context_ptr).get_field_i32)(vm_context, addr, 3) as c_int;
-    result.ctxData = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as *mut c_void;
+    result.ctxData = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as usize as *mut c_void;
     result
 }
 
@@ -1590,11 +1690,23 @@ unsafe fn writeback_vr_device_info(vm_context: *mut c_void, addr: u32, val: &C_V
     ((*context_ptr).write_field_u64)(vm_context, addr, 4, val.eyeToScreenDistance.to_bits() as u64);
     ((*context_ptr).write_field_u64)(vm_context, addr, 5, val.lensSeparationDistance.to_bits() as u64);
     ((*context_ptr).write_field_u64)(vm_context, addr, 6, val.interpupillaryDistance.to_bits() as u64);
+    let arr_addr_7 = ((*context_ptr).alloc_array)(vm_context, 4, 0);
+    for elem_idx in 0..4u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_7, elem_idx, val.lensDistortionValues[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 7, arr_addr_7 as u64);
+    let arr_addr_8 = ((*context_ptr).alloc_array)(vm_context, 4, 0);
+    for elem_idx in 0..4u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_8, elem_idx, val.chromaAbCorrection[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 8, arr_addr_8 as u64);
 }
 
 unsafe fn pack_vr_device_info(vm_context: *mut c_void, val: C_VrDeviceInfo) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 9);
+    let class_name_str = c"VrDeviceInfo";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 9);
     if addr > 0 {
         writeback_vr_device_info(vm_context, addr, &val);
     }
@@ -1612,17 +1724,77 @@ unsafe fn unpack_vr_device_info(vm_context: *mut c_void, addr: u32) -> C_VrDevic
     result.eyeToScreenDistance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 4) as u32);
     result.lensSeparationDistance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 5) as u32);
     result.interpupillaryDistance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32);
+    let arr_addr_7 = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as u32;
+    if arr_addr_7 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_7).min(4);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_7, elem_idx);
+            result.lensDistortionValues[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
+    let arr_addr_8 = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as u32;
+    if arr_addr_8 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_8).min(4);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_8, elem_idx);
+            result.chromaAbCorrection[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
     result
 }
 
 unsafe fn writeback_vr_stereo_config(vm_context: *mut c_void, addr: u32, val: &C_VrStereoConfig) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
+    let arr_addr_0 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        let child_addr = pack_matrix(vm_context, val.projection[elem_idx as usize]);
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_0, elem_idx, child_addr as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, arr_addr_0 as u64);
+    let arr_addr_1 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        let child_addr = pack_matrix(vm_context, val.viewOffset[elem_idx as usize]);
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, child_addr as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, arr_addr_1 as u64);
+    let arr_addr_2 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, val.leftLensCenter[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, arr_addr_2 as u64);
+    let arr_addr_3 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_3, elem_idx, val.rightLensCenter[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, arr_addr_3 as u64);
+    let arr_addr_4 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_4, elem_idx, val.leftScreenCenter[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 4, arr_addr_4 as u64);
+    let arr_addr_5 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_5, elem_idx, val.rightScreenCenter[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 5, arr_addr_5 as u64);
+    let arr_addr_6 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_6, elem_idx, val.scale[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 6, arr_addr_6 as u64);
+    let arr_addr_7 = ((*context_ptr).alloc_array)(vm_context, 2, 0);
+    for elem_idx in 0..2u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_7, elem_idx, val.scaleIn[elem_idx as usize].to_bits() as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 7, arr_addr_7 as u64);
 }
 
 unsafe fn pack_vr_stereo_config(vm_context: *mut c_void, val: C_VrStereoConfig) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 8);
+    let class_name_str = c"VrStereoConfig";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 8);
     if addr > 0 {
         writeback_vr_stereo_config(vm_context, addr, &val);
     }
@@ -1633,6 +1805,70 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
     if addr == 0 { return C_VrStereoConfig::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_VrStereoConfig::default();
+    let arr_addr_0 = ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32;
+    if arr_addr_0 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_0).min(2);
+        for elem_idx in 0..arr_len {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            result.projection[elem_idx as usize] = unpack_matrix(vm_context, child_addr);
+        }
+    }
+    let arr_addr_1 = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32;
+    if arr_addr_1 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_1).min(2);
+        for elem_idx in 0..arr_len {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx) as u32;
+            result.viewOffset[elem_idx as usize] = unpack_matrix(vm_context, child_addr);
+        }
+    }
+    let arr_addr_2 = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32;
+    if arr_addr_2 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_2).min(2);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            result.leftLensCenter[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
+    let arr_addr_3 = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32;
+    if arr_addr_3 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_3).min(2);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_3, elem_idx);
+            result.rightLensCenter[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
+    let arr_addr_4 = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as u32;
+    if arr_addr_4 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_4).min(2);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_4, elem_idx);
+            result.leftScreenCenter[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
+    let arr_addr_5 = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as u32;
+    if arr_addr_5 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_5).min(2);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_5, elem_idx);
+            result.rightScreenCenter[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
+    let arr_addr_6 = ((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32;
+    if arr_addr_6 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_6).min(2);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_6, elem_idx);
+            result.scale[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
+    let arr_addr_7 = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as u32;
+    if arr_addr_7 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_7).min(2);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_7, elem_idx);
+            result.scaleIn[elem_idx as usize] = f32::from_bits(raw_val as u32);
+        }
+    }
     result
 }
 
@@ -1645,7 +1881,9 @@ unsafe fn writeback_file_path_list(vm_context: *mut c_void, addr: u32, val: &C_F
 
 unsafe fn pack_file_path_list(vm_context: *mut c_void, val: C_FilePathList) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 2);
+    let class_name_str = c"FilePathList";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 2);
     if addr > 0 {
         writeback_file_path_list(vm_context, addr, &val);
     }
@@ -1657,7 +1895,7 @@ unsafe fn unpack_file_path_list(vm_context: *mut c_void, addr: u32) -> C_FilePat
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_FilePathList::default();
     result.count = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_uint;
-    result.paths = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as *mut *mut c_char;
+    result.paths = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as usize as *mut *mut c_char;
     result
 }
 
@@ -1666,11 +1904,18 @@ unsafe fn writeback_automation_event(vm_context: *mut c_void, addr: u32, val: &C
     let context_ptr = vm_context as *mut SolixVmContext;
     ((*context_ptr).set_field_i32)(vm_context, addr, 0, val.frame as i32);
     ((*context_ptr).set_field_i32)(vm_context, addr, 1, val.r#type as i32);
+    let arr_addr_2 = ((*context_ptr).alloc_array)(vm_context, 4, 0);
+    for elem_idx in 0..4u32 {
+        ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, val.params[elem_idx as usize] as u64);
+    }
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, arr_addr_2 as u64);
 }
 
 unsafe fn pack_automation_event(vm_context: *mut c_void, val: C_AutomationEvent) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"AutomationEvent";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_automation_event(vm_context, addr, &val);
     }
@@ -1683,6 +1928,14 @@ unsafe fn unpack_automation_event(vm_context: *mut c_void, addr: u32) -> C_Autom
     let mut result = C_AutomationEvent::default();
     result.frame = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_uint;
     result.r#type = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_uint;
+    let arr_addr_2 = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32;
+    if arr_addr_2 > 0 {
+        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_2).min(4);
+        for elem_idx in 0..arr_len {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            result.params[elem_idx as usize] = raw_val as c_int;
+        }
+    }
     result
 }
 
@@ -1696,7 +1949,9 @@ unsafe fn writeback_automation_event_list(vm_context: *mut c_void, addr: u32, va
 
 unsafe fn pack_automation_event_list(vm_context: *mut c_void, val: C_AutomationEventList) -> u32 {
     let context_ptr = vm_context as *mut SolixVmContext;
-    let addr = ((*context_ptr).alloc_object)(vm_context, 0, 3);
+    let class_name_str = c"AutomationEventList";
+    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());
+    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, 3);
     if addr > 0 {
         writeback_automation_event_list(vm_context, addr, &val);
     }
@@ -1709,7 +1964,7 @@ unsafe fn unpack_automation_event_list(vm_context: *mut c_void, addr: u32) -> C_
     let mut result = C_AutomationEventList::default();
     result.capacity = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_uint;
     result.count = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_uint;
-    result.events = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as *mut C_AutomationEvent;
+    result.events = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as usize as *mut C_AutomationEvent;
     result
 }
 
@@ -1730,7 +1985,7 @@ unsafe fn pack_camera(vm_context: *mut c_void, val: C_Camera) -> u32 { pack_came
 unsafe fn writeback_camera(vm_context: *mut c_void, addr: u32, val: &C_Camera) { writeback_camera3d(vm_context, addr, val); }
 
 // ===========================================================================
-// Upstream Raylib Extern "C" Declarations
+// Upstream Extern "C" Declarations
 // ===========================================================================
 unsafe extern "C" {
     pub fn InitWindow(arg_0: c_int, arg_1: c_int, arg_2: *const c_char);
@@ -1795,7 +2050,7 @@ unsafe extern "C" {
     pub fn EndMode2D();
     pub fn BeginMode3D(arg_0: C_Camera3D);
     pub fn EndMode3D();
-    pub fn BeginTextureMode(arg_0: C_RenderTexture2D);
+    pub fn BeginTextureMode(arg_0: C_RenderTexture);
     pub fn EndTextureMode();
     pub fn BeginShaderMode(arg_0: C_Shader);
     pub fn EndShaderMode();
@@ -1815,15 +2070,15 @@ unsafe extern "C" {
     pub fn SetShaderValue(arg_0: C_Shader, arg_1: c_int, arg_2: *mut c_void, arg_3: c_int);
     pub fn SetShaderValueV(arg_0: C_Shader, arg_1: c_int, arg_2: *mut c_void, arg_3: c_int, arg_4: c_int);
     pub fn SetShaderValueMatrix(arg_0: C_Shader, arg_1: c_int, arg_2: C_Matrix);
-    pub fn SetShaderValueTexture(arg_0: C_Shader, arg_1: c_int, arg_2: C_Texture2D);
+    pub fn SetShaderValueTexture(arg_0: C_Shader, arg_1: c_int, arg_2: C_Texture);
     pub fn UnloadShader(arg_0: C_Shader);
-    pub fn GetScreenToWorldRay(arg_0: C_Vector2, arg_1: C_Camera) -> C_Ray;
-    pub fn GetScreenToWorldRayEx(arg_0: C_Vector2, arg_1: C_Camera, arg_2: c_int, arg_3: c_int) -> C_Ray;
-    pub fn GetWorldToScreen(arg_0: C_Vector3, arg_1: C_Camera) -> C_Vector2;
-    pub fn GetWorldToScreenEx(arg_0: C_Vector3, arg_1: C_Camera, arg_2: c_int, arg_3: c_int) -> C_Vector2;
+    pub fn GetScreenToWorldRay(arg_0: C_Vector2, arg_1: C_Camera3D) -> C_Ray;
+    pub fn GetScreenToWorldRayEx(arg_0: C_Vector2, arg_1: C_Camera3D, arg_2: c_int, arg_3: c_int) -> C_Ray;
+    pub fn GetWorldToScreen(arg_0: C_Vector3, arg_1: C_Camera3D) -> C_Vector2;
+    pub fn GetWorldToScreenEx(arg_0: C_Vector3, arg_1: C_Camera3D, arg_2: c_int, arg_3: c_int) -> C_Vector2;
     pub fn GetWorldToScreen2D(arg_0: C_Vector2, arg_1: C_Camera2D) -> C_Vector2;
     pub fn GetScreenToWorld2D(arg_0: C_Vector2, arg_1: C_Camera2D) -> C_Vector2;
-    pub fn GetCameraMatrix(arg_0: C_Camera) -> C_Matrix;
+    pub fn GetCameraMatrix(arg_0: C_Camera3D) -> C_Matrix;
     pub fn GetCameraMatrix2D(arg_0: C_Camera2D) -> C_Matrix;
     pub fn SetTargetFPS(arg_0: c_int);
     pub fn GetFrameTime() -> f32;
@@ -1848,7 +2103,7 @@ unsafe extern "C" {
     pub fn LoadFileData(arg_0: *const c_char, arg_1: *mut c_int) -> *mut u8;
     pub fn UnloadFileData(arg_0: *mut u8);
     pub fn SaveFileData(arg_0: *const c_char, arg_1: *mut c_void, arg_2: c_int) -> bool;
-    pub fn ExportDataAsCode(arg_0: *mut u8, arg_1: c_int, arg_2: *const c_char) -> bool;
+    pub fn ExportDataAsCode(arg_0: *const u8, arg_1: c_int, arg_2: *const c_char) -> bool;
     pub fn LoadFileText(arg_0: *const c_char) -> *const c_char;
     pub fn UnloadFileText(arg_0: *const c_char);
     pub fn SaveFileText(arg_0: *const c_char, arg_1: *const c_char) -> bool;
@@ -1889,14 +2144,14 @@ unsafe extern "C" {
     pub fn UnloadDroppedFiles(arg_0: C_FilePathList);
     pub fn GetDirectoryFileCount(arg_0: *const c_char) -> c_uint;
     pub fn GetDirectoryFileCountEx(arg_0: *const c_char, arg_1: *const c_char, arg_2: bool) -> c_uint;
-    pub fn CompressData(arg_0: *mut u8, arg_1: c_int, arg_2: *mut c_int) -> *mut u8;
-    pub fn DecompressData(arg_0: *mut u8, arg_1: c_int, arg_2: *mut c_int) -> *mut u8;
-    pub fn EncodeDataBase64(arg_0: *mut u8, arg_1: c_int, arg_2: *mut c_int) -> *const c_char;
+    pub fn CompressData(arg_0: *const u8, arg_1: c_int, arg_2: *mut c_int) -> *mut u8;
+    pub fn DecompressData(arg_0: *const u8, arg_1: c_int, arg_2: *mut c_int) -> *mut u8;
+    pub fn EncodeDataBase64(arg_0: *const u8, arg_1: c_int, arg_2: *mut c_int) -> *const c_char;
     pub fn DecodeDataBase64(arg_0: *const c_char, arg_1: *mut c_int) -> *mut u8;
-    pub fn ComputeCRC32(arg_0: *mut u8, arg_1: c_int) -> c_uint;
-    pub fn ComputeMD5(arg_0: *mut u8, arg_1: c_int) -> *mut c_uint;
-    pub fn ComputeSHA1(arg_0: *mut u8, arg_1: c_int) -> *mut c_uint;
-    pub fn ComputeSHA256(arg_0: *mut u8, arg_1: c_int) -> *mut c_uint;
+    pub fn ComputeCRC32(arg_0: *const u8, arg_1: c_int) -> c_uint;
+    pub fn ComputeMD5(arg_0: *const u8, arg_1: c_int) -> *mut c_uint;
+    pub fn ComputeSHA1(arg_0: *const u8, arg_1: c_int) -> *mut c_uint;
+    pub fn ComputeSHA256(arg_0: *const u8, arg_1: c_int) -> *mut c_uint;
     pub fn LoadAutomationEventList(arg_0: *const c_char) -> C_AutomationEventList;
     pub fn UnloadAutomationEventList(arg_0: C_AutomationEventList);
     pub fn ExportAutomationEventList(arg_0: C_AutomationEventList, arg_1: *const c_char) -> bool;
@@ -1952,10 +2207,10 @@ unsafe extern "C" {
     pub fn GetGestureDragAngle() -> f32;
     pub fn GetGesturePinchVector() -> C_Vector2;
     pub fn GetGesturePinchAngle() -> f32;
-    pub fn UpdateCamera(arg_0: *mut C_Camera, arg_1: c_int);
-    pub fn UpdateCameraPro(arg_0: *mut C_Camera, arg_1: C_Vector3, arg_2: C_Vector3, arg_3: f32);
-    pub fn SetShapesTexture(arg_0: C_Texture2D, arg_1: C_Rectangle);
-    pub fn GetShapesTexture() -> C_Texture2D;
+    pub fn UpdateCamera(arg_0: *mut C_Camera3D, arg_1: c_int);
+    pub fn UpdateCameraPro(arg_0: *mut C_Camera3D, arg_1: C_Vector3, arg_2: C_Vector3, arg_3: f32);
+    pub fn SetShapesTexture(arg_0: C_Texture, arg_1: C_Rectangle);
+    pub fn GetShapesTexture() -> C_Texture;
     pub fn GetShapesTextureRectangle() -> C_Rectangle;
     pub fn DrawPixel(arg_0: c_int, arg_1: c_int, arg_2: C_Color);
     pub fn DrawPixelV(arg_0: C_Vector2, arg_1: C_Color);
@@ -2032,9 +2287,9 @@ unsafe extern "C" {
     pub fn LoadImage(arg_0: *const c_char) -> C_Image;
     pub fn LoadImageRaw(arg_0: *const c_char, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int) -> C_Image;
     pub fn LoadImageAnim(arg_0: *const c_char, arg_1: *mut c_int) -> C_Image;
-    pub fn LoadImageAnimFromMemory(arg_0: *const c_char, arg_1: *mut u8, arg_2: c_int, arg_3: *mut c_int) -> C_Image;
-    pub fn LoadImageFromMemory(arg_0: *const c_char, arg_1: *mut u8, arg_2: c_int) -> C_Image;
-    pub fn LoadImageFromTexture(arg_0: C_Texture2D) -> C_Image;
+    pub fn LoadImageAnimFromMemory(arg_0: *const c_char, arg_1: *const u8, arg_2: c_int, arg_3: *mut c_int) -> C_Image;
+    pub fn LoadImageFromMemory(arg_0: *const c_char, arg_1: *const u8, arg_2: c_int) -> C_Image;
+    pub fn LoadImageFromTexture(arg_0: C_Texture) -> C_Image;
     pub fn LoadImageFromScreen() -> C_Image;
     pub fn IsImageValid(arg_0: C_Image) -> bool;
     pub fn UnloadImage(arg_0: C_Image);
@@ -2063,7 +2318,7 @@ unsafe extern "C" {
     pub fn ImageAlphaMask(arg_0: *mut C_Image, arg_1: C_Image);
     pub fn ImageAlphaPremultiply(arg_0: *mut C_Image);
     pub fn ImageBlurGaussian(arg_0: *mut C_Image, arg_1: c_int);
-    pub fn ImageKernelConvolution(arg_0: *mut C_Image, arg_1: *mut f32, arg_2: c_int);
+    pub fn ImageKernelConvolution(arg_0: *mut C_Image, arg_1: *const f32, arg_2: c_int);
     pub fn ImageResize(arg_0: *mut C_Image, arg_1: c_int, arg_2: c_int);
     pub fn ImageResizeNN(arg_0: *mut C_Image, arg_1: c_int, arg_2: c_int);
     pub fn ImageResizeCanvas(arg_0: *mut C_Image, arg_1: c_int, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: C_Color);
@@ -2117,26 +2372,26 @@ unsafe extern "C" {
     pub fn ImageDrawText(arg_0: *mut C_Image, arg_1: *const c_char, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: C_Color);
     pub fn ImageDrawTextEx(arg_0: *mut C_Image, arg_1: C_Font, arg_2: *const c_char, arg_3: C_Vector2, arg_4: f32, arg_5: f32, arg_6: C_Color);
     pub fn ImageDrawTextPro(arg_0: *mut C_Image, arg_1: C_Font, arg_2: *const c_char, arg_3: C_Vector2, arg_4: C_Vector2, arg_5: f32, arg_6: f32, arg_7: f32, arg_8: C_Color);
-    pub fn LoadTexture(arg_0: *const c_char) -> C_Texture2D;
-    pub fn LoadTextureFromImage(arg_0: C_Image) -> C_Texture2D;
-    pub fn LoadTextureCubemap(arg_0: C_Image, arg_1: c_int) -> C_TextureCubemap;
-    pub fn LoadRenderTexture(arg_0: c_int, arg_1: c_int) -> C_RenderTexture2D;
-    pub fn LoadRenderTextureEx(arg_0: c_int, arg_1: c_int, arg_2: c_int) -> C_RenderTexture2D;
-    pub fn IsTextureValid(arg_0: C_Texture2D) -> bool;
-    pub fn UnloadTexture(arg_0: C_Texture2D);
-    pub fn IsRenderTextureValid(arg_0: C_RenderTexture2D) -> bool;
-    pub fn UnloadRenderTexture(arg_0: C_RenderTexture2D);
-    pub fn UpdateTexture(arg_0: C_Texture2D, arg_1: *mut c_void);
-    pub fn UpdateTextureRec(arg_0: C_Texture2D, arg_1: C_Rectangle, arg_2: *mut c_void);
-    pub fn GenTextureMipmaps(arg_0: *mut C_Texture2D);
-    pub fn SetTextureFilter(arg_0: C_Texture2D, arg_1: c_int);
-    pub fn SetTextureWrap(arg_0: C_Texture2D, arg_1: c_int);
-    pub fn DrawTexture(arg_0: C_Texture2D, arg_1: c_int, arg_2: c_int, arg_3: C_Color);
-    pub fn DrawTextureV(arg_0: C_Texture2D, arg_1: C_Vector2, arg_2: C_Color);
-    pub fn DrawTextureEx(arg_0: C_Texture2D, arg_1: C_Vector2, arg_2: f32, arg_3: f32, arg_4: C_Color);
-    pub fn DrawTextureRec(arg_0: C_Texture2D, arg_1: C_Rectangle, arg_2: C_Vector2, arg_3: C_Color);
-    pub fn DrawTexturePro(arg_0: C_Texture2D, arg_1: C_Rectangle, arg_2: C_Rectangle, arg_3: C_Vector2, arg_4: f32, arg_5: C_Color);
-    pub fn DrawTextureNPatch(arg_0: C_Texture2D, arg_1: C_NPatchInfo, arg_2: C_Rectangle, arg_3: C_Vector2, arg_4: f32, arg_5: C_Color);
+    pub fn LoadTexture(arg_0: *const c_char) -> C_Texture;
+    pub fn LoadTextureFromImage(arg_0: C_Image) -> C_Texture;
+    pub fn LoadTextureCubemap(arg_0: C_Image, arg_1: c_int) -> C_Texture;
+    pub fn LoadRenderTexture(arg_0: c_int, arg_1: c_int) -> C_RenderTexture;
+    pub fn LoadRenderTextureEx(arg_0: c_int, arg_1: c_int, arg_2: c_int) -> C_RenderTexture;
+    pub fn IsTextureValid(arg_0: C_Texture) -> bool;
+    pub fn UnloadTexture(arg_0: C_Texture);
+    pub fn IsRenderTextureValid(arg_0: C_RenderTexture) -> bool;
+    pub fn UnloadRenderTexture(arg_0: C_RenderTexture);
+    pub fn UpdateTexture(arg_0: C_Texture, arg_1: *mut c_void);
+    pub fn UpdateTextureRec(arg_0: C_Texture, arg_1: C_Rectangle, arg_2: *mut c_void);
+    pub fn GenTextureMipmaps(arg_0: *mut C_Texture);
+    pub fn SetTextureFilter(arg_0: C_Texture, arg_1: c_int);
+    pub fn SetTextureWrap(arg_0: C_Texture, arg_1: c_int);
+    pub fn DrawTexture(arg_0: C_Texture, arg_1: c_int, arg_2: c_int, arg_3: C_Color);
+    pub fn DrawTextureV(arg_0: C_Texture, arg_1: C_Vector2, arg_2: C_Color);
+    pub fn DrawTextureEx(arg_0: C_Texture, arg_1: C_Vector2, arg_2: f32, arg_3: f32, arg_4: C_Color);
+    pub fn DrawTextureRec(arg_0: C_Texture, arg_1: C_Rectangle, arg_2: C_Vector2, arg_3: C_Color);
+    pub fn DrawTexturePro(arg_0: C_Texture, arg_1: C_Rectangle, arg_2: C_Rectangle, arg_3: C_Vector2, arg_4: f32, arg_5: C_Color);
+    pub fn DrawTextureNPatch(arg_0: C_Texture, arg_1: C_NPatchInfo, arg_2: C_Rectangle, arg_3: C_Vector2, arg_4: f32, arg_5: C_Color);
     pub fn ColorIsEqual(arg_0: C_Color, arg_1: C_Color) -> bool;
     pub fn Fade(arg_0: C_Color, arg_1: f32) -> C_Color;
     pub fn ColorToInt(arg_0: C_Color) -> c_int;
@@ -2156,12 +2411,12 @@ unsafe extern "C" {
     pub fn GetPixelDataSize(arg_0: c_int, arg_1: c_int, arg_2: c_int) -> c_int;
     pub fn GetFontDefault() -> C_Font;
     pub fn LoadFont(arg_0: *const c_char) -> C_Font;
-    pub fn LoadFontEx(arg_0: *const c_char, arg_1: c_int, arg_2: *mut c_int, arg_3: c_int) -> C_Font;
+    pub fn LoadFontEx(arg_0: *const c_char, arg_1: c_int, arg_2: *const c_int, arg_3: c_int) -> C_Font;
     pub fn LoadFontFromImage(arg_0: C_Image, arg_1: C_Color, arg_2: c_int) -> C_Font;
-    pub fn LoadFontFromMemory(arg_0: *const c_char, arg_1: *mut u8, arg_2: c_int, arg_3: c_int, arg_4: *mut c_int, arg_5: c_int) -> C_Font;
+    pub fn LoadFontFromMemory(arg_0: *const c_char, arg_1: *const u8, arg_2: c_int, arg_3: c_int, arg_4: *const c_int, arg_5: c_int) -> C_Font;
     pub fn IsFontValid(arg_0: C_Font) -> bool;
-    pub fn LoadFontData(arg_0: *mut u8, arg_1: c_int, arg_2: c_int, arg_3: *mut c_int, arg_4: c_int, arg_5: c_int, arg_6: *mut c_int) -> *mut C_GlyphInfo;
-    pub fn GenImageFontAtlas(arg_0: *const C_GlyphInfo, arg_1: *mut *mut C_Rectangle, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: c_int) -> C_Image;
+    pub fn LoadFontData(arg_0: *const u8, arg_1: c_int, arg_2: c_int, arg_3: *const c_int, arg_4: c_int, arg_5: c_int, arg_6: *mut c_int) -> *mut C_GlyphInfo;
+    pub fn GenImageFontAtlas(arg_0: *const C_GlyphInfo, arg_1: *mut c_void, arg_2: c_int, arg_3: c_int, arg_4: c_int, arg_5: c_int) -> C_Image;
     pub fn UnloadFontData(arg_0: *mut C_GlyphInfo, arg_1: c_int);
     pub fn UnloadFont(arg_0: C_Font);
     pub fn ExportFontAsCode(arg_0: C_Font, arg_1: *const c_char) -> bool;
@@ -2170,15 +2425,15 @@ unsafe extern "C" {
     pub fn DrawTextEx(arg_0: C_Font, arg_1: *const c_char, arg_2: C_Vector2, arg_3: f32, arg_4: f32, arg_5: C_Color);
     pub fn DrawTextPro(arg_0: C_Font, arg_1: *const c_char, arg_2: C_Vector2, arg_3: C_Vector2, arg_4: f32, arg_5: f32, arg_6: f32, arg_7: C_Color);
     pub fn DrawTextCodepoint(arg_0: C_Font, arg_1: c_int, arg_2: C_Vector2, arg_3: f32, arg_4: C_Color);
-    pub fn DrawTextCodepoints(arg_0: C_Font, arg_1: *mut c_int, arg_2: c_int, arg_3: C_Vector2, arg_4: f32, arg_5: f32, arg_6: C_Color);
+    pub fn DrawTextCodepoints(arg_0: C_Font, arg_1: *const c_int, arg_2: c_int, arg_3: C_Vector2, arg_4: f32, arg_5: f32, arg_6: C_Color);
     pub fn SetTextLineSpacing(arg_0: c_int);
     pub fn MeasureText(arg_0: *const c_char, arg_1: c_int) -> c_int;
     pub fn MeasureTextEx(arg_0: C_Font, arg_1: *const c_char, arg_2: f32, arg_3: f32) -> C_Vector2;
-    pub fn MeasureTextCodepoints(arg_0: C_Font, arg_1: *mut c_int, arg_2: c_int, arg_3: f32, arg_4: f32) -> C_Vector2;
+    pub fn MeasureTextCodepoints(arg_0: C_Font, arg_1: *const c_int, arg_2: c_int, arg_3: f32, arg_4: f32) -> C_Vector2;
     pub fn GetGlyphIndex(arg_0: C_Font, arg_1: c_int) -> c_int;
     pub fn GetGlyphInfo(arg_0: C_Font, arg_1: c_int) -> C_GlyphInfo;
     pub fn GetGlyphAtlasRec(arg_0: C_Font, arg_1: c_int) -> C_Rectangle;
-    pub fn LoadUTF8(arg_0: *mut c_int, arg_1: c_int) -> *const c_char;
+    pub fn LoadUTF8(arg_0: *const c_int, arg_1: c_int) -> *const c_char;
     pub fn UnloadUTF8(arg_0: *const c_char);
     pub fn LoadCodepoints(arg_0: *const c_char, arg_1: *mut c_int) -> *mut c_int;
     pub fn UnloadCodepoints(arg_0: *mut c_int);
@@ -2244,9 +2499,9 @@ unsafe extern "C" {
     pub fn DrawModelWires(arg_0: C_Model, arg_1: C_Vector3, arg_2: f32, arg_3: C_Color);
     pub fn DrawModelWiresEx(arg_0: C_Model, arg_1: C_Vector3, arg_2: C_Vector3, arg_3: f32, arg_4: C_Vector3, arg_5: C_Color);
     pub fn DrawBoundingBox(arg_0: C_BoundingBox, arg_1: C_Color);
-    pub fn DrawBillboard(arg_0: C_Camera, arg_1: C_Texture2D, arg_2: C_Vector3, arg_3: f32, arg_4: C_Color);
-    pub fn DrawBillboardRec(arg_0: C_Camera, arg_1: C_Texture2D, arg_2: C_Rectangle, arg_3: C_Vector3, arg_4: C_Vector2, arg_5: C_Color);
-    pub fn DrawBillboardPro(arg_0: C_Camera, arg_1: C_Texture2D, arg_2: C_Rectangle, arg_3: C_Vector3, arg_4: C_Vector3, arg_5: C_Vector2, arg_6: C_Vector2, arg_7: f32, arg_8: C_Color);
+    pub fn DrawBillboard(arg_0: C_Camera3D, arg_1: C_Texture, arg_2: C_Vector3, arg_3: f32, arg_4: C_Color);
+    pub fn DrawBillboardRec(arg_0: C_Camera3D, arg_1: C_Texture, arg_2: C_Rectangle, arg_3: C_Vector3, arg_4: C_Vector2, arg_5: C_Color);
+    pub fn DrawBillboardPro(arg_0: C_Camera3D, arg_1: C_Texture, arg_2: C_Rectangle, arg_3: C_Vector3, arg_4: C_Vector3, arg_5: C_Vector2, arg_6: C_Vector2, arg_7: f32, arg_8: C_Color);
     pub fn UploadMesh(arg_0: *mut C_Mesh, arg_1: bool);
     pub fn UpdateMeshBuffer(arg_0: C_Mesh, arg_1: c_int, arg_2: *mut c_void, arg_3: c_int, arg_4: c_int);
     pub fn UnloadMesh(arg_0: C_Mesh);
@@ -2271,7 +2526,7 @@ unsafe extern "C" {
     pub fn LoadMaterialDefault() -> C_Material;
     pub fn IsMaterialValid(arg_0: C_Material) -> bool;
     pub fn UnloadMaterial(arg_0: C_Material);
-    pub fn SetMaterialTexture(arg_0: *mut C_Material, arg_1: c_int, arg_2: C_Texture2D);
+    pub fn SetMaterialTexture(arg_0: *mut C_Material, arg_1: c_int, arg_2: C_Texture);
     pub fn SetModelMeshMaterial(arg_0: *mut C_Model, arg_1: c_int, arg_2: c_int);
     pub fn LoadModelAnimations(arg_0: *const c_char, arg_1: *mut c_int) -> *mut C_ModelAnimation;
     pub fn UpdateModelAnimation(arg_0: C_Model, arg_1: C_ModelAnimation, arg_2: f32);
@@ -2292,7 +2547,7 @@ unsafe extern "C" {
     pub fn SetMasterVolume(arg_0: f32);
     pub fn GetMasterVolume() -> f32;
     pub fn LoadWave(arg_0: *const c_char) -> C_Wave;
-    pub fn LoadWaveFromMemory(arg_0: *const c_char, arg_1: *mut u8, arg_2: c_int) -> C_Wave;
+    pub fn LoadWaveFromMemory(arg_0: *const c_char, arg_1: *const u8, arg_2: c_int) -> C_Wave;
     pub fn IsWaveValid(arg_0: C_Wave) -> bool;
     pub fn LoadSound(arg_0: *const c_char) -> C_Sound;
     pub fn LoadSoundFromWave(arg_0: C_Wave) -> C_Sound;
@@ -2318,7 +2573,7 @@ unsafe extern "C" {
     pub fn LoadWaveSamples(arg_0: C_Wave) -> *mut f32;
     pub fn UnloadWaveSamples(arg_0: *mut f32);
     pub fn LoadMusicStream(arg_0: *const c_char) -> C_Music;
-    pub fn LoadMusicStreamFromMemory(arg_0: *const c_char, arg_1: *mut u8, arg_2: c_int) -> C_Music;
+    pub fn LoadMusicStreamFromMemory(arg_0: *const c_char, arg_1: *const u8, arg_2: c_int) -> C_Music;
     pub fn IsMusicValid(arg_0: C_Music) -> bool;
     pub fn UnloadMusicStream(arg_0: C_Music);
     pub fn PlayMusicStream(arg_0: C_Music);
@@ -3089,7 +3344,7 @@ pub unsafe extern "C" fn Raylib_BeginTextureMode(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    BeginTextureMode(unpack_render_texture2d(vm_context, (*args.add(0)).payload as u32));
+    BeginTextureMode(unpack_render_texture(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::null()
 }
 
@@ -3336,7 +3591,7 @@ pub unsafe extern "C" fn Raylib_SetShaderValue(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetShaderValue(unpack_shader(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_void, (*args.add(3)).payload as c_int);
+    SetShaderValue(unpack_shader(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as usize as *mut c_void, (*args.add(3)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -3347,7 +3602,7 @@ pub unsafe extern "C" fn Raylib_SetShaderValueV(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetShaderValueV(unpack_shader(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_void, (*args.add(3)).payload as c_int, (*args.add(4)).payload as c_int);
+    SetShaderValueV(unpack_shader(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as usize as *mut c_void, (*args.add(3)).payload as c_int, (*args.add(4)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -3369,7 +3624,7 @@ pub unsafe extern "C" fn Raylib_SetShaderValueTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetShaderValueTexture(unpack_shader(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, unpack_texture2d(vm_context, (*args.add(2)).payload as u32));
+    SetShaderValueTexture(unpack_shader(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, unpack_texture(vm_context, (*args.add(2)).payload as u32));
     SolixCValue::null()
 }
 
@@ -3391,7 +3646,7 @@ pub unsafe extern "C" fn Raylib_GetScreenToWorldRay(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GetScreenToWorldRay(unpack_vector2(vm_context, (*args.add(0)).payload as u32), unpack_camera(vm_context, (*args.add(1)).payload as u32));
+    let call_result = GetScreenToWorldRay(unpack_vector2(vm_context, (*args.add(0)).payload as u32), unpack_camera3d(vm_context, (*args.add(1)).payload as u32));
     SolixCValue::ref_val(pack_ray(vm_context, call_result))
 }
 
@@ -3402,7 +3657,7 @@ pub unsafe extern "C" fn Raylib_GetScreenToWorldRayEx(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GetScreenToWorldRayEx(unpack_vector2(vm_context, (*args.add(0)).payload as u32), unpack_camera(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int);
+    let call_result = GetScreenToWorldRayEx(unpack_vector2(vm_context, (*args.add(0)).payload as u32), unpack_camera3d(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int);
     SolixCValue::ref_val(pack_ray(vm_context, call_result))
 }
 
@@ -3413,7 +3668,7 @@ pub unsafe extern "C" fn Raylib_GetWorldToScreen(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GetWorldToScreen(unpack_vector3(vm_context, (*args.add(0)).payload as u32), unpack_camera(vm_context, (*args.add(1)).payload as u32));
+    let call_result = GetWorldToScreen(unpack_vector3(vm_context, (*args.add(0)).payload as u32), unpack_camera3d(vm_context, (*args.add(1)).payload as u32));
     SolixCValue::ref_val(pack_vector2(vm_context, call_result))
 }
 
@@ -3424,7 +3679,7 @@ pub unsafe extern "C" fn Raylib_GetWorldToScreenEx(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GetWorldToScreenEx(unpack_vector3(vm_context, (*args.add(0)).payload as u32), unpack_camera(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int);
+    let call_result = GetWorldToScreenEx(unpack_vector3(vm_context, (*args.add(0)).payload as u32), unpack_camera3d(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int);
     SolixCValue::ref_val(pack_vector2(vm_context, call_result))
 }
 
@@ -3457,7 +3712,7 @@ pub unsafe extern "C" fn Raylib_GetCameraMatrix(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GetCameraMatrix(unpack_camera(vm_context, (*args.add(0)).payload as u32));
+    let call_result = GetCameraMatrix(unpack_camera3d(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::ref_val(pack_matrix(vm_context, call_result))
 }
 
@@ -3589,7 +3844,26 @@ pub unsafe extern "C" fn Raylib_UnloadRandomSequence(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadRandomSequence((*args.add(0)).payload as *mut c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<c_int> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as c_int);
+        }
+    }
+    UnloadRandomSequence(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_0[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_0, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::null()
 }
 
@@ -3664,18 +3938,17 @@ pub unsafe extern "C" fn Raylib_TraceLog(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let log_level = (*args.add(0)).payload as c_int;
-    let str_addr = (*args.add(1)).payload as u32;
-    let mut str_buf = [0u8; 1024];
-    let str_ptr = if str_addr > 0 {
+    let str_addr_1 = (*args.add(1)).payload as u32;
+    let mut str_buf_1 = [0u8; 1024];
+    let str_ptr_1 = if str_addr_1 > 0 {
         let context_ptr = vm_context as *mut SolixVmContext;
-        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr, str_buf.as_mut_ptr(), 1023) as usize;
-        str_buf[read_len] = 0;
-        str_buf.as_ptr() as *const c_char
+        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr_1, str_buf_1.as_mut_ptr(), 1023) as usize;
+        str_buf_1[read_len] = 0;
+        str_buf_1.as_ptr() as *const c_char
     } else {
         c"".as_ptr()
     };
-    TraceLog(log_level, c"%s".as_ptr(), str_ptr);
+    TraceLog((*args.add(0)).payload as c_int, c"%s".as_ptr(), str_ptr_1);
     SolixCValue::null()
 }
 
@@ -3708,7 +3981,7 @@ pub unsafe extern "C" fn Raylib_MemRealloc(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = MemRealloc((*args.add(0)).payload as *mut c_void, (*args.add(1)).payload as c_uint);
+    let call_result = MemRealloc((*args.add(0)).payload as usize as *mut c_void, (*args.add(1)).payload as c_uint);
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -3719,7 +3992,7 @@ pub unsafe extern "C" fn Raylib_MemFree(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    MemFree((*args.add(0)).payload as *mut c_void);
+    MemFree((*args.add(0)).payload as usize as *mut c_void);
     SolixCValue::null()
 }
 
@@ -3740,7 +4013,26 @@ pub unsafe extern "C" fn Raylib_LoadFileData(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadFileData(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadFileData(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -3751,7 +4043,26 @@ pub unsafe extern "C" fn Raylib_UnloadFileData(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadFileData((*args.add(0)).payload as *mut u8);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    UnloadFileData(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_0[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_0, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::null()
 }
 
@@ -3772,7 +4083,7 @@ pub unsafe extern "C" fn Raylib_SaveFileData(
     } else {
         c"".as_ptr()
     };
-    let call_result = SaveFileData(str_ptr_0, (*args.add(1)).payload as *mut c_void, (*args.add(2)).payload as c_int);
+    let call_result = SaveFileData(str_ptr_0, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).payload as c_int);
     SolixCValue::bool_val(call_result)
 }
 
@@ -3783,6 +4094,17 @@ pub unsafe extern "C" fn Raylib_ExportDataAsCode(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
     let str_addr_2 = (*args.add(2)).payload as u32;
     let mut str_buf_2 = [0u8; 1024];
     let str_ptr_2 = if str_addr_2 > 0 {
@@ -3793,7 +4115,7 @@ pub unsafe extern "C" fn Raylib_ExportDataAsCode(
     } else {
         c"".as_ptr()
     };
-    let call_result = ExportDataAsCode((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int, str_ptr_2);
+    let call_result = ExportDataAsCode(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int, str_ptr_2);
     SolixCValue::bool_val(call_result)
 }
 
@@ -4684,7 +5006,37 @@ pub unsafe extern "C" fn Raylib_CompressData(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = CompressData((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = CompressData(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -4695,7 +5047,37 @@ pub unsafe extern "C" fn Raylib_DecompressData(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = DecompressData((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = DecompressData(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -4706,7 +5088,37 @@ pub unsafe extern "C" fn Raylib_EncodeDataBase64(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = EncodeDataBase64((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = EncodeDataBase64(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     if call_result.is_null() { return SolixCValue::null(); }
     let c_str = CStr::from_ptr(call_result);
     let bytes = c_str.to_bytes();
@@ -4732,7 +5144,26 @@ pub unsafe extern "C" fn Raylib_DecodeDataBase64(
     } else {
         c"".as_ptr()
     };
-    let call_result = DecodeDataBase64(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = DecodeDataBase64(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -4743,7 +5174,18 @@ pub unsafe extern "C" fn Raylib_ComputeCRC32(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = ComputeCRC32((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let call_result = ComputeCRC32(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int);
     SolixCValue::i32_val(call_result as i32)
 }
 
@@ -4754,7 +5196,18 @@ pub unsafe extern "C" fn Raylib_ComputeMD5(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = ComputeMD5((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let call_result = ComputeMD5(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int);
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -4765,7 +5218,18 @@ pub unsafe extern "C" fn Raylib_ComputeSHA1(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = ComputeSHA1((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let call_result = ComputeSHA1(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int);
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -4776,7 +5240,18 @@ pub unsafe extern "C" fn Raylib_ComputeSHA256(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = ComputeSHA256((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let call_result = ComputeSHA256(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int);
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -5435,7 +5910,10 @@ pub unsafe extern "C" fn Raylib_UpdateCamera(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateCamera((*args.add(0)).payload as *mut C_Camera, (*args.add(1)).payload as c_int);
+    let camera3d_addr_0 = (*args.add(0)).payload as u32;
+    let mut camera3d_mut_0 = unpack_camera3d(vm_context, camera3d_addr_0);
+    UpdateCamera(&mut camera3d_mut_0, (*args.add(1)).payload as c_int);
+    writeback_camera3d(vm_context, camera3d_addr_0, &camera3d_mut_0);
     SolixCValue::null()
 }
 
@@ -5446,7 +5924,10 @@ pub unsafe extern "C" fn Raylib_UpdateCameraPro(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateCameraPro((*args.add(0)).payload as *mut C_Camera, unpack_vector3(vm_context, (*args.add(1)).payload as u32), unpack_vector3(vm_context, (*args.add(2)).payload as u32), f64::from_bits((*args.add(3)).payload) as f32);
+    let camera3d_addr_0 = (*args.add(0)).payload as u32;
+    let mut camera3d_mut_0 = unpack_camera3d(vm_context, camera3d_addr_0);
+    UpdateCameraPro(&mut camera3d_mut_0, unpack_vector3(vm_context, (*args.add(1)).payload as u32), unpack_vector3(vm_context, (*args.add(2)).payload as u32), f64::from_bits((*args.add(3)).payload) as f32);
+    writeback_camera3d(vm_context, camera3d_addr_0, &camera3d_mut_0);
     SolixCValue::null()
 }
 
@@ -5457,7 +5938,7 @@ pub unsafe extern "C" fn Raylib_SetShapesTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetShapesTexture(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32));
+    SetShapesTexture(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32));
     SolixCValue::null()
 }
 
@@ -5469,7 +5950,7 @@ pub unsafe extern "C" fn Raylib_GetShapesTexture(
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
     let call_result = GetShapesTexture();
-    SolixCValue::ref_val(pack_texture2d(vm_context, call_result))
+    SolixCValue::ref_val(pack_texture(vm_context, call_result))
 }
 
 #[unsafe(no_mangle)]
@@ -5545,7 +6026,18 @@ pub unsafe extern "C" fn Raylib_DrawLineStrip(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawLineStrip((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawLineStrip(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
     SolixCValue::null()
 }
 
@@ -5622,7 +6114,18 @@ pub unsafe extern "C" fn Raylib_DrawTriangleFan(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTriangleFan((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawTriangleFan(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
     SolixCValue::null()
 }
 
@@ -5633,7 +6136,18 @@ pub unsafe extern "C" fn Raylib_DrawTriangleStrip(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTriangleStrip((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawTriangleStrip(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
     SolixCValue::null()
 }
 
@@ -5996,7 +6510,18 @@ pub unsafe extern "C" fn Raylib_DrawSplineLinear(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawSplineLinear((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawSplineLinear(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -6007,7 +6532,18 @@ pub unsafe extern "C" fn Raylib_DrawSplineBasis(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawSplineBasis((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawSplineBasis(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -6018,7 +6554,18 @@ pub unsafe extern "C" fn Raylib_DrawSplineCatmullRom(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawSplineCatmullRom((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawSplineCatmullRom(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -6029,7 +6576,18 @@ pub unsafe extern "C" fn Raylib_DrawSplineBezierQuadratic(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawSplineBezierQuadratic((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawSplineBezierQuadratic(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -6040,7 +6598,18 @@ pub unsafe extern "C" fn Raylib_DrawSplineBezierCubic(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawSplineBezierCubic((*args.add(0)).payload as *const C_Vector2, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector2> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    DrawSplineBezierCubic(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, f64::from_bits((*args.add(2)).payload) as f32, unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -6249,7 +6818,18 @@ pub unsafe extern "C" fn Raylib_CheckCollisionPointPoly(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = CheckCollisionPointPoly(unpack_vector2(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as *const C_Vector2, (*args.add(2)).payload as c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut struct_vec_1: Vec<C_Vector2> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        struct_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx) as u32;
+            struct_vec_1.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    let call_result = CheckCollisionPointPoly(unpack_vector2(vm_context, (*args.add(0)).payload as u32), if arr_addr_1 > 0 { struct_vec_1.as_ptr() } else { std::ptr::null() }, (*args.add(2)).payload as c_int);
     SolixCValue::bool_val(call_result)
 }
 
@@ -6337,7 +6917,26 @@ pub unsafe extern "C" fn Raylib_LoadImageAnim(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadImageAnim(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadImageAnim(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::ref_val(pack_image(vm_context, call_result))
 }
 
@@ -6358,7 +6957,37 @@ pub unsafe extern "C" fn Raylib_LoadImageAnimFromMemory(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadImageAnimFromMemory(str_ptr_0, (*args.add(1)).payload as *mut u8, (*args.add(2)).payload as c_int, (*args.add(3)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<u8> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as u8);
+        }
+    }
+    let arr_addr_3 = (*args.add(3)).payload as u32;
+    let mut prim_vec_3: Vec<c_int> = Vec::new();
+    if arr_addr_3 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_3);
+        prim_vec_3.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_3, elem_idx);
+            prim_vec_3.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadImageAnimFromMemory(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int, if arr_addr_3 > 0 { prim_vec_3.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_3 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_3);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_3[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_3, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::ref_val(pack_image(vm_context, call_result))
 }
 
@@ -6379,7 +7008,18 @@ pub unsafe extern "C" fn Raylib_LoadImageFromMemory(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadImageFromMemory(str_ptr_0, (*args.add(1)).payload as *mut u8, (*args.add(2)).payload as c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<u8> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as u8);
+        }
+    }
+    let call_result = LoadImageFromMemory(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int);
     SolixCValue::ref_val(pack_image(vm_context, call_result))
 }
 
@@ -6390,7 +7030,7 @@ pub unsafe extern "C" fn Raylib_LoadImageFromTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = LoadImageFromTexture(unpack_texture2d(vm_context, (*args.add(0)).payload as u32));
+    let call_result = LoadImageFromTexture(unpack_texture(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::ref_val(pack_image(vm_context, call_result))
 }
 
@@ -6465,7 +7105,26 @@ pub unsafe extern "C" fn Raylib_ExportImageToMemory(
     } else {
         c"".as_ptr()
     };
-    let call_result = ExportImageToMemory(unpack_image(vm_context, (*args.add(0)).payload as u32), str_ptr_1, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = ExportImageToMemory(unpack_image(vm_context, (*args.add(0)).payload as u32), str_ptr_1, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -6795,7 +7454,18 @@ pub unsafe extern "C" fn Raylib_ImageKernelConvolution(
 ) -> SolixCValue {
     let image_addr_0 = (*args.add(0)).payload as u32;
     let mut image_mut_0 = unpack_image(vm_context, image_addr_0);
-    ImageKernelConvolution(&mut image_mut_0, (*args.add(1)).payload as *mut f32, (*args.add(2)).payload as c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<f32> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(f32::from_bits(raw_val as u32));
+        }
+    }
+    ImageKernelConvolution(&mut image_mut_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int);
     writeback_image(vm_context, image_addr_0, &image_mut_0);
     SolixCValue::null()
 }
@@ -7042,7 +7712,26 @@ pub unsafe extern "C" fn Raylib_LoadImagePalette(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = LoadImagePalette(unpack_image(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadImagePalette(unpack_image(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -7189,7 +7878,18 @@ pub unsafe extern "C" fn Raylib_ImageDrawLineStrip(
 ) -> SolixCValue {
     let image_addr_0 = (*args.add(0)).payload as u32;
     let mut image_mut_0 = unpack_image(vm_context, image_addr_0);
-    ImageDrawLineStrip(&mut image_mut_0, (*args.add(1)).payload as *const C_Vector2, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut struct_vec_1: Vec<C_Vector2> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        struct_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx) as u32;
+            struct_vec_1.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    ImageDrawLineStrip(&mut image_mut_0, if arr_addr_1 > 0 { struct_vec_1.as_ptr() } else { std::ptr::null() }, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
     writeback_image(vm_context, image_addr_0, &image_mut_0);
     SolixCValue::null()
 }
@@ -7245,7 +7945,18 @@ pub unsafe extern "C" fn Raylib_ImageDrawTriangleFan(
 ) -> SolixCValue {
     let image_addr_0 = (*args.add(0)).payload as u32;
     let mut image_mut_0 = unpack_image(vm_context, image_addr_0);
-    ImageDrawTriangleFan(&mut image_mut_0, (*args.add(1)).payload as *const C_Vector2, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut struct_vec_1: Vec<C_Vector2> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        struct_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx) as u32;
+            struct_vec_1.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    ImageDrawTriangleFan(&mut image_mut_0, if arr_addr_1 > 0 { struct_vec_1.as_ptr() } else { std::ptr::null() }, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
     writeback_image(vm_context, image_addr_0, &image_mut_0);
     SolixCValue::null()
 }
@@ -7259,7 +7970,18 @@ pub unsafe extern "C" fn Raylib_ImageDrawTriangleStrip(
 ) -> SolixCValue {
     let image_addr_0 = (*args.add(0)).payload as u32;
     let mut image_mut_0 = unpack_image(vm_context, image_addr_0);
-    ImageDrawTriangleStrip(&mut image_mut_0, (*args.add(1)).payload as *const C_Vector2, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut struct_vec_1: Vec<C_Vector2> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        struct_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx) as u32;
+            struct_vec_1.push(unpack_vector2(vm_context, child_addr));
+        }
+    }
+    ImageDrawTriangleStrip(&mut image_mut_0, if arr_addr_1 > 0 { struct_vec_1.as_ptr() } else { std::ptr::null() }, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
     writeback_image(vm_context, image_addr_0, &image_mut_0);
     SolixCValue::null()
 }
@@ -7578,7 +8300,7 @@ pub unsafe extern "C" fn Raylib_LoadTexture(
         c"".as_ptr()
     };
     let call_result = LoadTexture(str_ptr_0);
-    SolixCValue::ref_val(pack_texture2d(vm_context, call_result))
+    SolixCValue::ref_val(pack_texture(vm_context, call_result))
 }
 
 #[unsafe(no_mangle)]
@@ -7589,7 +8311,7 @@ pub unsafe extern "C" fn Raylib_LoadTextureFromImage(
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
     let call_result = LoadTextureFromImage(unpack_image(vm_context, (*args.add(0)).payload as u32));
-    SolixCValue::ref_val(pack_texture2d(vm_context, call_result))
+    SolixCValue::ref_val(pack_texture(vm_context, call_result))
 }
 
 #[unsafe(no_mangle)]
@@ -7600,7 +8322,7 @@ pub unsafe extern "C" fn Raylib_LoadTextureCubemap(
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
     let call_result = LoadTextureCubemap(unpack_image(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int);
-    SolixCValue::ref_val(pack_texture_cubemap(vm_context, call_result))
+    SolixCValue::ref_val(pack_texture(vm_context, call_result))
 }
 
 #[unsafe(no_mangle)]
@@ -7611,7 +8333,7 @@ pub unsafe extern "C" fn Raylib_LoadRenderTexture(
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
     let call_result = LoadRenderTexture((*args.add(0)).payload as c_int, (*args.add(1)).payload as c_int);
-    SolixCValue::ref_val(pack_render_texture2d(vm_context, call_result))
+    SolixCValue::ref_val(pack_render_texture(vm_context, call_result))
 }
 
 #[unsafe(no_mangle)]
@@ -7622,7 +8344,7 @@ pub unsafe extern "C" fn Raylib_LoadRenderTextureEx(
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
     let call_result = LoadRenderTextureEx((*args.add(0)).payload as c_int, (*args.add(1)).payload as c_int, (*args.add(2)).payload as c_int);
-    SolixCValue::ref_val(pack_render_texture2d(vm_context, call_result))
+    SolixCValue::ref_val(pack_render_texture(vm_context, call_result))
 }
 
 #[unsafe(no_mangle)]
@@ -7632,7 +8354,7 @@ pub unsafe extern "C" fn Raylib_IsTextureValid(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = IsTextureValid(unpack_texture2d(vm_context, (*args.add(0)).payload as u32));
+    let call_result = IsTextureValid(unpack_texture(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::bool_val(call_result)
 }
 
@@ -7643,7 +8365,7 @@ pub unsafe extern "C" fn Raylib_UnloadTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadTexture(unpack_texture2d(vm_context, (*args.add(0)).payload as u32));
+    UnloadTexture(unpack_texture(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7654,7 +8376,7 @@ pub unsafe extern "C" fn Raylib_IsRenderTextureValid(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = IsRenderTextureValid(unpack_render_texture2d(vm_context, (*args.add(0)).payload as u32));
+    let call_result = IsRenderTextureValid(unpack_render_texture(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::bool_val(call_result)
 }
 
@@ -7665,7 +8387,7 @@ pub unsafe extern "C" fn Raylib_UnloadRenderTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadRenderTexture(unpack_render_texture2d(vm_context, (*args.add(0)).payload as u32));
+    UnloadRenderTexture(unpack_render_texture(vm_context, (*args.add(0)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7676,7 +8398,7 @@ pub unsafe extern "C" fn Raylib_UpdateTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateTexture(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as *mut c_void);
+    UpdateTexture(unpack_texture(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as usize as *mut c_void);
     SolixCValue::null()
 }
 
@@ -7687,7 +8409,7 @@ pub unsafe extern "C" fn Raylib_UpdateTextureRec(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateTextureRec(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as *mut c_void);
+    UpdateTextureRec(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as usize as *mut c_void);
     SolixCValue::null()
 }
 
@@ -7698,7 +8420,10 @@ pub unsafe extern "C" fn Raylib_GenTextureMipmaps(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    GenTextureMipmaps((*args.add(0)).payload as *mut C_Texture2D);
+    let texture_addr_0 = (*args.add(0)).payload as u32;
+    let mut texture_mut_0 = unpack_texture(vm_context, texture_addr_0);
+    GenTextureMipmaps(&mut texture_mut_0);
+    writeback_texture(vm_context, texture_addr_0, &texture_mut_0);
     SolixCValue::null()
 }
 
@@ -7709,7 +8434,7 @@ pub unsafe extern "C" fn Raylib_SetTextureFilter(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetTextureFilter(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int);
+    SetTextureFilter(unpack_texture(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -7720,7 +8445,7 @@ pub unsafe extern "C" fn Raylib_SetTextureWrap(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetTextureWrap(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int);
+    SetTextureWrap(unpack_texture(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -7731,7 +8456,7 @@ pub unsafe extern "C" fn Raylib_DrawTexture(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTexture(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
+    DrawTexture(unpack_texture(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as c_int, unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7742,7 +8467,7 @@ pub unsafe extern "C" fn Raylib_DrawTextureV(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTextureV(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_vector2(vm_context, (*args.add(1)).payload as u32), unpack_color(vm_context, (*args.add(2)).payload as u32));
+    DrawTextureV(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_vector2(vm_context, (*args.add(1)).payload as u32), unpack_color(vm_context, (*args.add(2)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7753,7 +8478,7 @@ pub unsafe extern "C" fn Raylib_DrawTextureEx(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTextureEx(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_vector2(vm_context, (*args.add(1)).payload as u32), f64::from_bits((*args.add(2)).payload) as f32, f64::from_bits((*args.add(3)).payload) as f32, unpack_color(vm_context, (*args.add(4)).payload as u32));
+    DrawTextureEx(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_vector2(vm_context, (*args.add(1)).payload as u32), f64::from_bits((*args.add(2)).payload) as f32, f64::from_bits((*args.add(3)).payload) as f32, unpack_color(vm_context, (*args.add(4)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7764,7 +8489,7 @@ pub unsafe extern "C" fn Raylib_DrawTextureRec(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTextureRec(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32), unpack_vector2(vm_context, (*args.add(2)).payload as u32), unpack_color(vm_context, (*args.add(3)).payload as u32));
+    DrawTextureRec(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32), unpack_vector2(vm_context, (*args.add(2)).payload as u32), unpack_color(vm_context, (*args.add(3)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7775,7 +8500,7 @@ pub unsafe extern "C" fn Raylib_DrawTexturePro(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTexturePro(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector2(vm_context, (*args.add(3)).payload as u32), f64::from_bits((*args.add(4)).payload) as f32, unpack_color(vm_context, (*args.add(5)).payload as u32));
+    DrawTexturePro(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_rectangle(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector2(vm_context, (*args.add(3)).payload as u32), f64::from_bits((*args.add(4)).payload) as f32, unpack_color(vm_context, (*args.add(5)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7786,7 +8511,7 @@ pub unsafe extern "C" fn Raylib_DrawTextureNPatch(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTextureNPatch(unpack_texture2d(vm_context, (*args.add(0)).payload as u32), unpack_n_patch_info(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector2(vm_context, (*args.add(3)).payload as u32), f64::from_bits((*args.add(4)).payload) as f32, unpack_color(vm_context, (*args.add(5)).payload as u32));
+    DrawTextureNPatch(unpack_texture(vm_context, (*args.add(0)).payload as u32), unpack_n_patch_info(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector2(vm_context, (*args.add(3)).payload as u32), f64::from_bits((*args.add(4)).payload) as f32, unpack_color(vm_context, (*args.add(5)).payload as u32));
     SolixCValue::null()
 }
 
@@ -7951,7 +8676,7 @@ pub unsafe extern "C" fn Raylib_GetPixelColor(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GetPixelColor((*args.add(0)).payload as *mut c_void, (*args.add(1)).payload as c_int);
+    let call_result = GetPixelColor((*args.add(0)).payload as usize as *mut c_void, (*args.add(1)).payload as c_int);
     SolixCValue::ref_val(pack_color(vm_context, call_result))
 }
 
@@ -7962,7 +8687,7 @@ pub unsafe extern "C" fn Raylib_SetPixelColor(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    SetPixelColor((*args.add(0)).payload as *mut c_void, unpack_color(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as c_int);
+    SetPixelColor((*args.add(0)).payload as usize as *mut c_void, unpack_color(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -8026,7 +8751,18 @@ pub unsafe extern "C" fn Raylib_LoadFontEx(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadFontEx(str_ptr_0, (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_int, (*args.add(3)).payload as c_int);
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadFontEx(str_ptr_0, (*args.add(1)).payload as c_int, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(3)).payload as c_int);
     SolixCValue::ref_val(pack_font(vm_context, call_result))
 }
 
@@ -8058,7 +8794,29 @@ pub unsafe extern "C" fn Raylib_LoadFontFromMemory(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadFontFromMemory(str_ptr_0, (*args.add(1)).payload as *mut u8, (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int, (*args.add(4)).payload as *mut c_int, (*args.add(5)).payload as c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<u8> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as u8);
+        }
+    }
+    let arr_addr_4 = (*args.add(4)).payload as u32;
+    let mut prim_vec_4: Vec<c_int> = Vec::new();
+    if arr_addr_4 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_4);
+        prim_vec_4.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_4, elem_idx);
+            prim_vec_4.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadFontFromMemory(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int, if arr_addr_4 > 0 { prim_vec_4.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(5)).payload as c_int);
     SolixCValue::ref_val(pack_font(vm_context, call_result))
 }
 
@@ -8080,7 +8838,48 @@ pub unsafe extern "C" fn Raylib_LoadFontData(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = LoadFontData((*args.add(0)).payload as *mut u8, (*args.add(1)).payload as c_int, (*args.add(2)).payload as c_int, (*args.add(3)).payload as *mut c_int, (*args.add(4)).payload as c_int, (*args.add(5)).payload as c_int, (*args.add(6)).payload as *mut c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<u8> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as u8);
+        }
+    }
+    let arr_addr_3 = (*args.add(3)).payload as u32;
+    let mut prim_vec_3: Vec<c_int> = Vec::new();
+    if arr_addr_3 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_3);
+        prim_vec_3.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_3, elem_idx);
+            prim_vec_3.push(raw_val as c_int);
+        }
+    }
+    let arr_addr_6 = (*args.add(6)).payload as u32;
+    let mut prim_vec_6: Vec<c_int> = Vec::new();
+    if arr_addr_6 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_6);
+        prim_vec_6.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_6, elem_idx);
+            prim_vec_6.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadFontData(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int, (*args.add(2)).payload as c_int, if arr_addr_3 > 0 { prim_vec_3.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(4)).payload as c_int, (*args.add(5)).payload as c_int, if arr_addr_6 > 0 { prim_vec_6.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_6 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_6);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_6[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_6, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -8091,7 +8890,18 @@ pub unsafe extern "C" fn Raylib_GenImageFontAtlas(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = GenImageFontAtlas((*args.add(0)).payload as *const C_GlyphInfo, (*args.add(1)).payload as *mut *mut C_Rectangle, (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int, (*args.add(4)).payload as c_int, (*args.add(5)).payload as c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_GlyphInfo> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_glyph_info(vm_context, child_addr));
+        }
+    }
+    let call_result = GenImageFontAtlas(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).payload as c_int, (*args.add(3)).payload as c_int, (*args.add(4)).payload as c_int, (*args.add(5)).payload as c_int);
     SolixCValue::ref_val(pack_image(vm_context, call_result))
 }
 
@@ -8233,7 +9043,18 @@ pub unsafe extern "C" fn Raylib_DrawTextCodepoints(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTextCodepoints(unpack_font(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as *mut c_int, (*args.add(2)).payload as c_int, unpack_vector2(vm_context, (*args.add(3)).payload as u32), f64::from_bits((*args.add(4)).payload) as f32, f64::from_bits((*args.add(5)).payload) as f32, unpack_color(vm_context, (*args.add(6)).payload as u32));
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    DrawTextCodepoints(unpack_font(vm_context, (*args.add(0)).payload as u32), if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int, unpack_vector2(vm_context, (*args.add(3)).payload as u32), f64::from_bits((*args.add(4)).payload) as f32, f64::from_bits((*args.add(5)).payload) as f32, unpack_color(vm_context, (*args.add(6)).payload as u32));
     SolixCValue::null()
 }
 
@@ -8297,7 +9118,18 @@ pub unsafe extern "C" fn Raylib_MeasureTextCodepoints(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = MeasureTextCodepoints(unpack_font(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as *mut c_int, (*args.add(2)).payload as c_int, f64::from_bits((*args.add(3)).payload) as f32, f64::from_bits((*args.add(4)).payload) as f32);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = MeasureTextCodepoints(unpack_font(vm_context, (*args.add(0)).payload as u32), if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int, f64::from_bits((*args.add(3)).payload) as f32, f64::from_bits((*args.add(4)).payload) as f32);
     SolixCValue::ref_val(pack_vector2(vm_context, call_result))
 }
 
@@ -8341,7 +9173,18 @@ pub unsafe extern "C" fn Raylib_LoadUTF8(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = LoadUTF8((*args.add(0)).payload as *mut c_int, (*args.add(1)).payload as c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<c_int> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadUTF8(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(1)).payload as c_int);
     if call_result.is_null() { return SolixCValue::null(); }
     let c_str = CStr::from_ptr(call_result);
     let bytes = c_str.to_bytes();
@@ -8388,7 +9231,26 @@ pub unsafe extern "C" fn Raylib_LoadCodepoints(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadCodepoints(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadCodepoints(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -8399,7 +9261,26 @@ pub unsafe extern "C" fn Raylib_UnloadCodepoints(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadCodepoints((*args.add(0)).payload as *mut c_int);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<c_int> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(raw_val as c_int);
+        }
+    }
+    UnloadCodepoints(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_0[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_0, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::null()
 }
 
@@ -8441,7 +9322,26 @@ pub unsafe extern "C" fn Raylib_GetCodepoint(
     } else {
         c"".as_ptr()
     };
-    let call_result = GetCodepoint(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = GetCodepoint(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i32_val(call_result as i32)
 }
 
@@ -8462,7 +9362,26 @@ pub unsafe extern "C" fn Raylib_GetCodepointNext(
     } else {
         c"".as_ptr()
     };
-    let call_result = GetCodepointNext(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = GetCodepointNext(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i32_val(call_result as i32)
 }
 
@@ -8483,7 +9402,26 @@ pub unsafe extern "C" fn Raylib_GetCodepointPrevious(
     } else {
         c"".as_ptr()
     };
-    let call_result = GetCodepointPrevious(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = GetCodepointPrevious(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i32_val(call_result as i32)
 }
 
@@ -8494,7 +9432,26 @@ pub unsafe extern "C" fn Raylib_CodepointToUTF8(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let call_result = CodepointToUTF8((*args.add(0)).payload as c_int, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = CodepointToUTF8((*args.add(0)).payload as c_int, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     if call_result.is_null() { return SolixCValue::null(); }
     let c_str = CStr::from_ptr(call_result);
     let bytes = c_str.to_bytes();
@@ -8520,7 +9477,26 @@ pub unsafe extern "C" fn Raylib_LoadTextLines(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadTextLines(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadTextLines(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -8531,7 +9507,7 @@ pub unsafe extern "C" fn Raylib_UnloadTextLines(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadTextLines((*args.add(0)).payload as *mut *mut c_char, (*args.add(1)).payload as c_int);
+    UnloadTextLines((*args.add(0)).payload as usize as *mut *mut c_char, (*args.add(1)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -8625,17 +9601,17 @@ pub unsafe extern "C" fn Raylib_TextFormat(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    let str_addr = (*args.add(0)).payload as u32;
-    let mut str_buf = [0u8; 1024];
-    let str_ptr = if str_addr > 0 {
+    let str_addr_0 = (*args.add(0)).payload as u32;
+    let mut str_buf_0 = [0u8; 1024];
+    let str_ptr_0 = if str_addr_0 > 0 {
         let context_ptr = vm_context as *mut SolixVmContext;
-        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr, str_buf.as_mut_ptr(), 1023) as usize;
-        str_buf[read_len] = 0;
-        str_buf.as_ptr() as *const c_char
+        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr_0, str_buf_0.as_mut_ptr(), 1023) as usize;
+        str_buf_0[read_len] = 0;
+        str_buf_0.as_ptr() as *const c_char
     } else {
         c"".as_ptr()
     };
-    let call_result = TextFormat(c"%s".as_ptr(), str_ptr);
+    let call_result = TextFormat(c"%s".as_ptr(), str_ptr_0);
     if call_result.is_null() { return SolixCValue::null(); }
     let c_str = CStr::from_ptr(call_result);
     let bytes = c_str.to_bytes();
@@ -9035,7 +10011,7 @@ pub unsafe extern "C" fn Raylib_TextJoin(
     } else {
         c"".as_ptr()
     };
-    let call_result = TextJoin((*args.add(0)).payload as *mut *mut c_char, (*args.add(1)).payload as c_int, str_ptr_2);
+    let call_result = TextJoin((*args.add(0)).payload as usize as *mut *mut c_char, (*args.add(1)).payload as c_int, str_ptr_2);
     if call_result.is_null() { return SolixCValue::null(); }
     let c_str = CStr::from_ptr(call_result);
     let bytes = c_str.to_bytes();
@@ -9061,7 +10037,26 @@ pub unsafe extern "C" fn Raylib_TextSplit(
     } else {
         c"".as_ptr()
     };
-    let call_result = TextSplit(str_ptr_0, (*args.add(1)).payload as c_char, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    let call_result = TextSplit(str_ptr_0, (*args.add(1)).payload as c_char, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -9092,7 +10087,26 @@ pub unsafe extern "C" fn Raylib_TextAppend(
     } else {
         c"".as_ptr()
     };
-    TextAppend(str_ptr_0, str_ptr_1, (*args.add(2)).payload as *mut c_int);
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut prim_vec_2: Vec<c_int> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        prim_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
+            prim_vec_2.push(raw_val as c_int);
+        }
+    }
+    TextAppend(str_ptr_0, str_ptr_1, if arr_addr_2 > 0 { prim_vec_2.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_2[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_2, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::null()
 }
 
@@ -9350,7 +10364,18 @@ pub unsafe extern "C" fn Raylib_DrawTriangleStrip3D(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawTriangleStrip3D((*args.add(0)).payload as *const C_Vector3, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut struct_vec_0: Vec<C_Vector3> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        struct_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx) as u32;
+            struct_vec_0.push(unpack_vector3(vm_context, child_addr));
+        }
+    }
+    DrawTriangleStrip3D(if arr_addr_0 > 0 { struct_vec_0.as_ptr() } else { std::ptr::null() }, (*args.add(1)).payload as c_int, unpack_color(vm_context, (*args.add(2)).payload as u32));
     SolixCValue::null()
 }
 
@@ -9657,7 +10682,7 @@ pub unsafe extern "C" fn Raylib_DrawBillboard(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawBillboard(unpack_camera(vm_context, (*args.add(0)).payload as u32), unpack_texture2d(vm_context, (*args.add(1)).payload as u32), unpack_vector3(vm_context, (*args.add(2)).payload as u32), f64::from_bits((*args.add(3)).payload) as f32, unpack_color(vm_context, (*args.add(4)).payload as u32));
+    DrawBillboard(unpack_camera3d(vm_context, (*args.add(0)).payload as u32), unpack_texture(vm_context, (*args.add(1)).payload as u32), unpack_vector3(vm_context, (*args.add(2)).payload as u32), f64::from_bits((*args.add(3)).payload) as f32, unpack_color(vm_context, (*args.add(4)).payload as u32));
     SolixCValue::null()
 }
 
@@ -9668,7 +10693,7 @@ pub unsafe extern "C" fn Raylib_DrawBillboardRec(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawBillboardRec(unpack_camera(vm_context, (*args.add(0)).payload as u32), unpack_texture2d(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector3(vm_context, (*args.add(3)).payload as u32), unpack_vector2(vm_context, (*args.add(4)).payload as u32), unpack_color(vm_context, (*args.add(5)).payload as u32));
+    DrawBillboardRec(unpack_camera3d(vm_context, (*args.add(0)).payload as u32), unpack_texture(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector3(vm_context, (*args.add(3)).payload as u32), unpack_vector2(vm_context, (*args.add(4)).payload as u32), unpack_color(vm_context, (*args.add(5)).payload as u32));
     SolixCValue::null()
 }
 
@@ -9679,7 +10704,7 @@ pub unsafe extern "C" fn Raylib_DrawBillboardPro(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawBillboardPro(unpack_camera(vm_context, (*args.add(0)).payload as u32), unpack_texture2d(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector3(vm_context, (*args.add(3)).payload as u32), unpack_vector3(vm_context, (*args.add(4)).payload as u32), unpack_vector2(vm_context, (*args.add(5)).payload as u32), unpack_vector2(vm_context, (*args.add(6)).payload as u32), f64::from_bits((*args.add(7)).payload) as f32, unpack_color(vm_context, (*args.add(8)).payload as u32));
+    DrawBillboardPro(unpack_camera3d(vm_context, (*args.add(0)).payload as u32), unpack_texture(vm_context, (*args.add(1)).payload as u32), unpack_rectangle(vm_context, (*args.add(2)).payload as u32), unpack_vector3(vm_context, (*args.add(3)).payload as u32), unpack_vector3(vm_context, (*args.add(4)).payload as u32), unpack_vector2(vm_context, (*args.add(5)).payload as u32), unpack_vector2(vm_context, (*args.add(6)).payload as u32), f64::from_bits((*args.add(7)).payload) as f32, unpack_color(vm_context, (*args.add(8)).payload as u32));
     SolixCValue::null()
 }
 
@@ -9704,7 +10729,7 @@ pub unsafe extern "C" fn Raylib_UpdateMeshBuffer(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateMeshBuffer(unpack_mesh(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as *mut c_void, (*args.add(3)).payload as c_int, (*args.add(4)).payload as c_int);
+    UpdateMeshBuffer(unpack_mesh(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as c_int, (*args.add(2)).payload as usize as *mut c_void, (*args.add(3)).payload as c_int, (*args.add(4)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -9737,7 +10762,18 @@ pub unsafe extern "C" fn Raylib_DrawMeshInstanced(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    DrawMeshInstanced(unpack_mesh(vm_context, (*args.add(0)).payload as u32), unpack_material(vm_context, (*args.add(1)).payload as u32), (*args.add(2)).payload as *const C_Matrix, (*args.add(3)).payload as c_int);
+    let arr_addr_2 = (*args.add(2)).payload as u32;
+    let mut struct_vec_2: Vec<C_Matrix> = Vec::new();
+    if arr_addr_2 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_2);
+        struct_vec_2.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx) as u32;
+            struct_vec_2.push(unpack_matrix(vm_context, child_addr));
+        }
+    }
+    DrawMeshInstanced(unpack_mesh(vm_context, (*args.add(0)).payload as u32), unpack_material(vm_context, (*args.add(1)).payload as u32), if arr_addr_2 > 0 { struct_vec_2.as_ptr() } else { std::ptr::null() }, (*args.add(3)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -9946,7 +10982,26 @@ pub unsafe extern "C" fn Raylib_LoadMaterials(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadMaterials(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadMaterials(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -9992,7 +11047,7 @@ pub unsafe extern "C" fn Raylib_SetMaterialTexture(
 ) -> SolixCValue {
     let material_addr_0 = (*args.add(0)).payload as u32;
     let mut material_mut_0 = unpack_material(vm_context, material_addr_0);
-    SetMaterialTexture(&mut material_mut_0, (*args.add(1)).payload as c_int, unpack_texture2d(vm_context, (*args.add(2)).payload as u32));
+    SetMaterialTexture(&mut material_mut_0, (*args.add(1)).payload as c_int, unpack_texture(vm_context, (*args.add(2)).payload as u32));
     writeback_material(vm_context, material_addr_0, &material_mut_0);
     SolixCValue::null()
 }
@@ -10028,7 +11083,26 @@ pub unsafe extern "C" fn Raylib_LoadModelAnimations(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadModelAnimations(str_ptr_0, (*args.add(1)).payload as *mut c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<c_int> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as c_int);
+        }
+    }
+    let call_result = LoadModelAnimations(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_1[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_1, elem_idx, updated_elem as u64);
+        }
+    }
     SolixCValue::i64_val(call_result as usize as i64)
 }
 
@@ -10260,7 +11334,18 @@ pub unsafe extern "C" fn Raylib_LoadWaveFromMemory(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadWaveFromMemory(str_ptr_0, (*args.add(1)).payload as *mut u8, (*args.add(2)).payload as c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<u8> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as u8);
+        }
+    }
+    let call_result = LoadWaveFromMemory(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int);
     SolixCValue::ref_val(pack_wave(vm_context, call_result))
 }
 
@@ -10336,7 +11421,7 @@ pub unsafe extern "C" fn Raylib_UpdateSound(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateSound(unpack_sound(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as *mut c_void, (*args.add(2)).payload as c_int);
+    UpdateSound(unpack_sound(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).payload as c_int);
     SolixCValue::null()
 }
 
@@ -10560,7 +11645,26 @@ pub unsafe extern "C" fn Raylib_UnloadWaveSamples(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UnloadWaveSamples((*args.add(0)).payload as *mut f32);
+    let arr_addr_0 = (*args.add(0)).payload as u32;
+    let mut prim_vec_0: Vec<f32> = Vec::new();
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        prim_vec_0.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_0, elem_idx);
+            prim_vec_0.push(f32::from_bits(raw_val as u32));
+        }
+    }
+    UnloadWaveSamples(if arr_addr_0 > 0 { prim_vec_0.as_mut_ptr() } else { std::ptr::null_mut() });
+    if arr_addr_0 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_0);
+        for elem_idx in 0..total_count {
+            let updated_elem = prim_vec_0[elem_idx as usize];
+            ((*context_ptr).array_set_u64)(vm_context, arr_addr_0, elem_idx, updated_elem.to_bits() as u64);
+        }
+    }
     SolixCValue::null()
 }
 
@@ -10602,7 +11706,18 @@ pub unsafe extern "C" fn Raylib_LoadMusicStreamFromMemory(
     } else {
         c"".as_ptr()
     };
-    let call_result = LoadMusicStreamFromMemory(str_ptr_0, (*args.add(1)).payload as *mut u8, (*args.add(2)).payload as c_int);
+    let arr_addr_1 = (*args.add(1)).payload as u32;
+    let mut prim_vec_1: Vec<u8> = Vec::new();
+    if arr_addr_1 > 0 {
+        let context_ptr = vm_context as *mut SolixVmContext;
+        let total_count = ((*context_ptr).array_len)(vm_context, arr_addr_1);
+        prim_vec_1.reserve_exact(total_count as usize);
+        for elem_idx in 0..total_count {
+            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
+            prim_vec_1.push(raw_val as u8);
+        }
+    }
+    let call_result = LoadMusicStreamFromMemory(str_ptr_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int);
     SolixCValue::ref_val(pack_music(vm_context, call_result))
 }
 
@@ -10800,7 +11915,7 @@ pub unsafe extern "C" fn Raylib_UpdateAudioStream(
     arg_count: u32,
     out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    UpdateAudioStream(unpack_audio_stream(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as *mut c_void, (*args.add(2)).payload as c_int);
+    UpdateAudioStream(unpack_audio_stream(vm_context, (*args.add(0)).payload as u32), (*args.add(1)).payload as usize as *mut c_void, (*args.add(2)).payload as c_int);
     SolixCValue::null()
 }
 

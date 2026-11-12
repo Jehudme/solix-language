@@ -2,14 +2,17 @@
 """
 generate_rust_bridge.py
 
-Generates 1-to-1 Rust FFI companion bridge (`natives/raylib/src/lib.rs`) from Raylib API JSON (`raylib_api.json`).
+Generates 1-to-1 Rust FFI companion bridge (`natives/<module>/src/lib.rs`) from rlparser C API JSON.
+100% generic: zero hardcoded struct, function, or callback names.
 Follows Solix language conventions and GL-0011 (no single-letter variables).
 """
 
+from __future__ import annotations
+
+import argparse
 import json
 import os
 import sys
-import argparse
 from pathlib import Path
 
 RUST_KEYWORDS = {
@@ -18,28 +21,69 @@ RUST_KEYWORDS = {
     "pub", "use", "where", "mod", "as", "struct", "enum", "trait", "impl"
 }
 
+
 def escape_rust_ident(ident_name: str) -> str:
     """Escapes Rust keywords using raw identifier syntax r#name."""
     if ident_name in RUST_KEYWORDS:
         return f"r#{ident_name}"
     return ident_name
 
+
 def to_snake_case(pascal_str: str) -> str:
     """Converts a PascalCase string to snake_case."""
     snake_chars = []
-    length = len(pascal_str)
-    for index, char in enumerate(pascal_str):
-        if char.isupper():
-            if index > 0 and (pascal_str[index - 1].islower() or (index + 1 < length and pascal_str[index + 1].islower())):
-                snake_chars.append('_')
-            snake_chars.append(char.lower())
+    str_len = len(pascal_str)
+    for index, char_elem in enumerate(pascal_str):
+        if char_elem.isupper():
+            if index > 0 and (
+                pascal_str[index - 1].islower()
+                or (index + 1 < str_len and pascal_str[index + 1].islower())
+            ):
+                snake_chars.append("_")
+            snake_chars.append(char_elem.lower())
         else:
-            snake_chars.append(char)
+            snake_chars.append(char_elem)
     return "".join(snake_chars)
 
-def map_c_type_to_rust(c_type_str: str) -> str:
-    """Maps a C type string from raylib_api.json to a Rust FFI type."""
-    normalized = c_type_str.strip()
+
+def resolve_alias_target(type_str: str, alias_map: dict[str, str]) -> str:
+    """Recursively resolves an alias to its concrete target type."""
+    visited_aliases = set()
+    current_target = type_str.strip()
+    while current_target in alias_map and current_target not in visited_aliases:
+        visited_aliases.add(current_target)
+        current_target = alias_map[current_target].strip()
+    return current_target
+
+
+def decompose_c_type(raw_type_str: str) -> tuple[str, bool, int]:
+    """Decomposes a C type into (base_type_name, is_const, pointer_depth)."""
+    cleaned = raw_type_str.strip()
+    is_const = False
+    if cleaned.startswith("const "):
+        is_const = True
+        cleaned = cleaned[6:].strip()
+    elif " const" in cleaned:
+        is_const = True
+        cleaned = cleaned.replace(" const", "").strip()
+
+    pointer_depth = 0
+    while cleaned.endswith("*"):
+        pointer_depth += 1
+        cleaned = cleaned[:-1].strip()
+
+    return cleaned, is_const, pointer_depth
+
+
+def map_c_type_to_rust(
+    raw_type_str: str,
+    struct_map: dict[str, dict],
+    alias_map: dict[str, str],
+    callback_map: dict[str, dict],
+) -> str:
+    """Maps a C type string from the schema to its Rust FFI counterpart."""
+    normalized = raw_type_str.strip()
+
     if normalized == "void":
         return "()"
     if normalized in ("bool", "_Bool"):
@@ -64,67 +108,70 @@ def map_c_type_to_rust(c_type_str: str) -> str:
         return "c_longlong"
     if normalized in ("unsigned long", "unsigned long long", "uint64"):
         return "c_ulonglong"
+
     if normalized in ("const char *", "char *"):
         return "*const c_char"
     if normalized in ("const char **", "char **"):
         return "*mut *mut c_char"
-    if normalized in ("void *", "const void *", "void**", "void **"):
+    if normalized in ("void *", "const void *", "void**", "void **", "va_list"):
         return "*mut c_void"
-    if normalized in ("const int *", "int *"):
-        return "*mut c_int"
-    if normalized in ("const unsigned int *", "unsigned int *"):
-        return "*mut c_uint"
-    if normalized in ("const float *", "float *"):
-        return "*mut f32"
-    if normalized in ("const unsigned char *", "unsigned char *"):
-        return "*mut u8"
-    if normalized in ("const unsigned short *", "unsigned short *"):
-        return "*mut c_ushort"
-    if normalized in ("Rectangle **",):
-        return "*mut *mut C_Rectangle"
-    if normalized in ("rAudioBuffer *", "rAudioProcessor *"):
-        return "*mut c_void"
-    if normalized in ("TraceLogCallback", "LoadFileDataCallback", "SaveFileDataCallback", "LoadFileTextCallback", "SaveFileTextCallback", "AudioCallback"):
-        return normalized
-    if normalized == "ModelAnimPose":
-        return "*mut C_Transform"
-    if normalized == "ModelAnimPose *":
-        return "*mut *mut C_Transform"
-    if normalized == "...":
-        return "..."
-    
-    # Known struct pointers
-    if normalized.endswith(" *"):
-        base_struct = normalized[:-2].strip()
-        is_const = False
-        if base_struct.startswith("const "):
-            base_struct = base_struct[6:].strip()
-            is_const = True
-        mut_or_const = "*const" if is_const else "*mut"
-        return f"{mut_or_const} C_{base_struct}"
-    
-    # Value structs
-    return f"C_{normalized}"
 
-def generate_header() -> list:
-    """Generates the preamble, type definitions, callbacks, and SolixVmContext layout for the Rust bridge."""
+    base_name, is_const, pointer_depth = decompose_c_type(normalized)
+    resolved_base = resolve_alias_target(base_name, alias_map)
+
+    # Callbacks
+    if base_name in callback_map:
+        return base_name
+    if resolved_base in callback_map:
+        return resolved_base
+
+    # Struct types
+    target_struct = None
+    if base_name in struct_map:
+        target_struct = base_name
+    elif resolved_base in struct_map:
+        target_struct = resolved_base
+
+    if target_struct is not None:
+        if pointer_depth == 0:
+            return f"C_{target_struct}"
+        if pointer_depth == 1:
+            mut_or_const = "*const" if is_const else "*mut"
+            return f"{mut_or_const} C_{target_struct}"
+        return "*mut c_void"
+
+    # Primitive pointers
+    primitive_rust = {
+        "int": "c_int", "i32": "c_int",
+        "unsigned int": "c_uint", "uint": "c_uint", "u32": "c_uint",
+        "float": "f32", "f32": "f32",
+        "double": "f64", "f64": "f64",
+        "char": "c_char", "int8": "c_char",
+        "unsigned char": "u8", "uint8": "u8", "uchar": "u8",
+        "short": "c_short", "int16": "c_short",
+        "unsigned short": "c_ushort", "uint16": "c_ushort", "ushort": "c_ushort",
+        "long": "c_longlong", "long long": "c_longlong", "int64": "c_longlong",
+        "unsigned long": "c_ulonglong", "unsigned long long": "c_ulonglong", "uint64": "c_ulonglong",
+    }
+    if pointer_depth == 1 and base_name in primitive_rust:
+        mut_or_const = "*const" if is_const else "*mut"
+        return f"{mut_or_const} {primitive_rust[base_name]}"
+
+    if pointer_depth > 0:
+        return "*mut c_void"
+
+    return f"C_{base_name}"
+
+
+def generate_header() -> list[str]:
+    """Generates the preamble, SolixCValue, and SolixVmContext layout for the Rust bridge."""
     return [
-        "//! Auto-generated 1-to-1 Rust native bridge extension for Solix Raylib bindings.",
-        "//! Generated from official raylib_api.json specification.",
+        "//! Auto-generated 1-to-1 Rust native bridge extension for Solix C-API bindings.",
+        "//! Schema-driven codegen: zero hardcoded engine types.",
         "",
         "#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals, unused_variables, dead_code, unused_imports, unused_mut, clippy::all)]",
         "",
         "use std::ffi::{c_char, c_int, c_longlong, c_short, c_uint, c_ulonglong, c_ushort, c_void, CStr};",
-        "",
-        "// ===========================================================================",
-        "// Upstream Raylib Callback Function Signatures",
-        "// ===========================================================================",
-        "pub type TraceLogCallback = Option<unsafe extern \"C\" fn(log_level: c_int, text: *const c_char, args: *mut c_void)>;",
-        "pub type LoadFileDataCallback = Option<unsafe extern \"C\" fn(file_name: *const c_char, data_size: *mut c_int) -> *mut u8>;",
-        "pub type SaveFileDataCallback = Option<unsafe extern \"C\" fn(file_name: *const c_char, data: *const c_void, data_size: c_int) -> bool>;",
-        "pub type LoadFileTextCallback = Option<unsafe extern \"C\" fn(file_name: *const c_char) -> *mut c_char>;",
-        "pub type SaveFileTextCallback = Option<unsafe extern \"C\" fn(file_name: *const c_char, text: *const c_char) -> bool>;",
-        "pub type AudioCallback = Option<unsafe extern \"C\" fn(buffer_data: *mut c_void, frames: c_uint)>;",
         "",
         "/// Stable C-ABI tagged value passed across native shared library boundaries.",
         "#[repr(C)]",
@@ -162,7 +209,7 @@ def generate_header() -> list:
         "    }",
         "}",
         "",
-        "/// Context structure passed to native C callbacks providing safe field and heap accessor function pointers.",
+        "/// Context structure passed to native callbacks providing safe field and heap accessor function pointers.",
         "#[repr(C)]",
         "pub struct SolixVmContext {",
         "    pub magic: u64,",
@@ -180,6 +227,7 @@ def generate_header() -> list:
         "    pub alloc_object: unsafe extern \"C\" fn(vm_ptr: *mut c_void, class_vtable_id: u32, field_count: u32) -> u32,",
         "    pub read_field_u64: unsafe extern \"C\" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32) -> u64,",
         "    pub write_field_u64: unsafe extern \"C\" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),",
+        "    pub get_class_vtable_id: unsafe extern \"C\" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,",
         "}",
         "",
         "pub type NativeCFunctionPtr = unsafe extern \"C\" fn(",
@@ -197,116 +245,201 @@ def generate_header() -> list:
         "",
     ]
 
-def generate_c_structs(structs_list: list) -> list:
-    """Generates #[repr(C)] struct definitions matching Raylib C structs."""
+
+def generate_callbacks(
+    callbacks_list: list[dict],
+    struct_map: dict[str, dict],
+    alias_map: dict[str, str],
+    callback_map: dict[str, dict],
+) -> list[str]:
+    """Generates dynamic type aliases for upstream callbacks."""
     lines = [
         "// ===========================================================================",
-        "// Raylib C ABI Struct Definitions",
+        "// Upstream Callback Function Signatures",
         "// ===========================================================================",
     ]
-    
-    # Custom type aliases
-    lines.append("pub type C_Texture2D = C_Texture;")
-    lines.append("pub type C_TextureCubemap = C_Texture;")
-    lines.append("pub type C_RenderTexture2D = C_RenderTexture;")
-    lines.append("pub type C_Camera = C_Camera3D;")
-    lines.append("pub type C_Quaternion = C_Vector4;")
-    lines.append("pub type C_ModelAnimPose = *mut C_Transform;")
+    for callback_item in callbacks_list:
+        callback_name = callback_item.get("name", "")
+        raw_return_type = callback_item.get("returnType", "void")
+        rust_return = map_c_type_to_rust(
+            raw_return_type, struct_map, alias_map, callback_map
+        )
+
+        param_declarations = []
+        for param in callback_item.get("params", []):
+            param_identifier = escape_rust_ident(to_snake_case(param.get("name", "arg")))
+            raw_param_type = param.get("type", "void")
+            rust_param_type = map_c_type_to_rust(
+                raw_param_type, struct_map, alias_map, callback_map
+            )
+            param_declarations.append(f"{param_identifier}: {rust_param_type}")
+
+        ret_suffix = "" if rust_return == "()" else f" -> {rust_return}"
+        lines.append(
+            f"pub type {callback_name} = Option<unsafe extern \"C\" fn({', '.join(param_declarations)}){ret_suffix}>;"
+        )
+
     lines.append("")
-    
+    return lines
+
+
+def generate_c_structs(
+    structs_list: list[dict],
+    aliases_list: list[dict],
+    struct_map: dict[str, dict],
+    alias_map: dict[str, str],
+    callback_map: dict[str, dict],
+) -> list[str]:
+    """Generates #[repr(C)] struct definitions and type aliases."""
+    lines = [
+        "// ===========================================================================",
+        "// C ABI Struct Definitions & Aliases",
+        "// ===========================================================================",
+    ]
+
+    # Type aliases
+    for alias_item in aliases_list:
+        alias_name = alias_item.get("name", "")
+        raw_target = alias_item.get("type", "")
+        resolved_target = resolve_alias_target(raw_target, alias_map)
+
+        if "*" in resolved_target:
+            base_ptr, _, ptr_depth = decompose_c_type(resolved_target)
+            if base_ptr in struct_map:
+                mut_stars = "*mut " * ptr_depth
+                lines.append(f"pub type C_{alias_name} = {mut_stars}C_{base_ptr};")
+            else:
+                lines.append(f"pub type C_{alias_name} = *mut c_void;")
+        elif resolved_target in struct_map:
+            lines.append(f"pub type C_{alias_name} = C_{resolved_target};")
+        else:
+            lines.append(f"pub type C_{alias_name} = *mut c_void;")
+
+    lines.append("")
+
     for struct_item in structs_list:
-        struct_name = struct_item["name"]
+        struct_name = struct_item.get("name", "")
         lines.append("#[repr(C)]")
         lines.append("#[derive(Clone, Copy)]")
         lines.append(f"pub struct C_{struct_name} {{")
-        
-        for field in struct_item.get("fields", []):
-            field_name = escape_rust_ident(field["name"])
-            raw_field_type = field["type"].strip()
-            
+
+        for field_item in struct_item.get("fields", []):
+            field_name = escape_rust_ident(field_item.get("name", ""))
+            raw_field_type = field_item.get("type", "").strip()
+
             if "[" in raw_field_type:
                 base_type_str = raw_field_type.split("[")[0].strip()
                 size_str = raw_field_type.split("[")[1].split("]")[0].strip()
-                rust_base = map_c_type_to_rust(base_type_str)
+                rust_base = map_c_type_to_rust(
+                    base_type_str, struct_map, alias_map, callback_map
+                )
                 lines.append(f"    pub {field_name}: [{rust_base}; {size_str}],")
             else:
-                rust_type = map_c_type_to_rust(raw_field_type)
+                rust_type = map_c_type_to_rust(
+                    raw_field_type, struct_map, alias_map, callback_map
+                )
                 lines.append(f"    pub {field_name}: {rust_type},")
+
         lines.append("}")
         lines.append("")
-        
-        # Default implementation for structs
+
         lines.append(f"impl Default for C_{struct_name} {{")
         lines.append("    fn default() -> Self {")
-        lines.append(f"        unsafe {{ std::mem::zeroed() }}")
+        lines.append("        unsafe { std::mem::zeroed() }")
         lines.append("    }")
         lines.append("}")
         lines.append("")
-        
+
     return lines
 
-def generate_struct_marshal_helpers(structs_list: list) -> list:
-    """Generates unpack, pack, and writeback helpers dynamically for all Raylib structs."""
+
+def generate_struct_marshal_helpers(
+    structs_list: list[dict],
+    aliases_list: list[dict],
+    struct_map: dict[str, dict],
+    alias_map: dict[str, str],
+    callback_map: dict[str, dict],
+) -> list[str]:
+    """Generates unpack, pack, and writeback helpers for all structs and aliases."""
     lines = [
         "// ===========================================================================",
-        "// Dynamic Struct Unpack, Pack & Writeback Helpers",
+        "// Struct Unpack, Pack & Writeback Helpers",
         "// ===========================================================================",
         "",
     ]
 
-    struct_names = set(item["name"] for item in structs_list)
-
     for struct_item in structs_list:
-        struct_name = struct_item["name"]
+        struct_name = struct_item.get("name", "")
         snake_name = to_snake_case(struct_name)
         fields = struct_item.get("fields", [])
         field_count = len(fields)
 
-        # 1. Generate writeback function
+        # 1. Writeback function
         lines.append(f"unsafe fn writeback_{snake_name}(vm_context: *mut c_void, addr: u32, val: &C_{struct_name}) {{")
         lines.append("    if addr == 0 { return; }")
         lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
 
-        for index, field in enumerate(fields):
-            field_ident = escape_rust_ident(field["name"])
-            raw_type = field["type"].strip()
+        for field_index, field in enumerate(fields):
+            field_ident = escape_rust_ident(field.get("name", ""))
+            raw_type = field.get("type", "").strip()
 
             if raw_type in ("bool", "_Bool"):
-                lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {index}, if val.{field_ident} {{ 1 }} else {{ 0 }});")
+                lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {field_index}, if val.{field_ident} {{ 1 }} else {{ 0 }});")
             elif raw_type in ("unsigned char", "uint8", "uchar", "char", "int8", "short", "int16", "unsigned short", "uint16", "ushort", "int", "i32", "unsigned int", "uint", "u32"):
-                lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {index}, val.{field_ident} as i32);")
+                lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {field_index}, val.{field_ident} as i32);")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {index}, val.{field_ident}.to_bits() as u64);")
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, val.{field_ident}.to_bits() as u64);")
             elif raw_type in ("double", "f64"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {index}, val.{field_ident}.to_bits());")
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, val.{field_ident}.to_bits());")
             elif raw_type in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {index}, val.{field_ident} as u64);")
-            elif raw_type.endswith("*") or raw_type.startswith("void"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {index}, val.{field_ident} as usize as u64);")
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, val.{field_ident} as u64);")
             elif "[" in raw_type:
-                # Fixed array field: arrays are managed separately
-                continue
-            elif raw_type in struct_names:
-                nested_snake = to_snake_case(raw_type)
-                lines.append(f"    let child_{index} = pack_{nested_snake}(vm_context, val.{field_ident});")
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {index}, child_{index} as u64);")
-            elif raw_type in ("Quaternion", "Texture2D", "TextureCubemap", "RenderTexture2D", "Camera"):
-                alias_target = (
-                    "vector4" if raw_type == "Quaternion"
-                    else ("texture" if raw_type in ("Texture2D", "TextureCubemap")
-                    else ("render_texture" if raw_type == "RenderTexture2D"
-                    else "camera3d"))
-                )
-                lines.append(f"    let child_{index} = pack_{alias_target}(vm_context, val.{field_ident});")
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {index}, child_{index} as u64);")
+                base_elem = raw_type.split("[")[0].strip()
+                size_str = raw_type.split("[")[1].split("]")[0].strip()
+                if base_elem in ("char", "const char"):
+                    lines.append(f"    let mut str_len_{field_index} = 0usize;")
+                    lines.append(f"    while str_len_{field_index} < {size_str} && val.{field_ident}[str_len_{field_index}] != 0 {{")
+                    lines.append(f"        str_len_{field_index} += 1;")
+                    lines.append("    }")
+                    lines.append(f"    let str_addr_{field_index} = ((*context_ptr).alloc_string)(vm_context, val.{field_ident}.as_ptr() as *const u8, str_len_{field_index} as u32);")
+                    lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, str_addr_{field_index} as u64);")
+                elif base_elem in struct_map or resolve_alias_target(base_elem, alias_map) in struct_map:
+                    resolved_struct = base_elem if base_elem in struct_map else resolve_alias_target(base_elem, alias_map)
+                    nested_snake = to_snake_case(resolved_struct)
+                    lines.append(f"    let arr_addr_{field_index} = ((*context_ptr).alloc_array)(vm_context, {size_str}, 0);")
+                    lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
+                    lines.append(f"        let child_addr = pack_{nested_snake}(vm_context, val.{field_ident}[elem_idx as usize]);")
+                    lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_index}, elem_idx, child_addr as u64);")
+                    lines.append("    }")
+                    lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, arr_addr_{field_index} as u64);")
+                else:
+                    lines.append(f"    let arr_addr_{field_index} = ((*context_ptr).alloc_array)(vm_context, {size_str}, 0);")
+                    lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
+                    if base_elem in ("float", "f32"):
+                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_index}, elem_idx, val.{field_ident}[elem_idx as usize].to_bits() as u64);")
+                    elif base_elem in ("double", "f64"):
+                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_index}, elem_idx, val.{field_ident}[elem_idx as usize].to_bits());")
+                    else:
+                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_index}, elem_idx, val.{field_ident}[elem_idx as usize] as u64);")
+                    lines.append("    }")
+                    lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, arr_addr_{field_index} as u64);")
+            elif raw_type in struct_map or resolve_alias_target(raw_type, alias_map) in struct_map:
+                resolved_struct = raw_type if raw_type in struct_map else resolve_alias_target(raw_type, alias_map)
+                nested_snake = to_snake_case(resolved_struct)
+                lines.append(f"    let child_{field_index} = pack_{nested_snake}(vm_context, val.{field_ident});")
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, child_{field_index} as u64);")
+            elif raw_type.endswith("*") or raw_type.startswith("void") or "*" in resolve_alias_target(raw_type, alias_map):
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_index}, val.{field_ident} as usize as u64);")
 
         lines.append("}")
         lines.append("")
 
-        # 2. Generate pack function (allocates and calls writeback)
+        # 2. Pack function (allocates object and calls writeback)
         lines.append(f"unsafe fn pack_{snake_name}(vm_context: *mut c_void, val: C_{struct_name}) -> u32 {{")
         lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
-        lines.append(f"    let addr = ((*context_ptr).alloc_object)(vm_context, 0, {field_count});")
+        lines.append(f'    let class_name_str = c"{struct_name}";')
+        lines.append("    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());")
+        lines.append(f"    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, {field_count});")
         lines.append("    if addr > 0 {")
         lines.append(f"        writeback_{snake_name}(vm_context, addr, &val);")
         lines.append("    }")
@@ -314,128 +447,165 @@ def generate_struct_marshal_helpers(structs_list: list) -> list:
         lines.append("}")
         lines.append("")
 
-        # 3. Generate unpack function
+        # 3. Unpack function
         lines.append(f"unsafe fn unpack_{snake_name}(vm_context: *mut c_void, addr: u32) -> C_{struct_name} {{")
         lines.append(f"    if addr == 0 {{ return C_{struct_name}::default(); }}")
         lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
         lines.append(f"    let mut result = C_{struct_name}::default();")
 
-        for index, field in enumerate(fields):
-            field_ident = escape_rust_ident(field["name"])
-            raw_type = field["type"].strip()
+        for field_index, field in enumerate(fields):
+            field_ident = escape_rust_ident(field.get("name", ""))
+            raw_type = field.get("type", "").strip()
 
             if raw_type in ("bool", "_Bool"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) != 0;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) != 0;")
             elif raw_type in ("unsigned char", "uint8", "uchar"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) as u8;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) as u8;")
             elif raw_type in ("char", "int8"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) as c_char;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) as c_char;")
             elif raw_type in ("short", "int16"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) as c_short;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) as c_short;")
             elif raw_type in ("unsigned short", "uint16", "ushort"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) as c_ushort;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) as c_ushort;")
             elif raw_type in ("int", "i32"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) as c_int;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) as c_int;")
             elif raw_type in ("unsigned int", "uint", "u32"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {index}) as c_uint;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_index}) as c_uint;")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    result.{field_ident} = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {index}) as u32);")
+                lines.append(f"    result.{field_ident} = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as u32);")
             elif raw_type in ("double", "f64"):
-                lines.append(f"    result.{field_ident} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {index}));")
+                lines.append(f"    result.{field_ident} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_index}));")
             elif raw_type in ("long", "long long", "int64"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).read_field_u64)(vm_context, addr, {index}) as c_longlong;")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as c_longlong;")
             elif raw_type in ("unsigned long", "unsigned long long", "uint64"):
-                lines.append(f"    result.{field_ident} = ((*context_ptr).read_field_u64)(vm_context, addr, {index}) as c_ulonglong;")
-            elif raw_type.endswith("*") or raw_type.startswith("void"):
-                rust_cast = map_c_type_to_rust(raw_type)
-                lines.append(f"    result.{field_ident} = ((*context_ptr).read_field_u64)(vm_context, addr, {index}) as {rust_cast};")
+                lines.append(f"    result.{field_ident} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as c_ulonglong;")
             elif "[" in raw_type:
-                # Array field: keep zeroed default
-                pass
-            elif raw_type in struct_names:
-                nested_snake = to_snake_case(raw_type)
-                lines.append(f"    result.{field_ident} = unpack_{nested_snake}(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, {index}) as u32);")
-            elif raw_type in ("Quaternion", "Texture2D", "TextureCubemap", "RenderTexture2D", "Camera"):
-                alias_target = (
-                    "vector4" if raw_type == "Quaternion"
-                    else ("texture" if raw_type in ("Texture2D", "TextureCubemap")
-                    else ("render_texture" if raw_type == "RenderTexture2D"
-                    else "camera3d"))
-                )
-                lines.append(f"    result.{field_ident} = unpack_{alias_target}(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, {index}) as u32);")
+                base_elem = raw_type.split("[")[0].strip()
+                size_str = raw_type.split("[")[1].split("]")[0].strip()
+                if base_elem in ("char", "const char"):
+                    lines.append(f"    let str_addr_{field_index} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as u32;")
+                    lines.append(f"    if str_addr_{field_index} > 0 {{")
+                    lines.append(f"        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr_{field_index}, result.{field_ident}.as_mut_ptr() as *mut u8, ({size_str} - 1) as u32) as usize;")
+                    lines.append(f"        result.{field_ident}[read_len] = 0;")
+                    lines.append("    }")
+                elif base_elem in struct_map or resolve_alias_target(base_elem, alias_map) in struct_map:
+                    resolved_struct = base_elem if base_elem in struct_map else resolve_alias_target(base_elem, alias_map)
+                    nested_snake = to_snake_case(resolved_struct)
+                    lines.append(f"    let arr_addr_{field_index} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as u32;")
+                    lines.append(f"    if arr_addr_{field_index} > 0 {{")
+                    lines.append(f"        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_{field_index}).min({size_str});")
+                    lines.append("        for elem_idx in 0..arr_len {")
+                    lines.append(f"            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_{field_index}, elem_idx) as u32;")
+                    lines.append(f"            result.{field_ident}[elem_idx as usize] = unpack_{nested_snake}(vm_context, child_addr);")
+                    lines.append("        }")
+                    lines.append("    }")
+                else:
+                    lines.append(f"    let arr_addr_{field_index} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as u32;")
+                    lines.append(f"    if arr_addr_{field_index} > 0 {{")
+                    lines.append(f"        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_{field_index}).min({size_str});")
+                    lines.append("        for elem_idx in 0..arr_len {")
+                    lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_{field_index}, elem_idx);")
+                    if base_elem in ("float", "f32"):
+                        lines.append(f"            result.{field_ident}[elem_idx as usize] = f32::from_bits(raw_val as u32);")
+                    elif base_elem in ("double", "f64"):
+                        lines.append(f"            result.{field_ident}[elem_idx as usize] = f64::from_bits(raw_val);")
+                    else:
+                        rust_elem_cast = map_c_type_to_rust(base_elem, struct_map, alias_map, callback_map)
+                        lines.append(f"            result.{field_ident}[elem_idx as usize] = raw_val as {rust_elem_cast};")
+                    lines.append("        }")
+                    lines.append("    }")
+            elif raw_type in struct_map or resolve_alias_target(raw_type, alias_map) in struct_map:
+                resolved_struct = raw_type if raw_type in struct_map else resolve_alias_target(raw_type, alias_map)
+                nested_snake = to_snake_case(resolved_struct)
+                lines.append(f"    result.{field_ident} = unpack_{nested_snake}(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as u32);")
+            elif raw_type.endswith("*") or raw_type.startswith("void") or "*" in resolve_alias_target(raw_type, alias_map):
+                rust_cast = map_c_type_to_rust(raw_type, struct_map, alias_map, callback_map)
+                lines.append(f"    result.{field_ident} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_index}) as usize as {rust_cast};")
 
         lines.append("    result")
         lines.append("}")
         lines.append("")
 
-    # Alias unpack/pack forwarders
-    lines.append("unsafe fn unpack_quaternion(vm_context: *mut c_void, addr: u32) -> C_Quaternion { unpack_vector4(vm_context, addr) }")
-    lines.append("unsafe fn pack_quaternion(vm_context: *mut c_void, val: C_Quaternion) -> u32 { pack_vector4(vm_context, val) }")
-    lines.append("unsafe fn writeback_quaternion(vm_context: *mut c_void, addr: u32, val: &C_Quaternion) { writeback_vector4(vm_context, addr, val); }")
-    lines.append("unsafe fn unpack_texture2d(vm_context: *mut c_void, addr: u32) -> C_Texture2D { unpack_texture(vm_context, addr) }")
-    lines.append("unsafe fn pack_texture2d(vm_context: *mut c_void, val: C_Texture2D) -> u32 { pack_texture(vm_context, val) }")
-    lines.append("unsafe fn writeback_texture2d(vm_context: *mut c_void, addr: u32, val: &C_Texture2D) { writeback_texture(vm_context, addr, val); }")
-    lines.append("unsafe fn unpack_texture_cubemap(vm_context: *mut c_void, addr: u32) -> C_TextureCubemap { unpack_texture(vm_context, addr) }")
-    lines.append("unsafe fn pack_texture_cubemap(vm_context: *mut c_void, val: C_TextureCubemap) -> u32 { pack_texture(vm_context, val) }")
-    lines.append("unsafe fn writeback_texture_cubemap(vm_context: *mut c_void, addr: u32, val: &C_TextureCubemap) { writeback_texture(vm_context, addr, val); }")
-    lines.append("unsafe fn unpack_render_texture2d(vm_context: *mut c_void, addr: u32) -> C_RenderTexture2D { unpack_render_texture(vm_context, addr) }")
-    lines.append("unsafe fn pack_render_texture2d(vm_context: *mut c_void, val: C_RenderTexture2D) -> u32 { pack_render_texture(vm_context, val) }")
-    lines.append("unsafe fn writeback_render_texture2d(vm_context: *mut c_void, addr: u32, val: &C_RenderTexture2D) { writeback_render_texture(vm_context, addr, val); }")
-    lines.append("unsafe fn unpack_camera(vm_context: *mut c_void, addr: u32) -> C_Camera { unpack_camera3d(vm_context, addr) }")
-    lines.append("unsafe fn pack_camera(vm_context: *mut c_void, val: C_Camera) -> u32 { pack_camera3d(vm_context, val) }")
-    lines.append("unsafe fn writeback_camera(vm_context: *mut c_void, addr: u32, val: &C_Camera) { writeback_camera3d(vm_context, addr, val); }")
-    lines.append("")
+    # Alias unpack/pack/writeback forwarders
+    for alias_item in aliases_list:
+        alias_name = alias_item.get("name", "")
+        raw_target = alias_item.get("type", "")
+        resolved_target = resolve_alias_target(raw_target, alias_map)
 
+        if "*" not in resolved_target and resolved_target in struct_map:
+            snake_alias = to_snake_case(alias_name)
+            snake_target = to_snake_case(resolved_target)
+            lines.append(f"unsafe fn unpack_{snake_alias}(vm_context: *mut c_void, addr: u32) -> C_{alias_name} {{ unpack_{snake_target}(vm_context, addr) }}")
+            lines.append(f"unsafe fn pack_{snake_alias}(vm_context: *mut c_void, val: C_{alias_name}) -> u32 {{ pack_{snake_target}(vm_context, val) }}")
+            lines.append(f"unsafe fn writeback_{snake_alias}(vm_context: *mut c_void, addr: u32, val: &C_{alias_name}) {{ writeback_{snake_target}(vm_context, addr, val); }}")
+
+    lines.append("")
     return lines
 
-def generate_extern_c_declarations(functions_list: list) -> list:
-    """Generates unsafe extern \"C\" declarations for upstream Raylib functions."""
+
+def generate_extern_c_declarations(
+    functions_list: list[dict],
+    struct_map: dict[str, dict],
+    alias_map: dict[str, str],
+    callback_map: dict[str, dict],
+) -> list[str]:
+    """Generates extern \"C\" declarations for upstream C functions."""
     lines = [
         "// ===========================================================================",
-        "// Upstream Raylib Extern \"C\" Declarations",
+        "// Upstream Extern \"C\" Declarations",
         "// ===========================================================================",
         "unsafe extern \"C\" {",
     ]
+
     for func in functions_list:
-        func_name = func["name"]
+        func_name = func.get("name", "")
         raw_ret = func.get("returnType", "void")
-        rust_ret = map_c_type_to_rust(raw_ret)
-        
+        rust_ret = map_c_type_to_rust(raw_ret, struct_map, alias_map, callback_map)
+
         param_decls = []
-        for index, param in enumerate(func.get("params", [])):
-            param_name = f"arg_{index}"
-            raw_param_type = param["type"]
+        for param_idx, param in enumerate(func.get("params", [])):
+            raw_param_type = param.get("type", "")
             if raw_param_type == "...":
                 param_decls.append("...")
             else:
-                rust_type = map_c_type_to_rust(raw_param_type)
-                param_decls.append(f"{param_name}: {rust_type}")
-            
+                param_var = f"arg_{param_idx}"
+                rust_type = map_c_type_to_rust(
+                    raw_param_type, struct_map, alias_map, callback_map
+                )
+                param_decls.append(f"{param_var}: {rust_type}")
+
         ret_suffix = "" if rust_ret == "()" else f" -> {rust_ret}"
         lines.append(f"    pub fn {func_name}({', '.join(param_decls)}){ret_suffix};")
-        
+
     lines.append("}")
     lines.append("")
     return lines
 
-def generate_wrappers(functions_list: list, structs_list: list) -> tuple[list, list]:
-    """Generates #[unsafe(no_mangle)] wrapper functions and symbol registration lists."""
+
+def generate_wrappers(
+    functions_list: list[dict],
+    struct_map: dict[str, dict],
+    alias_map: dict[str, str],
+    callback_map: dict[str, dict],
+    class_name: str,
+    package_name: str,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Generates Solix C-ABI wrapper functions and symbol registration lists."""
     wrapper_lines = [
         "// ===========================================================================",
         "// Solix C-ABI Native Wrapper Functions",
         "// ===========================================================================",
     ]
-    registration_entries = []
-    struct_names = set(item["name"] for item in structs_list)
-    alias_names = {"Quaternion", "Texture2D", "TextureCubemap", "RenderTexture2D", "Camera"}
-    callback_names = {"TraceLogCallback", "LoadFileDataCallback", "SaveFileDataCallback", "LoadFileTextCallback", "SaveFileTextCallback", "AudioCallback"}
-    
+    registration_entries: list[tuple[str, str]] = []
+
     for func in functions_list:
-        func_name = func["name"]
-        wrapper_name = f"Raylib_{func_name}"
+        func_name = func.get("name", "")
+        wrapper_name = f"{class_name}_{func_name}"
         raw_ret = func.get("returnType", "void").strip()
         params = func.get("params", [])
-        
+
+        is_variadic = any(param.get("type") == "..." for param in params)
+
         wrapper_lines.append("#[unsafe(no_mangle)]")
         wrapper_lines.append(f"pub unsafe extern \"C\" fn {wrapper_name}(")
         wrapper_lines.append("    vm_context: *mut c_void,")
@@ -443,78 +613,20 @@ def generate_wrappers(functions_list: list, structs_list: list) -> tuple[list, l
         wrapper_lines.append("    arg_count: u32,")
         wrapper_lines.append("    out_error: *mut SolixCValue,")
         wrapper_lines.append(") -> SolixCValue {")
-        
+
         call_args = []
-        string_buffers = []
-        writeback_lines = []
-        
-        # Handle special variadic functions
-        if func_name == "TraceLog":
-            string_buffers.append(
-                "    let log_level = (*args.add(0)).payload as c_int;\n"
-                "    let str_addr = (*args.add(1)).payload as u32;\n"
-                "    let mut str_buf = [0u8; 1024];\n"
-                "    let str_ptr = if str_addr > 0 {\n"
-                "        let context_ptr = vm_context as *mut SolixVmContext;\n"
-                "        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr, str_buf.as_mut_ptr(), 1023) as usize;\n"
-                "        str_buf[read_len] = 0;\n"
-                "        str_buf.as_ptr() as *const c_char\n"
-                "    } else {\n"
-                '        c"".as_ptr()\n'
-                "    };"
-            )
-            for string_buf in string_buffers:
-                wrapper_lines.append(string_buf)
-            wrapper_lines.append('    TraceLog(log_level, c"%s".as_ptr(), str_ptr);')
-            wrapper_lines.append("    SolixCValue::null()")
-            wrapper_lines.append("}")
-            wrapper_lines.append("")
-            snake_name = to_snake_case(func_name)
-            registration_entries.append((f"Raylib::{func_name}", wrapper_name))
-            registration_entries.append((f"Raylib::{snake_name}", wrapper_name))
-            registration_entries.append((f"raylib::{func_name}", wrapper_name))
-            registration_entries.append((f"raylib::{snake_name}", wrapper_name))
-            registration_entries.append((func_name, wrapper_name))
-            registration_entries.append((snake_name, wrapper_name))
-            continue
+        pre_call_lines = []
+        post_call_lines = []
 
-        if func_name == "TextFormat":
-            string_buffers.append(
-                "    let str_addr = (*args.add(0)).payload as u32;\n"
-                "    let mut str_buf = [0u8; 1024];\n"
-                "    let str_ptr = if str_addr > 0 {\n"
-                "        let context_ptr = vm_context as *mut SolixVmContext;\n"
-                "        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr, str_buf.as_mut_ptr(), 1023) as usize;\n"
-                "        str_buf[read_len] = 0;\n"
-                "        str_buf.as_ptr() as *const c_char\n"
-                "    } else {\n"
-                '        c"".as_ptr()\n'
-                "    };"
-            )
-            for string_buf in string_buffers:
-                wrapper_lines.append(string_buf)
-            wrapper_lines.append('    let call_result = TextFormat(c"%s".as_ptr(), str_ptr);')
-            wrapper_lines.append("    if call_result.is_null() { return SolixCValue::null(); }")
-            wrapper_lines.append("    let c_str = CStr::from_ptr(call_result);")
-            wrapper_lines.append("    let bytes = c_str.to_bytes();")
-            wrapper_lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
-            wrapper_lines.append("    let addr = ((*context_ptr).alloc_string)(vm_context, bytes.as_ptr(), bytes.len() as u32);")
-            wrapper_lines.append("    SolixCValue::ref_val(addr)")
-            wrapper_lines.append("}")
-            wrapper_lines.append("")
-            snake_name = to_snake_case(func_name)
-            registration_entries.append((f"Raylib::{func_name}", wrapper_name))
-            registration_entries.append((f"Raylib::{snake_name}", wrapper_name))
-            registration_entries.append((f"raylib::{func_name}", wrapper_name))
-            registration_entries.append((f"raylib::{snake_name}", wrapper_name))
-            registration_entries.append((func_name, wrapper_name))
-            registration_entries.append((snake_name, wrapper_name))
-            continue
+        # Filter out "..." parameter
+        non_variadic_params = [param for param in params if param.get("type") != "..."]
 
-        for index, param in enumerate(params):
-            arg_expr = f"(*args.add({index}))"
-            raw_param_type = param["type"].strip()
-            
+        for param_idx, param in enumerate(non_variadic_params):
+            arg_expr = f"(*args.add({param_idx}))"
+            raw_param_type = param.get("type", "").strip()
+            base_param, is_const_param, ptr_depth = decompose_c_type(raw_param_type)
+            resolved_param = resolve_alias_target(base_param, alias_map)
+
             if raw_param_type in ("int", "i32"):
                 call_args.append(f"{arg_expr}.payload as c_int")
             elif raw_param_type in ("unsigned int", "uint", "u32"):
@@ -538,118 +650,188 @@ def generate_wrappers(functions_list: list, structs_list: list) -> tuple[list, l
             elif raw_param_type in ("bool", "_Bool"):
                 call_args.append(f"{arg_expr}.payload != 0")
             elif raw_param_type in ("const char *", "char *"):
-                buf_name = f"str_buf_{index}"
-                ptr_name = f"str_ptr_{index}"
-                addr_name = f"str_addr_{index}"
-                string_buffers.append(
-                    f"    let {addr_name} = {arg_expr}.payload as u32;\n"
-                    f"    let mut {buf_name} = [0u8; 1024];\n"
-                    f"    let {ptr_name} = if {addr_name} > 0 {{\n"
-                    f"        let context_ptr = vm_context as *mut SolixVmContext;\n"
-                    f"        let read_len = ((*context_ptr).read_bytes)(vm_context, {addr_name}, {buf_name}.as_mut_ptr(), 1023) as usize;\n"
-                    f"        {buf_name}[read_len] = 0;\n"
-                    f"        {buf_name}.as_ptr() as *const c_char\n"
-                    f"    }} else {{\n"
-                    f'        c"".as_ptr()\n'
-                    f"    }};"
+                buf_var = f"str_buf_{param_idx}"
+                ptr_var = f"str_ptr_{param_idx}"
+                addr_var = f"str_addr_{param_idx}"
+                pre_call_lines.append(f"    let {addr_var} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let mut {buf_var} = [0u8; 1024];")
+                pre_call_lines.append(f"    let {ptr_var} = if {addr_var} > 0 {{")
+                pre_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
+                pre_call_lines.append(f"        let read_len = ((*context_ptr).read_bytes)(vm_context, {addr_var}, {buf_var}.as_mut_ptr(), 1023) as usize;")
+                pre_call_lines.append(f"        {buf_var}[read_len] = 0;")
+                pre_call_lines.append(f"        {buf_var}.as_ptr() as *const c_char")
+                pre_call_lines.append("    } else {")
+                pre_call_lines.append('        c"".as_ptr()')
+                pre_call_lines.append("    };")
+                call_args.append(ptr_var)
+            elif base_param in callback_map or resolved_param in callback_map:
+                call_args.append(
+                    f"if {arg_expr}.payload == 0 {{ None }} else {{ Some(std::mem::transmute({arg_expr}.payload as usize)) }}"
                 )
-                call_args.append(ptr_name)
-            elif raw_param_type in callback_names:
-                call_args.append(f"if {arg_expr}.payload == 0 {{ None }} else {{ Some(std::mem::transmute({arg_expr}.payload as usize)) }}")
-            elif raw_param_type in struct_names or raw_param_type in alias_names:
-                struct_snake = to_snake_case(raw_param_type)
+            # Struct values
+            elif ptr_depth == 0 and (base_param in struct_map or resolved_param in struct_map):
+                concrete_struct = base_param if base_param in struct_map else resolved_param
+                struct_snake = to_snake_case(concrete_struct)
                 call_args.append(f"unpack_{struct_snake}(vm_context, {arg_expr}.payload as u32)")
-            # In-place mutable struct pointers (e.g. Camera *, Image *, Mesh *, Model *, Wave *)
-            elif raw_param_type.endswith(" *") and raw_param_type[:-2].strip() in struct_names:
-                base_struct = raw_param_type[:-2].strip()
-                struct_snake = to_snake_case(base_struct)
-                var_name = f"{struct_snake}_mut_{index}"
-                addr_name = f"{struct_snake}_addr_{index}"
-                string_buffers.append(
-                    f"    let {addr_name} = {arg_expr}.payload as u32;\n"
-                    f"    let mut {var_name} = unpack_{struct_snake}(vm_context, {addr_name});"
-                )
+            # Mutable struct pointers (in-place writeback)
+            elif ptr_depth == 1 and not is_const_param and (base_param in struct_map or resolved_param in struct_map):
+                concrete_struct = base_param if base_param in struct_map else resolved_param
+                struct_snake = to_snake_case(concrete_struct)
+                var_name = f"{struct_snake}_mut_{param_idx}"
+                addr_name = f"{struct_snake}_addr_{param_idx}"
+                pre_call_lines.append(f"    let {addr_name} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let mut {var_name} = unpack_{struct_snake}(vm_context, {addr_name});")
                 call_args.append(f"&mut {var_name}")
-                writeback_lines.append(f"    writeback_{struct_snake}(vm_context, {addr_name}, &{var_name});")
+                post_call_lines.append(f"    writeback_{struct_snake}(vm_context, {addr_name}, &{var_name});")
+            # Struct arrays (const T *)
+            elif ptr_depth == 1 and is_const_param and (base_param in struct_map or resolved_param in struct_map):
+                concrete_struct = base_param if base_param in struct_map else resolved_param
+                struct_snake = to_snake_case(concrete_struct)
+                vec_name = f"struct_vec_{param_idx}"
+                arr_name = f"arr_addr_{param_idx}"
+                pre_call_lines.append(f"    let {arr_name} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let mut {vec_name}: Vec<C_{concrete_struct}> = Vec::new();")
+                pre_call_lines.append(f"    if {arr_name} > 0 {{")
+                pre_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
+                pre_call_lines.append(f"        let total_count = ((*context_ptr).array_len)(vm_context, {arr_name});")
+                pre_call_lines.append(f"        {vec_name}.reserve_exact(total_count as usize);")
+                pre_call_lines.append("        for elem_idx in 0..total_count {")
+                pre_call_lines.append(f"            let child_addr = ((*context_ptr).array_get_u64)(vm_context, {arr_name}, elem_idx) as u32;")
+                pre_call_lines.append(f"            {vec_name}.push(unpack_{struct_snake}(vm_context, child_addr));")
+                pre_call_lines.append("        }")
+                pre_call_lines.append("    }")
+                call_args.append(f"if {arr_name} > 0 {{ {vec_name}.as_ptr() }} else {{ std::ptr::null() }}")
+            # Primitive arrays (const int *, int *, float *, etc.)
+            elif ptr_depth == 1 and base_param in (
+                "int", "i32", "unsigned int", "uint", "u32", "float", "f32", "double", "f64",
+                "char", "int8", "unsigned char", "uint8", "uchar", "short", "int16", "unsigned short", "uint16", "ushort"
+            ):
+                rust_elem = map_c_type_to_rust(base_param, struct_map, alias_map, callback_map)
+                vec_name = f"prim_vec_{param_idx}"
+                arr_name = f"arr_addr_{param_idx}"
+                pre_call_lines.append(f"    let {arr_name} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let mut {vec_name}: Vec<{rust_elem}> = Vec::new();")
+                pre_call_lines.append(f"    if {arr_name} > 0 {{")
+                pre_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
+                pre_call_lines.append(f"        let total_count = ((*context_ptr).array_len)(vm_context, {arr_name});")
+                pre_call_lines.append(f"        {vec_name}.reserve_exact(total_count as usize);")
+                pre_call_lines.append("        for elem_idx in 0..total_count {")
+                pre_call_lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, {arr_name}, elem_idx);")
+                if base_param in ("float", "f32"):
+                    pre_call_lines.append(f"            {vec_name}.push(f32::from_bits(raw_val as u32));")
+                elif base_param in ("double", "f64"):
+                    pre_call_lines.append(f"            {vec_name}.push(f64::from_bits(raw_val));")
+                else:
+                    pre_call_lines.append(f"            {vec_name}.push(raw_val as {rust_elem});")
+                pre_call_lines.append("        }")
+                pre_call_lines.append("    }")
+                call_args.append(f"if {arr_name} > 0 {{ {vec_name}.as_mut_ptr() }} else {{ std::ptr::null_mut() }}")
+
+                # Writeback for mutable primitive arrays
+                if not is_const_param:
+                    post_call_lines.append(f"    if {arr_name} > 0 {{")
+                    post_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
+                    post_call_lines.append(f"        let total_count = ((*context_ptr).array_len)(vm_context, {arr_name});")
+                    post_call_lines.append("        for elem_idx in 0..total_count {")
+                    post_call_lines.append(f"            let updated_elem = {vec_name}[elem_idx as usize];")
+                    if base_param in ("float", "f32"):
+                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem.to_bits() as u64);")
+                    elif base_param in ("double", "f64"):
+                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem.to_bits());")
+                    else:
+                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem as u64);")
+                    post_call_lines.append("        }")
+                    post_call_lines.append("    }")
             else:
-                # Raw integer or pointer cast
-                rust_cast = map_c_type_to_rust(raw_param_type)
-                call_args.append(f"{arg_expr}.payload as {rust_cast}")
-        
-        for string_buf in string_buffers:
-            wrapper_lines.append(string_buf)
-            
-        call_expr = f"{func_name}({', '.join(call_args)})"
-        
-        # Handle return values
+                rust_cast = map_c_type_to_rust(raw_param_type, struct_map, alias_map, callback_map)
+                call_args.append(f"{arg_expr}.payload as usize as {rust_cast}")
+
+        # Emit pre-call code
+        for pre_line in pre_call_lines:
+            wrapper_lines.append(pre_line)
+
+        # Variadic invocation handling
+        if is_variadic:
+            last_arg = call_args.pop() if call_args else 'c"".as_ptr()'
+            if call_args:
+                call_invocation = f"{func_name}({', '.join(call_args)}, c\"%s\".as_ptr(), {last_arg})"
+            else:
+                call_invocation = f"{func_name}(c\"%s\".as_ptr(), {last_arg})"
+        else:
+            call_invocation = f"{func_name}({', '.join(call_args)})"
+
+        # Return value marshaling
+        base_ret, is_const_ret, ret_ptr_depth = decompose_c_type(raw_ret)
+        resolved_ret = resolve_alias_target(base_ret, alias_map)
+
         if raw_ret == "void":
-            wrapper_lines.append(f"    {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::null()")
         elif raw_ret in ("bool", "_Bool"):
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::bool_val(call_result)")
         elif raw_ret in ("int", "i32", "unsigned int", "uint", "u32", "short", "int16", "unsigned short", "uint16", "ushort", "char", "int8", "unsigned char", "uint8", "uchar"):
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::i32_val(call_result as i32)")
         elif raw_ret in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::i64_val(call_result as i64)")
         elif raw_ret in ("float", "f32"):
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::f64_val(call_result as f64)")
         elif raw_ret in ("double", "f64"):
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::f64_val(call_result)")
         elif raw_ret in ("const char *", "char *"):
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    if call_result.is_null() { return SolixCValue::null(); }")
             wrapper_lines.append("    let c_str = CStr::from_ptr(call_result);")
             wrapper_lines.append("    let bytes = c_str.to_bytes();")
             wrapper_lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
             wrapper_lines.append("    let addr = ((*context_ptr).alloc_string)(vm_context, bytes.as_ptr(), bytes.len() as u32);")
             wrapper_lines.append("    SolixCValue::ref_val(addr)")
-        elif raw_ret in struct_names or raw_ret in alias_names:
-            struct_snake = to_snake_case(raw_ret)
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+        elif ret_ptr_depth == 0 and (base_ret in struct_map or resolved_ret in struct_map):
+            concrete_struct = base_ret if base_ret in struct_map else resolved_ret
+            struct_snake = to_snake_case(concrete_struct)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append(f"    SolixCValue::ref_val(pack_{struct_snake}(vm_context, call_result))")
         else:
-            # Fallback raw pointer address
-            wrapper_lines.append(f"    let call_result = {call_expr};")
-            for writeback_line in writeback_lines:
-                wrapper_lines.append(writeback_line)
+            wrapper_lines.append(f"    let call_result = {call_invocation};")
+            for post_line in post_call_lines:
+                wrapper_lines.append(post_line)
             wrapper_lines.append("    SolixCValue::i64_val(call_result as usize as i64)")
-            
+
         wrapper_lines.append("}")
         wrapper_lines.append("")
-        
-        # Registration entries for all naming styles
+
         snake_name = to_snake_case(func_name)
-        registration_entries.append((f"Raylib::{func_name}", wrapper_name))
-        registration_entries.append((f"Raylib::{snake_name}", wrapper_name))
-        registration_entries.append((f"raylib::{func_name}", wrapper_name))
-        registration_entries.append((f"raylib::{snake_name}", wrapper_name))
+        registration_entries.append((f"{class_name}::{func_name}", wrapper_name))
+        registration_entries.append((f"{class_name}::{snake_name}", wrapper_name))
+        registration_entries.append((f"{package_name}::{func_name}", wrapper_name))
+        registration_entries.append((f"{package_name}::{snake_name}", wrapper_name))
         registration_entries.append((func_name, wrapper_name))
         registration_entries.append((snake_name, wrapper_name))
-        
+
     return wrapper_lines, registration_entries
 
-def generate_registration(registration_entries: list) -> list:
+
+def generate_registration(registration_entries: list[tuple[str, str]]) -> list[str]:
     """Generates the solix_register_natives entrypoint function."""
     lines = [
         "// ===========================================================================",
@@ -666,47 +848,116 @@ def generate_registration(registration_entries: list) -> list:
         if symbol_path in seen_symbols:
             continue
         seen_symbols.add(symbol_path)
-        lines.append(f'    register_callback(collector_context, c"{symbol_path}".as_ptr(), {wrapper_name});')
-        
+        lines.append(
+            f'    register_callback(collector_context, c"{symbol_path}".as_ptr(), {wrapper_name});'
+        )
+
     lines.append("}")
     lines.append("")
     return lines
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate Rust FFI bridge from raylib_api.json")
-    parser.add_argument("--api", default="libraries/raylib/api/raylib_api.json", help="Path to raylib_api.json")
-    parser.add_argument("--output", default="libraries/raylib/natives/raylib/src/lib.rs", help="Path to output lib.rs")
-    args = parser.parse_args()
-    
-    api_path = Path(args.api)
-    output_path = Path(args.output)
-    
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate generic Rust FFI companion bridge from rlparser JSON."
+    )
+    parser.add_argument(
+        "--api",
+        default="build/.cache/api/raylib_api.json",
+        help="Path to rlparser API JSON schema",
+    )
+    parser.add_argument(
+        "--output",
+        default="natives/raylib/src/lib.rs",
+        help="Path to output Rust source file",
+    )
+    parser.add_argument(
+        "--package-name",
+        default="raylib",
+        help="Solix package name",
+    )
+    parser.add_argument(
+        "--class-name",
+        default="Raylib",
+        help="Solix primary class container name",
+    )
+    parser.add_argument(
+        "--define-guard",
+        default="RLAPI",
+        help="API macro define guard to skip",
+    )
+    cli_arguments = parser.parse_args()
+
+    api_path = Path(cli_arguments.api)
+    output_path = Path(cli_arguments.output)
+
     if not api_path.exists():
-        print(f"Error: API file not found at {api_path}", file=sys.stderr)
+        print(f"Error: API schema not found at '{api_path}'", file=sys.stderr)
         sys.exit(1)
-        
-    with open(api_path, "r", encoding="utf-8") as file_handle:
-        api_data = json.load(file_handle)
-        
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
+    with open(api_path, "r", encoding="utf-8") as schema_file:
+        api_data = json.load(schema_file)
+
+    struct_map = {
+        struct_item["name"]: struct_item
+        for struct_item in api_data.get("structs", [])
+    }
+    alias_map = {
+        alias_item["name"]: alias_item["type"]
+        for alias_item in api_data.get("aliases", [])
+    }
+    enum_map = {
+        enum_item["name"]: enum_item
+        for enum_item in api_data.get("enums", [])
+    }
+    callback_map = {
+        callback_item["name"]: callback_item
+        for callback_item in api_data.get("callbacks", [])
+    }
+
     structs_list = api_data.get("structs", [])
+    aliases_list = api_data.get("aliases", [])
     functions_list = api_data.get("functions", [])
+    callbacks_list = api_data.get("callbacks", [])
 
     output_lines = []
     output_lines.extend(generate_header())
-    output_lines.extend(generate_c_structs(structs_list))
-    output_lines.extend(generate_struct_marshal_helpers(structs_list))
-    output_lines.extend(generate_extern_c_declarations(functions_list))
-    
-    wrapper_lines, registration_entries = generate_wrappers(functions_list, structs_list)
+    output_lines.extend(
+        generate_callbacks(callbacks_list, struct_map, alias_map, callback_map)
+    )
+    output_lines.extend(
+        generate_c_structs(
+            structs_list, aliases_list, struct_map, alias_map, callback_map
+        )
+    )
+    output_lines.extend(
+        generate_struct_marshal_helpers(
+            structs_list, aliases_list, struct_map, alias_map, callback_map
+        )
+    )
+    output_lines.extend(
+        generate_extern_c_declarations(
+            functions_list, struct_map, alias_map, callback_map
+        )
+    )
+
+    wrapper_lines, registration_entries = generate_wrappers(
+        functions_list,
+        struct_map,
+        alias_map,
+        callback_map,
+        cli_arguments.class_name,
+        cli_arguments.package_name,
+    )
     output_lines.extend(wrapper_lines)
     output_lines.extend(generate_registration(registration_entries))
-    
-    with open(output_path, "w", encoding="utf-8") as out_file:
-        out_file.write("\n".join(output_lines) + "\n")
-        
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as destination_file:
+        destination_file.write("\n".join(output_lines) + "\n")
+
     print(f"Successfully generated {output_path} ({len(output_lines)} lines)")
+
 
 if __name__ == "__main__":
     main()

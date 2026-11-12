@@ -1,21 +1,21 @@
-// Auto-generated 1-to-1 Raylib bindings for the Solix Programming Language
-// Generated from official raylib_api.json specification
+// Auto-generated 1-to-1 C API bindings for the Solix Programming Language
+// Source schema: raylib_api.json
 
 package raylib;
 
 // ===========================================================================
-// Raylib Version and Mathematical Constants
+// Global Constants & Evaluated Defines
 // ===========================================================================
 const int32 RAYLIB_VERSION_MAJOR = 6;
-const int32 RAYLIB_VERSION_MINOR = 5;
+const int32 RAYLIB_VERSION_MINOR = 2;
 const int32 RAYLIB_VERSION_PATCH = 0;
-const string RAYLIB_VERSION = "6.5-dev";
+const string RAYLIB_VERSION = "6.2";
 const float32 PI = (float32)3.141592653589793;
 const float32 DEG2RAD = (float32)0.017453292519943295;
 const float32 RAD2DEG = (float32)57.29577951308232;
 
 // ===========================================================================
-// Raylib Enums and Bitflags
+// Enums & Bitflags
 // ===========================================================================
 /// System/Window config flags
 public enum ConfigFlags {
@@ -712,7 +712,7 @@ public enum NPatchLayout {
 }
 
 // ===========================================================================
-// Raylib Struct Classes (1-to-1 Solix Classes)
+// Struct Classes
 // ===========================================================================
 /// Vector2, 2 components
 public class Vector2 {
@@ -860,32 +860,58 @@ public class Color {
         this.a = init_a;
     }
 
-    // --- Raylib Palette Preset Constants ---
+    // --- Preset Constants ---
+    /// Light Gray
     public static Color LIGHTGRAY = new Color((uint8)200, (uint8)200, (uint8)200, (uint8)255);
+    /// Gray
     public static Color GRAY = new Color((uint8)130, (uint8)130, (uint8)130, (uint8)255);
+    /// Dark Gray
     public static Color DARKGRAY = new Color((uint8)80, (uint8)80, (uint8)80, (uint8)255);
+    /// Yellow
     public static Color YELLOW = new Color((uint8)253, (uint8)249, (uint8)0, (uint8)255);
+    /// Gold
     public static Color GOLD = new Color((uint8)255, (uint8)203, (uint8)0, (uint8)255);
+    /// Orange
     public static Color ORANGE = new Color((uint8)255, (uint8)161, (uint8)0, (uint8)255);
+    /// Pink
     public static Color PINK = new Color((uint8)255, (uint8)109, (uint8)194, (uint8)255);
+    /// Red
     public static Color RED = new Color((uint8)230, (uint8)41, (uint8)55, (uint8)255);
+    /// Maroon
     public static Color MAROON = new Color((uint8)190, (uint8)33, (uint8)55, (uint8)255);
+    /// Green
     public static Color GREEN = new Color((uint8)0, (uint8)228, (uint8)48, (uint8)255);
+    /// Lime
     public static Color LIME = new Color((uint8)0, (uint8)158, (uint8)47, (uint8)255);
+    /// Dark Green
     public static Color DARKGREEN = new Color((uint8)0, (uint8)117, (uint8)44, (uint8)255);
+    /// Sky Blue
     public static Color SKYBLUE = new Color((uint8)102, (uint8)191, (uint8)255, (uint8)255);
+    /// Blue
     public static Color BLUE = new Color((uint8)0, (uint8)121, (uint8)241, (uint8)255);
+    /// Dark Blue
     public static Color DARKBLUE = new Color((uint8)0, (uint8)82, (uint8)172, (uint8)255);
+    /// Purple
     public static Color PURPLE = new Color((uint8)200, (uint8)122, (uint8)255, (uint8)255);
+    /// Violet
     public static Color VIOLET = new Color((uint8)135, (uint8)60, (uint8)190, (uint8)255);
+    /// Dark Purple
     public static Color DARKPURPLE = new Color((uint8)112, (uint8)31, (uint8)126, (uint8)255);
+    /// Beige
     public static Color BEIGE = new Color((uint8)211, (uint8)176, (uint8)131, (uint8)255);
+    /// Brown
     public static Color BROWN = new Color((uint8)127, (uint8)106, (uint8)79, (uint8)255);
+    /// Dark Brown
     public static Color DARKBROWN = new Color((uint8)76, (uint8)63, (uint8)47, (uint8)255);
+    /// White
     public static Color WHITE = new Color((uint8)255, (uint8)255, (uint8)255, (uint8)255);
+    /// Black
     public static Color BLACK = new Color((uint8)0, (uint8)0, (uint8)0, (uint8)255);
+    /// Blank (Transparent)
     public static Color BLANK = new Color((uint8)0, (uint8)0, (uint8)0, (uint8)0);
+    /// Magenta
     public static Color MAGENTA = new Color((uint8)255, (uint8)0, (uint8)255, (uint8)255);
+    /// My own White (raylib logo)
     public static Color RAYWHITE = new Color((uint8)245, (uint8)245, (uint8)245, (uint8)255);
 }
 
@@ -980,17 +1006,17 @@ public class RenderTexture {
     /// OpenGL framebuffer object id
     public uint32 id;
     /// Color buffer attachment texture
-    public Texture2D texture;
+    public Texture texture;
     /// Depth buffer attachment texture
-    public Texture2D depth;
+    public Texture depth;
 
     public RenderTexture() {
         this.id = (uint32)0;
-        this.texture = new Texture2D();
-        this.depth = new Texture2D();
+        this.texture = new Texture();
+        this.depth = new Texture();
     }
 
-    public RenderTexture(uint32 init_id, Texture2D init_texture, Texture2D init_depth) {
+    public RenderTexture(uint32 init_id, Texture init_texture, Texture init_depth) {
         this.id = init_id;
         this.texture = init_texture;
         this.depth = init_depth;
@@ -1074,7 +1100,7 @@ public class Font {
     /// Rectangles in texture for the glyphs
     public Rectangle recs;
     /// Glyphs info data
-    public GlyphInfo[] glyphs;
+    public GlyphInfo glyphs;
 
     public Font() {
         this.baseSize = 0;
@@ -1082,10 +1108,10 @@ public class Font {
         this.glyphPadding = 0;
         this.texture = new Texture2D();
         this.recs = new Rectangle();
-        this.glyphs = new GlyphInfo[0];
+        this.glyphs = new GlyphInfo();
     }
 
-    public Font(int32 init_baseSize, int32 init_glyphCount, int32 init_glyphPadding, Texture2D init_texture, Rectangle init_recs, GlyphInfo[] init_glyphs) {
+    public Font(int32 init_baseSize, int32 init_glyphCount, int32 init_glyphPadding, Texture2D init_texture, Rectangle init_recs, GlyphInfo init_glyphs) {
         this.baseSize = init_baseSize;
         this.glyphCount = init_glyphCount;
         this.glyphPadding = init_glyphPadding;
@@ -1251,13 +1277,13 @@ public class Material {
     /// Material shader
     public Shader shader;
     /// Material maps array (MAX_MATERIAL_MAPS)
-    public uint64 maps;
+    public MaterialMap maps;
     /// Material generic parameters (if required)
     public float32[] params;
 
     public Material() {
         this.shader = new Shader();
-        this.maps = (uint64)0;
+        this.maps = new MaterialMap();
         this.params = new float32[4];
     }
 }
@@ -1267,17 +1293,17 @@ public class Transform {
     /// Translation
     public Vector3 translation;
     /// Rotation
-    public Vector4 rotation;
+    public Quaternion rotation;
     /// Scale
     public Vector3 scale;
 
     public Transform() {
         this.translation = new Vector3();
-        this.rotation = new Vector4();
+        this.rotation = new Quaternion();
         this.scale = new Vector3();
     }
 
-    public Transform(Vector3 init_translation, Vector4 init_rotation, Vector3 init_scale) {
+    public Transform(Vector3 init_translation, Quaternion init_rotation, Vector3 init_scale) {
         this.translation = init_translation;
         this.rotation = init_rotation;
         this.scale = init_scale;
@@ -1302,17 +1328,17 @@ public class ModelSkeleton {
     /// Number of bones
     public uint32 boneCount;
     /// Bones information (skeleton)
-    public uint64 bones;
+    public BoneInfo bones;
     /// Bones base transformation (Transform[])
     public uint64 bindPose;
 
     public ModelSkeleton() {
         this.boneCount = (uint32)0;
-        this.bones = (uint64)0;
+        this.bones = new BoneInfo();
         this.bindPose = (uint64)0;
     }
 
-    public ModelSkeleton(uint32 init_boneCount, uint64 init_bones, uint64 init_bindPose) {
+    public ModelSkeleton(uint32 init_boneCount, BoneInfo init_bones, uint64 init_bindPose) {
         this.boneCount = init_boneCount;
         this.bones = init_bones;
         this.bindPose = init_bindPose;
@@ -1330,7 +1356,7 @@ public class Model {
     /// Meshes array
     public Mesh meshes;
     /// Materials array
-    public uint64 materials;
+    public Material materials;
     /// Mesh material number
     public int32[] meshMaterial;
     /// Skeleton for animation
@@ -1338,18 +1364,18 @@ public class Model {
     /// Current animation pose (Transform[])
     public uint64 currentPose;
     /// Bones animated transformation matrices
-    public Matrix[] boneMatrices;
+    public Matrix boneMatrices;
 
     public Model() {
         this.transform = new Matrix();
         this.meshCount = 0;
         this.materialCount = 0;
         this.meshes = new Mesh();
-        this.materials = (uint64)0;
+        this.materials = new Material();
         this.meshMaterial = new int32[0];
         this.skeleton = new ModelSkeleton();
         this.currentPose = (uint64)0;
-        this.boneMatrices = new Matrix[0];
+        this.boneMatrices = new Matrix();
     }
 }
 
@@ -1648,15 +1674,15 @@ public class AutomationEventList {
     /// Events entries count
     public uint32 count;
     /// Events entries
-    public uint64 events;
+    public AutomationEvent events;
 
     public AutomationEventList() {
         this.capacity = (uint32)0;
         this.count = (uint32)0;
-        this.events = (uint64)0;
+        this.events = new AutomationEvent();
     }
 
-    public AutomationEventList(uint32 init_capacity, uint32 init_count, uint64 init_events) {
+    public AutomationEventList(uint32 init_capacity, uint32 init_count, AutomationEvent init_events) {
         this.capacity = init_capacity;
         this.count = init_count;
         this.events = init_events;
@@ -1664,7 +1690,7 @@ public class AutomationEventList {
 }
 
 // ===========================================================================
-// Raylib Type Aliases (Extended Subclasses)
+// Type Aliases (Extended Subclasses)
 // ===========================================================================
 /// Quaternion, 4 components (Vector4 alias)
 public class Quaternion extends Vector4 {
@@ -1692,12 +1718,15 @@ public class Camera extends Camera3D {
 }
 
 // ===========================================================================
-// Raylib Primary Engine API (Class Raylib & Top-Level Functions)
+// Primary Engine API (Class Raylib & Top-Level Functions)
 // ===========================================================================
 public class Raylib {
-    public static const float32 PI = (float32)3.141592653589793;
     public static const float32 DEG2RAD = (float32)0.017453292519943295;
+    public static const float32 PI = (float32)3.141592653589793;
     public static const float32 RAD2DEG = (float32)57.29577951308232;
+    public static const float32 RAYLIB_VERSION_MAJOR = (float32)6.0;
+    public static const float32 RAYLIB_VERSION_MINOR = (float32)2.0;
+    public static const float32 RAYLIB_VERSION_PATCH = (float32)0.0;
 
     /// Initialize window and OpenGL context
     public static native void InitWindow(int32 width, int32 height, string title);
@@ -1952,17 +1981,17 @@ public class Raylib {
     public static native void UnloadShader(Shader shader);
     public static native void unload_shader(Shader shader);
     /// Get a ray trace from screen position (i.e mouse)
-    public static native Ray GetScreenToWorldRay(Vector2 position, Camera3D camera);
-    public static native Ray get_screen_to_world_ray(Vector2 position, Camera3D camera);
+    public static native Ray GetScreenToWorldRay(Vector2 position, Camera camera);
+    public static native Ray get_screen_to_world_ray(Vector2 position, Camera camera);
     /// Get a ray trace from screen position (i.e mouse) in a viewport
-    public static native Ray GetScreenToWorldRayEx(Vector2 position, Camera3D camera, int32 width, int32 height);
-    public static native Ray get_screen_to_world_ray_ex(Vector2 position, Camera3D camera, int32 width, int32 height);
+    public static native Ray GetScreenToWorldRayEx(Vector2 position, Camera camera, int32 width, int32 height);
+    public static native Ray get_screen_to_world_ray_ex(Vector2 position, Camera camera, int32 width, int32 height);
     /// Get screen space position for a 3d world space position
-    public static native Vector2 GetWorldToScreen(Vector3 position, Camera3D camera);
-    public static native Vector2 get_world_to_screen(Vector3 position, Camera3D camera);
+    public static native Vector2 GetWorldToScreen(Vector3 position, Camera camera);
+    public static native Vector2 get_world_to_screen(Vector3 position, Camera camera);
     /// Get sized screen space position for a 3d world space position
-    public static native Vector2 GetWorldToScreenEx(Vector3 position, Camera3D camera, int32 width, int32 height);
-    public static native Vector2 get_world_to_screen_ex(Vector3 position, Camera3D camera, int32 width, int32 height);
+    public static native Vector2 GetWorldToScreenEx(Vector3 position, Camera camera, int32 width, int32 height);
+    public static native Vector2 get_world_to_screen_ex(Vector3 position, Camera camera, int32 width, int32 height);
     /// Get screen space position for a 2d camera world space position
     public static native Vector2 GetWorldToScreen2D(Vector2 position, Camera2D camera);
     public static native Vector2 get_world_to_screen2d(Vector2 position, Camera2D camera);
@@ -1970,8 +1999,8 @@ public class Raylib {
     public static native Vector2 GetScreenToWorld2D(Vector2 position, Camera2D camera);
     public static native Vector2 get_screen_to_world2d(Vector2 position, Camera2D camera);
     /// Get camera transform matrix (view matrix)
-    public static native Matrix GetCameraMatrix(Camera3D camera);
-    public static native Matrix get_camera_matrix(Camera3D camera);
+    public static native Matrix GetCameraMatrix(Camera camera);
+    public static native Matrix get_camera_matrix(Camera camera);
     /// Get camera 2d transform matrix
     public static native Matrix GetCameraMatrix2D(Camera2D camera);
     public static native Matrix get_camera_matrix2d(Camera2D camera);
@@ -2201,8 +2230,8 @@ public class Raylib {
     public static native bool ExportAutomationEventList(AutomationEventList list, string fileName);
     public static native bool export_automation_event_list(AutomationEventList list, string fileName);
     /// Set automation event list to record to
-    public static native void SetAutomationEventList(uint64 list);
-    public static native void set_automation_event_list(uint64 list);
+    public static native void SetAutomationEventList(AutomationEventList list);
+    public static native void set_automation_event_list(AutomationEventList list);
     /// Set automation event internal base frame to start recording
     public static native void SetAutomationEventBaseFrame(int32 frame);
     public static native void set_automation_event_base_frame(int32 frame);
@@ -2357,11 +2386,11 @@ public class Raylib {
     public static native float32 GetGesturePinchAngle();
     public static native float32 get_gesture_pinch_angle();
     /// Update camera position for selected mode
-    public static native void UpdateCamera(Camera3D camera, int32 mode);
-    public static native void update_camera(Camera3D camera, int32 mode);
+    public static native void UpdateCamera(Camera camera, int32 mode);
+    public static native void update_camera(Camera camera, int32 mode);
     /// Update camera movement/rotation
-    public static native void UpdateCameraPro(Camera3D camera, Vector3 movement, Vector3 rotation, float32 zoom);
-    public static native void update_camera_pro(Camera3D camera, Vector3 movement, Vector3 rotation, float32 zoom);
+    public static native void UpdateCameraPro(Camera camera, Vector3 movement, Vector3 rotation, float32 zoom);
+    public static native void update_camera_pro(Camera camera, Vector3 movement, Vector3 rotation, float32 zoom);
     /// Set texture and rectangle to be used on shapes drawing
     public static native void SetShapesTexture(Texture2D texture, Rectangle rec);
     public static native void set_shapes_texture(Texture2D texture, Rectangle rec);
@@ -2582,8 +2611,8 @@ public class Raylib {
     public static native bool CheckCollisionPointPoly(Vector2 point, Vector2[] points, int32 pointCount);
     public static native bool check_collision_point_poly(Vector2 point, Vector2[] points, int32 pointCount);
     /// Check the collision between two lines defined by two points each, returns collision point by reference
-    public static native bool CheckCollisionLines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2[] collisionPoint);
-    public static native bool check_collision_lines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2[] collisionPoint);
+    public static native bool CheckCollisionLines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2 collisionPoint);
+    public static native bool check_collision_lines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2 collisionPoint);
     /// Get collision rectangle for two rectangles collision
     public static native Rectangle GetCollisionRec(Rectangle rec1, Rectangle rec2);
     public static native Rectangle get_collision_rec(Rectangle rec1, Rectangle rec2);
@@ -2741,17 +2770,17 @@ public class Raylib {
     public static native void ImageColorReplace(Image image, Color color, Color replace);
     public static native void image_color_replace(Image image, Color color, Color replace);
     /// Load color data from image as a Color array (RGBA - 32bit)
-    public static native Color[] LoadImageColors(Image image);
-    public static native Color[] load_image_colors(Image image);
+    public static native Color LoadImageColors(Image image);
+    public static native Color load_image_colors(Image image);
     /// Load colors palette from image as a Color array (RGBA - 32bit)
-    public static native Color[] LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
-    public static native Color[] load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
+    public static native Color LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
+    public static native Color load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
     /// Unload color data loaded with LoadImageColors()
-    public static native void UnloadImageColors(Color[] colors);
-    public static native void unload_image_colors(Color[] colors);
+    public static native void UnloadImageColors(Color colors);
+    public static native void unload_image_colors(Color colors);
     /// Unload colors palette loaded with LoadImagePalette()
-    public static native void UnloadImagePalette(Color[] colors);
-    public static native void unload_image_palette(Color[] colors);
+    public static native void UnloadImagePalette(Color colors);
+    public static native void unload_image_palette(Color colors);
     /// Get image alpha border rectangle
     public static native Rectangle GetImageAlphaBorder(Image image, float32 threshold);
     public static native Rectangle get_image_alpha_border(Image image, float32 threshold);
@@ -2981,14 +3010,14 @@ public class Raylib {
     public static native bool IsFontValid(Font font);
     public static native bool is_font_valid(Font font);
     /// Load font data for further use
-    public static native GlyphInfo[] LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
-    public static native GlyphInfo[] load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+    public static native GlyphInfo LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+    public static native GlyphInfo load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
     /// Generate image font atlas using chars info
     public static native Image GenImageFontAtlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
     public static native Image gen_image_font_atlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
     /// Unload font chars info data (RAM)
-    public static native void UnloadFontData(GlyphInfo[] glyphs, int32 glyphCount);
-    public static native void unload_font_data(GlyphInfo[] glyphs, int32 glyphCount);
+    public static native void UnloadFontData(GlyphInfo glyphs, int32 glyphCount);
+    public static native void unload_font_data(GlyphInfo glyphs, int32 glyphCount);
     /// Unload font from GPU memory (VRAM)
     public static native void UnloadFont(Font font);
     public static native void unload_font(Font font);
@@ -3233,14 +3262,14 @@ public class Raylib {
     public static native void DrawBoundingBox(BoundingBox box, Color color);
     public static native void draw_bounding_box(BoundingBox box, Color color);
     /// Draw a billboard texture
-    public static native void DrawBillboard(Camera3D camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
-    public static native void draw_billboard(Camera3D camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
+    public static native void DrawBillboard(Camera camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
+    public static native void draw_billboard(Camera camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
     /// Draw a billboard texture defined by rectangle
-    public static native void DrawBillboardRec(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
-    public static native void draw_billboard_rec(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
+    public static native void DrawBillboardRec(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
+    public static native void draw_billboard_rec(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
     /// Draw a billboard texture defined by source rectangle with scaling and rotation
-    public static native void DrawBillboardPro(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
-    public static native void draw_billboard_pro(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
+    public static native void DrawBillboardPro(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
+    public static native void draw_billboard_pro(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
     /// Upload mesh vertex data in GPU and provide VAO/VBO ids
     public static native void UploadMesh(Mesh mesh, bool dynamic);
     public static native void upload_mesh(Mesh mesh, bool dynamic);
@@ -3302,8 +3331,8 @@ public class Raylib {
     public static native Mesh GenMeshCubicmap(Image cubicmap, Vector3 cubeSize);
     public static native Mesh gen_mesh_cubicmap(Image cubicmap, Vector3 cubeSize);
     /// Load materials from model file
-    public static native uint64 LoadMaterials(string fileName, int32[] materialCount);
-    public static native uint64 load_materials(string fileName, int32[] materialCount);
+    public static native Material LoadMaterials(string fileName, int32[] materialCount);
+    public static native Material load_materials(string fileName, int32[] materialCount);
     /// Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
     public static native Material LoadMaterialDefault();
     public static native Material load_material_default();
@@ -3314,14 +3343,14 @@ public class Raylib {
     public static native void UnloadMaterial(Material material);
     public static native void unload_material(Material material);
     /// Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...)
-    public static native void SetMaterialTexture(uint64 material, int32 mapType, Texture2D texture);
-    public static native void set_material_texture(uint64 material, int32 mapType, Texture2D texture);
+    public static native void SetMaterialTexture(Material material, int32 mapType, Texture2D texture);
+    public static native void set_material_texture(Material material, int32 mapType, Texture2D texture);
     /// Set material for a mesh
     public static native void SetModelMeshMaterial(Model model, int32 meshId, int32 materialId);
     public static native void set_model_mesh_material(Model model, int32 meshId, int32 materialId);
     /// Load model animations from file
-    public static native uint64 LoadModelAnimations(string fileName, int32[] animCount);
-    public static native uint64 load_model_animations(string fileName, int32[] animCount);
+    public static native ModelAnimation LoadModelAnimations(string fileName, int32[] animCount);
+    public static native ModelAnimation load_model_animations(string fileName, int32[] animCount);
     /// Update model animation pose (vertex buffers and bone matrices)
     public static native void UpdateModelAnimation(Model model, ModelAnimation anim, float32 frame);
     public static native void update_model_animation(Model model, ModelAnimation anim, float32 frame);
@@ -3329,8 +3358,8 @@ public class Raylib {
     public static native void UpdateModelAnimationEx(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
     public static native void update_model_animation_ex(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
     /// Unload animation array data
-    public static native void UnloadModelAnimations(uint64 animations, int32 animCount);
-    public static native void unload_model_animations(uint64 animations, int32 animCount);
+    public static native void UnloadModelAnimations(ModelAnimation animations, int32 animCount);
+    public static native void unload_model_animations(ModelAnimation animations, int32 animCount);
     /// Check model animation skeleton match
     public static native bool IsModelAnimationValid(Model model, ModelAnimation anim);
     public static native bool is_model_animation_valid(Model model, ModelAnimation anim);
@@ -3727,20 +3756,20 @@ public native void SetShaderValueTexture(Shader shader, int32 locIndex, Texture2
 public native void set_shader_value_texture(Shader shader, int32 locIndex, Texture2D texture);
 public native void UnloadShader(Shader shader);
 public native void unload_shader(Shader shader);
-public native Ray GetScreenToWorldRay(Vector2 position, Camera3D camera);
-public native Ray get_screen_to_world_ray(Vector2 position, Camera3D camera);
-public native Ray GetScreenToWorldRayEx(Vector2 position, Camera3D camera, int32 width, int32 height);
-public native Ray get_screen_to_world_ray_ex(Vector2 position, Camera3D camera, int32 width, int32 height);
-public native Vector2 GetWorldToScreen(Vector3 position, Camera3D camera);
-public native Vector2 get_world_to_screen(Vector3 position, Camera3D camera);
-public native Vector2 GetWorldToScreenEx(Vector3 position, Camera3D camera, int32 width, int32 height);
-public native Vector2 get_world_to_screen_ex(Vector3 position, Camera3D camera, int32 width, int32 height);
+public native Ray GetScreenToWorldRay(Vector2 position, Camera camera);
+public native Ray get_screen_to_world_ray(Vector2 position, Camera camera);
+public native Ray GetScreenToWorldRayEx(Vector2 position, Camera camera, int32 width, int32 height);
+public native Ray get_screen_to_world_ray_ex(Vector2 position, Camera camera, int32 width, int32 height);
+public native Vector2 GetWorldToScreen(Vector3 position, Camera camera);
+public native Vector2 get_world_to_screen(Vector3 position, Camera camera);
+public native Vector2 GetWorldToScreenEx(Vector3 position, Camera camera, int32 width, int32 height);
+public native Vector2 get_world_to_screen_ex(Vector3 position, Camera camera, int32 width, int32 height);
 public native Vector2 GetWorldToScreen2D(Vector2 position, Camera2D camera);
 public native Vector2 get_world_to_screen2d(Vector2 position, Camera2D camera);
 public native Vector2 GetScreenToWorld2D(Vector2 position, Camera2D camera);
 public native Vector2 get_screen_to_world2d(Vector2 position, Camera2D camera);
-public native Matrix GetCameraMatrix(Camera3D camera);
-public native Matrix get_camera_matrix(Camera3D camera);
+public native Matrix GetCameraMatrix(Camera camera);
+public native Matrix get_camera_matrix(Camera camera);
 public native Matrix GetCameraMatrix2D(Camera2D camera);
 public native Matrix get_camera_matrix2d(Camera2D camera);
 public native void SetTargetFPS(int32 fps);
@@ -3893,8 +3922,8 @@ public native void UnloadAutomationEventList(AutomationEventList list);
 public native void unload_automation_event_list(AutomationEventList list);
 public native bool ExportAutomationEventList(AutomationEventList list, string fileName);
 public native bool export_automation_event_list(AutomationEventList list, string fileName);
-public native void SetAutomationEventList(uint64 list);
-public native void set_automation_event_list(uint64 list);
+public native void SetAutomationEventList(AutomationEventList list);
+public native void set_automation_event_list(AutomationEventList list);
 public native void SetAutomationEventBaseFrame(int32 frame);
 public native void set_automation_event_base_frame(int32 frame);
 public native void StartAutomationEventRecording();
@@ -3997,10 +4026,10 @@ public native Vector2 GetGesturePinchVector();
 public native Vector2 get_gesture_pinch_vector();
 public native float32 GetGesturePinchAngle();
 public native float32 get_gesture_pinch_angle();
-public native void UpdateCamera(Camera3D camera, int32 mode);
-public native void update_camera(Camera3D camera, int32 mode);
-public native void UpdateCameraPro(Camera3D camera, Vector3 movement, Vector3 rotation, float32 zoom);
-public native void update_camera_pro(Camera3D camera, Vector3 movement, Vector3 rotation, float32 zoom);
+public native void UpdateCamera(Camera camera, int32 mode);
+public native void update_camera(Camera camera, int32 mode);
+public native void UpdateCameraPro(Camera camera, Vector3 movement, Vector3 rotation, float32 zoom);
+public native void update_camera_pro(Camera camera, Vector3 movement, Vector3 rotation, float32 zoom);
 public native void SetShapesTexture(Texture2D texture, Rectangle rec);
 public native void set_shapes_texture(Texture2D texture, Rectangle rec);
 public native Texture2D GetShapesTexture();
@@ -4147,8 +4176,8 @@ public native bool CheckCollisionPointLine(Vector2 point, Vector2 p1, Vector2 p2
 public native bool check_collision_point_line(Vector2 point, Vector2 p1, Vector2 p2, int32 threshold);
 public native bool CheckCollisionPointPoly(Vector2 point, Vector2[] points, int32 pointCount);
 public native bool check_collision_point_poly(Vector2 point, Vector2[] points, int32 pointCount);
-public native bool CheckCollisionLines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2[] collisionPoint);
-public native bool check_collision_lines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2[] collisionPoint);
+public native bool CheckCollisionLines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2 collisionPoint);
+public native bool check_collision_lines(Vector2 startPos1, Vector2 endPos1, Vector2 startPos2, Vector2 endPos2, Vector2 collisionPoint);
 public native Rectangle GetCollisionRec(Rectangle rec1, Rectangle rec2);
 public native Rectangle get_collision_rec(Rectangle rec1, Rectangle rec2);
 public native Image LoadImage(string fileName);
@@ -4253,14 +4282,14 @@ public native void ImageColorBrightness(Image image, int32 brightness);
 public native void image_color_brightness(Image image, int32 brightness);
 public native void ImageColorReplace(Image image, Color color, Color replace);
 public native void image_color_replace(Image image, Color color, Color replace);
-public native Color[] LoadImageColors(Image image);
-public native Color[] load_image_colors(Image image);
-public native Color[] LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
-public native Color[] load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
-public native void UnloadImageColors(Color[] colors);
-public native void unload_image_colors(Color[] colors);
-public native void UnloadImagePalette(Color[] colors);
-public native void unload_image_palette(Color[] colors);
+public native Color LoadImageColors(Image image);
+public native Color load_image_colors(Image image);
+public native Color LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
+public native Color load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
+public native void UnloadImageColors(Color colors);
+public native void unload_image_colors(Color colors);
+public native void UnloadImagePalette(Color colors);
+public native void unload_image_palette(Color colors);
 public native Rectangle GetImageAlphaBorder(Image image, float32 threshold);
 public native Rectangle get_image_alpha_border(Image image, float32 threshold);
 public native Color GetImageColor(Image image, int32 x, int32 y);
@@ -4413,12 +4442,12 @@ public native Font LoadFontFromMemory(string fileType, uint8[] fileData, int32 d
 public native Font load_font_from_memory(string fileType, uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount);
 public native bool IsFontValid(Font font);
 public native bool is_font_valid(Font font);
-public native GlyphInfo[] LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
-public native GlyphInfo[] load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+public native GlyphInfo LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+public native GlyphInfo load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
 public native Image GenImageFontAtlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
 public native Image gen_image_font_atlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
-public native void UnloadFontData(GlyphInfo[] glyphs, int32 glyphCount);
-public native void unload_font_data(GlyphInfo[] glyphs, int32 glyphCount);
+public native void UnloadFontData(GlyphInfo glyphs, int32 glyphCount);
+public native void unload_font_data(GlyphInfo glyphs, int32 glyphCount);
 public native void UnloadFont(Font font);
 public native void unload_font(Font font);
 public native bool ExportFontAsCode(Font font, string fileName);
@@ -4581,12 +4610,12 @@ public native void DrawModelWiresEx(Model model, Vector3 position, Vector3 rotat
 public native void draw_model_wires_ex(Model model, Vector3 position, Vector3 rotationAxis, float32 rotationAngle, Vector3 scale, Color tint);
 public native void DrawBoundingBox(BoundingBox box, Color color);
 public native void draw_bounding_box(BoundingBox box, Color color);
-public native void DrawBillboard(Camera3D camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
-public native void draw_billboard(Camera3D camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
-public native void DrawBillboardRec(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
-public native void draw_billboard_rec(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
-public native void DrawBillboardPro(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
-public native void draw_billboard_pro(Camera3D camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
+public native void DrawBillboard(Camera camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
+public native void draw_billboard(Camera camera, Texture2D texture, Vector3 position, float32 scale, Color tint);
+public native void DrawBillboardRec(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
+public native void draw_billboard_rec(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector2 size, Color tint);
+public native void DrawBillboardPro(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
+public native void draw_billboard_pro(Camera camera, Texture2D texture, Rectangle rec, Vector3 position, Vector3 up, Vector2 size, Vector2 origin, float32 rotation, Color tint);
 public native void UploadMesh(Mesh mesh, bool dynamic);
 public native void upload_mesh(Mesh mesh, bool dynamic);
 public native void UpdateMeshBuffer(Mesh mesh, int32 index, uint64 data, int32 dataSize, int32 offset);
@@ -4627,26 +4656,26 @@ public native Mesh GenMeshHeightmap(Image heightmap, Vector3 size);
 public native Mesh gen_mesh_heightmap(Image heightmap, Vector3 size);
 public native Mesh GenMeshCubicmap(Image cubicmap, Vector3 cubeSize);
 public native Mesh gen_mesh_cubicmap(Image cubicmap, Vector3 cubeSize);
-public native uint64 LoadMaterials(string fileName, int32[] materialCount);
-public native uint64 load_materials(string fileName, int32[] materialCount);
+public native Material LoadMaterials(string fileName, int32[] materialCount);
+public native Material load_materials(string fileName, int32[] materialCount);
 public native Material LoadMaterialDefault();
 public native Material load_material_default();
 public native bool IsMaterialValid(Material material);
 public native bool is_material_valid(Material material);
 public native void UnloadMaterial(Material material);
 public native void unload_material(Material material);
-public native void SetMaterialTexture(uint64 material, int32 mapType, Texture2D texture);
-public native void set_material_texture(uint64 material, int32 mapType, Texture2D texture);
+public native void SetMaterialTexture(Material material, int32 mapType, Texture2D texture);
+public native void set_material_texture(Material material, int32 mapType, Texture2D texture);
 public native void SetModelMeshMaterial(Model model, int32 meshId, int32 materialId);
 public native void set_model_mesh_material(Model model, int32 meshId, int32 materialId);
-public native uint64 LoadModelAnimations(string fileName, int32[] animCount);
-public native uint64 load_model_animations(string fileName, int32[] animCount);
+public native ModelAnimation LoadModelAnimations(string fileName, int32[] animCount);
+public native ModelAnimation load_model_animations(string fileName, int32[] animCount);
 public native void UpdateModelAnimation(Model model, ModelAnimation anim, float32 frame);
 public native void update_model_animation(Model model, ModelAnimation anim, float32 frame);
 public native void UpdateModelAnimationEx(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
 public native void update_model_animation_ex(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
-public native void UnloadModelAnimations(uint64 animations, int32 animCount);
-public native void unload_model_animations(uint64 animations, int32 animCount);
+public native void UnloadModelAnimations(ModelAnimation animations, int32 animCount);
+public native void unload_model_animations(ModelAnimation animations, int32 animCount);
 public native bool IsModelAnimationValid(Model model, ModelAnimation anim);
 public native bool is_model_animation_valid(Model model, ModelAnimation anim);
 public native bool CheckCollisionSpheres(Vector3 center1, float32 radius1, Vector3 center2, float32 radius2);
