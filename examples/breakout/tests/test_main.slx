@@ -1,0 +1,11 @@
+import raylib.*;
+
+public class TestRunner {
+    public static int32 test() {
+        Color background_color = new Color((uint8)18, (uint8)20, (uint8)30, (uint8)255);
+        if (background_color.r != (uint8)18) {
+            return 1;
+        }
+        return 0;
+    }
+}
