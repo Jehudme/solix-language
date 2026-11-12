@@ -4,8 +4,9 @@ use solix_common::bytecode::BinaryProgram;
 use solix_runtime::context::RuntimeContext;
 use solix_runtime::native::ffi::{
     SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, solix_vm_alloc_array, solix_vm_alloc_byte_array,
-    solix_vm_alloc_chars, solix_vm_alloc_string, solix_vm_array_get_u64, solix_vm_array_len,
-    solix_vm_array_set_u64, solix_vm_get_field_i32, solix_vm_read_bytes, solix_vm_set_field_i32,
+    solix_vm_alloc_chars, solix_vm_alloc_object, solix_vm_alloc_string, solix_vm_array_get_u64,
+    solix_vm_array_len, solix_vm_array_set_u64, solix_vm_get_field_i32, solix_vm_read_bytes,
+    solix_vm_read_field_u64, solix_vm_set_field_i32, solix_vm_write_field_u64,
 };
 use solix_runtime::options::RuntimeOptions;
 use solix_runtime::vm::VirtualMachine;
@@ -31,6 +32,9 @@ fn test_ffi_string_allocation_and_read() {
         array_len: solix_vm_array_len,
         array_get_u64: solix_vm_array_get_u64,
         array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -76,6 +80,9 @@ fn test_ffi_char_and_byte_arrays() {
         array_len: solix_vm_array_len,
         array_get_u64: solix_vm_array_get_u64,
         array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -148,6 +155,9 @@ fn test_ffi_generic_array_manipulation() {
         array_len: solix_vm_array_len,
         array_get_u64: solix_vm_array_get_u64,
         array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -189,5 +199,64 @@ fn test_ffi_generic_array_manipulation() {
     assert_eq!(
         unsafe { (context_wrapper.array_get_u64)(context_ptr, array_address, 5) },
         0
+    );
+}
+
+#[test]
+fn test_ffi_object_allocation_and_u64_fields() {
+    let options = RuntimeOptions::new().with_binary(BinaryProgram::new());
+    let context = RuntimeContext::new(options).expect("failed to construct context");
+    let mut virtual_machine = VirtualMachine::new(context);
+
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+    let mut context_wrapper = SolixVmContext {
+        magic: SOLIX_VM_CONTEXT_MAGIC,
+        vm_ptr: vm_pointer,
+        get_field_i32: solix_vm_get_field_i32,
+        set_field_i32: solix_vm_set_field_i32,
+        read_bytes: solix_vm_read_bytes,
+        alloc_string: solix_vm_alloc_string,
+        alloc_chars: solix_vm_alloc_chars,
+        alloc_byte_array: solix_vm_alloc_byte_array,
+        alloc_array: solix_vm_alloc_array,
+        array_len: solix_vm_array_len,
+        array_get_u64: solix_vm_array_get_u64,
+        array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
+    };
+    let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
+
+    let target_vtable_id: u32 = 42;
+    let field_slot_count: u32 = 4;
+    let object_address = unsafe {
+        (context_wrapper.alloc_object)(context_ptr, target_vtable_id, field_slot_count)
+    };
+    assert_ne!(object_address, 0, "Object allocation must return non-zero address");
+
+    // Write 64-bit field values at indices 0, 1, 2, 3
+    unsafe {
+        (context_wrapper.write_field_u64)(context_ptr, object_address, 0, 0x1122_3344_5566_7788);
+        (context_wrapper.write_field_u64)(context_ptr, object_address, 1, 0xAABB_CCDD_EEFF_0011);
+        (context_wrapper.write_field_u64)(context_ptr, object_address, 2, 1024);
+        (context_wrapper.write_field_u64)(context_ptr, object_address, 3, 2048);
+    }
+
+    assert_eq!(
+        unsafe { (context_wrapper.read_field_u64)(context_ptr, object_address, 0) },
+        0x1122_3344_5566_7788
+    );
+    assert_eq!(
+        unsafe { (context_wrapper.read_field_u64)(context_ptr, object_address, 1) },
+        0xAABB_CCDD_EEFF_0011
+    );
+    assert_eq!(
+        unsafe { (context_wrapper.read_field_u64)(context_ptr, object_address, 2) },
+        1024
+    );
+    assert_eq!(
+        unsafe { (context_wrapper.read_field_u64)(context_ptr, object_address, 3) },
+        2048
     );
 }

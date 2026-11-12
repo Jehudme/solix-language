@@ -1,0 +1,6 @@
+/build/
+/target/
+/natives/raylib/target/
+*.slxb
+*.slxarc
+__pycache__/

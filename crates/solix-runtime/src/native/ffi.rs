@@ -164,6 +164,18 @@ pub struct SolixVmContext {
     /// Sets a 64-bit element (int64, float64 bits, or ref u32) at `index` in a guest `ArrayRef`.
     pub array_set_u64:
         unsafe extern "C" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32, raw_val: u64),
+
+    /// Allocates an object on the guest heap with `class_vtable_id` and `field_count` 8-byte slots.
+    pub alloc_object:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, class_vtable_id: u32, field_count: u32) -> u32,
+
+    /// Reads a 64-bit field from an object at a field index or direct byte offset.
+    pub read_field_u64:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32) -> u64,
+
+    /// Writes a 64-bit field to an object at a field index or direct byte offset.
+    pub write_field_u64:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),
 }
 
 /// Stable C-ABI native function pointer signature.
@@ -242,6 +254,9 @@ pub fn invoke_c_native(
         array_len: solix_vm_array_len,
         array_get_u64: solix_vm_array_get_u64,
         array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -816,4 +831,107 @@ pub unsafe extern "C" fn solix_vm_array_set_u64(
             let _ = vm_instance.heap.write_u64(slot_address, raw_value);
         }
     }
+}
+
+/// Allocates an object on the guest heap with `class_vtable_id` and `field_count` 8-byte slots.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_alloc_object(
+    vm_context: *mut c_void,
+    class_vtable_id: u32,
+    field_count: u32,
+) -> u32 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    let payload_size = 8 + (field_count as usize) * 8;
+    let object_address = match vm_instance.heap.allocate(payload_size, BlockTag::Object) {
+        Ok(allocated_address) => allocated_address,
+        Err(_) => return 0,
+    };
+    let _ = vm_instance.heap.write_u32(object_address, class_vtable_id);
+    object_address
+}
+
+/// Reads a 64-bit field from an object at a field index or direct byte offset.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_read_field_u64(
+    vm_context: *mut c_void,
+    object_address: u32,
+    offset: u32,
+) -> u64 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    if object_address == 0 {
+        return 0;
+    }
+    let actual_offset = if offset < 8 {
+        let resolved_offset = vm_instance
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_id| vm_instance.context.get_class_by_vtable_id(vtable_id))
+            .and_then(|class_desc| {
+                let mut sorted_fields = class_desc.field_types.clone();
+                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
+                sorted_fields
+                    .get(offset as usize)
+                    .map(|&(field_offset, _)| field_offset as u32)
+            });
+        resolved_offset.unwrap_or(8 + offset * 8)
+    } else {
+        offset
+    };
+    vm_instance
+        .heap
+        .read_u64(object_address + actual_offset)
+        .unwrap_or(0)
+}
+
+/// Writes a 64-bit field to an object at a field index or direct byte offset.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_write_field_u64(
+    vm_context: *mut c_void,
+    object_address: u32,
+    offset: u32,
+    raw_value: u64,
+) {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return,
+    };
+    if object_address == 0 {
+        return;
+    }
+    let actual_offset = if offset < 8 {
+        let resolved_offset = vm_instance
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_id| vm_instance.context.get_class_by_vtable_id(vtable_id))
+            .and_then(|class_desc| {
+                let mut sorted_fields = class_desc.field_types.clone();
+                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
+                sorted_fields
+                    .get(offset as usize)
+                    .map(|&(field_offset, _)| field_offset as u32)
+            });
+        resolved_offset.unwrap_or(8 + offset * 8)
+    } else {
+        offset
+    };
+    let _ = vm_instance
+        .heap
+        .write_u64(object_address + actual_offset, raw_value);
 }
