@@ -3,7 +3,7 @@
 
 Automated 3-Step Execution Sequence:
 Step 1: Host rlparser compilation and API JSON extraction (build/.cache/api/raylib_api.json).
-Step 2: Schema-driven 1-to-1 codegen for Solix API (src/raylib.slx) and Rust bridge (natives/raylib/src/lib.rs).
+Step 2: Unified Two-Pass IR Codegen for Solix API (src/raylib.slx) and Rust bridge (natives/raylib/src/lib.rs).
 Step 3: Platform compilation (debug/test for host, release multi-target cross-compilation) and packaging.
 """
 
@@ -33,10 +33,7 @@ def step_1_extract_api(root_path: Path) -> Path:
         "cmake",
         "-B", str(cmake_host_directory),
         "-S", str(natives_raylib_directory),
-        "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-        "-DBUILD_EXAMPLES=OFF",
-        "-DBUILD_GAMES=OFF",
-        "-DBUILD_SHARED_LIBS=OFF",
+        "-DBUILD_HOST_PARSER_ONLY=ON",
         f"-DAPI_OUTPUT_FILE={api_schema_path}",
     ]
     configure_result = subprocess.run(cmake_configure_cmd, check=False)
@@ -51,14 +48,6 @@ def step_1_extract_api(root_path: Path) -> Path:
     if extract_result.returncode != 0:
         raise RuntimeError(f"CMake extract_api_json failed with code {extract_result.returncode}")
 
-    print("  [cmake] Compiling static raylib library...")
-    raylib_lib_result = subprocess.run(
-        ["cmake", "--build", str(cmake_host_directory), "--target", "raylib"],
-        check=False,
-    )
-    if raylib_lib_result.returncode != 0:
-        raise RuntimeError(f"CMake raylib build failed with code {raylib_lib_result.returncode}")
-
     if not api_schema_path.exists():
         raise FileNotFoundError(f"Expected generated API JSON schema not found at '{api_schema_path}'")
 
@@ -67,35 +56,42 @@ def step_1_extract_api(root_path: Path) -> Path:
 
 
 def step_2_codegen(root_path: Path, api_schema_path: Path) -> None:
-    """Executes schema-driven codegen for Solix declarations and Rust FFI companion bridge."""
+    """Executes schema-driven Two-Pass IR codegen for Solix declarations and Rust FFI bridge."""
     scripts_dir = root_path / "scripts"
     solix_output_file = root_path / "src" / "raylib.slx"
     rust_output_file = root_path / "natives" / "raylib" / "src" / "lib.rs"
 
-    print("=== [Step 2] Schema-Driven Code Generation ===")
-    solix_codegen_cmd = [
+    print("=== [Step 2] Unified Two-Pass IR Code Generation ===")
+    codegen_cmd = [
         sys.executable,
-        str(scripts_dir / "generate_solix_api.py"),
+        str(scripts_dir / "generate_bindings.py"),
         "--api", str(api_schema_path),
-        "--output", str(solix_output_file),
+        "--out-slx", str(solix_output_file),
+        "--out-rs", str(rust_output_file),
+        "--package", "raylib",
+        "--class-name", "Raylib",
     ]
-    print(f"  [codegen] Generating Solix API: {solix_output_file}...")
-    solix_result = subprocess.run(solix_codegen_cmd, check=False)
-    if solix_result.returncode != 0:
-        raise RuntimeError(f"Solix API codegen failed with code {solix_result.returncode}")
-
-    rust_codegen_cmd = [
-        sys.executable,
-        str(scripts_dir / "generate_rust_bridge.py"),
-        "--api", str(api_schema_path),
-        "--output", str(rust_output_file),
-    ]
-    print(f"  [codegen] Generating Rust FFI bridge: {rust_output_file}...")
-    rust_result = subprocess.run(rust_codegen_cmd, check=False)
-    if rust_result.returncode != 0:
-        raise RuntimeError(f"Rust bridge codegen failed with code {rust_result.returncode}")
+    print(f"  [codegen] Generating Solix API and Rust companion bridge...")
+    codegen_result = subprocess.run(codegen_cmd, check=False)
+    if codegen_result.returncode != 0:
+        raise RuntimeError(f"Binding codegen failed with code {codegen_result.returncode}")
 
     print("  [step 2] Codegen completed successfully.")
+
+
+def run_pipeline(build_profile: str = "debug", root_path: Path | None = None) -> Path:
+    """Executes the complete 3-step pipeline."""
+    target_root = root_path if root_path is not None else project_root
+
+    # Step 1: Host rlparser & API extraction
+    api_schema = step_1_extract_api(target_root)
+
+    # Step 2: Schema-driven Codegen
+    step_2_codegen(target_root, api_schema)
+
+    # Step 3: Platform compilation and packaging
+    print("=== [Step 3] Platform Compilation & Distribution Packaging ===")
+    return solix_toolbox.auto_build(profile=build_profile, project_root=target_root)
 
 
 def main() -> None:
@@ -114,15 +110,7 @@ def main() -> None:
         elif argument_item == "--debug":
             build_profile = "debug"
 
-    # Step 1: Host rlparser & API extraction
-    api_schema = step_1_extract_api(project_root)
-
-    # Step 2: Schema-driven Codegen
-    step_2_codegen(project_root, api_schema)
-
-    # Step 3: Platform compilation and packaging
-    print("=== [Step 3] Platform Compilation & Distribution Packaging ===")
-    solix_toolbox.auto_build(profile=build_profile, project_root=project_root)
+    run_pipeline(build_profile=build_profile, root_path=project_root)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 //! Auto-generated 1-to-1 Rust native bridge extension for Solix C-API bindings.
-//! Schema-driven codegen: zero hardcoded engine types.
+//! Generated via unified Two-Pass IR generator with zero hardcoded engine types.
 
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals, unused_variables, dead_code, unused_imports, unused_mut, clippy::all)]
 
@@ -76,7 +76,7 @@ pub type RegisterNativeCallback = unsafe extern "C" fn(
 );
 
 // ===========================================================================
-// Upstream Callback Function Signatures
+// Callback Function Signatures
 // ===========================================================================
 pub type TraceLogCallback = Option<unsafe extern "C" fn(log_level: c_int, text: *const c_char, args: *mut c_void)>;
 pub type LoadFileDataCallback = Option<unsafe extern "C" fn(file_name: *const c_char, data_size: *mut c_int) -> *mut u8>;
@@ -421,7 +421,7 @@ impl Default for C_BoneInfo {
 pub struct C_ModelSkeleton {
     pub boneCount: c_uint,
     pub bones: *mut C_BoneInfo,
-    pub bindPose: C_ModelAnimPose,
+    pub bindPose: *mut C_Transform,
 }
 
 impl Default for C_ModelSkeleton {
@@ -440,7 +440,7 @@ pub struct C_Model {
     pub materials: *mut C_Material,
     pub meshMaterial: *mut c_int,
     pub skeleton: C_ModelSkeleton,
-    pub currentPose: C_ModelAnimPose,
+    pub currentPose: *mut C_Transform,
     pub boneMatrices: *mut C_Matrix,
 }
 
@@ -456,7 +456,7 @@ pub struct C_ModelAnimation {
     pub name: [c_char; 32],
     pub boneCount: c_uint,
     pub keyframeCount: c_int,
-    pub keyframePoses: *mut c_void,
+    pub keyframePoses: *mut *mut C_Transform,
 }
 
 impl Default for C_ModelAnimation {
@@ -650,7 +650,6 @@ impl Default for C_AutomationEventList {
 // ===========================================================================
 // Struct Unpack, Pack & Writeback Helpers
 // ===========================================================================
-
 unsafe fn writeback_vector2(vm_context: *mut c_void, addr: u32, val: &C_Vector2) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
@@ -1374,7 +1373,7 @@ unsafe fn unpack_model_skeleton(vm_context: *mut c_void, addr: u32) -> C_ModelSk
     let mut result = C_ModelSkeleton::default();
     result.boneCount = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_uint;
     result.bones = ((*context_ptr).read_field_u64)(vm_context, addr, 1) as usize as *mut C_BoneInfo;
-    result.bindPose = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as usize as C_ModelAnimPose;
+    result.bindPose = ((*context_ptr).read_field_u64)(vm_context, addr, 2) as usize as *mut C_Transform;
     result
 }
 
@@ -1416,7 +1415,7 @@ unsafe fn unpack_model(vm_context: *mut c_void, addr: u32) -> C_Model {
     result.materials = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as usize as *mut C_Material;
     result.meshMaterial = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as usize as *mut c_int;
     result.skeleton = unpack_model_skeleton(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32);
-    result.currentPose = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as usize as C_ModelAnimPose;
+    result.currentPose = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as usize as *mut C_Transform;
     result.boneMatrices = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as usize as *mut C_Matrix;
     result
 }
@@ -1457,7 +1456,7 @@ unsafe fn unpack_model_animation(vm_context: *mut c_void, addr: u32) -> C_ModelA
     }
     result.boneCount = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_uint;
     result.keyframeCount = ((*context_ptr).get_field_i32)(vm_context, addr, 2) as c_int;
-    result.keyframePoses = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as usize as *mut c_void;
+    result.keyframePoses = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as usize as *mut *mut C_Transform;
     result
 }
 

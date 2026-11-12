@@ -4,11 +4,10 @@ use std::process::Command;
 
 fn find_libraylib(cache_directory: &Path) -> Option<PathBuf> {
     let candidate_paths = [
-        cache_directory.join("_deps").join("raylib-build").join("raylib").join("libraylib.a"),
+        cache_directory.join("lib").join("libraylib.a"),
         cache_directory.join("raylib").join("libraylib.a"),
+        cache_directory.join("_deps").join("raylib-build").join("raylib").join("libraylib.a"),
         cache_directory.join("libraylib.a"),
-        cache_directory.join("host").join("raylib").join("libraylib.a"),
-        cache_directory.join("host").join("_deps").join("raylib-build").join("raylib").join("libraylib.a"),
     ];
 
     for candidate in &candidate_paths {
@@ -28,36 +27,32 @@ fn main() {
         .expect("raylib root directory")
         .to_path_buf();
 
-    let host_cache_directory = project_root
-        .join("build")
-        .join(".cache")
-        .join("cmake")
-        .join("host");
+    let target_triple = env::var("TARGET").unwrap_or_else(|_| "host".to_string());
+    let cmake_base_cache = project_root.join("build").join(".cache").join("cmake");
 
-    let target_cache_directory = if let Ok(target_triple) = env::var("TARGET") {
-        project_root
-            .join("build")
-            .join(".cache")
-            .join("cmake")
-            .join(target_triple)
-    } else {
-        host_cache_directory.clone()
-    };
+    let candidate_dirs = [
+        cmake_base_cache.join(format!("target-{target_triple}")),
+        cmake_base_cache.join("target-host"),
+        cmake_base_cache.join(&target_triple),
+        cmake_base_cache.join("host"),
+    ];
 
     let library_file_option = if let Ok(custom_lib_directory) = env::var("RAYLIB_LIB_DIR") {
         find_libraylib(Path::new(&custom_lib_directory))
     } else {
-        find_libraylib(&target_cache_directory).or_else(|| find_libraylib(&host_cache_directory))
+        candidate_dirs.iter().find_map(|dir_path| find_libraylib(dir_path))
     };
 
     let final_library_file = match library_file_option {
         Some(found_library_path) => found_library_path,
         None => {
+            let target_cache_directory = cmake_base_cache.join(format!("target-{target_triple}"));
             let configure_status = Command::new("cmake")
                 .arg("-B")
-                .arg(&host_cache_directory)
+                .arg(&target_cache_directory)
                 .arg("-S")
                 .arg(&manifest_directory)
+                .arg("-DBUILD_HOST_PARSER_ONLY=OFF")
                 .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
                 .arg("-DBUILD_EXAMPLES=OFF")
                 .arg("-DBUILD_SHARED_LIBS=OFF")
@@ -70,7 +65,7 @@ fn main() {
 
             let build_status = Command::new("cmake")
                 .arg("--build")
-                .arg(&host_cache_directory)
+                .arg(&target_cache_directory)
                 .arg("--target")
                 .arg("raylib")
                 .status()
@@ -80,7 +75,7 @@ fn main() {
                 panic!("cmake build failed with status: {:?}", build_status);
             }
 
-            find_libraylib(&host_cache_directory).expect("libraylib.a must exist after cmake build")
+            find_libraylib(&target_cache_directory).expect("libraylib.a must exist after cmake build")
         }
     };
 

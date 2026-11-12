@@ -1,5 +1,5 @@
 // Auto-generated 1-to-1 C API bindings for the Solix Programming Language
-// Source schema: raylib_api.json
+// Generated via unified Two-Pass IR generator with zero hardcoded types.
 
 package raylib;
 
