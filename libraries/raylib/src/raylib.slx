@@ -1098,20 +1098,20 @@ public class Font {
     /// Texture atlas containing the glyphs
     public Texture2D texture;
     /// Rectangles in texture for the glyphs
-    public Rectangle recs;
+    public uint64 recs;
     /// Glyphs info data
-    public GlyphInfo glyphs;
+    public uint64 glyphs;
 
     public Font() {
         this.baseSize = 0;
         this.glyphCount = 0;
         this.glyphPadding = 0;
         this.texture = new Texture2D();
-        this.recs = new Rectangle();
-        this.glyphs = new GlyphInfo();
+        this.recs = (uint64)0;
+        this.glyphs = (uint64)0;
     }
 
-    public Font(int32 init_baseSize, int32 init_glyphCount, int32 init_glyphPadding, Texture2D init_texture, Rectangle init_recs, GlyphInfo init_glyphs) {
+    public Font(int32 init_baseSize, int32 init_glyphCount, int32 init_glyphPadding, Texture2D init_texture, uint64 init_recs, uint64 init_glyphs) {
         this.baseSize = init_baseSize;
         this.glyphCount = init_glyphCount;
         this.glyphPadding = init_glyphPadding;
@@ -1184,51 +1184,51 @@ public class Mesh {
     /// Number of triangles stored (indexed or not)
     public int32 triangleCount;
     /// Vertex position (XYZ - 3 components per vertex) (shader-location = 0)
-    public float32[] vertices;
+    public uint64 vertices;
     /// Vertex texture coordinates (UV - 2 components per vertex) (shader-location = 1)
-    public float32[] texcoords;
+    public uint64 texcoords;
     /// Vertex texture second coordinates (UV - 2 components per vertex) (shader-location = 5)
-    public float32[] texcoords2;
+    public uint64 texcoords2;
     /// Vertex normals (XYZ - 3 components per vertex) (shader-location = 2)
-    public float32[] normals;
+    public uint64 normals;
     /// Vertex tangents (XYZW - 4 components per vertex) (shader-location = 4)
-    public float32[] tangents;
+    public uint64 tangents;
     /// Vertex colors (RGBA - 4 components per vertex) (shader-location = 3)
-    public uint8[] colors;
+    public uint64 colors;
     /// Vertex indices (in case vertex data comes indexed)
-    public uint16[] indices;
+    public uint64 indices;
     /// Number of bones (MAX: 256 bones)
     public int32 boneCount;
     /// Vertex bone indices, up to 4 bones influence by vertex (skinning) (shader-location = 6)
-    public uint8[] boneIndices;
+    public uint64 boneIndices;
     /// Vertex bone weight, up to 4 bones influence by vertex (skinning) (shader-location = 7)
-    public float32[] boneWeights;
+    public uint64 boneWeights;
     /// Animated vertex positions (after bones transformations)
-    public float32[] animVertices;
+    public uint64 animVertices;
     /// Animated normals (after bones transformations)
-    public float32[] animNormals;
+    public uint64 animNormals;
     /// OpenGL Vertex Array Object id
     public uint32 vaoId;
     /// OpenGL Vertex Buffer Objects id (default vertex data)
-    public uint32[] vboId;
+    public uint64 vboId;
 
     public Mesh() {
         this.vertexCount = 0;
         this.triangleCount = 0;
-        this.vertices = new float32[0];
-        this.texcoords = new float32[0];
-        this.texcoords2 = new float32[0];
-        this.normals = new float32[0];
-        this.tangents = new float32[0];
-        this.colors = new uint8[0];
-        this.indices = new uint16[0];
+        this.vertices = (uint64)0;
+        this.texcoords = (uint64)0;
+        this.texcoords2 = (uint64)0;
+        this.normals = (uint64)0;
+        this.tangents = (uint64)0;
+        this.colors = (uint64)0;
+        this.indices = (uint64)0;
         this.boneCount = 0;
-        this.boneIndices = new uint8[0];
-        this.boneWeights = new float32[0];
-        this.animVertices = new float32[0];
-        this.animNormals = new float32[0];
+        this.boneIndices = (uint64)0;
+        this.boneWeights = (uint64)0;
+        this.animVertices = (uint64)0;
+        this.animNormals = (uint64)0;
         this.vaoId = (uint32)0;
-        this.vboId = new uint32[0];
+        this.vboId = (uint64)0;
     }
 }
 
@@ -1237,14 +1237,14 @@ public class Shader {
     /// Shader program id
     public uint32 id;
     /// Shader locations array (RL_MAX_SHADER_LOCATIONS)
-    public int32[] locs;
+    public uint64 locs;
 
     public Shader() {
         this.id = (uint32)0;
-        this.locs = new int32[0];
+        this.locs = (uint64)0;
     }
 
-    public Shader(uint32 init_id, int32[] init_locs) {
+    public Shader(uint32 init_id, uint64 init_locs) {
         this.id = init_id;
         this.locs = init_locs;
     }
@@ -1277,13 +1277,13 @@ public class Material {
     /// Material shader
     public Shader shader;
     /// Material maps array (MAX_MATERIAL_MAPS)
-    public MaterialMap maps;
+    public uint64 maps;
     /// Material generic parameters (if required)
     public float32[] params;
 
     public Material() {
         this.shader = new Shader();
-        this.maps = new MaterialMap();
+        this.maps = (uint64)0;
         this.params = new float32[4];
     }
 }
@@ -1328,17 +1328,17 @@ public class ModelSkeleton {
     /// Number of bones
     public uint32 boneCount;
     /// Bones information (skeleton)
-    public BoneInfo bones;
+    public uint64 bones;
     /// Bones base transformation (Transform[])
     public uint64 bindPose;
 
     public ModelSkeleton() {
         this.boneCount = (uint32)0;
-        this.bones = new BoneInfo();
+        this.bones = (uint64)0;
         this.bindPose = (uint64)0;
     }
 
-    public ModelSkeleton(uint32 init_boneCount, BoneInfo init_bones, uint64 init_bindPose) {
+    public ModelSkeleton(uint32 init_boneCount, uint64 init_bones, uint64 init_bindPose) {
         this.boneCount = init_boneCount;
         this.bones = init_bones;
         this.bindPose = init_bindPose;
@@ -1354,28 +1354,28 @@ public class Model {
     /// Number of materials
     public int32 materialCount;
     /// Meshes array
-    public Mesh meshes;
+    public uint64 meshes;
     /// Materials array
-    public Material materials;
+    public uint64 materials;
     /// Mesh material number
-    public int32[] meshMaterial;
+    public uint64 meshMaterial;
     /// Skeleton for animation
     public ModelSkeleton skeleton;
     /// Current animation pose (Transform[])
     public uint64 currentPose;
     /// Bones animated transformation matrices
-    public Matrix boneMatrices;
+    public uint64 boneMatrices;
 
     public Model() {
         this.transform = new Matrix();
         this.meshCount = 0;
         this.materialCount = 0;
-        this.meshes = new Mesh();
-        this.materials = new Material();
-        this.meshMaterial = new int32[0];
+        this.meshes = (uint64)0;
+        this.materials = (uint64)0;
+        this.meshMaterial = (uint64)0;
         this.skeleton = new ModelSkeleton();
         this.currentPose = (uint64)0;
-        this.boneMatrices = new Matrix();
+        this.boneMatrices = (uint64)0;
     }
 }
 
@@ -1638,14 +1638,14 @@ public class FilePathList {
     /// Filepaths entries count
     public uint32 count;
     /// Filepaths entries
-    public string[] paths;
+    public uint64 paths;
 
     public FilePathList() {
         this.count = (uint32)0;
-        this.paths = new string[0];
+        this.paths = (uint64)0;
     }
 
-    public FilePathList(uint32 init_count, string[] init_paths) {
+    public FilePathList(uint32 init_count, uint64 init_paths) {
         this.count = init_count;
         this.paths = init_paths;
     }
@@ -1674,15 +1674,15 @@ public class AutomationEventList {
     /// Events entries count
     public uint32 count;
     /// Events entries
-    public AutomationEvent events;
+    public uint64 events;
 
     public AutomationEventList() {
         this.capacity = (uint32)0;
         this.count = (uint32)0;
-        this.events = new AutomationEvent();
+        this.events = (uint64)0;
     }
 
-    public AutomationEventList(uint32 init_capacity, uint32 init_count, AutomationEvent init_events) {
+    public AutomationEventList(uint32 init_capacity, uint32 init_count, uint64 init_events) {
         this.capacity = init_capacity;
         this.count = init_count;
         this.events = init_events;
@@ -1721,12 +1721,13 @@ public class Camera extends Camera3D {
 // Primary Engine API (Class Raylib & Top-Level Functions)
 // ===========================================================================
 public class Raylib {
-    public static const float32 DEG2RAD = (float32)0.017453292519943295;
+    public static const int32 RAYLIB_VERSION_MAJOR = 6;
+    public static const int32 RAYLIB_VERSION_MINOR = 2;
+    public static const int32 RAYLIB_VERSION_PATCH = 0;
+    public static const string RAYLIB_VERSION = "6.2";
     public static const float32 PI = (float32)3.141592653589793;
+    public static const float32 DEG2RAD = (float32)0.017453292519943295;
     public static const float32 RAD2DEG = (float32)57.29577951308232;
-    public static const float32 RAYLIB_VERSION_MAJOR = (float32)6.0;
-    public static const float32 RAYLIB_VERSION_MINOR = (float32)2.0;
-    public static const float32 RAYLIB_VERSION_PATCH = (float32)0.0;
 
     /// Initialize window and OpenGL context
     public static native void InitWindow(int32 width, int32 height, string title);
@@ -2032,11 +2033,11 @@ public class Raylib {
     public static native int32 GetRandomValue(int32 min, int32 max);
     public static native int32 get_random_value(int32 min, int32 max);
     /// Load random values sequence, no values repeated
-    public static native int32[] LoadRandomSequence(uint32 count, int32 min, int32 max);
-    public static native int32[] load_random_sequence(uint32 count, int32 min, int32 max);
+    public static native uint64 LoadRandomSequence(uint32 count, int32 min, int32 max);
+    public static native uint64 load_random_sequence(uint32 count, int32 min, int32 max);
     /// Unload random values sequence
-    public static native void UnloadRandomSequence(int32[] sequence);
-    public static native void unload_random_sequence(int32[] sequence);
+    public static native void UnloadRandomSequence(uint64 sequence);
+    public static native void unload_random_sequence(uint64 sequence);
     /// Takes a screenshot of current screen (filename extension defines format)
     public static native void TakeScreenshot(string fileName);
     public static native void take_screenshot(string fileName);
@@ -2065,11 +2066,11 @@ public class Raylib {
     public static native void MemFree(uint64 ptr);
     public static native void mem_free(uint64 ptr);
     /// Load file data as byte array (read)
-    public static native uint8[] LoadFileData(string fileName, int32[] dataSize);
-    public static native uint8[] load_file_data(string fileName, int32[] dataSize);
+    public static native uint64 LoadFileData(string fileName, int32[] dataSize);
+    public static native uint64 load_file_data(string fileName, int32[] dataSize);
     /// Unload file data allocated by LoadFileData()
-    public static native void UnloadFileData(uint8[] data);
-    public static native void unload_file_data(uint8[] data);
+    public static native void UnloadFileData(uint64 data);
+    public static native void unload_file_data(uint64 data);
     /// Save data to file from byte array (write), returns true on success
     public static native bool SaveFileData(string fileName, uint64 data, int32 dataSize);
     public static native bool save_file_data(string fileName, uint64 data, int32 dataSize);
@@ -2197,29 +2198,29 @@ public class Raylib {
     public static native uint32 GetDirectoryFileCountEx(string basePath, string filter, bool scanSubdirs);
     public static native uint32 get_directory_file_count_ex(string basePath, string filter, bool scanSubdirs);
     /// Compress data (DEFLATE algorithm), memory must be MemFree()
-    public static native uint8[] CompressData(uint8[] data, int32 dataSize, int32[] compDataSize);
-    public static native uint8[] compress_data(uint8[] data, int32 dataSize, int32[] compDataSize);
+    public static native uint64 CompressData(uint8[] data, int32 dataSize, int32[] compDataSize);
+    public static native uint64 compress_data(uint8[] data, int32 dataSize, int32[] compDataSize);
     /// Decompress data (DEFLATE algorithm), memory must be MemFree()
-    public static native uint8[] DecompressData(uint8[] compData, int32 compDataSize, int32[] dataSize);
-    public static native uint8[] decompress_data(uint8[] compData, int32 compDataSize, int32[] dataSize);
+    public static native uint64 DecompressData(uint8[] compData, int32 compDataSize, int32[] dataSize);
+    public static native uint64 decompress_data(uint8[] compData, int32 compDataSize, int32[] dataSize);
     /// Encode data to Base64 string (includes NULL terminator), memory must be MemFree()
     public static native string EncodeDataBase64(uint8[] data, int32 dataSize, int32[] outputSize);
     public static native string encode_data_base64(uint8[] data, int32 dataSize, int32[] outputSize);
     /// Decode Base64 string (expected NULL terminated), memory must be MemFree()
-    public static native uint8[] DecodeDataBase64(string text, int32[] outputSize);
-    public static native uint8[] decode_data_base64(string text, int32[] outputSize);
+    public static native uint64 DecodeDataBase64(string text, int32[] outputSize);
+    public static native uint64 decode_data_base64(string text, int32[] outputSize);
     /// Compute CRC32 hash code
     public static native uint32 ComputeCRC32(uint8[] data, int32 dataSize);
     public static native uint32 compute_crc32(uint8[] data, int32 dataSize);
     /// Compute MD5 hash code, returns static int[4] (16 bytes)
-    public static native uint32[] ComputeMD5(uint8[] data, int32 dataSize);
-    public static native uint32[] compute_md5(uint8[] data, int32 dataSize);
+    public static native uint64 ComputeMD5(uint8[] data, int32 dataSize);
+    public static native uint64 compute_md5(uint8[] data, int32 dataSize);
     /// Compute SHA1 hash code, returns static int[5] (20 bytes)
-    public static native uint32[] ComputeSHA1(uint8[] data, int32 dataSize);
-    public static native uint32[] compute_sha1(uint8[] data, int32 dataSize);
+    public static native uint64 ComputeSHA1(uint8[] data, int32 dataSize);
+    public static native uint64 compute_sha1(uint8[] data, int32 dataSize);
     /// Compute SHA256 hash code, returns static int[8] (32 bytes)
-    public static native uint32[] ComputeSHA256(uint8[] data, int32 dataSize);
-    public static native uint32[] compute_sha256(uint8[] data, int32 dataSize);
+    public static native uint64 ComputeSHA256(uint8[] data, int32 dataSize);
+    public static native uint64 compute_sha256(uint8[] data, int32 dataSize);
     /// Load automation events list from file, NULL for empty list, capacity = MAX_AUTOMATION_EVENTS
     public static native AutomationEventList LoadAutomationEventList(string fileName);
     public static native AutomationEventList load_automation_event_list(string fileName);
@@ -2647,8 +2648,8 @@ public class Raylib {
     public static native bool ExportImage(Image image, string fileName);
     public static native bool export_image(Image image, string fileName);
     /// Export image to memory buffer, memory must be MemFree()
-    public static native uint8[] ExportImageToMemory(Image image, string fileType, int32[] fileSize);
-    public static native uint8[] export_image_to_memory(Image image, string fileType, int32[] fileSize);
+    public static native uint64 ExportImageToMemory(Image image, string fileType, int32[] fileSize);
+    public static native uint64 export_image_to_memory(Image image, string fileType, int32[] fileSize);
     /// Export image as code file defining an array of bytes, returns true on success
     public static native bool ExportImageAsCode(Image image, string fileName);
     public static native bool export_image_as_code(Image image, string fileName);
@@ -2770,17 +2771,17 @@ public class Raylib {
     public static native void ImageColorReplace(Image image, Color color, Color replace);
     public static native void image_color_replace(Image image, Color color, Color replace);
     /// Load color data from image as a Color array (RGBA - 32bit)
-    public static native Color LoadImageColors(Image image);
-    public static native Color load_image_colors(Image image);
+    public static native uint64 LoadImageColors(Image image);
+    public static native uint64 load_image_colors(Image image);
     /// Load colors palette from image as a Color array (RGBA - 32bit)
-    public static native Color LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
-    public static native Color load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
+    public static native uint64 LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
+    public static native uint64 load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
     /// Unload color data loaded with LoadImageColors()
-    public static native void UnloadImageColors(Color colors);
-    public static native void unload_image_colors(Color colors);
+    public static native void UnloadImageColors(uint64 colors);
+    public static native void unload_image_colors(uint64 colors);
     /// Unload colors palette loaded with LoadImagePalette()
-    public static native void UnloadImagePalette(Color colors);
-    public static native void unload_image_palette(Color colors);
+    public static native void UnloadImagePalette(uint64 colors);
+    public static native void unload_image_palette(uint64 colors);
     /// Get image alpha border rectangle
     public static native Rectangle GetImageAlphaBorder(Image image, float32 threshold);
     public static native Rectangle get_image_alpha_border(Image image, float32 threshold);
@@ -3010,14 +3011,14 @@ public class Raylib {
     public static native bool IsFontValid(Font font);
     public static native bool is_font_valid(Font font);
     /// Load font data for further use
-    public static native GlyphInfo LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
-    public static native GlyphInfo load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+    public static native uint64 LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+    public static native uint64 load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
     /// Generate image font atlas using chars info
     public static native Image GenImageFontAtlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
     public static native Image gen_image_font_atlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
     /// Unload font chars info data (RAM)
-    public static native void UnloadFontData(GlyphInfo glyphs, int32 glyphCount);
-    public static native void unload_font_data(GlyphInfo glyphs, int32 glyphCount);
+    public static native void UnloadFontData(uint64 glyphs, int32 glyphCount);
+    public static native void unload_font_data(uint64 glyphs, int32 glyphCount);
     /// Unload font from GPU memory (VRAM)
     public static native void UnloadFont(Font font);
     public static native void unload_font(Font font);
@@ -3070,11 +3071,11 @@ public class Raylib {
     public static native void UnloadUTF8(string text);
     public static native void unload_utf8(string text);
     /// Load all codepoints from a UTF-8 text string, codepoints count returned by parameter
-    public static native int32[] LoadCodepoints(string text, int32[] count);
-    public static native int32[] load_codepoints(string text, int32[] count);
+    public static native uint64 LoadCodepoints(string text, int32[] count);
+    public static native uint64 load_codepoints(string text, int32[] count);
     /// Unload codepoints data from memory
-    public static native void UnloadCodepoints(int32[] codepoints);
-    public static native void unload_codepoints(int32[] codepoints);
+    public static native void UnloadCodepoints(uint64 codepoints);
+    public static native void unload_codepoints(uint64 codepoints);
     /// Get total number of codepoints in a UTF-8 encoded string
     public static native int32 GetCodepointCount(string text);
     public static native int32 get_codepoint_count(string text);
@@ -3091,11 +3092,11 @@ public class Raylib {
     public static native string CodepointToUTF8(int32 codepoint, int32[] utf8Size);
     public static native string codepoint_to_utf8(int32 codepoint, int32[] utf8Size);
     /// Load text as separate lines ('\n')
-    public static native string[] LoadTextLines(string text, int32[] count);
-    public static native string[] load_text_lines(string text, int32[] count);
+    public static native uint64 LoadTextLines(string text, int32[] count);
+    public static native uint64 load_text_lines(string text, int32[] count);
     /// Unload text lines
-    public static native void UnloadTextLines(string[] text, int32 lineCount);
-    public static native void unload_text_lines(string[] text, int32 lineCount);
+    public static native void UnloadTextLines(uint64 text, int32 lineCount);
+    public static native void unload_text_lines(uint64 text, int32 lineCount);
     /// Copy one string to another, returns bytes copied
     public static native int32 TextCopy(string dst, string src);
     public static native int32 text_copy(string dst, string src);
@@ -3139,8 +3140,8 @@ public class Raylib {
     public static native string TextJoin(string[] textList, int32 count, string delimiter);
     public static native string text_join(string[] textList, int32 count, string delimiter);
     /// Split text into multiple strings, using MAX_TEXTSPLIT_COUNT static strings
-    public static native string[] TextSplit(string text, int8 delimiter, int32[] count);
-    public static native string[] text_split(string text, int8 delimiter, int32[] count);
+    public static native uint64 TextSplit(string text, int8 delimiter, int32[] count);
+    public static native uint64 text_split(string text, int8 delimiter, int32[] count);
     /// Append text at specific position and move cursor
     public static native void TextAppend(string text, string append, int32[] position);
     public static native void text_append(string text, string append, int32[] position);
@@ -3331,8 +3332,8 @@ public class Raylib {
     public static native Mesh GenMeshCubicmap(Image cubicmap, Vector3 cubeSize);
     public static native Mesh gen_mesh_cubicmap(Image cubicmap, Vector3 cubeSize);
     /// Load materials from model file
-    public static native Material LoadMaterials(string fileName, int32[] materialCount);
-    public static native Material load_materials(string fileName, int32[] materialCount);
+    public static native uint64 LoadMaterials(string fileName, int32[] materialCount);
+    public static native uint64 load_materials(string fileName, int32[] materialCount);
     /// Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
     public static native Material LoadMaterialDefault();
     public static native Material load_material_default();
@@ -3349,8 +3350,8 @@ public class Raylib {
     public static native void SetModelMeshMaterial(Model model, int32 meshId, int32 materialId);
     public static native void set_model_mesh_material(Model model, int32 meshId, int32 materialId);
     /// Load model animations from file
-    public static native ModelAnimation LoadModelAnimations(string fileName, int32[] animCount);
-    public static native ModelAnimation load_model_animations(string fileName, int32[] animCount);
+    public static native uint64 LoadModelAnimations(string fileName, int32[] animCount);
+    public static native uint64 load_model_animations(string fileName, int32[] animCount);
     /// Update model animation pose (vertex buffers and bone matrices)
     public static native void UpdateModelAnimation(Model model, ModelAnimation anim, float32 frame);
     public static native void update_model_animation(Model model, ModelAnimation anim, float32 frame);
@@ -3358,8 +3359,8 @@ public class Raylib {
     public static native void UpdateModelAnimationEx(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
     public static native void update_model_animation_ex(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
     /// Unload animation array data
-    public static native void UnloadModelAnimations(ModelAnimation animations, int32 animCount);
-    public static native void unload_model_animations(ModelAnimation animations, int32 animCount);
+    public static native void UnloadModelAnimations(uint64 animations, int32 animCount);
+    public static native void unload_model_animations(uint64 animations, int32 animCount);
     /// Check model animation skeleton match
     public static native bool IsModelAnimationValid(Model model, ModelAnimation anim);
     public static native bool is_model_animation_valid(Model model, ModelAnimation anim);
@@ -3475,11 +3476,11 @@ public class Raylib {
     public static native void WaveFormat(Wave wave, int32 sampleRate, int32 sampleSize, int32 channels);
     public static native void wave_format(Wave wave, int32 sampleRate, int32 sampleSize, int32 channels);
     /// Load samples data from wave as a 32bit float data array
-    public static native float32[] LoadWaveSamples(Wave wave);
-    public static native float32[] load_wave_samples(Wave wave);
+    public static native uint64 LoadWaveSamples(Wave wave);
+    public static native uint64 load_wave_samples(Wave wave);
     /// Unload samples data loaded with LoadWaveSamples()
-    public static native void UnloadWaveSamples(float32[] samples);
-    public static native void unload_wave_samples(float32[] samples);
+    public static native void UnloadWaveSamples(uint64 samples);
+    public static native void unload_wave_samples(uint64 samples);
     /// Load music stream from file
     public static native Music LoadMusicStream(string fileName);
     public static native Music load_music_stream(string fileName);
@@ -3790,10 +3791,10 @@ public native void SetRandomSeed(uint32 seed);
 public native void set_random_seed(uint32 seed);
 public native int32 GetRandomValue(int32 min, int32 max);
 public native int32 get_random_value(int32 min, int32 max);
-public native int32[] LoadRandomSequence(uint32 count, int32 min, int32 max);
-public native int32[] load_random_sequence(uint32 count, int32 min, int32 max);
-public native void UnloadRandomSequence(int32[] sequence);
-public native void unload_random_sequence(int32[] sequence);
+public native uint64 LoadRandomSequence(uint32 count, int32 min, int32 max);
+public native uint64 load_random_sequence(uint32 count, int32 min, int32 max);
+public native void UnloadRandomSequence(uint64 sequence);
+public native void unload_random_sequence(uint64 sequence);
 public native void TakeScreenshot(string fileName);
 public native void take_screenshot(string fileName);
 public native void SetConfigFlags(uint32 flags);
@@ -3812,10 +3813,10 @@ public native uint64 MemRealloc(uint64 ptr, uint32 size);
 public native uint64 mem_realloc(uint64 ptr, uint32 size);
 public native void MemFree(uint64 ptr);
 public native void mem_free(uint64 ptr);
-public native uint8[] LoadFileData(string fileName, int32[] dataSize);
-public native uint8[] load_file_data(string fileName, int32[] dataSize);
-public native void UnloadFileData(uint8[] data);
-public native void unload_file_data(uint8[] data);
+public native uint64 LoadFileData(string fileName, int32[] dataSize);
+public native uint64 load_file_data(string fileName, int32[] dataSize);
+public native void UnloadFileData(uint64 data);
+public native void unload_file_data(uint64 data);
 public native bool SaveFileData(string fileName, uint64 data, int32 dataSize);
 public native bool save_file_data(string fileName, uint64 data, int32 dataSize);
 public native bool ExportDataAsCode(uint8[] data, int32 dataSize, string fileName);
@@ -3900,22 +3901,22 @@ public native uint32 GetDirectoryFileCount(string dirPath);
 public native uint32 get_directory_file_count(string dirPath);
 public native uint32 GetDirectoryFileCountEx(string basePath, string filter, bool scanSubdirs);
 public native uint32 get_directory_file_count_ex(string basePath, string filter, bool scanSubdirs);
-public native uint8[] CompressData(uint8[] data, int32 dataSize, int32[] compDataSize);
-public native uint8[] compress_data(uint8[] data, int32 dataSize, int32[] compDataSize);
-public native uint8[] DecompressData(uint8[] compData, int32 compDataSize, int32[] dataSize);
-public native uint8[] decompress_data(uint8[] compData, int32 compDataSize, int32[] dataSize);
+public native uint64 CompressData(uint8[] data, int32 dataSize, int32[] compDataSize);
+public native uint64 compress_data(uint8[] data, int32 dataSize, int32[] compDataSize);
+public native uint64 DecompressData(uint8[] compData, int32 compDataSize, int32[] dataSize);
+public native uint64 decompress_data(uint8[] compData, int32 compDataSize, int32[] dataSize);
 public native string EncodeDataBase64(uint8[] data, int32 dataSize, int32[] outputSize);
 public native string encode_data_base64(uint8[] data, int32 dataSize, int32[] outputSize);
-public native uint8[] DecodeDataBase64(string text, int32[] outputSize);
-public native uint8[] decode_data_base64(string text, int32[] outputSize);
+public native uint64 DecodeDataBase64(string text, int32[] outputSize);
+public native uint64 decode_data_base64(string text, int32[] outputSize);
 public native uint32 ComputeCRC32(uint8[] data, int32 dataSize);
 public native uint32 compute_crc32(uint8[] data, int32 dataSize);
-public native uint32[] ComputeMD5(uint8[] data, int32 dataSize);
-public native uint32[] compute_md5(uint8[] data, int32 dataSize);
-public native uint32[] ComputeSHA1(uint8[] data, int32 dataSize);
-public native uint32[] compute_sha1(uint8[] data, int32 dataSize);
-public native uint32[] ComputeSHA256(uint8[] data, int32 dataSize);
-public native uint32[] compute_sha256(uint8[] data, int32 dataSize);
+public native uint64 ComputeMD5(uint8[] data, int32 dataSize);
+public native uint64 compute_md5(uint8[] data, int32 dataSize);
+public native uint64 ComputeSHA1(uint8[] data, int32 dataSize);
+public native uint64 compute_sha1(uint8[] data, int32 dataSize);
+public native uint64 ComputeSHA256(uint8[] data, int32 dataSize);
+public native uint64 compute_sha256(uint8[] data, int32 dataSize);
 public native AutomationEventList LoadAutomationEventList(string fileName);
 public native AutomationEventList load_automation_event_list(string fileName);
 public native void UnloadAutomationEventList(AutomationEventList list);
@@ -4200,8 +4201,8 @@ public native void UnloadImage(Image image);
 public native void unload_image(Image image);
 public native bool ExportImage(Image image, string fileName);
 public native bool export_image(Image image, string fileName);
-public native uint8[] ExportImageToMemory(Image image, string fileType, int32[] fileSize);
-public native uint8[] export_image_to_memory(Image image, string fileType, int32[] fileSize);
+public native uint64 ExportImageToMemory(Image image, string fileType, int32[] fileSize);
+public native uint64 export_image_to_memory(Image image, string fileType, int32[] fileSize);
 public native bool ExportImageAsCode(Image image, string fileName);
 public native bool export_image_as_code(Image image, string fileName);
 public native Image GenImageColor(int32 width, int32 height, Color color);
@@ -4282,14 +4283,14 @@ public native void ImageColorBrightness(Image image, int32 brightness);
 public native void image_color_brightness(Image image, int32 brightness);
 public native void ImageColorReplace(Image image, Color color, Color replace);
 public native void image_color_replace(Image image, Color color, Color replace);
-public native Color LoadImageColors(Image image);
-public native Color load_image_colors(Image image);
-public native Color LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
-public native Color load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
-public native void UnloadImageColors(Color colors);
-public native void unload_image_colors(Color colors);
-public native void UnloadImagePalette(Color colors);
-public native void unload_image_palette(Color colors);
+public native uint64 LoadImageColors(Image image);
+public native uint64 load_image_colors(Image image);
+public native uint64 LoadImagePalette(Image image, int32 maxPaletteSize, int32[] colorCount);
+public native uint64 load_image_palette(Image image, int32 maxPaletteSize, int32[] colorCount);
+public native void UnloadImageColors(uint64 colors);
+public native void unload_image_colors(uint64 colors);
+public native void UnloadImagePalette(uint64 colors);
+public native void unload_image_palette(uint64 colors);
 public native Rectangle GetImageAlphaBorder(Image image, float32 threshold);
 public native Rectangle get_image_alpha_border(Image image, float32 threshold);
 public native Color GetImageColor(Image image, int32 x, int32 y);
@@ -4442,12 +4443,12 @@ public native Font LoadFontFromMemory(string fileType, uint8[] fileData, int32 d
 public native Font load_font_from_memory(string fileType, uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount);
 public native bool IsFontValid(Font font);
 public native bool is_font_valid(Font font);
-public native GlyphInfo LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
-public native GlyphInfo load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+public native uint64 LoadFontData(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
+public native uint64 load_font_data(uint8[] fileData, int32 dataSize, int32 fontSize, int32[] codepoints, int32 codepointCount, int32 type, int32[] glyphCount);
 public native Image GenImageFontAtlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
 public native Image gen_image_font_atlas(GlyphInfo[] glyphs, uint64 glyphRecs, int32 glyphCount, int32 fontSize, int32 padding, int32 packMethod);
-public native void UnloadFontData(GlyphInfo glyphs, int32 glyphCount);
-public native void unload_font_data(GlyphInfo glyphs, int32 glyphCount);
+public native void UnloadFontData(uint64 glyphs, int32 glyphCount);
+public native void unload_font_data(uint64 glyphs, int32 glyphCount);
 public native void UnloadFont(Font font);
 public native void unload_font(Font font);
 public native bool ExportFontAsCode(Font font, string fileName);
@@ -4482,10 +4483,10 @@ public native string LoadUTF8(int32[] codepoints, int32 length);
 public native string load_utf8(int32[] codepoints, int32 length);
 public native void UnloadUTF8(string text);
 public native void unload_utf8(string text);
-public native int32[] LoadCodepoints(string text, int32[] count);
-public native int32[] load_codepoints(string text, int32[] count);
-public native void UnloadCodepoints(int32[] codepoints);
-public native void unload_codepoints(int32[] codepoints);
+public native uint64 LoadCodepoints(string text, int32[] count);
+public native uint64 load_codepoints(string text, int32[] count);
+public native void UnloadCodepoints(uint64 codepoints);
+public native void unload_codepoints(uint64 codepoints);
 public native int32 GetCodepointCount(string text);
 public native int32 get_codepoint_count(string text);
 public native int32 GetCodepoint(string text, int32[] codepointSize);
@@ -4496,10 +4497,10 @@ public native int32 GetCodepointPrevious(string text, int32[] codepointSize);
 public native int32 get_codepoint_previous(string text, int32[] codepointSize);
 public native string CodepointToUTF8(int32 codepoint, int32[] utf8Size);
 public native string codepoint_to_utf8(int32 codepoint, int32[] utf8Size);
-public native string[] LoadTextLines(string text, int32[] count);
-public native string[] load_text_lines(string text, int32[] count);
-public native void UnloadTextLines(string[] text, int32 lineCount);
-public native void unload_text_lines(string[] text, int32 lineCount);
+public native uint64 LoadTextLines(string text, int32[] count);
+public native uint64 load_text_lines(string text, int32[] count);
+public native void UnloadTextLines(uint64 text, int32 lineCount);
+public native void unload_text_lines(uint64 text, int32 lineCount);
 public native int32 TextCopy(string dst, string src);
 public native int32 text_copy(string dst, string src);
 public native bool TextIsEqual(string text1, string text2);
@@ -4528,8 +4529,8 @@ public native string TextInsertAlloc(string text, string insert, int32 position)
 public native string text_insert_alloc(string text, string insert, int32 position);
 public native string TextJoin(string[] textList, int32 count, string delimiter);
 public native string text_join(string[] textList, int32 count, string delimiter);
-public native string[] TextSplit(string text, int8 delimiter, int32[] count);
-public native string[] text_split(string text, int8 delimiter, int32[] count);
+public native uint64 TextSplit(string text, int8 delimiter, int32[] count);
+public native uint64 text_split(string text, int8 delimiter, int32[] count);
 public native void TextAppend(string text, string append, int32[] position);
 public native void text_append(string text, string append, int32[] position);
 public native int32 TextFindIndex(string text, string search);
@@ -4656,8 +4657,8 @@ public native Mesh GenMeshHeightmap(Image heightmap, Vector3 size);
 public native Mesh gen_mesh_heightmap(Image heightmap, Vector3 size);
 public native Mesh GenMeshCubicmap(Image cubicmap, Vector3 cubeSize);
 public native Mesh gen_mesh_cubicmap(Image cubicmap, Vector3 cubeSize);
-public native Material LoadMaterials(string fileName, int32[] materialCount);
-public native Material load_materials(string fileName, int32[] materialCount);
+public native uint64 LoadMaterials(string fileName, int32[] materialCount);
+public native uint64 load_materials(string fileName, int32[] materialCount);
 public native Material LoadMaterialDefault();
 public native Material load_material_default();
 public native bool IsMaterialValid(Material material);
@@ -4668,14 +4669,14 @@ public native void SetMaterialTexture(Material material, int32 mapType, Texture2
 public native void set_material_texture(Material material, int32 mapType, Texture2D texture);
 public native void SetModelMeshMaterial(Model model, int32 meshId, int32 materialId);
 public native void set_model_mesh_material(Model model, int32 meshId, int32 materialId);
-public native ModelAnimation LoadModelAnimations(string fileName, int32[] animCount);
-public native ModelAnimation load_model_animations(string fileName, int32[] animCount);
+public native uint64 LoadModelAnimations(string fileName, int32[] animCount);
+public native uint64 load_model_animations(string fileName, int32[] animCount);
 public native void UpdateModelAnimation(Model model, ModelAnimation anim, float32 frame);
 public native void update_model_animation(Model model, ModelAnimation anim, float32 frame);
 public native void UpdateModelAnimationEx(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
 public native void update_model_animation_ex(Model model, ModelAnimation animA, float32 frameA, ModelAnimation animB, float32 frameB, float32 blend);
-public native void UnloadModelAnimations(ModelAnimation animations, int32 animCount);
-public native void unload_model_animations(ModelAnimation animations, int32 animCount);
+public native void UnloadModelAnimations(uint64 animations, int32 animCount);
+public native void unload_model_animations(uint64 animations, int32 animCount);
 public native bool IsModelAnimationValid(Model model, ModelAnimation anim);
 public native bool is_model_animation_valid(Model model, ModelAnimation anim);
 public native bool CheckCollisionSpheres(Vector3 center1, float32 radius1, Vector3 center2, float32 radius2);
@@ -4752,10 +4753,10 @@ public native void WaveCrop(Wave wave, int32 initFrame, int32 finalFrame);
 public native void wave_crop(Wave wave, int32 initFrame, int32 finalFrame);
 public native void WaveFormat(Wave wave, int32 sampleRate, int32 sampleSize, int32 channels);
 public native void wave_format(Wave wave, int32 sampleRate, int32 sampleSize, int32 channels);
-public native float32[] LoadWaveSamples(Wave wave);
-public native float32[] load_wave_samples(Wave wave);
-public native void UnloadWaveSamples(float32[] samples);
-public native void unload_wave_samples(float32[] samples);
+public native uint64 LoadWaveSamples(Wave wave);
+public native uint64 load_wave_samples(Wave wave);
+public native void UnloadWaveSamples(uint64 samples);
+public native void unload_wave_samples(uint64 samples);
 public native Music LoadMusicStream(string fileName);
 public native Music load_music_stream(string fileName);
 public native Music LoadMusicStreamFromMemory(string fileType, uint8[] data, int32 dataSize);

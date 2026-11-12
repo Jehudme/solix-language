@@ -785,12 +785,22 @@ pub unsafe extern "C" fn solix_vm_array_get_u64(
         .read_u8(array_address + 4)
         .unwrap_or(8)
         .max(1) as usize;
+    let type_tag = vm_instance
+        .heap
+        .read_u8(array_address + 7)
+        .unwrap_or(0);
     let slot_address = array_address + 8 + (element_index * element_size as u32);
-    match element_size {
-        1 => vm_instance.heap.read_u8(slot_address).unwrap_or(0) as u64,
-        2 => vm_instance.heap.read_u16(slot_address).unwrap_or(0) as u64,
-        4 => vm_instance.heap.read_u32(slot_address).unwrap_or(0) as u64,
-        _ => vm_instance.heap.read_u64(slot_address).unwrap_or(0),
+    if type_tag == 9 {
+        let raw_u32 = vm_instance.heap.read_u32(slot_address).unwrap_or(0);
+        let float_val = f32::from_bits(raw_u32);
+        (float_val as f64).to_bits()
+    } else {
+        match element_size {
+            1 => vm_instance.heap.read_u8(slot_address).unwrap_or(0) as u64,
+            2 => vm_instance.heap.read_u16(slot_address).unwrap_or(0) as u64,
+            4 => vm_instance.heap.read_u32(slot_address).unwrap_or(0) as u64,
+            _ => vm_instance.heap.read_u64(slot_address).unwrap_or(0),
+        }
     }
 }
 
@@ -821,19 +831,28 @@ pub unsafe extern "C" fn solix_vm_array_set_u64(
         .read_u8(array_address + 4)
         .unwrap_or(8)
         .max(1) as usize;
+    let type_tag = vm_instance
+        .heap
+        .read_u8(array_address + 7)
+        .unwrap_or(0);
     let slot_address = array_address + 8 + (element_index * element_size as u32);
-    match element_size {
-        1 => {
-            let _ = vm_instance.heap.write_u8(slot_address, raw_value as u8);
-        }
-        2 => {
-            let _ = vm_instance.heap.write_u16(slot_address, raw_value as u16);
-        }
-        4 => {
-            let _ = vm_instance.heap.write_u32(slot_address, raw_value as u32);
-        }
-        _ => {
-            let _ = vm_instance.heap.write_u64(slot_address, raw_value);
+    if type_tag == 9 {
+        let float_val = f64::from_bits(raw_value) as f32;
+        let _ = vm_instance.heap.write_u32(slot_address, float_val.to_bits());
+    } else {
+        match element_size {
+            1 => {
+                let _ = vm_instance.heap.write_u8(slot_address, raw_value as u8);
+            }
+            2 => {
+                let _ = vm_instance.heap.write_u16(slot_address, raw_value as u16);
+            }
+            4 => {
+                let _ = vm_instance.heap.write_u32(slot_address, raw_value as u32);
+            }
+            _ => {
+                let _ = vm_instance.heap.write_u64(slot_address, raw_value);
+            }
         }
     }
 }
@@ -878,27 +897,65 @@ pub unsafe extern "C" fn solix_vm_read_field_u64(
     if object_address == 0 {
         return 0;
     }
-    let actual_offset = if offset < 8 {
-        let resolved_offset = vm_instance
+    let (actual_offset, field_tag) = if offset < 8 {
+        let resolved_info = vm_instance
             .heap
             .read_u32(object_address)
             .ok()
-            .and_then(|vtable_id| vm_instance.context.get_class_by_vtable_id(vtable_id))
-            .and_then(|class_desc| {
-                let mut sorted_fields = class_desc.field_types.clone();
-                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
-                sorted_fields
-                    .get(offset as usize)
-                    .map(|&(field_offset, _)| field_offset as u32)
+            .and_then(|vtable_identifier| vm_instance.context.get_class_by_vtable_id(vtable_identifier))
+            .and_then(|class_descriptor| {
+                let mut sorted_field_list = class_descriptor.field_types.clone();
+                sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
+                sorted_field_list.get(offset as usize).copied()
             });
-        resolved_offset.unwrap_or(8 + offset * 8)
+        match resolved_info {
+            Some((field_offset, type_tag_val)) => (field_offset as u32, Some(type_tag_val)),
+            None => (8 + offset * 8, None),
+        }
     } else {
-        offset
+        let resolved_tag = vm_instance
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_identifier| vm_instance.context.get_class_by_vtable_id(vtable_identifier))
+            .and_then(|class_descriptor| class_descriptor.get_field_type(offset as usize));
+        (offset, resolved_tag)
     };
-    vm_instance
-        .heap
-        .read_u64(object_address + actual_offset)
-        .unwrap_or(0)
+
+    match field_tag {
+        Some(1) | Some(2) | Some(11) => {
+            vm_instance
+                .heap
+                .read_u8(object_address + actual_offset)
+                .unwrap_or(0) as u64
+        }
+        Some(3) | Some(4) => {
+            vm_instance
+                .heap
+                .read_u16(object_address + actual_offset)
+                .unwrap_or(0) as u64
+        }
+        Some(5) | Some(6) => {
+            vm_instance
+                .heap
+                .read_u32(object_address + actual_offset)
+                .unwrap_or(0) as u64
+        }
+        Some(9) => {
+            let raw_u32_bits = vm_instance
+                .heap
+                .read_u32(object_address + actual_offset)
+                .unwrap_or(0);
+            let float_value = f32::from_bits(raw_u32_bits);
+            (float_value as f64).to_bits()
+        }
+        _ => {
+            vm_instance
+                .heap
+                .read_u64(object_address + actual_offset)
+                .unwrap_or(0)
+        }
+    }
 }
 
 /// Writes a 64-bit field to an object at a field index or direct byte offset.
@@ -919,26 +976,59 @@ pub unsafe extern "C" fn solix_vm_write_field_u64(
     if object_address == 0 {
         return;
     }
-    let actual_offset = if offset < 8 {
-        let resolved_offset = vm_instance
+    let (actual_offset, field_tag) = if offset < 8 {
+        let resolved_info = vm_instance
             .heap
             .read_u32(object_address)
             .ok()
-            .and_then(|vtable_id| vm_instance.context.get_class_by_vtable_id(vtable_id))
-            .and_then(|class_desc| {
-                let mut sorted_fields = class_desc.field_types.clone();
-                sorted_fields.sort_by_key(|&(field_offset, _)| field_offset);
-                sorted_fields
-                    .get(offset as usize)
-                    .map(|&(field_offset, _)| field_offset as u32)
+            .and_then(|vtable_identifier| vm_instance.context.get_class_by_vtable_id(vtable_identifier))
+            .and_then(|class_descriptor| {
+                let mut sorted_field_list = class_descriptor.field_types.clone();
+                sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
+                sorted_field_list.get(offset as usize).copied()
             });
-        resolved_offset.unwrap_or(8 + offset * 8)
+        match resolved_info {
+            Some((field_offset, type_tag_val)) => (field_offset as u32, Some(type_tag_val)),
+            None => (8 + offset * 8, None),
+        }
     } else {
-        offset
+        let resolved_tag = vm_instance
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_identifier| vm_instance.context.get_class_by_vtable_id(vtable_identifier))
+            .and_then(|class_descriptor| class_descriptor.get_field_type(offset as usize));
+        (offset, resolved_tag)
     };
-    let _ = vm_instance
-        .heap
-        .write_u64(object_address + actual_offset, raw_value);
+
+    match field_tag {
+        Some(1) | Some(2) | Some(11) => {
+            let _ = vm_instance
+                .heap
+                .write_u8(object_address + actual_offset, raw_value as u8);
+        }
+        Some(3) | Some(4) => {
+            let _ = vm_instance
+                .heap
+                .write_u16(object_address + actual_offset, raw_value as u16);
+        }
+        Some(5) | Some(6) => {
+            let _ = vm_instance
+                .heap
+                .write_u32(object_address + actual_offset, raw_value as u32);
+        }
+        Some(9) => {
+            let float_value = f64::from_bits(raw_value) as f32;
+            let _ = vm_instance
+                .heap
+                .write_u32(object_address + actual_offset, float_value.to_bits());
+        }
+        _ => {
+            let _ = vm_instance
+                .heap
+                .write_u64(object_address + actual_offset, raw_value);
+        }
+    }
 }
 
 /// Looks up a registered class VTable ID by qualified or simple name. Returns 0 if not found.

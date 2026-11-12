@@ -91,11 +91,11 @@ Native functions can read and write heap structures via VM helper callbacks:
 - `alloc_byte_array`: Allocates contiguous byte buffer on virtual heap.
 - `alloc_array`: Allocates typed array of specified length.
 - `array_len`: Returns element count of heap array.
-- `array_get_u64` & `array_set_u64`: Accesses elements by index.
+- `array_get_u64` & `array_set_u64`: Accesses elements by index. For `float32[]` arrays (`type_tag == 9`), transparently normalizes between 32-bit heap bit-patterns and standard IEEE-754 64-bit float representations.
 - `alloc_object`: Allocates a generic or vtable-associated heap object instance with dynamic field slots.
 - `get_class_vtable_id`: Resolves the unique virtual table index for a class by name (`*const c_char`), enabling typed object instantiation via `alloc_object`.
-- `read_field_u64`: Reads a 64-bit field slot from a heap object using resolved field index or direct byte offset.
-- `write_field_u64`: Writes a 64-bit word directly to a heap object's field slot.
+- `read_field_u64`: Reads a field slot from a heap object using resolved field index or direct byte offset, adapting byte width and IEEE-754 bit-encoding according to class type tags (e.g. converting `float32` to standard 64-bit representation without clobbering adjacent fields).
+- `write_field_u64`: Writes a field value to a heap object's slot according to resolved type tags, writing only the defined field size (1, 2, 4, or 8 bytes) and encoding `float32` IEEE-754 bits accurately.
 
 ---
 

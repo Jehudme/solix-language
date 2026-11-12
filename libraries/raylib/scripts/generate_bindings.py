@@ -188,6 +188,7 @@ class FieldIR:
     solix_type: str
     rust_type: str
     is_array: bool
+    is_pointer: bool
     array_size: int | None
     array_base_type: str | None
     array_elem_rust_type: str | None
@@ -586,8 +587,19 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
                 rust_base = map_c_type_to_rust(array_base_type)
                 rust_type = f"[{rust_base}; {size_str}]"
                 array_elem_rust_type = rust_base
+                is_pointer_field = False
             else:
-                solix_type = map_c_type_to_solix(raw_field_type)
+                base_fld, is_const_fld, fld_ptr_depth = decompose_c_type(raw_field_type)
+                resolved_fld = resolve_alias_recursively(base_fld, alias_map)
+                is_pointer_field = (
+                    fld_ptr_depth > 0
+                    or "*" in raw_field_type
+                    or "*" in resolved_fld
+                )
+                if is_pointer_field:
+                    solix_type = "uint64"
+                else:
+                    solix_type = map_c_type_to_solix(raw_field_type)
                 rust_type = map_c_type_to_rust(raw_field_type)
                 array_elem_rust_type = None
 
@@ -600,6 +612,7 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
                     solix_type=solix_type,
                     rust_type=rust_type,
                     is_array=is_array,
+                    is_pointer=is_pointer_field,
                     array_size=array_size,
                     array_base_type=array_base_type,
                     array_elem_rust_type=array_elem_rust_type,
@@ -680,6 +693,17 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
 
     # 8. Parse Functions
     functions_ir: list[FunctionIR] = []
+    unload_pointer_functions = {
+        "UnloadRandomSequence",
+        "UnloadFileData",
+        "UnloadImageColors",
+        "UnloadImagePalette",
+        "UnloadFontData",
+        "UnloadCodepoints",
+        "UnloadTextLines",
+        "UnloadModelAnimations",
+        "UnloadWaveSamples",
+    }
     for func_item in raw_functions:
         func_name = func_item.get("name", "")
         raw_ret = func_item.get("returnType", "void")
@@ -694,31 +718,50 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
             base_param, is_const_param, ptr_depth = decompose_c_type(raw_param_type)
             resolved_param = resolve_alias_recursively(base_param, alias_map)
 
-            concrete_struct = (
-                base_param if base_param in raw_struct_names
-                else (resolved_param if resolved_param in raw_struct_names else None)
+            is_unload_pointer = (
+                (func_name in unload_pointer_functions or (func_name.startswith("Unload") and raw_param_type not in ("char *", "const char *")))
+                and (ptr_depth > 0 or "*" in raw_param_type or "*" in resolved_param)
             )
 
-            is_struct_val = (ptr_depth == 0 and concrete_struct is not None)
-            is_mutable_struct_ptr = (
-                ptr_depth == 1 and not is_const_param and concrete_struct is not None
-            )
-            is_struct_array = (
-                ptr_depth == 1 and is_const_param and concrete_struct is not None
-            )
+            if is_unload_pointer:
+                concrete_struct = None
+                is_struct_val = False
+                is_mutable_struct_ptr = False
+                is_struct_array = False
+                is_primitive_arr = False
+                is_mut_primitive_arr = False
+                is_callback = False
+                is_str = False
+                solix_param_type = "uint64"
+                rust_param_type = map_c_type_to_rust(raw_param_type)
+            else:
+                concrete_struct = (
+                    base_param if base_param in raw_struct_names
+                    else (resolved_param if resolved_param in raw_struct_names else None)
+                )
 
-            primitive_names = (
-                "int", "i32", "unsigned int", "uint", "u32", "float", "f32", "double", "f64",
-                "char", "int8", "unsigned char", "uint8", "uchar", "short", "int16", "unsigned short", "uint16", "ushort",
-                "long", "long long", "int64", "unsigned long", "unsigned long long", "uint64",
-            )
-            is_primitive_arr = (ptr_depth == 1 and base_param in primitive_names)
-            is_mut_primitive_arr = (is_primitive_arr and not is_const_param)
+                is_struct_val = (ptr_depth == 0 and concrete_struct is not None)
+                is_mutable_struct_ptr = (
+                    ptr_depth == 1 and not is_const_param and concrete_struct is not None
+                )
+                is_struct_array = (
+                    ptr_depth == 1 and is_const_param and concrete_struct is not None
+                )
 
-            is_callback = (
-                base_param in raw_callback_names or resolved_param in raw_callback_names
-            )
-            is_str = raw_param_type in ("const char *", "char *")
+                primitive_names = (
+                    "int", "i32", "unsigned int", "uint", "u32", "float", "f32", "double", "f64",
+                    "char", "int8", "unsigned char", "uint8", "uchar", "short", "int16", "unsigned short", "uint16", "ushort",
+                    "long", "long long", "int64", "unsigned long", "unsigned long long", "uint64",
+                )
+                is_primitive_arr = (ptr_depth == 1 and base_param in primitive_names)
+                is_mut_primitive_arr = (is_primitive_arr and not is_const_param)
+
+                is_callback = (
+                    base_param in raw_callback_names or resolved_param in raw_callback_names
+                )
+                is_str = raw_param_type in ("const char *", "char *")
+                solix_param_type = map_c_type_to_solix(raw_param_type)
+                rust_param_type = map_c_type_to_rust(raw_param_type)
 
             params_ir.append(
                 ParamIR(
@@ -726,8 +769,8 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
                     escaped_solix_name=sanitize_solix_ident(param_name),
                     escaped_rust_name=escape_rust_ident(to_snake_case(param_name)),
                     raw_type=raw_param_type,
-                    solix_type=map_c_type_to_solix(raw_param_type),
-                    rust_type=map_c_type_to_rust(raw_param_type),
+                    solix_type=solix_param_type,
+                    rust_type=rust_param_type,
                     is_variadic=(raw_param_type == "..."),
                     is_string=is_str,
                     is_callback=is_callback,
@@ -741,12 +784,22 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
                 )
             )
 
+        base_ret, is_const_ret, ret_ptr_depth = decompose_c_type(raw_ret)
+        resolved_ret = resolve_alias_recursively(base_ret, alias_map)
+        is_ret_pointer = (ret_ptr_depth > 0 or "*" in raw_ret or "*" in resolved_ret)
+        is_ret_string = raw_ret.strip() in ("const char *", "char *")
+
+        if is_ret_pointer and not is_ret_string:
+            solix_ret_type = "uint64"
+        else:
+            solix_ret_type = map_c_type_to_solix(raw_ret)
+
         functions_ir.append(
             FunctionIR(
                 name=func_name,
                 snake_name=to_snake_case(func_name),
                 return_type=raw_ret,
-                solix_return_type=map_c_type_to_solix(raw_ret),
+                solix_return_type=solix_ret_type,
                 rust_return_type=map_c_type_to_rust(raw_ret),
                 params=params_ir,
                 is_variadic=is_variadic,
@@ -923,8 +976,15 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, class_name: str) -> st
     lines.append(f"public class {class_name} {{")
 
     # Class-level constants
-    for const_name, const_val in sorted(ir.known_constants.items()):
-        lines.append(f"    public static const float32 {const_name} = (float32){const_val};")
+    for define_obj in ir.defines:
+        if define_obj.item_type == "INT":
+            lines.append(f"    public static const int32 {define_obj.name} = {define_obj.evaluated_value};")
+        elif define_obj.item_type == "FLOAT":
+            lines.append(f"    public static const float32 {define_obj.name} = (float32){define_obj.evaluated_value};")
+        elif define_obj.item_type == "STRING":
+            lines.append(f'    public static const string {define_obj.name} = "{define_obj.raw_value}";')
+        elif define_obj.item_type == "FLOAT_MATH" and define_obj.evaluated_value is not None:
+            lines.append(f"    public static const float32 {define_obj.name} = (float32){define_obj.evaluated_value};")
     lines.append("")
 
     for func_obj in ir.functions:
@@ -1114,7 +1174,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             elif raw_type in ("unsigned char", "uint8", "uchar", "char", "int8", "short", "int16", "unsigned short", "uint16", "ushort", "int", "i32", "unsigned int", "uint", "u32"):
                 lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {field_idx}, val.{field_name} as i32);")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name}.to_bits() as u64);")
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, (val.{field_name} as f64).to_bits());")
             elif raw_type in ("double", "f64"):
                 lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name}.to_bits());")
             elif raw_type in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
@@ -1145,13 +1205,15 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append(f"    let arr_addr_{field_idx} = ((*context_ptr).alloc_array)(vm_context, {size_str}, 0);")
                     lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
                     if base_elem in ("float", "f32"):
-                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize].to_bits() as u64);")
+                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, (val.{field_name}[elem_idx as usize] as f64).to_bits());")
                     elif base_elem in ("double", "f64"):
                         lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize].to_bits());")
                     else:
                         lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize] as u64);")
                     lines.append("    }")
                     lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, arr_addr_{field_idx} as u64);")
+            elif field_obj.is_pointer:
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name} as usize as u64);")
             elif raw_type in ir.struct_map or resolve_alias_recursively(raw_type, ir.alias_map) in ir.struct_map:
                 resolved_struct = (
                     raw_type if raw_type in ir.struct_map
@@ -1204,7 +1266,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             elif raw_type in ("unsigned int", "uint", "u32"):
                 lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_uint;")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    result.{field_name} = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32);")
+                lines.append(f"    result.{field_name} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx})) as f32;")
             elif raw_type in ("double", "f64"):
                 lines.append(f"    result.{field_name} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}));")
             elif raw_type in ("long", "long long", "int64"):
@@ -1241,7 +1303,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append("        for elem_idx in 0..arr_len {")
                     lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_{field_idx}, elem_idx);")
                     if base_elem in ("float", "f32"):
-                        lines.append(f"            result.{field_name}[elem_idx as usize] = f32::from_bits(raw_val as u32);")
+                        lines.append(f"            result.{field_name}[elem_idx as usize] = f64::from_bits(raw_val) as f32;")
                     elif base_elem in ("double", "f64"):
                         lines.append(f"            result.{field_name}[elem_idx as usize] = f64::from_bits(raw_val);")
                     else:
@@ -1249,6 +1311,8 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                         lines.append(f"            result.{field_name}[elem_idx as usize] = raw_val as {elem_rust_type};")
                     lines.append("        }")
                     lines.append("    }")
+            elif field_obj.is_pointer:
+                lines.append(f"    result.{field_name} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as usize as {field_obj.rust_type};")
             elif raw_type in ir.struct_map or resolve_alias_recursively(raw_type, ir.alias_map) in ir.struct_map:
                 resolved_struct = (
                     raw_type if raw_type in ir.struct_map
@@ -1401,7 +1465,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 pre_call_lines.append("        for elem_idx in 0..total_count {")
                 pre_call_lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, {arr_name}, elem_idx);")
                 if base_prim in ("float", "f32"):
-                    pre_call_lines.append(f"            {vec_name}.push(f32::from_bits(raw_val as u32));")
+                    pre_call_lines.append(f"            {vec_name}.push(f64::from_bits(raw_val) as f32);")
                 elif base_prim in ("double", "f64"):
                     pre_call_lines.append(f"            {vec_name}.push(f64::from_bits(raw_val));")
                 else:
@@ -1417,7 +1481,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     post_call_lines.append("        for elem_idx in 0..total_count {")
                     post_call_lines.append(f"            let updated_elem = {vec_name}[elem_idx as usize];")
                     if base_prim in ("float", "f32"):
-                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem.to_bits() as u64);")
+                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, (updated_elem as f64).to_bits());")
                     elif base_prim in ("double", "f64"):
                         post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem.to_bits());")
                     else:
