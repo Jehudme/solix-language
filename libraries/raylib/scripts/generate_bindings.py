@@ -1174,7 +1174,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             elif raw_type in ("unsigned char", "uint8", "uchar", "char", "int8", "short", "int16", "unsigned short", "uint16", "ushort", "int", "i32", "unsigned int", "uint", "u32"):
                 lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {field_idx}, val.{field_name} as i32);")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, (val.{field_name} as f64).to_bits());")
+                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name}.to_bits() as u64);")
             elif raw_type in ("double", "f64"):
                 lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name}.to_bits());")
             elif raw_type in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
@@ -1266,7 +1266,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             elif raw_type in ("unsigned int", "uint", "u32"):
                 lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_uint;")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    result.{field_name} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx})) as f32;")
+                lines.append(f"    result.{field_name} = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32);")
             elif raw_type in ("double", "f64"):
                 lines.append(f"    result.{field_name} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}));")
             elif raw_type in ("long", "long long", "int64"):
@@ -1303,7 +1303,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append("        for elem_idx in 0..arr_len {")
                     lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_{field_idx}, elem_idx);")
                     if base_elem in ("float", "f32"):
-                        lines.append(f"            result.{field_name}[elem_idx as usize] = f64::from_bits(raw_val) as f32;")
+                        lines.append(f"            result.{field_name}[elem_idx as usize] = if (raw_val >> 32) == 0 {{ f32::from_bits(raw_val as u32) }} else {{ f64::from_bits(raw_val) as f32 }};")
                     elif base_elem in ("double", "f64"):
                         lines.append(f"            result.{field_name}[elem_idx as usize] = f64::from_bits(raw_val);")
                     else:
@@ -1465,7 +1465,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 pre_call_lines.append("        for elem_idx in 0..total_count {")
                 pre_call_lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, {arr_name}, elem_idx);")
                 if base_prim in ("float", "f32"):
-                    pre_call_lines.append(f"            {vec_name}.push(f64::from_bits(raw_val) as f32);")
+                    pre_call_lines.append(f"            {vec_name}.push(if (raw_val >> 32) == 0 {{ f32::from_bits(raw_val as u32) }} else {{ f64::from_bits(raw_val) as f32 }});")
                 elif base_prim in ("double", "f64"):
                     pre_call_lines.append(f"            {vec_name}.push(f64::from_bits(raw_val));")
                 else:

@@ -157,6 +157,11 @@ Used for static, direct, and virtual function dispatch:
 | `0x86` | `Ret` | A | `val` | Returns `val` to caller's destination register. |
 | `0x87` | `RetVoid` | A | — | Returns `void`. |
 
+### 3.7. Array Operations & Element Tagging
+- `AllocArray`: Allocates typed `ArrayRef` on the heap with specified element capacity, stride, and element type tag.
+- `GetArray`: Retrieves array element by index. For `float32` arrays (`type_tag == 9`), transparently handles both 4-byte native bit patterns and 8-byte VM register storage representations.
+- `SetArray`: Writes array element at specified index, converting value to the primitive storage representation matching the array type tag.
+
 ---
 
 ## 4. Call Frame Layout & Sliding Windows

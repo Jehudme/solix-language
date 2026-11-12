@@ -1889,7 +1889,13 @@ impl VirtualMachine {
                             6 => Value::I32(raw_word as u16 as i32),
                             7 => Value::I32(raw_word as u32 as i32),
                             8 => Value::I64(raw_word as i64),
-                            9 => Value::F64(f32::from_bits(raw_word as u32) as f64),
+                            9 => {
+                                if elem_size == 4 || (raw_word >> 32) == 0 {
+                                    Value::F64(f32::from_bits(raw_word as u32) as f64)
+                                } else {
+                                    Value::F64(f64::from_bits(raw_word))
+                                }
+                            }
                             10 => Value::F64(f64::from_bits(raw_word)),
                             11 => Value::Bool(raw_word != 0),
                             13 | 0x80..=0xFF => {

@@ -92,10 +92,10 @@ Native functions can read and write heap structures via VM helper callbacks:
 - `alloc_array`: Allocates typed array of specified length.
 - `array_len`: Returns element count of heap array.
 - `array_get_u64` & `array_set_u64`: Accesses elements by index. For `float32[]` arrays (`type_tag == 9`), transparently normalizes between 32-bit heap bit-patterns and standard IEEE-754 64-bit float representations.
-- `alloc_object`: Allocates a generic or vtable-associated heap object instance with dynamic field slots.
+- `alloc_object`: Allocates an object instance on the virtual heap, reserving `class_desc.instance_size.max(8 + field_count * 8)` bytes for proper field layout alignment.
 - `get_class_vtable_id`: Resolves the unique virtual table index for a class by name (`*const c_char`), enabling typed object instantiation via `alloc_object`.
-- `read_field_u64`: Reads a field slot from a heap object using resolved field index or direct byte offset, adapting byte width and IEEE-754 bit-encoding according to class type tags (e.g. converting `float32` to standard 64-bit representation without clobbering adjacent fields).
-- `write_field_u64`: Writes a field value to a heap object's slot according to resolved type tags, writing only the defined field size (1, 2, 4, or 8 bytes) and encoding `float32` IEEE-754 bits accurately.
+- `read_field_u64`: Reads a field slot from a heap object using resolved field index or direct byte offset, adapting byte width and IEEE-754 bit-encoding according to class type tags (e.g. reading 32-bit `float32` bits without clobbering adjacent fields, and extracting untagged addresses from Tag 12 `Value::Ref`).
+- `write_field_u64`: Writes a field value to a heap object's slot according to resolved type tags, writing only the defined field size (1, 2, 4, or 8 bytes), storing `float32` bits into 4-byte slots, and applying `Value::TAG_REF` boxing for Tag 12 reference fields.
 
 ---
 

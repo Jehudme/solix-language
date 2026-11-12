@@ -653,8 +653,8 @@ impl Default for C_AutomationEventList {
 unsafe fn writeback_vector2(vm_context: *mut c_void, addr: u32, val: &C_Vector2) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
-    ((*context_ptr).write_field_u64)(vm_context, addr, 0, (val.x as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 1, (val.y as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, val.x.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.y.to_bits() as u64);
 }
 
 unsafe fn pack_vector2(vm_context: *mut c_void, val: C_Vector2) -> u32 {
@@ -672,17 +672,17 @@ unsafe fn unpack_vector2(vm_context: *mut c_void, addr: u32) -> C_Vector2 {
     if addr == 0 { return C_Vector2::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Vector2::default();
-    result.x = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0)) as f32;
-    result.y = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1)) as f32;
+    result.x = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
+    result.y = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
     result
 }
 
 unsafe fn writeback_vector3(vm_context: *mut c_void, addr: u32, val: &C_Vector3) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
-    ((*context_ptr).write_field_u64)(vm_context, addr, 0, (val.x as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 1, (val.y as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.z as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, val.x.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.y.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.z.to_bits() as u64);
 }
 
 unsafe fn pack_vector3(vm_context: *mut c_void, val: C_Vector3) -> u32 {
@@ -700,19 +700,19 @@ unsafe fn unpack_vector3(vm_context: *mut c_void, addr: u32) -> C_Vector3 {
     if addr == 0 { return C_Vector3::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Vector3::default();
-    result.x = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0)) as f32;
-    result.y = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1)) as f32;
-    result.z = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
+    result.x = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
+    result.y = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
+    result.z = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
     result
 }
 
 unsafe fn writeback_vector4(vm_context: *mut c_void, addr: u32, val: &C_Vector4) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
-    ((*context_ptr).write_field_u64)(vm_context, addr, 0, (val.x as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 1, (val.y as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.z as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 3, (val.w as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, val.x.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.y.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.z.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.w.to_bits() as u64);
 }
 
 unsafe fn pack_vector4(vm_context: *mut c_void, val: C_Vector4) -> u32 {
@@ -730,32 +730,32 @@ unsafe fn unpack_vector4(vm_context: *mut c_void, addr: u32) -> C_Vector4 {
     if addr == 0 { return C_Vector4::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Vector4::default();
-    result.x = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0)) as f32;
-    result.y = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1)) as f32;
-    result.z = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
-    result.w = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3)) as f32;
+    result.x = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
+    result.y = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
+    result.z = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
+    result.w = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
     result
 }
 
 unsafe fn writeback_matrix(vm_context: *mut c_void, addr: u32, val: &C_Matrix) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
-    ((*context_ptr).write_field_u64)(vm_context, addr, 0, (val.m0 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 1, (val.m4 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.m8 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 3, (val.m12 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 4, (val.m1 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 5, (val.m5 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 6, (val.m9 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 7, (val.m13 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 8, (val.m2 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 9, (val.m6 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 10, (val.m10 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 11, (val.m14 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 12, (val.m3 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 13, (val.m7 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 14, (val.m11 as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 15, (val.m15 as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, val.m0.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.m4.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.m8.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.m12.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 4, val.m1.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 5, val.m5.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 6, val.m9.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 7, val.m13.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 8, val.m2.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 9, val.m6.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 10, val.m10.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 11, val.m14.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 12, val.m3.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 13, val.m7.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 14, val.m11.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 15, val.m15.to_bits() as u64);
 }
 
 unsafe fn pack_matrix(vm_context: *mut c_void, val: C_Matrix) -> u32 {
@@ -773,22 +773,22 @@ unsafe fn unpack_matrix(vm_context: *mut c_void, addr: u32) -> C_Matrix {
     if addr == 0 { return C_Matrix::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Matrix::default();
-    result.m0 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0)) as f32;
-    result.m4 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1)) as f32;
-    result.m8 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
-    result.m12 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3)) as f32;
-    result.m1 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 4)) as f32;
-    result.m5 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 5)) as f32;
-    result.m9 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 6)) as f32;
-    result.m13 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 7)) as f32;
-    result.m2 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 8)) as f32;
-    result.m6 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 9)) as f32;
-    result.m10 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 10)) as f32;
-    result.m14 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 11)) as f32;
-    result.m3 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 12)) as f32;
-    result.m7 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 13)) as f32;
-    result.m11 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 14)) as f32;
-    result.m15 = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 15)) as f32;
+    result.m0 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
+    result.m4 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
+    result.m8 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
+    result.m12 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
+    result.m1 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 4) as u32);
+    result.m5 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 5) as u32);
+    result.m9 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32);
+    result.m13 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 7) as u32);
+    result.m2 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 8) as u32);
+    result.m6 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 9) as u32);
+    result.m10 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 10) as u32);
+    result.m14 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 11) as u32);
+    result.m3 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 12) as u32);
+    result.m7 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 13) as u32);
+    result.m11 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 14) as u32);
+    result.m15 = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 15) as u32);
     result
 }
 
@@ -826,10 +826,10 @@ unsafe fn unpack_color(vm_context: *mut c_void, addr: u32) -> C_Color {
 unsafe fn writeback_rectangle(vm_context: *mut c_void, addr: u32, val: &C_Rectangle) {
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
-    ((*context_ptr).write_field_u64)(vm_context, addr, 0, (val.x as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 1, (val.y as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.width as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 3, (val.height as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 0, val.x.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.y.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.width.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.height.to_bits() as u64);
 }
 
 unsafe fn pack_rectangle(vm_context: *mut c_void, val: C_Rectangle) -> u32 {
@@ -847,10 +847,10 @@ unsafe fn unpack_rectangle(vm_context: *mut c_void, addr: u32) -> C_Rectangle {
     if addr == 0 { return C_Rectangle::default(); }
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_Rectangle::default();
-    result.x = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0)) as f32;
-    result.y = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1)) as f32;
-    result.width = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
-    result.height = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3)) as f32;
+    result.x = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
+    result.y = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
+    result.width = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
+    result.height = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
     result
 }
 
@@ -1066,7 +1066,7 @@ unsafe fn writeback_camera3d(vm_context: *mut c_void, addr: u32, val: &C_Camera3
     ((*context_ptr).write_field_u64)(vm_context, addr, 1, child_1 as u64);
     let child_2 = pack_vector3(vm_context, val.up);
     ((*context_ptr).write_field_u64)(vm_context, addr, 2, child_2 as u64);
-    ((*context_ptr).write_field_u64)(vm_context, addr, 3, (val.fovy as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.fovy.to_bits() as u64);
     ((*context_ptr).set_field_i32)(vm_context, addr, 4, val.projection as i32);
 }
 
@@ -1088,7 +1088,7 @@ unsafe fn unpack_camera3d(vm_context: *mut c_void, addr: u32) -> C_Camera3D {
     result.position = unpack_vector3(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
     result.target = unpack_vector3(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
     result.up = unpack_vector3(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
-    result.fovy = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3)) as f32;
+    result.fovy = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
     result.projection = ((*context_ptr).get_field_i32)(vm_context, addr, 4) as c_int;
     result
 }
@@ -1100,8 +1100,8 @@ unsafe fn writeback_camera2d(vm_context: *mut c_void, addr: u32, val: &C_Camera2
     ((*context_ptr).write_field_u64)(vm_context, addr, 0, child_0 as u64);
     let child_1 = pack_vector2(vm_context, val.target);
     ((*context_ptr).write_field_u64)(vm_context, addr, 1, child_1 as u64);
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.rotation as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 3, (val.zoom as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.rotation.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.zoom.to_bits() as u64);
 }
 
 unsafe fn pack_camera2d(vm_context: *mut c_void, val: C_Camera2D) -> u32 {
@@ -1121,8 +1121,8 @@ unsafe fn unpack_camera2d(vm_context: *mut c_void, addr: u32) -> C_Camera2D {
     let mut result = C_Camera2D::default();
     result.offset = unpack_vector2(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
     result.target = unpack_vector2(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
-    result.rotation = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
-    result.zoom = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3)) as f32;
+    result.rotation = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
+    result.zoom = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
     result
 }
 
@@ -1215,7 +1215,7 @@ unsafe fn writeback_material_map(vm_context: *mut c_void, addr: u32, val: &C_Mat
     ((*context_ptr).write_field_u64)(vm_context, addr, 0, child_0 as u64);
     let child_1 = pack_color(vm_context, val.color);
     ((*context_ptr).write_field_u64)(vm_context, addr, 1, child_1 as u64);
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.value as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.value.to_bits() as u64);
 }
 
 unsafe fn pack_material_map(vm_context: *mut c_void, val: C_MaterialMap) -> u32 {
@@ -1235,7 +1235,7 @@ unsafe fn unpack_material_map(vm_context: *mut c_void, addr: u32) -> C_MaterialM
     let mut result = C_MaterialMap::default();
     result.texture = unpack_texture(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 0) as u32);
     result.color = unpack_color(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
-    result.value = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
+    result.value = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
     result
 }
 
@@ -1274,7 +1274,7 @@ unsafe fn unpack_material(vm_context: *mut c_void, addr: u32) -> C_Material {
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_2).min(4);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
-            result.params[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.params[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     result
@@ -1493,7 +1493,7 @@ unsafe fn writeback_ray_collision(vm_context: *mut c_void, addr: u32, val: &C_Ra
     if addr == 0 { return; }
     let context_ptr = vm_context as *mut SolixVmContext;
     ((*context_ptr).set_field_i32)(vm_context, addr, 0, if val.hit { 1 } else { 0 });
-    ((*context_ptr).write_field_u64)(vm_context, addr, 1, (val.distance as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 1, val.distance.to_bits() as u64);
     let child_2 = pack_vector3(vm_context, val.point);
     ((*context_ptr).write_field_u64)(vm_context, addr, 2, child_2 as u64);
     let child_3 = pack_vector3(vm_context, val.normal);
@@ -1516,7 +1516,7 @@ unsafe fn unpack_ray_collision(vm_context: *mut c_void, addr: u32) -> C_RayColli
     let context_ptr = vm_context as *mut SolixVmContext;
     let mut result = C_RayCollision::default();
     result.hit = ((*context_ptr).get_field_i32)(vm_context, addr, 0) != 0;
-    result.distance = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1)) as f32;
+    result.distance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 1) as u32);
     result.point = unpack_vector3(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
     result.normal = unpack_vector3(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
     result
@@ -1684,11 +1684,11 @@ unsafe fn writeback_vr_device_info(vm_context: *mut c_void, addr: u32, val: &C_V
     let context_ptr = vm_context as *mut SolixVmContext;
     ((*context_ptr).set_field_i32)(vm_context, addr, 0, val.hResolution as i32);
     ((*context_ptr).set_field_i32)(vm_context, addr, 1, val.vResolution as i32);
-    ((*context_ptr).write_field_u64)(vm_context, addr, 2, (val.hScreenSize as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 3, (val.vScreenSize as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 4, (val.eyeToScreenDistance as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 5, (val.lensSeparationDistance as f64).to_bits());
-    ((*context_ptr).write_field_u64)(vm_context, addr, 6, (val.interpupillaryDistance as f64).to_bits());
+    ((*context_ptr).write_field_u64)(vm_context, addr, 2, val.hScreenSize.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 3, val.vScreenSize.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 4, val.eyeToScreenDistance.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 5, val.lensSeparationDistance.to_bits() as u64);
+    ((*context_ptr).write_field_u64)(vm_context, addr, 6, val.interpupillaryDistance.to_bits() as u64);
     let arr_addr_7 = ((*context_ptr).alloc_array)(vm_context, 4, 0);
     for elem_idx in 0..4u32 {
         ((*context_ptr).array_set_u64)(vm_context, arr_addr_7, elem_idx, (val.lensDistortionValues[elem_idx as usize] as f64).to_bits());
@@ -1718,17 +1718,17 @@ unsafe fn unpack_vr_device_info(vm_context: *mut c_void, addr: u32) -> C_VrDevic
     let mut result = C_VrDeviceInfo::default();
     result.hResolution = ((*context_ptr).get_field_i32)(vm_context, addr, 0) as c_int;
     result.vResolution = ((*context_ptr).get_field_i32)(vm_context, addr, 1) as c_int;
-    result.hScreenSize = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2)) as f32;
-    result.vScreenSize = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3)) as f32;
-    result.eyeToScreenDistance = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 4)) as f32;
-    result.lensSeparationDistance = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 5)) as f32;
-    result.interpupillaryDistance = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 6)) as f32;
+    result.hScreenSize = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 2) as u32);
+    result.vScreenSize = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32);
+    result.eyeToScreenDistance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 4) as u32);
+    result.lensSeparationDistance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 5) as u32);
+    result.interpupillaryDistance = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32);
     let arr_addr_7 = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as u32;
     if arr_addr_7 > 0 {
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_7).min(4);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_7, elem_idx);
-            result.lensDistortionValues[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.lensDistortionValues[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     let arr_addr_8 = ((*context_ptr).read_field_u64)(vm_context, addr, 8) as u32;
@@ -1736,7 +1736,7 @@ unsafe fn unpack_vr_device_info(vm_context: *mut c_void, addr: u32) -> C_VrDevic
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_8).min(4);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_8, elem_idx);
-            result.chromaAbCorrection[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.chromaAbCorrection[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     result
@@ -1825,7 +1825,7 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_2).min(2);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_2, elem_idx);
-            result.leftLensCenter[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.leftLensCenter[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     let arr_addr_3 = ((*context_ptr).read_field_u64)(vm_context, addr, 3) as u32;
@@ -1833,7 +1833,7 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_3).min(2);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_3, elem_idx);
-            result.rightLensCenter[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.rightLensCenter[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     let arr_addr_4 = ((*context_ptr).read_field_u64)(vm_context, addr, 4) as u32;
@@ -1841,7 +1841,7 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_4).min(2);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_4, elem_idx);
-            result.leftScreenCenter[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.leftScreenCenter[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     let arr_addr_5 = ((*context_ptr).read_field_u64)(vm_context, addr, 5) as u32;
@@ -1849,7 +1849,7 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_5).min(2);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_5, elem_idx);
-            result.rightScreenCenter[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.rightScreenCenter[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     let arr_addr_6 = ((*context_ptr).read_field_u64)(vm_context, addr, 6) as u32;
@@ -1857,7 +1857,7 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_6).min(2);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_6, elem_idx);
-            result.scale[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.scale[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     let arr_addr_7 = ((*context_ptr).read_field_u64)(vm_context, addr, 7) as u32;
@@ -1865,7 +1865,7 @@ unsafe fn unpack_vr_stereo_config(vm_context: *mut c_void, addr: u32) -> C_VrSte
         let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_7).min(2);
         for elem_idx in 0..arr_len {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_7, elem_idx);
-            result.scaleIn[elem_idx as usize] = f64::from_bits(raw_val) as f32;
+            result.scaleIn[elem_idx as usize] = if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 };
         }
     }
     result
@@ -7423,7 +7423,7 @@ pub unsafe extern "C" fn Raylib_ImageKernelConvolution(
         prim_vec_1.reserve_exact(total_count as usize);
         for elem_idx in 0..total_count {
             let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_1, elem_idx);
-            prim_vec_1.push(f64::from_bits(raw_val) as f32);
+            prim_vec_1.push(if (raw_val >> 32) == 0 { f32::from_bits(raw_val as u32) } else { f64::from_bits(raw_val) as f32 });
         }
     }
     ImageKernelConvolution(&mut image_mut_0, if arr_addr_1 > 0 { prim_vec_1.as_mut_ptr() } else { std::ptr::null_mut() }, (*args.add(2)).payload as c_int);
