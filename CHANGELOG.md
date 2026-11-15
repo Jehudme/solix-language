@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.1.3] - 2026-11-15
+
+### Visual Studio Code Tooling, Compiler Diagnostic Parity & Language Intelligence
+* **LSP Autocompletion with Signature Label Details:**
+  * Enabled LSP 3.17 `CompletionItemLabelDetails` in code completion (`textDocument/completion`), presenting complete parameter signatures (e.g. `(Rectangle rec, float32 roundness, int32 segments, Color color)`) and return types (`void`, `int32`) on method proposals.
+* **Resilient Live Signature Help During Active Typing:**
+  * Implemented backward lexical invocation analysis (`find_enclosing_call_lexical`) to resolve active callee signatures, parameter names, and argument indices even when unclosed parentheses (`(`) prevent AST statement creation.
+  * Preserved semantic snapshot symbol tables across intermediate typing states containing syntax errors, preventing inlay hint and signature help drops.
+* **Semantic Token Highlight Resilience & Coordinate Precision:**
+  * Resolved mid-word character fragment coloring during syntax errors by prioritizing call invocation syntax (`ident(` and `::ident(`) in lexical classification over PascalCase class heuristics.
+  * Sanitized carriage return (`\r`) handling in UTF-16 column positioning, guaranteeing consistent visual column alignment across Linux, macOS, and Windows CRLF documents.
+* **Compiler Diagnostic & Package Import Parity:**
+  * Enforced strict package boundary validation in compiler Pass 1 and LSP background analysis: wildcard imports targeting undeclared external packages (such as `solix.*` or `raylib.*`) consistently emit `CannotResolveImport` (`E0232`), reserving automatic package resolution strictly to standard library modules (`std::*`) and built-in intrinsics (`blt::*`).
+* **Visual Studio Code Disassembly & Build Tooling:**
+  * Added one-click **Inspect 64-bit VM Disassembly** action bar button providing interactive disassembly viewing directly in the editor with custom syntax highlighting.
+  * Added top action bar **Solix Build** button to execute project builds in an integrated terminal.
+  * Added upward `manifest.toml` directory discovery to `solix compile`, allowing compilation of nested source files with dependency resolution without requiring manual `--deps` flags.
+* **Compiler & Optimizer Remediation:**
+  * Eliminated unsound loop-invariant code motion hoisting expressions across conditional blocks, preventing corrupt bytecode branch offsets.
+  * Preserved formal parameter names across all compilation passes on `SymbolEntry`, exposing true declared parameter names in inlay hints and hover tooltips.
+
+---
+
 ## [1.1.0] - 2026-11-15
 
 ### Multi-Platform Release Distribution & Universal Compatibility
