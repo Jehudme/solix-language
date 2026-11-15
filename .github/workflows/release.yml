@@ -1,18 +1,21 @@
-name: Multi-Platform Release Distribution
+# Multi-Platform Release Distribution for Solix Toolchain
+# Builds and publishes across Windows, macOS (Intel & Apple Silicon), and Universal Linux (GNU & MUSL)
+
+name: Release
+permissions:
+  "contents": "write"
 
 on:
+  pull_request:
   push:
     tags:
-      - "v*.*.*"
+      - '**[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release Git tag (e.g. v1.0.0)"
+        description: "Release Git tag (e.g. v1.1.0)"
         required: true
-        default: "v1.0.0"
-
-permissions:
-  contents: write
+        default: "v1.1.0"
 
 jobs:
   build-bundled-libraries:
@@ -24,9 +27,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -52,51 +52,249 @@ jobs:
           name: bundled-packages
           path: crates/solix-toolchain/assets/packages/
 
-  build-and-publish-release:
-    name: Build & Publish Multi-Platform Release
-    needs: build-bundled-libraries
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - name: Stage standalone slxarc for release
+        run: |
+          mkdir -p staging-packages
+          cp crates/solix-toolchain/assets/packages/*/*.slxarc staging-packages/
 
+      - name: Upload standalone slxarc for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-bundled-packages
+          path: staging-packages/
+
+  # Run 'dist plan' to determine what tasks we need to do
+  plan:
+    runs-on: "ubuntu-latest"
+    outputs:
+      val: ${{ steps.plan.outputs.manifest }}
+      tag: ${{ github.event.inputs.tag_name || (!github.event.pull_request && github.ref_name) || '' }}
+      tag-flag: ${{ format('--tag={0}', github.event.inputs.tag_name || (!github.event.pull_request && github.ref_name) || '') }}
+      publishing: ${{ !github.event.pull_request }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dist
+        shell: bash
+        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh"
+      - name: Cache dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-dist-cache
+          path: ~/.cargo/bin/dist
+      - id: plan
+        run: |
+          dist ${{ (!github.event.pull_request && format('host --steps=create {0}', (github.event.inputs.tag_name && format('--tag={0}', github.event.inputs.tag_name)) || format('--tag={0}', github.ref_name))) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          echo "dist ran successfully"
+          cat plan-dist-manifest.json
+          echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
+      - name: "Upload dist-manifest.json"
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-plan-dist-manifest
+          path: plan-dist-manifest.json
+
+  # Build and packages all the platform-specific things
+  build-local-artifacts:
+    name: build-local-artifacts (${{ join(matrix.targets, ', ') }})
+    needs:
+      - plan
+      - build-bundled-libraries
+    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container && matrix.container.image || null }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
+    steps:
+      - name: enable windows longpaths
+        run: |
+          git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-
+        with:
+          targets: ${{ join(matrix.targets, ',') }}
       - name: Download bundled packages artifact
         uses: actions/download-artifact@v4
         with:
           name: bundled-packages
           path: crates/solix-toolchain/assets/packages/
-
-      - name: Install cargo-dist
+      - name: Install dist
+        run: ${{ matrix.install_dist.run }}
+      # Get the dist-manifest
+      - name: Fetch local artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: target/distrib/
+          merge-multiple: true
+      - name: Set up Zig compiler
+        if: runner.os == 'Linux'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.13.0"
+      - name: Install cargo-zigbuild
+        if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64-unknown-linux-gnu')
+        run: pipx install cargo-zigbuild
+      - name: Install musl-tools
+        if: runner.os == 'Linux' && contains(matrix.targets, 'x86_64-unknown-linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install dependencies
+        run: |
+          ${{ matrix.packages_install }}
+      - name: Build artifacts
+        run: |
+          dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
+          echo "dist ran successfully"
+      - id: cargo-dist
+        name: Post-build
         shell: bash
         run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
+          dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Build release archives
-        run: dist build --artifacts host
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+          cp dist-manifest.json "$BUILD_MANIFEST_NAME"
+      - name: "Upload artifacts"
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: |
-            target/distrib/*.tar.gz
-            target/distrib/*.tar.xz
-            target/distrib/*.zip
-            target/distrib/*.sh
-            target/distrib/*.rb
-            target/distrib/*.sha256
-            target/distrib/sha256.sum
-            crates/solix-toolchain/assets/packages/*.slxarc
-          fail_on_unmatched_files: false
-          generate_release_notes: true
+          name: artifacts-build-local-${{ join(matrix.targets, '_') }}
+          path: |
+            ${{ steps.cargo-dist.outputs.paths }}
+            ${{ env.BUILD_MANIFEST_NAME }}
+
+  # Build and package all the platform-agnostic(ish) things
+  build-global-artifacts:
+    needs:
+      - plan
+      - build-local-artifacts
+    runs-on: "ubuntu-latest"
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install cached dist
+        uses: actions/download-artifact@v4
+        with:
+          name: cargo-dist-cache
+          path: ~/.cargo/bin/
+      - run: chmod +x ~/.cargo/bin/dist
+      # Get all the local artifacts for the global tasks to use (for e.g. checksums)
+      - name: Fetch local artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: target/distrib/
+          merge-multiple: true
+      - id: cargo-dist
+        shell: bash
+        run: |
+          dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
+          echo "dist ran successfully"
+
+          # Parse out what we just built and upload it to scratch storage
+          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
+          jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          cp dist-manifest.json "$BUILD_MANIFEST_NAME"
+      - name: "Upload artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-build-global
+          path: |
+            ${{ steps.cargo-dist.outputs.paths }}
+            ${{ env.BUILD_MANIFEST_NAME }}
+
+  # Determines if we should publish/announce
+  host:
+    needs:
+      - plan
+      - build-bundled-libraries
+      - build-local-artifacts
+      - build-global-artifacts
+    if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    runs-on: "ubuntu-latest"
+    outputs:
+      val: ${{ steps.host.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install cached dist
+        uses: actions/download-artifact@v4
+        with:
+          name: cargo-dist-cache
+          path: ~/.cargo/bin/
+      - run: chmod +x ~/.cargo/bin/dist
+      # Fetch artifacts from scratch-storage
+      - name: Fetch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: target/distrib/
+          merge-multiple: true
+      - id: host
+        shell: bash
+        run: |
+          dist host ${{ needs.plan.outputs.tag-flag }} --steps=upload --steps=release --output-format=json > dist-manifest.json
+          echo "artifacts uploaded and released successfully"
+          cat dist-manifest.json
+          echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
+      - name: "Upload dist-manifest.json"
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-dist-manifest
+          path: dist-manifest.json
+      # Create a GitHub Release while uploading all files to it
+      - name: "Download GitHub Artifacts"
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: artifacts
+          merge-multiple: true
+      - name: Cleanup
+        run: |
+          # Remove the granular manifests
+          rm -f artifacts/*-dist-manifest.json
+      - name: Create GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
+          ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
+          ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
+          RELEASE_COMMIT: "${{ github.sha }}"
+        run: |
+          echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          RELEASE_FILES=$(find artifacts -maxdepth 1 -type f)
+          if gh release view "${{ needs.plan.outputs.tag }}" > /dev/null 2>&1; then
+            gh release upload "${{ needs.plan.outputs.tag }}" $RELEASE_FILES --clobber
+          else
+            gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" $RELEASE_FILES
+          fi
+
+  announce:
+    needs:
+      - plan
+      - host
+    if: ${{ always() && needs.host.result == 'success' }}
+    runs-on: "ubuntu-latest"
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive

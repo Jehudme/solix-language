@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.1.0] - 2026-11-15
+
+### Multi-Platform Release Distribution & Universal Compatibility
+* **Universal Multi-Platform Support Across All Systems & Linux Distributions:**
+  * **Windows 64-bit (`x86_64-pc-windows-msvc`):** Native Windows executable (`solix.exe`), distribution archive (`.zip`), and automated PowerShell installer (`solix-toolchain-installer.ps1`).
+  * **macOS Apple Silicon (`aarch64-apple-darwin`):** Native release archive for M1/M2/M3/M4 Macs.
+  * **macOS Intel (`x86_64-apple-darwin`):** Native release archive for Intel Macs.
+  * **Universal Linux Statically Linked (`x86_64-unknown-linux-musl`):** 100% statically linked binary with zero glibc dependency, running on all Linux distributions including Alpine Linux, Void Linux, Ubuntu 16.04–24.04, Debian 10–12, CentOS/RHEL/Rocky/AlmaLinux, Arch Linux, Fedora, openSUSE, and NixOS.
+  * **Linux x86_64 GNU (`x86_64-unknown-linux-gnu`):** Standard GNU glibc distribution archive.
+  * **Linux ARM64 GNU (`aarch64-unknown-linux-gnu`):** Native Linux ARM64 binary for Raspberry Pi 4/5, AWS Graviton, and ARM-based servers.
+* **Release Artifacts & Installers:**
+  * Universal Unix shell script installer (`solix-toolchain-installer.sh`) supporting macOS and Linux auto-detection.
+  * Windows PowerShell installer (`solix-toolchain-installer.ps1`).
+  * Homebrew formula (`solix-toolchain.rb`).
+  * Direct standalone bundled first-party packages (`raylib.slxarc`, `solix.slxarc`).
+  * SHA-256 checksum manifests (`sha256.sum`).
+
+---
+
 ## [1.0.0] - 2026-12-01
 
 ### Summary

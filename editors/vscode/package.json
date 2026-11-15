@@ -2,7 +2,7 @@
     "name": "solix",
     "displayName": "Solix",
     "description": "Official language support for Solix v2.0 (Language Server, 108-token grammar, formatting, and task runner)",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "publisher": "solix-lang",
     "license": "MIT",
     "repository": {
