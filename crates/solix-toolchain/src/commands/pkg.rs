@@ -268,10 +268,27 @@ pub fn install_package_artifact(
 /// # Errors
 /// Returns an error if building fails, package cannot be read, metadata is missing, or copy operations fail.
 pub fn execute_install(args: InstallArgs) -> Result<()> {
-    let resolved_path = args.path.canonicalize().with_context(|| {
+    if args.bundled {
+        let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+        let installed_count =
+            crate::assets::install_bundled_packages(&store_directory, args.force)?;
+        println!(
+            "Installed {installed_count} bundled default package(s) into '{}'",
+            store_directory.display()
+        );
+        return Ok(());
+    }
+
+    let input_path = args.path.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Missing package path to install. Use 'solix install <path>' or 'solix install --bundled'"
+        )
+    })?;
+
+    let resolved_path = input_path.canonicalize().with_context(|| {
         format!(
             "Failed to resolve package path at '{}'",
-            args.path.display()
+            input_path.display()
         )
     })?;
 
@@ -425,7 +442,8 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
             }
             if targets_to_reinstall.is_empty() {
                 execute_install(InstallArgs {
-                    path: current_directory,
+                    path: Some(current_directory),
+                    bundled: false,
                     force: args.force,
                     profile: args.profile,
                     pkg_dir: args.pkg_dir,
@@ -497,7 +515,8 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
         );
 
         execute_install(InstallArgs {
-            path: project_directory.clone(),
+            path: Some(project_directory.clone()),
+            bundled: false,
             force: true,
             profile: Some(effective_profile.to_string()),
             pkg_dir: args.pkg_dir.clone(),

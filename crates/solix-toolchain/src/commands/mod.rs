@@ -19,5 +19,8 @@ pub use fmt::execute_fmt;
 pub use info::execute_info;
 pub use lsp::execute_lsp;
 pub use new::execute_new;
-pub use pkg::{execute_install, execute_list, execute_reinstall, execute_sync, execute_uninstall};
+pub use pkg::{
+    execute_install, execute_list, execute_reinstall, execute_sync, execute_uninstall,
+    install_package_artifact,
+};
 pub use run::execute_run;

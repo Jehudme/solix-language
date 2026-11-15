@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-040
 * **Target Version:** `v0.1.0`
 * **Milestone Branch:** `milestone/040-cicd-release-plz-cargo-dist-and-bundled-libs`
-* **Status:** DRAFT
+* **Status:** COMPLETED
 * **Lead Architect:** @solix-lead
 * **Target Delivery Date:** 2026-11-25
 * **Related Specifications:**
@@ -34,12 +34,12 @@ When a user installs Solix on any platform (via the `curl | sh` installer on Ubu
 ## 3. Prioritized Deliverables & Task Matrix
 
 ### 3.1 P0: Critical Blockers (Release Gate)
-- [ ] `[P0]` **Dynamic Default Library Builder (`scripts/build_default_libraries.py`):** Create a Python script that scans `libraries/*` for directories containing `manifest.toml`, topologically sorts them by their `[dependencies]` table (so `solixlib` is always built and installed before dependent libraries like `raylib`), builds each library in `release` (and optionally `debug`) profile, and stages the resulting `.slxarc` archives into `crates/solix-toolchain/assets/packages/<name>-<profile>@<version>/<name>.slxarc` along with a `bundled_manifest.json` index. Adding a new library under `libraries/` in the future requires zero workflow changes.
-- [ ] `[P0]` **First-Run Auto-Bootstrap of Bundled Libraries (`crates/solix-toolchain/build.rs`, `src/assets.rs`, `src/commands/install.rs`):**
+- [x] `[P0]` **Dynamic Default Library Builder (`scripts/build_default_libraries.py`):** Create a Python script that scans `libraries/*` for directories containing `manifest.toml`, topologically sorts them by their `[dependencies]` table (so `solixlib` is always built and installed before dependent libraries like `raylib`), builds each library in `release` (and optionally `debug`) profile, and stages the resulting `.slxarc` archives into `crates/solix-toolchain/assets/packages/<name>-<profile>@<version>/<name>.slxarc` along with a `bundled_manifest.json` index. Adding a new library under `libraries/` in the future requires zero workflow changes.
+- [x] `[P0]` **First-Run Auto-Bootstrap of Bundled Libraries (`crates/solix-toolchain/build.rs`, `src/assets.rs`, `src/commands/install.rs`):**
   1. Update `crates/solix-toolchain/build.rs` to copy `crates/solix-toolchain/assets/packages/` (if present) into `<target_dir>/assets/packages/`.
   2. Implement `ensure_bundled_packages_installed(pkg_dir: &Path)` in `crates/solix-toolchain/src/assets.rs` and invoke it automatically when initializing/accessing the default package store (unless `SOLIX_NO_AUTO_BOOTSTRAP=1` is set): for each `<name>-<profile>@<version>/<pkg>.slxarc` in `<exe_dir>/assets/packages/`, if that `(name, profile, version)` is not yet registered in `registry.json`, install it silently into `pkg_dir`.
   3. Add `solix install --bundled` (with `--force` support) so users can manually re-extract bundled standard libraries at any time.
-- [ ] `[P0]` **Cross-Platform Continuous Integration Workflow (`.github/workflows/ci.yml`):**
+- [x] `[P0]` **Cross-Platform Continuous Integration Workflow (`.github/workflows/ci.yml`):**
   Configure GitHub Actions triggered on `push` to `main`/`master` and `pull_request`:
   1. **Lint & Format Gate:** `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D warnings`.
   2. **Multi-OS Test & Library Build Matrix (`ubuntu-latest`, `macos-latest`, `windows-latest`):**
@@ -48,31 +48,31 @@ When a user installs Solix on any platform (via the `curl | sh` installer on Ubu
      * Run `python3 scripts/build_default_libraries.py` and run `solix run --test` on `solixlib` and `raylib`.
 
 ### 3.2 P1: High Priority (Milestone Core)
-- [ ] `[P1]` **Automated Versioning & Changelog with `release-plz` (`release-plz.toml`, `cliff.toml`, `.github/workflows/release-plz.yml`):**
+- [x] `[P1]` **Automated Versioning & Changelog with `release-plz` (`release-plz.toml`, `cliff.toml`, `.github/workflows/release-plz.yml`):**
   1. Configure `release-plz.toml` with `publish = false` (since `solix` is distributed as prebuilt binaries rather than crates.io source crates), `git_tag_enable = true`, and `git_release_enable = false` (allowing `cargo-dist` / `release.yml` to publish the GitHub Release with binary installers when the `v*` tag is pushed).
   2. Configure `cliff.toml` for clean Conventional Commits changelog generation in `CHANGELOG.md`.
   3. Create `.github/workflows/release-plz.yml` triggered on pushes to the default branch.
-- [ ] `[P1]` **Cross-Platform Installers & Release Workflow (`dist-workspace.toml`, `.github/workflows/release.yml`):**
+- [x] `[P1]` **Cross-Platform Installers & Release Workflow (`dist-workspace.toml`, `.github/workflows/release.yml`):**
   1. Set workspace version in `Cargo.toml` to `0.1.0` for the test release baseline.
   2. Configure `dist-workspace.toml` for targets `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc` with installers `shell` (universal Linux distros & macOS `curl | sh`), `powershell` (Windows `irm | iex`), and `homebrew`, including `crates/solix-toolchain/assets` in every archive.
   3. Create `.github/workflows/release.yml` triggered on `v*.*.*` tags (and `workflow_dispatch`) that builds all `libraries/*` via `python3 scripts/build_default_libraries.py`, packages the `solix` toolchain binaries with bundled `assets/packages/`, generates the platform installer scripts and SHA-256 checksums, and publishes the GitHub Release.
-- [ ] `[P1]` **Integration Test for Bundled Package Bootstrap (`crates/solix-toolchain/tests/`):** Add an automated integration test verifying that running `solix list` or `solix install --bundled` against a clean temporary `SOLIX_PKG_DIR` automatically installs all bundled `.slxarc` archives from `assets/packages/`.
+- [x] `[P1]` **Integration Test for Bundled Package Bootstrap (`crates/solix-toolchain/tests/`):** Add an automated integration test verifying that running `solix list` or `solix install --bundled` against a clean temporary `SOLIX_PKG_DIR` automatically installs all bundled `.slxarc` archives from `assets/packages/`.
 
 ### 3.3 P2: Medium Priority (Ergonomics & Polish)
-- [ ] `[P2]` **VS Code Extension Packaging Check in CI (`.github/workflows/ci.yml`):** Validate `editors/vscode/package.json` syntax in CI so editor tooling stays synchronized with toolchain releases.
+- [x] `[P2]` **VS Code Extension Packaging Check in CI (`.github/workflows/ci.yml`):** Validate `editors/vscode/package.json` syntax in CI so editor tooling stays synchronized with toolchain releases.
 
 ### 3.4 P3: Low Priority (Opportunistic Cleanups)
-- [ ] `[P3]` **Cargo Cache Optimization in GitHub Actions:** Configure `Swatinem/rust-cache@v2` across CI and release workflows to minimize build times.
+- [x] `[P3]` **Cargo Cache Optimization in GitHub Actions:** Configure `Swatinem/rust-cache@v2` across CI and release workflows to minimize build times.
 
 ## 4. Definition of Done (DoD) Sign-Off Matrix
 
 | DoD Requirement | Target Benchmark | Verification Tool | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **Workspace Compilation** | Zero warnings with `-D warnings` | `cargo build --workspace --all-targets` | [ ] Pending |
-| **Automated Test Suite** | 100% pass across all unit, integration, and doc tests | `cargo test --workspace --all-targets` | [ ] Pending |
-| **Clippy Static Analysis** | Zero warnings, zero `unwrap` / `expect` | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
-| **Rustfmt Formatting** | Zero formatting violations | `cargo fmt --check` | [ ] Pending |
-| **Documentation Sync** | Specs and guides updated to GL-0010 | GL-0010 audit checklist | [ ] Pending |
+| **Workspace Compilation** | Zero warnings with `-D warnings` | `cargo build --workspace --all-targets` | [x] Completed |
+| **Automated Test Suite** | 100% pass across all unit, integration, and doc tests | `cargo test --workspace --all-targets` | [x] Completed |
+| **Clippy Static Analysis** | Zero warnings, zero `unwrap` / `expect` | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Completed |
+| **Rustfmt Formatting** | Zero formatting violations | `cargo fmt --check` | [x] Completed |
+| **Documentation Sync** | Specs and guides updated to GL-0010 | GL-0010 audit checklist | [x] Completed |
 
 ## 5. Risk Assessment & Mitigation Strategies
 * **Risk 1:** `release-plz` by default attempts to run `cargo publish` to crates.io, which fails for private/binary-distributed workspaces without a `CARGO_REGISTRY_TOKEN`.

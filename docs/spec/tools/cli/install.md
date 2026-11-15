@@ -7,7 +7,7 @@ The `install` subcommand installs compiled Solix binary containers (`.slxb`), ar
 ## Synopsis
 
 ```bash
-solix install <path> [options]
+solix install [<path>] [options]
 ```
 
 ---
@@ -16,7 +16,7 @@ solix install <path> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<path>` | Path | **Yes** | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.toml`. |
+| `[path]` | Path | Optional | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.toml`. Required unless `--bundled` is specified. |
 
 ---
 
@@ -24,6 +24,7 @@ solix install <path> [options]
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
+| `--bundled` | | Flag | `false` | Install or re-extract all bundled first-party default libraries (`solix`, `raylib`) from `assets/packages/`. |
 | `--force` | `-f` | Flag | `false` | Force overwrite if package version is already installed in the package store. |
 | `--profile <prof>` | | String | `"release"` | Target build profile when installing from a project directory (`debug`, `release`, or `test`). |
 | `--debug` | | Flag | `false` | Shorthand for `--profile debug`. |
@@ -77,3 +78,14 @@ When installing a `.slxb` or `.slxarc` file directly:
 ```bash
 solix install build/release/raylib.slxarc --force
 ```
+
+### 5. Bundled Standard Libraries Installation (`--bundled`)
+
+When invoked with `--bundled`, Solix scans `<exe_dir>/assets/packages/` and extracts the first-party libraries (`solix-release@2.0.0`, `raylib-release@5.5.0`) into `$SOLIX_PKG_DIR`.
+
+```bash
+# Re-extract bundled standard libraries
+solix install --bundled --force
+```
+
+First-party libraries are also automatically bootstrapped on first run when invoking `solix list`, `solix compile`, or `solix run` on an empty package store (unless `SOLIX_NO_AUTO_BOOTSTRAP=1` is set).

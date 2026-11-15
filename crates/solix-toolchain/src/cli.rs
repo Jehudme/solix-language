@@ -358,8 +358,12 @@ pub struct InfoArgs {
 #[derive(Debug, Args, Clone)]
 pub struct InstallArgs {
     /// Path to a .slxb binary, .slxarc archive container, or project directory to install into the package store
-    #[arg(required = true)]
-    pub path: PathBuf,
+    #[arg(required_unless_present = "bundled")]
+    pub path: Option<PathBuf>,
+
+    /// Install or re-extract all bundled first-party default libraries from assets/packages/
+    #[arg(long)]
+    pub bundled: bool,
 
     /// Force overwrite if package is already installed
     #[arg(short, long)]

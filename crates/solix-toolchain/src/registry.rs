@@ -84,6 +84,7 @@ impl PackageRegistry {
     /// Loads `$SOLIX_PKG_DIR/registry.json` or creates a new one, self-healing by
     /// backfilling any installed packages present on disk but missing from the manifest.
     pub fn load_or_sync(store_directory: &Path) -> Result<Self> {
+        let _ = crate::assets::ensure_bundled_packages_installed(store_directory);
         let registry_path = store_directory.join("registry.json");
         let mut registry = if registry_path.exists() {
             let manifest_content = fs::read_to_string(&registry_path).with_context(|| {
