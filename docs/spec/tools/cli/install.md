@@ -16,7 +16,7 @@ solix install [<path>] [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `[path]` | Path | Optional | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.toml`. Required unless `--bundled` is specified. |
+| `[path]` | Path | Optional | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.toml`. Required unless `--bundled` or `--vscode` is specified. |
 
 ---
 
@@ -25,6 +25,7 @@ solix install [<path>] [options]
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
 | `--bundled` | | Flag | `false` | Install or re-extract all bundled first-party default libraries (`solix`, `raylib`) from `assets/packages/`. |
+| `--vscode` | | Flag | `false` | Discover installed editor CLIs (`code`, `codium`, `cursor`) and automatically install the bundled official Solix extension (`.vsix`). |
 | `--force` | `-f` | Flag | `false` | Force overwrite if package version is already installed in the package store. |
 | `--profile <prof>` | | String | `"release"` | Target build profile when installing from a project directory (`debug`, `release`, or `test`). |
 | `--debug` | | Flag | `false` | Shorthand for `--profile debug`. |
@@ -89,3 +90,13 @@ solix install --bundled --force
 ```
 
 First-party libraries are also automatically bootstrapped on first run when invoking `solix list`, `solix compile`, or `solix run` on an empty package store (unless `SOLIX_NO_AUTO_BOOTSTRAP=1` is set).
+
+### 6. VS Code Extension Installation (`--vscode`)
+
+When invoked with `--vscode`, Solix locates the bundled `.vsix` extension archive (`assets/vscode/solix-language.vsix`), discovers installed editor command-line tools (`code`, `codium`, `cursor`) in the system `PATH`, and executes the extension installation:
+
+```bash
+solix install --vscode
+```
+
+If no supported editor CLI is found in `PATH`, the command prints the absolute path to the `.vsix` file along with instructions for manual graphical installation.

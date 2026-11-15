@@ -63,6 +63,31 @@ jobs:
           name: artifacts-bundled-packages
           path: staging-packages/
 
+  build-vscode-extension:
+    name: Build & Package VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies and compile extension
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run compile
+          npx @vscode/vsce package --no-dependencies -o solix-language.vsix
+
+      - name: Upload VS Code Extension for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-vscode-extension
+          path: editors/vscode/solix-language.vsix
+
   # Run 'dist plan' to determine what tasks we need to do
   plan:
     runs-on: "ubuntu-latest"
@@ -223,6 +248,7 @@ jobs:
     needs:
       - plan
       - build-bundled-libraries
+      - build-vscode-extension
       - build-local-artifacts
       - build-global-artifacts
     if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}

@@ -361,12 +361,16 @@ pub struct InfoArgs {
 #[derive(Debug, Args, Clone)]
 pub struct InstallArgs {
     /// Path to a .slxb binary, .slxarc archive container, or project directory to install into the package store
-    #[arg(required_unless_present = "bundled")]
+    #[arg(required_unless_present_any = ["bundled", "vscode"])]
     pub path: Option<PathBuf>,
 
     /// Install or re-extract all bundled first-party default libraries from assets/packages/
     #[arg(long)]
     pub bundled: bool,
+
+    /// Install the official Solix Visual Studio Code / VSCodium / Cursor extension
+    #[arg(long, conflicts_with = "path")]
+    pub vscode: bool,
 
     /// Force overwrite if package is already installed
     #[arg(short, long)]

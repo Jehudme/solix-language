@@ -563,3 +563,27 @@ fn test_bundled_default_packages_bootstrap_and_manual_install() {
         0
     );
 }
+
+#[test]
+fn test_install_vscode_flag_parsing_and_resolution() {
+    let install_vscode_cli = Cli::try_parse_from(["solix", "install", "--vscode"])
+        .expect("Must parse 'solix install --vscode' cleanly");
+    if let solix_toolchain::Commands::Install(args) = install_vscode_cli.command {
+        assert!(args.vscode);
+        assert!(args.path.is_none());
+        assert!(!args.bundled);
+    } else {
+        panic!("Expected Install command");
+    }
+
+    let resolved_vsix = solix_toolchain::assets::resolve_bundled_vscode_extension_path();
+    assert!(
+        resolved_vsix.is_some(),
+        "Must discover staged or workspace .vsix extension file"
+    );
+    let extension_path = resolved_vsix.unwrap();
+    assert!(
+        extension_path.is_file(),
+        "Resolved extension must be an existing file"
+    );
+}

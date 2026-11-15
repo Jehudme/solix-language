@@ -78,25 +78,33 @@ When launching a debug session from VS Code, the extension spawns `solix dap --p
 
 ## 4. Installation
 
-### Option A: Install Pre-packaged `.vsix`
-To install the pre-built `.vsix` extension file directly into Visual Studio Code:
+### Option A: One-Command Installation (`solix install --vscode`)
+The simplest and recommended method to install the official extension into Visual Studio Code, VSCodium, or Cursor is using the built-in toolchain command:
 
 ```bash
-code --install-extension editors/vscode/solix-0.1.0.vsix --force
+solix install --vscode
 ```
 
-> [!IMPORTANT]
+This command inspects your environment, detects any installed editor command-line tools (`code`, `codium`, `cursor`), and automatically installs the bundled extension archive with zero external downloads required.
+
+### Option B: Install Pre-packaged `.vsix` via Editor CLI
+You can also install the `.vsix` package manually using your editor's CLI:
+
+```bash
+code --install-extension editors/vscode/solix-language.vsix --force
+```
+
 > [!TIP]
-> If you are updating from an earlier version of the Solix extension, reload the VS Code window after installation (`Ctrl+Shift+P` / `Cmd+Shift+P` $\to$ `Developer: Reload Window`) to refresh registered commands and clear any cached extension state.
+> If you are updating from an earlier version of the Solix extension, reload the editor window after installation (`Ctrl+Shift+P` / `Cmd+Shift+P` -> `Developer: Reload Window`) to refresh registered commands and language server background workers.
 
 Alternatively, inside Visual Studio Code:
 1. Open the Extensions view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
 2. Click the `...` (Views and More Actions) menu in the top-right corner.
 3. Select **Install from VSIX...**.
-4. Browse to `editors/vscode/solix-0.1.0.vsix` and click **Install**.
+4. Browse to `solix-language.vsix` and click **Install**.
 5. Run `Developer: Reload Window` via the Command Palette.
 
-### Option B: Development Mode (Run from Source)
+### Option C: Development Mode (Run from Source)
 1. Open the `editors/vscode` folder in VS Code:
    ```bash
    code editors/vscode

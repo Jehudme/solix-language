@@ -50,10 +50,19 @@ solix install <path> [options]
 
 ### Key Options & Flags
 * `<path>`: Path to the target `.slxb` or `.slxarc` file to install.
+* `--bundled`: Installs or re-extracts bundled first-party packages (`solix`, `raylib`) from `assets/packages/`.
+* `--vscode`: Automatically installs the bundled official Solix extension into VS Code, VSCodium, or Cursor.
+* `-f, --force`: Overwrites existing package version in the store.
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
 
 ### Practical Examples
 ```bash
+# Install the official Solix VS Code / VSCodium / Cursor extension
+solix install --vscode
+
+# Re-extract bundled standard packages
+solix install --bundled --force
+
 # Install a compiled binary library into the package store
 solix install build/release/math_utils.slxb
 

@@ -178,6 +178,98 @@ pub fn resolve_bundled_packages_dir() -> Option<PathBuf> {
     None
 }
 
+/// Resolves the filesystem path to the bundled Solix Visual Studio Code extension (`.vsix`).
+///
+/// Priority:
+/// 1. `SOLIX_VSCODE_VSIX_PATH` environment variable override.
+/// 2. Sibling `<exe_dir>/assets/vscode/solix-language.vsix` or `<exe_dir>/assets/vscode/*.vsix`.
+/// 3. Sibling `<exe_dir>/../assets/vscode/*.vsix`.
+/// 4. Compile-time `CARGO_MANIFEST_DIR/assets/vscode/*.vsix`.
+/// 5. Repository fallback: `<workspace_root>/editors/vscode/*.vsix`.
+#[must_use]
+pub fn resolve_bundled_vscode_extension_path() -> Option<PathBuf> {
+    if let Ok(custom_path) = std::env::var("SOLIX_VSCODE_VSIX_PATH") {
+        let candidate = PathBuf::from(custom_path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    if let Some(executable_directory) = std::env::current_exe()
+        .ok()
+        .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
+    {
+        let candidate_directory = executable_directory.join("assets").join("vscode");
+        if let Some(extension_path) = find_vsix_in_directory(&candidate_directory) {
+            return Some(extension_path);
+        }
+
+        if let Some(parent_directory) = executable_directory.parent() {
+            let alternative_directory = parent_directory.join("assets").join("vscode");
+            if let Some(extension_path) = find_vsix_in_directory(&alternative_directory) {
+                return Some(extension_path);
+            }
+        }
+    }
+
+    let manifest_directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("vscode");
+    if let Some(extension_path) = find_vsix_in_directory(&manifest_directory) {
+        return Some(extension_path);
+    }
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        let editors_directory = current_dir.join("editors").join("vscode");
+        if let Some(extension_path) = find_vsix_in_directory(&editors_directory) {
+            return Some(extension_path);
+        }
+        let workspace_toolchain_directory = current_dir
+            .join("crates")
+            .join("solix-toolchain")
+            .join("assets")
+            .join("vscode");
+        if let Some(extension_path) = find_vsix_in_directory(&workspace_toolchain_directory) {
+            return Some(extension_path);
+        }
+    }
+
+    None
+}
+
+/// Discovers a `.vsix` file in the specified directory.
+fn find_vsix_in_directory(directory: &Path) -> Option<PathBuf> {
+    if !directory.is_dir() {
+        return None;
+    }
+
+    let canonical_file = directory.join("solix-language.vsix");
+    if canonical_file.is_file() {
+        return Some(canonical_file);
+    }
+
+    if let Ok(entries) = fs::read_dir(directory) {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if entry_path.is_file()
+                && entry_path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext_str| ext_str.eq_ignore_ascii_case("vsix"))
+            {
+                candidates.push(entry_path);
+            }
+        }
+        candidates.sort();
+        if let Some(latest_file) = candidates.pop() {
+            return Some(latest_file);
+        }
+    }
+
+    None
+}
+
 /// Discovers and installs all bundled default libraries from `assets/packages/` into `store_directory`.
 ///
 /// # Errors

@@ -268,6 +268,10 @@ pub fn install_package_artifact(
 /// # Errors
 /// Returns an error if building fails, package cannot be read, metadata is missing, or copy operations fail.
 pub fn execute_install(args: InstallArgs) -> Result<()> {
+    if args.vscode {
+        return execute_install_vscode();
+    }
+
     if args.bundled {
         let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
         let installed_count =
@@ -444,6 +448,7 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
                 execute_install(InstallArgs {
                     path: Some(current_directory),
                     bundled: false,
+                    vscode: false,
                     force: args.force,
                     profile: args.profile,
                     pkg_dir: args.pkg_dir,
@@ -517,6 +522,7 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
         execute_install(InstallArgs {
             path: Some(project_directory.clone()),
             bundled: false,
+            vscode: false,
             force: true,
             profile: Some(effective_profile.to_string()),
             pkg_dir: args.pkg_dir.clone(),
@@ -792,4 +798,110 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Discovers supported editor CLIs (`code`, `codium`, `cursor`) and installs the Solix extension.
+///
+/// # Errors
+/// Returns an error if the bundled `.vsix` cannot be located or installation fails.
+pub fn execute_install_vscode() -> Result<()> {
+    let extension_path = crate::assets::resolve_bundled_vscode_extension_path().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not locate bundled Solix VS Code extension (.vsix).\n\
+             Please ensure 'assets/vscode/solix-language.vsix' exists or set SOLIX_VSCODE_VSIX_PATH."
+        )
+    })?;
+
+    println!(
+        "Found Solix VS Code extension at '{}'",
+        extension_path.display()
+    );
+
+    let editor_binaries = ["code", "codium", "cursor"];
+    let mut installed_count: usize = 0;
+    let mut discovered_editors: Vec<PathBuf> = Vec::new();
+
+    for editor_name in editor_binaries {
+        if let Some(editor_path) = find_executable_in_path(editor_name) {
+            discovered_editors.push(editor_path);
+        }
+    }
+
+    if discovered_editors.is_empty() {
+        println!(
+            "\nNo supported editor command-line tool ('code', 'codium', 'cursor') found in PATH.\n\
+             \nTo install manually into Visual Studio Code / VSCodium / Cursor:\n\
+             1. Open your editor.\n\
+             2. Press Ctrl+Shift+P (or Cmd+Shift+P on macOS).\n\
+             3. Select 'Extensions: Install from VSIX...'\n\
+             4. Choose the extension file:\n\
+                {}\n",
+            extension_path.display()
+        );
+        return Ok(());
+    }
+
+    for editor_executable in &discovered_editors {
+        let editor_display = editor_executable
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("editor");
+
+        println!("Installing extension using '{editor_display}'...");
+        let installation_status = std::process::Command::new(editor_executable)
+            .arg("--install-extension")
+            .arg(&extension_path)
+            .status();
+
+        match installation_status {
+            Ok(status) if status.success() => {
+                println!(
+                    "Successfully installed Solix extension into '{editor_display}'!"
+                );
+                installed_count += 1;
+            }
+            Ok(status) => {
+                eprintln!(
+                    "Warning: '{editor_display} --install-extension' exited with code {:?}",
+                    status.code()
+                );
+            }
+            Err(error_details) => {
+                eprintln!(
+                    "Warning: Failed to execute '{editor_display}': {error_details}"
+                );
+            }
+        }
+    }
+
+    if installed_count > 0 {
+        println!(
+            "\nExtension installation complete. Restart your editor or run 'Developer: Reload Window' to activate."
+        );
+    }
+
+    Ok(())
+}
+
+fn find_executable_in_path(executable_name: &str) -> Option<PathBuf> {
+    if let Some(path_variable) = std::env::var_os("PATH") {
+        for path_entry in std::env::split_paths(&path_variable) {
+            let direct_candidate = path_entry.join(executable_name);
+            if direct_candidate.is_file() {
+                return Some(direct_candidate);
+            }
+            #[cfg(windows)]
+            {
+                let cmd_candidate = path_entry.join(format!("{executable_name}.cmd"));
+                if cmd_candidate.is_file() {
+                    return Some(cmd_candidate);
+                }
+                let exe_candidate = path_entry.join(format!("{executable_name}.exe"));
+                if exe_candidate.is_file() {
+                    return Some(exe_candidate);
+                }
+            }
+        }
+    }
+    None
 }
