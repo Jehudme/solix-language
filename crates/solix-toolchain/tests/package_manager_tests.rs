@@ -516,3 +516,50 @@ version = "1.0.0"
         "Reinstall with mismatched manifest name must fail"
     );
 }
+
+#[test]
+fn test_bundled_default_packages_bootstrap_and_manual_install() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("solix_packages");
+    let store_string = package_store_directory.to_str().expect("valid path");
+
+    // Ensure directory is clean
+    assert!(!package_store_directory.exists());
+
+    // 1. Explicit 'solix install --bundled' into any store directory
+    let install_bundled_cli =
+        Cli::try_parse_from(["solix", "install", "--bundled", "--pkg-dir", store_string])
+            .expect("parse install bundled cli");
+    assert_eq!(run(install_bundled_cli).expect("run install bundled"), 0);
+
+    // Verify registry was created and default libraries are installed
+    let registry_file = package_store_directory.join("registry.json");
+    assert!(registry_file.exists(), "registry.json must be created");
+
+    let marker_file = package_store_directory.join(format!(
+        ".bundled_bootstrapped_v{}",
+        env!("CARGO_PKG_VERSION")
+    ));
+    assert!(marker_file.exists(), "Marker file must be created");
+
+    // 2. Calling 'solix install --bundled' on an already-bootstrapped store is idempotent
+    let idempotent_cli =
+        Cli::try_parse_from(["solix", "install", "--bundled", "--pkg-dir", store_string])
+            .expect("parse install bundled cli");
+    assert_eq!(run(idempotent_cli).expect("run install bundled"), 0);
+
+    // 3. Calling 'solix install --bundled --force' successfully re-extracts packages
+    let force_bundled_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        "--bundled",
+        "--force",
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("parse install bundled force cli");
+    assert_eq!(
+        run(force_bundled_cli).expect("run install bundled force"),
+        0
+    );
+}

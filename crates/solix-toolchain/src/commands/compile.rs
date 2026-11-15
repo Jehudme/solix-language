@@ -88,6 +88,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
 
     // 4. Initialize compilation options and attach package store solver
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+    let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
 
     let mut options = CompilationOptions::new()

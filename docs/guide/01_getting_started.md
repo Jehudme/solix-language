@@ -27,7 +27,31 @@ This guide provides a practical, hands-on walkthrough for setting up the toolcha
 
 ## Prerequisites & Building from Source
 
-### Prerequisites
+### Quick Installation (Prebuilt Binaries)
+
+Install the official prebuilt Solix binary toolchain directly on Linux, macOS, or Windows:
+
+#### Linux & macOS (Universal Shell Script)
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/solix-language/solix/main/install.sh | sh
+```
+
+#### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/solix-language/solix/main/install.ps1 | iex
+```
+
+#### macOS Homebrew
+```bash
+brew install solix-language/tap/solix
+```
+
+> [!NOTE]
+> All official release packages include first-party default libraries (`solix` standard library and `raylib` 2D graphics bindings) pre-bundled inside `assets/packages/`. On first run, Solix automatically bootstraps these libraries into your local package store (`~/.solix/packages`). You can also manually re-extract them at any time via `solix install --bundled --force`.
+
+---
+
+### Prerequisites & Building from Source
 
 | Tool | Minimum Version | Purpose |
 |---|---|---|

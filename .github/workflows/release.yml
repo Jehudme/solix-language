@@ -1,0 +1,89 @@
+name: Multi-Platform Release Distribution
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release Git tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-bundled-libraries:
+    name: Build & Package Default First-Party Libraries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
+
+      - name: Install Zig compiler
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.13.0"
+
+      - name: Build and stage default first-party libraries
+        run: python3 scripts/build_default_libraries.py
+
+      - name: Upload bundled packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundled-packages
+          path: crates/solix-toolchain/assets/packages/
+
+  build-and-publish-release:
+    name: Build & Publish Multi-Platform Release
+    needs: build-bundled-libraries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Download bundled packages artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bundled-packages
+          path: crates/solix-toolchain/assets/packages/
+
+      - name: Install cargo-dist
+        run: cargo install cargo-dist --version 0.28.0 --locked
+
+      - name: Build release archives
+        run: cargo dist build --artifacts all
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/distrib/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
