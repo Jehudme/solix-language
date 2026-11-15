@@ -52,6 +52,36 @@ function readPackageName(projectRoot: string): string {
 }
 
 /**
+ * Extracts declared dependencies from manifest.toml content as "name@version" pairs.
+ */
+function parseManifestDependencies(manifestContent: string): string[] {
+    const dependencies: string[] = [];
+    const depsMatch = manifestContent.match(/\[dependencies\]([\s\S]*?)(?:\[|$)/);
+    if (depsMatch && depsMatch[1]) {
+        const lines = depsMatch[1].split('\n');
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine || trimmedLine.startsWith('#')) {
+                continue;
+            }
+            const match = trimmedLine.match(/^([a-zA-Z0-9_\-\.]+)\s*=\s*["']([^"']+)["']/);
+            if (match && match[1] && match[2]) {
+                dependencies.push(`${match[1]}@${match[2]}`);
+            }
+        }
+    }
+    return dependencies;
+}
+
+/**
+ * Extracts canonical entry point symbol from manifest.toml if specified.
+ */
+function parseManifestEntryPoint(manifestContent: string): string | undefined {
+    const entryMatch = manifestContent.match(/\[entrypoints\][\s\S]*?main\s*=\s*["']([^"']+)["']/);
+    return entryMatch && entryMatch[1] ? entryMatch[1].trim() : undefined;
+}
+
+/**
  * Resolves a target document URI from CodeLens arguments or active text editor.
  */
 function resolveTargetUri(documentArgument?: string | vscode.Uri): vscode.Uri | undefined {
@@ -100,8 +130,26 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
                 try {
                     const projectRoot = findProjectRoot(sourceFilePath);
                     let compilationSources = [sourceFilePath];
+                    const extraArguments: string[] = [];
 
                     if (projectRoot) {
+                        const manifestPath = path.join(projectRoot, 'manifest.toml');
+                        if (fs.existsSync(manifestPath)) {
+                            try {
+                                const manifestContent = fs.readFileSync(manifestPath, 'utf8');
+                                const dependencies = parseManifestDependencies(manifestContent);
+                                for (const dependency of dependencies) {
+                                    extraArguments.push('--deps', dependency);
+                                }
+                                const entryPoint = parseManifestEntryPoint(manifestContent);
+                                if (entryPoint) {
+                                    extraArguments.push('--entry', entryPoint);
+                                }
+                            } catch {
+                                // Ignore manifest parse errors
+                            }
+                        }
+
                         const sourceDirectory = path.join(projectRoot, 'src');
                         if (fs.existsSync(sourceDirectory)) {
                             const discoveredFiles = fs.readdirSync(sourceDirectory)
@@ -115,19 +163,42 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
 
                     childProcess.execFileSync(
                         this.solixBinaryPath,
-                        ['compile', ...compilationSources, '-o', temporaryBinaryPath],
-                        { encoding: 'utf8', timeout: 8000 }
+                        ['compile', ...compilationSources, ...extraArguments, '-o', temporaryBinaryPath],
+                        { encoding: 'utf8', timeout: 15000 }
                     );
                     inspectionTarget = temporaryBinaryPath;
                 } catch (compilationError) {
-                    return `// Compilation Failed for inspection of ${sourceFilePath}:\n// ${String(compilationError)}`;
+                    // Fall back to existing compiled artifact if available in project build folder
+                    let fallbackResolved = false;
+                    const projectRoot = findProjectRoot(sourceFilePath);
+                    if (projectRoot) {
+                        const packageName = readPackageName(projectRoot);
+                        const candidatePaths = [
+                            path.join(projectRoot, 'build', activeBuildProfile, `${packageName}.slxarc`),
+                            path.join(projectRoot, 'build', 'release', `${packageName}.slxarc`),
+                            path.join(projectRoot, 'build', 'debug', `${packageName}.slxarc`),
+                            path.join(projectRoot, 'build', '.cache', 'stage', activeBuildProfile, 'bin', `${packageName}.slxb`),
+                            path.join(projectRoot, 'build', '.cache', 'stage', 'release', 'bin', `${packageName}.slxb`),
+                            path.join(projectRoot, 'build', '.cache', 'stage', 'debug', 'bin', `${packageName}.slxb`),
+                        ];
+                        for (const candidatePath of candidatePaths) {
+                            if (fs.existsSync(candidatePath)) {
+                                inspectionTarget = candidatePath;
+                                fallbackResolved = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!fallbackResolved) {
+                        return `// Compilation Failed for inspection of ${sourceFilePath}:\n// ${String(compilationError)}`;
+                    }
                 }
             }
 
             const executionOutput = childProcess.execFileSync(
                 this.solixBinaryPath,
                 ['info', this.commandFlag, inspectionTarget],
-                { encoding: 'utf8', timeout: 5000 }
+                { encoding: 'utf8', timeout: 15000 }
             );
             return executionOutput;
         } catch (executionError) {
@@ -291,6 +362,14 @@ export function registerSolixCommands(
     profileStatusBarItem.show();
     extensionContext.subscriptions.push(profileStatusBarItem);
 
+    // 5b. Build Button in Status Bar
+    const buildStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    buildStatusBarItem.command = 'solix.buildProject';
+    buildStatusBarItem.text = '$(gear) Build';
+    buildStatusBarItem.tooltip = `Build Solix Project (solix build --${activeBuildProfile})`;
+    buildStatusBarItem.show();
+    extensionContext.subscriptions.push(buildStatusBarItem);
+
     extensionContext.subscriptions.push(
         vscode.commands.registerCommand('solix.selectProfile', async () => {
             const profileSelection = await vscode.window.showQuickPick(
@@ -307,6 +386,7 @@ export function registerSolixCommands(
                 if (profileStatusBarItem) {
                     profileStatusBarItem.text = `$(tools) Solix: ${activeBuildProfile}`;
                 }
+                buildStatusBarItem.tooltip = `Build Solix Project (solix build --${activeBuildProfile})`;
                 vscode.window.showInformationMessage(`Active Solix build profile set to: ${activeBuildProfile}`);
             }
         })
