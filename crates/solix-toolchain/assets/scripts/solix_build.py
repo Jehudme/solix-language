@@ -23,6 +23,7 @@ SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
     ("x86_64-unknown-linux-gnu", ".so"),
     ("aarch64-unknown-linux-gnu", ".so"),
     ("x86_64-pc-windows-gnu", ".dll"),
+    ("x86_64-pc-windows-msvc", ".dll"),
     ("x86_64-apple-darwin", ".dylib"),
     ("aarch64-apple-darwin", ".dylib"),
 ]
@@ -321,11 +322,19 @@ def compile_rust_project(
     successful_targets = 0
 
     for target_triple, target_extension in SUPPORTED_RELEASE_TARGETS:
-        is_host_platform = (target_triple == host_target_triple)
+        is_host_platform = (
+            target_triple == host_target_triple
+            or (
+                target_triple.startswith("x86_64-pc-windows")
+                and host_target_triple.startswith("x86_64-pc-windows")
+            )
+        )
         target_stage_directory = stage_lib_directory / target_triple
         target_stage_directory.mkdir(parents=True, exist_ok=True)
 
         if has_cargo_zigbuild:
+            if "msvc" in target_triple:
+                continue
             cargo_command = [
                 "cargo",
                 "zigbuild",
