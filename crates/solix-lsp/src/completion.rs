@@ -14,8 +14,9 @@ use solix_common::types::Type;
 use solix_compilation::phases::binder::symbols::SymbolEntry;
 use solix_compilation::phases::parser::statements::declarations::Declaration;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionParams, Documentation,
-    InsertTextFormat, MarkupContent, MarkupKind, Position, Range, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionList,
+    CompletionParams, Documentation, InsertTextFormat, MarkupContent, MarkupKind, Position, Range,
+    TextEdit,
 };
 
 /// Postfix completion templates supported in Solix.
@@ -913,22 +914,51 @@ fn handle_general_completion(
 }
 
 fn make_symbol_completion_item(symbol: &SymbolEntry) -> CompletionItem {
-    let (item_kind, detail) = match &symbol.symbol_type {
-        Type::FunctionPointer { .. } => (
-            CompletionItemKind::METHOD,
-            Some(symbol.to_signature_string()),
-        ),
+    let (item_kind, detail, label_details) = match &symbol.symbol_type {
+        Type::FunctionPointer {
+            return_type,
+            parameter_types,
+        } => {
+            let parameter_strings = parameter_types
+                .iter()
+                .enumerate()
+                .map(|(param_index, param_type)| {
+                    if let Some(param_name) = symbol.parameter_names.get(param_index)
+                        && !param_name.is_empty()
+                    {
+                        format!("{param_type} {param_name}")
+                    } else {
+                        param_type.to_string()
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+            (
+                CompletionItemKind::METHOD,
+                Some(symbol.to_signature_string()),
+                Some(CompletionItemLabelDetails {
+                    detail: Some(format!("({parameter_strings})")),
+                    description: Some(return_type.to_string()),
+                }),
+            )
+        }
         Type::Class { .. } => (
             CompletionItemKind::CLASS,
             Some(format!("class {}", symbol.name)),
+            None,
         ),
         Type::Enum { .. } => (
             CompletionItemKind::ENUM,
             Some(format!("enum {}", symbol.name)),
+            None,
         ),
         _ => (
             CompletionItemKind::FIELD,
             Some(format!("{} {}", symbol.symbol_type, symbol.name)),
+            Some(CompletionItemLabelDetails {
+                detail: None,
+                description: Some(symbol.symbol_type.to_string()),
+            }),
         ),
     };
 
@@ -936,6 +966,7 @@ fn make_symbol_completion_item(symbol: &SymbolEntry) -> CompletionItem {
         label: symbol.name.clone(),
         kind: Some(item_kind),
         detail,
+        label_details,
         ..Default::default()
     }
 }

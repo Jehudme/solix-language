@@ -187,9 +187,18 @@ Semantic tokens (`textDocument/semanticTokens/full`) utilize LSP 3.17 relative d
 1. **UTF-16 Code Unit Precision**: Character offsets and lengths are computed using UTF-16 code unit counts conforming strictly to the LSP specification.
 2. **Multi-line Token Splitting**: Spans spanning line breaks are split at newline boundaries, ensuring no token has multi-line span length.
 3. **Strict Non-Overlapping Invariant**: Tokens are strictly sorted by line and character offset and sanitized so subsequent tokens never start before the preceding token ends.
-4. **Resilient Token Fallback**: If syntax errors prevent full AST generation, the lexer token stream provides robust lexical classification, preventing token drift across remaining source lines.
+4. **Resilient Token Fallback**: If syntax errors prevent full AST generation, the lexer token stream provides robust lexical classification (prioritizing call patterns `ident(` and `::ident(` as method/function tokens before initial-casing type heuristics), preventing token drift and color fragmentation across remaining source lines.
+5. **CRLF Visual Alignment**: Character coordinates ignore `\r` carriage return bytes in UTF-16 code unit accumulation, ensuring column positioning remains invariant between LF and CRLF line terminations.
 
 ### 7.4 Formal Parameter Preservation for Inlay Hints & Signatures
-Parameter names and types are preserved across all compiler passes (`SymbolEntry::parameter_names`). Inlay hints (`textDocument/inlayHint`) and signature help (`textDocument/signatureHelp`) display true declared parameter names (`brick_rect:`, `active_color:`) rather than synthesized `arg{index}:` placeholders.
+Parameter names and types are preserved across all compiler passes (`SymbolEntry::parameter_names`).
+1. **Inlay Hints**: Inlay hints (`textDocument/inlayHint`) display true declared parameter names (`brick_rect:`, `active_color:`) rather than synthesized `arg{index}:` placeholders.
+2. **Signature Help Resilience**: Active typing of unclosed invocations (e.g. `Raylib::DrawRectangleRounded(brick_rect, `) invokes a backward lexical scanner that extracts the callee symbol and active parameter index even when resilient AST generation produces empty call nodes.
+3. **Completion Label Details**: In autocompletion lists (`textDocument/completion`), method and function entries utilize LSP 3.17 `CompletionItemLabelDetails` to render parameter signatures in `detail` (`(Rectangle rec, float32 roundness, int32 segments, Color color)`) and return types in `description` (`void`), while field/variable entries display their evaluated type.
+
+### 7.5 Strict Import Resolution Parity
+The Language Server enforces diagnostic parity with the CLI compiler (`solix compile` / `solix build`):
+1. **Builtin Packages**: Only `std::*` standard library packages and `blt` / `blt::*` compiler builtins are recognized without project dependencies.
+2. **External Packages**: Any external package (such as `solix.*` or `raylib.*`) requires an explicit dependency entry in `manifest.toml` or an `extern import` declaration. Wildcard imports targeting undeclared external packages consistently emit `CannotResolveImport` (`E0232`).
 
 

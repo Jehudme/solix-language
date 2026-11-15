@@ -1053,22 +1053,45 @@ impl WorkspaceManager {
         }
 
         // Extract semantic artifacts
-        let new_semantic_snapshot = context.binding_artifacts.map(|artifacts| {
-            Arc::new(BoundSemanticSnapshot {
+        let previous_semantic = self
+            .snapshots
+            .get(target_uri)
+            .and_then(|snap| snap.last_good_semantic.clone());
+
+        let new_semantic_snapshot = context.binding_artifacts.and_then(|artifacts| {
+            let user_symbols_count = artifacts
+                .symbol_table
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.source_id == target_source_id)
+                .count();
+
+            if !target_parse_errors.is_empty()
+                && let Some(ref prev_sem) = previous_semantic
+            {
+                let prev_user_symbols_count = prev_sem
+                    .symbol_table
+                    .symbols
+                    .iter()
+                    .filter(|symbol| symbol.source_id == target_source_id)
+                    .count();
+
+                if user_symbols_count < prev_user_symbols_count {
+                    return None;
+                }
+            }
+
+            Some(Arc::new(BoundSemanticSnapshot {
                 symbol_table: artifacts.symbol_table,
                 layouts: artifacts.layouts,
                 node_types: artifacts.node_types,
                 resolved_symbols: artifacts.resolved_symbols,
                 monomorphized_classes: artifacts.monomorphized_classes,
-            })
+            }))
         });
 
         // Retain last good semantic snapshot if the current bind failed to produce one
-        let last_good_semantic = new_semantic_snapshot.or_else(|| {
-            self.snapshots
-                .get(target_uri)
-                .and_then(|snap| snap.last_good_semantic.clone())
-        });
+        let last_good_semantic = new_semantic_snapshot.or(previous_semantic);
 
         // Stage 4: Dead code & unused symbol diagnostics
         let target_ast = context

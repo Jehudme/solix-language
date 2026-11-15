@@ -888,13 +888,13 @@ pub fn execute_pass1_symbol_discovery(
         for import_entry in imports {
             if import_entry.is_wildcard {
                 let path = &import_entry.path;
-                let is_std = path.starts_with("std") || path.starts_with("solix");
+                let is_std_builtin = path.starts_with("std::");
                 let is_known_pkg = symbol_table.known_packages.contains(path)
                     || symbol_table
                         .file_packages
                         .iter()
                         .any(|pkg_name| pkg_name == path);
-                if !is_std && !is_known_pkg {
+                if !is_std_builtin && !is_known_pkg {
                     accumulated_errors.push((
                         import_entry.source_id,
                         BindingError::CannotResolveImport {
