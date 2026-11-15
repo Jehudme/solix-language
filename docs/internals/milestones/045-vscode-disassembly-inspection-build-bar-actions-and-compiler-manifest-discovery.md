@@ -4,9 +4,10 @@
 * **Milestone ID:** MS-045
 * **Target Version:** `v1.1.2`
 * **Milestone Branch:** `milestone/045-vscode-disassembly-inspection-build-bar-actions-and-compiler-manifest-discovery`
-* **Status:** ACTIVE
+* **Status:** COMPLETED
 * **Lead Architect:** Core Systems & Toolchain Team
 * **Target Delivery Date:** 2026-11-15
+* **Completion Commit:** `46c74ab`
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)
 
 ---
