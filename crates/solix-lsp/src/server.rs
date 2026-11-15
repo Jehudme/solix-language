@@ -25,6 +25,7 @@ use crate::semantic_tokens::{
 use crate::signature_help::signature_help;
 use crate::symbols::{document_symbols, workspace_symbols};
 use crate::workspace::WorkspaceManager;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::request::{
@@ -41,26 +42,25 @@ pub struct SolixLanguageServer {
     client: Client,
     /// Workspace state and document overlay manager.
     workspace: Arc<WorkspaceManager>,
+    /// Active debounced diagnostic tasks indexed by document URI.
+    debounce_tasks: Arc<tokio::sync::Mutex<HashMap<Url, tokio::task::JoinHandle<()>>>>,
 }
 
 impl SolixLanguageServer {
     /// Creates a new language server instance with the given client and workspace manager.
     #[must_use]
     pub fn new(client: Client, workspace: Arc<WorkspaceManager>) -> Self {
-        Self { client, workspace }
+        Self {
+            client,
+            workspace,
+            debounce_tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
     }
 
     /// Accessor for the underlying workspace manager.
     #[must_use]
     pub fn workspace(&self) -> &Arc<WorkspaceManager> {
         &self.workspace
-    }
-
-    async fn analyze_and_publish(&self, uri: &Url, version: i32, content: &str) {
-        let snapshot = self.workspace.did_change(uri, version, content.to_string());
-        self.client
-            .publish_diagnostics(uri.clone(), snapshot.diagnostics, Some(version))
-            .await;
     }
 }
 
@@ -104,7 +104,6 @@ impl LanguageServer for SolixLanguageServer {
                     ":".to_string(),
                     "@".to_string(),
                     "<".to_string(),
-                    " ".to_string(),
                 ]),
                 all_commit_characters: None,
                 work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -172,10 +171,18 @@ impl LanguageServer for SolixLanguageServer {
         let version = params.text_document.version;
         let content = params.text_document.text;
 
-        let snapshot = self.workspace.did_open(uri.clone(), version, content);
-        self.client
-            .publish_diagnostics(uri, snapshot.diagnostics, Some(version))
-            .await;
+        let workspace = self.workspace.clone();
+        let target_uri = uri.clone();
+        let snapshot_result = tokio::task::spawn_blocking(move || {
+            workspace.did_open(target_uri, version, content)
+        })
+        .await;
+
+        if let Ok(snapshot) = snapshot_result {
+            self.client
+                .publish_diagnostics(uri, snapshot.diagnostics, Some(version))
+                .await;
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -183,26 +190,88 @@ impl LanguageServer for SolixLanguageServer {
         let version = params.text_document.version;
 
         if let Some(change) = params.content_changes.into_iter().last() {
-            self.analyze_and_publish(&uri, version, &change.text).await;
+            // Update document buffer in memory immediately so completion/hover see newest text
+            self.workspace.update_document(&uri, version, change.text.clone());
+
+            // Cancel previous debounced analysis if still pending
+            let mut tasks = self.debounce_tasks.lock().await;
+            if let Some(previous_task) = tasks.remove(&uri) {
+                previous_task.abort();
+            }
+
+            let client = self.client.clone();
+            let workspace = self.workspace.clone();
+            let target_uri = uri.clone();
+            let content = change.text;
+
+            let debounce_handle = tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                let analysis_uri = target_uri.clone();
+                let snapshot_opt = tokio::task::spawn_blocking(move || {
+                    workspace.analyze_document_change(&analysis_uri, version, &content)
+                })
+                .await
+                .ok();
+
+                if let Some(snapshot) = snapshot_opt {
+                    client
+                        .publish_diagnostics(target_uri, snapshot.diagnostics, Some(version))
+                        .await;
+                }
+            });
+
+            tasks.insert(uri, debounce_handle);
         }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
+
+        // Cancel pending debounce on save and run immediately
+        let mut tasks = self.debounce_tasks.lock().await;
+        if let Some(previous_task) = tasks.remove(&uri) {
+            previous_task.abort();
+        }
+        drop(tasks);
+
+        let workspace = self.workspace.clone();
+        let target_uri = uri.clone();
+
         if let Some(text) = params.text {
             let doc_version = self
                 .workspace
                 .get_document(&uri)
                 .map_or(1, |doc| doc.version);
-            self.analyze_and_publish(&uri, doc_version, &text).await;
-        } else if let Some(snapshot) = self.workspace.recompile_document(&uri) {
-            self.client
-                .publish_diagnostics(uri, snapshot.diagnostics, Some(snapshot.version))
-                .await;
+            let snapshot_opt = tokio::task::spawn_blocking(move || {
+                workspace.did_change(&target_uri, doc_version, text)
+            })
+            .await
+            .ok();
+            if let Some(snapshot) = snapshot_opt {
+                self.client
+                    .publish_diagnostics(uri, snapshot.diagnostics, Some(doc_version))
+                    .await;
+            }
+        } else {
+            let snapshot_opt = tokio::task::spawn_blocking(move || {
+                workspace.recompile_document(&target_uri)
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(snapshot) = snapshot_opt {
+                self.client
+                    .publish_diagnostics(uri, snapshot.diagnostics, Some(snapshot.version))
+                    .await;
+            }
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let mut tasks = self.debounce_tasks.lock().await;
+        if let Some(previous_task) = tasks.remove(&params.text_document.uri) {
+            previous_task.abort();
+        }
         self.workspace.did_close(&params.text_document.uri);
     }
 

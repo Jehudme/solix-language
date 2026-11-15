@@ -253,6 +253,8 @@ pub struct WorkspaceManager {
     solver: Option<Arc<dyn ModuleSolver>>,
     /// Cached package namespace export indexes for fast autocompletion.
     package_export_index: std::sync::RwLock<HashMap<String, PackageNamespaceIndex>>,
+    /// In-memory cache of resolved dependency programs to avoid disk re-scans.
+    cached_dependencies: DashMap<String, solix_common::bytecode::BinaryProgram>,
 }
 
 impl WorkspaceManager {
@@ -269,6 +271,7 @@ impl WorkspaceManager {
             workspace_root: std::sync::RwLock::new(workspace_root),
             solver: effective_solver,
             package_export_index: std::sync::RwLock::new(HashMap::new()),
+            cached_dependencies: DashMap::new(),
         }
     }
 
@@ -561,16 +564,26 @@ impl WorkspaceManager {
         self.analyze_document(&uri, version, &content)
     }
 
-    /// Updates an in-memory document buffer and performs an analysis pass.
-    pub fn did_change(&self, uri: &Url, version: i32, content: String) -> AnalysisSnapshot {
+    /// Updates the in-memory document buffer immediately without running a blocking compilation pass.
+    pub fn update_document(&self, uri: &Url, version: i32, content: String) {
         self.documents.insert(
             uri.clone(),
             VersionedDocument {
                 uri: uri.clone(),
                 version,
-                content: content.clone(),
+                content,
             },
         );
+    }
+
+    /// Performs an analysis pass for an updated document.
+    pub fn analyze_document_change(&self, uri: &Url, version: i32, content: &str) -> AnalysisSnapshot {
+        self.analyze_document(uri, version, content)
+    }
+
+    /// Updates an in-memory document buffer and performs an analysis pass.
+    pub fn did_change(&self, uri: &Url, version: i32, content: String) -> AnalysisSnapshot {
+        self.update_document(uri, version, content.clone());
         self.analyze_document(uri, version, &content)
     }
 
@@ -708,12 +721,21 @@ impl WorkspaceManager {
             }
         }
 
+        // Pre-populate dependency_binaries from in-memory cache to avoid disk reads
+        let mut cached_binaries = Vec::new();
+        for dependency_spec in &dependency_specs {
+            if let Some(cached_binary) = self.cached_dependencies.get(&dependency_spec.name) {
+                cached_binaries.push(cached_binary.value().clone());
+            }
+        }
+
         // Construct CompilationContext
         let mut options = CompilationOptions {
             profile: BuildProfile::Debug,
             include_builtins: true,
             codes: sources_map,
             dependency_specs,
+            dependency_binaries: cached_binaries,
             ..Default::default()
         };
         if let Some(solver) = &self.solver {
@@ -724,6 +746,14 @@ impl WorkspaceManager {
 
         // Pre-run dependency resolution phase to ingest manifest dependencies
         let _ = solix_compilation::phases::dependency::run_dependency_resolution(&mut context);
+
+        // Cache any newly resolved dependency binaries in memory
+        for binary_program in &context.options.dependency_binaries {
+            if !binary_program.package_name.is_empty() {
+                self.cached_dependencies
+                    .insert(binary_program.package_name.clone(), binary_program.clone());
+            }
+        }
 
         // Stage 1: Tokenize all sources
         let mut accumulated_diagnostics = Vec::new();

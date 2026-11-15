@@ -77,6 +77,11 @@ function findToolchainBinary(serverLogChannel: vscode.OutputChannel): string {
         }
 
         discoveredCandidates.sort((firstCandidate, secondCandidate) => {
+            const firstIsRelease = firstCandidate.includes(path.join('target', 'release'));
+            const secondIsRelease = secondCandidate.includes(path.join('target', 'release'));
+            if (firstIsRelease !== secondIsRelease) {
+                return firstIsRelease ? -1 : 1;
+            }
             try {
                 return fs.statSync(secondCandidate).mtimeMs - fs.statSync(firstCandidate).mtimeMs;
             } catch {
