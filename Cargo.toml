@@ -66,7 +66,7 @@ cargo-dist-version = "0.28.0"
 ci = "github"
 allow-dirty = ["ci"]
 installers = ["shell", "powershell", "homebrew"]
-github-custom-runners = { "aarch64-unknown-linux-gnu" = "ubuntu-latest", "x86_64-unknown-linux-gnu" = "ubuntu-latest", "x86_64-unknown-linux-musl" = "ubuntu-latest", "x86_64-pc-windows-msvc" = "windows-latest", "aarch64-apple-darwin" = "macos-latest", "x86_64-apple-darwin" = "macos-13", "global" = "ubuntu-latest" }
+github-custom-runners = { "aarch64-unknown-linux-gnu" = "ubuntu-latest", "x86_64-unknown-linux-gnu" = "ubuntu-latest", "x86_64-unknown-linux-musl" = "ubuntu-latest", "x86_64-pc-windows-msvc" = "windows-latest", "aarch64-apple-darwin" = "macos-latest", "x86_64-apple-darwin" = "macos-latest", "global" = "ubuntu-latest" }
 targets = [
     "x86_64-unknown-linux-gnu",
     "x86_64-unknown-linux-musl",

@@ -14,12 +14,12 @@ Install the official pre-built Solix toolchain and bundled standard packages wit
 
 ### Linux & macOS (bash / zsh)
 ```bash
-curl -fsSL https://solix-lang.org/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Jehudme/solix-language/releases/latest/download/solix-toolchain-installer.sh | sh
 ```
 
 ### Windows (PowerShell)
 ```powershell
-irm https://solix-lang.org/install.ps1 | iex
+irm https://github.com/Jehudme/solix-language/releases/latest/download/solix-toolchain-installer.ps1 | iex
 ```
 
 ### Homebrew (macOS & Linux)
