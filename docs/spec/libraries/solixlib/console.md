@@ -75,3 +75,17 @@ Reads and parses input from standard input (`std::io::stdin()`).
 
 - **POSIX (Linux / macOS)**: Uses standard ANSI terminal escape sequences and POSIX I/O streams.
 - **Windows**: Automatically initializes Windows Virtual Terminal Processing (`ENABLE_VIRTUAL_TERMINAL_PROCESSING`) via `SetConsoleMode` on standard output and error handles, enabling full ANSI color and cursor sequence support across Windows 10 and 11 terminals.
+
+---
+
+## 4. Module Aliasing & Scope Resolution
+
+To align with Solix strict type path semantics, the root alias is declared using double-colon (`::`) scope resolution:
+
+```solix
+package solix.system;
+
+import solix.io.Console;
+
+alias Console = solix::io::Console;
+```
