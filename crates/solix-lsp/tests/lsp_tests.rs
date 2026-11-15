@@ -599,6 +599,38 @@ fn test_feature_24_semantic_tokens() {
     }
 }
 
+#[test]
+fn test_semantic_tokens_syntax_error_resilience_and_no_overlap() {
+    let (workspace, uri) = create_test_workspace();
+    let source = "/* Multi-line\n   comment */\nclass Worker {\n    int32 id;\n    public void work( {\n    Raylib::ClearBackground(bg_slate);\n}\n";
+
+    let snapshot = workspace.did_open(uri, 1, source.to_string());
+    let result = semantic_tokens_full(&snapshot).unwrap();
+    if let SemanticTokensResult::Tokens(tokens) = result {
+        assert!(!tokens.data.is_empty());
+        let mut _previous_line = 0u32;
+        let mut previous_start = 0u32;
+        let mut previous_len = 0u32;
+        for token in &tokens.data {
+            if token.delta_line == 0 {
+                let absolute_start = previous_start + token.delta_start;
+                assert!(
+                    absolute_start >= previous_start + previous_len,
+                    "Tokens must NEVER overlap on same line! Prev start: {previous_start}, len: {previous_len}, cur start: {absolute_start}"
+                );
+                previous_start = absolute_start;
+            } else {
+                _previous_line += token.delta_line;
+                previous_start = token.delta_start;
+            }
+            previous_len = token.length;
+            assert!(token.length > 0, "Token length must be > 0");
+        }
+    } else {
+        panic!("Expected full tokens");
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Feature 25: Code Lens
 // -----------------------------------------------------------------------------
