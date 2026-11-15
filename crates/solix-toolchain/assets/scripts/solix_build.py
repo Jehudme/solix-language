@@ -458,6 +458,77 @@ def resolve_solix_binary() -> str:
     return "solix"
 
 
+def resolve_profile_options(manifest: dict, target_profile: str) -> dict:
+    """Resolves hierarchical profile inheritance (e.g. bench -> release -> default)."""
+    visited_profiles: list[str] = []
+    resolution_chain: list[str] = []
+    current_profile_name = target_profile
+    profiles_table = manifest.get("profile", {})
+
+    while current_profile_name:
+        if current_profile_name in visited_profiles:
+            break
+        visited_profiles.append(current_profile_name)
+        resolution_chain.append(current_profile_name)
+        current_config = profiles_table.get(current_profile_name, {})
+        parent_name = current_config.get("inherits")
+        if not parent_name:
+            if current_profile_name in ("release", "debug"):
+                parent_name = "default"
+            elif current_profile_name == "test":
+                parent_name = "debug"
+            elif current_profile_name == "default":
+                parent_name = None
+            else:
+                parent_name = "default"
+        if parent_name == "default" and current_profile_name == "default":
+            break
+        current_profile_name = parent_name
+
+    resolved_options = {
+        "opt_level": 0,
+        "inline_threshold": 8,
+        "debug_symbols": True,
+        "emit_disassembly": False,
+        "warnings_as_errors": False,
+        "verify_checksum": True,
+        "link": "dynamic",
+    }
+
+    build_table = manifest.get("build", {})
+    if "inline_threshold" in build_table:
+        resolved_options["inline_threshold"] = build_table["inline_threshold"]
+    if "verify_checksum" in build_table:
+        resolved_options["verify_checksum"] = build_table["verify_checksum"]
+    if "link" in build_table:
+        resolved_options["link"] = build_table["link"]
+
+    while resolution_chain:
+        step_profile = resolution_chain.pop()
+        if step_profile == "release":
+            resolved_options["opt_level"] = 3
+            resolved_options["inline_threshold"] = 8
+            resolved_options["debug_symbols"] = False
+        elif step_profile in ("debug", "test"):
+            resolved_options["opt_level"] = 0
+            resolved_options["debug_symbols"] = True
+
+        step_config = profiles_table.get(step_profile, {})
+        for option_key in (
+            "opt_level",
+            "inline_threshold",
+            "debug_symbols",
+            "emit_disassembly",
+            "warnings_as_errors",
+            "verify_checksum",
+            "link",
+        ):
+            if option_key in step_config:
+                resolved_options[option_key] = step_config[option_key]
+
+    return resolved_options
+
+
 def compile_solix_sources(
     project_root: Path,
     manifest: dict[str, Any],
@@ -507,22 +578,26 @@ def compile_solix_sources(
         if selected_entrypoint:
             compile_command.extend(["--entry", str(selected_entrypoint)])
 
-    build_config = manifest.get("build", {})
-    link_mode = os.environ.get("SOLIX_LINK_MODE") or build_config.get("link")
+    resolved_profile_options = resolve_profile_options(manifest, profile)
+
+    link_mode = os.environ.get("SOLIX_LINK_MODE") or resolved_profile_options.get("link")
     if link_mode:
         compile_command.extend(["--link", str(link_mode)])
 
-    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR") or build_config.get("pkg_dir")
+    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR") or manifest.get("build", {}).get("pkg_dir")
     if pkg_dir_override:
         compile_command.extend(["--pkg-dir", str(pkg_dir_override)])
 
-    verify_checksum = build_config.get("verify_checksum", True)
+    verify_checksum = resolved_profile_options.get("verify_checksum", True)
     if not verify_checksum or os.environ.get("SOLIX_VERIFY_CHECKSUM") == "0":
         compile_command.append("--no-verify")
 
-    inline_threshold = os.environ.get("SOLIX_INLINE_THRESHOLD") or build_config.get("inline_threshold")
+    inline_threshold = os.environ.get("SOLIX_INLINE_THRESHOLD") or resolved_profile_options.get("inline_threshold")
     if inline_threshold is not None:
         compile_command.extend(["--inline-threshold", str(inline_threshold)])
+
+    if resolved_profile_options.get("emit_disassembly"):
+        compile_command.append("--disasm")
 
     for lib_file in stage_lib_directory.iterdir():
         if lib_file.name.endswith(".slxb"):
@@ -530,8 +605,18 @@ def compile_solix_sources(
 
     dependencies = manifest.get("dependencies", {})
     if isinstance(dependencies, dict):
-        for dependency_name, dependency_version in sorted(dependencies.items()):
-            compile_command.extend(["--deps", f"{dependency_name}@{dependency_version}"])
+        for raw_dependency_key, dependency_val in sorted(dependencies.items()):
+            if isinstance(dependency_val, dict):
+                dep_version = dependency_val.get("version", "")
+                dep_name = raw_dependency_key
+            else:
+                dep_version = str(dependency_val)
+                dep_name = raw_dependency_key
+                for known_suffix in ("-release", "-debug", "-test"):
+                    if dep_name.endswith(known_suffix):
+                        dep_name = dep_name[:-len(known_suffix)]
+                        break
+            compile_command.extend(["--deps", f"{dep_name}@{dep_version}"])
 
     print(f"  [solix] Compiling Solix sources for '{package_name}' ({profile})...")
     run_command(

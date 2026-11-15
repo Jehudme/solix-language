@@ -256,14 +256,14 @@ math_utils = "2.0.0"
         project_manifest
             .dependencies
             .get("raylib")
-            .map(String::as_str),
+            .map(|dep| dep.version()),
         Some("1.2.0")
     );
     assert_eq!(
         project_manifest
             .dependencies
             .get("math_utils")
-            .map(String::as_str),
+            .map(|dep| dep.version()),
         Some("2.0.0")
     );
 }
@@ -294,6 +294,148 @@ inline_threshold = 12
     assert!(project_manifest.build.force_install);
     assert!(!project_manifest.build.verify_checksum);
     assert_eq!(project_manifest.build.inline_threshold, 12);
+}
+
+#[test]
+fn test_hierarchical_profile_inheritance_and_overrides() {
+    let manifest_toml = r#"
+[info]
+name = "engine_demo"
+version = "1.0.0"
+
+[profile.default]
+warnings_as_errors = false
+inline_threshold = 10
+
+[profile.release]
+opt_level = 3
+inline_threshold = 16
+
+[profile.bench]
+inherits = "release"
+opt_level = 3
+inline_threshold = 32
+memory_limit_mb = 1024
+
+[profile.ci]
+inherits = "bench"
+warnings_as_errors = true
+"#;
+
+    let project_manifest =
+        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+
+    // 1. Resolve default profile
+    let default_profile = project_manifest
+        .resolve_profile("default")
+        .expect("Default profile resolution must succeed");
+    assert_eq!(default_profile.name, "default");
+    assert_eq!(default_profile.opt_level, 0);
+    assert_eq!(default_profile.inline_threshold, 10);
+    assert!(!default_profile.warnings_as_errors);
+
+    // 2. Resolve release profile (inherits from default, overrides opt_level and inline_threshold)
+    let release_profile = project_manifest
+        .resolve_profile("release")
+        .expect("Release profile resolution must succeed");
+    assert_eq!(release_profile.name, "release");
+    assert_eq!(release_profile.opt_level, 3);
+    assert_eq!(release_profile.inline_threshold, 16);
+    assert!(!release_profile.debug_symbols);
+
+    // 3. Resolve bench profile (inherits from release -> default)
+    let bench_profile = project_manifest
+        .resolve_profile("bench")
+        .expect("Bench profile resolution must succeed");
+    assert_eq!(bench_profile.name, "bench");
+    assert_eq!(bench_profile.opt_level, 3);
+    assert_eq!(bench_profile.inline_threshold, 32);
+    assert_eq!(bench_profile.memory_limit_mb, Some(1024));
+    assert!(!bench_profile.debug_symbols); // inherited from release
+
+    // 4. Resolve ci profile (inherits from bench -> release -> default)
+    let ci_profile = project_manifest
+        .resolve_profile("ci")
+        .expect("CI profile resolution must succeed");
+    assert_eq!(ci_profile.name, "ci");
+    assert_eq!(ci_profile.opt_level, 3);
+    assert_eq!(ci_profile.inline_threshold, 32); // inherited from bench
+    assert!(ci_profile.warnings_as_errors); // overridden by ci
+    assert_eq!(ci_profile.memory_limit_mb, Some(1024)); // inherited from bench
+}
+
+#[test]
+fn test_cyclic_profile_inheritance_detection() {
+    let cyclic_manifest_toml = r#"
+[info]
+name = "broken_project"
+version = "0.1.0"
+
+[profile.alpha]
+inherits = "beta"
+
+[profile.beta]
+inherits = "gamma"
+
+[profile.gamma]
+inherits = "alpha"
+"#;
+
+    let project_manifest = ProjectManifest::from_toml_str(cyclic_manifest_toml)
+        .expect("Parsing manifest syntax must succeed");
+    let resolution_result = project_manifest.resolve_profile("alpha");
+    assert!(
+        resolution_result.is_err(),
+        "Cyclic profile inheritance must be detected and rejected"
+    );
+}
+
+#[test]
+fn test_profile_aware_dependency_specifications() {
+    let manifest_toml = r#"
+[info]
+name = "full_stack_app"
+version = "2.0.0"
+
+[dependencies]
+math = "1.0.0"
+raylib-debug = "5.5.0"
+solixlib = { version = "2.0.0", profile = "release" }
+crypto-test = "0.4.0"
+"#;
+
+    let project_manifest =
+        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+    let resolved_dependencies = project_manifest.resolved_dependencies();
+    assert_eq!(resolved_dependencies.len(), 4);
+
+    let math_dep = resolved_dependencies
+        .iter()
+        .find(|dep| dep.package_name == "math")
+        .expect("math dependency must exist");
+    assert_eq!(math_dep.version, "1.0.0");
+    assert_eq!(math_dep.build_profile, "release"); // defaults to release
+
+    let raylib_dep = resolved_dependencies
+        .iter()
+        .find(|dep| dep.package_name == "raylib")
+        .expect("raylib dependency must exist");
+    assert_eq!(raylib_dep.version, "5.5.0");
+    assert_eq!(raylib_dep.build_profile, "debug"); // extracted from -debug suffix
+
+    let solixlib_dep = resolved_dependencies
+        .iter()
+        .find(|dep| dep.package_name == "solixlib")
+        .expect("solixlib dependency must exist");
+    assert_eq!(solixlib_dep.version, "2.0.0");
+    assert_eq!(solixlib_dep.build_profile, "release"); // explicit table profile
+
+    let crypto_dep = resolved_dependencies
+        .iter()
+        .find(|dep| dep.package_name == "crypto")
+        .expect("crypto dependency must exist");
+    assert_eq!(crypto_dep.version, "0.4.0");
+    assert_eq!(crypto_dep.build_profile, "test"); // extracted from -test suffix
 }
 
 #[test]

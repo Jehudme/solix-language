@@ -8,3 +8,12 @@ authors = ["Jehud Metellus"]
 [entrypoints]
 main = "Main::main"
 test = "TestRunner::test"
+
+[profile.default]
+opt_level = 0
+inline_threshold = 8
+debug_symbols = true
+
+[profile.release]
+opt_level = 3
+debug_symbols = false

@@ -20,9 +20,19 @@ authors = ["Jane Developer <jane@example.com>", "Solix Core Team"]
 main = "Main::main"
 test = "TestRunner::test"
 
+[profile.default]
+opt_level = 0
+inline_threshold = 8
+debug_symbols = true
+
+[profile.release]
+opt_level = 3
+debug_symbols = false
+
 [dependencies]
 solixlib = "2.0.0"
-raylib = ">=1.0.0"
+raylib = { version = ">=1.0.0", profile = "release" }
+math_matrix-debug = "0.3.1"
 ```
 
 ---
@@ -96,7 +106,76 @@ math_matrix = "0.3.1"
 
 ---
 
-### 4. `[build]` Table (Optional)
+#### Profile-Aware Dependency Declarations
+
+Dependencies can specify their target build profile explicitly:
+
+1. **Table Notation**:
+   ```toml
+   [dependencies]
+   raylib = { version = "5.5.0", profile = "debug" }
+   solixlib = { version = "2.0.0", profile = "release" }
+   ```
+2. **Suffix Notation**:
+   ```toml
+   [dependencies]
+   raylib-debug = "5.5.0"
+   raylib-release = "5.5.0"
+   ```
+3. **Simple Notation** (defaults automatically to `"release"`):
+   ```toml
+   [dependencies]
+   math = "1.0.0" # resolves to math-release@1.0.0
+   ```
+
+---
+
+### 4. `[profile.<name>]` Tables (Hierarchical Profile System)
+
+Defines granular compilation, optimization, and code emission options per profile with single inheritance:
+
+```toml
+[profile.default]
+opt_level = 0
+inline_threshold = 8
+debug_symbols = true
+emit_disassembly = false
+warnings_as_errors = false
+verify_checksum = true
+link = "dynamic"
+
+[profile.release]
+opt_level = 3
+debug_symbols = false
+
+[profile.bench]
+inherits = "release"
+opt_level = 3
+inline_threshold = 32
+memory_limit_mb = 1024
+
+[profile.ci]
+inherits = "bench"
+warnings_as_errors = true
+```
+
+#### Profile Keys & Inheritance
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `inherits` | String | `None` | Parent profile name to inherit options from (e.g. `"default"`, `"release"`). |
+| `opt_level` | Integer | `0` (debug) / `3` (release) | Bytecode optimizer level (0..=3). |
+| `inline_threshold` | Integer | `8` | Maximum statement count for AST inlining. |
+| `debug_symbols` | Boolean | `true` (debug) / `false` (release) | Emits source line mappings and debug symbols in `.slxb`. |
+| `emit_disassembly` | Boolean | `false` | Emits human-readable register VM disassembly files during compilation. |
+| `warnings_as_errors`| Boolean | `false` | Treats compiler warnings as fatal errors. |
+| `verify_checksum` | Boolean | `true` | Validates dependency cryptographic SHA-256 hashes against pinned manifests. |
+| `link` | String | `"dynamic"` | Linking mode for dependencies: `"dynamic"` or `"static"`. |
+| `memory_limit_mb` | Integer | `None` | Maximum virtual heap allocation limit in megabytes. |
+
+---
+
+### 5. `[build]` Table (Optional / Backward Compatibility)
 
 Configures default compilation, linking, inlining, and package store behavior when executing `solix build` or invoking build scripts:
 
@@ -123,7 +202,7 @@ inline_threshold = 8          # Statement threshold limit for AST function inlin
 
 ---
 
-### 5. `[native_library_checksums]` Table (Generated / Optional)
+### 6. `[native_library_checksums]` Table (Generated / Optional)
 
 Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_build.py` during packaging to ensure binary tamper resistance across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
 

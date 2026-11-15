@@ -897,12 +897,12 @@ impl WorkspaceManager {
             && let Ok(project_manifest) =
                 solix_common::project::ProjectManifest::from_file(manifest_file_path)
         {
-            for (dependency_name, version_string) in project_manifest.dependencies {
+            for resolved_dependency in project_manifest.resolved_dependencies() {
                 if let Ok(parsed_version) =
-                    solix_common::solver::PackageVersion::parse(&version_string)
+                    solix_common::solver::PackageVersion::parse(&resolved_dependency.version)
                 {
                     dependency_specs.push(solix_common::solver::DependencyRequirement::new(
-                        dependency_name,
+                        resolved_dependency.package_name,
                         parsed_version,
                     ));
                 }

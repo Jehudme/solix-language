@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-049
 * **Target Version:** `v1.1.4`
 * **Milestone Branch:** `milestone/049-hierarchical-profile-inheritance-and-manifest-compilation-options`
-* **Status:** ACTIVE
+* **Status:** COMPLETED
 * **Lead Architect:** Core Systems & Toolchain Team
 * **Target Delivery Date:** 2026-11-15
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)

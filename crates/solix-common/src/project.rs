@@ -101,6 +101,121 @@ impl Default for BuildConfig {
     }
 }
 
+/// Profile-specific compilation and build options declared in `[profile.<name>]`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ProfileConfig {
+    /// Optional parent profile to inherit from (e.g. `"default"`, `"release"`).
+    #[serde(default)]
+    pub inherits: Option<String>,
+    /// Optimization level: 0 (none), 1 (basic), 2 (standard), 3 (aggressive).
+    #[serde(default)]
+    pub opt_level: Option<u8>,
+    /// Inlining threshold statement limit.
+    #[serde(default)]
+    pub inline_threshold: Option<usize>,
+    /// Whether to generate debug line numbers and symbol information.
+    #[serde(default)]
+    pub debug_symbols: Option<bool>,
+    /// Whether to emit VM disassembly alongside the binary.
+    #[serde(default)]
+    pub emit_disassembly: Option<bool>,
+    /// Whether warnings should be treated as fatal compilation errors.
+    #[serde(default)]
+    pub warnings_as_errors: Option<bool>,
+    /// Verify cryptographic checksums of packages.
+    #[serde(default)]
+    pub verify_checksum: Option<bool>,
+    /// Linking mode: `"dynamic"` or `"static"`.
+    #[serde(default)]
+    pub link: Option<String>,
+    /// Custom maximum memory limit in megabytes.
+    #[serde(default)]
+    pub memory_limit_mb: Option<usize>,
+}
+
+/// Fully resolved, flattened profile configuration with all inheritance applied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedProfile {
+    /// Profile identifier name (e.g. `"debug"`, `"release"`, `"bench"`).
+    pub name: String,
+    /// Optimization level: 0..=3.
+    pub opt_level: u8,
+    /// Inlining threshold statement limit.
+    pub inline_threshold: usize,
+    /// Whether debug symbol tables and line maps are emitted.
+    pub debug_symbols: bool,
+    /// Whether human-readable VM disassembly is emitted.
+    pub emit_disassembly: bool,
+    /// Whether warnings are treated as fatal errors.
+    pub warnings_as_errors: bool,
+    /// Verify cryptographic checksums.
+    pub verify_checksum: bool,
+    /// Dynamic or static link mode.
+    pub link: String,
+    /// Maximum virtual heap allocation limit in megabytes.
+    pub memory_limit_mb: Option<usize>,
+}
+
+impl ResolvedProfile {
+    /// Creates the standard default baseline profile.
+    #[must_use]
+    pub fn default_baseline() -> Self {
+        Self {
+            name: "default".to_string(),
+            opt_level: 0,
+            inline_threshold: 8,
+            debug_symbols: true,
+            emit_disassembly: false,
+            warnings_as_errors: false,
+            verify_checksum: true,
+            link: "dynamic".to_string(),
+            memory_limit_mb: None,
+        }
+    }
+}
+
+/// Representation of a dependency requirement in `[dependencies]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DependencySpec {
+    /// Shorthand version string or suffix (e.g. `"5.5.0"`).
+    Simple(String),
+    /// Detailed dependency table with version and profile.
+    Detailed {
+        version: String,
+        #[serde(default)]
+        profile: Option<String>,
+    },
+}
+
+impl DependencySpec {
+    /// Retrieves the semantic version requirement string.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        match self {
+            Self::Simple(version_string) => version_string.as_str(),
+            Self::Detailed { version, .. } => version.as_str(),
+        }
+    }
+
+    /// Retrieves the optional target profile name.
+    #[must_use]
+    pub fn profile(&self) -> Option<&str> {
+        match self {
+            Self::Simple(_) => None,
+            Self::Detailed { profile, .. } => profile.as_deref(),
+        }
+    }
+}
+
+/// A fully resolved dependency declaration with target build profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedDependency {
+    pub package_name: String,
+    pub version: String,
+    pub build_profile: String,
+}
+
 /// Minimal, user-editable project manifest contract parsed from `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectManifest {
@@ -112,9 +227,12 @@ pub struct ProjectManifest {
     /// Declarative build configuration declared in `[build]`.
     #[serde(default)]
     pub build: BuildConfig,
-    /// Explicit external dependencies mapped as `name => version` declared in `[dependencies]`.
+    /// Granular profile configurations mapped as `[profile.<name>]`.
     #[serde(default)]
-    pub dependencies: std::collections::BTreeMap<String, String>,
+    pub profile: std::collections::BTreeMap<String, ProfileConfig>,
+    /// Explicit external dependencies mapped as `name => specification` declared in `[dependencies]`.
+    #[serde(default)]
+    pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
     /// Cryptographic SHA-256 digests of bundled native shared libraries.
     #[serde(default)]
     pub native_library_checksums: std::collections::HashMap<String, String>,
@@ -151,6 +269,136 @@ impl ProjectManifest {
                 reason: format!("failed to serialize manifest to toml: {serialize_error}"),
             }
         })
+    }
+
+    /// Resolves the hierarchical profile configuration for the requested profile name.
+    ///
+    /// Evaluates inheritance chains (e.g. `bench` -> `release` -> `default`), detects cycles,
+    /// and applies user-defined overrides on top of standard built-in compiler profiles.
+    ///
+    /// # Errors
+    /// Returns an error if a cyclic profile inheritance loop is detected.
+    pub fn resolve_profile(&self, target_profile: &str) -> Result<ResolvedProfile, EmissionError> {
+        let mut visited_profiles: Vec<String> = Vec::new();
+        let mut resolution_chain: Vec<String> = Vec::new();
+
+        let mut current_profile_name = target_profile.to_string();
+
+        while !current_profile_name.is_empty() {
+            if visited_profiles.contains(&current_profile_name) {
+                return Err(EmissionError::ContainerSerializationFailed {
+                    reason: format!(
+                        "Cyclic profile inheritance detected: {} -> {}",
+                        visited_profiles.join(" -> "),
+                        current_profile_name
+                    ),
+                });
+            }
+
+            visited_profiles.push(current_profile_name.clone());
+            resolution_chain.push(current_profile_name.clone());
+
+            let next_parent = if let Some(config) = self.profile.get(&current_profile_name)
+                && let Some(ref inherits_from) = config.inherits
+            {
+                Some(inherits_from.clone())
+            } else {
+                match current_profile_name.as_str() {
+                    "release" => Some("default".to_string()),
+                    "debug" => Some("default".to_string()),
+                    "test" => Some("debug".to_string()),
+                    "default" => None,
+                    _ => Some("default".to_string()),
+                }
+            };
+
+            if let Some(parent_name) = next_parent {
+                if current_profile_name == "default" {
+                    break;
+                }
+                current_profile_name = parent_name;
+            } else {
+                break;
+            }
+        }
+
+        let mut resolved = ResolvedProfile::default_baseline();
+
+        while let Some(step_profile) = resolution_chain.pop() {
+            match step_profile.as_str() {
+                "release" => {
+                    resolved.opt_level = 3;
+                    resolved.inline_threshold = 8;
+                    resolved.debug_symbols = false;
+                }
+                "debug" => {
+                    resolved.opt_level = 0;
+                    resolved.debug_symbols = true;
+                }
+                "test" => {
+                    resolved.opt_level = 0;
+                    resolved.debug_symbols = true;
+                }
+                _ => {}
+            }
+
+            if let Some(user_config) = self.profile.get(&step_profile) {
+                if let Some(opt_level) = user_config.opt_level {
+                    resolved.opt_level = opt_level;
+                }
+                if let Some(inline_threshold) = user_config.inline_threshold {
+                    resolved.inline_threshold = inline_threshold;
+                }
+                if let Some(debug_symbols) = user_config.debug_symbols {
+                    resolved.debug_symbols = debug_symbols;
+                }
+                if let Some(emit_disassembly) = user_config.emit_disassembly {
+                    resolved.emit_disassembly = emit_disassembly;
+                }
+                if let Some(warnings_as_errors) = user_config.warnings_as_errors {
+                    resolved.warnings_as_errors = warnings_as_errors;
+                }
+                if let Some(verify_checksum) = user_config.verify_checksum {
+                    resolved.verify_checksum = verify_checksum;
+                }
+                if let Some(ref link) = user_config.link {
+                    resolved.link = link.clone();
+                }
+                if let Some(memory_limit_mb) = user_config.memory_limit_mb {
+                    resolved.memory_limit_mb = Some(memory_limit_mb);
+                }
+            }
+        }
+
+        resolved.name = target_profile.to_string();
+        Ok(resolved)
+    }
+
+    /// Resolves all dependencies into structured `ResolvedDependency` records.
+    #[must_use]
+    pub fn resolved_dependencies(&self) -> Vec<ResolvedDependency> {
+        let mut results = Vec::new();
+        for (raw_name, specification) in &self.dependencies {
+            let version = specification.version().to_string();
+            let (package_name, build_profile) = if let Some(explicit_profile) = specification.profile() {
+                (raw_name.clone(), explicit_profile.to_string())
+            } else if let Some(stripped_name) = raw_name.strip_suffix("-release") {
+                (stripped_name.to_string(), "release".to_string())
+            } else if let Some(stripped_name) = raw_name.strip_suffix("-debug") {
+                (stripped_name.to_string(), "debug".to_string())
+            } else if let Some(stripped_name) = raw_name.strip_suffix("-test") {
+                (stripped_name.to_string(), "test".to_string())
+            } else {
+                (raw_name.clone(), "release".to_string())
+            };
+
+            results.push(ResolvedDependency {
+                package_name,
+                version,
+                build_profile,
+            });
+        }
+        results
     }
 }
 

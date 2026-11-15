@@ -106,6 +106,15 @@ test = "{test_entry}"
 [build]
 profile = "debug"
 
+[profile.default]
+opt_level = 0
+inline_threshold = 8
+debug_symbols = true
+
+[profile.release]
+opt_level = 3
+debug_symbols = false
+
 [dependencies]
 {deps_block}
 """
