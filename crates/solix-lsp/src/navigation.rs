@@ -34,7 +34,9 @@ pub fn find_definition(
             if import_stmt.span.start <= target_offset && target_offset <= import_stmt.span.end {
                 let last_segment = import_stmt.path.last()?;
                 let symbol_name = get_span_text(&snapshot.source_text, *last_segment);
-                if let Some(target_location) = find_symbol_declaration_by_name(workspace, symbol_name) {
+                if let Some(target_location) =
+                    find_symbol_declaration_by_name(workspace, symbol_name)
+                {
                     return Some(GotoDefinitionResponse::Scalar(target_location));
                 }
             }
@@ -49,7 +51,8 @@ pub fn find_definition(
 
     if is_on_declaration {
         // Chain to type definition!
-        if let Some(type_location) = resolve_type_location(workspace, semantic, &symbol.symbol_type) {
+        if let Some(type_location) = resolve_type_location(workspace, semantic, &symbol.symbol_type)
+        {
             return Some(GotoDefinitionResponse::Scalar(type_location));
         }
     }
@@ -95,15 +98,20 @@ pub fn find_implementations(
     // Case 1: Cursor is on an Interface declaration
     for class_layout in semantic.layouts.values() {
         if (class_layout.itable_methods.contains_key(&symbol.name)
-            || class_layout.itable_methods.contains_key(&symbol.fully_qualified_name))
-            && let Some(class_symbol) = semantic.symbol_table.get_symbol(class_layout.class_symbol_id) {
-                let target_url = resolve_source_url(workspace, snapshot, class_symbol.source_id);
-                let target_range = span_to_range(&snapshot.source_text, class_symbol.span);
-                locations.push(Location {
-                    uri: target_url,
-                    range: target_range,
-                });
-            }
+            || class_layout
+                .itable_methods
+                .contains_key(&symbol.fully_qualified_name))
+            && let Some(class_symbol) = semantic
+                .symbol_table
+                .get_symbol(class_layout.class_symbol_id)
+        {
+            let target_url = resolve_source_url(workspace, snapshot, class_symbol.source_id);
+            let target_range = span_to_range(&snapshot.source_text, class_symbol.span);
+            locations.push(Location {
+                uri: target_url,
+                range: target_range,
+            });
+        }
     }
 
     // Case 2: Cursor is on an Interface method or Virtual method
@@ -124,14 +132,16 @@ pub fn find_implementations(
         // Check virtual method overrides
         for &vtable_method_id in &class_layout.vtable_methods {
             if let Some(impl_method) = semantic.symbol_table.get_symbol(vtable_method_id)
-                && impl_method.name == symbol.name && impl_method.id != symbol.id {
-                    let target_url = resolve_source_url(workspace, snapshot, impl_method.source_id);
-                    let target_range = span_to_range(&snapshot.source_text, impl_method.span);
-                    locations.push(Location {
-                        uri: target_url,
-                        range: target_range,
-                    });
-                }
+                && impl_method.name == symbol.name
+                && impl_method.id != symbol.id
+            {
+                let target_url = resolve_source_url(workspace, snapshot, impl_method.source_id);
+                let target_range = span_to_range(&snapshot.source_text, impl_method.span);
+                locations.push(Location {
+                    uri: target_url,
+                    range: target_range,
+                });
+            }
         }
     }
 
@@ -247,7 +257,9 @@ pub fn document_links(
         for import_stmt in &ast.imports {
             if let Some(last_segment) = import_stmt.path.last() {
                 let symbol_name = get_span_text(&snapshot.source_text, *last_segment);
-                if let Some(target_location) = find_symbol_declaration_by_name(workspace, symbol_name) {
+                if let Some(target_location) =
+                    find_symbol_declaration_by_name(workspace, symbol_name)
+                {
                     let range = span_to_range(&snapshot.source_text, import_stmt.span);
                     links.push(DocumentLink {
                         range,
@@ -266,18 +278,19 @@ pub fn document_links(
             let text = get_span_text(&snapshot.source_text, token.span);
             let unquoted = text.trim_matches('"');
             if let Some(resource_path) = unquoted.strip_prefix("res://")
-                && let Some(root) = workspace.workspace_root() {
-                    let full_resource_path = root.join("assets").join(resource_path);
-                    if let Ok(target_url) = Url::from_file_path(full_resource_path) {
-                        let range = span_to_range(&snapshot.source_text, token.span);
-                        links.push(DocumentLink {
-                            range,
-                            target: Some(target_url),
-                            tooltip: Some(format!("Open asset {unquoted}")),
-                            data: None,
-                        });
-                    }
+                && let Some(root) = workspace.workspace_root()
+            {
+                let full_resource_path = root.join("assets").join(resource_path);
+                if let Ok(target_url) = Url::from_file_path(full_resource_path) {
+                    let range = span_to_range(&snapshot.source_text, token.span);
+                    links.push(DocumentLink {
+                        range,
+                        target: Some(target_url),
+                        tooltip: Some(format!("Open asset {unquoted}")),
+                        data: None,
+                    });
                 }
+            }
         }
     }
 
@@ -322,13 +335,13 @@ fn resolve_type_location(
                 .all_snapshots()
                 .into_iter()
                 .find(|snap| snap.source_id == symbol_entry.source_id)
-            {
-                let range = span_to_range(&snapshot.source_text, symbol_entry.span);
-                return Some(Location {
-                    uri: snapshot.uri,
-                    range,
-                });
-            }
+        {
+            let range = span_to_range(&snapshot.source_text, symbol_entry.span);
+            return Some(Location {
+                uri: snapshot.uri,
+                range,
+            });
+        }
     }
 
     find_symbol_declaration_by_name(workspace, type_name)
@@ -341,7 +354,9 @@ fn find_symbol_declaration_by_name(
     for snapshot in workspace.all_snapshots() {
         if let Some(semantic) = &snapshot.last_good_semantic {
             for symbol_entry in &semantic.symbol_table.symbols {
-                if symbol_entry.name == symbol_name || symbol_entry.fully_qualified_name == symbol_name {
+                if symbol_entry.name == symbol_name
+                    || symbol_entry.fully_qualified_name == symbol_name
+                {
                     let range = span_to_range(&snapshot.source_text, symbol_entry.span);
                     return Some(Location {
                         uri: snapshot.uri.clone(),
@@ -375,9 +390,10 @@ fn collect_write_spans_in_ast(ast: &ProgramAst, write_spans: &mut std::collectio
             Declaration::Class(class_decl) => {
                 for member in &class_decl.members {
                     if let ClassMember::Method(method_decl) = member
-                        && let Some(body) = &method_decl.body {
-                            collect_write_spans_in_statements(&body.statements, write_spans);
-                        }
+                        && let Some(body) = &method_decl.body
+                    {
+                        collect_write_spans_in_statements(&body.statements, write_spans);
+                    }
                 }
             }
             _ => {}
@@ -435,9 +451,7 @@ fn collect_write_spans_in_expression(
             collect_write_spans_in_expression(value, write_spans);
         }
         Expression::Unary {
-            operand,
-            operator,
-            ..
+            operand, operator, ..
         } => {
             if matches!(
                 operator,

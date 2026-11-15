@@ -3,8 +3,8 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
-use crate::phases::lexing::tokens::{Span, Token, TokenKind, lookup_keyword};
 pub use crate::LexingError;
+use crate::phases::lexing::tokens::{Span, Token, TokenKind, lookup_keyword};
 use std::time::{Duration, Instant};
 
 /// Metadata and statistics summarizing the completion of the lexical analysis phase.

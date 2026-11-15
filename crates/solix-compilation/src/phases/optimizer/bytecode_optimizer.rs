@@ -7,8 +7,8 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
-use crate::phases::phase::CompilationPhase;
 use crate::CompilationDiagnostic;
+use crate::phases::phase::CompilationPhase;
 use solix_common::bytecode::{CompiledFunction, Instruction, OpCode, SourceMapEntry};
 use std::collections::HashSet;
 

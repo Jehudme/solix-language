@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::span::Span;
 use miette::{Diagnostic, SourceSpan};
+use solix_common::span::Span;
 
 /// Diagnostic error emitted when a syntactic violation or malformed AST construct is encountered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Diagnostic)]

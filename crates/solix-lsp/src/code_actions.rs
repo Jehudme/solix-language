@@ -28,7 +28,9 @@ pub fn code_actions(
         };
 
         // Quick Fix 1: E0226 - Replace '.' with '::' on static member access
-        if code_str == "E0226" || diagnostic.message.contains("static") && diagnostic.message.contains("via '.'") {
+        if code_str == "E0226"
+            || diagnostic.message.contains("static") && diagnostic.message.contains("via '.'")
+        {
             let edit_range = diagnostic.range;
             let mut changes = std::collections::HashMap::new();
             changes.insert(
@@ -61,15 +63,22 @@ pub fn code_actions(
                     if let Some(ast) = &other_snap.ast {
                         for decl in &ast.declarations {
                             if let Declaration::Class(c) = decl {
-                                let class_name = get_span_text(&other_snap.source_text, c.name_span);
+                                let class_name =
+                                    get_span_text(&other_snap.source_text, c.name_span);
                                 if class_name == unresolved_name {
                                     let mut changes = std::collections::HashMap::new();
                                     changes.insert(
                                         snapshot.uri.clone(),
                                         vec![TextEdit {
                                             range: Range {
-                                                start: Position { line: 0, character: 0 },
-                                                end: Position { line: 0, character: 0 },
+                                                start: Position {
+                                                    line: 0,
+                                                    character: 0,
+                                                },
+                                                end: Position {
+                                                    line: 0,
+                                                    character: 0,
+                                                },
                                             },
                                             new_text: format!("import {class_name};\n"),
                                         }],
@@ -124,51 +133,56 @@ pub fn code_actions(
 
     // 2. Refactorings: Organize Imports
     if let Some(ast) = &snapshot.ast
-        && ast.imports.len() > 1 {
-            let mut import_lines: Vec<String> = ast
-                .imports
-                .iter()
-                .map(|imp| get_span_text(&snapshot.source_text, imp.span).trim().to_string())
-                .collect();
-            import_lines.sort();
-            import_lines.dedup();
+        && ast.imports.len() > 1
+    {
+        let mut import_lines: Vec<String> = ast
+            .imports
+            .iter()
+            .map(|imp| {
+                get_span_text(&snapshot.source_text, imp.span)
+                    .trim()
+                    .to_string()
+            })
+            .collect();
+        import_lines.sort();
+        import_lines.dedup();
 
-            let first_import = &ast.imports[0];
-            let last_import = &ast.imports[ast.imports.len() - 1];
-            let replace_range = span_to_range(
-                &snapshot.source_text,
-                first_import.span.combine(last_import.span),
-            );
+        let first_import = &ast.imports[0];
+        let last_import = &ast.imports[ast.imports.len() - 1];
+        let replace_range = span_to_range(
+            &snapshot.source_text,
+            first_import.span.combine(last_import.span),
+        );
 
-            let mut changes = std::collections::HashMap::new();
-            changes.insert(
-                snapshot.uri.clone(),
-                vec![TextEdit {
-                    range: replace_range,
-                    new_text: import_lines.join("\n"),
-                }],
-            );
+        let mut changes = std::collections::HashMap::new();
+        changes.insert(
+            snapshot.uri.clone(),
+            vec![TextEdit {
+                range: replace_range,
+                new_text: import_lines.join("\n"),
+            }],
+        );
 
-            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: "Organize Imports".to_string(),
-                kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
-                diagnostics: None,
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }),
-                is_preferred: Some(false),
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title: "Organize Imports".to_string(),
+            kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
+            diagnostics: None,
+            edit: Some(WorkspaceEdit {
+                changes: Some(changes),
                 ..Default::default()
-            }));
-        }
+            }),
+            is_preferred: Some(false),
+            ..Default::default()
+        }));
+    }
 
     if let Some(requested_kinds) = &params.context.only {
         actions.retain(|action| match action {
             CodeActionOrCommand::CodeAction(code_action) => {
                 if let Some(action_kind) = &code_action.kind {
-                    requested_kinds
-                        .iter()
-                        .any(|requested_kind| action_kind.as_str().starts_with(requested_kind.as_str()))
+                    requested_kinds.iter().any(|requested_kind| {
+                        action_kind.as_str().starts_with(requested_kind.as_str())
+                    })
                 } else {
                     true
                 }
@@ -182,9 +196,10 @@ pub fn code_actions(
 
 fn extract_symbol_name_from_message(msg: &str) -> &str {
     if let Some(start) = msg.find('\'')
-        && let Some(end) = msg[start + 1..].find('\'') {
-            return &msg[start + 1..start + 1 + end];
-        }
+        && let Some(end) = msg[start + 1..].find('\'')
+    {
+        return &msg[start + 1..start + 1 + end];
+    }
     ""
 }
 

@@ -517,15 +517,17 @@ impl<'a> Emitter<'a> {
         let var_type = self.query_type(var_decl.span);
         let type_name_string = self.get_lexeme(var_decl.var_type.span()).to_string();
 
-        self.function.local_variables.push(solix_common::bytecode::LocalVariableDebugInfo {
-            register: local_reg,
-            name,
-            type_name: type_name_string.clone(),
-            var_type: var_type.clone(),
-            start_pc: self.function.instructions.len() as u32,
-            end_pc: u32::MAX,
-            is_parameter: false,
-        });
+        self.function
+            .local_variables
+            .push(solix_common::bytecode::LocalVariableDebugInfo {
+                register: local_reg,
+                name,
+                type_name: type_name_string.clone(),
+                var_type: var_type.clone(),
+                start_pc: self.function.instructions.len() as u32,
+                end_pc: u32::MAX,
+                is_parameter: false,
+            });
         let is_ref = var_type.is_reference_type()
             || matches!(
                 var_decl.var_type,

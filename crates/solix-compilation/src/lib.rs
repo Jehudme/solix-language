@@ -15,8 +15,8 @@ pub use diagnostics::{
 };
 pub use manifest::manifest_to_source;
 pub use phases::{
-    parse_context_resilient, parse_source_resilient, BinderPhase, CompilationPhase, EmitterPhase,
-    LexerPhase, ParserPhase, PhaseDecision,
+    BinderPhase, CompilationPhase, EmitterPhase, LexerPhase, ParserPhase, PhaseDecision,
+    parse_context_resilient, parse_source_resilient,
 };
 pub use pipeline::CompilationPipeline;
 pub use telemetry::{CompilerTelemetry, PhaseMetric};

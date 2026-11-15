@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::tokens::Token;
 use miette::{Diagnostic, SourceSpan};
+use solix_common::tokens::Token;
 
 /// Structured error emitted during lexical tokenization when an unknown or illegal token is encountered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Diagnostic)]

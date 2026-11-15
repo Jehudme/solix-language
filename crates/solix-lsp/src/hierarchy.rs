@@ -65,18 +65,22 @@ pub fn outgoing_calls(
     for decl in &ast.declarations {
         match decl {
             Declaration::Method(method_decl) => {
-                if method_decl.span.start <= target_offset && target_offset <= method_decl.span.end
-                    && let Some(body) = &method_decl.body {
-                        collect_callees_in_statements(&snapshot, &body.statements, &mut outgoing);
-                    }
+                if method_decl.span.start <= target_offset
+                    && target_offset <= method_decl.span.end
+                    && let Some(body) = &method_decl.body
+                {
+                    collect_callees_in_statements(&snapshot, &body.statements, &mut outgoing);
+                }
             }
             Declaration::Class(class_decl) => {
                 for member in &class_decl.members {
                     if let ClassMember::Method(method_decl) = member
-                        && method_decl.span.start <= target_offset && target_offset <= method_decl.span.end
-                            && let Some(body) = &method_decl.body {
-                                collect_callees_in_statements(&snapshot, &body.statements, &mut outgoing);
-                            }
+                        && method_decl.span.start <= target_offset
+                        && target_offset <= method_decl.span.end
+                        && let Some(body) = &method_decl.body
+                    {
+                        collect_callees_in_statements(&snapshot, &body.statements, &mut outgoing);
+                    }
                 }
             }
             _ => {}
@@ -100,7 +104,10 @@ pub fn prepare_type_hierarchy(
     let symbol = snapshot.symbol_at_offset(offset)?;
 
     if matches!(symbol.symbol_type, Type::Class { .. }) {
-        let kind = if symbol.modifiers.contains(&solix_compilation::phases::parser::statements::Modifier::Abstract) {
+        let kind = if symbol
+            .modifiers
+            .contains(&solix_compilation::phases::parser::statements::Modifier::Abstract)
+        {
             SymbolKind::INTERFACE
         } else {
             SymbolKind::CLASS
@@ -172,18 +179,16 @@ pub fn subtypes(
         if let Some(ast) = &other_snapshot.ast {
             for decl in &ast.declarations {
                 if let Declaration::Class(class_decl) = decl {
-                    let is_subclass = class_decl
-                        .super_class
-                        .as_ref()
-                        .is_some_and(|super_type| {
-                            get_span_text(&other_snapshot.source_text, super_type.span()) == item.name
-                        });
+                    let is_subclass = class_decl.super_class.as_ref().is_some_and(|super_type| {
+                        get_span_text(&other_snapshot.source_text, super_type.span()) == item.name
+                    });
                     let is_impl = class_decl.interfaces.iter().any(|iface| {
                         get_span_text(&other_snapshot.source_text, iface.span()) == item.name
                     });
 
                     if is_subclass || is_impl {
-                        let name = get_span_text(&other_snapshot.source_text, class_decl.name_span).to_string();
+                        let name = get_span_text(&other_snapshot.source_text, class_decl.name_span)
+                            .to_string();
                         let range = span_to_range(&other_snapshot.source_text, class_decl.span);
                         result.push(TypeHierarchyItem {
                             name,
@@ -239,10 +244,21 @@ fn collect_callers_in_ast(
             Declaration::Method(method_decl) => {
                 if let Some(body) = &method_decl.body {
                     let mut call_ranges = Vec::new();
-                    find_calls_in_statements(&snapshot.source_text, &body.statements, target_name, &mut call_ranges);
+                    find_calls_in_statements(
+                        &snapshot.source_text,
+                        &body.statements,
+                        target_name,
+                        &mut call_ranges,
+                    );
                     if !call_ranges.is_empty() {
-                        let caller_name = get_span_text(&snapshot.source_text, method_decl.name_span);
-                        let from_item = make_call_hierarchy_item(snapshot, caller_name, method_decl.span, method_decl.name_span);
+                        let caller_name =
+                            get_span_text(&snapshot.source_text, method_decl.name_span);
+                        let from_item = make_call_hierarchy_item(
+                            snapshot,
+                            caller_name,
+                            method_decl.span,
+                            method_decl.name_span,
+                        );
                         incoming.push(CallHierarchyIncomingCall {
                             from: from_item,
                             from_ranges: call_ranges,
@@ -253,18 +269,30 @@ fn collect_callers_in_ast(
             Declaration::Class(class_decl) => {
                 for member in &class_decl.members {
                     if let ClassMember::Method(method_decl) = member
-                        && let Some(body) = &method_decl.body {
-                            let mut call_ranges = Vec::new();
-                            find_calls_in_statements(&snapshot.source_text, &body.statements, target_name, &mut call_ranges);
-                            if !call_ranges.is_empty() {
-                                let caller_name = get_span_text(&snapshot.source_text, method_decl.name_span);
-                                let from_item = make_call_hierarchy_item(snapshot, caller_name, method_decl.span, method_decl.name_span);
-                                incoming.push(CallHierarchyIncomingCall {
-                                    from: from_item,
-                                    from_ranges: call_ranges,
-                                });
-                            }
+                        && let Some(body) = &method_decl.body
+                    {
+                        let mut call_ranges = Vec::new();
+                        find_calls_in_statements(
+                            &snapshot.source_text,
+                            &body.statements,
+                            target_name,
+                            &mut call_ranges,
+                        );
+                        if !call_ranges.is_empty() {
+                            let caller_name =
+                                get_span_text(&snapshot.source_text, method_decl.name_span);
+                            let from_item = make_call_hierarchy_item(
+                                snapshot,
+                                caller_name,
+                                method_decl.span,
+                                method_decl.name_span,
+                            );
+                            incoming.push(CallHierarchyIncomingCall {
+                                from: from_item,
+                                from_ranges: call_ranges,
+                            });
                         }
+                    }
                 }
             }
             _ => {}
@@ -281,7 +309,12 @@ fn find_calls_in_statements(
     for stmt in statements {
         match stmt {
             Statement::Expression(expr_stmt) => {
-                find_calls_in_expression(source_text, &expr_stmt.expression, target_name, call_ranges);
+                find_calls_in_expression(
+                    source_text,
+                    &expr_stmt.expression,
+                    target_name,
+                    call_ranges,
+                );
             }
             Statement::Block(block) => {
                 find_calls_in_statements(source_text, &block.statements, target_name, call_ranges);
@@ -300,7 +333,9 @@ fn find_calls_in_expression(
     if let Expression::MethodCall { callee, span, .. } = expression {
         let callee_name = match &**callee {
             Expression::Identifier { span: id_span } => get_span_text(source_text, *id_span),
-            Expression::MemberAccess { member_span, .. } => get_span_text(source_text, *member_span),
+            Expression::MemberAccess { member_span, .. } => {
+                get_span_text(source_text, *member_span)
+            }
             _ => "",
         };
 
@@ -335,8 +370,12 @@ fn collect_callees_in_expression(
 ) {
     if let Expression::MethodCall { callee, span, .. } = expression {
         let callee_name = match &**callee {
-            Expression::Identifier { span: id_span } => get_span_text(&snapshot.source_text, *id_span),
-            Expression::MemberAccess { member_span, .. } => get_span_text(&snapshot.source_text, *member_span),
+            Expression::Identifier { span: id_span } => {
+                get_span_text(&snapshot.source_text, *id_span)
+            }
+            Expression::MemberAccess { member_span, .. } => {
+                get_span_text(&snapshot.source_text, *member_span)
+            }
             _ => "",
         };
 

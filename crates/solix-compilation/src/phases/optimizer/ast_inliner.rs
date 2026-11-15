@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
+use crate::CompilationDiagnostic;
 use crate::phases::lexing::Span;
 use crate::phases::parser::statements::Statement;
 use crate::phases::parser::statements::control_flow::VariableDeclarationStatement;
@@ -12,7 +13,6 @@ use crate::phases::parser::statements::declarations::{
 use crate::phases::parser::statements::expressions::Expression;
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::phase::CompilationPhase;
-use crate::CompilationDiagnostic;
 use solix_common::Type;
 use std::collections::HashMap;
 

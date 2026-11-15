@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_compilation::CompilationDiagnostic;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_compilation::CompilationDiagnostic;
 use solix_compilation::CompilationPipeline;
 use solix_compilation::phases::phase::{CompilationPhase, PhaseDecision};
 use solix_compilation::phases::standard::{BinderPhase, EmitterPhase, LexerPhase, ParserPhase};

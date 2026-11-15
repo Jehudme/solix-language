@@ -32,10 +32,7 @@ pub fn format_document(snapshot: &AnalysisSnapshot) -> Vec<TextEdit> {
 
 /// Formats a specific line range within a Solix source document.
 #[must_use]
-pub fn format_range(
-    snapshot: &AnalysisSnapshot,
-    range: Range,
-) -> Vec<TextEdit> {
+pub fn format_range(snapshot: &AnalysisSnapshot, range: Range) -> Vec<TextEdit> {
     let start_offset = position_to_byte_offset(&snapshot.source_text, range.start);
     let end_offset = position_to_byte_offset(&snapshot.source_text, range.end);
 
@@ -94,11 +91,20 @@ pub fn format_source(source: &str) -> String {
 
         // Apply statement formatting
         let formatted_content = format_line_content(trimmed);
-        formatted_lines.push(format!("{}{formatted_content}", INDENT_SPACES.repeat(indent_level)));
+        formatted_lines.push(format!(
+            "{}{formatted_content}",
+            INDENT_SPACES.repeat(indent_level)
+        ));
 
         // Adjust indent level for trailing opening braces
-        let open_count = trimmed.chars().filter(|&character| character == '{').count();
-        let close_count = trimmed.chars().filter(|&character| character == '}').count();
+        let open_count = trimmed
+            .chars()
+            .filter(|&character| character == '{')
+            .count();
+        let close_count = trimmed
+            .chars()
+            .filter(|&character| character == '}')
+            .count();
 
         if starts_with_closing_brace {
             let remaining_close = close_count.saturating_sub(1);
@@ -187,7 +193,11 @@ fn format_line_content(line: &str) -> String {
         // Semicolon spacing in for loops
         if current == ';' {
             result.push(';');
-            if index + 1 < chars.len() && chars[index + 1] != ' ' && chars[index + 1] != '\n' && chars[index + 1] != '}' {
+            if index + 1 < chars.len()
+                && chars[index + 1] != ' '
+                && chars[index + 1] != '\n'
+                && chars[index + 1] != '}'
+            {
                 result.push(' ');
             }
             previous_char = ';';
@@ -210,7 +220,10 @@ fn format_line_content(line: &str) -> String {
         }
 
         // Member access dot . must have zero spaces
-        if current == '.' && !previous_char.is_ascii_digit() && (index + 1 >= chars.len() || !chars[index + 1].is_ascii_digit()) {
+        if current == '.'
+            && !previous_char.is_ascii_digit()
+            && (index + 1 >= chars.len() || !chars[index + 1].is_ascii_digit())
+        {
             if result.ends_with(' ') {
                 result.pop();
             }
@@ -279,8 +292,14 @@ fn format_line_content(line: &str) -> String {
         }
 
         // Shift compound assignment '<<=', '>>='
-        if (current == '<' && index + 2 < chars.len() && chars[index + 1] == '<' && chars[index + 2] == '=')
-            || (current == '>' && index + 2 < chars.len() && chars[index + 1] == '>' && chars[index + 2] == '=')
+        if (current == '<'
+            && index + 2 < chars.len()
+            && chars[index + 1] == '<'
+            && chars[index + 2] == '=')
+            || (current == '>'
+                && index + 2 < chars.len()
+                && chars[index + 1] == '>'
+                && chars[index + 2] == '=')
         {
             let operator_string = format!("{current}{current}=");
             if !result.ends_with(' ') && !result.is_empty() {

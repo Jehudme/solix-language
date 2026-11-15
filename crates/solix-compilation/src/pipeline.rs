@@ -3,13 +3,13 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
+use crate::CompilationDiagnostic;
 use crate::phases::phase::{CompilationPhase, PhaseDecision};
 use crate::phases::standard::{
     AstInlinerPhase, BinderPhase, BytecodeOptimizerPhase, DependencyResolutionPhase, EmitterPhase,
     LexerPhase, ParserPhase,
 };
 use crate::telemetry::{CompilerTelemetry, PhaseMetric};
-use crate::CompilationDiagnostic;
 
 /// Sequential pipeline holding an ordered sequence of compilation phases.
 #[derive(Debug)]

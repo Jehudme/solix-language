@@ -7,9 +7,7 @@ use crate::navigation::find_references;
 use crate::workspace::{AnalysisSnapshot, WorkspaceManager};
 use solix_common::tokens::lookup_keyword;
 use std::collections::HashMap;
-use tower_lsp::lsp_types::{
-    Position, PrepareRenameResponse, TextEdit, Url, WorkspaceEdit,
-};
+use tower_lsp::lsp_types::{Position, PrepareRenameResponse, TextEdit, Url, WorkspaceEdit};
 
 /// Validates whether the symbol at `position` can be safely renamed.
 #[must_use]
@@ -48,13 +46,10 @@ pub fn rename_symbol(
     let mut changes_map: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
     for location in references {
-        changes_map
-            .entry(location.uri)
-            .or_default()
-            .push(TextEdit {
-                range: location.range,
-                new_text: new_name.clone(),
-            });
+        changes_map.entry(location.uri).or_default().push(TextEdit {
+            range: location.range,
+            new_text: new_name.clone(),
+        });
     }
 
     Some(WorkspaceEdit {

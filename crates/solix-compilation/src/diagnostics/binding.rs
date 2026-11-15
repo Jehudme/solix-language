@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::span::Span;
 use miette::{Diagnostic, SourceSpan};
+use solix_common::span::Span;
 
 /// Structured diagnostic errors emitted during semantic binding and type resolution.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Diagnostic)]
@@ -1089,7 +1089,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Dependency checksum verification failed for '{name}@{version}': expected {expected_sha256}, found {actual_sha256}")]
+    #[error(
+        "Dependency checksum verification failed for '{name}@{version}': expected {expected_sha256}, found {actual_sha256}"
+    )]
     #[diagnostic(
         code(solix::binder::dependency_checksum_mismatch),
         help(

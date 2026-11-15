@@ -44,25 +44,29 @@ pub fn hover(snapshot: &AnalysisSnapshot, position: Position) -> Option<Hover> {
 
         // Check if symbol is a class
         if matches!(symbol.symbol_type, Type::Class { .. })
-            && let Some(layout) = semantic.layouts.get(&symbol.id) {
-                layout_meta.push(format!("**`sizeof`**: `{}B`", layout.instance_size_bytes));
-                if layout.reference_field_offsets.is_empty() {
-                    layout_meta.push("**ARC Status**: `ObjectPod` (Value/Pod payload, zero ref-fields)".to_string());
-                } else {
-                    layout_meta.push(format!(
-                        "**ARC Status**: `Object` ({} ref-fields, {} weak)",
-                        layout.reference_field_offsets.len(),
-                        layout.weak_field_offsets.len()
-                    ));
-                }
+            && let Some(layout) = semantic.layouts.get(&symbol.id)
+        {
+            layout_meta.push(format!("**`sizeof`**: `{}B`", layout.instance_size_bytes));
+            if layout.reference_field_offsets.is_empty() {
+                layout_meta.push(
+                    "**ARC Status**: `ObjectPod` (Value/Pod payload, zero ref-fields)".to_string(),
+                );
+            } else {
+                layout_meta.push(format!(
+                    "**ARC Status**: `Object` ({} ref-fields, {} weak)",
+                    layout.reference_field_offsets.len(),
+                    layout.weak_field_offsets.len()
+                ));
             }
+        }
 
         // Check if symbol is a field within an enclosing class
         if let Some(parent_id) = symbol.parent_symbol
             && let Some(parent_layout) = semantic.layouts.get(&parent_id)
-                && let Some(byte_offset) = parent_layout.field_offsets.get(&symbol.name) {
-                    layout_meta.push(format!("**Field Offset**: `+{}B`", byte_offset));
-                }
+            && let Some(byte_offset) = parent_layout.field_offsets.get(&symbol.name)
+        {
+            layout_meta.push(format!("**Field Offset**: `+{}B`", byte_offset));
+        }
 
         if !layout_meta.is_empty() {
             markdown_sections.push(layout_meta.join(" • "));

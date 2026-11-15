@@ -425,7 +425,9 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             let param_names = cls
                                 .generic_params
                                 .iter()
-                                .map(|param_node| get_span_text(param_node.name_span, code).to_string())
+                                .map(|param_node| {
+                                    get_span_text(param_node.name_span, code).to_string()
+                                })
                                 .collect();
                             generic_templates.push(ExportedGenericTemplate {
                                 name: qualified_class_symbol,
@@ -672,20 +674,26 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         if method_declaration.modifiers.contains(&Modifier::Private) {
                             continue;
                         }
-                        let func_name = get_span_text(method_declaration.name_span, code).to_string();
+                        let func_name =
+                            get_span_text(method_declaration.name_span, code).to_string();
                         let arity = method_declaration.parameters.len();
                         let full_sym = if current_package_prefix.is_empty() {
                             format!("{func_name}/{arity}")
                         } else {
                             format!("{current_package_prefix}::{func_name}/{arity}")
                         };
-                        let ret_type =
-                            resolve_type_annotation(ast.source_id, code, &method_declaration.return_type, sym_table);
+                        let ret_type = resolve_type_annotation(
+                            ast.source_id,
+                            code,
+                            &method_declaration.return_type,
+                            sym_table,
+                        );
                         let params = method_declaration
                             .parameters
                             .iter()
                             .map(|param_node| {
-                                let param_name = get_span_text(param_node.name_span, code).to_string();
+                                let param_name =
+                                    get_span_text(param_node.name_span, code).to_string();
                                 let param_type = resolve_type_annotation(
                                     ast.source_id,
                                     code,
@@ -719,8 +727,12 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             continue;
                         }
                         let var_name = get_span_text(field_declaration.name_span, code).to_string();
-                        let var_type =
-                            resolve_type_annotation(ast.source_id, code, &field_declaration.field_type, sym_table);
+                        let var_type = resolve_type_annotation(
+                            ast.source_id,
+                            code,
+                            &field_declaration.field_type,
+                            sym_table,
+                        );
                         let slot = static_layout.lookup_slot(&var_name).unwrap_or(0);
                         let mods = field_declaration
                             .modifiers
@@ -971,12 +983,15 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
             for source_entry in &mut compiled_function.source_map {
                 let token_start_offset = source_entry.span.start as usize;
-                let found_line_index = match line_starting_offsets.binary_search(&token_start_offset) {
-                    Ok(exact_line) => exact_line,
-                    Err(insertion_point) => insertion_point.saturating_sub(1),
-                };
+                let found_line_index =
+                    match line_starting_offsets.binary_search(&token_start_offset) {
+                        Ok(exact_line) => exact_line,
+                        Err(insertion_point) => insertion_point.saturating_sub(1),
+                    };
                 source_entry.line = (found_line_index + 1) as u32;
-                source_entry.column = (token_start_offset.saturating_sub(line_starting_offsets[found_line_index]) + 1) as u32;
+                source_entry.column = (token_start_offset
+                    .saturating_sub(line_starting_offsets[found_line_index])
+                    + 1) as u32;
             }
         }
 
@@ -1998,9 +2013,7 @@ fn resolve_annotation_type(
             }
         }
         TypeAnnotation::Generic {
-            base,
-            arguments,
-            ..
+            base, arguments, ..
         } => {
             let base_type = resolve_annotation_type(base, node_types, sources);
             let argument_types = arguments
@@ -2078,33 +2091,43 @@ fn compile_single_method(
     if is_instance {
         let this_register = allocator.alloc_param("this")?;
         let class_identifier = symbol.split("::").next().unwrap_or("Object");
-        func.local_variables.push(solix_common::bytecode::LocalVariableDebugInfo {
-            register: this_register,
-            name: "this".to_string(),
-            type_name: class_identifier.to_string(),
-            var_type: solix_common::types::Type::Class {
-                symbol_name: class_identifier.to_string(),
-                type_arguments: Vec::new(),
-            },
-            start_pc: 0,
-            end_pc: u32::MAX,
-            is_parameter: true,
-        });
+        func.local_variables
+            .push(solix_common::bytecode::LocalVariableDebugInfo {
+                register: this_register,
+                name: "this".to_string(),
+                type_name: class_identifier.to_string(),
+                var_type: solix_common::types::Type::Class {
+                    symbol_name: class_identifier.to_string(),
+                    type_arguments: Vec::new(),
+                },
+                start_pc: 0,
+                end_pc: u32::MAX,
+                is_parameter: true,
+            });
     }
 
     for parameter_decl in &m.parameters {
-        let param_name = get_span_text(parameter_decl.name_span, &sources[parameter_decl.name_span.id as usize]);
+        let param_name = get_span_text(
+            parameter_decl.name_span,
+            &sources[parameter_decl.name_span.id as usize],
+        );
         let param_register = allocator.alloc_param(param_name)?;
-        let param_type_string = get_span_text(parameter_decl.param_type.span(), &sources[parameter_decl.param_type.span().id as usize]);
-        func.local_variables.push(solix_common::bytecode::LocalVariableDebugInfo {
-            register: param_register,
-            name: param_name.to_string(),
-            type_name: param_type_string.to_string(),
-            var_type: solix_common::types::Type::Primitive(solix_common::types::PrimitiveKind::Void),
-            start_pc: 0,
-            end_pc: u32::MAX,
-            is_parameter: true,
-        });
+        let param_type_string = get_span_text(
+            parameter_decl.param_type.span(),
+            &sources[parameter_decl.param_type.span().id as usize],
+        );
+        func.local_variables
+            .push(solix_common::bytecode::LocalVariableDebugInfo {
+                register: param_register,
+                name: param_name.to_string(),
+                type_name: param_type_string.to_string(),
+                var_type: solix_common::types::Type::Primitive(
+                    solix_common::types::PrimitiveKind::Void,
+                ),
+                start_pc: 0,
+                end_pc: u32::MAX,
+                is_parameter: true,
+            });
     }
 
     allocator.enter_scope();

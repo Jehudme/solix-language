@@ -19,9 +19,7 @@ use crate::navigation::{
 };
 use crate::rename::{prepare_rename, rename_symbol};
 use crate::selection_range::selection_ranges;
-use crate::semantic_tokens::{
-    semantic_tokens_full, semantic_tokens_legend, semantic_tokens_range,
-};
+use crate::semantic_tokens::{semantic_tokens_full, semantic_tokens_legend, semantic_tokens_range};
 use crate::signature_help::signature_help;
 use crate::symbols::{document_symbols, workspace_symbols};
 use crate::workspace::WorkspaceManager;
@@ -68,9 +66,10 @@ impl SolixLanguageServer {
 impl LanguageServer for SolixLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         if let Some(root_uri) = params.root_uri
-            && let Ok(root_path) = root_uri.to_file_path() {
-                self.workspace.set_workspace_root(root_path);
-            }
+            && let Ok(root_path) = root_uri.to_file_path()
+        {
+            self.workspace.set_workspace_root(root_path);
+        }
 
         let capabilities = ServerCapabilities {
             text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
@@ -173,10 +172,9 @@ impl LanguageServer for SolixLanguageServer {
 
         let workspace = self.workspace.clone();
         let target_uri = uri.clone();
-        let snapshot_result = tokio::task::spawn_blocking(move || {
-            workspace.did_open(target_uri, version, content)
-        })
-        .await;
+        let snapshot_result =
+            tokio::task::spawn_blocking(move || workspace.did_open(target_uri, version, content))
+                .await;
 
         if let Ok(snapshot) = snapshot_result {
             self.client
@@ -191,7 +189,8 @@ impl LanguageServer for SolixLanguageServer {
 
         if let Some(change) = params.content_changes.into_iter().last() {
             // Update document buffer in memory immediately so completion/hover see newest text
-            self.workspace.update_document(&uri, version, change.text.clone());
+            self.workspace
+                .update_document(&uri, version, change.text.clone());
 
             // Cancel previous debounced analysis if still pending
             let mut tasks = self.debounce_tasks.lock().await;
@@ -253,12 +252,11 @@ impl LanguageServer for SolixLanguageServer {
                     .await;
             }
         } else {
-            let snapshot_opt = tokio::task::spawn_blocking(move || {
-                workspace.recompile_document(&target_uri)
-            })
-            .await
-            .ok()
-            .flatten();
+            let snapshot_opt =
+                tokio::task::spawn_blocking(move || workspace.recompile_document(&target_uri))
+                    .await
+                    .ok()
+                    .flatten();
             if let Some(snapshot) = snapshot_opt {
                 self.client
                     .publish_diagnostics(uri, snapshot.diagnostics, Some(snapshot.version))
@@ -337,7 +335,12 @@ impl LanguageServer for SolixLanguageServer {
             None => return Ok(None),
         };
 
-        Ok(find_references(&self.workspace, &snapshot, position, include_decl))
+        Ok(find_references(
+            &self.workspace,
+            &snapshot,
+            position,
+            include_decl,
+        ))
     }
 
     async fn document_highlight(
@@ -412,8 +415,8 @@ impl LanguageServer for SolixLanguageServer {
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
-        let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+        let snapshot = match self.workspace.get_live_snapshot(uri) {
+            Some(snap) => snap,
             None => return Ok(None),
         };
 
@@ -432,8 +435,8 @@ impl LanguageServer for SolixLanguageServer {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+        let snapshot = match self.workspace.get_live_snapshot(uri) {
+            Some(snap) => snap,
             None => return Ok(None),
         };
 
@@ -443,8 +446,8 @@ impl LanguageServer for SolixLanguageServer {
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+        let snapshot = match self.workspace.get_live_snapshot(uri) {
+            Some(snap) => snap,
             None => return Ok(None),
         };
 
@@ -512,7 +515,10 @@ impl LanguageServer for SolixLanguageServer {
         Ok(document_symbols(&snapshot))
     }
 
-    async fn symbol(&self, params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
         let query = &params.query;
         let response = workspace_symbols(&self.workspace, query);
         match response {
@@ -611,7 +617,12 @@ impl LanguageServer for SolixLanguageServer {
             None => return Ok(None),
         };
 
-        Ok(rename_symbol(&self.workspace, &snapshot, position, new_name))
+        Ok(rename_symbol(
+            &self.workspace,
+            &snapshot,
+            position,
+            new_name,
+        ))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {

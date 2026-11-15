@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::monomorphizer::GenericBlueprintRegistry;
 use crate::phases::binder::passes::pass1_symbol_discovery::{
@@ -16,7 +17,6 @@ use crate::phases::parser::statements::declarations::*;
 use crate::phases::parser::statements::expressions::*;
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::visitor::AstVisitor;
-use crate::BindingError;
 use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 
@@ -1169,8 +1169,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                     .collect();
 
                 if let Type::Class {
-                    ref symbol_name,
-                    ..
+                    ref symbol_name, ..
                 } = resolved_type
                     && let Some(class_id) = self
                         .symbol_table
@@ -2701,8 +2700,12 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             self.symbol_table,
         );
 
-        if let Type::Class { ref symbol_name, .. } = declared_type
-            && let Some(class_id) = self.symbol_table.resolve_symbol(self.source_id, symbol_name)
+        if let Type::Class {
+            ref symbol_name, ..
+        } = declared_type
+            && let Some(class_id) = self
+                .symbol_table
+                .resolve_symbol(self.source_id, symbol_name)
         {
             self.resolved_symbols.insert(node.var_type.span(), class_id);
         }
@@ -2837,7 +2840,8 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             symbol_id: var_id,
         });
         self.resolved_symbols.insert(node.name_span, var_id);
-        self.node_types.insert(node.name_span, declared_type.clone());
+        self.node_types
+            .insert(node.name_span, declared_type.clone());
         self.node_types.insert(node.span, declared_type);
     }
 
@@ -3074,7 +3078,8 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             is_const: false,
             symbol_id: exception_id,
         });
-        self.resolved_symbols.insert(node.variable_name, exception_id);
+        self.resolved_symbols
+            .insert(node.variable_name, exception_id);
         self.node_types.insert(node.variable_name, exception_type);
 
         for statement in &node.block.statements {

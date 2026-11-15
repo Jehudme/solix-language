@@ -182,7 +182,9 @@ public class Calculator {
 
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: main_uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: main_uri.clone(),
+            },
             position: Position {
                 line: 0,
                 character: 18,

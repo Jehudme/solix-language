@@ -13,31 +13,31 @@ use tower_lsp::lsp_types::{
 
 /// Canonical semantic token types supported by the Solix Language Server.
 pub const TOKEN_TYPES: &[SemanticTokenType] = &[
-    SemanticTokenType::NAMESPACE,     // 0
-    SemanticTokenType::TYPE,          // 1
-    SemanticTokenType::CLASS,         // 2
-    SemanticTokenType::INTERFACE,     // 3
-    SemanticTokenType::ENUM,          // 4
-    SemanticTokenType::ENUM_MEMBER,   // 5
-    SemanticTokenType::FUNCTION,      // 6
-    SemanticTokenType::METHOD,        // 7
-    SemanticTokenType::PROPERTY,      // 8
-    SemanticTokenType::VARIABLE,      // 9
-    SemanticTokenType::PARAMETER,     // 10
-    SemanticTokenType::KEYWORD,       // 11
-    SemanticTokenType::MODIFIER,      // 12
-    SemanticTokenType::COMMENT,       // 13
-    SemanticTokenType::STRING,        // 14
-    SemanticTokenType::NUMBER,        // 15
-    SemanticTokenType::OPERATOR,      // 16
+    SemanticTokenType::NAMESPACE,   // 0
+    SemanticTokenType::TYPE,        // 1
+    SemanticTokenType::CLASS,       // 2
+    SemanticTokenType::INTERFACE,   // 3
+    SemanticTokenType::ENUM,        // 4
+    SemanticTokenType::ENUM_MEMBER, // 5
+    SemanticTokenType::FUNCTION,    // 6
+    SemanticTokenType::METHOD,      // 7
+    SemanticTokenType::PROPERTY,    // 8
+    SemanticTokenType::VARIABLE,    // 9
+    SemanticTokenType::PARAMETER,   // 10
+    SemanticTokenType::KEYWORD,     // 11
+    SemanticTokenType::MODIFIER,    // 12
+    SemanticTokenType::COMMENT,     // 13
+    SemanticTokenType::STRING,      // 14
+    SemanticTokenType::NUMBER,      // 15
+    SemanticTokenType::OPERATOR,    // 16
 ];
 
 /// Canonical semantic token modifiers supported by the Solix Language Server.
 pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
-    SemanticTokenModifier::DECLARATION,       // 1 << 0
-    SemanticTokenModifier::STATIC,            // 1 << 1
-    SemanticTokenModifier::READONLY,          // 1 << 2
-    SemanticTokenModifier::DEFAULT_LIBRARY,   // 1 << 3
+    SemanticTokenModifier::DECLARATION,     // 1 << 0
+    SemanticTokenModifier::STATIC,          // 1 << 1
+    SemanticTokenModifier::READONLY,        // 1 << 2
+    SemanticTokenModifier::DEFAULT_LIBRARY, // 1 << 3
 ];
 
 /// Constructs the official LSP [`SemanticTokensLegend`] for Solix.
@@ -93,9 +93,10 @@ fn compute_semantic_tokens(
         let token_len = token.span.end.saturating_sub(token.span.start);
 
         if let Some(range) = range_filter
-            && (start_pos.line < range.start.line || start_pos.line > range.end.line) {
-                continue;
-            }
+            && (start_pos.line < range.start.line || start_pos.line > range.end.line)
+        {
+            continue;
+        }
 
         let mut token_type_index = None;
         let mut modifier_mask = 0u32;
@@ -105,32 +106,33 @@ fn compute_semantic_tokens(
                 // Check if resolved by binder
                 if let Some(sem) = semantic
                     && let Some(&symbol_id) = sem.resolved_symbols.get(&token.span)
-                        && let Some(symbol) = sem.symbol_table.get_symbol(symbol_id) {
-                            if symbol.is_static {
-                                modifier_mask |= 1 << 1; // static
-                            }
-                            if symbol.is_const {
-                                modifier_mask |= 1 << 2; // readonly
-                            }
+                    && let Some(symbol) = sem.symbol_table.get_symbol(symbol_id)
+                {
+                    if symbol.is_static {
+                        modifier_mask |= 1 << 1; // static
+                    }
+                    if symbol.is_const {
+                        modifier_mask |= 1 << 2; // readonly
+                    }
 
-                            token_type_index = match &symbol.symbol_type {
-                                Type::Class { .. } => Some(2), // class
-                                Type::FunctionPointer { .. } => {
-                                    if symbol.parent_symbol.is_some() {
-                                        Some(7) // method
-                                    } else {
-                                        Some(6) // function
-                                    }
-                                }
-                                _ => {
-                                    if symbol.parent_symbol.is_some() {
-                                        Some(8) // property/field
-                                    } else {
-                                        Some(9) // variable
-                                    }
-                                }
-                            };
+                    token_type_index = match &symbol.symbol_type {
+                        Type::Class { .. } => Some(2), // class
+                        Type::FunctionPointer { .. } => {
+                            if symbol.parent_symbol.is_some() {
+                                Some(7) // method
+                            } else {
+                                Some(6) // function
+                            }
                         }
+                        _ => {
+                            if symbol.parent_symbol.is_some() {
+                                Some(8) // property/field
+                            } else {
+                                Some(9) // variable
+                            }
+                        }
+                    };
+                }
             }
             TokenKind::String => {
                 token_type_index = Some(14); // string
@@ -149,7 +151,12 @@ fn compute_semantic_tokens(
                     let text = get_span_text(&snapshot.source_text, token.span);
                     if text == "class" || text == "interface" || text == "enum" {
                         token_type_index = Some(11); // keyword
-                    } else if text == "public" || text == "private" || text == "static" || text == "virtual" || text == "override" {
+                    } else if text == "public"
+                        || text == "private"
+                        || text == "static"
+                        || text == "virtual"
+                        || text == "override"
+                    {
                         token_type_index = Some(12); // modifier
                     } else {
                         token_type_index = Some(11); // keyword

@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::CompilationContext::CompilationContext;
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::monomorphizer::GenericBlueprintRegistry;
@@ -12,7 +13,6 @@ use crate::phases::binder::symbols::{SymbolId, SymbolTable};
 use crate::phases::lexing::Span;
 use crate::phases::parser::statements::declarations::ClassDeclaration;
 use crate::phases::parser::visitor::AstVisitor;
-use crate::BindingError;
 use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -261,7 +261,9 @@ pub fn bind_context(
             accumulated_errors.push((
                 *main_source_id,
                 BindingError::MainMethodSignatureInvalid {
-                    reason: format!("Main method must return 'void' or 'int32', found '{return_type}'"),
+                    reason: format!(
+                        "Main method must return 'void' or 'int32', found '{return_type}'"
+                    ),
                     span: main_span.to_source_span(),
                 },
             ));

@@ -3122,9 +3122,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     member_span,
                     is_scope_resolution: false,
                 };
-            } else if let Some(colon_token) = self
-                .cursor
-                .match_token(TokenKind::PunctuationDoubleColon)
+            } else if let Some(colon_token) =
+                self.cursor.match_token(TokenKind::PunctuationDoubleColon)
             {
                 let colon_span = colon_token.span;
                 // Static member access

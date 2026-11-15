@@ -7,11 +7,11 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
+use crate::diagnostics::{BindingError, CompilationDiagnostic};
 use crate::manifest::manifest_to_source;
 use crate::phases::lexing::Span;
 use crate::phases::phase::CompilationPhase;
 use miette::SourceSpan;
-use crate::diagnostics::{BindingError, CompilationDiagnostic};
 use solix_common::bytecode::BinaryProgram;
 use solix_common::solver::{DependencyRequirement, PackageVersion, SolverError};
 use std::collections::{HashMap, VecDeque};
@@ -299,9 +299,9 @@ fn ingest_package_api_source(
     context.mark_external_source(source_id);
 
     if !program.export_manifest.exported_ast_bytes.is_empty() {
-        let deserialized_result = bincode::deserialize::<crate::phases::parser::statements::ProgramAst>(
-            &program.export_manifest.exported_ast_bytes,
-        )
+        let deserialized_result = bincode::deserialize::<
+            crate::phases::parser::statements::ProgramAst,
+        >(&program.export_manifest.exported_ast_bytes)
         .or_else(|_| {
             serde_json::from_slice::<crate::phases::parser::statements::ProgramAst>(
                 &program.export_manifest.exported_ast_bytes,

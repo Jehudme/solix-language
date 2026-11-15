@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::passes::pass1_symbol_discovery::{
     compute_effective_package, extract_namespace_path,
@@ -13,7 +14,6 @@ use crate::phases::parser::statements::declarations::{
     ClassDeclaration, ClassMember, Declaration, InterfaceDeclaration, Modifier,
 };
 use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
-use crate::BindingError;
 use solix_common::{PrimitiveKind, TokenKind, Type};
 use std::collections::{HashMap, HashSet};
 

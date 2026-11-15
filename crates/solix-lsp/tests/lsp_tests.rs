@@ -28,8 +28,8 @@ use solix_lsp::signature_help::signature_help;
 use solix_lsp::symbols::{document_symbols, workspace_symbols};
 use solix_lsp::workspace::WorkspaceManager;
 use std::sync::Arc;
-use tower_lsp::lsp_types::*;
 use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::*;
 
 fn create_test_workspace() -> (Arc<WorkspaceManager>, Url) {
     let workspace = Arc::new(WorkspaceManager::new(None, None));
@@ -111,7 +111,11 @@ fn test_feature_03_upward_manifest_discovery() {
     let temp_dir = tempfile::tempdir().unwrap();
     let project_root = temp_dir.path();
     let manifest_file = project_root.join("manifest.toml");
-    std::fs::write(&manifest_file, "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        &manifest_file,
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
 
     let src_dir = project_root.join("src").join("utils");
     std::fs::create_dir_all(&src_dir).unwrap();
@@ -206,13 +210,15 @@ fn test_feature_08_error_wiki_links() {
 #[test]
 fn test_feature_09_dead_code_diagnostics() {
     let (workspace, uri) = create_test_workspace();
-    let dead_code_source = "int32 compute() {\n    return 42;\n    int32 unreachable_var = 100;\n}\n";
+    let dead_code_source =
+        "int32 compute() {\n    return 42;\n    int32 unreachable_var = 100;\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, dead_code_source.to_string());
-    let dead_code_diag = snapshot
-        .diagnostics
-        .iter()
-        .find(|d| d.tags.as_ref().is_some_and(|tags| tags.contains(&DiagnosticTag::UNNECESSARY)));
+    let dead_code_diag = snapshot.diagnostics.iter().find(|d| {
+        d.tags
+            .as_ref()
+            .is_some_and(|tags| tags.contains(&DiagnosticTag::UNNECESSARY))
+    });
 
     assert!(dead_code_diag.is_some());
     let diag = dead_code_diag.unwrap();
@@ -246,7 +252,10 @@ fn test_feature_11_goto_definition() {
 
     let snapshot = workspace.did_open(uri.clone(), 1, source.to_string());
     // Cursor on 'health' access in p.health (line 5, character 6)
-    let pos = Position { line: 5, character: 6 };
+    let pos = Position {
+        line: 5,
+        character: 6,
+    };
     let def_resp = find_definition(&workspace, &snapshot, pos);
 
     assert!(def_resp.is_some());
@@ -266,7 +275,10 @@ fn test_feature_12_goto_type_definition() {
     let source = "class Hero {}\nvoid main() {\n    Hero warrior = new Hero();\n}\n";
 
     let snapshot = workspace.did_open(uri.clone(), 1, source.to_string());
-    let pos = Position { line: 2, character: 8 };
+    let pos = Position {
+        line: 2,
+        character: 8,
+    };
     let type_def = find_type_definition(&workspace, &snapshot, pos);
 
     assert!(type_def.is_some());
@@ -282,7 +294,10 @@ fn test_feature_13_goto_implementation() {
     let source = "interface IWorker {\n    void work();\n}\nclass Worker implements IWorker {\n    override void work() {}\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 0, character: 10 };
+    let pos = Position {
+        line: 0,
+        character: 10,
+    };
     let impls = find_implementations(&workspace, &snapshot, pos);
 
     assert!(impls.is_some());
@@ -299,7 +314,10 @@ fn test_feature_14_find_all_references() {
     let source = "class Target {}\nvoid run() {\n    Target a = new Target();\n    Target b = new Target();\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 0, character: 6 };
+    let pos = Position {
+        line: 0,
+        character: 6,
+    };
     let refs = find_references(&workspace, &snapshot, pos, true);
 
     assert!(refs.is_some());
@@ -313,16 +331,26 @@ fn test_feature_14_find_all_references() {
 #[test]
 fn test_feature_15_document_highlight_read_write() {
     let (workspace, uri) = create_test_workspace();
-    let source = "void test() {\n    int32 value = 10;\n    value = 20;\n    int32 read_val = value;\n}\n";
+    let source =
+        "void test() {\n    int32 value = 10;\n    value = 20;\n    int32 read_val = value;\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 1, character: 10 };
+    let pos = Position {
+        line: 1,
+        character: 10,
+    };
     let highlights = document_highlights(&snapshot, pos);
 
     assert!(highlights.is_some());
     let list = highlights.unwrap();
-    assert!(list.iter().any(|h| h.kind == Some(DocumentHighlightKind::WRITE)));
-    assert!(list.iter().any(|h| h.kind == Some(DocumentHighlightKind::READ)));
+    assert!(
+        list.iter()
+            .any(|h| h.kind == Some(DocumentHighlightKind::WRITE))
+    );
+    assert!(
+        list.iter()
+            .any(|h| h.kind == Some(DocumentHighlightKind::READ))
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -335,7 +363,10 @@ fn test_feature_16_call_hierarchy() {
     let source = "void callee() {}\nvoid caller() {\n    callee();\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 0, character: 5 };
+    let pos = Position {
+        line: 0,
+        character: 5,
+    };
     let prep = prepare_call_hierarchy(&snapshot, pos).unwrap();
     assert_eq!(prep[0].name, "callee");
 
@@ -354,7 +385,10 @@ fn test_feature_17_type_hierarchy() {
     let source = "class Animal {}\nclass Dog extends Animal {}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 0, character: 6 };
+    let pos = Position {
+        line: 0,
+        character: 6,
+    };
     let prep = prepare_type_hierarchy(&snapshot, pos).unwrap();
     assert_eq!(prep[0].name, "Animal");
 
@@ -376,7 +410,10 @@ fn test_feature_18_dot_completion_on_instance() {
     let params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
-            position: Position { line: 6, character: 6 },
+            position: Position {
+                line: 6,
+                character: 6,
+            },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
@@ -402,7 +439,10 @@ fn test_feature_18_scope_resolution_completion() {
     let params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
-            position: Position { line: 5, character: 10 },
+            position: Position {
+                line: 5,
+                character: 10,
+            },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
@@ -427,7 +467,10 @@ fn test_feature_18_dot_on_type_auto_rewrite() {
     let params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
-            position: Position { line: 4, character: 12 },
+            position: Position {
+                line: 4,
+                character: 12,
+            },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
@@ -469,10 +512,14 @@ fn test_feature_20_completion_resolve_docs() {
 #[test]
 fn test_feature_21_rich_hover_card() {
     let (workspace, uri) = create_test_workspace();
-    let source = "/// Represents player state.\nclass Player {\n    int32 health;\n    float64 speed;\n}\n";
+    let source =
+        "/// Represents player state.\nclass Player {\n    int32 health;\n    float64 speed;\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 1, character: 6 };
+    let pos = Position {
+        line: 1,
+        character: 6,
+    };
     let hover_card = hover(&snapshot, pos).unwrap();
 
     if let HoverContents::Markup(content) = hover_card.contents {
@@ -492,10 +539,14 @@ fn test_feature_21_rich_hover_card() {
 #[test]
 fn test_feature_22_signature_help_active_param() {
     let (workspace, uri) = create_test_workspace();
-    let source = "void draw(int32 x, int32 y, string color) {}\nvoid main() {\n    draw(10, 20, );\n}\n";
+    let source =
+        "void draw(int32 x, int32 y, string color) {}\nvoid main() {\n    draw(10, 20, );\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 2, character: 17 };
+    let pos = Position {
+        line: 2,
+        character: 17,
+    };
     let sig_help = signature_help(&snapshot, pos).unwrap();
 
     assert_eq!(sig_help.signatures.len(), 1);
@@ -513,8 +564,14 @@ fn test_feature_23_inlay_hints() {
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 3, character: 1 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 3,
+            character: 1,
+        },
     };
 
     let hints = inlay_hints(&snapshot, range);
@@ -554,8 +611,16 @@ fn test_feature_25_code_lens_run_main_and_test() {
     let snapshot = workspace.did_open(uri, 1, source.to_string());
     let lenses = code_lenses(&workspace, &snapshot);
 
-    assert!(lenses.iter().any(|l| l.command.as_ref().is_some_and(|c| c.title == "▶ Run Main")));
-    assert!(lenses.iter().any(|l| l.command.as_ref().is_some_and(|c| c.title == "▶ Run Test")));
+    assert!(
+        lenses
+            .iter()
+            .any(|l| l.command.as_ref().is_some_and(|c| c.title == "▶ Run Main"))
+    );
+    assert!(
+        lenses
+            .iter()
+            .any(|l| l.command.as_ref().is_some_and(|c| c.title == "▶ Run Test"))
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -603,8 +668,16 @@ fn test_feature_28_folding_ranges() {
     let snapshot = workspace.did_open(uri, 1, source.to_string());
     let folds = folding_ranges(&snapshot);
 
-    assert!(folds.iter().any(|f| f.kind == Some(FoldingRangeKind::Imports)));
-    assert!(folds.iter().any(|f| f.kind == Some(FoldingRangeKind::Region)));
+    assert!(
+        folds
+            .iter()
+            .any(|f| f.kind == Some(FoldingRangeKind::Imports))
+    );
+    assert!(
+        folds
+            .iter()
+            .any(|f| f.kind == Some(FoldingRangeKind::Region))
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -617,7 +690,10 @@ fn test_feature_29_selection_range_expansion() {
     let source = "class Test {\n    void run() {\n        int32 x = 42;\n    }\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 2, character: 16 };
+    let pos = Position {
+        line: 2,
+        character: 16,
+    };
     let sel_ranges = selection_ranges(&snapshot, &[pos]);
 
     assert_eq!(sel_ranges.len(), 1);
@@ -651,8 +727,14 @@ fn test_feature_31_quick_fix_replace_dot_with_double_colon() {
 
     let diag = Diagnostic {
         range: Range {
-            start: Position { line: 0, character: 7 },
-            end: Position { line: 0, character: 8 },
+            start: Position {
+                line: 0,
+                character: 7,
+            },
+            end: Position {
+                line: 0,
+                character: 8,
+            },
         },
         code: Some(NumberOrString::String("E0226".to_string())),
         message: "Cannot access static member 'println' via '.'".to_string(),
@@ -689,7 +771,10 @@ fn test_feature_32_rename_symbol_validation() {
     let source = "void test() {\n    int32 my_var = 10;\n    int32 second = my_var;\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
-    let pos = Position { line: 1, character: 8 };
+    let pos = Position {
+        line: 1,
+        character: 8,
+    };
 
     // Valid rename
     let edit_ok = rename_symbol(&workspace, &snapshot, pos, "updated_var".to_string());
@@ -727,11 +812,26 @@ fn test_ms029_formatter_compound_operators_and_else_block() {
     let unformatted_input = "void test_ops() {\nint32 total = 0;\ntotal += 10;\ntotal -= 2;\ntotal *= 3;\ntotal /= 2;\nif (total > 0) {\ntotal += 1;\n} else {\ntotal -= 1;\n}\n}\n";
     let formatted_output = format_source(unformatted_input);
 
-    assert!(formatted_output.contains("total += 10;"), "Expected '+=' to remain intact: {formatted_output}");
-    assert!(formatted_output.contains("total -= 2;"), "Expected '-=' to remain intact: {formatted_output}");
-    assert!(formatted_output.contains("total *= 3;"), "Expected '*=' to remain intact: {formatted_output}");
-    assert!(formatted_output.contains("total /= 2;"), "Expected '/=' to remain intact: {formatted_output}");
-    assert!(formatted_output.contains("} else {"), "Expected '}} else {{' on single indented line: {formatted_output}");
+    assert!(
+        formatted_output.contains("total += 10;"),
+        "Expected '+=' to remain intact: {formatted_output}"
+    );
+    assert!(
+        formatted_output.contains("total -= 2;"),
+        "Expected '-=' to remain intact: {formatted_output}"
+    );
+    assert!(
+        formatted_output.contains("total *= 3;"),
+        "Expected '*=' to remain intact: {formatted_output}"
+    );
+    assert!(
+        formatted_output.contains("total /= 2;"),
+        "Expected '/=' to remain intact: {formatted_output}"
+    );
+    assert!(
+        formatted_output.contains("} else {"),
+        "Expected '}} else {{' on single indented line: {formatted_output}"
+    );
 }
 
 #[test]
@@ -744,7 +844,10 @@ fn test_ms029_local_var_dot_completion() {
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: test_uri },
-            position: Position { line: 9, character: 17 },
+            position: Position {
+                line: 9,
+                character: 17,
+            },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
         partial_result_params: PartialResultParams::default(),
@@ -752,7 +855,11 @@ fn test_ms029_local_var_dot_completion() {
     };
     let completion_list = completions(&workspace, &snapshot, &completion_params);
 
-    let completion_labels: Vec<String> = completion_list.items.into_iter().map(|item| item.label).collect();
+    let completion_labels: Vec<String> = completion_list
+        .items
+        .into_iter()
+        .map(|item| item.label)
+        .collect();
     assert!(
         completion_labels.contains(&"coordinate_x".to_string()),
         "Expected 'coordinate_x' in completions, got: {:?}",

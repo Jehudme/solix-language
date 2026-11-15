@@ -181,8 +181,14 @@ fn test_dependency_resolution_phase_diamond_incompatible_conflict_fails() {
 
     let options = CompilationOptions::new()
         .with_source("main.slx", consumer_code)
-        .with_dependency_spec(DependencyRequirement::new("lib_a", PackageVersion::new(1, 0, 0)))
-        .with_dependency_spec(DependencyRequirement::new("lib_b", PackageVersion::new(1, 0, 0)))
+        .with_dependency_spec(DependencyRequirement::new(
+            "lib_a",
+            PackageVersion::new(1, 0, 0),
+        ))
+        .with_dependency_spec(DependencyRequirement::new(
+            "lib_b",
+            PackageVersion::new(1, 0, 0),
+        ))
         .with_solver(Arc::new(solver));
 
     let mut context = CompilationContext::new(options);

@@ -36,35 +36,35 @@ pub fn signature_help(snapshot: &AnalysisSnapshot, position: Position) -> Option
                 return_type,
                 parameter_types,
             } = &symbol.symbol_type
-            {
-                let mut param_infos = Vec::new();
-                let mut param_strings = Vec::new();
+        {
+            let mut param_infos = Vec::new();
+            let mut param_strings = Vec::new();
 
-                for (param_idx, param_type) in parameter_types.iter().enumerate() {
-                    let label = format!("{param_type} arg{param_idx}");
-                    param_strings.push(label.clone());
-                    param_infos.push(ParameterInformation {
-                        label: ParameterLabel::Simple(label),
-                        documentation: None,
-                    });
-                }
-
-                let full_label = format!("{return_type} {callee_name}({})", param_strings.join(", "));
-                let mut doc = None;
-                if let Some(doc_text) = snapshot.extract_doc_comment_for_span(symbol.span) {
-                    doc = Some(Documentation::MarkupContent(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: doc_text,
-                    }));
-                }
-
-                signatures.push(SignatureInformation {
-                    label: full_label,
-                    documentation: doc,
-                    parameters: Some(param_infos),
-                    active_parameter: Some(active_parameter_index as u32),
+            for (param_idx, param_type) in parameter_types.iter().enumerate() {
+                let label = format!("{param_type} arg{param_idx}");
+                param_strings.push(label.clone());
+                param_infos.push(ParameterInformation {
+                    label: ParameterLabel::Simple(label),
+                    documentation: None,
                 });
             }
+
+            let full_label = format!("{return_type} {callee_name}({})", param_strings.join(", "));
+            let mut doc = None;
+            if let Some(doc_text) = snapshot.extract_doc_comment_for_span(symbol.span) {
+                doc = Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: doc_text,
+                }));
+            }
+
+            signatures.push(SignatureInformation {
+                label: full_label,
+                documentation: doc,
+                parameters: Some(param_infos),
+                active_parameter: Some(active_parameter_index as u32),
+            });
+        }
     }
 
     if signatures.is_empty() {
@@ -88,15 +88,26 @@ fn find_enclosing_call_in_ast(
         match decl {
             Declaration::Method(method_decl) => {
                 if let Some(body) = &method_decl.body {
-                    find_enclosing_call_in_statements(&body.statements, target_offset, source_text, best_call);
+                    find_enclosing_call_in_statements(
+                        &body.statements,
+                        target_offset,
+                        source_text,
+                        best_call,
+                    );
                 }
             }
             Declaration::Class(class_decl) => {
                 for member in &class_decl.members {
                     if let ClassMember::Method(method_decl) = member
-                        && let Some(body) = &method_decl.body {
-                            find_enclosing_call_in_statements(&body.statements, target_offset, source_text, best_call);
-                        }
+                        && let Some(body) = &method_decl.body
+                    {
+                        find_enclosing_call_in_statements(
+                            &body.statements,
+                            target_offset,
+                            source_text,
+                            best_call,
+                        );
+                    }
                 }
             }
             _ => {}
@@ -113,10 +124,20 @@ fn find_enclosing_call_in_statements(
     for stmt in statements {
         match stmt {
             Statement::Expression(expr_stmt) => {
-                find_enclosing_call_in_expression(&expr_stmt.expression, target_offset, source_text, best_call);
+                find_enclosing_call_in_expression(
+                    &expr_stmt.expression,
+                    target_offset,
+                    source_text,
+                    best_call,
+                );
             }
             Statement::Block(block) => {
-                find_enclosing_call_in_statements(&block.statements, target_offset, source_text, best_call);
+                find_enclosing_call_in_statements(
+                    &block.statements,
+                    target_offset,
+                    source_text,
+                    best_call,
+                );
             }
             _ => {}
         }
@@ -135,23 +156,27 @@ fn find_enclosing_call_in_expression(
         arguments,
         ..
     } = expression
-        && span.start <= target_offset && target_offset <= span.end {
-            let callee_name = match &**callee {
-                Expression::Identifier { span: id_span } => get_span_text(source_text, *id_span),
-                Expression::MemberAccess { member_span, .. } => get_span_text(source_text, *member_span),
-                _ => "",
-            };
-
-            // Calculate active parameter based on comma counts before target_offset
-            let mut active_param = 0;
-            for (idx, arg) in arguments.iter().enumerate() {
-                if target_offset > arg.span().end {
-                    active_param = idx + 1;
-                }
+        && span.start <= target_offset
+        && target_offset <= span.end
+    {
+        let callee_name = match &**callee {
+            Expression::Identifier { span: id_span } => get_span_text(source_text, *id_span),
+            Expression::MemberAccess { member_span, .. } => {
+                get_span_text(source_text, *member_span)
             }
+            _ => "",
+        };
 
-            *best_call = Some((*span, callee_name.to_string(), active_param));
+        // Calculate active parameter based on comma counts before target_offset
+        let mut active_param = 0;
+        for (idx, arg) in arguments.iter().enumerate() {
+            if target_offset > arg.span().end {
+                active_param = idx + 1;
+            }
         }
+
+        *best_call = Some((*span, callee_name.to_string(), active_param));
+    }
 }
 
 fn get_span_text(source: &str, span: Span) -> &str {

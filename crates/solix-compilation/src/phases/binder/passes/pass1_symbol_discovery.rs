@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::phases::binder::monomorphizer::{GenericBlueprint, GenericBlueprintRegistry};
 use crate::phases::binder::symbols::{ImportEntry, SymbolEntry, SymbolId, SymbolTable};
 use crate::phases::binder::type_resolver::resolve_type_annotation;
@@ -9,7 +10,6 @@ use crate::phases::lexing::Span;
 use crate::phases::parser::statements::ProgramAst;
 use crate::phases::parser::statements::declarations::{ClassMember, Declaration, Modifier};
 use crate::phases::parser::statements::types::TypeAnnotation;
-use crate::BindingError;
 use solix_common::{PrimitiveKind, Type};
 use std::collections::{HashMap, HashSet};
 

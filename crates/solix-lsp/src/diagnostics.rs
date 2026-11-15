@@ -175,7 +175,11 @@ pub fn collect_dead_code_diagnostics(source_text: &str, ast: &ProgramAst) -> Vec
         match declaration {
             Declaration::Method(method_declaration) => {
                 if let Some(body_block) = &method_declaration.body {
-                    inspect_block_for_dead_code(source_text, &body_block.statements, &mut diagnostics);
+                    inspect_block_for_dead_code(
+                        source_text,
+                        &body_block.statements,
+                        &mut diagnostics,
+                    );
                 }
             }
             Declaration::Constructor(constructor_declaration) => {
@@ -325,7 +329,10 @@ pub fn collect_unused_symbols_diagnostics(
     source_text: &str,
     source_id: u16,
     symbol_table: &SymbolTable,
-    resolved_symbols: &std::collections::HashMap<Span, solix_compilation::phases::binder::symbols::SymbolId>,
+    resolved_symbols: &std::collections::HashMap<
+        Span,
+        solix_compilation::phases::binder::symbols::SymbolId,
+    >,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let used_ids: std::collections::HashSet<_> = resolved_symbols.values().copied().collect();
@@ -343,7 +350,10 @@ pub fn collect_unused_symbols_diagnostics(
                 code: Some(NumberOrString::String("W0002".to_string())),
                 code_description: make_code_description("W0002"),
                 source: Some("solix".to_string()),
-                message: format!("Private symbol '{}' is declared but never used", symbol_entry.name),
+                message: format!(
+                    "Private symbol '{}' is declared but never used",
+                    symbol_entry.name
+                ),
                 related_information: None,
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                 data: None,

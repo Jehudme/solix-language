@@ -2,13 +2,13 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::parser::statements::declarations::{ClassDeclaration, ClassMember, Modifier};
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::statements::{Expression, LambdaBody, Statement};
-use crate::BindingError;
 use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 

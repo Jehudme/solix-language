@@ -2,11 +2,11 @@
 
 #![forbid(unsafe_code)]
 
+use crate::diagnostics::{CompilationDiagnostic, LexingError, ParsingError};
 use crate::phases::lexing::tokens::{Span, Token};
 use crate::phases::parser::statements::ProgramAst;
 use solix_common::bytecode::BinaryProgram;
 use solix_common::solver::{DependencyRequirement, ModuleSolver};
-use crate::diagnostics::{CompilationDiagnostic, LexingError, ParsingError};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

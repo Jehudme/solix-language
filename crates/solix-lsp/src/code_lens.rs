@@ -5,37 +5,37 @@
 use crate::diagnostics::span_to_range;
 use crate::workspace::{AnalysisSnapshot, WorkspaceManager};
 use solix_common::Span;
-use solix_compilation::phases::parser::statements::declarations::{ClassMember, Declaration, Modifier};
+use solix_compilation::phases::parser::statements::declarations::{
+    ClassMember, Declaration, Modifier,
+};
 use tower_lsp::lsp_types::{CodeLens, Command};
 
 /// Resolves `textDocument/codeLens` for entry points and references.
 #[must_use]
-pub fn code_lenses(
-    workspace: &WorkspaceManager,
-    snapshot: &AnalysisSnapshot,
-) -> Vec<CodeLens> {
+pub fn code_lenses(workspace: &WorkspaceManager, snapshot: &AnalysisSnapshot) -> Vec<CodeLens> {
     let ast = match snapshot.ast.as_ref() {
         Some(program_ast) => program_ast,
         None => return Vec::new(),
     };
 
-    let (configured_main, configured_test) = if let Some(manifest) = workspace.project_manifest_for_uri(&snapshot.uri) {
-        let main_symbol = manifest
-            .entrypoints
-            .main
-            .as_deref()
-            .unwrap_or("main")
-            .to_string();
-        let test_symbol = manifest
-            .entrypoints
-            .test
-            .as_deref()
-            .unwrap_or("test")
-            .to_string();
-        (main_symbol, test_symbol)
-    } else {
-        ("main".to_string(), "test".to_string())
-    };
+    let (configured_main, configured_test) =
+        if let Some(manifest) = workspace.project_manifest_for_uri(&snapshot.uri) {
+            let main_symbol = manifest
+                .entrypoints
+                .main
+                .as_deref()
+                .unwrap_or("main")
+                .to_string();
+            let test_symbol = manifest
+                .entrypoints
+                .test
+                .as_deref()
+                .unwrap_or("test")
+                .to_string();
+            (main_symbol, test_symbol)
+        } else {
+            ("main".to_string(), "test".to_string())
+        };
 
     let file_package = if let Some(package_statement) = &ast.package {
         let mut segments = Vec::new();
@@ -58,10 +58,15 @@ pub fn code_lenses(
             Declaration::Method(method_decl) => {
                 let name = get_span_text(&snapshot.source_text, method_decl.name_span);
                 let range = span_to_range(&snapshot.source_text, method_decl.span);
-                let qualifier = if file_package.is_empty() { None } else { Some(file_package.as_str()) };
+                let qualifier = if file_package.is_empty() {
+                    None
+                } else {
+                    Some(file_package.as_str())
+                };
 
                 let is_main = matches_entrypoint(name, qualifier, &configured_main);
-                let is_test = name.starts_with("test") || matches_entrypoint(name, qualifier, &configured_test);
+                let is_test = name.starts_with("test")
+                    || matches_entrypoint(name, qualifier, &configured_test);
 
                 if is_main {
                     lenses.push(CodeLens {
@@ -157,13 +162,21 @@ pub fn code_lenses(
 
                 for member in &class_decl.members {
                     if let ClassMember::Method(method_decl) = member {
-                        let method_name = get_span_text(&snapshot.source_text, method_decl.name_span);
+                        let method_name =
+                            get_span_text(&snapshot.source_text, method_decl.name_span);
                         let method_range = span_to_range(&snapshot.source_text, method_decl.span);
 
-                        let is_main = matches_entrypoint(method_name, Some(&class_qualifier), &configured_main)
-                            && method_decl.modifiers.contains(&Modifier::Static);
+                        let is_main = matches_entrypoint(
+                            method_name,
+                            Some(&class_qualifier),
+                            &configured_main,
+                        ) && method_decl.modifiers.contains(&Modifier::Static);
                         let is_test = (method_name.starts_with("test")
-                            || matches_entrypoint(method_name, Some(&class_qualifier), &configured_test))
+                            || matches_entrypoint(
+                                method_name,
+                                Some(&class_qualifier),
+                                &configured_test,
+                            ))
                             && method_decl.modifiers.contains(&Modifier::Static);
 
                         if is_main {
@@ -172,7 +185,9 @@ pub fn code_lenses(
                                 command: Some(Command {
                                     title: "▶ Run Main".to_string(),
                                     command: "solix.runMain".to_string(),
-                                    arguments: Some(vec![serde_json::json!(snapshot.uri.to_string())]),
+                                    arguments: Some(vec![serde_json::json!(
+                                        snapshot.uri.to_string()
+                                    )]),
                                 }),
                                 data: None,
                             });
@@ -181,7 +196,9 @@ pub fn code_lenses(
                                 command: Some(Command {
                                     title: "Debug Main".to_string(),
                                     command: "solix.debugMain".to_string(),
-                                    arguments: Some(vec![serde_json::json!(snapshot.uri.to_string())]),
+                                    arguments: Some(vec![serde_json::json!(
+                                        snapshot.uri.to_string()
+                                    )]),
                                 }),
                                 data: None,
                             });
@@ -243,9 +260,10 @@ fn count_references(workspace: &WorkspaceManager, symbol_name: &str) -> usize {
         if let Some(semantic) = &snapshot.last_good_semantic {
             for symbol_id in semantic.resolved_symbols.values() {
                 if let Some(symbol) = semantic.symbol_table.get_symbol(*symbol_id)
-                    && symbol.name == symbol_name {
-                        count += 1;
-                    }
+                    && symbol.name == symbol_name
+                {
+                    count += 1;
+                }
             }
         }
     }

@@ -3,9 +3,9 @@
 #![forbid(unsafe_code)]
 
 use crate::diagnostics::{BindingError, LexingError, ParsingError};
+use miette::{Diagnostic, SourceSpan};
 use solix_common::diagnostics::EmissionError;
 use solix_common::span::Span;
-use miette::{Diagnostic, SourceSpan};
 
 /// Unified compiler diagnostic representing any error or warning across the compilation lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Diagnostic)]

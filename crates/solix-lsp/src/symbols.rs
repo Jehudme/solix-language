@@ -51,9 +51,12 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                 for member in &class_decl.members {
                     match member {
                         ClassMember::Field(field_decl) => {
-                            let field_name = get_span_text(&snapshot.source_text, field_decl.name_span).to_string();
+                            let field_name =
+                                get_span_text(&snapshot.source_text, field_decl.name_span)
+                                    .to_string();
                             let field_range = span_to_range(&snapshot.source_text, field_decl.span);
-                            let field_sel = span_to_range(&snapshot.source_text, field_decl.name_span);
+                            let field_sel =
+                                span_to_range(&snapshot.source_text, field_decl.name_span);
                             children.push(DocumentSymbol {
                                 name: field_name,
                                 detail: None,
@@ -62,13 +65,17 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                                 range: field_range,
                                 selection_range: field_sel,
                                 children: None,
-            deprecated: None,
+                                deprecated: None,
                             });
                         }
                         ClassMember::Method(method_decl) => {
-                            let method_name = get_span_text(&snapshot.source_text, method_decl.name_span).to_string();
-                            let method_range = span_to_range(&snapshot.source_text, method_decl.span);
-                            let method_sel = span_to_range(&snapshot.source_text, method_decl.name_span);
+                            let method_name =
+                                get_span_text(&snapshot.source_text, method_decl.name_span)
+                                    .to_string();
+                            let method_range =
+                                span_to_range(&snapshot.source_text, method_decl.span);
+                            let method_sel =
+                                span_to_range(&snapshot.source_text, method_decl.name_span);
                             children.push(DocumentSymbol {
                                 name: method_name,
                                 detail: None,
@@ -77,13 +84,16 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                                 range: method_range,
                                 selection_range: method_sel,
                                 children: None,
-            deprecated: None,
+                                deprecated: None,
                             });
                         }
                         ClassMember::Constructor(ctor_decl) => {
-                            let ctor_name = get_span_text(&snapshot.source_text, ctor_decl.name_span).to_string();
+                            let ctor_name =
+                                get_span_text(&snapshot.source_text, ctor_decl.name_span)
+                                    .to_string();
                             let ctor_range = span_to_range(&snapshot.source_text, ctor_decl.span);
-                            let ctor_sel = span_to_range(&snapshot.source_text, ctor_decl.name_span);
+                            let ctor_sel =
+                                span_to_range(&snapshot.source_text, ctor_decl.name_span);
                             children.push(DocumentSymbol {
                                 name: ctor_name,
                                 detail: Some("constructor".to_string()),
@@ -92,13 +102,17 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                                 range: ctor_range,
                                 selection_range: ctor_sel,
                                 children: None,
-            deprecated: None,
+                                deprecated: None,
                             });
                         }
                         ClassMember::Destructor(dtor_decl) => {
-                            let dtor_name = format!("~{}", get_span_text(&snapshot.source_text, dtor_decl.name_span));
+                            let dtor_name = format!(
+                                "~{}",
+                                get_span_text(&snapshot.source_text, dtor_decl.name_span)
+                            );
                             let dtor_range = span_to_range(&snapshot.source_text, dtor_decl.span);
-                            let dtor_sel = span_to_range(&snapshot.source_text, dtor_decl.name_span);
+                            let dtor_sel =
+                                span_to_range(&snapshot.source_text, dtor_decl.name_span);
                             children.push(DocumentSymbol {
                                 name: dtor_name,
                                 detail: Some("destructor".to_string()),
@@ -107,7 +121,7 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                                 range: dtor_range,
                                 selection_range: dtor_sel,
                                 children: None,
-            deprecated: None,
+                                deprecated: None,
                             });
                         }
                         _ => {}
@@ -121,7 +135,11 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                     tags: None,
                     range,
                     selection_range,
-                    children: if children.is_empty() { None } else { Some(children) },
+                    children: if children.is_empty() {
+                        None
+                    } else {
+                        Some(children)
+                    },
                     deprecated: None,
                 });
             }
@@ -132,7 +150,8 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                 let mut children = Vec::new();
 
                 for method_decl in &iface_decl.methods {
-                    let method_name = get_span_text(&snapshot.source_text, method_decl.name_span).to_string();
+                    let method_name =
+                        get_span_text(&snapshot.source_text, method_decl.name_span).to_string();
                     let method_range = span_to_range(&snapshot.source_text, method_decl.span);
                     let method_sel = span_to_range(&snapshot.source_text, method_decl.name_span);
                     children.push(DocumentSymbol {
@@ -143,7 +162,7 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                         range: method_range,
                         selection_range: method_sel,
                         children: None,
-            deprecated: None,
+                        deprecated: None,
                     });
                 }
 
@@ -154,7 +173,11 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                     tags: None,
                     range,
                     selection_range,
-                    children: if children.is_empty() { None } else { Some(children) },
+                    children: if children.is_empty() {
+                        None
+                    } else {
+                        Some(children)
+                    },
                     deprecated: None,
                 });
             }
@@ -165,7 +188,8 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                 let mut children = Vec::new();
 
                 for variant in &enum_decl.variants {
-                    let var_name = get_span_text(&snapshot.source_text, variant.name_span).to_string();
+                    let var_name =
+                        get_span_text(&snapshot.source_text, variant.name_span).to_string();
                     let var_range = span_to_range(&snapshot.source_text, variant.span);
                     let var_sel = span_to_range(&snapshot.source_text, variant.name_span);
                     children.push(DocumentSymbol {
@@ -176,7 +200,7 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                         range: var_range,
                         selection_range: var_sel,
                         children: None,
-            deprecated: None,
+                        deprecated: None,
                     });
                 }
 
@@ -187,7 +211,11 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                     tags: None,
                     range,
                     selection_range,
-                    children: if children.is_empty() { None } else { Some(children) },
+                    children: if children.is_empty() {
+                        None
+                    } else {
+                        Some(children)
+                    },
                     deprecated: None,
                 });
             }
@@ -203,7 +231,7 @@ pub fn document_symbols(snapshot: &AnalysisSnapshot) -> Option<DocumentSymbolRes
                     range,
                     selection_range,
                     children: None,
-            deprecated: None,
+                    deprecated: None,
                 });
             }
             _ => {}
@@ -227,7 +255,10 @@ pub fn workspace_symbols(
             for symbol in &semantic.symbol_table.symbols {
                 if query_lower.is_empty()
                     || symbol.name.to_lowercase().contains(&query_lower)
-                    || symbol.fully_qualified_name.to_lowercase().contains(&query_lower)
+                    || symbol
+                        .fully_qualified_name
+                        .to_lowercase()
+                        .contains(&query_lower)
                 {
                     let kind = match &symbol.symbol_type {
                         solix_common::types::Type::Class { .. } => SymbolKind::CLASS,
