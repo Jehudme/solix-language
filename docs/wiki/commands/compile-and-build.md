@@ -12,22 +12,25 @@ solix compile <sources...> [options]
 
 ### Key Options & Flags
 * `-o, --output <path>`: Specifies destination `.slxb` output file path [default: `<name>.slxb`].
-* `-d, --deps <pkg@version>`: External package dependency requirement (can be repeated).
-* `-l, --lib <path>`: External library binary (`.slxb`) or archive (`.slxarc`) to link against (can be repeated).
+* `-d, --deps <pkg@version>`: External package dependency requirement formatted as `<name>[-<profile>]@<version>` (can be repeated).
+* `-l, --deps-file <path>`: External library binary (`.slxb`) or archive (`.slxarc`) to link against (visible alias `--lib`, can be repeated).
 * `-n, --name <name>`: Package or module identifier name.
 * `-V, --version <semver>`: Semantic version embedded into binary metadata [default: `0.1.0`].
 * `--description <desc>`: Package description string.
 * `--profile <debug|release|test>`: Compilation profile [default: `release`].
+* `-e, --entry <symbol>`: Overrides default entry point symbol (e.g. `Main::main`).
 * `--emit-api <file.slx>`: Synthesizes and writes public external API signatures to a `.slx` file.
 * `--no-builtins`: Disables automatic inclusion of built-in standard library definitions (`blt.io`).
 * `--check`: Performs syntax and semantic binder verification without emitting bytecode.
 * `--time`: Prints wall-clock duration for each compiler pipeline phase.
-* `--metrics`: Prints compiler throughput metrics and phase duration breakdown.
-* `--metrics-json`: Emits compiler phase latency and telemetry as machine-readable JSON.
+* `--metrics [<format>]`: Prints compiler throughput metrics and phase duration breakdown (`text` or `json`).
 * `--inline-threshold <N>`: Inlining statement threshold limit for `AstInlinerPhase` [default: `8`].
 * `--link <dynamic|static>`: Linking mode for dependencies and emission [default: `dynamic`].
 * `--static`: Shorthand flag for static linking mode (`--link static`), bundling all dependencies into one binary.
+* `--no-verify`: Bypasses dependency cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
+* `--install`: Automatically installs compiled binary into package store (visible alias `--sync`).
+* `-f, --force-install`: Force overwrites existing packages in store when `--install` is active.
 
 ### Practical Examples
 ```bash

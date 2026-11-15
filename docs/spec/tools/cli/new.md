@@ -60,7 +60,7 @@ my_app/
 │       └── src/lib.rs        # SolixCValue FFI and native callback exports
 └── scripts/
     ├── build.py              # Build automation script
-    └── solix_toolbox.py      # Turnkey build orchestration primitives
+    └── solix_build.py        # Turnkey build orchestration primitives
 ```
 
 #### Generated `src/main.slx`

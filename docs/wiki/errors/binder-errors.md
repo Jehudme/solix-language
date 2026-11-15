@@ -105,4 +105,4 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
 
 ### `E0291`: Dependency Checksum Mismatch
 * **Cause:** A resolved package artifact's SHA-256 digest does not match the pinned checksum recorded at compile time.
-* **Fix:** Rebuild the dependency or compile with `--yolo` (`--ignore-checksum`) if intentionally hot-swapping code.
+* **Fix:** Rebuild the dependency or compile with `--no-verify` (`--ignore-checksum`) if intentionally hot-swapping code.

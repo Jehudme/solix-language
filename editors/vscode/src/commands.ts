@@ -275,11 +275,11 @@ export function registerSolixCommands(
             if (activeUri && activeUri.fsPath) {
                 const projectRoot = findProjectRoot(activeUri.fsPath);
                 if (projectRoot) {
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" sync --all`);
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" reinstall --all`);
                     return;
                 }
             }
-            terminal.sendText(`"${solixBinaryPath}" sync --all`);
+            terminal.sendText(`"${solixBinaryPath}" reinstall --all`);
         })
     );
 

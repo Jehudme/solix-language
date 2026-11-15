@@ -21,8 +21,8 @@ solix run <binaries...> [options] [-- [guest_args...]]
 * `--max-stack <depth>`: Maximum call stack frame depth [default: `1024`].
 * `-v, --verbose`: Prints VM execution summary and heap statistics upon completion.
 * `--safe`: Executes in defensive safe mode with bounds checking and invariant assertions.
-* `--metrics`: Prints runtime execution telemetry and memory allocation profiling.
-* `--metrics-json`: Emits runtime telemetry formatted as machine-readable JSON.
+* `--metrics [<format>]`: Prints runtime execution telemetry and memory profiling (`text` or `json`).
+* `--no-verify`: Bypasses dependency and native library cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
 * `-- [guest_args...]`: Trailing arguments passed directly to the guest Solix entry point.
 

@@ -113,4 +113,4 @@ Solix supports two complementary binary linking strategies:
 2. **Static Linking (`--link static`):**
    * Transitive bytecode dependencies are merged into a single consolidated binary payload.
    * Controlled via the `SOLIX_LINK_MODE=static` environment variable or the `--link static` CLI compilation flag.
-   * `solix_toolbox.py` checks `os.environ.get("SOLIX_LINK_MODE")` during project build scripts and forwards the flag to `solix compile`.
+   * `solix_build.py` checks `os.environ.get("SOLIX_LINK_MODE")` during project build scripts and forwards the flag to `solix compile`.

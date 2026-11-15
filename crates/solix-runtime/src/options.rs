@@ -42,7 +42,7 @@ pub struct RuntimeOptions {
     pub native_functions: HashMap<String, NativeFunction>,
     /// Optional pluggable module solver for auto-fetching dependencies on PC B.
     pub solver: Option<Arc<dyn ModuleSolver>>,
-    /// Whether to verify cryptographic SHA-256 checksums on dependencies and native libraries (default true; false when --yolo).
+    /// Whether to verify cryptographic SHA-256 checksums on dependencies and native libraries (default true; false when --no-verify).
     pub verify_checksums: bool,
     /// Optional thread-safe output sink for capturing guest standard output.
     pub output_sink: Option<OutputSink>,

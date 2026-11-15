@@ -67,6 +67,7 @@ Solix v2.0 represents a modern, ground-up rewrite in safe Rust under `#![forbid(
 11. [`editors_vscode.md`](guide/editors_vscode.md) — VS Code extension, Language Server Protocol (`solix-lsp`)
 12. [`release.md`](guide/release.md) — Release automation, cross-compilation, packaging
 13. [`solix_raylib_plan.md`](guide/solix_raylib_plan.md) — Raylib game engine bindings and game loop design
+14. [`build-system.md`](features/build-system.md) — Hermetic Python build engine (`solix_build.py`), cache isolation, and Zig/CMake compilation
 
 ### 3.3 Formal Specifications ([Specifications](spec/README.md))
 * [Lexical Grammar & Tokenization](spec/lexical.md)
@@ -90,3 +91,4 @@ Solix v2.0 represents a modern, ground-up rewrite in safe Rust under `#![forbid(
 * [Rust Military Safety Standards (`GL-0011`)](internals/guidelines/language-conventions.md)
 * [Tripartite Documentation Guidelines (`GL-0012`)](internals/guidelines/authoring-features-and-wiki.md)
 * [Documentation Update Protocol (`GL-0013`)](internals/guidelines/documentation-update-protocol.md)
+* [Engineering Milestones Index (`MS-001` to `MS-043`)](internals/milestones/README.md)

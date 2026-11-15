@@ -108,7 +108,7 @@ pub fn run_dependency_resolution(
                     continue;
                 } else {
                     eprintln!(
-                        "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                        "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
                         requirement.name, requirement.version
                     );
                 }
@@ -173,7 +173,7 @@ pub fn run_dependency_resolution(
                             continue;
                         } else {
                             eprintln!(
-                                "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                                "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
                                 requirement.name, requirement.version
                             );
                         }
@@ -473,7 +473,7 @@ fn resolve_transitive_requirement(
                 )]);
             } else {
                 eprintln!(
-                    "warning: checksum verification bypassed (--yolo); loading unverified dependency '{}@{}'",
+                    "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
                     requirement.name, requirement.version
                 );
             }

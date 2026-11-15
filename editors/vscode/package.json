@@ -114,7 +114,7 @@
             },
             {
                 "command": "solix.syncPackages",
-                "title": "Sync Installed Packages (solix sync --all)",
+                "title": "Reinstall Packages (solix reinstall --all)",
                 "category": "Solix"
             },
             {

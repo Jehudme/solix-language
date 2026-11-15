@@ -25,22 +25,25 @@ solix compile <sources...> [options]
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
 | `--output <file>` | `-o` | Path | `<name>.slxb` | Destination file path for the compiled `.slxb` binary container. |
-| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Package dependency requirements (e.g. `-d raylib@1.0.0`). |
-| `--lib <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxarc` archives whose API interfaces should be extracted and linked. |
+| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Package dependency requirements formatted as `<name>[-<profile>]@<version>` (e.g. `-d raylib-release@5.5.0`). |
+| `--deps-file <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxarc` archives whose API interfaces should be extracted and linked (visible alias `--lib`). |
 | `--name <name>` | `-n` | String | (Derived from sources) | Package or module identifier name. |
 | `--version <semver>` | `-V` | String | `"0.1.0"` | Semantic version string embedded into binary container metadata. |
 | `--description <desc>` | | String | `""` | Human-readable package description. |
 | `--profile <mode>` | | String | `"release"` | Target compilation profile: `debug`, `release`, or `test`. |
+| `--entry <symbol>` | `-e` | String | None | Explicit entry point function symbol (e.g. `-e Main::main`). |
 | `--emit-api <file.slx>` | | Path | None | Synthesizes and writes the public interface API declarations to a `.slx` file. |
 | `--no-builtins` | | Flag | `false` | Omits automatic ingestion of built-in standard library definitions (`blt.io`). |
 | `--check` | | Flag | `false` | Executes lexical, grammatical, and semantic binder checks without emitting bytecode. |
 | `--time` | | Flag | `false` | Prints wall-clock elapsed duration for each compiler pipeline phase. |
-| `--metrics` | | Flag | `false` | Prints compiler throughput metrics and detailed phase duration breakdown. |
-| `--metrics-json` | | Flag | `false` | Outputs compiler metrics and phase telemetry formatted as machine-readable JSON. |
+| `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints compiler throughput metrics and phase duration breakdown formatted as `text` or `json`. |
 | `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for `AstInlinerPhase` function inlining. |
 | `--link <mode>` | | String | `"dynamic"` | Linking mode for dependencies and emission: `dynamic` (default) or `static`. |
 | `--static` | | Flag | `false` | Shorthand for static linking mode (`--link static`), merging dependencies into a single self-contained binary. |
+| `--no-verify` | | Flag | `false` | Bypasses dependency cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
+| `--install` | | Flag | `false` | Automatically installs the compiled binary container into the local package store upon success (visible alias `--sync`). |
+| `--force-install` | `-f` | Flag | `false` | Overwrites existing package artifacts when `--install` is active. |
 
 ---
 

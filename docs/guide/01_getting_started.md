@@ -133,7 +133,7 @@ hello_solix/
 │       └── src/lib.rs
 └── scripts/
     ├── build.py              # Build orchestration script
-    └── solix_toolbox.py      # Build toolbox helper module
+    └── solix_build.py        # Build engine helper module
 ```
 
 #### The Starter Source (`src/main.slx`)
@@ -406,13 +406,13 @@ solix uninstall math_utils@0.1.0
 solix uninstall math_utils
 ```
 
-### 6. Cryptographic Verification & YOLO Mode (`--yolo`)
+### 6. Cryptographic Verification & Bypassing Checks (`--no-verify`)
 By default, the Solix toolchain cryptographically verifies that every resolved dependency and native shared library matches the exact SHA-256 digest recorded at compile time.
 
 To temporarily bypass checksum verification when hot-swapping or debugging experimental libraries:
 ```bash
-solix run app.slxb --yolo
-# or: solix run app.slxb --ignore-checksum
+solix run app.slxb --no-verify
+# or: solix compile src/main.slx --no-verify
 ```
 
 ---

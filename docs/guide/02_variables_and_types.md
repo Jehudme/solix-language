@@ -51,13 +51,14 @@ Solix defines **13 primitive types** built into the compiler. They are never hea
 ### Literals
 
 ```solix
-bool  flag    = true;
-char  letter  = (char)65;        // 'A' — char literals use integer casts
-int8  tiny    = (int8)-10;
-int32 count   = 42;
-int64 big     = 9000000000;
-float32 ratio = (float32)3.14;
-float64 pi    = 3.141592653589793;
+bool    flag     = true;
+char    letter   = (char)65;     // 'A' — char literals use integer casts
+int8    tiny     = -10;          // Context-typed numeric literal coercion
+uint8   byte_val = 255;          // Implicitly coerced to uint8
+int32   count    = 42;
+int64   big      = 9000000000;
+float32 ratio    = 3.14;         // Implicitly coerced to float32
+float64 pi       = 3.141592653589793;
 ```
 
 > [!NOTE]
@@ -235,14 +236,14 @@ String copy   = new String(other_string);      // Copy constructor
 ```solix
 String message = new String("  Hello, Solix!  ");
 
-int32  len     = s.length();          // 17
-char   ch      = s.char_at(2);        // 'H' (index 2)
-bool   empty   = s.is_empty();        // false
-String upper   = s.to_upper_case();   // "  HELLO, SOLIX!  "
-String trimmed = s.trim();            // "Hello, Solix!"
-String sub     = s.substring(2, 7);   // "Hello"
+int32  char_count = message.length();          // 17
+char   target_ch  = message.char_at(2);        // 'H' (index 2)
+bool   is_empty   = message.is_empty();        // false
+String upper      = message.to_upper_case();   // "  HELLO, SOLIX!  "
+String trimmed    = message.trim();            // "Hello, Solix!"
+String sub_str    = message.substring(2, 7);   // "Hello"
 
-bool eq = s.equals(new String("other")); // false
+bool is_equal = message.equals(new String("other")); // false
 
 // Concatenation via + operator or concat()
 String greeting = new String("Hello") + new String(", ") + new String("World!");
@@ -280,7 +281,7 @@ Dereferencing a `null` reference at runtime throws a `NullPointerException`.
 
 ```solix
 String message = null;
-int32 len = s.length();   // Throws NullPointerException at runtime
+int32 char_count = message.length();   // Throws NullPointerException at runtime
 ```
 
 > [!WARNING]
@@ -291,11 +292,47 @@ Use the `Optional<T>` class from `solix.core` to express optionality explicitly 
 ```solix
 import solix.core.Optional;
 
-Optional<String> maybeValue = Optional.of_nullable(getUserInput());
-if (maybeValue.is_present()) {
-    String val = maybeValue.get();
-    Console::println(val);
+Optional<String> maybe_value = Optional.of_nullable(getUserInput());
+if (maybe_value.is_present()) {
+    String text_value = maybe_value.get();
+    Console::println(text_value);
 }
+```
+
+---
+
+## Numeric Coercion & Widening Conversions
+
+Solix features strong static typing combined with safe, ergonomic numeric conversions:
+
+### 1. Context-Typed Numeric Literal Coercion
+Unsuffixed integer and floating-point literals automatically coerce to the target type without explicit casts, provided the literal value fits within the target type's representable bounds:
+
+```solix
+uint8  byte_val = 255;       // Implicit coercion to uint8
+int8   neg_val  = -10;       // Implicit coercion to int8
+float32 ratio   = 3.14;      // Implicit coercion to float32
+```
+
+### 2. Lossless Widening Conversions (Implicit)
+Values of smaller numeric types implicitly widen to larger numeric types along safe conversion paths without data loss:
+- `int8` $\to$ `int16` $\to$ `int32` $\to$ `int64`
+- `uint8` $\to$ `uint16` $\to$ `uint32` $\to$ `uint64`
+- `float32` $\to$ `float64`
+
+```solix
+int16   small_num  = 500;
+int32   medium_num = small_num;    // Implicit widening
+int64   large_num  = medium_num;   // Implicit widening
+float64 precise_pi = ratio;        // Implicit float32 -> float64
+```
+
+### 3. Narrowing Conversions (Explicit Cast Required)
+Narrowing conversions that could lose precision or overflow require an explicit cast:
+
+```solix
+int64 timestamp = 1700000000;
+int32 truncated = (int32)timestamp; // Explicit cast required
 ```
 
 ---
@@ -305,19 +342,19 @@ if (maybeValue.is_present()) {
 The `tuple` type in Solix is a built-in primitive representing an ordered, fixed-length heterogeneous collection of values.
 
 ```solix
-tuple t = new tuple(42, "hello", true);
-int32 len = t.length;          // 3
-int32 v0 = (int32)t[0];        // 42
-String v1 = (String)t[1];      // "hello"
-bool v2 = (bool)t[2];          // true
+tuple record = new tuple(42, "hello", true);
+int32 element_count = record.length;              // 3
+int32 first_val     = (int32)record[0];           // 42
+String second_val   = (String)record[1];          // "hello"
+bool third_val      = (bool)record[2];            // true
 ```
 
 ### Dynamic Operations on Tuples
-- **Subscript Access**: `t[i]` retrieves the element at integer index `i`.
+- **Subscript Access**: `record[item_index]` retrieves the element at integer index `item_index`.
 - **`instanceof`**: Evaluates whether an element matches a type (primitive or reference):
   ```solix
-  if (t[0] instanceof int32) { ... }
+  if (record[0] instanceof int32) { ... }
   ```
-- **Type Casting**: `(Type)t[i]` coerces the element to the given type, with runtime validation throwing `TypeCastException` on mismatch.
+- **Type Casting**: `(Type)record[item_index]` coerces the element to the given type, with runtime validation throwing `TypeCastException` on mismatch.
 - **Automatic Cleanup**: Contained reference objects are managed by ARC and automatically destroyed via RAII when the tuple's ref count drops to zero.
 

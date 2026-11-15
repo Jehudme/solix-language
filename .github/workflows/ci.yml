@@ -48,6 +48,9 @@ jobs:
       - name: Run documentation synchronization and quality gate
         run: python3 scripts/doc_sync_check.py
 
+      - name: Verify documentation drift and link integrity
+        run: python3 scripts/verify_docs.py
+
       - name: Validate VS Code extension manifest
         run: node -e "JSON.parse(require('fs').readFileSync('editors/vscode/package.json', 'utf8'))"
 

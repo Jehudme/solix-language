@@ -103,7 +103,7 @@ pub struct CompilationOptions {
     pub entry_point: Option<String>,
     /// Linking mode for dependencies and executable emission (`dynamic` or `static`).
     pub link_mode: LinkMode,
-    /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --yolo).
+    /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --no-verify).
     pub verify_checksums: bool,
 }
 

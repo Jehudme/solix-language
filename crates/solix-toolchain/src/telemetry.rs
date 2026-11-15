@@ -110,7 +110,7 @@ pub struct ExecutionTelemetry {
     pub quickened_calls: u64,
 }
 
-/// Structured execution telemetry report output for `solix run --metrics-json`.
+/// Structured execution telemetry report output for `solix run --metrics json`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RunMetricsReport {
     pub workload: String,
@@ -121,7 +121,7 @@ pub struct RunMetricsReport {
     pub execution: ExecutionTelemetry,
 }
 
-/// Structured compiler metrics report output for `solix compile --metrics-json`.
+/// Structured compiler metrics report output for `solix compile --metrics json`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CompileMetricsReport {
     pub package_name: String,

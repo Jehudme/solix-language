@@ -96,9 +96,36 @@ math_matrix = "0.3.1"
 
 ---
 
-### 4. `[native_library_checksums]` Table (Generated / Optional)
+### 4. `[build]` Table (Optional)
 
-Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_toolbox.py` during packaging to ensure binary tamper resistance across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
+Configures default compilation, linking, inlining, and package store behavior when executing `solix build` or invoking build scripts:
+
+```toml
+[build]
+profile = "release"           # Default target profile: "debug", "release", or "test"
+link = "dynamic"              # Linking mode: "dynamic" (default) or "static"
+pkg_dir = ""                  # Optional package store override path (defaults to ~/.solix/packages)
+install = false               # Automatically install archive into store upon successful build
+force_install = false         # Force overwrite if package is already installed
+verify_checksum = true        # Cryptographically verify SHA-256 dependency digests
+inline_threshold = 8          # Statement threshold limit for AST function inlining
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `profile` | String | `"release"` | Target compilation profile (`"debug"`, `"release"`, `"test"`). Can be overridden by `--profile` CLI flag. |
+| `link` | String | `"dynamic"` | Linking mode for dependencies: `"dynamic"` or `"static"`. |
+| `pkg_dir` | String | `""` | Package store directory override path. Defaults to `~/.solix/packages`. |
+| `install` | Boolean | `false` | When `true`, automatically installs `.slxarc` into the package store after building. |
+| `force_install` | Boolean | `false` | When `true`, overwrites existing package versions during installation. |
+| `verify_checksum` | Boolean | `true` | Validates dependency cryptographic SHA-256 hashes against pinned manifests. |
+| `inline_threshold` | Integer | `8` | Maximum statement count for `AstInlinerPhase` inlining. |
+
+---
+
+### 5. `[native_library_checksums]` Table (Generated / Optional)
+
+Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_build.py` during packaging to ensure binary tamper resistance across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
 
 ```toml
 [native_library_checksums]
@@ -106,7 +133,7 @@ Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries
 "lib/x86_64-unknown-linux-gnu/libsolixlib_native.so" = "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
 ```
 
-When loading native dynamic libraries into the virtual machine (`RuntimeContext::new` or `SlxarcArchive::extract_and_load`), the runtime validates that the extracted library's SHA-256 digest matches this pin. Any mismatch halts execution unless `--yolo` (`--ignore-checksum`) is passed.
+When loading native dynamic libraries into the virtual machine (`RuntimeContext::new` or `SlxarcArchive::extract_and_load`), the runtime validates that the extracted library's SHA-256 digest matches this pin. Any mismatch halts execution unless `--no-verify` (`--ignore-checksum`) is passed.
 
 ---
 
@@ -130,7 +157,7 @@ my_project/
 │       └── src/lib.rs
 └── scripts/
     ├── build.py              # Build automation entrypoint
-    └── solix_toolbox.py      # Build toolbox helper module
+    └── solix_build.py        # Build engine helper module
 ```
 
 ---
@@ -138,6 +165,6 @@ my_project/
 ## Role in Build & Distribution Lifecycle
 
 1. **Scaffolding (`solix new`)**: Creates `manifest.toml` populated with CLI arguments (`--name`, `--version`, `--license`, `--author`, `--deps`).
-2. **Building (`solix build`)**: `scripts/build.py` via `solix_toolbox.py` reads `manifest.toml`, extracts metadata and dependencies, forwards configured entrypoints (`--entry`) and linking modes (`SOLIX_LINK_MODE`), invokes `solix compile`, and packages `manifest.toml` at the root of the resulting `.slxarc` archive.
+2. **Building (`solix build`)**: `scripts/build.py` via `solix_build.py` reads `manifest.toml`, extracts metadata and dependencies, forwards configured entrypoints (`--entry`) and linking modes (`SOLIX_LINK_MODE`), invokes `solix compile`, and packages `manifest.toml` at the root of the resulting `.slxarc` archive.
 3. **Execution (`solix run`)**: When running a `.slxarc` archive, the VM runtime reads `manifest.toml` from the archive container to determine entry points (`[entrypoints].main` or `[entrypoints].test`), validate visibility/return signatures, and resolve bundled resources.
 4. **Inspection (`solix info`)**: Reads and formats `manifest.toml` when displaying container metadata.

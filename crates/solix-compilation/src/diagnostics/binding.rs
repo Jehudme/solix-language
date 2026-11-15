@@ -1097,7 +1097,7 @@ pub enum BindingError {
         help(
             "The resolved package artifact does not match the pinned compile-time SHA-256 digest.\n\
              This indicates the package has been mutated, corrupted, or tampered with.\n\
-             To bypass checksum enforcement when testing modified dependencies, pass '--yolo'."
+             To bypass checksum enforcement when testing modified dependencies, pass '--no-verify'."
         )
     )]
     DependencyChecksumMismatch {

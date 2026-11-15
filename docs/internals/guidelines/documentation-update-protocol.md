@@ -36,10 +36,10 @@ All contributors and CI verification pipelines **MUST** enforce the following ru
    ```bash
    python3 scripts/doc_sync_check.py --base main
    ```
-4. **Link Integrity Mandate:**
-   All markdown links across `docs/` **MUST** resolve to valid files. Broken links, dangling relative anchors, and references to deleted files are blocking defects verified via:
+4. **Link Integrity & Automated Drift Verification Mandate:**
+   All markdown links across `docs/` and `README.md` **MUST** resolve to valid files, all active CLI subcommands and manifest sections must be fully documented, and zero deprecated terms may be present. This is strictly verified via:
    ```bash
-   python3 scripts/verify_doc_links.py
+   python3 scripts/verify_docs.py
    ```
 5. **No Single-Letter Variables Mandate (GL-0011):**
    All code snippets in updated documentation **MUST NOT** use single-letter variable names (`x`, `y`, `i`, `n`, `s`, `v`, `e`). Every identifier must be descriptive (`coord_x`, `coord_y`, `index`, `item_count`, `error_val`).
@@ -66,7 +66,7 @@ When `git diff main...HEAD` reveals modifications in any left-hand subsystem, th
 | **Register VM & Opcodes**<br>`crates/solix-runtime/src/vm/`<br>`crates/solix-common/src/bytecode.rs` | `docs/wiki/errors/runtime-errors.md` (`R0001`–`R0023`) | `docs/spec/vm_isa.md` | `docs/architecture/memory_model.md`<br>`docs/architecture/arc_internals.md`<br>`docs/architecture/exception_unwinding.md`<br>`docs/guide/05_memory_management_arc.md` |
 | **Native Interop & FFI**<br>`crates/solix-runtime/src/native/` | N/A | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
-| **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/init_project.py`<br>`crates/solix-toolchain/assets/scripts/solix_toolbox.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
+| **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/solix_scaffold.py`<br>`crates/solix-toolchain/assets/scripts/solix_build.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
 
 ---
 
