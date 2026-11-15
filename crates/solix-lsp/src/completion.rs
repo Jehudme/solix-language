@@ -227,6 +227,14 @@ pub fn completions(
     let line_suffix = get_line_suffix(&snapshot.source_text, offset);
     let has_trailing_semicolon = line_suffix.trim_start().starts_with(';');
 
+    // If typing a single colon (e.g. `solix::collections:`), suppress completion until the second colon `::`
+    if line_prefix.ends_with(':') && !line_prefix.ends_with("::") {
+        return CompletionList {
+            is_incomplete: false,
+            items: Vec::new(),
+        };
+    }
+
     let mut items = Vec::new();
 
     let trimmed_prefix = line_prefix.trim_start();

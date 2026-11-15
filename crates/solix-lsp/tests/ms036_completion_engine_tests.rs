@@ -334,3 +334,30 @@ fn test_ms036_chained_dot_and_call_receiver_resolution() {
         "Chained dot access must propose 'coord_y': {labels:?}"
     );
 }
+
+#[test]
+fn test_single_colon_completion_suppression() {
+    let (workspace, uri) = create_test_workspace();
+    let source_text = "package test;\nvoid main() {\n    solix::collections:\n}\n";
+
+    let snapshot = workspace.did_open(uri.clone(), 1, source_text.to_string());
+    let params_single_colon = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 2,
+                character: 23,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let list_single = completions(&workspace, &snapshot, &params_single_colon);
+    assert!(
+        list_single.items.is_empty(),
+        "Typing single colon ':' MUST NOT trigger completions, got: {:?}",
+        list_single.items.iter().map(|item| &item.label).collect::<Vec<_>>()
+    );
+}
