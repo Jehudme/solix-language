@@ -81,6 +81,15 @@ impl Default for PackageRegistry {
 }
 
 impl PackageRegistry {
+    /// Constructs a clean, empty package registry targeting the specified package store directory.
+    pub fn new_empty(store_directory: &Path) -> Self {
+        Self {
+            schema_version: default_schema_version(),
+            packages: Vec::new(),
+            registry_file_path: store_directory.join("registry.json"),
+        }
+    }
+
     /// Loads `$SOLIX_PKG_DIR/registry.json` or creates a new one, self-healing by
     /// backfilling any installed packages present on disk but missing from the manifest.
     pub fn load_or_sync(store_directory: &Path) -> Result<Self> {

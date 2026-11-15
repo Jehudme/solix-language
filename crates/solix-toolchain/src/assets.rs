@@ -334,6 +334,11 @@ pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<u
         installed_count += 1;
     }
 
+    if !registry_file.exists() {
+        let empty_registry = crate::registry::PackageRegistry::new_empty(store_directory);
+        empty_registry.save()?;
+    }
+
     let toolchain_version = env!("CARGO_PKG_VERSION");
     let marker_path = store_directory.join(format!(".bundled_bootstrapped_v{toolchain_version}"));
     let _ = fs::write(marker_path, "1");

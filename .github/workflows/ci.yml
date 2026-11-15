@@ -88,6 +88,10 @@ jobs:
         with:
           version: "0.13.0"
 
+      - name: Build and stage default first-party libraries
+        if: runner.os == 'Linux'
+        run: python3 scripts/build_default_libraries.py
+
       - name: Build solix toolchain binary
         run: cargo build --bin solix
 
@@ -96,11 +100,9 @@ jobs:
         env:
           SOLIX_BIN: ${{ runner.os == 'Windows' && format('{0}/target/debug/solix.exe', github.workspace) || format('{0}/target/debug/solix', github.workspace) }}
 
-      - name: Build and stage default first-party libraries
+      - name: List installed packages
         if: runner.os == 'Linux'
-        run: |
-          python3 scripts/build_default_libraries.py
-          cargo run --bin solix -- list
+        run: cargo run --bin solix -- list
 
       - name: Verify example application compilation
         if: runner.os == 'Linux'
