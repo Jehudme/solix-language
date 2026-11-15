@@ -2,7 +2,7 @@
     "name": "solix",
     "displayName": "Solix",
     "description": "Official language support for Solix v2.0 (Language Server, 108-token grammar, formatting, and task runner)",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "publisher": "solix-lang",
     "license": "MIT",
     "repository": {
@@ -110,7 +110,8 @@
             {
                 "command": "solix.buildProject",
                 "title": "Build Project (solix build)",
-                "category": "Solix"
+                "category": "Solix",
+                "icon": "$(gear)"
             },
             {
                 "command": "solix.syncPackages",
@@ -142,24 +143,29 @@
         "menus": {
             "editor/title": [
                 {
-                    "command": "solix.runMain",
+                    "command": "solix.buildProject",
                     "when": "resourceExtname == .slx",
                     "group": "navigation@1"
                 },
                 {
-                    "command": "solix.debugMain",
+                    "command": "solix.runMain",
                     "when": "resourceExtname == .slx",
                     "group": "navigation@2"
                 },
                 {
-                    "command": "solix.runTest",
+                    "command": "solix.debugMain",
                     "when": "resourceExtname == .slx",
                     "group": "navigation@3"
                 },
                 {
-                    "command": "solix.showDisassembly",
+                    "command": "solix.runTest",
                     "when": "resourceExtname == .slx",
                     "group": "navigation@4"
+                },
+                {
+                    "command": "solix.showDisassembly",
+                    "when": "resourceExtname == .slx",
+                    "group": "navigation@5"
                 }
             ]
         },

@@ -47,6 +47,9 @@ solix compile src/main.slx --check
 solix compile src/main.slx -d math_utils@0.2.0 --static --metrics
 ```
 
+### Upward Manifest Auto-Discovery
+If `solix compile` is executed on files inside a project tree without explicit `--deps`, `--entry`, or `--name` parameters, it automatically traverses parent directories (up to 12 levels) to discover `manifest.toml`. Dependencies from `[dependencies]`, entry points from `[entrypoints].main`, and project metadata from `[info]` are inherited automatically.
+
 ---
 
 ## 2. `solix build`

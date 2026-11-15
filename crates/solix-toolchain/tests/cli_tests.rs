@@ -1664,3 +1664,111 @@ class Main {
     assert!(text_content.contains("linux-x86_64, macos-arm64"));
     assert!(text_content.contains("Exported Symbols:"));
 }
+
+#[test]
+fn test_cli_compile_upward_manifest_auto_discovery() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let package_store = workspace.root_path().join("pkg_store");
+    std::fs::create_dir_all(&package_store).expect("create pkg_store");
+    let store_string = package_store.to_str().expect("valid store path");
+
+    // 1. Compile and install dependency math_lib
+    let math_source = workspace
+        .write_file(
+            "math.slx",
+            r#"
+package math_lib;
+
+public class MathLib {
+    public static int32 square(int32 operand) {
+        return operand * operand;
+    }
+}
+"#,
+        )
+        .expect("write math");
+
+    let math_bin = workspace.file_path("math_lib.slxb");
+    let compile_math = Cli::try_parse_from([
+        "solix",
+        "compile",
+        math_source.to_str().expect("valid path"),
+        "--name",
+        "math_lib",
+        "--version",
+        "1.0.0",
+        "-o",
+        math_bin.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+        "--install",
+    ])
+    .expect("parse compile math");
+    assert_eq!(run(compile_math).expect("compile math succeeds"), 0);
+
+    // 2. Set up project with manifest.toml in parent folder
+    let project_dir = workspace.root_path().join("my_game");
+    let source_dir = project_dir.join("src");
+    std::fs::create_dir_all(&source_dir).expect("create src dir");
+
+    let manifest_content = r#"
+[info]
+name = "my_game"
+version = "1.2.0"
+description = "Showcase game"
+
+[entrypoints]
+main = "Game::main"
+
+[dependencies]
+math_lib = "1.0.0"
+"#;
+    std::fs::write(project_dir.join("manifest.toml"), manifest_content).expect("write manifest");
+
+    let main_source_path = source_dir.join("main.slx");
+    std::fs::write(
+        &main_source_path,
+        r#"
+import math_lib.*;
+
+public class Game {
+    public static int32 main() {
+        return MathLib::square(6);
+    }
+}
+"#,
+    )
+    .expect("write main source");
+
+    let output_binary_path = workspace.file_path("my_game.slxb");
+
+    // Compile referencing only src/main.slx, WITHOUT --deps, --name, or --entry
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        main_source_path.to_str().expect("valid path"),
+        "-o",
+        output_binary_path.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("parse compile command");
+
+    assert_eq!(
+        run(compile_cli).expect("compile with upward manifest discovery succeeds"),
+        0
+    );
+    assert!(output_binary_path.exists());
+
+    // 3. Run the compiled binary and verify execution
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        output_binary_path.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("parse run command");
+
+    assert_eq!(run(run_cli).expect("run succeeds"), 36);
+}

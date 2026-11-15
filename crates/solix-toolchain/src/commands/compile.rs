@@ -44,6 +44,26 @@ fn collect_slx_sources_recursively(
     Ok(())
 }
 
+/// Searches upward from the target source path looking for an enclosing `manifest.toml`.
+fn find_parent_manifest(initial_path: &std::path::Path) -> Option<PathBuf> {
+    let mut current_directory = if initial_path.is_dir() {
+        initial_path.to_path_buf()
+    } else {
+        initial_path.parent()?.to_path_buf()
+    };
+
+    for _ in 0..12 {
+        let manifest_candidate = current_directory.join("manifest.toml");
+        if manifest_candidate.is_file() {
+            return Some(manifest_candidate);
+        }
+        if !current_directory.pop() {
+            break;
+        }
+    }
+    None
+}
+
 /// Executes the `compile` subcommand.
 ///
 /// # Errors
@@ -71,15 +91,29 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         bail!("No Solix source files (*.slx) found to compile");
     }
 
+    // 2b. Attempt to discover parent manifest.toml if within a Solix project
+    let parent_manifest = resolved_sources
+        .first()
+        .and_then(|source_path| find_parent_manifest(source_path))
+        .and_then(|manifest_path| {
+            solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
+        });
+
     // 3. Resolve package name, linking mode, and output destination
     let link_mode = args.resolved_link_mode();
     let package_name = args.name.unwrap_or_else(|| {
-        resolved_sources
-            .first()
-            .and_then(|path| path.file_stem())
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("app")
-            .to_string()
+        if let Some(ref manifest) = parent_manifest
+            && !manifest.info.name.is_empty()
+        {
+            manifest.info.name.clone()
+        } else {
+            resolved_sources
+                .first()
+                .and_then(|path| path.file_stem())
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("app")
+                .to_string()
+        }
     });
 
     let output_path = args
@@ -91,19 +125,38 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
 
+    let package_version = if args.version == "0.1.0"
+        && let Some(ref manifest) = parent_manifest
+        && !manifest.info.version.is_empty()
+    {
+        &manifest.info.version
+    } else {
+        &args.version
+    };
+
+    let package_description = match args.description.as_deref() {
+        Some(explicit_description) => explicit_description,
+        None => parent_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.info.description.as_deref())
+            .unwrap_or(""),
+    };
+
     let mut options = CompilationOptions::new()
         .with_profile(profile)
         .with_link_mode(link_mode)
-        .with_package_metadata(
-            &package_name,
-            &args.version,
-            args.description.as_deref().unwrap_or(""),
-        )
+        .with_package_metadata(&package_name, package_version, package_description)
         .with_builtins(!args.no_builtins)
         .with_solver(solver)
         .with_verify_checksums(!args.no_verify);
 
-    if let Some(entry_sym) = args.entry {
+    let effective_entry = args.entry.or_else(|| {
+        parent_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.entrypoints.main.clone())
+    });
+
+    if let Some(entry_sym) = effective_entry {
         options = options.with_entry_point(Some(entry_sym));
     }
 
@@ -118,7 +171,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         options = options.with_source(source_path.display().to_string(), code);
     }
 
-    // 6. Register explicit dependency specifications (--deps <name>@<version>)
+    // 6. Register explicit dependency specifications (--deps <name>@<version>) or parent manifest dependencies
     for dependency_specification in &args.deps {
         let requirement =
             DependencyRequirement::parse(dependency_specification).map_err(|parse_error| {
@@ -127,6 +180,21 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
                 )
             })?;
         options = options.with_dependency_spec(requirement);
+    }
+
+    if args.deps.is_empty()
+        && let Some(ref manifest) = parent_manifest
+    {
+        for (dep_name, dep_version) in &manifest.dependencies {
+            let spec_string = format!("{dep_name}@{dep_version}");
+            let requirement =
+                DependencyRequirement::parse(&spec_string).map_err(|parse_error| {
+                    anyhow::anyhow!(
+                        "Invalid dependency requirement '{spec_string}' in manifest: {parse_error}"
+                    )
+                })?;
+            options = options.with_dependency_spec(requirement);
+        }
     }
 
     // 7. Mount dependency library binaries or archives passed via `-l, --lib`
