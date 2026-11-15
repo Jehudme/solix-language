@@ -31,7 +31,7 @@ pub fn byte_offset_to_position(source_text: &str, byte_offset: usize) -> Positio
         if character == '\n' {
             line_number += 1;
             character_offset = 0;
-        } else {
+        } else if character != '\r' {
             character_offset += character.len_utf16() as u32;
         }
     }

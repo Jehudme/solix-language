@@ -77,15 +77,15 @@ The Solix Language Server supports 32 language intelligence features:
 2. **Document Overlay**: Live in-memory buffer synchronization (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`).
 3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.toml` discovery and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
 4. **Resilient Compilation**: AST and semantic cache retention during partial typing or syntax errors.
-5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` to prevent multi-file cross-boundary offset panics, linked to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
+5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` with strict compiler import resolution parity (exempting only `std::*` and `blt::*`), linked to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
 6. **Code Navigation**: Go-to Definition (`gd`), Type Definition (`gy`), Implementation (`gi`), and Find All References (`gr`).
 7. **Document Highlights**: Distinction between read usages and write/mutating usages.
 8. **Call & Type Hierarchies**: Incoming/outgoing call trees and subtype/supertype navigation.
-9. **Intelligent Completion**: Receiver-type-aware instance member completion on local variables and parameters, hierarchical solver-backed `import` and `extern import` completion discovering installed packages via `ModuleSolver::list_packages()` alongside subpackage trees and public symbols, strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
+9. **Intelligent Completion**: Receiver-type-aware instance member completion on local variables and parameters, LSP 3.17 `label_details` displaying full parameter signatures and return types on completion items, hierarchical solver-backed `import` and `extern import` completion discovering installed packages via `ModuleSolver::list_packages()` alongside subpackage trees and public symbols, strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
 10. **Rich Hover Cards**: Complete signature, `sizeof: XXB` instance byte size, struct field `+XB` offsets, and doc comments for functions, classes, fields, parameters, and local variables.
-11. **Signature Help**: Active parameter tracking with declared formal parameter names and overload switching.
+11. **Signature Help**: Active parameter tracking with declared formal parameter names, overload switching, and lexical fallback during active typing of unclosed invocations.
 12. **Inlay Hints**: True parameter names (e.g., `brick_rect:`, `active_color:` instead of generic `arg0:`) and RAII scope-exit destructor hints (`~dtor()`).
-13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting with UTF-16 coordinate precision, multi-line span splitting, overlap deduplication, and syntax-error drift resilience.
+13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting with UTF-16 coordinate precision, CRLF column alignment, multi-line span splitting, overlap deduplication, and syntax-error drift resilience with call-site token classification.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
 15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `Debug Main` for application entrypoints configured in `manifest.toml` (or `"main"` fallback) and `▶ Run Test` / `Debug Test` for test suites, plus reference count lenses linked to `solix.showReferences`.
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).

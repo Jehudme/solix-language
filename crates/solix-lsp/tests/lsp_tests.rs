@@ -999,34 +999,133 @@ void main() {
 }
 
 #[test]
-fn test_lsp_unresolved_import_diagnostic_parity() {
-    let (workspace, test_uri) = create_test_workspace();
-    let test_source = r#"
-import solix.collections.List;
-
-public class TestClass {
-    public int32 run() {
-        return 0;
-    }
-}
-"#;
-
-    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
-    assert!(
-        !snapshot.diagnostics.is_empty(),
-        "Expected LSP diagnostics for unimported external package 'solix.collections.List'"
+fn test_breakout_real_inlay_hints() {
+    use solix_common::solver::ClientModuleSolver;
+    use std::path::PathBuf;
+    let workspace = WorkspaceManager::new(
+        Some(PathBuf::from(
+            "/home/jehud/Projects/solix-language/examples/breakout",
+        )),
+        Some(Arc::new(ClientModuleSolver::new())),
     );
+    let uri =
+        Url::from_file_path("/home/jehud/Projects/solix-language/examples/breakout/src/main.slx")
+            .unwrap();
+    let source = std::fs::read_to_string(
+        "/home/jehud/Projects/solix-language/examples/breakout/src/main.slx",
+    )
+    .unwrap();
+    let snapshot = workspace.did_open(uri, 1, source);
+    let hints = inlay_hints(
+        &snapshot,
+        Range {
+            start: Position {
+                line: 55,
+                character: 0,
+            },
+            end: Position {
+                line: 65,
+                character: 0,
+            },
+        },
+    );
+    assert!(
+        !hints.is_empty(),
+        "Expected inlay hints in breakout main.slx"
+    );
+    let has_real_param = hints.iter().any(|hint| match &hint.label {
+        InlayHintLabel::String(label_text) => {
+            label_text.contains("rec: ") || label_text.contains("roundness: ")
+        }
+        _ => false,
+    });
+    assert!(
+        has_real_param,
+        "Inlay hints must show real parameter names, got: {:?}",
+        hints
+    );
+}
 
-    let found_import_error = snapshot.diagnostics.iter().any(|diagnostic| {
+#[test]
+fn test_unclosed_call_lexical_signature_help() {
+    let (workspace, test_uri) = create_test_workspace();
+    let valid_source = "class Calculator {\n    public int32 compute(int32 first_val, int32 second_val) {\n        return first_val + second_val;\n    }\n    public void run() {}\n}\n";
+    let _ = workspace.did_open(test_uri.clone(), 1, valid_source.to_string());
+
+    let unclosed_source = "class Calculator {\n    public int32 compute(int32 first_val, int32 second_val) {\n        return first_val + second_val;\n    }\n    public void run() {\n        this.compute(10, \n";
+    let snapshot = workspace.did_change(&test_uri, 2, unclosed_source.to_string());
+
+    let position = Position {
+        line: 5,
+        character: 25,
+    };
+    let help_result = signature_help(&snapshot, position);
+    assert!(
+        help_result.is_some(),
+        "Expected signature help for unclosed call during active typing"
+    );
+    let signature_help = help_result.unwrap();
+    assert!(!signature_help.signatures.is_empty());
+    let signature_info = &signature_help.signatures[0];
+    assert!(
+        signature_info
+            .label
+            .contains("int32 compute(int32 first_val, int32 second_val)"),
+        "Signature label mismatch: {}",
+        signature_info.label
+    );
+    assert_eq!(signature_help.active_parameter, Some(1));
+}
+
+#[test]
+fn test_import_wildcard_undeclared_package_fails_with_e0232() {
+    let (workspace, test_uri) = create_test_workspace();
+    let test_source = "import solix.collections.*;\n\npublic class Sample {\n    public int32 run() { return 0; }\n}\n";
+    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
+    let has_e0232 = snapshot.diagnostics.iter().any(|diagnostic| {
         diagnostic.code.as_ref().is_some_and(|code| match code {
             NumberOrString::String(code_str) => code_str == "E0232",
             _ => false,
         }) || diagnostic.message.contains("Cannot resolve import")
     });
-
     assert!(
-        found_import_error,
-        "Expected E0232 CannotResolveImport diagnostic in LSP snapshot, got: {:?}",
+        has_e0232,
+        "Wildcard import of unimported package must emit E0232, got: {:?}",
         snapshot.diagnostics
     );
+}
+
+#[test]
+fn test_semantic_tokens_pascal_case_method_call_classification() {
+    let (workspace, test_uri) = create_test_workspace();
+    let test_source =
+        "class Worker {\n    public void work( {\n    Raylib::ClearBackground(bg_slate);\n}\n";
+    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
+    let result = semantic_tokens_full(&snapshot).unwrap();
+    if let SemanticTokensResult::Tokens(tokens) = result {
+        let mut current_line = 0u32;
+        let mut current_char = 0u32;
+        let mut found_clear_bg = false;
+        for token in &tokens.data {
+            if token.delta_line > 0 {
+                current_line += token.delta_line;
+                current_char = token.delta_start;
+            } else {
+                current_char += token.delta_start;
+            }
+            if current_line == 2 && current_char == 12 && token.length == 15 {
+                found_clear_bg = true;
+                assert_eq!(
+                    token.token_type, 7,
+                    "ClearBackground preceded by :: and followed by ( must be classified as METHOD (7)"
+                );
+            }
+        }
+        assert!(
+            found_clear_bg,
+            "Expected to locate ClearBackground semantic token"
+        );
+    } else {
+        panic!("Expected full semantic tokens result");
+    }
 }

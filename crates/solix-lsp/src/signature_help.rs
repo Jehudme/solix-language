@@ -19,57 +19,86 @@ use tower_lsp::lsp_types::{
 pub fn signature_help(snapshot: &AnalysisSnapshot, position: Position) -> Option<SignatureHelp> {
     let offset = position_to_byte_offset(&snapshot.source_text, position);
     let target_offset = offset as u32;
-    let ast = snapshot.ast.as_ref()?;
     let semantic = snapshot.last_good_semantic.as_ref()?;
 
-    // Search for enclosing MethodCall in AST
+    // 1. Search for enclosing MethodCall in AST if AST is present
     let mut best_call: Option<(Span, String, usize)> = None;
-    find_enclosing_call_in_ast(ast, target_offset, &snapshot.source_text, &mut best_call);
+    if let Some(ast) = snapshot.ast.as_ref() {
+        find_enclosing_call_in_ast(ast, target_offset, &snapshot.source_text, &mut best_call);
+    }
 
-    let (_, callee_name, active_parameter_index) = best_call?;
+    // 2. Fall back to resilient lexical scan if AST does not contain an enclosing call (e.g. while actively typing)
+    let (callee_name, qualifier_name, active_parameter_index) = match best_call {
+        Some((_, call_callee, param_index)) => (call_callee, None, param_index),
+        None => find_enclosing_call_lexical(&snapshot.source_text, offset)?,
+    };
 
-    // Find all matching symbols for callee_name (overloads)
+    // Find all matching symbols for callee_name (overloads, methods, and constructors)
     let mut signatures = Vec::new();
-    for symbol in &semantic.symbol_table.symbols {
-        if symbol.name == callee_name
-            && let Type::FunctionPointer {
-                return_type,
-                parameter_types,
-            } = &symbol.symbol_type
-        {
-            let mut param_infos = Vec::new();
-            let mut param_strings = Vec::new();
 
-            for (param_idx, param_type) in parameter_types.iter().enumerate() {
-                let param_name = symbol
-                    .parameter_names
-                    .get(param_idx)
-                    .map(String::as_str)
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or("arg");
-                let label = format!("{param_type} {param_name}");
-                param_strings.push(label.clone());
-                param_infos.push(ParameterInformation {
-                    label: ParameterLabel::Simple(label),
-                    documentation: None,
-                });
+    // Try finding matching symbols under qualified class first if qualifier is present
+    if let Some(ref qualifier) = qualifier_name {
+        for class_symbol in &semantic.symbol_table.symbols {
+            if class_symbol.name == *qualifier
+                && matches!(class_symbol.symbol_type, Type::Class { .. })
+            {
+                for member_id in &class_symbol.members {
+                    if let Some(member) = semantic.symbol_table.get_symbol(*member_id)
+                        && member.name == callee_name
+                        && let Type::FunctionPointer {
+                            return_type,
+                            parameter_types,
+                        } = &member.symbol_type
+                    {
+                        signatures.push(build_signature_info(
+                            member,
+                            &callee_name,
+                            return_type,
+                            parameter_types,
+                            active_parameter_index,
+                            snapshot,
+                        ));
+                    }
+                }
             }
+        }
+    }
 
-            let full_label = format!("{return_type} {callee_name}({})", param_strings.join(", "));
-            let mut doc = None;
-            if let Some(doc_text) = snapshot.extract_doc_comment_for_span(symbol.span) {
-                doc = Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: doc_text,
-                }));
+    // Search general symbol table if no qualified symbols were found
+    if signatures.is_empty() {
+        for symbol in &semantic.symbol_table.symbols {
+            if symbol.name == callee_name
+                && let Type::FunctionPointer {
+                    return_type,
+                    parameter_types,
+                } = &symbol.symbol_type
+            {
+                signatures.push(build_signature_info(
+                    symbol,
+                    &callee_name,
+                    return_type,
+                    parameter_types,
+                    active_parameter_index,
+                    snapshot,
+                ));
+            } else if symbol.name == "constructor"
+                && let Some(parent_id) = symbol.parent_symbol
+                && let Some(parent_class) = semantic.symbol_table.get_symbol(parent_id)
+                && parent_class.name == callee_name
+                && let Type::FunctionPointer {
+                    return_type,
+                    parameter_types,
+                } = &symbol.symbol_type
+            {
+                signatures.push(build_signature_info(
+                    symbol,
+                    &callee_name,
+                    return_type,
+                    parameter_types,
+                    active_parameter_index,
+                    snapshot,
+                ));
             }
-
-            signatures.push(SignatureInformation {
-                label: full_label,
-                documentation: doc,
-                parameters: Some(param_infos),
-                active_parameter: Some(active_parameter_index as u32),
-            });
         }
     }
 
@@ -82,6 +111,123 @@ pub fn signature_help(snapshot: &AnalysisSnapshot, position: Position) -> Option
             active_parameter: Some(active_parameter_index as u32),
         })
     }
+}
+
+fn build_signature_info(
+    symbol: &solix_compilation::phases::binder::symbols::SymbolEntry,
+    display_name: &str,
+    return_type: &Type,
+    parameter_types: &[Type],
+    active_parameter_index: usize,
+    snapshot: &AnalysisSnapshot,
+) -> SignatureInformation {
+    let mut parameter_infos = Vec::new();
+    let mut parameter_strings = Vec::new();
+
+    for (parameter_index, parameter_type) in parameter_types.iter().enumerate() {
+        let parameter_name = symbol
+            .parameter_names
+            .get(parameter_index)
+            .map(String::as_str)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("arg");
+        let label = format!("{parameter_type} {parameter_name}");
+        parameter_strings.push(label.clone());
+        parameter_infos.push(ParameterInformation {
+            label: ParameterLabel::Simple(label),
+            documentation: None,
+        });
+    }
+
+    let full_label = if display_name == "constructor" || symbol.name == "constructor" {
+        format!("{display_name}({})", parameter_strings.join(", "))
+    } else {
+        format!(
+            "{return_type} {display_name}({})",
+            parameter_strings.join(", ")
+        )
+    };
+
+    let mut documentation = None;
+    if let Some(doc_text) = snapshot.extract_doc_comment_for_span(symbol.span) {
+        documentation = Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: doc_text,
+        }));
+    }
+
+    SignatureInformation {
+        label: full_label,
+        documentation,
+        parameters: Some(parameter_infos),
+        active_parameter: Some(active_parameter_index as u32),
+    }
+}
+
+fn find_enclosing_call_lexical(
+    source_text: &str,
+    target_offset: usize,
+) -> Option<(String, Option<String>, usize)> {
+    let clamped_offset = target_offset.min(source_text.len());
+    let prefix_text = &source_text[..clamped_offset];
+
+    let mut paren_depth = 0i32;
+    let mut comma_count = 0usize;
+    let mut open_paren_offset: Option<usize> = None;
+
+    for (byte_index, character) in prefix_text.char_indices().rev() {
+        if character == ')' {
+            paren_depth += 1;
+        } else if character == '(' {
+            if paren_depth > 0 {
+                paren_depth -= 1;
+            } else {
+                open_paren_offset = Some(byte_index);
+                break;
+            }
+        } else if character == ',' && paren_depth == 0 {
+            comma_count += 1;
+        } else if (character == ';' || character == '{' || character == '}') && paren_depth == 0 {
+            break;
+        }
+    }
+
+    let paren_byte_offset = open_paren_offset?;
+    let before_paren = source_text[..paren_byte_offset].trim_end();
+
+    let mut identifier_start = before_paren.len();
+    for (byte_index, character) in before_paren.char_indices().rev() {
+        if character.is_alphanumeric() || character == '_' {
+            identifier_start = byte_index;
+        } else {
+            break;
+        }
+    }
+
+    if identifier_start >= before_paren.len() {
+        return None;
+    }
+
+    let callee_name = before_paren[identifier_start..].to_string();
+    let before_callee = before_paren[..identifier_start].trim_end();
+
+    let qualifier_name = if let Some(stripped) = before_callee.strip_suffix("::") {
+        let trimmed_qualifier = stripped.trim_end();
+        let qualifier_start = trimmed_qualifier
+            .rfind(|character: char| !character.is_alphanumeric() && character != '_')
+            .map_or(0, |index| index + 1);
+        Some(trimmed_qualifier[qualifier_start..].to_string())
+    } else if let Some(stripped) = before_callee.strip_suffix('.') {
+        let trimmed_qualifier = stripped.trim_end();
+        let qualifier_start = trimmed_qualifier
+            .rfind(|character: char| !character.is_alphanumeric() && character != '_')
+            .map_or(0, |index| index + 1);
+        Some(trimmed_qualifier[qualifier_start..].to_string())
+    } else {
+        None
+    };
+
+    Some((callee_name, qualifier_name, comma_count))
 }
 
 fn find_enclosing_call_in_ast(

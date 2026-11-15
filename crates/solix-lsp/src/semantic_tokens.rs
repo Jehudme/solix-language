@@ -143,19 +143,24 @@ fn compute_semantic_tokens(
                 // 2. Lexical fallback for unresolved identifiers or during syntax errors
                 if !resolved && !identifier_text.is_empty() {
                     let first_char = identifier_text.chars().next().unwrap_or('_');
-                    if first_char.is_ascii_uppercase() {
+                    let after_span = (token.span.end as usize).min(snapshot.source_text.len());
+                    let is_call = snapshot.source_text[after_span..]
+                        .trim_start()
+                        .starts_with('(');
+
+                    if is_call {
+                        let before_span =
+                            (token.span.start as usize).min(snapshot.source_text.len());
+                        let prefix_trimmed = snapshot.source_text[..before_span].trim_end();
+                        if prefix_trimmed.ends_with("::") || prefix_trimmed.ends_with('.') {
+                            token_type_index = Some(7); // method
+                        } else {
+                            token_type_index = Some(6); // function
+                        }
+                    } else if first_char.is_ascii_uppercase() {
                         token_type_index = Some(2); // class / type
                     } else {
-                        // Check if followed by open paren '('
-                        let after_span = (token.span.end as usize).min(snapshot.source_text.len());
-                        let is_call = snapshot.source_text[after_span..]
-                            .trim_start()
-                            .starts_with('(');
-                        if is_call {
-                            token_type_index = Some(6); // function / method
-                        } else {
-                            token_type_index = Some(9); // variable
-                        }
+                        token_type_index = Some(9); // variable
                     }
                 }
             }
