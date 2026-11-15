@@ -45,6 +45,62 @@ pub struct ProjectEntryPoints {
     pub test: Option<String>,
 }
 
+fn default_build_profile() -> String {
+    "debug".to_string()
+}
+
+fn default_build_link() -> String {
+    "dynamic".to_string()
+}
+
+const fn default_verify_checksum() -> bool {
+    true
+}
+
+const fn default_inline_threshold() -> usize {
+    8
+}
+
+/// Declarative build settings declared in the `[build]` table of `manifest.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildConfig {
+    /// Target build profile: `"debug"`, `"release"`, or `"test"`.
+    #[serde(default = "default_build_profile")]
+    pub profile: String,
+    /// Linking mode for dependencies and executable emission: `"dynamic"` or `"static"`.
+    #[serde(default = "default_build_link")]
+    pub link: String,
+    /// Optional package store root directory override.
+    #[serde(default)]
+    pub pkg_dir: String,
+    /// Automatically install the built archive container into the local package store.
+    #[serde(default)]
+    pub install: bool,
+    /// Force overwrite if package is already installed.
+    #[serde(default)]
+    pub force_install: bool,
+    /// Verify cryptographic SHA-256 checksums of dependencies.
+    #[serde(default = "default_verify_checksum")]
+    pub verify_checksum: bool,
+    /// Inlining statement threshold limit for AstInlinerPhase.
+    #[serde(default = "default_inline_threshold")]
+    pub inline_threshold: usize,
+}
+
+impl Default for BuildConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_build_profile(),
+            link: default_build_link(),
+            pkg_dir: String::new(),
+            install: false,
+            force_install: false,
+            verify_checksum: true,
+            inline_threshold: 8,
+        }
+    }
+}
+
 /// Minimal, user-editable project manifest contract parsed from `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectManifest {
@@ -53,6 +109,9 @@ pub struct ProjectManifest {
     /// Entry point symbol mappings.
     #[serde(default)]
     pub entrypoints: ProjectEntryPoints,
+    /// Declarative build configuration declared in `[build]`.
+    #[serde(default)]
+    pub build: BuildConfig,
     /// Explicit external dependencies mapped as `name => version` declared in `[dependencies]`.
     #[serde(default)]
     pub dependencies: std::collections::BTreeMap<String, String>,

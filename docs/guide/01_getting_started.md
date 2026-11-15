@@ -326,15 +326,15 @@ solix install build/release/math_utils.slxb
 > [!NOTE]
 > Solix guards against accidental package overwrites. If `<name>@<version>` is already installed, `solix install` refuses to overwrite unless `--force` (`-f`) is explicitly provided.
 
-### 2. Synchronize Packages from Source (`solix sync`)
-When developing libraries locally, `solix sync` eliminates the manual rebuild-and-reinstall loop by rebuilding installed packages directly from their recorded source directories:
+### 2. Reinstall Packages from Source (`solix reinstall`)
+When developing libraries locally, `solix reinstall` (alias `sync`) eliminates the manual rebuild-and-reinstall loop by validating source manifests and rebuilding installed packages directly from their recorded source directories:
 
 ```bash
-# Synchronize a specific package from its recorded source directory
-solix sync solixlib
+# Reinstall a specific package from its recorded source directory
+solix reinstall solixlib
 
-# Synchronize all registered packages that have source project directories
-solix sync --all
+# Reinstall all registered packages that have source project directories
+solix reinstall --all
 ```
 
 ### 3. List Installed Packages (`solix list`)

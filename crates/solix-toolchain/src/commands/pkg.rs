@@ -1,9 +1,9 @@
-//! Package manager command implementations (`install`, `sync`, `uninstall`, `list`).
+//! Package manager command implementations (`install`, `reinstall`, `sync`, `uninstall`, `list`).
 
 #![forbid(unsafe_code)]
 
 use crate::cache::FilesystemPackageCache;
-use crate::cli::{BuildArgs, InstallArgs, ListArgs, SyncArgs, UninstallArgs};
+use crate::cli::{BuildArgs, InstallArgs, ListArgs, ReinstallArgs, SyncArgs, UninstallArgs};
 use crate::commands::execute_build;
 use crate::registry::{PackageRecord, PackageRegistry, format_iso8601_timestamp};
 use crate::solver::{resolve_native_cache_dir, resolve_package_store_dir};
@@ -12,7 +12,8 @@ use solix_common::bytecode::BinaryProgram;
 use solix_common::cache::PackageCache;
 use solix_common::hash::{sha256_file, sha256_hex};
 use solix_common::project::{ProjectManifest, SlxarcArchive};
-use solix_common::solver::{DependencyRequirement, PackageVersion};
+use solix_common::solver::PackageVersion;
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -89,19 +90,19 @@ pub fn install_package_artifact(
             "release"
         });
 
-        let target_dir = store_directory
-            .join(package_name)
-            .join(package_version.to_string());
+        let folder_name = format!("{package_name}-{effective_profile}@{package_version}");
+        let target_dir = store_directory.join(&folder_name);
         let target_file = target_dir.join(format!("{package_name}.slxb"));
 
-        let already_installed = registry
-            .get(package_name, Some(&package_version.to_string()))
-            .is_some()
-            || target_file.exists();
+        let already_installed = registry.packages.iter().any(|existing| {
+            existing.name == package_name
+                && existing.build_profile == effective_profile
+                && existing.version == package_version.to_string()
+        }) || target_file.exists();
 
         if already_installed && !force {
             bail!(
-                "Package '{package_name}@{package_version}' is already installed. Use '--force' ('-f') to overwrite."
+                "Package '{package_name}-{effective_profile}@{package_version}' is already installed. Use '--force' ('-f') to overwrite."
             );
         }
 
@@ -130,7 +131,7 @@ pub fn install_package_artifact(
             size_bytes: file_size,
             installed_at_unix_secs: current_timestamp,
             installed_at_iso8601: iso8601_string,
-            source_project_dir,
+            source: source_project_dir,
             artifact_path: target_file.clone(),
             native_libraries: program.native_library_checksums.clone(),
             description: program.package_description.clone(),
@@ -141,7 +142,7 @@ pub fn install_package_artifact(
         registry.register(record.clone())?;
 
         println!(
-            "Installed '{package_name}@{package_version}' (.slxb) to {}",
+            "Installed '{package_name}-{effective_profile}@{package_version}' (.slxb) to {}",
             target_file.display()
         );
         Ok(record)
@@ -180,19 +181,19 @@ pub fn install_package_artifact(
 
         let effective_profile = profile_override.unwrap_or("release");
 
-        let target_dir = store_directory
-            .join(package_name)
-            .join(package_version.to_string());
+        let folder_name = format!("{package_name}-{effective_profile}@{package_version}");
+        let target_dir = store_directory.join(&folder_name);
         let target_file = target_dir.join(format!("{package_name}.slxarc"));
 
-        let already_installed = registry
-            .get(package_name, Some(&package_version.to_string()))
-            .is_some()
-            || target_file.exists();
+        let already_installed = registry.packages.iter().any(|existing| {
+            existing.name == package_name
+                && existing.build_profile == effective_profile
+                && existing.version == package_version.to_string()
+        }) || target_file.exists();
 
         if already_installed && !force {
             bail!(
-                "Package '{package_name}@{package_version}' is already installed. Use '--force' ('-f') to overwrite."
+                "Package '{package_name}-{effective_profile}@{package_version}' is already installed. Use '--force' ('-f') to overwrite."
             );
         }
 
@@ -239,7 +240,7 @@ pub fn install_package_artifact(
             size_bytes: file_size,
             installed_at_unix_secs: current_timestamp,
             installed_at_iso8601: iso8601_string,
-            source_project_dir,
+            source: source_project_dir,
             artifact_path: target_file.clone(),
             native_libraries: manifest.native_library_checksums.clone(),
             description: manifest.info.description.unwrap_or_default(),
@@ -250,7 +251,7 @@ pub fn install_package_artifact(
         registry.register(record.clone())?;
 
         println!(
-            "Installed '{package_name}@{package_version}' (.slxarc) to {}",
+            "Installed '{package_name}-{effective_profile}@{package_version}' (.slxarc) to {}",
             target_file.display()
         );
         Ok(record)
@@ -294,16 +295,13 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
 
         execute_build(BuildArgs {
             path: resolved_path.clone(),
-            profile: profile.to_string(),
-            debug: args.debug,
-            release: args.release,
-            test: args.test,
-            link: "dynamic".to_string(),
-            r#static: false,
+            profile: Some(profile.to_string()),
+            debug: false,
+            release: false,
+            test: false,
             pkg_dir: args.pkg_dir.clone(),
             install: false,
             force: args.force,
-            yolo: false,
         })?;
 
         let candidate_archive = resolved_path
@@ -346,80 +344,139 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
     }
 }
 
-/// Synchronizes and rebuilds installed packages from their recorded source directories.
+/// Reinstalls and rebuilds installed packages from their recorded source directories.
 ///
 /// # Errors
 /// Returns an error if rebuilding, packaging, or registry persistence fails.
-pub fn execute_sync(args: SyncArgs) -> Result<()> {
+pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let registry = PackageRegistry::load_or_sync(&store_directory)?;
 
-    let mut targets_to_sync: Vec<PackageRecord> = Vec::new();
+    let mut targets_to_reinstall: Vec<PackageRecord> = Vec::new();
 
     if args.all {
         for record in &registry.packages {
-            if record.source_project_dir.is_some() {
-                targets_to_sync.push(record.clone());
+            if record.source.is_some() {
+                targets_to_reinstall.push(record.clone());
             }
         }
-        if targets_to_sync.is_empty() {
-            println!(
-                "No registered packages with source project directories found to synchronize."
-            );
+        if targets_to_reinstall.is_empty() {
+            println!("No registered packages with source project directories found to reinstall.");
             return Ok(());
         }
-    } else if let Some(ref target_name) = args.package {
-        let matching_records = registry.find_all(target_name);
-        if matching_records.is_empty() {
-            bail!("Package '{target_name}' is not registered in the package store.");
+    } else if let Some(ref spec) = args.spec {
+        let target_spec = spec.trim();
+        let (spec_name_part, spec_version_part) =
+            if let Some((left, right)) = target_spec.split_once('@') {
+                (left, Some(right))
+            } else {
+                (target_spec, None)
+            };
+
+        let (package_name, profile_filter) =
+            if let Some(base) = spec_name_part.strip_suffix("-debug") {
+                (base, Some("debug"))
+            } else if let Some(base) = spec_name_part.strip_suffix("-release") {
+                (base, Some("release"))
+            } else if let Some(base) = spec_name_part.strip_suffix("-test") {
+                (base, Some("test"))
+            } else {
+                (spec_name_part, None)
+            };
+
+        let mut matching_records: Vec<&PackageRecord> = registry
+            .packages
+            .iter()
+            .filter(|record| record.name == package_name)
+            .collect();
+
+        if let Some(prof) = profile_filter {
+            matching_records.retain(|record| record.build_profile == prof);
         }
+        if let Some(version_str) = spec_version_part {
+            matching_records.retain(|record| record.version == version_str);
+        }
+
+        if matching_records.is_empty() {
+            bail!("Package '{spec}' is not registered in the package store.");
+        }
+
         for record in matching_records {
-            if record.source_project_dir.is_some() {
-                targets_to_sync.push(record.clone());
+            if record.source.is_some() {
+                targets_to_reinstall.push(record.clone());
             } else {
                 bail!(
-                    "Package '{target_name}@{}' does not have a recorded source project directory to synchronize from.",
+                    "Package '{}-{}@{}' does not have a recorded source project directory to reinstall from.",
+                    record.name,
+                    record.build_profile,
                     record.version
                 );
             }
         }
     } else {
-        let current_dir = std::env::current_dir()?;
-        let manifest_path = current_dir.join("manifest.toml");
+        let current_directory = std::env::current_dir()?;
+        let manifest_path = current_directory.join("manifest.toml");
         if manifest_path.exists() {
             let manifest = ProjectManifest::from_file(&manifest_path)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
             let matching_records = registry.find_all(&manifest.info.name);
             for record in matching_records {
-                targets_to_sync.push(record.clone());
+                targets_to_reinstall.push(record.clone());
             }
-            if targets_to_sync.is_empty() {
+            if targets_to_reinstall.is_empty() {
                 execute_install(InstallArgs {
-                    path: current_dir,
+                    path: current_directory,
                     force: args.force,
                     profile: args.profile,
-                    debug: false,
-                    release: false,
-                    test: false,
                     pkg_dir: args.pkg_dir,
                 })?;
                 return Ok(());
             }
         } else {
-            bail!("Must specify a package name or '--all' to synchronize packages.");
+            bail!("Must specify a package name or '--all' to reinstall packages.");
         }
     }
 
-    for record in targets_to_sync {
-        let project_dir = record.source_project_dir.as_ref().unwrap();
-        if !project_dir.exists() {
+    for record in targets_to_reinstall {
+        let project_directory = record.source.as_ref().unwrap();
+        if !project_directory.exists() {
             eprintln!(
-                "warning: Source directory for '{}@{}' at '{}' no longer exists; skipping.",
+                "warning: Source directory for '{}-{}@{}' at '{}' no longer exists; skipping.",
                 record.name,
+                record.build_profile,
                 record.version,
-                project_dir.display()
+                project_directory.display()
             );
             continue;
+        }
+
+        let manifest_path = project_directory.join("manifest.toml");
+        if !manifest_path.exists() {
+            eprintln!(
+                "warning: Source manifest for '{}-{}@{}' at '{}' no longer exists; skipping.",
+                record.name,
+                record.build_profile,
+                record.version,
+                manifest_path.display()
+            );
+            continue;
+        }
+
+        let source_manifest = ProjectManifest::from_file(&manifest_path)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        if source_manifest.info.name != record.name {
+            bail!(
+                "Source directory manifest name '{}' does not match package name '{}'",
+                source_manifest.info.name,
+                record.name
+            );
+        }
+        if source_manifest.info.version != record.version {
+            bail!(
+                "Source directory manifest version '{}' does not match package version '{}'",
+                source_manifest.info.version,
+                record.version
+            );
         }
 
         let effective_profile =
@@ -432,24 +489,30 @@ pub fn execute_sync(args: SyncArgs) -> Result<()> {
                 });
 
         println!(
-            "Synchronizing '{}@{}' from '{}' (profile: {effective_profile})...",
+            "Reinstalling '{}-{}@{}' from '{}' (profile: {effective_profile})...",
             record.name,
+            record.build_profile,
             record.version,
-            project_dir.display()
+            project_directory.display()
         );
 
         execute_install(InstallArgs {
-            path: project_dir.clone(),
+            path: project_directory.clone(),
             force: true,
             profile: Some(effective_profile.to_string()),
-            debug: false,
-            release: false,
-            test: false,
             pkg_dir: args.pkg_dir.clone(),
         })?;
     }
 
     Ok(())
+}
+
+/// Backward compatibility alias for `execute_reinstall`.
+///
+/// # Errors
+/// Returns an error if rebuilding, packaging, or registry persistence fails.
+pub fn execute_sync(args: SyncArgs) -> Result<()> {
+    execute_reinstall(args)
 }
 
 /// Uninstalls a package version or an entire package from the local package store.
@@ -462,75 +525,106 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
     let native_cache_directory = resolve_native_cache_dir(&store_directory);
     let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
 
-    if specification.contains('@') {
-        let requirement = DependencyRequirement::parse(specification)?;
-        let version_folder = store_directory
-            .join(&requirement.name)
-            .join(requirement.version.to_string());
+    let (spec_name_part, spec_version_part) =
+        if let Some((left, right)) = specification.split_once('@') {
+            (left, Some(right))
+        } else {
+            (specification, None)
+        };
 
-        if !version_folder.exists() {
-            bail!(
-                "Package version '{}@{}' is not installed",
-                requirement.name,
-                requirement.version
-            );
-        }
-
-        fs::remove_dir_all(&version_folder).with_context(|| {
-            format!(
-                "Failed to remove package directory '{}'",
-                version_folder.display()
-            )
-        })?;
-
-        let cached_natives_folder =
-            native_cache_directory.join(format!("{}-{}", requirement.name, requirement.version));
-        if cached_natives_folder.exists() {
-            let _ = fs::remove_dir_all(&cached_natives_folder);
-        }
-
-        let _ = registry.unregister(&requirement.name, &requirement.version.to_string());
-
-        println!("Uninstalled '{}@{}'", requirement.name, requirement.version);
-
-        let package_folder = store_directory.join(&requirement.name);
-        if let Ok(mut entries) = fs::read_dir(&package_folder)
-            && entries.next().is_none()
-        {
-            let _ = fs::remove_dir(&package_folder);
-        }
-        Ok(())
+    let (package_name, profile_filter) = if let Some(base) = spec_name_part.strip_suffix("-debug") {
+        (base, Some("debug"))
+    } else if let Some(base) = spec_name_part.strip_suffix("-release") {
+        (base, Some("release"))
+    } else if let Some(base) = spec_name_part.strip_suffix("-test") {
+        (base, Some("test"))
     } else {
-        let package_folder = store_directory.join(specification);
-        if !package_folder.exists() {
-            bail!("Package '{specification}' is not installed");
-        }
+        (spec_name_part, None)
+    };
 
-        fs::remove_dir_all(&package_folder).with_context(|| {
-            format!(
-                "Failed to remove package directory '{}'",
-                package_folder.display()
-            )
-        })?;
+    let removed_records = registry.unregister(package_name, spec_version_part, profile_filter)?;
 
-        if let Ok(entries) = fs::read_dir(&native_cache_directory) {
-            for entry_result in entries.flatten() {
-                let folder_name = entry_result.file_name();
-                let name_str = folder_name.to_string_lossy();
-                if name_str.starts_with(&format!("{specification}-")) {
-                    let _ = fs::remove_dir_all(entry_result.path());
+    let mut any_folder_removed = false;
+    if store_directory.exists()
+        && let Ok(store_entries) = fs::read_dir(&store_directory)
+    {
+        for entry_result in store_entries.flatten() {
+            let entry_path = entry_result.path();
+            let entry_name = entry_result.file_name().to_string_lossy().to_string();
+
+            let should_remove = if let Some(version_target) = spec_version_part {
+                if let Some(prof_target) = profile_filter {
+                    entry_name == format!("{package_name}-{prof_target}@{version_target}")
+                } else {
+                    entry_name == format!("{package_name}@{version_target}")
+                        || (entry_name.starts_with(&format!("{package_name}-"))
+                            && entry_name.ends_with(&format!("@{version_target}")))
                 }
+            } else if let Some(prof_target) = profile_filter {
+                entry_name.starts_with(&format!("{package_name}-{prof_target}@"))
+            } else {
+                entry_name == package_name
+                    || entry_name.starts_with(&format!("{package_name}-"))
+                    || entry_name.starts_with(&format!("{package_name}@"))
+            };
+
+            if should_remove && entry_path.exists() {
+                let _ = fs::remove_dir_all(&entry_path);
+                any_folder_removed = true;
             }
         }
-
-        registry
-            .packages
-            .retain(|record| record.name != specification);
-        let _ = registry.save();
-
-        println!("Uninstalled all versions of package '{specification}'");
-        Ok(())
     }
+
+    // Also check legacy nested structure: store_directory/<name>/<version>
+    let legacy_package_folder = store_directory.join(package_name);
+    if legacy_package_folder.exists() {
+        if let Some(version_target) = spec_version_part {
+            let legacy_version_folder = legacy_package_folder.join(version_target);
+            if legacy_version_folder.exists() {
+                let _ = fs::remove_dir_all(&legacy_version_folder);
+                any_folder_removed = true;
+            }
+        } else {
+            let _ = fs::remove_dir_all(&legacy_package_folder);
+            any_folder_removed = true;
+        }
+        if let Ok(mut remaining) = fs::read_dir(&legacy_package_folder)
+            && remaining.next().is_none()
+        {
+            let _ = fs::remove_dir(&legacy_package_folder);
+        }
+    }
+
+    // Clean up native cache
+    if native_cache_directory.exists()
+        && let Ok(entries) = fs::read_dir(&native_cache_directory)
+    {
+        for entry_result in entries.flatten() {
+            let folder_name = entry_result.file_name().to_string_lossy().to_string();
+            let should_remove = if let Some(version_target) = spec_version_part {
+                if let Some(prof_target) = profile_filter {
+                    folder_name == format!("{package_name}-{prof_target}@{version_target}")
+                        || folder_name == format!("{package_name}-{version_target}")
+                } else {
+                    folder_name.starts_with(&format!("{package_name}-"))
+                        && (folder_name.ends_with(&format!("@{version_target}"))
+                            || folder_name.ends_with(&format!("-{version_target}")))
+                }
+            } else {
+                folder_name.starts_with(&format!("{package_name}-"))
+            };
+            if should_remove {
+                let _ = fs::remove_dir_all(entry_result.path());
+            }
+        }
+    }
+
+    if removed_records.is_empty() && !any_folder_removed {
+        bail!("Package '{specification}' is not installed");
+    }
+
+    println!("Uninstalled '{specification}'");
+    Ok(())
 }
 
 /// Formats a byte size into a human-readable string (B, KB, MB).
@@ -614,48 +708,68 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
         filtered_packages.reverse();
     }
 
+    let mut output_content = String::new();
     if args.json {
-        let json_output = serde_json::to_string_pretty(&filtered_packages)?;
-        println!("{json_output}");
+        output_content = serde_json::to_string_pretty(&filtered_packages)?;
     } else {
-        println!("Installed Solix Packages ({}):", store_directory.display());
+        let _ = writeln!(
+            output_content,
+            "Installed Solix Packages ({}):",
+            store_directory.display()
+        );
         if filtered_packages.is_empty() {
-            println!("  (no packages found)");
-            return Ok(());
-        }
-
-        println!(
-            "{:<16} {:<10} {:<7} {:<8} {:<10} {:<20} {:<15} SOURCE DIR",
-            "NAME", "VERSION", "KIND", "PROFILE", "SIZE", "INSTALLED AT", "SHA256"
-        );
-        println!(
-            "{:-<16} {:-<10} {:-<7} {:-<8} {:-<10} {:-<20} {:-<15} {:-<20}",
-            "", "", "", "", "", "", "", ""
-        );
-        for package in &filtered_packages {
-            let short_sha256 = if package.sha256.len() >= 12 {
-                format!("{}...", &package.sha256[..12])
-            } else {
-                package.sha256.clone()
-            };
-            let size_display = format_human_size(package.size_bytes);
-            let source_display = package
-                .source_project_dir
-                .as_ref()
-                .map_or("-", |dir_path| dir_path.to_str().unwrap_or("-"));
-
-            println!(
-                "{:<16} {:<10} {:<7} {:<8} {:<10} {:<20} {:<15} {}",
-                package.name,
-                package.version,
-                package.kind,
-                package.build_profile,
-                size_display,
-                package.installed_at_iso8601,
-                short_sha256,
-                source_display
+            let _ = writeln!(output_content, "  (no packages found)");
+        } else {
+            let _ = writeln!(
+                output_content,
+                "{:<16} {:<10} {:<7} {:<8} {:<10} {:<20} {:<15} SOURCE",
+                "NAME", "VERSION", "KIND", "PROFILE", "SIZE", "INSTALLED AT", "SHA256"
             );
+            let _ = writeln!(
+                output_content,
+                "{:-<16} {:-<10} {:-<7} {:-<8} {:-<10} {:-<20} {:-<15} {:-<20}",
+                "", "", "", "", "", "", "", ""
+            );
+            for package in &filtered_packages {
+                let short_sha256 = if package.sha256.len() >= 12 {
+                    format!("{}...", &package.sha256[..12])
+                } else {
+                    package.sha256.clone()
+                };
+                let size_display = format_human_size(package.size_bytes);
+                let source_display = package
+                    .source
+                    .as_ref()
+                    .map_or("-", |dir_path| dir_path.to_str().unwrap_or("-"));
+
+                let _ = writeln!(
+                    output_content,
+                    "{:<16} {:<10} {:<7} {:<8} {:<10} {:<20} {:<15} {}",
+                    package.name,
+                    package.version,
+                    package.kind,
+                    package.build_profile,
+                    size_display,
+                    package.installed_at_iso8601,
+                    short_sha256,
+                    source_display
+                );
+            }
         }
+    }
+
+    if let Some(ref output_path) = args.output {
+        if let Some(parent) = output_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(output_path, &output_content).with_context(|| {
+            format!("Failed to write list output to '{}'", output_path.display())
+        })?;
+        println!("Wrote package list to '{}'", output_path.display());
+    } else {
+        print!("{output_content}");
     }
 
     Ok(())

@@ -466,8 +466,7 @@ public class Main {
 
     // 4. Tamper the installed math_service binary in the package store
     let installed_math_path = package_store_directory
-        .join("math_service")
-        .join("1.0.0")
+        .join("math_service-release@1.0.0")
         .join("math_service.slxb");
     assert!(installed_math_path.exists());
 

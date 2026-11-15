@@ -64,8 +64,7 @@ public class MathUtils {
     assert_eq!(run(install_math_cli).expect("Install must succeed"), 0);
 
     let installed_math_file = package_store_directory
-        .join("math_utils")
-        .join("1.0.0")
+        .join("math_utils-release@1.0.0")
         .join("math_utils.slxb");
     assert!(
         installed_math_file.exists(),
@@ -215,10 +214,10 @@ description = "Raylib graphics updated"
         0
     );
 
-    let raylib_v100_path = package_store_directory.join("raylib").join("1.0.0");
+    let raylib_v100_path = package_store_directory.join("raylib-release@1.0.0");
     assert!(!raylib_v100_path.exists(), "raylib 1.0.0 must be deleted");
 
-    let raylib_v120_path = package_store_directory.join("raylib").join("1.2.0");
+    let raylib_v120_path = package_store_directory.join("raylib-release@1.2.0");
     assert!(
         raylib_v120_path.exists(),
         "raylib 1.2.0 must still remain installed"
@@ -233,9 +232,8 @@ description = "Raylib graphics updated"
         0
     );
 
-    let raylib_package_folder = package_store_directory.join("raylib");
     assert!(
-        !raylib_package_folder.exists(),
+        !raylib_v120_path.exists(),
         "Entire raylib package folder must be deleted"
     );
 
@@ -269,5 +267,252 @@ fn test_install_invalid_file_format_fails() {
     assert!(
         install_result.is_err(),
         "Installing text file must fail with unsupported format error"
+    );
+}
+
+#[test]
+fn test_side_by_side_profiles_installation_and_resolution() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("solix_packages");
+    fs::create_dir_all(&package_store_directory).expect("Failed to create package store dir");
+    let store_string = package_store_directory.to_str().expect("valid path");
+
+    let source_path = workspace
+        .write_file(
+            "physics.slx",
+            r#"
+public class Physics {
+    public static int32 gravity() {
+        return 98;
+    }
+}
+"#,
+        )
+        .expect("write physics source");
+
+    let debug_binary = workspace.file_path("physics_debug.slxb");
+    let compile_debug = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().expect("valid path"),
+        "--name",
+        "physics",
+        "--version",
+        "1.0.0",
+        "--profile",
+        "debug",
+        "-o",
+        debug_binary.to_str().expect("valid path"),
+    ])
+    .expect("compile debug cli");
+    assert_eq!(run(compile_debug).expect("compile debug"), 0);
+
+    let release_binary = workspace.file_path("physics_release.slxb");
+    let compile_release = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().expect("valid path"),
+        "--name",
+        "physics",
+        "--version",
+        "1.0.0",
+        "--profile",
+        "release",
+        "-o",
+        release_binary.to_str().expect("valid path"),
+    ])
+    .expect("compile release cli");
+    assert_eq!(run(compile_release).expect("compile release"), 0);
+
+    // Install debug build
+    let install_debug = Cli::try_parse_from([
+        "solix",
+        "install",
+        debug_binary.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+        "--profile",
+        "debug",
+    ])
+    .expect("install debug cli");
+    assert_eq!(run(install_debug).expect("install debug"), 0);
+
+    // Install release build side-by-side
+    let install_release = Cli::try_parse_from([
+        "solix",
+        "install",
+        release_binary.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+        "--profile",
+        "release",
+    ])
+    .expect("install release cli");
+    assert_eq!(run(install_release).expect("install release"), 0);
+
+    let debug_folder = package_store_directory.join("physics-debug@1.0.0");
+    let release_folder = package_store_directory.join("physics-release@1.0.0");
+    assert!(debug_folder.exists(), "Debug folder must exist");
+    assert!(release_folder.exists(), "Release folder must exist");
+
+    // ClientModuleSolver without profile preference picks release
+    let solver = ClientModuleSolver::with_store_dir(package_store_directory.clone());
+    let default_resolved = solver
+        .resolve_latest("physics")
+        .expect("resolve latest physics");
+    assert_eq!(default_resolved.program.build_profile, "release");
+
+    // ClientModuleSolver with explicit debug requirement picks debug
+    let debug_resolved = solver
+        .resolve_latest("physics-debug")
+        .expect("resolve debug requirement");
+    assert_eq!(debug_resolved.program.build_profile, "debug");
+
+    // Uninstall debug profile only
+    let uninstall_debug = Cli::try_parse_from([
+        "solix",
+        "uninstall",
+        "physics-debug@1.0.0",
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("uninstall debug cli");
+    assert_eq!(run(uninstall_debug).expect("uninstall debug"), 0);
+
+    assert!(!debug_folder.exists(), "Debug folder must be deleted");
+    assert!(release_folder.exists(), "Release folder must still exist");
+
+    // After debug is uninstalled, solver fallback still finds release
+    let fallback_resolved = solver
+        .resolve_latest("physics")
+        .expect("resolve latest physics");
+    assert_eq!(fallback_resolved.program.build_profile, "release");
+}
+
+#[test]
+fn test_list_output_file_redirection() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("solix_packages");
+    fs::create_dir_all(&package_store_directory).expect("Failed to create package store dir");
+    let store_string = package_store_directory.to_str().expect("valid path");
+
+    let source_path = workspace
+        .write_file("util.slx", "public class Util {}")
+        .expect("write util");
+    let util_binary = workspace.file_path("util.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().expect("valid path"),
+        "--name",
+        "util",
+        "--version",
+        "1.0.0",
+        "-o",
+        util_binary.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+        "--install",
+    ])
+    .expect("compile cli");
+    assert_eq!(run(compile_cli).expect("compile"), 0);
+
+    let output_text_path = workspace.file_path("package_list.txt");
+    let list_text_cli = Cli::try_parse_from([
+        "solix",
+        "list",
+        "--pkg-dir",
+        store_string,
+        "-o",
+        output_text_path.to_str().expect("valid path"),
+    ])
+    .expect("list text cli");
+    assert_eq!(run(list_text_cli).expect("list text"), 0);
+
+    assert!(output_text_path.exists(), "List text file must exist");
+    let text_content = fs::read_to_string(&output_text_path).expect("read text");
+    assert!(text_content.contains("util"));
+    assert!(text_content.contains("SOURCE"));
+
+    let output_json_path = workspace.file_path("package_list.json");
+    let list_json_cli = Cli::try_parse_from([
+        "solix",
+        "list",
+        "--json",
+        "--pkg-dir",
+        store_string,
+        "-o",
+        output_json_path.to_str().expect("valid path"),
+    ])
+    .expect("list json cli");
+    assert_eq!(run(list_json_cli).expect("list json"), 0);
+
+    assert!(output_json_path.exists(), "List json file must exist");
+    let json_content = fs::read_to_string(&output_json_path).expect("read json");
+    let parsed_json: serde_json::Value = serde_json::from_str(&json_content).expect("parse json");
+    assert!(parsed_json.is_array());
+    assert_eq!(parsed_json.as_array().unwrap().len(), 1);
+    assert_eq!(parsed_json[0]["name"], "util");
+}
+
+#[test]
+fn test_reinstall_command_with_source_validation() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("solix_packages");
+    fs::create_dir_all(&package_store_directory).expect("Failed to create package store dir");
+    let store_string = package_store_directory.to_str().expect("valid path");
+
+    let project_dir = workspace.root_path().join("my_lib");
+    let new_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        project_dir.to_str().expect("valid path"),
+        "--name",
+        "my_lib",
+        "--version",
+        "1.0.0",
+        "--no-native",
+    ])
+    .expect("new cli");
+    assert_eq!(run(new_cli).expect("new project"), 0);
+
+    // Install from project directory
+    let install_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        project_dir.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("install cli");
+    assert_eq!(run(install_cli).expect("install project"), 0);
+
+    let installed_archive = package_store_directory
+        .join("my_lib-release@1.0.0")
+        .join("my_lib.slxarc");
+    assert!(installed_archive.exists(), "Installed archive must exist");
+
+    // Reinstall by package name
+    let reinstall_cli =
+        Cli::try_parse_from(["solix", "reinstall", "my_lib", "--pkg-dir", store_string])
+            .expect("reinstall cli");
+    assert_eq!(run(reinstall_cli).expect("reinstall project"), 0);
+
+    // Tamper the manifest name: reinstall must fail due to source mismatch
+    let manifest_path = project_dir.join("manifest.toml");
+    let tampered_manifest = r#"
+[info]
+name = "tampered_name"
+version = "1.0.0"
+"#;
+    fs::write(&manifest_path, tampered_manifest).expect("write tampered manifest");
+
+    let reinstall_mismatch =
+        Cli::try_parse_from(["solix", "reinstall", "my_lib", "--pkg-dir", store_string])
+            .expect("reinstall cli");
+    let mismatch_result = run(reinstall_mismatch);
+    assert!(
+        mismatch_result.is_err(),
+        "Reinstall with mismatched manifest name must fail"
     );
 }

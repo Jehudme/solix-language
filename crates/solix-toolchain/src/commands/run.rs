@@ -93,11 +93,11 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_native_function("blt::io::print", builtin_print)
         .with_native_function("Console::println", builtin_println)
         .with_native_function("Console::print", builtin_print)
-        .with_verify_checksums(!args.yolo);
+        .with_verify_checksums(!args.no_verify);
 
-    if args.yolo {
+    if args.no_verify {
         eprintln!(
-            "warning: checksum verification bypassed (--yolo); running without cryptographic validation"
+            "warning: checksum verification bypassed (--no-verify); running without cryptographic validation"
         );
     }
 
@@ -330,7 +330,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         "error"
     };
 
-    if args.metrics_json {
+    let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
+    let is_text_metrics = args.metrics.as_deref() == Some("text");
+
+    if is_json_metrics {
         let report = RunMetricsReport {
             workload: workload_name,
             status: status_str.to_string(),
@@ -358,7 +361,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         let json_output = serde_json::to_string_pretty(&report)
             .context("Failed to serialize run metrics to JSON")?;
         println!("{json_output}");
-    } else if args.metrics {
+    } else if is_text_metrics {
         println!("=== Solix VM Telemetry ===");
         println!("Workload:       {workload_name}");
         println!("Status:         {status_str} (exit code: {exit_code})");

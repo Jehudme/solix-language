@@ -37,9 +37,9 @@ pub struct PackageRecord {
     pub installed_at_unix_secs: u64,
     /// Human-readable ISO 8601 UTC timestamp string.
     pub installed_at_iso8601: String,
-    /// Optional filesystem path to the original source project directory for rebuilding via `solix sync`.
-    #[serde(default)]
-    pub source_project_dir: Option<PathBuf>,
+    /// Optional filesystem path to the original source project directory for rebuilding via `solix reinstall`.
+    #[serde(default, alias = "source_project_dir")]
+    pub source: Option<PathBuf>,
     /// Filesystem path to the installed package artifact in the store.
     pub artifact_path: PathBuf,
     /// Cryptographic SHA-256 digests of bundled native shared libraries.
@@ -113,22 +113,58 @@ impl PackageRegistry {
         let mut modified = false;
         if store_directory.exists()
             && store_directory.is_dir()
-            && let Ok(package_dir_entries) = fs::read_dir(store_directory)
+            && let Ok(store_entries) = fs::read_dir(store_directory)
         {
-            for package_entry_result in package_dir_entries.flatten() {
-                let package_dir = package_entry_result.path();
-                if !package_dir.is_dir() {
+            for entry_result in store_entries.flatten() {
+                let entry_path = entry_result.path();
+                if !entry_path.is_dir() {
                     continue;
                 }
-                let package_name = package_entry_result
-                    .file_name()
-                    .to_string_lossy()
-                    .to_string();
-                if package_name.starts_with('.') || package_name == "registry.json" {
+                let entry_name = entry_result.file_name().to_string_lossy().to_string();
+                if entry_name.starts_with('.')
+                    || entry_name == "registry.json"
+                    || entry_name == "cache"
+                {
                     continue;
                 }
 
-                if let Ok(version_dir_entries) = fs::read_dir(&package_dir) {
+                // Case 1: Folder name `<name>-<profile>@<version>` or `<name>@<version>`
+                if let Some((name_part, version_string)) = entry_name.split_once('@')
+                    && PackageVersion::parse(version_string).is_ok()
+                {
+                    let (package_name, profile_string) =
+                        if let Some(base) = name_part.strip_suffix("-debug") {
+                            (base.to_string(), "debug".to_string())
+                        } else if let Some(base) = name_part.strip_suffix("-release") {
+                            (base.to_string(), "release".to_string())
+                        } else if let Some(base) = name_part.strip_suffix("-test") {
+                            (base.to_string(), "test".to_string())
+                        } else {
+                            (name_part.to_string(), "release".to_string())
+                        };
+
+                    let already_registered = registry.packages.iter().any(|existing| {
+                        existing.name == package_name
+                            && existing.build_profile == profile_string
+                            && existing.version == version_string
+                    });
+
+                    if !already_registered
+                        && let Some(backfilled_record) = backfill_package_from_dir(
+                            &package_name,
+                            &profile_string,
+                            version_string,
+                            &entry_path,
+                        )
+                    {
+                        registry.packages.push(backfilled_record);
+                        modified = true;
+                    }
+                    continue;
+                }
+
+                // Case 2: Legacy layout `<name>/<version>/`
+                if let Ok(version_dir_entries) = fs::read_dir(&entry_path) {
                     for version_entry_result in version_dir_entries.flatten() {
                         let version_dir = version_entry_result.path();
                         if !version_dir.is_dir() {
@@ -143,12 +179,13 @@ impl PackageRegistry {
                         }
 
                         let already_registered = registry.packages.iter().any(|existing| {
-                            existing.name == package_name && existing.version == version_string
+                            existing.name == entry_name && existing.version == version_string
                         });
 
                         if !already_registered
                             && let Some(backfilled_record) = backfill_package_from_dir(
-                                &package_name,
+                                &entry_name,
+                                "release",
                                 &version_string,
                                 &version_dir,
                             )
@@ -215,31 +252,59 @@ impl PackageRegistry {
         Ok(())
     }
 
-    /// Finds a registered package record by exact name and optional version (or highest SemVer version if omitted).
+    /// Finds a registered package record by exact name, optional profile, and optional version.
+    /// When profile is omitted, prefers "release", falling back to "debug", then "test".
+    /// When version is omitted, finds the highest SemVer version.
     #[must_use]
     pub fn get(
         &self,
-        package_name: &str,
+        package_spec: &str,
         requested_version: Option<&str>,
     ) -> Option<&PackageRecord> {
-        if let Some(target_version) = requested_version {
-            self.packages
-                .iter()
-                .find(|record| record.name == package_name && record.version == target_version)
-        } else {
-            // Find highest SemVer version
-            let mut matching_records: Vec<&PackageRecord> = self
-                .packages
-                .iter()
-                .filter(|record| record.name == package_name)
-                .collect();
+        let (package_name, requested_profile) =
+            if let Some(stripped) = package_spec.strip_suffix("-debug") {
+                (stripped, Some("debug"))
+            } else if let Some(stripped) = package_spec.strip_suffix("-release") {
+                (stripped, Some("release"))
+            } else if let Some(stripped) = package_spec.strip_suffix("-test") {
+                (stripped, Some("test"))
+            } else {
+                (package_spec, None)
+            };
 
+        let mut matching_records: Vec<&PackageRecord> = self
+            .packages
+            .iter()
+            .filter(|record| record.name == package_name)
+            .collect();
+
+        if let Some(profile) = requested_profile {
+            matching_records.retain(|record| record.build_profile == profile);
+        } else {
+            // Apply profile fallback: release -> debug -> test
+            let has_release = matching_records
+                .iter()
+                .any(|record| record.build_profile == "release");
+            let has_debug = matching_records
+                .iter()
+                .any(|record| record.build_profile == "debug");
+            if has_release {
+                matching_records.retain(|record| record.build_profile == "release");
+            } else if has_debug {
+                matching_records.retain(|record| record.build_profile == "debug");
+            }
+        }
+
+        if let Some(target_version) = requested_version {
+            matching_records
+                .into_iter()
+                .find(|record| record.version == target_version)
+        } else {
             matching_records.sort_by(|record_alpha, record_beta| {
                 let parsed_alpha = PackageVersion::parse(&record_alpha.version).ok();
                 let parsed_beta = PackageVersion::parse(&record_beta.version).ok();
                 parsed_alpha.cmp(&parsed_beta)
             });
-
             matching_records.last().copied()
         }
     }
@@ -255,11 +320,11 @@ impl PackageRegistry {
 
     /// Registers or updates a package record and persists changes to disk.
     pub fn register(&mut self, record: PackageRecord) -> Result<()> {
-        if let Some(existing_index) = self
-            .packages
-            .iter()
-            .position(|existing| existing.name == record.name && existing.version == record.version)
-        {
+        if let Some(existing_index) = self.packages.iter().position(|existing| {
+            existing.name == record.name
+                && existing.build_profile == record.build_profile
+                && existing.version == record.version
+        }) {
             self.packages[existing_index] = record;
         } else {
             self.packages.push(record);
@@ -267,32 +332,62 @@ impl PackageRegistry {
         self.save()
     }
 
-    /// Removes a package record from the registry and persists changes to disk.
+    /// Removes matching package records from the registry and persists changes to disk.
     pub fn unregister(
         &mut self,
         package_name: &str,
-        package_version: &str,
-    ) -> Result<Option<PackageRecord>> {
-        if let Some(existing_index) = self.packages.iter().position(|existing| {
-            existing.name == package_name && existing.version == package_version
-        }) {
-            let removed = self.packages.remove(existing_index);
+        package_version: Option<&str>,
+        profile: Option<&str>,
+    ) -> Result<Vec<PackageRecord>> {
+        let mut removed_records = Vec::new();
+        self.packages.retain(|existing| {
+            let name_matches = existing.name == package_name;
+            let version_matches = package_version.is_none_or(|version| existing.version == version);
+            let profile_matches =
+                profile.is_none_or(|profile_target| existing.build_profile == profile_target);
+
+            if name_matches && version_matches && profile_matches {
+                removed_records.push(existing.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        if !removed_records.is_empty() {
             self.save()?;
-            Ok(Some(removed))
-        } else {
-            Ok(None)
         }
+        Ok(removed_records)
     }
 }
 
 /// Helper function to construct a backfilled `PackageRecord` from an unlisted directory.
 fn backfill_package_from_dir(
     package_name: &str,
+    build_profile: &str,
     version_string: &str,
     version_dir: &Path,
 ) -> Option<PackageRecord> {
-    let slxarc_candidate = version_dir.join(format!("{package_name}.slxarc"));
-    let slxb_candidate = version_dir.join(format!("{package_name}.slxb"));
+    let mut slxarc_candidate = version_dir.join(format!("{package_name}.slxarc"));
+    let mut slxb_candidate = version_dir.join(format!("{package_name}.slxb"));
+
+    if !slxarc_candidate.exists()
+        && !slxb_candidate.exists()
+        && let Ok(dir_entries) = fs::read_dir(version_dir)
+    {
+        for entry_result in dir_entries.flatten() {
+            let file_path = entry_result.path();
+            if file_path.is_file() {
+                if file_path.extension().is_some_and(|ext| ext == "slxarc") {
+                    slxarc_candidate = file_path;
+                    break;
+                } else if file_path.extension().is_some_and(|ext| ext == "slxb") {
+                    slxb_candidate = file_path;
+                    break;
+                }
+            }
+        }
+    }
 
     let current_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -329,12 +424,12 @@ fn backfill_package_from_dir(
             name: package_name.to_string(),
             version: version_string.to_string(),
             kind: "slxarc".to_string(),
-            build_profile: "release".to_string(),
+            build_profile: build_profile.to_string(),
             sha256: computed_sha256,
             size_bytes: file_metadata.len(),
             installed_at_unix_secs: current_timestamp,
             installed_at_iso8601: iso8601_string,
-            source_project_dir: None,
+            source: None,
             artifact_path: slxarc_candidate,
             native_libraries,
             description,
@@ -347,16 +442,22 @@ fn backfill_package_from_dir(
         let computed_sha256 = sha256_hex(&file_bytes);
         let program = BinaryProgram::from_bytes(&file_bytes).ok()?;
 
+        let effective_profile = if !program.build_profile.is_empty() {
+            program.build_profile.clone()
+        } else {
+            build_profile.to_string()
+        };
+
         Some(PackageRecord {
             name: package_name.to_string(),
             version: version_string.to_string(),
             kind: "slxb".to_string(),
-            build_profile: program.build_profile.clone(),
+            build_profile: effective_profile,
             sha256: computed_sha256,
             size_bytes: file_metadata.len(),
             installed_at_unix_secs: current_timestamp,
             installed_at_iso8601: iso8601_string,
-            source_project_dir: None,
+            source: None,
             artifact_path: slxb_candidate,
             native_libraries: program.native_library_checksums.clone(),
             description: program.package_description.clone(),

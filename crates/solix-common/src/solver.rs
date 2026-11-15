@@ -114,11 +114,14 @@ impl fmt::Display for PackageVersion {
     }
 }
 
-/// A named package dependency requirement (e.g. `raylib@1.2.0` or `solix@2.0.0#e3b0c4...`).
+/// A named package dependency requirement (e.g. `raylib@1.2.0`, `raylib-debug@1.2.0`, or `solix@2.0.0#release#e3b0c4...`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DependencyRequirement {
     /// Package canonical identifier name.
     pub name: String,
+    /// Optional requested build profile ("debug", "release", or "test").
+    #[serde(default)]
+    pub profile: Option<String>,
     /// Required minimum compatible semantic version.
     pub version: PackageVersion,
     /// Exact SHA-256 hex digest of the dependency `.slxb` binary at compile time.
@@ -131,9 +134,17 @@ impl DependencyRequirement {
     pub fn new(name: impl Into<String>, version: PackageVersion) -> Self {
         Self {
             name: name.into(),
+            profile: None,
             version,
             sha256: String::new(),
         }
+    }
+
+    /// Associates an explicit build profile (e.g. "debug", "release", "test") with this requirement.
+    #[must_use]
+    pub fn with_profile(mut self, profile: impl Into<String>) -> Self {
+        self.profile = Some(profile.into());
+        self
     }
 
     /// Associates an expected cryptographic SHA-256 checksum with this requirement.
@@ -143,7 +154,10 @@ impl DependencyRequirement {
         self
     }
 
-    /// Parses a requirement specification string formatted as `name@version` or `name@version#sha256`.
+    /// Parses a requirement specification string formatted as:
+    /// - `name[-profile]@version` (e.g. `raylib-debug@5.5.0`, `raylib@5.5.0`)
+    /// - `name@version#profile` (e.g. `raylib@5.5.0#debug`)
+    /// - `name@version#sha256` or `name@version#profile#sha256`
     ///
     /// # Errors
     /// Returns a [`SolverError`] if the format is invalid or version parsing fails.
@@ -154,11 +168,30 @@ impl DependencyRequirement {
         if parts.len() != 2 {
             return Err(SolverError::InvalidVersionString {
                 raw: specification.to_string(),
-                reason: "Dependency specification must be formatted as 'name@version' or 'name@version#sha256'".to_string(),
+                reason: "Dependency specification must be formatted as 'name[-profile]@version' or 'name@version#profile'".to_string(),
             });
         }
 
-        let package_name = parts[0].trim();
+        let raw_name = parts[0].trim();
+        if raw_name.is_empty() {
+            return Err(SolverError::InvalidVersionString {
+                raw: specification.to_string(),
+                reason: "Package name cannot be empty".to_string(),
+            });
+        }
+
+        // Check for -debug, -release, -test profile suffix in name before @
+        let (package_name, name_profile) =
+            if let Some(stripped_name) = raw_name.strip_suffix("-debug") {
+                (stripped_name, Some("debug".to_string()))
+            } else if let Some(stripped_name) = raw_name.strip_suffix("-release") {
+                (stripped_name, Some("release".to_string()))
+            } else if let Some(stripped_name) = raw_name.strip_suffix("-test") {
+                (stripped_name, Some("test".to_string()))
+            } else {
+                (raw_name, None)
+            };
+
         if package_name.is_empty() {
             return Err(SolverError::InvalidVersionString {
                 raw: specification.to_string(),
@@ -166,16 +199,33 @@ impl DependencyRequirement {
             });
         }
 
-        let (version_str, sha256_str) = if let Some((ver, sha)) = parts[1].split_once('#') {
-            (ver.trim(), sha.trim().to_string())
+        // Handle # after version: can be #<profile>, #<sha256>, or #<profile>#<sha256>
+        let (version_str, hash_profile, sha256_str) = if let Some((ver, hash_part)) =
+            parts[1].split_once('#')
+        {
+            let trimmed_hash = hash_part.trim();
+            if let Some((profile_part, sha_part)) = trimmed_hash.split_once('#') {
+                (
+                    ver.trim(),
+                    Some(profile_part.trim().to_string()),
+                    sha_part.trim().to_string(),
+                )
+            } else if trimmed_hash == "debug" || trimmed_hash == "release" || trimmed_hash == "test"
+            {
+                (ver.trim(), Some(trimmed_hash.to_string()), String::new())
+            } else {
+                (ver.trim(), None, trimmed_hash.to_string())
+            }
         } else {
-            (parts[1].trim(), String::new())
+            (parts[1].trim(), None, String::new())
         };
 
+        let effective_profile = name_profile.or(hash_profile);
         let parsed_version = PackageVersion::parse(version_str)?;
 
         Ok(Self {
             name: package_name.to_string(),
+            profile: effective_profile,
             version: parsed_version,
             sha256: sha256_str,
         })
@@ -184,10 +234,15 @@ impl DependencyRequirement {
 
 impl fmt::Display for DependencyRequirement {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.sha256.is_empty() {
-            write!(formatter, "{}@{}", self.name, self.version)
+        let base_name = if let Some(ref profile) = self.profile {
+            format!("{}-{}", self.name, profile)
         } else {
-            write!(formatter, "{}@{}#{}", self.name, self.version, self.sha256)
+            self.name.clone()
+        };
+        if self.sha256.is_empty() {
+            write!(formatter, "{}@{}", base_name, self.version)
+        } else {
+            write!(formatter, "{}@{}#{}", base_name, self.version, self.sha256)
         }
     }
 }
@@ -513,48 +568,134 @@ impl ClientModuleSolver {
         &self.package_cache
     }
 
-    /// Scans the package store for all installed versions of `package_name`.
-    fn scan_installed_versions(
-        &self,
-        package_name: &str,
-    ) -> Result<Vec<(PackageVersion, PathBuf)>, SolverError> {
-        let package_folder = self.store_directory.join(package_name);
-        if !package_folder.exists() || !package_folder.is_dir() {
-            return Err(SolverError::PackageNotFound {
-                name: package_name.to_string(),
-            });
+    /// Scans the package store for all installed candidate entries matching both profile-aware
+    /// (`<name>-<profile>@<version>`) and legacy (`<name>/<version>/`) layouts.
+    fn scan_all_installed_candidates(&self) -> Vec<InstalledCandidate> {
+        let mut candidates = Vec::new();
+        if !self.store_directory.exists() || !self.store_directory.is_dir() {
+            return candidates;
         }
 
-        let mut discovered_versions = Vec::new();
-        let read_entries =
-            std::fs::read_dir(&package_folder).map_err(|error| SolverError::IoError {
-                path: package_folder.clone(),
-                reason: error.to_string(),
-            })?;
+        let read_dir_result = match fs::read_dir(&self.store_directory) {
+            Ok(entries) => entries,
+            Err(_) => return candidates,
+        };
 
-        for entry_result in read_entries {
-            let entry = entry_result.map_err(|error| SolverError::IoError {
-                path: package_folder.clone(),
-                reason: error.to_string(),
-            })?;
+        for entry_result in read_dir_result.flatten() {
+            let entry_path = entry_result.path();
+            if !entry_path.is_dir() {
+                continue;
+            }
 
-            if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
-                let folder_name = entry.file_name();
-                let version_string = folder_name.to_string_lossy();
-                if let Ok(parsed_version) = PackageVersion::parse(&version_string) {
-                    discovered_versions.push((parsed_version, entry.path()));
+            let entry_name = entry_path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if entry_name.starts_with('.') || entry_name == "registry.json" || entry_name == "cache"
+            {
+                continue;
+            }
+
+            // Case 1: Layout `<name>-<profile>@<version>` or `<name>@<version>`
+            if let Some((name_part, version_str)) = entry_name.split_once('@')
+                && let Ok(parsed_version) = PackageVersion::parse(version_str)
+            {
+                let (pkg_name, profile) = if let Some(base) = name_part.strip_suffix("-debug") {
+                    (base.to_string(), "debug".to_string())
+                } else if let Some(base) = name_part.strip_suffix("-release") {
+                    (base.to_string(), "release".to_string())
+                } else if let Some(base) = name_part.strip_suffix("-test") {
+                    (base.to_string(), "test".to_string())
+                } else {
+                    (name_part.to_string(), "release".to_string())
+                };
+
+                candidates.push(InstalledCandidate {
+                    package_name: pkg_name,
+                    profile,
+                    version: parsed_version,
+                    dir_path: entry_path,
+                });
+                continue;
+            }
+
+            // Case 2: Legacy layout `<name>/<version>/`
+            if let Ok(version_dir_entries) = fs::read_dir(&entry_path) {
+                for version_entry_result in version_dir_entries.flatten() {
+                    let version_entry_path = version_entry_result.path();
+                    if !version_entry_path.is_dir() {
+                        continue;
+                    }
+                    let version_folder_name = version_entry_path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if let Ok(parsed_version) = PackageVersion::parse(&version_folder_name) {
+                        candidates.push(InstalledCandidate {
+                            package_name: entry_name.clone(),
+                            profile: "release".to_string(),
+                            version: parsed_version,
+                            dir_path: version_entry_path,
+                        });
+                    }
                 }
             }
         }
 
-        if discovered_versions.is_empty() {
+        candidates
+    }
+
+    /// Scans the package store for all installed versions of `package_name`, applying deterministic
+    /// profile fallback (`release` -> `debug` -> `test`) when no explicit profile is requested.
+    fn scan_installed_versions(
+        &self,
+        package_name: &str,
+        requested_profile: Option<&str>,
+    ) -> Result<Vec<(PackageVersion, PathBuf)>, SolverError> {
+        let all_candidates = self.scan_all_installed_candidates();
+        let matching_pkg_candidates: Vec<InstalledCandidate> = all_candidates
+            .into_iter()
+            .filter(|candidate| candidate.package_name == package_name)
+            .collect();
+
+        if matching_pkg_candidates.is_empty() {
             return Err(SolverError::PackageNotFound {
                 name: package_name.to_string(),
             });
         }
 
-        discovered_versions.sort_by_key(|(version, _)| *version);
-        Ok(discovered_versions)
+        if let Some(target_profile) = requested_profile {
+            let profile_candidates: Vec<(PackageVersion, PathBuf)> = matching_pkg_candidates
+                .into_iter()
+                .filter(|candidate| candidate.profile == target_profile)
+                .map(|candidate| (candidate.version, candidate.dir_path))
+                .collect();
+            if profile_candidates.is_empty() {
+                return Err(SolverError::PackageNotFound {
+                    name: format!("{package_name}-{target_profile}"),
+                });
+            }
+            return Ok(profile_candidates);
+        }
+
+        // Profile fallback order: release -> debug -> test
+        for fallback_profile in ["release", "debug", "test"] {
+            let candidates_for_profile: Vec<(PackageVersion, PathBuf)> = matching_pkg_candidates
+                .iter()
+                .filter(|candidate| candidate.profile == fallback_profile)
+                .map(|candidate| (candidate.version, candidate.dir_path.clone()))
+                .collect();
+            if !candidates_for_profile.is_empty() {
+                return Ok(candidates_for_profile);
+            }
+        }
+
+        let fallback_all: Vec<(PackageVersion, PathBuf)> = matching_pkg_candidates
+            .into_iter()
+            .map(|candidate| (candidate.version, candidate.dir_path))
+            .collect();
+        Ok(fallback_all)
     }
 
     /// Loads a package from its version directory containing `<name>.slxarc` or `<name>.slxb`.
@@ -564,13 +705,33 @@ impl ClientModuleSolver {
         version: PackageVersion,
         version_dir: &std::path::Path,
     ) -> Result<SolvedPackage, SolverError> {
-        let slxarc_candidate = version_dir.join(format!("{package_name}.slxarc"));
-        let slxb_candidate = version_dir.join(format!("{package_name}.slxb"));
+        let mut slxarc_candidate = version_dir.join(format!("{package_name}.slxarc"));
+        let mut slxb_candidate = version_dir.join(format!("{package_name}.slxb"));
+
+        if !slxarc_candidate.exists()
+            && !slxb_candidate.exists()
+            && let Ok(dir_entries) = fs::read_dir(version_dir)
+        {
+            for entry_result in dir_entries.flatten() {
+                let file_path = entry_result.path();
+                if file_path.is_file() {
+                    if file_path.extension().is_some_and(|ext| ext == "slxarc") {
+                        slxarc_candidate = file_path;
+                        break;
+                    } else if file_path.extension().is_some_and(|ext| ext == "slxb") {
+                        slxb_candidate = file_path;
+                        break;
+                    }
+                }
+            }
+        }
 
         if slxarc_candidate.exists() {
-            let extraction_target = self
-                .native_cache_directory
-                .join(format!("{package_name}-{version}"));
+            let extraction_folder_name = version_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("{package_name}-{version}"));
+            let extraction_target = self.native_cache_directory.join(extraction_folder_name);
 
             // 1. Check authenticated extraction cache first to avoid re-inflating archive
             if let Ok(Some(cached_program)) =
@@ -662,13 +823,32 @@ impl ClientModuleSolver {
     }
 }
 
+/// Helper struct for discovered package directories in the package store.
+#[derive(Debug, Clone)]
+struct InstalledCandidate {
+    pub package_name: String,
+    pub profile: String,
+    pub version: PackageVersion,
+    pub dir_path: PathBuf,
+}
+
 impl ModuleSolver for ClientModuleSolver {
     fn resolve_compatible(
         &self,
         package_name: &str,
         min_version: PackageVersion,
     ) -> Result<SolvedPackage, SolverError> {
-        let discovered_versions = self.scan_installed_versions(package_name)?;
+        let (base_name, req_profile) = if let Some(stripped) = package_name.strip_suffix("-debug") {
+            (stripped, Some("debug"))
+        } else if let Some(stripped) = package_name.strip_suffix("-release") {
+            (stripped, Some("release"))
+        } else if let Some(stripped) = package_name.strip_suffix("-test") {
+            (stripped, Some("test"))
+        } else {
+            (package_name, None)
+        };
+
+        let discovered_versions = self.scan_installed_versions(base_name, req_profile)?;
 
         let mut compatible_versions: Vec<(PackageVersion, PathBuf)> = discovered_versions
             .into_iter()
@@ -677,7 +857,7 @@ impl ModuleSolver for ClientModuleSolver {
 
         if compatible_versions.is_empty() {
             let available_versions = self
-                .scan_installed_versions(package_name)?
+                .scan_installed_versions(base_name, req_profile)?
                 .into_iter()
                 .map(|(version, _)| version)
                 .collect();
@@ -693,48 +873,36 @@ impl ModuleSolver for ClientModuleSolver {
             .last()
             .expect("compatible versions non-empty");
 
-        self.load_package_from_dir(package_name, *winning_version, winning_dir)
+        self.load_package_from_dir(base_name, *winning_version, winning_dir)
     }
 
     fn resolve_latest(&self, package_name: &str) -> Result<SolvedPackage, SolverError> {
-        let mut discovered_versions = self.scan_installed_versions(package_name)?;
+        let (base_name, req_profile) = if let Some(stripped) = package_name.strip_suffix("-debug") {
+            (stripped, Some("debug"))
+        } else if let Some(stripped) = package_name.strip_suffix("-release") {
+            (stripped, Some("release"))
+        } else if let Some(stripped) = package_name.strip_suffix("-test") {
+            (stripped, Some("test"))
+        } else {
+            (package_name, None)
+        };
+
+        let mut discovered_versions = self.scan_installed_versions(base_name, req_profile)?;
         discovered_versions.sort_by_key(|(version, _)| *version);
 
         let (winning_version, winning_dir) = discovered_versions
             .last()
             .expect("discovered versions non-empty");
 
-        self.load_package_from_dir(package_name, *winning_version, winning_dir)
+        self.load_package_from_dir(base_name, *winning_version, winning_dir)
     }
 
     fn list_packages(&self) -> Vec<String> {
-        let mut package_names = Vec::new();
-        if let Ok(read_dir) = fs::read_dir(&self.store_directory) {
-            for entry_result in read_dir.flatten() {
-                let package_path = entry_result.path();
-                if package_path.is_dir()
-                    && let Some(folder_name) =
-                        package_path.file_name().and_then(|name| name.to_str())
-                    && let Ok(version_read_dir) = fs::read_dir(&package_path)
-                {
-                    let mut has_version = false;
-                    for version_entry_result in version_read_dir.flatten() {
-                        let version_candidate = version_entry_result.path();
-                        if version_candidate.is_dir()
-                            && let Some(candidate_name) =
-                                version_candidate.file_name().and_then(|name| name.to_str())
-                            && PackageVersion::parse(candidate_name).is_ok()
-                        {
-                            has_version = true;
-                            break;
-                        }
-                    }
-                    if has_version {
-                        package_names.push(folder_name.to_string());
-                    }
-                }
-            }
-        }
+        let all_candidates = self.scan_all_installed_candidates();
+        let mut package_names: Vec<String> = all_candidates
+            .into_iter()
+            .map(|candidate| candidate.package_name)
+            .collect();
         package_names.sort();
         package_names.dedup();
         package_names
