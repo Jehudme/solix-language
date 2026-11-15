@@ -144,9 +144,27 @@ public class TreeMap<K, V> implements IMap<K, V>, IStringable {
         return this.entry_count == 0;
     }
 
+    private void clear_subtree(TreeMapNode<K, V> subtree_root_node) {
+        if (subtree_root_node == null) {
+            return;
+        }
+        TreeMapNode<K, V> left_child_node = subtree_root_node.left_child;
+        TreeMapNode<K, V> right_child_node = subtree_root_node.right_child;
+        subtree_root_node.left_child = null;
+        subtree_root_node.right_child = null;
+        subtree_root_node.parent_node = null;
+        this.clear_subtree(left_child_node);
+        this.clear_subtree(right_child_node);
+    }
+
     public void clear() {
+        this.clear_subtree(this.root_node);
         this.root_node = null;
         this.entry_count = 0;
+    }
+
+    ~TreeMap() {
+        this.clear();
     }
 
     private TreeMapNode<K, V> find_node(K lookup_key) {

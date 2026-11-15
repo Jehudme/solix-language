@@ -4,7 +4,7 @@
 
 use crate::exceptions::RuntimeError;
 use crate::memory::deallocator::FreeListManager;
-use crate::memory::layout::{BlockHeader, BlockTag, HEADER_SIZE, align_up};
+use crate::memory::layout::{ALIGNMENT, BlockHeader, BlockTag, HEADER_SIZE, align_up};
 use std::fmt::Write;
 
 /// Allocation metadata record maintained for heap integrity and leak auditing.
@@ -141,7 +141,7 @@ impl VirtualHeap {
     /// # Errors
     /// Returns `RuntimeError::OutOfMemory` if insufficient free heap space exists.
     pub fn allocate(&mut self, payload_size: usize, tag: BlockTag) -> Result<u32, RuntimeError> {
-        let aligned_payload = align_up(payload_size);
+        let aligned_payload = align_up(payload_size).max(ALIGNMENT);
         let required_block_size = HEADER_SIZE + aligned_payload;
 
         if required_block_size > self.dynamic_capacity {
@@ -172,10 +172,9 @@ impl VirtualHeap {
             } else if self.bump_cursor + required_block_size <= self.dynamic_capacity {
                 // O(1) Bump allocation for any block size fitting the remaining bump capacity
                 let block_offset = self.bump_cursor;
-                self.bump_cursor += required_block_size;
-
                 let block_abs_addr = self.static_size + block_offset;
                 let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
+                self.bump_cursor += required_block_size;
 
                 let header = BlockHeader::new(payload_size as u32, tag, 1);
                 let header_bytes = header.to_bytes();
@@ -250,7 +249,7 @@ impl VirtualHeap {
         }
 
         let header = self.read_header(payload_addr)?;
-        let total_block_size = HEADER_SIZE + align_up(header.size as usize);
+        let total_block_size = HEADER_SIZE + align_up(header.size as usize).max(ALIGNMENT);
         let block_abs_addr = addr - HEADER_SIZE;
         let block_offset = block_abs_addr - self.static_size;
 
@@ -302,7 +301,7 @@ impl VirtualHeap {
             return Err(RuntimeError::NullReferenceAccess);
         }
 
-        let total_block_size = HEADER_SIZE + align_up(size as usize);
+        let total_block_size = HEADER_SIZE + align_up(size as usize).max(ALIGNMENT);
         let block_abs_addr = addr_usize - HEADER_SIZE;
         let block_offset = block_abs_addr - self.static_size;
 
@@ -596,7 +595,8 @@ impl VirtualHeap {
                 let block_abs_addr = self.static_size + current_offset;
                 let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
                 if let Ok(header) = self.read_header(payload_addr) {
-                    let total_block_size = HEADER_SIZE + align_up(header.size as usize);
+                    let total_block_size =
+                        HEADER_SIZE + align_up(header.size as usize).max(ALIGNMENT);
                     if total_block_size == 0 {
                         break;
                     }

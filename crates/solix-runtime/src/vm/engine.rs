@@ -829,6 +829,7 @@ impl VirtualMachine {
                     let bytes = arg_str.as_bytes();
                     let str_addr = self.heap.allocate(bytes.len(), BlockTag::String)?;
                     self.heap.write_bytes(str_addr, bytes)?;
+                    self.interned_string_addrs.push(str_addr);
                     let elem_addr = args_arr_addr + 8 + (arg_idx * 8) as u32;
                     self.heap
                         .write_u64(elem_addr, Value::Ref(str_addr).to_raw_u64())?;

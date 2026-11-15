@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-043
 * **Target Version:** `v1.0.0`
 * **Milestone Branch:** `milestone/043-release-v1.0.0`
-* **Status:** DRAFT
+* **Status:** COMPLETED
 * **Lead Architect:** @solix-lead
 * **Target Delivery Date:** 2026-12-01
 * **Related Specifications:**
@@ -29,25 +29,25 @@ Complete the final production release verification, bump the Solix workspace, cr
 ## 3. Prioritized Deliverables & Task Matrix
 
 ### 3.1 P0: Critical Blockers (Release Gate)
-- [ ] `[P0]` **Workspace & Extension Version Bump to `1.0.0` (`Cargo.toml`, `editors/vscode/package.json`):**
+- [x] `[P0]` **Workspace & Extension Version Bump to `1.0.0` (`Cargo.toml`, `editors/vscode/package.json`):**
   1. Set `[workspace.package] version = "1.0.0"` in root `Cargo.toml` and update any internal crate dependency version pins across `crates/*/Cargo.toml` to `"1.0.0"`.
   2. Set `"version": "1.0.0"` in `editors/vscode/package.json`.
   3. Verify `solix --version` outputs `solix 1.0.0`.
-- [ ] `[P0]` **Full Rebuild & Verification of Bundled Default Libraries (`solixlib` & `raylib`):**
+- [x] `[P0]` **Full Rebuild & Verification of Bundled Default Libraries (`solixlib` & `raylib`):**
   1. Run `python3 scripts/build_default_libraries.py` to build and stage fresh `release` and `debug` `.slxarc` archives into `crates/solix-toolchain/assets/packages/`.
   2. Run `solix build libraries/solixlib --profile test` and `solix run --test --gc-stats libraries/solixlib/build/test/solix.slxarc`, verifying 100% test pass and 0 memory leaks.
   3. Run `solix build libraries/raylib --profile test` and `solix run --test --gc-stats libraries/raylib/build/test/raylib.slxarc`, verifying 100% test pass and 0 memory leaks.
-- [ ] `[P0]` **End-to-End Verification of `examples/breakout`:**
+- [x] `[P0]` **End-to-End Verification of `examples/breakout`:**
   Build `examples/breakout` in both `debug` (`solix build examples/breakout --profile debug`) and `release` (`solix build examples/breakout --profile release`) profiles and verify clean compilation and archive packaging.
 
 ### 3.2 P1: High Priority (Milestone Core)
-- [ ] `[P1]` **Execute Complete 5-Pillar DoD & Documentation Gate:**
+- [x] `[P1]` **Execute Complete 5-Pillar DoD & Documentation Gate:**
   1. `cargo build --workspace --all-targets`
   2. `cargo test --workspace --all-targets`
   3. `cargo clippy --workspace --all-targets -- -D warnings`
   4. `cargo fmt --all -- --check`
   5. `python3 scripts/verify_docs.py`
-- [ ] `[P1]` **Finalize `CHANGELOG.md` for `v1.0.0`:** Author the comprehensive `[1.0.0]` release entry in `CHANGELOG.md` covering:
+- [x] `[P1]` **Finalize `CHANGELOG.md` for `v1.0.0`:** Author the comprehensive `[1.0.0]` release entry in `CHANGELOG.md` covering:
   * **Compiler & Language:** 4-pass semantic binder, context-typed numeric literal coercion & safe widening, AST inliner, peephole optimizer, AOT bytecode verifier.
   * **Runtime & VM:** 64-bit NaN-boxed register VM, deterministic ARC with POD fast-path, generational handles, zero-marshal FFI bridge.
   * **Package Manager & Build System:** Profile-aware `<name>-<profile>@<version>` store, SemVer + SHA-256 solver with automatic `release` $\to$ `debug` fallback, declarative `[build]` manifest section, `solix_build.py` engine with hermetic `build/.cache/` isolation.
@@ -55,20 +55,20 @@ Complete the final production release verification, bump the Solix workspace, cr
   * **IDE & Tooling:** `solix-lsp` (zero-lag `.` / `::` and hierarchical `import` completion), `solix-dap` debugger, VS Code extension, and cross-platform installers with pre-bundled default libraries.
 
 ### 3.3 P2: Medium Priority (Ergonomics & Polish)
-- [ ] `[P2]` **Milestone Closure Audit (`docs/internals/milestones/`):** Ensure all milestone documents from `001` through `043` have complete DoD sign-off matrices and accurate status fields.
+- [x] `[P2]` **Milestone Closure Audit (`docs/internals/milestones/`):** Ensure all milestone documents from `001` through `043` have complete DoD sign-off matrices and accurate status fields.
 
 ### 3.4 P3: Low Priority (Opportunistic Cleanups)
-- [ ] `[P3]` **Final Git Status Cleanliness Check:** Verify `git status` has zero untracked temporary artifacts or stray build caches outside `.gitignore`.
+- [x] `[P3]` **Final Git Status Cleanliness Check:** Verify `git status` has zero untracked temporary artifacts or stray build caches outside `.gitignore`.
 
 ## 4. Definition of Done (DoD) Sign-Off Matrix
 
 | DoD Requirement | Target Benchmark | Verification Tool | Sign-off Status |
 | :--- | :--- | :--- | :--- |
-| **Workspace Compilation** | Zero warnings with `-D warnings` | `cargo build --workspace --all-targets` | [ ] Pending |
-| **Automated Test Suite** | 100% pass across all unit, integration, and doc tests | `cargo test --workspace --all-targets` | [ ] Pending |
-| **Clippy Static Analysis** | Zero warnings, zero `unwrap` / `expect` | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
-| **Rustfmt Formatting** | Zero formatting violations | `cargo fmt --check` | [ ] Pending |
-| **Documentation Sync** | `python3 scripts/verify_docs.py` exits `0` | `python3 scripts/verify_docs.py` | [ ] Pending |
+| **Workspace Compilation** | Zero warnings with `-D warnings` | `cargo build --workspace --all-targets` | [x] VALIDATED |
+| **Automated Test Suite** | 100% pass across all unit, integration, and doc tests | `cargo test --workspace --all-targets` | [x] VALIDATED |
+| **Clippy Static Analysis** | Zero warnings, zero `unwrap` / `expect` | `cargo clippy --workspace --all-targets -- -D warnings` | [x] VALIDATED |
+| **Rustfmt Formatting** | Zero formatting violations | `cargo fmt --check` | [x] VALIDATED |
+| **Documentation Sync** | `python3 scripts/verify_docs.py` exits `0` | `python3 scripts/verify_docs.py` | [x] VALIDATED |
 
 ## 5. Risk Assessment & Mitigation Strategies
 * **Risk 1:** Bumping the workspace version to `1.0.0` could cause CLI version assertion tests expecting `0.1.0` to fail.

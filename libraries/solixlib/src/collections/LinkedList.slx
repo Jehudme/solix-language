@@ -71,9 +71,20 @@ public class LinkedList<T> implements IList<T>, IDeque<T>, ICollection<T>, IIter
     }
 
     public void clear() {
+        LinkedListNode<T> current_node = this.head_node;
+        while (current_node != null) {
+            LinkedListNode<T> next_node = current_node.next_node;
+            current_node.next_node = null;
+            current_node.previous_node = null;
+            current_node = next_node;
+        }
         this.head_node = null;
         this.tail_node = null;
         this.element_count = 0;
+    }
+
+    ~LinkedList() {
+        this.clear();
     }
 
     public void add_first(T item) {

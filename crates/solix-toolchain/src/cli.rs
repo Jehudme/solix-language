@@ -301,7 +301,7 @@ pub struct RunArgs {
     pub max_stack: usize,
 
     /// Print execution statistics and memory report upon completion
-    #[arg(short, long)]
+    #[arg(short, long, alias = "gc-stats")]
     pub verbose: bool,
 
     /// Execute in safe mode (bounds-checked execution with defensive invariant validation)

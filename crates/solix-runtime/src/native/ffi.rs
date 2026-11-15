@@ -637,6 +637,7 @@ pub unsafe extern "C" fn solix_vm_alloc_string(
             unsafe { std::slice::from_raw_parts(source_pointer, byte_count as usize) };
         let _ = vm_instance.heap.write_bytes(string_address, source_slice);
     }
+    vm_instance.interned_string_addrs.push(string_address);
     string_address
 }
 

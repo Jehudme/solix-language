@@ -89,6 +89,8 @@ pub unsafe extern "C" fn solix_register_natives(
 
 Native functions can read and write heap structures via VM helper callbacks:
 - `alloc_byte_array`: Allocates contiguous byte buffer on virtual heap.
+- `alloc_string`: Allocates immutable raw UTF-8 string buffer (`BlockTag::String`) and tracks its address for clean teardown upon runtime shutdown.
+- `alloc_chars`: Allocates unpacked `char[]` array buffer for Solix character slice operations.
 - `alloc_array`: Allocates typed array of specified length.
 - `array_len`: Returns element count of heap array.
 - `array_get_u64` & `array_set_u64`: Accesses elements by index. For `float32[]` arrays (`type_tag == 9`), transparently normalizes between 32-bit heap bit-patterns and standard IEEE-754 64-bit float representations.

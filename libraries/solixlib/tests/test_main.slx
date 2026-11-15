@@ -16,6 +16,7 @@ class TestRunner {
             return 100 + result;
         }
         result = TestCollections::run_all_tests();
+        result = TestCollections::run_all_tests();
         if (result != 0) {
             return 200 + result;
         }

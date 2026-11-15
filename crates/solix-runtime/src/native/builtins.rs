@@ -118,5 +118,6 @@ pub fn builtin_str_concat(vm: &mut VirtualMachine, args: &[Value]) -> Result<Val
         .heap
         .allocate(string_bytes.len(), crate::memory::BlockTag::String)?;
     vm.heap.write_bytes(allocated_address, string_bytes)?;
+    vm.interned_string_addrs.push(allocated_address);
     Ok(Value::Ref(allocated_address))
 }

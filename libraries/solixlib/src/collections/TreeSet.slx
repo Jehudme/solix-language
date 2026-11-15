@@ -74,6 +74,10 @@ public class TreeSet<T> implements ISet<T>, IReadOnlyCollection<T>, IIterable<T>
         this.internal_map.clear();
     }
 
+    ~TreeSet() {
+        this.clear();
+    }
+
     public bool contains(T item) {
         return this.internal_map.contains_key(item);
     }

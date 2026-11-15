@@ -120,3 +120,8 @@ public class TreeNode {
 1. Storing an object address into a `weak` field copies the address without invoking `IncRef`.
 2. The runtime registers the weak field slot in the object's weak reference table.
 3. When the owning object is deallocated at `ref_count == 0`, all registered weak references pointing to it are automatically nullified (`null`), preventing dangling pointer hazards.
+
+### 4.2. Collection Destructors & Intrusive Lifecycle
+1. Bidirectional data structures (such as `LinkedList` doubly-linked nodes and `TreeMap` parent/child nodes) define explicit destructors (`~LinkedList()`, `~TreeMap()`, `~TreeSet()`).
+2. Upon collection deallocation, the destructor walks the structure to sever internal cyclical references (`previous_node = null`, `parent_node = null`), allowing standard ARC cascade drops to reclaim all nodes deterministically.
+3. Primitive strings (`BlockTag::String`) allocated via runtime builtins (`__builtin_str_concat`) or FFI (`solix_vm_alloc_string`) are tracked in `interned_string_addrs`, ensuring complete heap reclamation during VM shutdown and zero-leak verification.

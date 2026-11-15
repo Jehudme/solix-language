@@ -119,3 +119,9 @@ Static utility class offering collection operations.
 
 ### Methods
 - `Collections.to_string<T>(IIterable<T> collection) -> String`: Formats any iterable collection into canonical comma-separated notation, e.g. `"[item1, item2, item3]"`. Integrates seamlessly with `IStringable` and `Console::print(IStringable)`.
+
+---
+
+## 10. Memory Lifecycle & Destructor Contracts
+
+All bidirectional and tree-structured collections (`LinkedList`, `TreeMap`, `TreeSet`) implement explicit destructors (`~LinkedList()`, `~TreeMap()`, `~TreeSet()`) that invoke `this.clear()`. This severs internal cyclic references (`previous_node = null`, `parent_node = null`) and guarantees deterministic cascading deallocation under the Solix ARC runtime with zero retained memory leaks.
