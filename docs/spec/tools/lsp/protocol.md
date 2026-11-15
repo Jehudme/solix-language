@@ -172,3 +172,13 @@ The Solix VS Code extension embeds `solix.tmLanguage.json` for syntax tokenizati
 - **Class Declarations**: Matches `class|interface` declarations, styling the declared type identifier with `entity.name.type.class.solix`.
 - **Reserved Keywords**: Comprehensive keyword coverage including `implements`, `extends`, `operator`, `assert`, `exit`, `weak`, `instanceof`, `sizeof`, control flow (`match`, `case`, `defer`, `return`, `throw`), and type keywords (`int8` through `uint64`, `f32`, `f64`, `bool`, `string`, `void`, `auto`).
 
+---
+
+## 7. Performance & UTF-8 Memory Safety Invariants
+
+### 7.1 Multibyte UTF-8 Character Slicing Safety
+All text offset conversions from LSP coordinates (UTF-16/character columns) to byte indices clamp boundaries to valid UTF-8 character boundaries (`is_char_boundary` / `clamp_to_char_boundary`). Slicing within multi-byte UTF-8 sequences in strings or comments is strictly prevented.
+
+### 7.2 External Package Index Caching
+To maintain sub-millisecond response latency during interactive typing, the LSP maintains an in-memory cache of resolved external package symbol indices (`PackageExportIndex`) keyed by `(package_name, profile, version, archive_mtime_secs)`. Modifications to installed `.slxarc` packages immediately invalidate cache entries via filesystem mtime detection.
+

@@ -42,6 +42,32 @@ fn test_case_3_2_continue_in_while_loop() {
 }
 
 #[test]
+fn test_case_3_3_continue_cleans_up_scoped_reference_registers() {
+    let source_code = r#"
+        class ScopedNode {
+            public int32 value;
+            public ScopedNode(int32 initial_val) {
+                this.value = initial_val;
+            }
+        }
+
+        int32 main() {
+            int32 sum = 0;
+            for (int32 iteration = 0; iteration < 8; iteration++) {
+                ScopedNode node = new ScopedNode(iteration);
+                if (iteration % 2 == 0) {
+                    continue;
+                }
+                sum += node.value;
+            }
+            return sum;
+        }
+    "#;
+    let (return_value, _) = compile_and_run(source_code);
+    assert_eq!(return_value, Value::I32(1 + 3 + 5 + 7));
+}
+
+#[test]
 fn test_case_4_1_continue_outside_loop() {
     // Error: E0100 / E0200
     let code = r#"

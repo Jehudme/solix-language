@@ -203,11 +203,15 @@ fn extract_symbol_name_from_message(msg: &str) -> &str {
     ""
 }
 
-fn get_span_text(source: &str, span: Span) -> &str {
-    let start = span.start as usize;
-    let end = span.end as usize;
-    if start <= end && end <= source.len() {
-        &source[start..end]
+fn get_span_text(source_text: &str, span: Span) -> &str {
+    let start_offset = span.start as usize;
+    let end_offset = span.end as usize;
+    if start_offset <= end_offset
+        && end_offset <= source_text.len()
+        && source_text.is_char_boundary(start_offset)
+        && source_text.is_char_boundary(end_offset)
+    {
+        &source_text[start_offset..end_offset]
     } else {
         ""
     }

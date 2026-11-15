@@ -58,6 +58,9 @@ pub enum Commands {
 
     /// Formats Solix source files according to official style guidelines
     Fmt(FmtArgs),
+
+    /// Removes project build artifacts and intermediate caches
+    Clean(CleanArgs),
 }
 
 /// Arguments for `solix dap`.
@@ -512,4 +515,16 @@ pub struct NewArgs {
     /// Overwrite existing manifest.toml if present
     #[arg(long)]
     pub force: bool,
+}
+
+/// Arguments for `solix clean`.
+#[derive(Debug, Args, Clone)]
+pub struct CleanArgs {
+    /// Project root directory containing manifest.toml [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Clean only intermediate build caches (build/.cache/) keeping final distribution archives
+    #[arg(long)]
+    pub cache_only: bool,
 }

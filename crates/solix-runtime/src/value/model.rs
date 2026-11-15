@@ -87,6 +87,7 @@ impl Value {
     }
 
     /// Extracts a boolean value or returns a `TypeMismatch` error.
+    #[inline(always)]
     pub fn as_bool(&self) -> Result<bool, RuntimeError> {
         match self {
             Self::Bool(boolean_value) => Ok(*boolean_value),
@@ -98,6 +99,7 @@ impl Value {
     }
 
     /// Extracts a 32-bit signed integer or returns a `TypeMismatch` error.
+    #[inline(always)]
     pub fn as_i32(&self) -> Result<i32, RuntimeError> {
         match self {
             Self::I32(primitive_number) => Ok(*primitive_number),
@@ -110,10 +112,11 @@ impl Value {
     }
 
     /// Extracts a 64-bit signed integer or returns a `TypeMismatch` error.
+    #[inline(always)]
     pub fn as_i64(&self) -> Result<i64, RuntimeError> {
         match self {
-            Self::I64(n) => Ok(*n),
-            Self::I32(n) => Ok(*n as i64),
+            Self::I64(number_val) => Ok(*number_val),
+            Self::I32(number_val) => Ok(*number_val as i64),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "int64".to_string(),
                 found: self.type_name().to_string(),
@@ -122,11 +125,12 @@ impl Value {
     }
 
     /// Extracts a 64-bit float or returns a `TypeMismatch` error.
+    #[inline(always)]
     pub fn as_f64(&self) -> Result<f64, RuntimeError> {
         match self {
-            Self::F64(f) => Ok(*f),
-            Self::I32(n) => Ok(*n as f64),
-            Self::I64(n) => Ok(*n as f64),
+            Self::F64(float_val) => Ok(*float_val),
+            Self::I32(number_val) => Ok(*number_val as f64),
+            Self::I64(number_val) => Ok(*number_val as f64),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "float64".to_string(),
                 found: self.type_name().to_string(),
@@ -135,9 +139,10 @@ impl Value {
     }
 
     /// Extracts a heap reference address or returns a `TypeMismatch` error.
+    #[inline(always)]
     pub fn as_ref(&self) -> Result<u32, RuntimeError> {
         match self {
-            Self::Ref(addr) => Ok(*addr),
+            Self::Ref(heap_address) => Ok(*heap_address),
             Self::Null => Ok(0),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "ref".to_string(),
@@ -147,9 +152,10 @@ impl Value {
     }
 
     /// Extracts a function pointer or returns a `TypeMismatch` error.
+    #[inline(always)]
     pub fn as_fn_ptr(&self) -> Result<u32, RuntimeError> {
         match self {
-            Self::FnPtr(id) => Ok(*id),
+            Self::FnPtr(func_id) => Ok(*func_id),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "fn_ptr".to_string(),
                 found: self.type_name().to_string(),
@@ -158,6 +164,7 @@ impl Value {
     }
 
     /// Returns `true` if this value is `Value::Null`.
+    #[inline(always)]
     #[must_use]
     pub const fn is_null(&self) -> bool {
         matches!(self, Self::Null)
@@ -172,6 +179,7 @@ impl Value {
     pub const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
 
     /// Returns the raw unwrapped 64-bit integer or bit pattern for static memory storage.
+    #[inline(always)]
     #[must_use]
     pub fn to_primitive_u64(&self) -> u64 {
         match self {

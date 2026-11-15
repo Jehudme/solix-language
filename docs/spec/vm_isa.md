@@ -98,11 +98,11 @@ Used for static, direct, and virtual function dispatch:
 | `0x16` | `MulI32` | A | `dst, src1, src2` | Signed 32-bit multiplication. |
 | `0x17` | `MulI64` | A | `dst, src1, src2` | Signed 64-bit multiplication. |
 | `0x18` | `MulF64` | A | `dst, src1, src2` | 64-bit floating multiplication. |
-| `0x19` | `DivI32` | A | `dst, src1, src2` | Signed 32-bit division (traps on divide by zero). |
-| `0x1A` | `DivI64` | A | `dst, src1, src2` | Signed 64-bit division (traps on divide by zero). |
+| `0x19` | `DivI32` | A | `dst, src1, src2` | Signed 32-bit division (traps on divide by zero; wrapping on `i32::MIN / -1`). |
+| `0x1A` | `DivI64` | A | `dst, src1, src2` | Signed 64-bit division (traps on divide by zero; wrapping on `i64::MIN / -1`). |
 | `0x1B` | `DivF64` | A | `dst, src1, src2` | 64-bit floating division. |
-| `0x1C` | `ModI32` | A | `dst, src1, src2` | Modulo remainder. |
-| `0x1D` | `ModI64` | A | `dst, src1, src2` | Modulo remainder. |
+| `0x1C` | `ModI32` | A | `dst, src1, src2` | Modulo remainder (traps on divide by zero; wrapping on `i32::MIN % -1`). |
+| `0x1D` | `ModI64` | A | `dst, src1, src2` | Modulo remainder (traps on divide by zero; wrapping on `i64::MIN % -1`). |
 | `0x1E` | `NegI32` | A | `dst, src1` | Negation: `dst = -src1`. |
 | `0x1F` | `NegI64` | A | `dst, src1` | Negation: `dst = -src1`. |
 | `0x20` | `NegF64` | A | `dst, src1` | Negation: `dst = -src1`. |

@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod build;
+pub mod clean;
 pub mod compile;
 pub mod dap;
 pub mod fmt;
@@ -13,6 +14,7 @@ pub mod pkg;
 pub mod run;
 
 pub use build::execute_build;
+pub use clean::execute_clean;
 pub use compile::execute_compile;
 pub use dap::execute_dap;
 pub use fmt::execute_fmt;

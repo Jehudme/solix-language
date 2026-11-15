@@ -50,6 +50,7 @@ solix <subcommand> --help
 | [`info`](info.md) | Inspects metadata, export manifests, disassembly, or synthesized APIs of `.slxb` or `.slxarc` | [info.md](info.md) |
 | [`install`](install.md) | Installs a `.slxb` binary, `.slxarc` archive, or project directory into the local package store | [install.md](install.md) |
 | [`sync`](sync.md) | Synchronizes and rebuilds installed packages from their recorded source directories | [sync.md](sync.md) |
+| [`clean`](clean.md) | Cleans project build artifacts and intermediate caches | [clean.md](clean.md) |
 | [`uninstall`](uninstall.md) | Removes an installed package or specific version from the local package store | [uninstall.md](uninstall.md) |
 | [`list`](list.md) | Lists all installed packages and versions in the local package store | [list.md](list.md) |
 
@@ -83,6 +84,7 @@ solix <subcommand> --help
 - [**`run` Subcommand**](run.md): VM runtime execution, direct `.slx` execution, `.slxarc` bundle ingestion, and guest argument passing.
 - [**`info` Subcommand**](info.md): Disassembly (`--disasm`), API reconstruction (`--api`), and JSON manifest extraction (`--json`).
 - [**`install` Subcommand**](install.md): Installing `.slxb` and `.slxarc` packages into the local store.
+- [**`clean` Subcommand**](clean.md): Cleaning project build artifacts (`build/`) and intermediate caches (`build/.cache/`).
 - [**`uninstall` Subcommand**](uninstall.md): Removing packages and versions from the local store.
 - [**`list` Subcommand**](list.md): Listing installed packages with tabular and `--json` formatting.
 - [**Project Manifest (`manifest.toml`) Specification**](manifest.md): Complete schema documentation for project manifests.

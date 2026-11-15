@@ -46,10 +46,10 @@ impl<'a> Emitter<'a> {
 
                 if let Some(active_loop) = loop_stack.last() {
                     let loop_depth = active_loop.scope_depth;
-                    for reg in self.allocator.scopes_allocated_from(loop_depth) {
-                        if self.function.reference_registers.contains(&reg) {
+                    for register in self.allocator.scopes_allocated_from(loop_depth) {
+                        if self.function.reference_registers.contains(&register) {
                             self.emit_instruction(
-                                Instruction::format_a(OpCode::DecRef, 0, reg, 0, 0),
+                                Instruction::format_a(OpCode::DecRef, 0, register, 0, 0),
                                 Some(break_stmt.span),
                             );
                         }
@@ -67,6 +67,18 @@ impl<'a> Emitter<'a> {
             }
             Statement::Continue(continue_stmt) => {
                 self.emit_active_finally_blocks()?;
+
+                if let Some(active_loop) = loop_stack.last() {
+                    let loop_depth = active_loop.scope_depth;
+                    for register in self.allocator.scopes_allocated_from(loop_depth) {
+                        if self.function.reference_registers.contains(&register) {
+                            self.emit_instruction(
+                                Instruction::format_a(OpCode::DecRef, 0, register, 0, 0),
+                                Some(continue_stmt.span),
+                            );
+                        }
+                    }
+                }
 
                 let patch_pc = self.emit_instruction(
                     Instruction::format_c(OpCode::Jump, 0, 0, 0),

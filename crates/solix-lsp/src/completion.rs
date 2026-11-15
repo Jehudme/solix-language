@@ -932,18 +932,30 @@ fn make_symbol_completion_item(symbol: &SymbolEntry) -> CompletionItem {
     }
 }
 
+fn clamp_to_char_boundary(source_text: &str, mut byte_offset: usize) -> usize {
+    if byte_offset >= source_text.len() {
+        return source_text.len();
+    }
+    while byte_offset > 0 && !source_text.is_char_boundary(byte_offset) {
+        byte_offset -= 1;
+    }
+    byte_offset
+}
+
 fn get_line_prefix(source_text: &str, offset: usize) -> &str {
-    let clamped = offset.min(source_text.len());
-    let prefix = &source_text[..clamped];
-    let last_newline = prefix.rfind('\n').map_or(0, |idx| idx + 1);
-    &prefix[last_newline..]
+    let clamped_offset = clamp_to_char_boundary(source_text, offset.min(source_text.len()));
+    let prefix_str = &source_text[..clamped_offset];
+    let last_newline = prefix_str.rfind('\n').map_or(0, |idx| idx + 1);
+    let safe_start = clamp_to_char_boundary(prefix_str, last_newline);
+    &prefix_str[safe_start..]
 }
 
 fn get_line_suffix(source_text: &str, offset: usize) -> &str {
-    let clamped = offset.min(source_text.len());
-    let suffix = &source_text[clamped..];
-    let next_newline = suffix.find('\n').unwrap_or(suffix.len());
-    &suffix[..next_newline]
+    let clamped_offset = clamp_to_char_boundary(source_text, offset.min(source_text.len()));
+    let suffix_str = &source_text[clamped_offset..];
+    let next_newline = suffix_str.find('\n').unwrap_or(suffix_str.len());
+    let safe_end = clamp_to_char_boundary(suffix_str, next_newline);
+    &suffix_str[..safe_end]
 }
 
 fn handle_import_completion(

@@ -241,6 +241,14 @@ pub struct PackageNamespaceIndex {
     pub symbols_by_namespace: HashMap<String, Vec<(String, CompletionItemKind, String)>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PackageExportCacheKey {
+    pub package_name: String,
+    pub profile: String,
+    pub version: String,
+    pub archive_mtime_secs: u64,
+}
+
 /// Workspace state manager coordinating document overlays, manifest resolution, and multi-file analysis.
 #[derive(Debug)]
 pub struct WorkspaceManager {
@@ -253,7 +261,8 @@ pub struct WorkspaceManager {
     /// Pluggable module solver for package dependencies and standard library resolution.
     solver: Option<Arc<dyn ModuleSolver>>,
     /// Cached package namespace export indexes for fast autocompletion.
-    package_export_index: std::sync::RwLock<HashMap<String, PackageNamespaceIndex>>,
+    package_export_index:
+        std::sync::RwLock<HashMap<String, (PackageExportCacheKey, PackageNamespaceIndex)>>,
     /// In-memory cache of resolved dependency programs to avoid disk re-scans.
     cached_dependencies: DashMap<String, solix_common::bytecode::BinaryProgram>,
 }
@@ -328,9 +337,48 @@ impl WorkspaceManager {
             return blt_index;
         }
 
-        // Check read cache
+        let mut cache_key = PackageExportCacheKey {
+            package_name: target_package_name.to_string(),
+            profile: "release".to_string(),
+            version: "0.1.0".to_string(),
+            archive_mtime_secs: 0,
+        };
+
+        if let Some(solver) = &self.solver
+            && let Ok(solved_package) = solver.resolve_latest(target_package_name)
+        {
+            let store_directory = solix_common::solver::resolve_package_store_dir(None);
+            let profile_name = if !solved_package.program.build_profile.is_empty() {
+                &solved_package.program.build_profile
+            } else {
+                "release"
+            };
+            let archive_file = store_directory
+                .join(format!(
+                    "{target_package_name}-{profile_name}@{}",
+                    solved_package.version
+                ))
+                .join(format!("{target_package_name}.slxarc"));
+            let mtime_secs = std::fs::metadata(&archive_file)
+                .and_then(|metadata| metadata.modified())
+                .and_then(|time| {
+                    time.duration_since(std::time::UNIX_EPOCH)
+                        .map_err(std::io::Error::other)
+                })
+                .map_or(0, |duration| duration.as_secs());
+
+            cache_key = PackageExportCacheKey {
+                package_name: target_package_name.to_string(),
+                profile: profile_name.to_string(),
+                version: solved_package.version.to_string(),
+                archive_mtime_secs: mtime_secs,
+            };
+        }
+
+        // Check read cache with key validation
         if let Ok(guard) = self.package_export_index.read()
-            && let Some(cached_index) = guard.get(target_package_name)
+            && let Some((cached_key, cached_index)) = guard.get(target_package_name)
+            && cached_key == &cache_key
         {
             return cached_index.clone();
         }
@@ -625,7 +673,10 @@ impl WorkspaceManager {
 
         // Cache and return
         if let Ok(mut guard) = self.package_export_index.write() {
-            guard.insert(target_package_name.to_string(), built_index.clone());
+            guard.insert(
+                target_package_name.to_string(),
+                (cache_key, built_index.clone()),
+            );
         }
 
         built_index

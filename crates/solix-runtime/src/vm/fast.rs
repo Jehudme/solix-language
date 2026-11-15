@@ -281,13 +281,13 @@ impl VirtualMachine {
                     let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
                     let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
                     match (val_a, val_b) {
-                        (Value::F64(x), Value::F64(y)) => unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(x + y);
+                        (Value::F64(left_val), Value::F64(right_val)) => unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val + right_val);
                         },
-                        (x, y) => {
+                        (left_val, right_val) => {
                             return Err(RuntimeError::TypeMismatch {
                                 expected: "Float64 and Float64".to_string(),
-                                found: format!("{x:?}, {y:?}"),
+                                found: format!("{left_val:?}, {right_val:?}"),
                             });
                         }
                     }
@@ -313,13 +313,13 @@ impl VirtualMachine {
                     let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
                     let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
                     match (val_a, val_b) {
-                        (Value::F64(x), Value::F64(y)) => unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(x - y);
+                        (Value::F64(left_val), Value::F64(right_val)) => unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val - right_val);
                         },
-                        (x, y) => {
+                        (left_val, right_val) => {
                             return Err(RuntimeError::TypeMismatch {
                                 expected: "Float64 and Float64".to_string(),
-                                found: format!("{x:?}, {y:?}"),
+                                found: format!("{left_val:?}, {right_val:?}"),
                             });
                         }
                     }
@@ -345,13 +345,13 @@ impl VirtualMachine {
                     let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
                     let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
                     match (val_a, val_b) {
-                        (Value::F64(x), Value::F64(y)) => unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(x * y);
+                        (Value::F64(left_val), Value::F64(right_val)) => unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val * right_val);
                         },
-                        (x, y) => {
+                        (left_val, right_val) => {
                             return Err(RuntimeError::TypeMismatch {
                                 expected: "Float64 and Float64".to_string(),
-                                found: format!("{x:?}, {y:?}"),
+                                found: format!("{left_val:?}, {right_val:?}"),
                             });
                         }
                     }
@@ -383,13 +383,13 @@ impl VirtualMachine {
                     let val_a = unsafe { *reg_base.add(inst.src1() as usize) };
                     let val_b = unsafe { *reg_base.add(inst.src2() as usize) };
                     match (val_a, val_b) {
-                        (Value::F64(x), Value::F64(y)) => unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(x / y);
+                        (Value::F64(left_val), Value::F64(right_val)) => unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val / right_val);
                         },
-                        (x, y) => {
+                        (left_val, right_val) => {
                             return Err(RuntimeError::TypeMismatch {
                                 expected: "Float64 and Float64".to_string(),
-                                found: format!("{x:?}, {y:?}"),
+                                found: format!("{left_val:?}, {right_val:?}"),
                             });
                         }
                     }
@@ -434,8 +434,8 @@ impl VirtualMachine {
                 OpCode::NegF64 => {
                     let val = unsafe { *reg_base.add(inst.src1() as usize) };
                     match val {
-                        Value::F64(f) => unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(-f);
+                        Value::F64(float_val) => unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(-float_val);
                         },
                         other => {
                             return Err(RuntimeError::TypeMismatch {

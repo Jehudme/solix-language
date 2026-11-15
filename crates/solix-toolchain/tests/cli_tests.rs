@@ -1494,3 +1494,173 @@ class Main {
     let exit_code = run(run_cli).expect("run archive success");
     assert_eq!(exit_code, 99);
 }
+
+#[test]
+fn test_cli_clean_full_and_cache_only() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let build_directory = workspace.root_path().join("build");
+    let cache_directory = build_directory.join(".cache");
+    let release_directory = build_directory.join("release");
+
+    std::fs::create_dir_all(&cache_directory).expect("create cache dir");
+    std::fs::create_dir_all(&release_directory).expect("create release dir");
+
+    let cache_file = cache_directory.join("temp_cache.bin");
+    let release_artifact = release_directory.join("app.slxarc");
+    std::fs::write(&cache_file, b"cached_bytes").expect("write cache file");
+    std::fs::write(&release_artifact, b"release_archive_bytes").expect("write artifact");
+
+    assert!(cache_file.exists());
+    assert!(release_artifact.exists());
+
+    // 1. Test clean --cache-only
+    let clean_cache_cli = Cli::try_parse_from([
+        "solix",
+        "clean",
+        workspace.root_path().to_str().expect("valid path"),
+        "--cache-only",
+    ])
+    .expect("parse clean cache-only");
+    assert_eq!(run(clean_cache_cli).expect("clean cache-only success"), 0);
+
+    assert!(!cache_directory.exists());
+    assert!(release_artifact.exists());
+    assert!(build_directory.exists());
+
+    // 2. Test full clean
+    let clean_full_cli = Cli::try_parse_from([
+        "solix",
+        "clean",
+        workspace.root_path().to_str().expect("valid path"),
+    ])
+    .expect("parse clean full");
+    assert_eq!(run(clean_full_cli).expect("clean full success"), 0);
+
+    assert!(!build_directory.exists());
+
+    // 3. Test clean when build/ does not exist (idempotent noop)
+    let clean_noop_cli = Cli::try_parse_from([
+        "solix",
+        "clean",
+        workspace.root_path().to_str().expect("valid path"),
+    ])
+    .expect("parse clean noop");
+    assert_eq!(run(clean_noop_cli).expect("clean noop success"), 0);
+}
+
+#[test]
+fn test_cli_info_enriched_fields() {
+    use solix_common::project::SlxarcArchive;
+
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let stage_directory = workspace.root_path().join("stage_info_enriched");
+    let bin_directory = stage_directory.join("bin");
+    let lib_linux_directory = stage_directory.join("lib").join("linux-x86_64");
+    let lib_macos_directory = stage_directory.join("lib").join("macos-arm64");
+
+    std::fs::create_dir_all(&bin_directory).expect("create bin dir");
+    std::fs::create_dir_all(&lib_linux_directory).expect("create linux lib dir");
+    std::fs::create_dir_all(&lib_macos_directory).expect("create macos lib dir");
+
+    let manifest_toml = r#"
+[info]
+name = "enriched_pkg"
+version = "3.2.1"
+description = "Enriched diagnostic test package"
+
+[entrypoints]
+main = "Main::main"
+"#;
+    std::fs::write(stage_directory.join("manifest.toml"), manifest_toml).expect("write manifest");
+
+    let source_path = workspace
+        .write_file(
+            "enriched_entry.slx",
+            r#"
+class Main {
+    public static int32 main() {
+        return 0;
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+    let bin_path = bin_directory.join("enriched_pkg.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().expect("valid path"),
+        "-o",
+        bin_path.to_str().expect("valid path"),
+    ])
+    .expect("parse compile");
+    assert_eq!(run(compile_cli).expect("compile success"), 0);
+
+    std::fs::write(
+        lib_linux_directory.join("libnative.so"),
+        b"sample_linux_native",
+    )
+    .expect("write linux lib");
+    std::fs::write(
+        lib_macos_directory.join("libnative.dylib"),
+        b"sample_macos_native",
+    )
+    .expect("write macos lib");
+
+    let archive_path = workspace.file_path("enriched_pkg.slxarc");
+    SlxarcArchive::pack_directory(&stage_directory, &archive_path).expect("pack slxarc");
+    assert!(archive_path.exists());
+
+    // 1. Check JSON format inspection
+    let json_output_path = workspace.file_path("enriched_info.json");
+    let info_json_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        archive_path.to_str().expect("valid path"),
+        "--json",
+        "-o",
+        json_output_path.to_str().expect("valid path"),
+    ])
+    .expect("parse info json");
+    assert_eq!(run(info_json_cli).expect("info json success"), 0);
+
+    let json_content = std::fs::read_to_string(&json_output_path).expect("read json");
+    let parsed_json: serde_json::Value = serde_json::from_str(&json_content).expect("parse json");
+
+    assert!(parsed_json["file_size_bytes"].as_u64().unwrap_or(0) > 0);
+    assert!(
+        !parsed_json["file_size_formatted"]
+            .as_str()
+            .unwrap_or("")
+            .is_empty()
+    );
+
+    let platforms_array = parsed_json["bundled_platforms"]
+        .as_array()
+        .expect("platforms array");
+    let platform_names: Vec<String> = platforms_array
+        .iter()
+        .map(|item| item.as_str().unwrap_or("").to_string())
+        .collect();
+    assert!(platform_names.contains(&"linux-x86_64".to_string()));
+    assert!(platform_names.contains(&"macos-arm64".to_string()));
+
+    // 2. Check text format output
+    let text_output_path = workspace.file_path("enriched_info.txt");
+    let info_text_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        archive_path.to_str().expect("valid path"),
+        "-o",
+        text_output_path.to_str().expect("valid path"),
+    ])
+    .expect("parse info text");
+    assert_eq!(run(info_text_cli).expect("info text success"), 0);
+
+    let text_content = std::fs::read_to_string(&text_output_path).expect("read text");
+    assert!(text_content.contains("File Size:"));
+    assert!(text_content.contains("Platforms:"));
+    assert!(text_content.contains("linux-x86_64, macos-arm64"));
+    assert!(text_content.contains("Exported Symbols:"));
+}

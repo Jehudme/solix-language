@@ -4,7 +4,8 @@
 
 use crate::cache::FilesystemPackageCache;
 use crate::cli::InfoArgs;
-use crate::registry::PackageRegistry;
+use crate::commands::clean::format_human_size;
+use crate::registry::{PackageRecord, PackageRegistry};
 use crate::solver::resolve_package_store_dir;
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
@@ -26,13 +27,27 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
 
     // Resolve target: check filesystem first, then installed package registry
-    let target_path: PathBuf = if args.target.exists() {
-        args.target.clone()
+    let (target_path, resolved_record): (PathBuf, Option<PackageRecord>) = if args.target.exists() {
+        let registry = PackageRegistry::load_or_sync(&store_directory).ok();
+        let canonical_target = args
+            .target
+            .canonicalize()
+            .unwrap_or_else(|_| args.target.clone());
+        let record = registry.and_then(|reg| {
+            reg.packages.into_iter().find(|pkg_record| {
+                pkg_record
+                    .artifact_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| pkg_record.artifact_path.clone())
+                    == canonical_target
+            })
+        });
+        (args.target.clone(), record)
     } else {
         let registry = PackageRegistry::load_or_sync(&store_directory)?;
         let target_str = args.target.to_string_lossy();
 
-        let resolved_record = if target_str.contains('@') {
+        let found_record = if target_str.contains('@') {
             let mut parts = target_str.splitn(2, '@');
             let package_name = parts.next().unwrap_or("");
             let package_version = parts.next().unwrap_or("");
@@ -41,8 +56,8 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             registry.get(&target_str, None)
         };
 
-        if let Some(record) = resolved_record {
-            record.artifact_path.clone()
+        if let Some(record) = found_record {
+            (record.artifact_path.clone(), Some(record.clone()))
         } else {
             bail!(
                 "Target '{}' was not found as a file or registered package in '{}'",
@@ -51,6 +66,11 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             );
         }
     };
+
+    let file_size_bytes = fs::metadata(&target_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let formatted_file_size = format_human_size(file_size_bytes);
 
     let is_archive = target_path
         .extension()
@@ -67,6 +87,51 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         })?;
 
         let computed_sha256 = sha256_file(&target_path).unwrap_or_default();
+
+        let detected_profile = resolved_record
+            .as_ref()
+            .map(|record| record.build_profile.clone())
+            .filter(|profile_str| !profile_str.is_empty())
+            .or_else(|| {
+                inspection
+                    .binaries
+                    .iter()
+                    .find(|(_, program)| !program.build_profile.is_empty())
+                    .map(|(_, program)| program.build_profile.clone())
+            })
+            .unwrap_or_else(|| "unspecified".to_string());
+
+        let source_directory = resolved_record
+            .as_ref()
+            .and_then(|record| record.source.as_ref())
+            .map(|path| path.display().to_string());
+
+        let mut bundled_platforms: Vec<String> = Vec::new();
+        for entry in &inspection.file_entries {
+            let clean_path = entry.path.trim_start_matches('/');
+            if let Some(rest) = clean_path.strip_prefix("lib/") {
+                let mut segments = rest.split('/');
+                if let Some(target_platform) = segments.next()
+                    && !target_platform.is_empty()
+                    && (rest.contains('/') || entry.is_directory)
+                {
+                    let target_string = target_platform.to_string();
+                    if !bundled_platforms.contains(&target_string) {
+                        bundled_platforms.push(target_string);
+                    }
+                }
+            }
+        }
+        bundled_platforms.sort();
+
+        let total_exported_symbols: usize = inspection
+            .binaries
+            .iter()
+            .map(|(_, program)| {
+                program.export_manifest.exported_functions.len()
+                    + program.export_manifest.exported_classes.len()
+            })
+            .sum();
 
         // Check authenticated extraction cache status
         let cache = FilesystemPackageCache::new();
@@ -118,6 +183,12 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
 
             let json_value = serde_json::json!({
                 "archive": target_path.display().to_string(),
+                "file_size_bytes": file_size_bytes,
+                "file_size_formatted": formatted_file_size,
+                "build_profile": detected_profile,
+                "source_directory": source_directory,
+                "bundled_platforms": bundled_platforms,
+                "exported_symbols_count": total_exported_symbols,
                 "sha256": computed_sha256,
                 "cache_status": cache_status,
                 "manifest": inspection.manifest,
@@ -146,7 +217,18 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             });
             serde_json::to_string_pretty(&json_value)?
         } else {
-            format_slxarc_info_summary(&target_path, &inspection, &computed_sha256, &cache_status)
+            format_slxarc_info_summary(
+                &target_path,
+                &inspection,
+                &computed_sha256,
+                &cache_status,
+                file_size_bytes,
+                &formatted_file_size,
+                &detected_profile,
+                source_directory.as_deref(),
+                &bundled_platforms,
+                total_exported_symbols,
+            )
         };
 
         if let Some(out_path) = &args.output {
@@ -178,6 +260,26 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         )
     })?;
 
+    let detected_profile = resolved_record
+        .as_ref()
+        .map(|record| record.build_profile.clone())
+        .filter(|profile_str| !profile_str.is_empty())
+        .unwrap_or_else(|| {
+            if !program.build_profile.is_empty() {
+                program.build_profile.clone()
+            } else {
+                "unspecified".to_string()
+            }
+        });
+
+    let source_directory = resolved_record
+        .as_ref()
+        .and_then(|record| record.source.as_ref())
+        .map(|path| path.display().to_string());
+
+    let total_exported_symbols = program.export_manifest.exported_functions.len()
+        + program.export_manifest.exported_classes.len();
+
     let content = if args.disasm {
         disassemble_program(&program)
     } else if args.api {
@@ -194,10 +296,14 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         let json_value = serde_json::json!({
             "target": target_path.display().to_string(),
             "kind": "slxb",
+            "file_size_bytes": file_size_bytes,
+            "file_size_formatted": formatted_file_size,
+            "build_profile": detected_profile,
+            "source_directory": source_directory,
+            "exported_symbols_count": total_exported_symbols,
             "sha256": computed_sha256,
             "package_name": program.package_name,
             "package_version": program.package_version,
-            "build_profile": program.build_profile,
             "description": program.package_description,
             "static_space_size": program.static_space_size,
             "functions_count": program.functions.len(),
@@ -207,7 +313,16 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         });
         serde_json::to_string_pretty(&json_value)?
     } else {
-        format_info_summary(&target_path, &program, &computed_sha256)
+        format_info_summary(
+            &target_path,
+            &program,
+            &computed_sha256,
+            file_size_bytes,
+            &formatted_file_size,
+            &detected_profile,
+            source_directory.as_deref(),
+            total_exported_symbols,
+        )
     };
 
     if let Some(out_path) = &args.output {
@@ -225,32 +340,55 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn format_slxarc_info_summary(
     archive_path: &Path,
     inspection: &SlxarcInspection,
     sha256_digest: &str,
     cache_status: &str,
+    file_size_bytes: u64,
+    formatted_file_size: &str,
+    build_profile: &str,
+    source_directory: Option<&str>,
+    bundled_platforms: &[String],
+    total_exported_symbols: usize,
 ) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "=== Solix Archive Container Inspection (.slxarc) ===");
-    let _ = writeln!(out, "Archive:      {}", archive_path.display());
-    let _ = writeln!(out, "SHA-256:      {sha256_digest}");
-    let _ = writeln!(out, "Cache Status: {cache_status}");
+    let _ = writeln!(out, "Archive:          {}", archive_path.display());
+    let _ = writeln!(
+        out,
+        "File Size:        {formatted_file_size} ({file_size_bytes} bytes)"
+    );
+    let _ = writeln!(out, "SHA-256:          {sha256_digest}");
+    let _ = writeln!(out, "Build Profile:    {build_profile}");
+    if let Some(source_path) = source_directory {
+        let _ = writeln!(out, "Source Dir:       {source_path}");
+    }
+    if !bundled_platforms.is_empty() {
+        let _ = writeln!(out, "Platforms:        {}", bundled_platforms.join(", "));
+    }
+    let _ = writeln!(out, "Exported Symbols: {total_exported_symbols}");
+    let _ = writeln!(out, "Cache Status:     {cache_status}");
 
     if let Some(manifest) = &inspection.manifest {
         let _ = writeln!(
             out,
-            "Package:      {} v{}",
+            "Package:          {} v{}",
             manifest.info.name, manifest.info.version
         );
         if let Some(description) = &manifest.info.description {
-            let _ = writeln!(out, "Description:  {description}");
+            let _ = writeln!(out, "Description:      {description}");
         }
         if let Some(license) = &manifest.info.license {
-            let _ = writeln!(out, "License:      {license}");
+            let _ = writeln!(out, "License:          {license}");
         }
         if !manifest.info.authors.is_empty() {
-            let _ = writeln!(out, "Authors:      {}", manifest.info.authors.join(", "));
+            let _ = writeln!(
+                out,
+                "Authors:          {}",
+                manifest.info.authors.join(", ")
+            );
         }
         let _ = writeln!(out, "\n--- Entry Points ---");
         let _ = writeln!(
@@ -275,7 +413,7 @@ fn format_slxarc_info_summary(
             }
         }
     } else {
-        let _ = writeln!(out, "Manifest:     <none>");
+        let _ = writeln!(out, "Manifest:         <none>");
     }
 
     let _ = writeln!(
@@ -321,11 +459,25 @@ fn format_slxarc_info_summary(
     out
 }
 
-fn format_info_summary(binary_path: &Path, program: &BinaryProgram, sha256_digest: &str) -> String {
+#[allow(clippy::too_many_arguments)]
+fn format_info_summary(
+    binary_path: &Path,
+    program: &BinaryProgram,
+    sha256_digest: &str,
+    file_size_bytes: u64,
+    formatted_file_size: &str,
+    build_profile: &str,
+    source_directory: Option<&str>,
+    total_exported_symbols: usize,
+) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "=== Solix Binary Container Inspection (.slxb) ===");
-    let _ = writeln!(out, "Binary:       {}", binary_path.display());
-    let _ = writeln!(out, "SHA-256:      {sha256_digest}");
+    let _ = writeln!(out, "Binary:           {}", binary_path.display());
+    let _ = writeln!(
+        out,
+        "File Size:        {formatted_file_size} ({file_size_bytes} bytes)"
+    );
+    let _ = writeln!(out, "SHA-256:          {sha256_digest}");
 
     let pkg_name = if program.package_name.is_empty() {
         "<unnamed>"
@@ -337,19 +489,18 @@ fn format_info_summary(binary_path: &Path, program: &BinaryProgram, sha256_diges
     } else {
         &program.package_version
     };
-    let profile_str = if !program.build_profile.is_empty() {
-        &program.build_profile
-    } else {
-        "unspecified"
-    };
 
-    let _ = writeln!(out, "Package:      {pkg_name} v{pkg_ver}");
-    let _ = writeln!(out, "Profile:      {profile_str}");
+    let _ = writeln!(out, "Package:          {pkg_name} v{pkg_ver}");
+    let _ = writeln!(out, "Build Profile:    {build_profile}");
+    if let Some(source_path) = source_directory {
+        let _ = writeln!(out, "Source Dir:       {source_path}");
+    }
+    let _ = writeln!(out, "Exported Symbols: {total_exported_symbols}");
     if !program.package_description.is_empty() {
-        let _ = writeln!(out, "Description:  {}", program.package_description);
+        let _ = writeln!(out, "Description:      {}", program.package_description);
     }
 
-    let _ = writeln!(out, "Static Space: {} bytes", program.static_space_size);
+    let _ = writeln!(out, "Static Space:     {} bytes", program.static_space_size);
 
     if !program.native_library_checksums.is_empty() {
         let _ = writeln!(
