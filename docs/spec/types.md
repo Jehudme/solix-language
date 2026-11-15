@@ -75,6 +75,16 @@ uint8 → uint16 → uint32 → uint64
 
 Each step zero-extends the value.
 
+### Unsigned-to-Larger-Signed Widening Chain
+
+```
+uint8  → int16 | int32 | int64
+uint16 → int32 | int64
+uint32 → int64
+```
+
+Because the target signed integer type has strictly more bits than the source unsigned type, every source value fits without sign inversion or truncation.
+
 ### Float Widening
 
 ```
@@ -85,12 +95,40 @@ The value is converted from IEEE 754 single-precision to double-precision. This 
 
 ### Integer-to-Float Widening
 
-Signed integers up to `int32` widen implicitly to `float64` when required by context. Larger integers (`int64`) require an explicit cast due to potential precision loss (see §3).
+Integers with bit-widths whose representable ranges fit safely within single or double-precision mantissas widen implicitly:
 
 ```
-int8, int16, int32 → float64   (implicit)
-int64 → float64                (explicit cast required)
+int8, uint8, int16, uint16 → float32 | float64   (implicit)
+int32, uint32              → float64             (implicit)
+int64, uint64              → float32 | float64   (explicit cast required)
+int32, uint32              → float32             (explicit cast required)
 ```
+
+### 2.1 Implicit Numeric Literal Coercion
+
+In addition to expression widening, Solix supports **context-typed numeric literal coercion**. Unsuffixed integer literals (`100`), negated integer literals (`-100`), and floating-point literals (`0.5`) coerce implicitly to their expected target type whenever the value fits within the target type's representable bounds:
+
+1. **Integer Literals**:
+   - `int8`: $[-128, 127]$
+   - `uint8`: $[0, 255]$
+   - `int16`: $[-32768, 32767]$
+   - `uint16`: $[0, 65535]$
+   - `int32`: $[-2147483648, 2147483647]$
+   - `uint32`: $[0, 4294967295]$
+   - `int64` / `uint64`: 64-bit bounds
+   - `float32` / `float64`: converted to floating-point value.
+   Out-of-range integer literals trigger compile-time error `E0203` (Type Mismatch).
+
+2. **Float Literals**:
+   - Unsuffixed floating-point literals (e.g. `345.0`, `0.05`) implicitly coerce to `float32` when context expects `float32`, and default to `float64` when unconstrained.
+
+3. **Coercion Contexts**:
+   - Variable declarations: `uint8 flag = 255;`, `float32 speed = 520.0;`
+   - Field initializers: `public uint8 r = 0;`
+   - Call & constructor arguments: `new Color(18, 20, 30, 255);`, `new Vector2(100.0, 200.0);`
+   - Return statements: `return 0;` inside `int64` or `float32` functions.
+   - Array literals: `float32[] list = [1.0, 2.5, 3.0];`
+   - Binary arithmetic & comparisons: `paddle_speed * delta_seconds` with `float32` variables and literals (`pos_x + 24.0`, `color.r == 255`).
 
 ### Widening at Assignments and Call Sites
 

@@ -363,7 +363,9 @@ pub fn execute_sync(args: SyncArgs) -> Result<()> {
             }
         }
         if targets_to_sync.is_empty() {
-            println!("No registered packages with source project directories found to synchronize.");
+            println!(
+                "No registered packages with source project directories found to synchronize."
+            );
             return Ok(());
         }
     } else if let Some(ref target_name) = args.package {
@@ -420,14 +422,14 @@ pub fn execute_sync(args: SyncArgs) -> Result<()> {
             continue;
         }
 
-        let effective_profile = args
-            .profile
-            .as_deref()
-            .unwrap_or(if !record.build_profile.is_empty() {
-                &record.build_profile
-            } else {
-                "release"
-            });
+        let effective_profile =
+            args.profile
+                .as_deref()
+                .unwrap_or(if !record.build_profile.is_empty() {
+                    &record.build_profile
+                } else {
+                    "release"
+                });
 
         println!(
             "Synchronizing '{}@{}' from '{}' (profile: {effective_profile})...",
@@ -575,9 +577,8 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
     }
 
     if let Some(ref kind_filter) = args.kind {
-        filtered_packages.retain(|package_record| {
-            package_record.kind.eq_ignore_ascii_case(kind_filter)
-        });
+        filtered_packages
+            .retain(|package_record| package_record.kind.eq_ignore_ascii_case(kind_filter));
     }
 
     match args.sort.to_ascii_lowercase().as_str() {

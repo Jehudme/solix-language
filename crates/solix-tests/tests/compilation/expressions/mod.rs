@@ -9,6 +9,7 @@ pub mod test_cast_expression;
 pub mod test_default_expression;
 pub mod test_function_pointers;
 pub mod test_identifier_node;
+pub mod test_implicit_numeric_coercion;
 pub mod test_instanceof_expression;
 pub mod test_intrinsics;
 pub mod test_lambdas;

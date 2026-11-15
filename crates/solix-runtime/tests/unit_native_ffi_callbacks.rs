@@ -235,10 +235,12 @@ fn test_ffi_object_allocation_and_u64_fields() {
 
     let target_vtable_id: u32 = 42;
     let field_slot_count: u32 = 4;
-    let object_address = unsafe {
-        (context_wrapper.alloc_object)(context_ptr, target_vtable_id, field_slot_count)
-    };
-    assert_ne!(object_address, 0, "Object allocation must return non-zero address");
+    let object_address =
+        unsafe { (context_wrapper.alloc_object)(context_ptr, target_vtable_id, field_slot_count) };
+    assert_ne!(
+        object_address, 0,
+        "Object allocation must return non-zero address"
+    );
 
     // Write 64-bit field values at indices 0, 1, 2, 3
     unsafe {
@@ -271,7 +273,12 @@ fn test_ffi_get_class_vtable_id_lookup() {
     let mut binary_program = BinaryProgram::new();
     binary_program
         .classes
-        .push(solix_common::CompiledClass::new("models::Vector2", 105, None, 16));
+        .push(solix_common::CompiledClass::new(
+            "models::Vector2",
+            105,
+            None,
+            16,
+        ));
     binary_program
         .classes
         .push(solix_common::CompiledClass::new("Color", 106, None, 16));
@@ -313,8 +320,7 @@ fn test_ffi_get_class_vtable_id_lookup() {
         unsafe { (context_wrapper.get_class_vtable_id)(context_ptr, c"Color".as_ptr()) };
     assert_eq!(color_vtable, 106);
 
-    let unknown_vtable = unsafe {
-        (context_wrapper.get_class_vtable_id)(context_ptr, c"NonExistentClass".as_ptr())
-    };
+    let unknown_vtable =
+        unsafe { (context_wrapper.get_class_vtable_id)(context_ptr, c"NonExistentClass".as_ptr()) };
     assert_eq!(unknown_vtable, 0);
 }

@@ -7,12 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Compile-time embedded copy of `init_project.py`.
-pub const EMBEDDED_INIT_PROJECT_SCRIPT: &str =
-    include_str!("../assets/scripts/init_project.py");
+pub const EMBEDDED_INIT_PROJECT_SCRIPT: &str = include_str!("../assets/scripts/init_project.py");
 
 /// Compile-time embedded copy of `solix_toolbox.py`.
-pub const EMBEDDED_SOLIX_TOOLBOX_SCRIPT: &str =
-    include_str!("../assets/scripts/solix_toolbox.py");
+pub const EMBEDDED_SOLIX_TOOLBOX_SCRIPT: &str = include_str!("../assets/scripts/solix_toolbox.py");
 
 /// Resolves the filesystem path to `init_project.py`.
 ///
@@ -33,7 +31,10 @@ pub fn resolve_init_project_script_path() -> Result<PathBuf> {
         .ok()
         .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
     {
-        let candidate = exe_dir.join("assets").join("scripts").join("init_project.py");
+        let candidate = exe_dir
+            .join("assets")
+            .join("scripts")
+            .join("init_project.py");
         if candidate.exists() {
             return Ok(candidate);
         }
@@ -58,13 +59,15 @@ fn materialize_embedded_scripts() -> Result<PathBuf> {
 
     // Write scripts if missing or updated
     if !init_path.exists()
-        || fs::read_to_string(&init_path).map_or(true, |content| content != EMBEDDED_INIT_PROJECT_SCRIPT)
+        || fs::read_to_string(&init_path)
+            .map_or(true, |content| content != EMBEDDED_INIT_PROJECT_SCRIPT)
     {
         fs::write(&init_path, EMBEDDED_INIT_PROJECT_SCRIPT)?;
     }
 
     if !toolbox_path.exists()
-        || fs::read_to_string(&toolbox_path).map_or(true, |content| content != EMBEDDED_SOLIX_TOOLBOX_SCRIPT)
+        || fs::read_to_string(&toolbox_path)
+            .map_or(true, |content| content != EMBEDDED_SOLIX_TOOLBOX_SCRIPT)
     {
         fs::write(&toolbox_path, EMBEDDED_SOLIX_TOOLBOX_SCRIPT)?;
     }

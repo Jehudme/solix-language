@@ -21,8 +21,5 @@ pub async fn run_dap_server(
     port: Option<u16>,
     project_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    tokio::task::spawn_blocking(move || {
-        server::run_dap_server_blocking(port, project_path)
-    })
-    .await?
+    tokio::task::spawn_blocking(move || server::run_dap_server_blocking(port, project_path)).await?
 }

@@ -57,9 +57,7 @@ pub enum SteppingState {
         start_line_number: u32,
     },
     /// Step Out: advance until call depth is strictly less than target depth.
-    StepOut {
-        target_call_depth: usize,
-    },
+    StepOut { target_call_depth: usize },
 }
 
 /// Internal classification of variable references exposed to VS Code.

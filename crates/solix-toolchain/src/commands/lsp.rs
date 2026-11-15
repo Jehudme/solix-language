@@ -3,7 +3,7 @@
 #![forbid(unsafe_code)]
 
 use crate::cli::LspArgs;
-use crate::solver::{resolve_package_store_dir, ClientModuleSolver};
+use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use std::sync::Arc;
 
 /// Runs the language server over stdio.

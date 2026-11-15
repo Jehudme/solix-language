@@ -476,7 +476,19 @@ impl<'a> Emitter<'a> {
         self.emit_active_finally_blocks()?;
 
         if let Some(val) = &return_stmt.value {
-            let r_val = self.emit_expression(val, None)?;
+            let mut r_val = self.emit_expression(val, None)?;
+            let val_type = self.query_type(val.span());
+            if self.function.return_type.is_floating_point()
+                && (val_type.is_signed_integer() || val_type.is_unsigned_integer())
+            {
+                let converted_reg = self.allocator.alloc_temp()?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                    Some(return_stmt.span),
+                );
+                self.allocator.free_temp(r_val);
+                r_val = converted_reg;
+            }
             if (self.query_type(val.span()).is_reference_type()
                 || matches!(
                     self.query_type(val.span()),
@@ -559,7 +571,19 @@ impl<'a> Emitter<'a> {
         }
 
         if let Some(init) = &var_decl.initializer {
-            self.emit_expression(init, Some(local_reg))?;
+            let init_type = self.query_type(init.span());
+            if var_type.is_floating_point()
+                && (init_type.is_signed_integer() || init_type.is_unsigned_integer())
+            {
+                let temp_reg = self.emit_expression(init, None)?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::ConvIToF, 0, local_reg, temp_reg, 0),
+                    Some(var_decl.span),
+                );
+                self.allocator.free_temp(temp_reg);
+            } else {
+                self.emit_expression(init, Some(local_reg))?;
+            }
             if is_ref && self.is_borrowed_reference(init) {
                 self.emit_instruction(
                     Instruction::format_a(OpCode::IncRef, 0, local_reg, 0, 0),

@@ -292,9 +292,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let mut vm = VirtualMachine::new(context);
     let binary_load_time_us = binary_load_timer.elapsed().as_micros() as u64;
 
-    let entry_id = vm.context.entry_point_function_id.ok_or_else(|| {
-        anyhow::anyhow!("Entry point not found in loaded binaries")
-    })?;
+    let entry_id = vm
+        .context
+        .entry_point_function_id
+        .ok_or_else(|| anyhow::anyhow!("Entry point not found in loaded binaries"))?;
     vm.validate_cli_entry_point(entry_id)
         .map_err(|error| anyhow::anyhow!("Invalid entry point signature: {error}"))?;
 

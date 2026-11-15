@@ -192,11 +192,12 @@ impl VirtualMachine {
     /// # Errors
     /// Returns `RuntimeError::InvalidEntryPointSignature` if any constraint is violated.
     pub fn validate_cli_entry_point(&self, func_id: u32) -> Result<(), RuntimeError> {
-        let func = self.context.get_function(func_id).ok_or_else(|| {
-            RuntimeError::EntryPointNotFound {
-                symbol: format!("#{func_id}"),
-            }
-        })?;
+        let func =
+            self.context
+                .get_function(func_id)
+                .ok_or_else(|| RuntimeError::EntryPointNotFound {
+                    symbol: format!("#{func_id}"),
+                })?;
 
         // Must be public
         if !func.is_public {
@@ -238,7 +239,10 @@ impl VirtualMachine {
                 .cloned()
                 .unwrap_or(Type::Primitive(PrimitiveKind::Void));
             let is_valid_cli_param = match &param_type {
-                Type::Array { element_type, depth } => {
+                Type::Array {
+                    element_type,
+                    depth,
+                } => {
                     if *depth == 1 {
                         matches!(&**element_type, Type::Primitive(PrimitiveKind::Char))
                             || matches!(
@@ -279,11 +283,12 @@ impl VirtualMachine {
         }
 
         let func_id = self.context.resolve_entry_function_id(symbol)?;
-        let func = self.context.get_function(func_id).ok_or_else(|| {
-            RuntimeError::EntryPointNotFound {
-                symbol: symbol.to_string(),
-            }
-        })?;
+        let func =
+            self.context
+                .get_function(func_id)
+                .ok_or_else(|| RuntimeError::EntryPointNotFound {
+                    symbol: symbol.to_string(),
+                })?;
 
         if !func.is_public {
             return Err(RuntimeError::InvalidEntryPointSignature {
@@ -305,11 +310,11 @@ impl VirtualMachine {
                 Type::Class { symbol_name, .. } => {
                     symbol_name == "std.string" || symbol_name == "string"
                 }
-                Type::Array { element_type, depth } if *depth == 1 => {
-                    matches!(
-                        &**element_type,
-                        Type::Primitive(_) | Type::Class { .. }
-                    )
+                Type::Array {
+                    element_type,
+                    depth,
+                } if *depth == 1 => {
+                    matches!(&**element_type, Type::Primitive(_) | Type::Class { .. })
                 }
                 Type::Array { .. } => false,
                 _ => false,

@@ -2,9 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::bytecode::{
-    BinaryProgram, CompiledFunction, Instruction, OpCode,
-};
+use solix_common::bytecode::{BinaryProgram, CompiledFunction, Instruction, OpCode};
 use solix_common::types::{PrimitiveKind, Type};
 use solix_runtime::context::RuntimeContext;
 use solix_runtime::exceptions::RuntimeError;
@@ -75,7 +73,8 @@ fn test_multiple_entrypoints_share_static_state_and_raii_shutdown() {
     binary_program.functions.push(get_function);
 
     let runtime_options = RuntimeOptions::new().with_binary(binary_program);
-    let runtime_context = RuntimeContext::new(runtime_options).expect("Context construction must succeed");
+    let runtime_context =
+        RuntimeContext::new(runtime_options).expect("Context construction must succeed");
     let mut virtual_machine =
         VirtualMachine::new_initialized(runtime_context).expect("VM initialization must succeed");
 
@@ -128,7 +127,8 @@ fn test_non_public_or_non_primitive_entrypoint_rejected() {
     binary_program.functions.push(complex_function);
 
     let runtime_options = RuntimeOptions::new().with_binary(binary_program);
-    let runtime_context = RuntimeContext::new(runtime_options).expect("Context construction must succeed");
+    let runtime_context =
+        RuntimeContext::new(runtime_options).expect("Context construction must succeed");
     let mut virtual_machine =
         VirtualMachine::new_initialized(runtime_context).expect("VM initialization must succeed");
 

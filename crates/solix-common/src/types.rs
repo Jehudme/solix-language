@@ -322,11 +322,15 @@ impl Type {
 
     /// Evaluates if `self` can be implicitly widened to `target` without information loss.
     ///
-    /// Chains defined in SPEC-0001 / `docs/spec/types.md`:
+    /// Chains defined in SPEC-0001 / `docs/internals/specs/language/type-system.md`:
     /// * `int8` -> `int16` -> `int32` -> `int64`
     /// * `uint8` -> `uint16` -> `uint32` -> `uint64`
+    /// * `uint8` -> `int16` | `int32` | `int64`
+    /// * `uint16` -> `int32` | `int64`
+    /// * `uint32` -> `int64`
     /// * `float32` -> `float64`
-    /// * `int8` | `int16` | `int32` -> `float64`
+    /// * `int8` | `uint8` | `int16` | `uint16` -> `float32` | `float64`
+    /// * `int32` | `uint32` -> `float64`
     #[must_use]
     pub fn is_widening_convertible_to(&self, target: &Self) -> bool {
         let unwrapped_source = self.unwrap_alias();
@@ -344,12 +348,16 @@ impl Type {
                     PrimitiveKind::Int16
                         | PrimitiveKind::Int32
                         | PrimitiveKind::Int64
+                        | PrimitiveKind::Float32
                         | PrimitiveKind::Float64,
                 ),
             ) | (
                 Self::Primitive(PrimitiveKind::Int16),
                 Self::Primitive(
-                    PrimitiveKind::Int32 | PrimitiveKind::Int64 | PrimitiveKind::Float64,
+                    PrimitiveKind::Int32
+                        | PrimitiveKind::Int64
+                        | PrimitiveKind::Float32
+                        | PrimitiveKind::Float64,
                 ),
             ) | (
                 Self::Primitive(PrimitiveKind::Int32),
@@ -357,14 +365,30 @@ impl Type {
             ) | (
                 Self::Primitive(PrimitiveKind::UInt8),
                 Self::Primitive(
-                    PrimitiveKind::UInt16 | PrimitiveKind::UInt32 | PrimitiveKind::UInt64,
+                    PrimitiveKind::UInt16
+                        | PrimitiveKind::UInt32
+                        | PrimitiveKind::UInt64
+                        | PrimitiveKind::Int16
+                        | PrimitiveKind::Int32
+                        | PrimitiveKind::Int64
+                        | PrimitiveKind::Float32
+                        | PrimitiveKind::Float64,
                 ),
             ) | (
                 Self::Primitive(PrimitiveKind::UInt16),
-                Self::Primitive(PrimitiveKind::UInt32 | PrimitiveKind::UInt64),
+                Self::Primitive(
+                    PrimitiveKind::UInt32
+                        | PrimitiveKind::UInt64
+                        | PrimitiveKind::Int32
+                        | PrimitiveKind::Int64
+                        | PrimitiveKind::Float32
+                        | PrimitiveKind::Float64,
+                ),
             ) | (
                 Self::Primitive(PrimitiveKind::UInt32),
-                Self::Primitive(PrimitiveKind::UInt64),
+                Self::Primitive(
+                    PrimitiveKind::UInt64 | PrimitiveKind::Int64 | PrimitiveKind::Float64,
+                ),
             ) | (
                 Self::Primitive(PrimitiveKind::Float32),
                 Self::Primitive(PrimitiveKind::Float64),
@@ -662,19 +686,52 @@ mod tests {
         let int16_type = Type::Primitive(PrimitiveKind::Int16);
         let int32_type = Type::Primitive(PrimitiveKind::Int32);
         let int64_type = Type::Primitive(PrimitiveKind::Int64);
+        let uint8_type = Type::Primitive(PrimitiveKind::UInt8);
+        let uint16_type = Type::Primitive(PrimitiveKind::UInt16);
+        let uint32_type = Type::Primitive(PrimitiveKind::UInt32);
+        let uint64_type = Type::Primitive(PrimitiveKind::UInt64);
         let float64_type = Type::Primitive(PrimitiveKind::Float64);
         let float32_type = Type::Primitive(PrimitiveKind::Float32);
 
+        // Signed chain
         assert!(int8_type.is_widening_convertible_to(&int16_type));
         assert!(int8_type.is_widening_convertible_to(&int32_type));
         assert!(int8_type.is_widening_convertible_to(&int64_type));
+        assert!(int8_type.is_widening_convertible_to(&float32_type));
         assert!(int8_type.is_widening_convertible_to(&float64_type));
+        assert!(int16_type.is_widening_convertible_to(&float32_type));
         assert!(int32_type.is_widening_convertible_to(&float64_type));
         assert!(float32_type.is_widening_convertible_to(&float64_type));
 
-        // Negative: int64 cannot implicitly widen to int32 (narrowing)
+        // Unsigned chain
+        assert!(uint8_type.is_widening_convertible_to(&uint16_type));
+        assert!(uint8_type.is_widening_convertible_to(&uint32_type));
+        assert!(uint8_type.is_widening_convertible_to(&uint64_type));
+        assert!(uint8_type.is_widening_convertible_to(&int16_type));
+        assert!(uint8_type.is_widening_convertible_to(&int32_type));
+        assert!(uint8_type.is_widening_convertible_to(&int64_type));
+        assert!(uint8_type.is_widening_convertible_to(&float32_type));
+        assert!(uint8_type.is_widening_convertible_to(&float64_type));
+
+        assert!(uint16_type.is_widening_convertible_to(&uint32_type));
+        assert!(uint16_type.is_widening_convertible_to(&uint64_type));
+        assert!(uint16_type.is_widening_convertible_to(&int32_type));
+        assert!(uint16_type.is_widening_convertible_to(&int64_type));
+        assert!(uint16_type.is_widening_convertible_to(&float32_type));
+        assert!(uint16_type.is_widening_convertible_to(&float64_type));
+
+        assert!(uint32_type.is_widening_convertible_to(&uint64_type));
+        assert!(uint32_type.is_widening_convertible_to(&int64_type));
+        assert!(uint32_type.is_widening_convertible_to(&float64_type));
+
+        // Negative: narrowing conversions
         assert!(!int64_type.is_widening_convertible_to(&int32_type));
         assert!(int64_type.is_narrowing_convertible_to(&int32_type));
+        assert!(!uint8_type.is_widening_convertible_to(&int8_type));
+        assert!(!uint16_type.is_widening_convertible_to(&int16_type));
+        assert!(!uint32_type.is_widening_convertible_to(&int32_type));
+        assert!(!int64_type.is_widening_convertible_to(&float64_type));
+        assert!(!float64_type.is_widening_convertible_to(&float32_type));
     }
 
     #[test]

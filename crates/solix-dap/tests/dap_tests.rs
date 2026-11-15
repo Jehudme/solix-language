@@ -4,8 +4,8 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use solix_common::bytecode::BinaryProgram;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
@@ -50,8 +50,7 @@ fn test_variable_reference_manager_lifecycle() {
     reference_manager.reset_transient_references();
     assert_eq!(reference_manager.resolve_reference(first_ref), None);
 
-    let reused_first_ref =
-        reference_manager.allocate_reference(VariableScopeType::FrameLocals(1));
+    let reused_first_ref = reference_manager.allocate_reference(VariableScopeType::FrameLocals(1));
     assert_eq!(reused_first_ref, 1000);
 }
 
@@ -70,8 +69,7 @@ fn test_evaluator_literals_and_arithmetic() {
         evaluate_expression_in_frame("false", &virtual_machine, 0).expect("Evaluate false");
     assert_eq!(bool_false_result, Value::Bool(false));
 
-    let int_result =
-        evaluate_expression_in_frame("42", &virtual_machine, 0).expect("Evaluate 42");
+    let int_result = evaluate_expression_in_frame("42", &virtual_machine, 0).expect("Evaluate 42");
     assert_eq!(int_result, Value::I32(42));
 
     // Binary arithmetic
@@ -159,8 +157,8 @@ fn test_controller_stepping_state_transitions() {
 fn test_exact_breakpoint_resolution_and_locals_inspection() {
     let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../editors/vscode/sample_workspace/src/main.slx");
-    let source_content = fs::read_to_string(&source_path)
-        .expect("Read sample_workspace/src/main.slx");
+    let source_content =
+        fs::read_to_string(&source_path).expect("Read sample_workspace/src/main.slx");
 
     let compilation_options = CompilationOptions::new()
         .with_profile(solix_compilation::BuildProfile::Debug)
@@ -201,7 +199,9 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         let main_function = deserialized_program
             .functions
             .iter()
-            .find(|candidate_func| candidate_func.symbol == "main" || candidate_func.symbol.ends_with("::main"))
+            .find(|candidate_func| {
+                candidate_func.symbol == "main" || candidate_func.symbol.ends_with("::main")
+            })
             .expect("Find main function");
         assert!(!main_function.source_map.is_empty());
         assert!(!main_function.local_variables.is_empty());
@@ -342,4 +342,3 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         .expect("Locals must contain static_result after stepping line 47");
     assert_eq!(static_result_entry.2, Value::I32(100));
 }
-

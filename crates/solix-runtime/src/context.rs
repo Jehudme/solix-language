@@ -165,7 +165,8 @@ impl RuntimeContext {
                 if class.symbol.starts_with("blt::") || class.symbol.starts_with("blt.") {
                     continue;
                 }
-                let is_generic_instantiation = class.symbol.contains('<') && class.symbol.contains('>');
+                let is_generic_instantiation =
+                    class.symbol.contains('<') && class.symbol.contains('>');
                 let is_generic_template = generic_template_names.iter().any(|template_name| {
                     &class.symbol == template_name
                         || class.symbol.ends_with(&format!("::{template_name}"))
@@ -189,7 +190,8 @@ impl RuntimeContext {
 
             // Check duplicate functions across modules
             for func in &binary.functions {
-                let is_built_in = func.symbol.starts_with("blt::") || func.symbol.starts_with("blt.");
+                let is_built_in =
+                    func.symbol.starts_with("blt::") || func.symbol.starts_with("blt.");
                 if is_built_in {
                     continue;
                 }
@@ -197,9 +199,12 @@ impl RuntimeContext {
                     || func.symbol.starts_with("__static_init")
                     || func.symbol.starts_with("<entry_")
                     || func.symbol.starts_with("<lambda_");
-                let is_generic_instantiation = func.symbol.contains('<') && func.symbol.contains('>');
+                let is_generic_instantiation =
+                    func.symbol.contains('<') && func.symbol.contains('>');
                 let is_generic_template = generic_template_names.contains(&func.symbol)
-                    || generic_template_names.iter().any(|template_name| func.symbol.starts_with(template_name));
+                    || generic_template_names
+                        .iter()
+                        .any(|template_name| func.symbol.starts_with(template_name));
                 if !is_synthetic && !is_generic_instantiation && !is_generic_template {
                     if let Some(first_module) = defined_functions.get(&func.symbol) {
                         if first_module != &binary_label {
@@ -897,7 +902,10 @@ fn verify_and_resolve_runtime_dependencies(
                         return Err(RuntimeError::DependencyError {
                             reason: format!(
                                 "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
-                                requirement.name, requirement.version, requirement.sha256, actual_sha256
+                                requirement.name,
+                                requirement.version,
+                                requirement.sha256,
+                                actual_sha256
                             ),
                         });
                     } else {
@@ -930,7 +938,10 @@ fn verify_and_resolve_runtime_dependencies(
                                 return Err(RuntimeError::DependencyError {
                                     reason: format!(
                                         "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
-                                        requirement.name, requirement.version, requirement.sha256, actual_sha256
+                                        requirement.name,
+                                        requirement.version,
+                                        requirement.sha256,
+                                        actual_sha256
                                     ),
                                 });
                             } else {
