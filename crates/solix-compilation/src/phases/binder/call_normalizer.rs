@@ -247,10 +247,13 @@ fn normalize_arguments_list(
         }
     } else if arguments.len() < declared_count {
         let start_index = arguments.len();
-        for parameter_index in start_index..declared_count {
-            if let Some(ref default_expression) =
-                candidate.parameters[parameter_index].default_value
-            {
+        for parameter in candidate
+            .parameters
+            .iter()
+            .take(declared_count)
+            .skip(start_index)
+        {
+            if let Some(ref default_expression) = parameter.default_value {
                 arguments.push(default_expression.clone());
             }
         }

@@ -18,13 +18,15 @@ version = "1.0.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Jehud Metellus"]
+description = "The Solix Programming Language Toolchain"
+repository = "https://github.com/Jehudme/solix-language"
+homepage = "https://github.com/Jehudme/solix-language"
 
 [workspace.dependencies]
 # Internal workspace crates
 solix-common = { path = "crates/solix-common" }
 solix-compilation = { path = "crates/solix-compilation" }
 solix-runtime = { path = "crates/solix-runtime" }
-solix-toolchain = { path = "crates/solix-toolchain" }
 solix-lsp = { path = "crates/solix-lsp" }
 solix-dap = { path = "crates/solix-dap" }
 
@@ -61,8 +63,8 @@ zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [workspace.metadata.dist]
 cargo-dist-version = "0.28.0"
-rust-toolchain-version = "stable"
 ci = "github"
+allow-dirty = ["ci"]
 installers = ["shell", "powershell", "homebrew"]
 targets = [
     "x86_64-unknown-linux-gnu",
@@ -82,3 +84,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

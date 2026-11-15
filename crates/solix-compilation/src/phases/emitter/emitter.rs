@@ -3121,10 +3121,7 @@ impl<'a> Emitter<'a> {
         match expr {
             Expression::Identifier { span } => {
                 let name = self.get_lexeme(*span);
-                if self.function_ids.and_then(|ids| ids.get(name)).is_some() {
-                    return false;
-                }
-                true
+                !self.function_ids.and_then(|ids| ids.get(name)).is_some()
             }
             Expression::MemberAccess {
                 object,
@@ -3134,14 +3131,10 @@ impl<'a> Emitter<'a> {
                 let obj_name = self.get_lexeme(object.span());
                 let member_name = self.get_lexeme(*member_span);
                 let full_sym = format!("{obj_name}::{member_name}");
-                if self
+                !self
                     .function_ids
                     .and_then(|ids| ids.get(&full_sym))
                     .is_some()
-                {
-                    return false;
-                }
-                true
             }
             Expression::ArrayAccess { .. } => true,
             Expression::Cast { expression, .. } => self.is_borrowed_reference(expression),

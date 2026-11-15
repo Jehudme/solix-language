@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release Git tag (e.g. v0.1.0)"
+        description: "Release Git tag (e.g. v1.0.0)"
         required: true
-        default: "v0.1.0"
+        default: "v1.0.0"
 
 permissions:
   contents: write
@@ -75,14 +75,18 @@ jobs:
           path: crates/solix-toolchain/assets/packages/
 
       - name: Install cargo-dist
-        run: cargo install cargo-dist --version 0.28.0 --locked
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build release archives
-        run: cargo dist build --artifacts all
+        run: dist build --artifacts host
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: target/distrib/**/*
           generate_release_notes: true
         env:
