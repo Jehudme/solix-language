@@ -18,7 +18,7 @@ import sys
 TRIGGER_MATRIX = [
     {
         "name": "CLI Subsystem",
-        "pattern": r"^crates/solix-client/src/(cli|commands)/",
+        "pattern": r"^crates/solix-toolchain/src/(cli|commands)/",
         "required_docs": [
             "docs/spec/tools/cli/",
             "docs/wiki/commands/",

@@ -1,4 +1,4 @@
-//! Shared test utilities for hermetic solix-client CLI integration tests.
+//! Shared test utilities for hermetic solix-toolchain CLI integration tests.
 
 #![forbid(unsafe_code)]
 
