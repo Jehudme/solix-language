@@ -85,6 +85,7 @@ fn create_app_binary_requiring(dependency_version: PackageVersion) -> BinaryProg
         dependencies: vec![DependencyRequirement {
             name: "math".to_string(),
             version: dependency_version,
+            profile: None,
             sha256: String::new(),
         }],
         exported_classes: Vec::new(),

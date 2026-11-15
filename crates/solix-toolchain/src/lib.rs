@@ -13,11 +13,12 @@ pub mod telemetry;
 
 pub use cli::{
     BuildArgs, Cli, Commands, CompileArgs, DapArgs, FmtArgs, InfoArgs, InstallArgs, ListArgs,
-    LspArgs, NewArgs, RunArgs, SyncArgs, UninstallArgs,
+    LspArgs, NewArgs, ReinstallArgs, RunArgs, SyncArgs, UninstallArgs,
 };
 pub use commands::{
     execute_build, execute_compile, execute_dap, execute_fmt, execute_info, execute_install,
-    execute_list, execute_lsp, execute_new, execute_run, execute_sync, execute_uninstall,
+    execute_list, execute_lsp, execute_new, execute_reinstall, execute_run, execute_sync,
+    execute_uninstall,
 };
 pub use diagnostics::render_diagnostics;
 pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
@@ -55,8 +56,8 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
             execute_install(args)?;
             Ok(0)
         }
-        Commands::Sync(args) => {
-            execute_sync(args)?;
+        Commands::Reinstall(args) => {
+            execute_reinstall(args)?;
             Ok(0)
         }
         Commands::Uninstall(args) => {

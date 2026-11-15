@@ -32,7 +32,7 @@ solix list [options]
 
 ```text
 Installed Solix Packages (/home/user/.solix/packages):
-NAME             VERSION    KIND    PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE DIR
+NAME             VERSION    KIND    PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE
 ---------------- ---------- ------- -------- ---------- -------------------- --------------- --------------------
 solix            2.0.0      slxarc  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
 raylib           1.2.0      slxarc  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
@@ -55,8 +55,8 @@ solix list --json
     "size_bytes": 698144,
     "installed_at_unix_secs": 1762839894,
     "installed_at_iso8601": "2026-11-11T05:44:54Z",
-    "source_project_dir": "/home/user/solixlib",
-    "artifact_path": "/home/user/.solix/packages/solix/2.0.0/solix.slxarc",
+    "source": "/home/user/solixlib",
+    "artifact_path": "/home/user/.solix/packages/solix-release@2.0.0/solix.slxarc",
     "native_libraries": {
       "lib/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
     },

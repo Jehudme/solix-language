@@ -34,7 +34,37 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         );
     }
 
-    let profile = args.resolved_profile();
+    let manifest_data = solix_common::project::ProjectManifest::from_file(&manifest_path)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let effective_profile = if let Some(ref prof) = args.profile {
+        prof.as_str()
+    } else if args.release {
+        "release"
+    } else if args.test {
+        "test"
+    } else if args.debug {
+        "debug"
+    } else if !manifest_data.build.profile.is_empty() {
+        manifest_data.build.profile.as_str()
+    } else {
+        "debug"
+    };
+
+    let effective_link_mode = if manifest_data.build.link.eq_ignore_ascii_case("static") {
+        "static"
+    } else {
+        "dynamic"
+    };
+
+    let effective_pkg_dir = args.pkg_dir.clone().or_else(|| {
+        if !manifest_data.build.pkg_dir.is_empty() {
+            Some(std::path::PathBuf::from(&manifest_data.build.pkg_dir))
+        } else {
+            None
+        }
+    });
+
     let current_exe = std::env::current_exe().unwrap_or_else(|_| "solix".into());
     let solix_bin = if let Ok(custom_bin) = std::env::var("SOLIX_BIN") {
         std::path::PathBuf::from(custom_bin)
@@ -62,7 +92,7 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
     };
 
     println!(
-        "Building Solix project '{}' (profile: {profile})...",
+        "Building Solix project '{}' (profile: {effective_profile})...",
         project_root.display()
     );
 
@@ -70,15 +100,25 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
     command
         .arg("scripts/build.py")
         .arg("--profile")
-        .arg(profile)
+        .arg(effective_profile)
         .current_dir(&project_root)
-        .env("SOLIX_BIN", solix_bin);
+        .env("SOLIX_BIN", solix_bin)
+        .env("SOLIX_PROFILE", effective_profile)
+        .env("SOLIX_LINK_MODE", effective_link_mode)
+        .env(
+            "SOLIX_INLINE_THRESHOLD",
+            manifest_data.build.inline_threshold.to_string(),
+        )
+        .env(
+            "SOLIX_VERIFY_CHECKSUM",
+            manifest_data.build.verify_checksum.to_string(),
+        );
 
-    if let Some(package_store_directory) = &args.pkg_dir {
+    if let Some(ref package_store_directory) = effective_pkg_dir {
         command.env("SOLIX_PKG_DIR", package_store_directory);
     }
 
-    if args.resolved_link_mode() == solix_compilation::LinkMode::Static {
+    if effective_link_mode == "static" {
         command.env("SOLIX_LINK_MODE", "static");
     }
 
@@ -94,13 +134,13 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         bail!("Build script terminated with non-zero exit code: {exit_code}");
     }
 
-    if args.install {
-        let manifest_data =
-            solix_common::project::ProjectManifest::from_file(project_root.join("manifest.toml"))
-                .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let should_install = args.install || manifest_data.build.install;
+    let force_install = args.force || manifest_data.build.force_install;
+
+    if should_install {
         let archive_candidate = project_root
             .join("build")
-            .join(profile)
+            .join(effective_profile)
             .join(format!("{}.slxarc", manifest_data.info.name));
 
         let archive_path = if archive_candidate.exists() {
@@ -122,9 +162,9 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         crate::commands::pkg::install_package_artifact(
             &archive_path,
             Some(project_root),
-            args.force,
-            Some(profile),
-            args.pkg_dir.as_deref(),
+            force_install,
+            Some(effective_profile),
+            effective_pkg_dir.as_deref(),
         )?;
     }
 

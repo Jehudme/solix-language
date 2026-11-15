@@ -89,16 +89,13 @@ fn test_solix_new_default_application() {
     // Verify build works on this newly generated project
     let build_arguments = BuildArgs {
         path: target_project_directory.clone(),
-        profile: "debug".to_string(),
+        profile: Some("debug".to_string()),
         debug: true,
         release: false,
         test: false,
-        link: "dynamic".to_string(),
-        r#static: false,
         pkg_dir: None,
         install: false,
         force: false,
-        yolo: false,
     };
     let build_result = execute_build(build_arguments);
     assert!(

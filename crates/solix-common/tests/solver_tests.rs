@@ -97,11 +97,49 @@ fn test_dependency_requirement_parsing() {
     let requirement =
         DependencyRequirement::parse("raylib@1.2.0").expect("Parsing requirement must succeed");
     assert_eq!(requirement.name, "raylib");
+    assert_eq!(requirement.profile, None);
     assert_eq!(requirement.version, PackageVersion::new(1, 2, 0));
     assert_eq!(requirement.to_string(), "raylib@1.2.0");
 
+    let debug_requirement = DependencyRequirement::parse("raylib-debug@1.2.0")
+        .expect("Parsing debug requirement must succeed");
+    assert_eq!(debug_requirement.name, "raylib");
+    assert_eq!(debug_requirement.profile.as_deref(), Some("debug"));
+    assert_eq!(debug_requirement.version, PackageVersion::new(1, 2, 0));
+    assert_eq!(debug_requirement.to_string(), "raylib-debug@1.2.0");
+
+    let release_requirement = DependencyRequirement::parse("raylib-release@5.5.0")
+        .expect("Parsing release requirement must succeed");
+    assert_eq!(release_requirement.name, "raylib");
+    assert_eq!(release_requirement.profile.as_deref(), Some("release"));
+    assert_eq!(release_requirement.version, PackageVersion::new(5, 5, 0));
+
+    let hyphenated_requirement = DependencyRequirement::parse("my-cool-package@2.0.0")
+        .expect("Hyphenated package without profile must succeed");
+    assert_eq!(hyphenated_requirement.name, "my-cool-package");
+    assert_eq!(hyphenated_requirement.profile, None);
+    assert_eq!(hyphenated_requirement.version, PackageVersion::new(2, 0, 0));
+
+    let hyphenated_debug_requirement = DependencyRequirement::parse("my-cool-package-debug@2.0.0")
+        .expect("Hyphenated package with debug profile must succeed");
+    assert_eq!(hyphenated_debug_requirement.name, "my-cool-package");
+    assert_eq!(
+        hyphenated_debug_requirement.profile.as_deref(),
+        Some("debug")
+    );
+    assert_eq!(
+        hyphenated_debug_requirement.version,
+        PackageVersion::new(2, 0, 0)
+    );
+
+    let hash_profile_requirement = DependencyRequirement::parse("raylib@1.2.0#release")
+        .expect("Parsing #profile must succeed");
+    assert_eq!(hash_profile_requirement.name, "raylib");
+    assert_eq!(hash_profile_requirement.profile.as_deref(), Some("release"));
+
     assert!(DependencyRequirement::parse("raylib").is_err());
     assert!(DependencyRequirement::parse("@1.2.0").is_err());
+    assert!(DependencyRequirement::parse("-debug@1.2.0").is_err());
     assert!(DependencyRequirement::parse("raylib@1.2").is_err());
 }
 
@@ -228,4 +266,79 @@ math_utils = "2.0.0"
             .map(String::as_str),
         Some("2.0.0")
     );
+}
+
+#[test]
+fn test_project_manifest_build_config_parsing() {
+    let manifest_toml = r#"
+[info]
+name = "breakout"
+version = "0.1.0"
+
+[build]
+profile = "release"
+link = "static"
+pkg_dir = "/custom/pkg"
+install = true
+force_install = true
+verify_checksum = false
+inline_threshold = 12
+"#;
+
+    let project_manifest =
+        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+    assert_eq!(project_manifest.build.profile, "release");
+    assert_eq!(project_manifest.build.link, "static");
+    assert_eq!(project_manifest.build.pkg_dir, "/custom/pkg");
+    assert!(project_manifest.build.install);
+    assert!(project_manifest.build.force_install);
+    assert!(!project_manifest.build.verify_checksum);
+    assert_eq!(project_manifest.build.inline_threshold, 12);
+}
+
+#[test]
+fn test_client_module_solver_profile_fallback() {
+    let temp_dir = std::env::temp_dir().join(format!("solix_test_solver_{}", std::process::id()));
+    let store_dir = temp_dir.join("packages");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&store_dir).expect("create store dir");
+
+    // 1. Create raylib-debug@5.0.0 and raylib-release@5.5.0 in store
+    let debug_dir = store_dir.join("raylib-debug@5.0.0");
+    std::fs::create_dir_all(&debug_dir).expect("create debug dir");
+    let dummy_program = BinaryProgram {
+        package_name: "raylib".to_string(),
+        package_version: "5.0.0".to_string(),
+        build_profile: "debug".to_string(),
+        ..Default::default()
+    };
+    std::fs::write(debug_dir.join("raylib.slxb"), dummy_program.to_bytes())
+        .expect("write debug binary");
+
+    let release_dir = store_dir.join("raylib-release@5.5.0");
+    std::fs::create_dir_all(&release_dir).expect("create release dir");
+    let release_program = BinaryProgram {
+        package_name: "raylib".to_string(),
+        package_version: "5.5.0".to_string(),
+        build_profile: "release".to_string(),
+        ..Default::default()
+    };
+    std::fs::write(release_dir.join("raylib.slxb"), release_program.to_bytes())
+        .expect("write release binary");
+
+    let solver = solix_common::solver::ClientModuleSolver::with_store_dir(store_dir);
+
+    // Resolving without profile must choose release 5.5.0
+    let resolved_default = solver
+        .resolve_compatible("raylib", PackageVersion::new(5, 0, 0))
+        .expect("must resolve release");
+    assert_eq!(resolved_default.version, PackageVersion::new(5, 5, 0));
+
+    // Resolving explicitly for debug must choose debug 5.0.0
+    let resolved_debug = solver
+        .resolve_compatible("raylib-debug", PackageVersion::new(5, 0, 0))
+        .expect("must resolve debug");
+    assert_eq!(resolved_debug.version, PackageVersion::new(5, 0, 0));
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }

@@ -100,7 +100,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         )
         .with_builtins(!args.no_builtins)
         .with_solver(solver)
-        .with_verify_checksums(!args.yolo);
+        .with_verify_checksums(!args.no_verify);
 
     if let Some(entry_sym) = args.entry {
         options = options.with_entry_point(Some(entry_sym));
@@ -192,7 +192,10 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
 
     // 6. Output handling
     if args.check {
-        if args.metrics_json {
+        let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
+        let is_text_metrics = args.metrics.as_deref() == Some("text");
+
+        if is_json_metrics {
             let telemetry = context.telemetry.unwrap_or_default();
             let report = CompileMetricsReport {
                 package_name,
@@ -208,7 +211,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
             let json_output = serde_json::to_string_pretty(&report)
                 .context("Failed to serialize compiler metrics to JSON")?;
             println!("{json_output}");
-        } else if args.metrics {
+        } else if is_text_metrics {
             let telemetry = context.telemetry.unwrap_or_default();
             println!("=== Solix Compiler Metrics ===");
             println!("Package:      {package_name}");
@@ -272,12 +275,16 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
                 api_out_path.display()
             )
         })?;
-        if !args.metrics_json {
+        let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
+        if !is_json_metrics {
             println!("Exported API header -> {}", api_out_path.display());
         }
     }
 
-    if args.metrics_json {
+    let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
+    let is_text_metrics = args.metrics.as_deref() == Some("text");
+
+    if is_json_metrics {
         let telemetry = context.telemetry.unwrap_or_default();
         let report = CompileMetricsReport {
             package_name,
@@ -293,7 +300,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         let json_output = serde_json::to_string_pretty(&report)
             .context("Failed to serialize compiler metrics to JSON")?;
         println!("{json_output}");
-    } else if args.metrics {
+    } else if is_text_metrics {
         let telemetry = context.telemetry.unwrap_or_default();
         println!("=== Solix Compiler Metrics ===");
         println!("Package:      {package_name}");

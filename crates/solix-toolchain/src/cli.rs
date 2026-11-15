@@ -40,8 +40,9 @@ pub enum Commands {
     /// Installs a .slxb or .slxarc package into the local package store
     Install(InstallArgs),
 
-    /// Synchronizes and rebuilds installed packages from their source directories
-    Sync(SyncArgs),
+    /// Reinstalls and rebuilds installed packages from their source directories
+    #[command(name = "reinstall", visible_alias = "sync")]
+    Reinstall(ReinstallArgs),
 
     /// Uninstalls a package or package version from the local package store
     Uninstall(UninstallArgs),
@@ -110,45 +111,33 @@ pub struct BuildArgs {
     #[arg(default_value = ".")]
     pub path: PathBuf,
 
-    /// Target build profile: debug, release, or test
-    #[arg(long, default_value = "debug")]
-    pub profile: String,
+    /// Target build profile override: debug, release, or test
+    #[arg(long)]
+    pub profile: Option<String>,
 
     /// Shorthand flag for debug build profile
-    #[arg(long, conflicts_with_all = ["release", "test"])]
+    #[arg(long, hide = true, conflicts_with_all = ["release", "test"])]
     pub debug: bool,
 
     /// Shorthand flag for release build profile
-    #[arg(long, conflicts_with_all = ["debug", "test"])]
+    #[arg(long, hide = true, conflicts_with_all = ["debug", "test"])]
     pub release: bool,
 
     /// Shorthand flag for test build profile
-    #[arg(long, conflicts_with_all = ["debug", "release"])]
+    #[arg(long, hide = true, conflicts_with_all = ["debug", "release"])]
     pub test: bool,
 
-    /// Linking mode for dependencies and executable emission: dynamic (default) or static
-    #[arg(long, default_value = "dynamic")]
-    pub link: String,
-
-    /// Shorthand flag for static linking mode (--link static)
-    #[arg(long)]
-    pub r#static: bool,
-
     /// Optional package store root directory override
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub pkg_dir: Option<PathBuf>,
 
     /// Automatically install the built archive container into the local package store
-    #[arg(long, visible_alias = "sync")]
+    #[arg(long, hide = true, visible_alias = "sync")]
     pub install: bool,
 
     /// Force overwrite if package is already installed
-    #[arg(short, long)]
+    #[arg(short, long, hide = true)]
     pub force: bool,
-
-    /// Bypass dependency cryptographic SHA-256 checksum verification
-    #[arg(long, visible_alias = "ignore-checksum")]
-    pub yolo: bool,
 }
 
 impl BuildArgs {
@@ -161,18 +150,10 @@ impl BuildArgs {
             "test"
         } else if self.debug {
             "debug"
+        } else if let Some(ref prof) = self.profile {
+            prof.as_str()
         } else {
-            &self.profile
-        }
-    }
-
-    /// Resolves the effective link mode considering the `--static` shorthand.
-    #[must_use]
-    pub fn resolved_link_mode(&self) -> solix_compilation::LinkMode {
-        if self.r#static || self.link.eq_ignore_ascii_case("static") {
-            solix_compilation::LinkMode::Static
-        } else {
-            solix_compilation::LinkMode::Dynamic
+            "debug"
         }
     }
 }
@@ -193,7 +174,7 @@ pub struct CompileArgs {
     pub deps: Vec<String>,
 
     /// Paths to library binary containers (*.slxb) or archives (*.slxarc) whose API interfaces should be extracted
-    #[arg(short = 'l', long = "lib")]
+    #[arg(short = 'l', long = "deps-file", visible_alias = "lib")]
     pub libs: Vec<PathBuf>,
 
     /// Package or library name
@@ -229,14 +210,14 @@ pub struct CompileArgs {
     pub time: bool,
 
     /// Print compiler throughput metrics and phase duration breakdown
-    #[arg(long)]
-    pub metrics: bool,
+    #[arg(long, value_name = "FORMAT", num_args = 0..=1, default_missing_value = "text", value_parser = ["text", "json"])]
+    pub metrics: Option<String>,
 
     /// Output compiler metrics formatted as machine-readable JSON
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub metrics_json: bool,
 
-    /// Inlining statement threshold limit for AstInlinerPhase [default: 8]
+    /// Inlining statement threshold limit for AstInlinerPhase
     #[arg(long, default_value_t = 8)]
     pub inline_threshold: usize,
 
@@ -261,12 +242,12 @@ pub struct CompileArgs {
     pub install: bool,
 
     /// Force overwrite if package is already installed
-    #[arg(short, long)]
+    #[arg(short = 'f', long = "force-install", alias = "force")]
     pub force: bool,
 
     /// Bypass dependency cryptographic SHA-256 checksum verification
-    #[arg(long, visible_alias = "ignore-checksum")]
-    pub yolo: bool,
+    #[arg(long, visible_alias = "ignore-checksum", alias = "yolo")]
+    pub no_verify: bool,
 }
 
 impl CompileArgs {
@@ -304,7 +285,7 @@ pub struct RunArgs {
     #[arg(long)]
     pub no_builtins: bool,
 
-    /// Inlining statement threshold limit for AstInlinerPhase [default: 8]
+    /// Inlining statement threshold limit for AstInlinerPhase
     #[arg(long, default_value_t = 8)]
     pub inline_threshold: usize,
 
@@ -325,11 +306,11 @@ pub struct RunArgs {
     pub safe: bool,
 
     /// Print execution telemetry and memory statistics
-    #[arg(long)]
-    pub metrics: bool,
+    #[arg(long, value_name = "FORMAT", num_args = 0..=1, default_missing_value = "text", value_parser = ["text", "json"])]
+    pub metrics: Option<String>,
 
     /// Output execution telemetry formatted as machine-readable JSON
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub metrics_json: bool,
 
     /// Arguments passed to the Solix application entry point
@@ -341,8 +322,8 @@ pub struct RunArgs {
     pub pkg_dir: Option<PathBuf>,
 
     /// Bypass dependency and native library cryptographic SHA-256 checksum verification
-    #[arg(long, visible_alias = "ignore-checksum")]
-    pub yolo: bool,
+    #[arg(long, visible_alias = "ignore-checksum", alias = "yolo")]
+    pub no_verify: bool,
 }
 
 /// Arguments for `solix info`.
@@ -388,34 +369,16 @@ pub struct InstallArgs {
     #[arg(long)]
     pub profile: Option<String>,
 
-    /// Shorthand flag for debug build profile
-    #[arg(long, conflicts_with_all = ["release", "test"])]
-    pub debug: bool,
-
-    /// Shorthand flag for release build profile
-    #[arg(long, conflicts_with_all = ["debug", "test"])]
-    pub release: bool,
-
-    /// Shorthand flag for test build profile
-    #[arg(long, conflicts_with_all = ["debug", "release"])]
-    pub test: bool,
-
     /// Optional package store root directory override
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
 }
 
 impl InstallArgs {
-    /// Resolves the effective build profile string considering shorthand flags.
+    /// Resolves the effective build profile string.
     #[must_use]
     pub fn resolved_profile(&self) -> &str {
-        if self.debug {
-            "debug"
-        } else if self.test {
-            "test"
-        } else if self.release {
-            "release"
-        } else if let Some(ref prof) = self.profile {
+        if let Some(ref prof) = self.profile {
             prof.as_str()
         } else {
             "release"
@@ -423,13 +386,13 @@ impl InstallArgs {
     }
 }
 
-/// Arguments for `solix sync`.
+/// Arguments for `solix reinstall`.
 #[derive(Debug, Args, Clone)]
-pub struct SyncArgs {
-    /// Package name to synchronize/rebuild from recorded source directory
-    pub package: Option<String>,
+pub struct ReinstallArgs {
+    /// Package specifier (e.g. `raylib`, `raylib-debug`, `raylib@5.5.0`, or `raylib-debug@5.5.0`) to reinstall
+    pub spec: Option<String>,
 
-    /// Synchronize all locally registered packages that have source project directories
+    /// Reinstall all locally registered packages that have source project directories
     #[arg(long)]
     pub all: bool,
 
@@ -445,6 +408,8 @@ pub struct SyncArgs {
     #[arg(long)]
     pub pkg_dir: Option<PathBuf>,
 }
+
+pub type SyncArgs = ReinstallArgs;
 
 /// Arguments for `solix uninstall`.
 #[derive(Debug, Args, Clone)]
@@ -484,6 +449,10 @@ pub struct ListArgs {
     /// Output package listing as machine-readable JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Output file destination for package listing [default: stdout]
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
 
     /// Optional package store root directory override
     #[arg(long)]
