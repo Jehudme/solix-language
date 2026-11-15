@@ -119,22 +119,65 @@ fn compute_semantic_tokens(
                         modifier_mask |= 1 << 2; // readonly
                     }
 
-                    token_type_index = match &symbol.symbol_type {
-                        Type::Class { .. } => Some(2),     // class
-                        Type::Enum { .. } => Some(4),      // enum
-                        Type::Interface { .. } => Some(3), // interface
-                        Type::FunctionPointer { .. } => {
-                            if symbol.parent_symbol.is_some() {
-                                Some(7) // method
-                            } else {
-                                Some(6) // function
+                    let is_local = sem
+                        .symbol_table
+                        .local_symbols
+                        .iter()
+                        .any(|loc| loc.symbol_id == symbol.id);
+                    let is_parameter = is_local && symbol.slot_index.is_some();
+
+                    token_type_index = if is_parameter {
+                        Some(10) // parameter
+                    } else if is_local {
+                        Some(9) // variable
+                    } else {
+                        match &symbol.symbol_type {
+                            Type::Class { symbol_name, .. } => {
+                                let simple_class_name =
+                                    symbol_name.split("::").last().unwrap_or(symbol_name);
+                                if symbol.name == *simple_class_name || symbol.name == *symbol_name {
+                                    Some(2) // class
+                                } else if symbol.parent_symbol.is_some() {
+                                    Some(8) // property/field
+                                } else {
+                                    Some(9) // variable
+                                }
                             }
-                        }
-                        _ => {
-                            if symbol.parent_symbol.is_some() {
-                                Some(8) // property/field
-                            } else {
-                                Some(9) // variable
+                            Type::Enum { symbol_name, .. } => {
+                                let simple_enum_name =
+                                    symbol_name.split("::").last().unwrap_or(symbol_name);
+                                if symbol.name == *simple_enum_name || symbol.name == *symbol_name {
+                                    Some(4) // enum
+                                } else if symbol.parent_symbol.is_some() {
+                                    Some(5) // enum member
+                                } else {
+                                    Some(9) // variable
+                                }
+                            }
+                            Type::Interface { symbol_name, .. } => {
+                                let simple_iface_name =
+                                    symbol_name.split("::").last().unwrap_or(symbol_name);
+                                if symbol.name == *simple_iface_name || symbol.name == *symbol_name {
+                                    Some(3) // interface
+                                } else if symbol.parent_symbol.is_some() {
+                                    Some(8) // property/field
+                                } else {
+                                    Some(9) // variable
+                                }
+                            }
+                            Type::FunctionPointer { .. } => {
+                                if symbol.parent_symbol.is_some() {
+                                    Some(7) // method
+                                } else {
+                                    Some(6) // function
+                                }
+                            }
+                            _ => {
+                                if symbol.parent_symbol.is_some() {
+                                    Some(8) // property/field
+                                } else {
+                                    Some(9) // variable
+                                }
                             }
                         }
                     };

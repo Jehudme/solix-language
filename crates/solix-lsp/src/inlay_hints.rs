@@ -281,12 +281,24 @@ fn collect_inlay_hints_in_expression(
 
                 // Look up callee parameter names in symbol table
                 if let Some(semantic) = &snapshot.last_good_semantic {
-                    let matching_symbol = semantic
-                        .symbol_table
-                        .symbols
-                        .iter()
-                        .filter(|symbol| symbol.name == callee_name)
-                        .find(|symbol| {
+                    let direct_symbol = match &**callee {
+                        Expression::MemberAccess { member_span, .. } => {
+                            semantic
+                                .resolved_symbols
+                                .get(member_span)
+                                .and_then(|id| semantic.symbol_table.get_symbol(*id))
+                        }
+                        Expression::Identifier { span: id_span } => {
+                            semantic
+                                .resolved_symbols
+                                .get(id_span)
+                                .and_then(|id| semantic.symbol_table.get_symbol(*id))
+                        }
+                        _ => None,
+                    };
+
+                    let matching_symbol = direct_symbol
+                        .filter(|symbol| {
                             if let Type::FunctionPointer {
                                 parameter_types, ..
                             } = &symbol.symbol_type
@@ -301,7 +313,24 @@ fn collect_inlay_hints_in_expression(
                                 .symbol_table
                                 .symbols
                                 .iter()
-                                .find(|symbol| symbol.name == callee_name)
+                                .filter(|symbol| symbol.name == callee_name)
+                                .find(|symbol| {
+                                    if let Type::FunctionPointer {
+                                        parameter_types, ..
+                                    } = &symbol.symbol_type
+                                    {
+                                        parameter_types.len() == arguments.len()
+                                    } else {
+                                        false
+                                    }
+                                })
+                                .or_else(|| {
+                                    semantic
+                                        .symbol_table
+                                        .symbols
+                                        .iter()
+                                        .find(|symbol| symbol.name == callee_name)
+                                })
                         });
 
                     if let Some(symbol) = matching_symbol
@@ -381,11 +410,18 @@ fn collect_inlay_hints_in_expression(
                 if let Some(semantic) = &snapshot.last_good_semantic
                     && !type_name.is_empty()
                 {
-                    let class_symbol = semantic
-                        .symbol_table
-                        .symbols
-                        .iter()
-                        .find(|symbol| symbol.name == type_name);
+                    let direct_class = semantic
+                        .resolved_symbols
+                        .get(&instance_type.span())
+                        .and_then(|id| semantic.symbol_table.get_symbol(*id));
+
+                    let class_symbol = direct_class.or_else(|| {
+                        semantic
+                            .symbol_table
+                            .symbols
+                            .iter()
+                            .find(|symbol| symbol.name == type_name)
+                    });
 
                     if let Some(class_sym) = class_symbol {
                         let constructor_symbol = semantic

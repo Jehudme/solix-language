@@ -457,7 +457,7 @@ impl LanguageServer for SolixLanguageServer {
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         let uri = &params.text_document.uri;
         let range = params.range;
-        let snapshot = match self.workspace.get_snapshot(uri) {
+        let snapshot = match self.workspace.get_live_snapshot(uri) {
             Some(s) => s,
             None => return Ok(None),
         };

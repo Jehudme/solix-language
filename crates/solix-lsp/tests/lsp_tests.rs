@@ -1080,6 +1080,82 @@ fn test_breakout_real_inlay_hints() {
 }
 
 #[test]
+fn test_breakout_semantic_tokens_clear_background() {
+    use solix_common::solver::ClientModuleSolver;
+    use std::path::{Path, PathBuf};
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let breakout_dir = repo_root.join("examples").join("breakout");
+    let breakout_main = breakout_dir.join("src").join("main.slx");
+    if !breakout_main.exists() {
+        return;
+    }
+
+    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let Ok(uri) = Url::from_file_path(&canonical_main) else {
+        return;
+    };
+    let Ok(source) = std::fs::read_to_string(&canonical_main) else {
+        return;
+    };
+
+    let workspace = WorkspaceManager::new(
+        Some(breakout_dir),
+        Some(Arc::new(ClientModuleSolver::new())),
+    );
+    let snapshot = workspace.did_open(uri, 1, source);
+    let result = semantic_tokens_full(&snapshot).expect("Expected full semantic tokens");
+    if let SemanticTokensResult::Tokens(tokens) = result {
+        let mut current_line = 0u32;
+        let mut current_char = 0u32;
+        let mut clear_bg_token = None;
+        let mut bg_slate_token = None;
+
+        for token in &tokens.data {
+            if token.delta_line > 0 {
+                current_line += token.delta_line;
+                current_char = token.delta_start;
+            } else {
+                current_char += token.delta_start;
+            }
+
+            // Line 572 (0-indexed) corresponds to line 573 in breakout/src/main.slx:
+            // "            Raylib::ClearBackground(bg_slate);"
+            if current_line == 572 {
+                if token.length == 15 {
+                    clear_bg_token = Some((current_line, current_char, token.length, token.token_type));
+                }
+                if token.length == 8 {
+                    bg_slate_token = Some((current_line, current_char, token.length, token.token_type));
+                }
+            }
+        }
+
+        assert!(
+            clear_bg_token.is_some(),
+            "Expected ClearBackground semantic token with length 15 on line 572"
+        );
+        let (_, cb_char, cb_len, cb_type) = clear_bg_token.unwrap();
+        assert_eq!(cb_char, 20, "ClearBackground must start at character index 20");
+        assert_eq!(cb_len, 15, "ClearBackground must be 15 characters long");
+        assert_eq!(cb_type, 7, "ClearBackground must be classified as METHOD (7)");
+
+        assert!(
+            bg_slate_token.is_some(),
+            "Expected bg_slate semantic token with length 8 on line 572"
+        );
+        let (_, slate_char, slate_len, slate_type) = bg_slate_token.unwrap();
+        assert_eq!(slate_char, 36, "bg_slate must start at character index 36");
+        assert_eq!(slate_len, 8, "bg_slate must be 8 characters long");
+        assert_eq!(slate_type, 9, "bg_slate must be classified as VARIABLE (9)");
+    }
+}
+
+#[test]
 fn test_unclosed_call_lexical_signature_help() {
     let (workspace, test_uri) = create_test_workspace();
     let valid_source = "class Calculator {\n    public int32 compute(int32 first_val, int32 second_val) {\n        return first_val + second_val;\n    }\n    public void run() {}\n}\n";
