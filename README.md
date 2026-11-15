@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/solix-lang/solix/actions/workflows/ci.yml/badge.svg)](https://github.com/solix-lang/solix/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.9.5-green.svg)](https://github.com/solix-lang/solix/releases)
+[![Version](https://img.shields.io/badge/version-v1.0.0-green.svg)](https://github.com/solix-lang/solix/releases)
 
 Solix is an expressive, memory-safe, statically typed systems and application programming language. Built entirely in safe Rust (`#![forbid(unsafe_code)]`), Solix combines an Ahead-of-Time AST compiler with a high-throughput **64-bit Register Virtual Machine**, deterministic **Automatic Reference Counting (ARC)** with immediate free-block recycling, and a turnkey hermetic build pipeline.
 
