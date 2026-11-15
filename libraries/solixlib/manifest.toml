@@ -9,5 +9,19 @@ authors = []
 main = "Main::main"
 test = "TestRunner::test"
 
+[build]
+profile = "release"
+
+[profile.default]
+opt_level = 0
+inline_threshold = 8
+debug_symbols = true
+
+[profile.release]
+inherits = "default"
+opt_level = 3
+inline_threshold = 16
+debug_symbols = false
+
 [dependencies]
 # solix = { version = "2.0.0", profile = "release" }
