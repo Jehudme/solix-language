@@ -42,17 +42,12 @@ pub fn evaluate_expression_in_frame(
     for comparison_operator in &["==", "!=", "<=", ">=", "<", ">"] {
         if let Some(operator_position) = trimmed_expression.find(comparison_operator) {
             let left_operand_text = &trimmed_expression[..operator_position];
-            let right_operand_text = &trimmed_expression[operator_position + comparison_operator.len()..];
-            let left_evaluated_value = evaluate_expression_in_frame(
-                left_operand_text,
-                virtual_machine,
-                frame_index,
-            )?;
-            let right_evaluated_value = evaluate_expression_in_frame(
-                right_operand_text,
-                virtual_machine,
-                frame_index,
-            )?;
+            let right_operand_text =
+                &trimmed_expression[operator_position + comparison_operator.len()..];
+            let left_evaluated_value =
+                evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+            let right_evaluated_value =
+                evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
 
             let comparison_result = evaluate_binary_comparison(
                 &left_evaluated_value,
@@ -71,18 +66,13 @@ pub fn evaluate_expression_in_frame(
         }
         if let Some(operator_position) = trimmed_expression.rfind(arithmetic_operator) {
             let left_operand_text = &trimmed_expression[..operator_position];
-            let right_operand_text = &trimmed_expression[operator_position + arithmetic_operator.len()..];
+            let right_operand_text =
+                &trimmed_expression[operator_position + arithmetic_operator.len()..];
             if !left_operand_text.trim().is_empty() && !right_operand_text.trim().is_empty() {
-                let left_evaluated_value = evaluate_expression_in_frame(
-                    left_operand_text,
-                    virtual_machine,
-                    frame_index,
-                )?;
-                let right_evaluated_value = evaluate_expression_in_frame(
-                    right_operand_text,
-                    virtual_machine,
-                    frame_index,
-                )?;
+                let left_evaluated_value =
+                    evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+                let right_evaluated_value =
+                    evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
 
                 return evaluate_binary_arithmetic(
                     &left_evaluated_value,
@@ -97,11 +87,8 @@ pub fn evaluate_expression_in_frame(
     if let Some(dot_position) = trimmed_expression.find('.') {
         let object_expression = &trimmed_expression[..dot_position];
         let field_identifier = trimmed_expression[dot_position + 1..].trim();
-        let target_object_value = evaluate_expression_in_frame(
-            object_expression,
-            virtual_machine,
-            frame_index,
-        )?;
+        let target_object_value =
+            evaluate_expression_in_frame(object_expression, virtual_machine, frame_index)?;
 
         if let Value::Ref(heap_address) = target_object_value {
             let object_fields = virtual_machine
@@ -114,7 +101,9 @@ pub fn evaluate_expression_in_frame(
             }
             return Err(format!("Field '{field_identifier}' not found on object"));
         }
-        return Err(format!("Cannot read field '{field_identifier}' on non-object"));
+        return Err(format!(
+            "Cannot read field '{field_identifier}' on non-object"
+        ));
     }
 
     // Check register lookup (e.g. `r0`, `r1`)
@@ -122,7 +111,9 @@ pub fn evaluate_expression_in_frame(
         if let Ok(register_number) = stripped_register.parse::<u16>() {
             if let Some(target_frame) = virtual_machine.call_frames.get(frame_index) {
                 let absolute_register_index = target_frame.register_base + register_number as usize;
-                if let Some(register_value) = virtual_machine.register_stack.get(absolute_register_index) {
+                if let Some(register_value) =
+                    virtual_machine.register_stack.get(absolute_register_index)
+                {
                     return Ok(*register_value);
                 }
             }
@@ -144,7 +135,9 @@ pub fn evaluate_expression_in_frame(
         }
     }
 
-    Err(format!("Undefined identifier or symbol '{trimmed_expression}'"))
+    Err(format!(
+        "Undefined identifier or symbol '{trimmed_expression}'"
+    ))
 }
 
 /// Evaluates a binary comparison operator between two runtime values.
@@ -340,11 +333,8 @@ pub fn interpolate_log_template(
             }
 
             if found_closing_brace {
-                match evaluate_expression_in_frame(
-                    &expression_buffer,
-                    virtual_machine,
-                    frame_index,
-                ) {
+                match evaluate_expression_in_frame(&expression_buffer, virtual_machine, frame_index)
+                {
                     Ok(evaluated_value) => {
                         rendered_output.push_str(&format!("{evaluated_value:?}"));
                     }

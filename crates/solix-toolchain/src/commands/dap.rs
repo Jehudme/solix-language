@@ -13,7 +13,5 @@ pub fn execute_dap(args: DapArgs) -> anyhow::Result<()> {
     };
 
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        solix_dap::run_dap_server(args.port, root_path).await
-    })
+    runtime.block_on(async { solix_dap::run_dap_server(args.port, root_path).await })
 }

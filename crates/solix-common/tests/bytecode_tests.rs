@@ -511,13 +511,21 @@ fn test_debug_metadata_lossless_roundtrip() {
     sample_function.source_map = vec![
         SourceMapEntry {
             instruction_pc: 0,
-            span: Span { id: 0, start: 10, end: 20 },
+            span: Span {
+                id: 0,
+                start: 10,
+                end: 20,
+            },
             line: 46,
             column: 5,
         },
         SourceMapEntry {
             instruction_pc: 1,
-            span: Span { id: 0, start: 25, end: 35 },
+            span: Span {
+                id: 0,
+                start: 25,
+                end: 35,
+            },
             line: 47,
             column: 9,
         },
@@ -545,8 +553,8 @@ fn test_debug_metadata_lossless_roundtrip() {
     program.functions.push(sample_function);
 
     let serialized_bytes = program.to_bytes();
-    let deserialized_program = BinaryProgram::from_bytes(&serialized_bytes)
-        .expect("round-trip deserialization succeeds");
+    let deserialized_program =
+        BinaryProgram::from_bytes(&serialized_bytes).expect("round-trip deserialization succeeds");
 
     assert_eq!(deserialized_program.classes.len(), 1);
     assert_eq!(
@@ -568,6 +576,9 @@ fn test_debug_metadata_lossless_roundtrip() {
     assert_eq!(deserialized_function.local_variables.len(), 2);
     assert_eq!(deserialized_function.local_variables[0].name, "this");
     assert!(deserialized_function.local_variables[0].is_parameter);
-    assert_eq!(deserialized_function.local_variables[1].name, "distance_result");
+    assert_eq!(
+        deserialized_function.local_variables[1].name,
+        "distance_result"
+    );
     assert_eq!(deserialized_function.local_variables[1].type_name, "int32");
 }

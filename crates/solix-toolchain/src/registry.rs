@@ -92,8 +92,8 @@ impl PackageRegistry {
                     registry_path.display()
                 )
             })?;
-            let mut parsed_registry: PackageRegistry =
-                serde_json::from_str(&manifest_content).with_context(|| {
+            let mut parsed_registry: PackageRegistry = serde_json::from_str(&manifest_content)
+                .with_context(|| {
                     format!(
                         "Failed to parse package registry JSON at '{}'",
                         registry_path.display()
@@ -120,7 +120,10 @@ impl PackageRegistry {
                 if !package_dir.is_dir() {
                     continue;
                 }
-                let package_name = package_entry_result.file_name().to_string_lossy().to_string();
+                let package_name = package_entry_result
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string();
                 if package_name.starts_with('.') || package_name == "registry.json" {
                     continue;
                 }
@@ -131,7 +134,10 @@ impl PackageRegistry {
                         if !version_dir.is_dir() {
                             continue;
                         }
-                        let version_string = version_entry_result.file_name().to_string_lossy().to_string();
+                        let version_string = version_entry_result
+                            .file_name()
+                            .to_string_lossy()
+                            .to_string();
                         if PackageVersion::parse(&version_string).is_err() {
                             continue;
                         }
@@ -177,12 +183,12 @@ impl PackageRegistry {
             })?;
         }
 
-        let json_string = serde_json::to_string_pretty(self).context("Failed to serialize registry manifest")?;
+        let json_string =
+            serde_json::to_string_pretty(self).context("Failed to serialize registry manifest")?;
 
-        let temporary_path = self.registry_file_path.with_extension(format!(
-            "json.tmp.{}",
-            std::process::id()
-        ));
+        let temporary_path = self
+            .registry_file_path
+            .with_extension(format!("json.tmp.{}", std::process::id()));
 
         {
             let mut file_handle = File::create(&temporary_path).with_context(|| {
@@ -194,7 +200,9 @@ impl PackageRegistry {
             file_handle
                 .write_all(json_string.as_bytes())
                 .context("Failed to write registry content")?;
-            file_handle.flush().context("Failed to flush registry file")?;
+            file_handle
+                .flush()
+                .context("Failed to flush registry file")?;
         }
 
         fs::rename(&temporary_path, &self.registry_file_path).with_context(|| {
@@ -209,7 +217,11 @@ impl PackageRegistry {
 
     /// Finds a registered package record by exact name and optional version (or highest SemVer version if omitted).
     #[must_use]
-    pub fn get(&self, package_name: &str, requested_version: Option<&str>) -> Option<&PackageRecord> {
+    pub fn get(
+        &self,
+        package_name: &str,
+        requested_version: Option<&str>,
+    ) -> Option<&PackageRecord> {
         if let Some(target_version) = requested_version {
             self.packages
                 .iter()
@@ -243,9 +255,11 @@ impl PackageRegistry {
 
     /// Registers or updates a package record and persists changes to disk.
     pub fn register(&mut self, record: PackageRecord) -> Result<()> {
-        if let Some(existing_index) = self.packages.iter().position(|existing| {
-            existing.name == record.name && existing.version == record.version
-        }) {
+        if let Some(existing_index) = self
+            .packages
+            .iter()
+            .position(|existing| existing.name == record.name && existing.version == record.version)
+        {
             self.packages[existing_index] = record;
         } else {
             self.packages.push(record);
@@ -254,7 +268,11 @@ impl PackageRegistry {
     }
 
     /// Removes a package record from the registry and persists changes to disk.
-    pub fn unregister(&mut self, package_name: &str, package_version: &str) -> Result<Option<PackageRecord>> {
+    pub fn unregister(
+        &mut self,
+        package_name: &str,
+        package_version: &str,
+    ) -> Result<Option<PackageRecord>> {
         if let Some(existing_index) = self.packages.iter().position(|existing| {
             existing.name == package_name && existing.version == package_version
         }) {
@@ -365,7 +383,8 @@ pub fn format_iso8601_timestamp(unix_seconds: u64) -> String {
     let shifted_days = days_since_epoch + 719468;
     let era = shifted_days / 146097;
     let day_of_era = shifted_days - era * 146097;
-    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
     let year = year_of_era + era * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_internal = (5 * day_of_year + 2) / 153;

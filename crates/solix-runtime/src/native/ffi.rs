@@ -785,10 +785,7 @@ pub unsafe extern "C" fn solix_vm_array_get_u64(
         .read_u8(array_address + 4)
         .unwrap_or(8)
         .max(1) as usize;
-    let type_tag = vm_instance
-        .heap
-        .read_u8(array_address + 7)
-        .unwrap_or(0);
+    let type_tag = vm_instance.heap.read_u8(array_address + 7).unwrap_or(0);
     let slot_address = array_address + 8 + (element_index * element_size as u32);
     if type_tag == 9 {
         let raw_u32 = vm_instance.heap.read_u32(slot_address).unwrap_or(0);
@@ -831,14 +828,13 @@ pub unsafe extern "C" fn solix_vm_array_set_u64(
         .read_u8(array_address + 4)
         .unwrap_or(8)
         .max(1) as usize;
-    let type_tag = vm_instance
-        .heap
-        .read_u8(array_address + 7)
-        .unwrap_or(0);
+    let type_tag = vm_instance.heap.read_u8(array_address + 7).unwrap_or(0);
     let slot_address = array_address + 8 + (element_index * element_size as u32);
     if type_tag == 9 {
         let float_val = f64::from_bits(raw_value) as f32;
-        let _ = vm_instance.heap.write_u32(slot_address, float_val.to_bits());
+        let _ = vm_instance
+            .heap
+            .write_u32(slot_address, float_val.to_bits());
     } else {
         match element_size {
             1 => {
@@ -873,7 +869,9 @@ pub unsafe extern "C" fn solix_vm_alloc_object(
     };
     let min_size = 8 + (field_count as usize) * 8;
     let class_descriptor = vm_instance.context.get_class_by_vtable_id(class_vtable_id);
-    let payload_size = class_descriptor.map_or(min_size, |target_class| target_class.instance_size.max(min_size));
+    let payload_size = class_descriptor.map_or(min_size, |target_class| {
+        target_class.instance_size.max(min_size)
+    });
     let object_address = match vm_instance.heap.allocate(payload_size, BlockTag::Object) {
         Ok(allocated_address) => allocated_address,
         Err(_) => return 0,
@@ -899,27 +897,31 @@ pub unsafe extern "C" fn solix_vm_read_field_u64(
     if object_address == 0 {
         return 0;
     }
-    let class_descriptor_opt = vm_instance
-        .heap
-        .read_u32(object_address)
-        .ok()
-        .and_then(|vtable_identifier| vm_instance.context.get_class_by_vtable_id(vtable_identifier));
+    let class_descriptor_opt =
+        vm_instance
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_identifier| {
+                vm_instance
+                    .context
+                    .get_class_by_vtable_id(vtable_identifier)
+            });
 
     if let Some(class_descriptor) = class_descriptor_opt
         && !class_descriptor.field_types.is_empty()
     {
-        let (actual_offset, field_tag) = if offset < 64
-            && (offset as usize) < class_descriptor.field_types.len()
-        {
-            let mut sorted_field_list = class_descriptor.field_types.clone();
-            sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
-            let (field_offset, resolved_tag) = sorted_field_list[offset as usize];
-            (field_offset as u32, resolved_tag)
-        } else {
-            let direct_offset = offset as usize;
-            let resolved_tag = class_descriptor.get_field_type(direct_offset).unwrap_or(0);
-            (offset, resolved_tag)
-        };
+        let (actual_offset, field_tag) =
+            if offset < 64 && (offset as usize) < class_descriptor.field_types.len() {
+                let mut sorted_field_list = class_descriptor.field_types.clone();
+                sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
+                let (field_offset, resolved_tag) = sorted_field_list[offset as usize];
+                (field_offset as u32, resolved_tag)
+            } else {
+                let direct_offset = offset as usize;
+                let resolved_tag = class_descriptor.get_field_type(direct_offset).unwrap_or(0);
+                (offset, resolved_tag)
+            };
 
         let field_addr = object_address + actual_offset;
         match field_tag {
@@ -974,27 +976,31 @@ pub unsafe extern "C" fn solix_vm_write_field_u64(
     if object_address == 0 {
         return;
     }
-    let class_descriptor_opt = vm_instance
-        .heap
-        .read_u32(object_address)
-        .ok()
-        .and_then(|vtable_identifier| vm_instance.context.get_class_by_vtable_id(vtable_identifier));
+    let class_descriptor_opt =
+        vm_instance
+            .heap
+            .read_u32(object_address)
+            .ok()
+            .and_then(|vtable_identifier| {
+                vm_instance
+                    .context
+                    .get_class_by_vtable_id(vtable_identifier)
+            });
 
     if let Some(class_descriptor) = class_descriptor_opt
         && !class_descriptor.field_types.is_empty()
     {
-        let (actual_offset, field_tag) = if offset < 64
-            && (offset as usize) < class_descriptor.field_types.len()
-        {
-            let mut sorted_field_list = class_descriptor.field_types.clone();
-            sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
-            let (field_offset, resolved_tag) = sorted_field_list[offset as usize];
-            (field_offset as u32, resolved_tag)
-        } else {
-            let direct_offset = offset as usize;
-            let resolved_tag = class_descriptor.get_field_type(direct_offset).unwrap_or(0);
-            (offset, resolved_tag)
-        };
+        let (actual_offset, field_tag) =
+            if offset < 64 && (offset as usize) < class_descriptor.field_types.len() {
+                let mut sorted_field_list = class_descriptor.field_types.clone();
+                sorted_field_list.sort_by_key(|&(field_offset, _)| field_offset);
+                let (field_offset, resolved_tag) = sorted_field_list[offset as usize];
+                (field_offset as u32, resolved_tag)
+            } else {
+                let direct_offset = offset as usize;
+                let resolved_tag = class_descriptor.get_field_type(direct_offset).unwrap_or(0);
+                (offset, resolved_tag)
+            };
 
         let field_addr = object_address + actual_offset;
         match field_tag {
@@ -1011,10 +1017,9 @@ pub unsafe extern "C" fn solix_vm_write_field_u64(
                 let _ = vm_instance.heap.write_u64(field_addr, raw_value);
             }
             11 => {
-                let _ = vm_instance.heap.write_u8(
-                    field_addr,
-                    if raw_value != 0 { 1 } else { 0 },
-                );
+                let _ = vm_instance
+                    .heap
+                    .write_u8(field_addr, if raw_value != 0 { 1 } else { 0 });
             }
             12 => {
                 let tagged_word = if raw_value == 0 {
@@ -1060,7 +1065,9 @@ pub unsafe extern "C" fn solix_vm_get_class_vtable_id(
     };
     for class_descriptor in &vm_instance.context.all_classes {
         if class_descriptor.symbol == class_name
-            || class_descriptor.symbol.ends_with(&format!("::{class_name}"))
+            || class_descriptor
+                .symbol
+                .ends_with(&format!("::{class_name}"))
         {
             return class_descriptor.vtable_id;
         }

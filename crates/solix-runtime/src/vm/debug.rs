@@ -98,14 +98,19 @@ impl VirtualMachine {
         }
 
         let target_frame = &self.call_frames[frame_index];
-        let compiled_function = match self.context.all_functions.get(target_frame.function_id as usize) {
+        let compiled_function = match self
+            .context
+            .all_functions
+            .get(target_frame.function_id as usize)
+        {
             Some(func) => func,
             None => return results,
         };
 
         for local_entry in &compiled_function.local_variables {
             if target_frame.pc >= local_entry.start_pc && target_frame.pc <= local_entry.end_pc {
-                let absolute_register_index = target_frame.register_base + local_entry.register as usize;
+                let absolute_register_index =
+                    target_frame.register_base + local_entry.register as usize;
                 let register_value = self
                     .register_stack
                     .get(absolute_register_index)
@@ -158,7 +163,9 @@ impl VirtualMachine {
                 "uint32" => Value::I64(i64::from(self.heap.read_u32(field_address)?)),
                 "int64" => Value::I64(self.heap.read_u64(field_address)? as i64),
                 "uint64" => Value::I64(self.heap.read_u64(field_address)? as i64),
-                "f32" => Value::F64(f64::from(f32::from_bits(self.heap.read_u32(field_address)?))),
+                "f32" => Value::F64(f64::from(f32::from_bits(
+                    self.heap.read_u32(field_address)?,
+                ))),
                 "f64" => Value::F64(f64::from_bits(self.heap.read_u64(field_address)?)),
                 "bool" => Value::Bool(self.heap.read_u8(field_address)? != 0),
                 "char" => Value::I32(self.heap.read_u32(field_address)? as i32),
@@ -262,8 +269,12 @@ impl VirtualMachine {
         match new_value {
             Value::I32(int_value) => self.heap.write_u32(field_address, int_value as u32)?,
             Value::I64(long_value) => self.heap.write_u64(field_address, long_value as u64)?,
-            Value::F64(double_value) => self.heap.write_u64(field_address, double_value.to_bits())?,
-            Value::Bool(bool_value) => self.heap.write_u8(field_address, if bool_value { 1 } else { 0 })?,
+            Value::F64(double_value) => {
+                self.heap.write_u64(field_address, double_value.to_bits())?
+            }
+            Value::Bool(bool_value) => self
+                .heap
+                .write_u8(field_address, if bool_value { 1 } else { 0 })?,
             Value::Ref(ref_address) => self.heap.write_u32(field_address, ref_address)?,
             Value::FnPtr(fn_ptr) => self.heap.write_u32(field_address, fn_ptr)?,
             Value::Null => self.heap.write_u32(field_address, 0)?,

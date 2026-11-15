@@ -108,7 +108,9 @@ pub enum RuntimeError {
     },
 
     /// Duplicate symbol definition across loaded modules.
-    #[error("DuplicateSymbolDefinition: cannot define {kind} '{symbol}' in module '{second_module}': already defined in module '{first_module}'")]
+    #[error(
+        "DuplicateSymbolDefinition: cannot define {kind} '{symbol}' in module '{second_module}': already defined in module '{first_module}'"
+    )]
     DuplicateSymbolDefinition {
         kind: String,
         symbol: String,
@@ -125,7 +127,9 @@ pub enum RuntimeError {
     DependencyError { reason: String },
 
     /// Native shared library checksum verification failure.
-    #[error("NativeLibraryChecksumMismatch: native library checksum verification failed for '{path}': expected {expected}, found {actual}")]
+    #[error(
+        "NativeLibraryChecksumMismatch: native library checksum verification failed for '{path}': expected {expected}, found {actual}"
+    )]
     NativeLibraryChecksumMismatch {
         path: String,
         expected: String,
@@ -240,9 +244,7 @@ impl RuntimeError {
             Self::InvalidEntryPointSignature { .. } => RuntimeErrorCode::InvalidEntryPointSignature,
             Self::SharedLibraryError { .. } => RuntimeErrorCode::SharedLibraryError,
             Self::DependencyError { .. } => RuntimeErrorCode::DependencyError,
-            Self::DuplicateSymbolDefinition { .. } => {
-                RuntimeErrorCode::DuplicateSymbolDefinition
-            }
+            Self::DuplicateSymbolDefinition { .. } => RuntimeErrorCode::DuplicateSymbolDefinition,
             Self::NativeLibraryChecksumMismatch { .. } => {
                 RuntimeErrorCode::NativeLibraryChecksumMismatch
             }

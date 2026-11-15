@@ -77,19 +77,46 @@ impl<'a> TypeCheckingVisitor<'a> {
         evaluated_type
     }
 
+    /// Evaluates the semantic [`Type`] of an expression, coercing literals if an expected target type is provided.
+    pub fn evaluate_expression_with_expected(
+        &mut self,
+        expression: &Expression,
+        expected_type: Option<&Type>,
+    ) -> Type {
+        let span = expression.span();
+        if let Some(target_type) = expected_type
+            && coerce_literal_node_type(self.node_types, expression, target_type)
+        {
+            return target_type.clone();
+        }
+        let evaluated_type = self.evaluate_expression_type_internal(expression);
+        self.node_types.insert(span, evaluated_type.clone());
+        evaluated_type
+    }
+
+    /// Coerces a literal or negated literal expression to a compatible target type,
+    /// recording the updated type in `self.node_types`.
+    pub fn coerce_literal_node_type(
+        &mut self,
+        expression: &Expression,
+        target_type: &Type,
+    ) -> bool {
+        coerce_literal_node_type(self.node_types, expression, target_type)
+    }
+
     fn evaluate_expression_type_internal(&mut self, expression: &Expression) -> Type {
         let span = expression.span();
         match expression {
             Expression::Literal { value, .. } => match value {
-                LiteralValue::Int(v) => {
-                    if *v > i32::MAX as i64 || *v < i32::MIN as i64 {
+                LiteralValue::Int(literal_val) => {
+                    if *literal_val > i32::MAX as i64 || *literal_val < i32::MIN as i64 {
                         Type::Primitive(PrimitiveKind::Int64)
                     } else {
                         Type::Primitive(PrimitiveKind::Int32)
                     }
                 }
-                LiteralValue::UInt(v) => {
-                    if *v > u32::MAX as u64 {
+                LiteralValue::UInt(literal_val) => {
+                    if *literal_val > u32::MAX as u64 {
                         Type::Primitive(PrimitiveKind::UInt64)
                     } else {
                         Type::Primitive(PrimitiveKind::UInt32)
@@ -179,8 +206,26 @@ impl<'a> TypeCheckingVisitor<'a> {
                 right,
                 ..
             } => {
-                let left_type = self.evaluate_expression_type(left);
-                let right_type = self.evaluate_expression_type(right);
+                let mut left_type = self.evaluate_expression_type(left);
+                let mut right_type = self.evaluate_expression_type(right);
+
+                // If one side is a typed numeric variable/expr and the other side is a numeric literal:
+                // Coerce the literal operand to the sibling operand's type if compatible!
+                if left_type.is_numeric()
+                    && !is_literal_or_negated_literal(left)
+                    && is_literal_or_negated_literal(right)
+                    && is_literal_compatible_with_type(right, &left_type)
+                {
+                    self.coerce_literal_node_type(right, &left_type);
+                    right_type = left_type.clone();
+                } else if right_type.is_numeric()
+                    && !is_literal_or_negated_literal(right)
+                    && is_literal_or_negated_literal(left)
+                    && is_literal_compatible_with_type(left, &right_type)
+                {
+                    self.coerce_literal_node_type(left, &right_type);
+                    left_type = right_type.clone();
+                }
 
                 match operator {
                     // Arithmetic operations
@@ -940,6 +985,20 @@ impl<'a> TypeCheckingVisitor<'a> {
                                             &evaluated_arg_types,
                                             arguments,
                                         ) {
+                                            for (expected_param, argument_expr) in
+                                                effective_params.iter().zip(arguments.iter())
+                                            {
+                                                if is_literal_compatible_with_type(
+                                                    argument_expr,
+                                                    expected_param,
+                                                ) {
+                                                    coerce_literal_node_type(
+                                                        self.node_types,
+                                                        argument_expr,
+                                                        expected_param,
+                                                    );
+                                                }
+                                            }
                                             found_method = Some((child_id, matched_return));
                                             break;
                                         }
@@ -1012,7 +1071,13 @@ impl<'a> TypeCheckingVisitor<'a> {
                                             &arguments[param_index],
                                             expected_param,
                                         );
-                                    if !is_compatible
+                                    if is_compatible {
+                                        coerce_literal_node_type(
+                                            self.node_types,
+                                            &arguments[param_index],
+                                            expected_param,
+                                        );
+                                    } else if !is_compatible
                                         && *expected_param != Type::Error
                                         && *actual_arg != Type::Error
                                     {
@@ -1050,6 +1115,17 @@ impl<'a> TypeCheckingVisitor<'a> {
                         &evaluated_arg_types,
                         arguments,
                     ) {
+                        for (expected_param, argument_expr) in
+                            parameter_types.iter().zip(arguments.iter())
+                        {
+                            if is_literal_compatible_with_type(argument_expr, expected_param) {
+                                coerce_literal_node_type(
+                                    self.node_types,
+                                    argument_expr,
+                                    expected_param,
+                                );
+                            }
+                        }
                         return matched_return;
                     }
                     if evaluated_arg_types.len() != parameter_types.len() {
@@ -1069,7 +1145,13 @@ impl<'a> TypeCheckingVisitor<'a> {
                                     &arguments[param_index],
                                     expected_param,
                                 );
-                            if !is_compatible
+                            if is_compatible {
+                                coerce_literal_node_type(
+                                    self.node_types,
+                                    &arguments[param_index],
+                                    expected_param,
+                                );
+                            } else if !is_compatible
                                 && *expected_param != Type::Error
                                 && *actual_arg != Type::Error
                             {
@@ -1132,7 +1214,13 @@ impl<'a> TypeCheckingVisitor<'a> {
                                         &arguments[param_index],
                                         expected_param,
                                     );
-                                if !is_compatible
+                                if is_compatible {
+                                    coerce_literal_node_type(
+                                        self.node_types,
+                                        &arguments[param_index],
+                                        expected_param,
+                                    );
+                                } else if !is_compatible
                                     && *expected_param != Type::Error
                                     && *actual_arg != Type::Error
                                 {
@@ -1203,26 +1291,44 @@ impl<'a> TypeCheckingVisitor<'a> {
 
                     if !ctors.is_empty() {
                         let mut found_ctor = false;
-                        for cid in ctors {
-                            if let Some(csym) = self.symbol_table.get_symbol(cid)
+                        for ctor_id in ctors {
+                            if let Some(ctor_symbol) = self.symbol_table.get_symbol(ctor_id)
                                 && let Type::FunctionPointer {
                                     ref parameter_types,
                                     ..
-                                } = csym.symbol_type
+                                } = ctor_symbol.symbol_type
                                 && parameter_types.len() == evaluated_arg_types.len()
                                 && parameter_types
                                     .iter()
                                     .zip(arguments.iter())
                                     .zip(&evaluated_arg_types)
-                                    .all(|((expected, arg), actual)| {
-                                        actual.is_assignable_to(expected, &|src, tgt| {
+                                    .all(|((expected_param, argument_expr), actual_arg)| {
+                                        actual_arg.is_assignable_to(expected_param, &|src, tgt| {
                                             self.check_is_subtype(src, tgt)
-                                        }) || actual == expected
-                                            || (actual.is_numeric() && expected.is_numeric())
-                                            || is_literal_compatible_with_type(arg, expected)
+                                        }) || actual_arg == expected_param
+                                            || (actual_arg.is_numeric()
+                                                && expected_param.is_numeric())
+                                            || is_literal_compatible_with_type(
+                                                argument_expr,
+                                                expected_param,
+                                            )
                                             || !type_arguments.is_empty()
                                     })
                             {
+                                for (expected_param, argument_expr) in
+                                    parameter_types.iter().zip(arguments.iter())
+                                {
+                                    if is_literal_compatible_with_type(
+                                        argument_expr,
+                                        expected_param,
+                                    ) {
+                                        coerce_literal_node_type(
+                                            self.node_types,
+                                            argument_expr,
+                                            expected_param,
+                                        );
+                                    }
+                                }
                                 found_ctor = true;
                                 break;
                             }
@@ -1320,24 +1426,41 @@ impl<'a> TypeCheckingVisitor<'a> {
                 }
             }
             Expression::ArrayLiteral { elements, .. } => {
-                let element_type = if let Some(first_element) = elements.first() {
+                let mut element_type = if let Some(first_element) = elements.first() {
                     self.evaluate_expression_type(first_element)
                 } else {
                     Type::Primitive(PrimitiveKind::Int32)
                 };
+
                 for element in elements {
-                    let elem_t = self.evaluate_expression_type(element);
-                    if !elem_t.is_assignable_to(&element_type, &|src, tgt| {
-                        self.check_is_subtype(src, tgt)
-                    }) && !element_type
-                        .is_assignable_to(&elem_t, &|src, tgt| self.check_is_subtype(src, tgt))
-                        && elem_t != Type::Error
-                        && element_type != Type::Error
+                    let current_elem_type = self.evaluate_expression_type(element);
+                    if current_elem_type == Type::Primitive(PrimitiveKind::Float64) {
+                        element_type = Type::Primitive(PrimitiveKind::Float64);
+                    } else if current_elem_type == Type::Primitive(PrimitiveKind::Float32)
+                        && element_type != Type::Primitive(PrimitiveKind::Float64)
                     {
+                        element_type = Type::Primitive(PrimitiveKind::Float32);
+                    } else if current_elem_type == Type::Primitive(PrimitiveKind::Int64)
+                        && !element_type.is_floating_point()
+                    {
+                        element_type = Type::Primitive(PrimitiveKind::Int64);
+                    }
+                }
+
+                for element in elements {
+                    let elem_type = self.evaluate_expression_type(element);
+                    let is_compatible = elem_type.is_assignable_to(&element_type, &|src, tgt| {
+                        self.check_is_subtype(src, tgt)
+                    }) || element_type
+                        .is_assignable_to(&elem_type, &|src, tgt| self.check_is_subtype(src, tgt))
+                        || is_literal_compatible_with_type(element, &element_type);
+                    if is_compatible {
+                        self.coerce_literal_node_type(element, &element_type);
+                    } else if elem_type != Type::Error && element_type != Type::Error {
                         self.errors.push(BindingError::TypeMismatch {
                             expected: element_type.to_string(),
                             found: format!(
-                                "Incompatible types in array literal: expected '{element_type}', found '{elem_t}'"
+                                "Incompatible types in array literal: expected '{element_type}', found '{elem_type}'"
                             ),
                             span: element.span().to_source_span(),
                         });
@@ -1575,14 +1698,16 @@ impl<'a> TypeCheckingVisitor<'a> {
                         self.validate_lambda_captures(captures);
                         self.evaluate_lambda_with_expected(parameters, body, Some(&target_type))
                     }
-                    _ => self.evaluate_expression_type(value),
+                    _ => self.evaluate_expression_with_expected(value, Some(&target_type)),
                 };
 
                 let is_compatible = value_type
                     .is_assignable_to(&target_type, &|src, tgt| self.check_is_subtype(src, tgt))
                     || is_literal_compatible_with_type(value, &target_type);
 
-                if !is_compatible && target_type != Type::Error && value_type != Type::Error {
+                if is_compatible {
+                    self.coerce_literal_node_type(value, &target_type);
+                } else if target_type != Type::Error && value_type != Type::Error {
                     self.errors.push(BindingError::TypeMismatch {
                         expected: target_type.to_string(),
                         found: value_type.to_string(),
@@ -2263,11 +2388,13 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             self.symbol_table,
         );
         if let Some(initializer) = &node.initializer {
-            let init_type = self.evaluate_expression_type(initializer);
+            let init_type = self.evaluate_expression_with_expected(initializer, Some(&field_type));
             let is_compatible = init_type
                 .is_assignable_to(&field_type, &|src, tgt| self.check_is_subtype(src, tgt))
                 || is_literal_compatible_with_type(initializer, &field_type);
-            if !is_compatible && field_type != Type::Error && init_type != Type::Error {
+            if is_compatible {
+                self.coerce_literal_node_type(initializer, &field_type);
+            } else if field_type != Type::Error && init_type != Type::Error {
                 self.errors
                     .push(BindingError::FieldInitializerTypeMismatch {
                         field_name: field_name.to_string(),
@@ -2357,11 +2484,14 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
 
             if let Some(default_val) = &parameter.default_value {
-                let default_type = self.evaluate_expression_type(default_val);
+                let default_type =
+                    self.evaluate_expression_with_expected(default_val, Some(&param_type));
                 let is_compatible = default_type
                     .is_assignable_to(&param_type, &|src, tgt| self.check_is_subtype(src, tgt))
                     || is_literal_compatible_with_type(default_val, &param_type);
-                if !is_compatible && param_type != Type::Error && default_type != Type::Error {
+                if is_compatible {
+                    self.coerce_literal_node_type(default_val, &param_type);
+                } else if param_type != Type::Error && default_type != Type::Error {
                     self.errors
                         .push(BindingError::ParameterDefaultValueMismatch {
                             parameter_name: param_name.to_string(),
@@ -2540,13 +2670,32 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                             if parameter_types.len() == evaluated_super_arg_types.len() {
                                 let types_match = parameter_types
                                     .iter()
+                                    .zip(super_args.iter())
                                     .zip(&evaluated_super_arg_types)
-                                    .all(|(expected_param, actual_arg)| {
+                                    .all(|((expected_param, argument_expr), actual_arg)| {
                                         actual_arg.is_assignable_to(expected_param, &|src, tgt| {
                                             self.check_is_subtype(src, tgt)
                                         }) || actual_arg == expected_param
+                                            || is_literal_compatible_with_type(
+                                                argument_expr,
+                                                expected_param,
+                                            )
                                     });
                                 if types_match {
+                                    for (expected_param, argument_expr) in
+                                        parameter_types.iter().zip(super_args.iter())
+                                    {
+                                        if is_literal_compatible_with_type(
+                                            argument_expr,
+                                            expected_param,
+                                        ) {
+                                            coerce_literal_node_type(
+                                                self.node_types,
+                                                argument_expr,
+                                                expected_param,
+                                            );
+                                        }
+                                    }
                                     matching_ctor = true;
                                     break;
                                 }
@@ -2793,14 +2942,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                     self.validate_lambda_captures(captures);
                     self.evaluate_lambda_with_expected(parameters, body, Some(&declared_type))
                 }
-                _ => self.evaluate_expression_type(initializer),
+                _ => self.evaluate_expression_with_expected(initializer, Some(&declared_type)),
             };
 
             let is_compatible = initializer_type
                 .is_assignable_to(&declared_type, &|src, tgt| self.check_is_subtype(src, tgt))
                 || is_literal_compatible_with_type(initializer, &declared_type);
 
-            if !is_compatible && declared_type != Type::Error && initializer_type != Type::Error {
+            if is_compatible {
+                self.coerce_literal_node_type(initializer, &declared_type);
+            } else if declared_type != Type::Error && initializer_type != Type::Error {
                 self.errors.push(BindingError::TypeMismatch {
                     expected: declared_type.to_string(),
                     found: initializer_type.to_string(),
@@ -2855,17 +3006,27 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             return;
         }
 
+        let expected_return_opt = self.current_method_return_type.clone();
+
         let returned_type = if let Some(expr) = &node.value {
-            self.evaluate_expression_type(expr)
+            self.evaluate_expression_with_expected(expr, expected_return_opt.as_ref())
         } else {
             Type::Primitive(PrimitiveKind::Void)
         };
 
-        if let Some(expected_return) = &self.current_method_return_type {
+        if let Some(expected_return) = &expected_return_opt {
             let is_compatible = returned_type
-                .is_assignable_to(expected_return, &|src, tgt| self.check_is_subtype(src, tgt));
+                .is_assignable_to(expected_return, &|src, tgt| self.check_is_subtype(src, tgt))
+                || node
+                    .value
+                    .as_ref()
+                    .is_some_and(|expr| is_literal_compatible_with_type(expr, expected_return));
 
-            if !is_compatible && *expected_return != Type::Error && returned_type != Type::Error {
+            if is_compatible {
+                if let Some(expr) = &node.value {
+                    coerce_literal_node_type(self.node_types, expr, expected_return);
+                }
+            } else if *expected_return != Type::Error && returned_type != Type::Error {
                 self.errors.push(BindingError::ReturnTypeMismatch {
                     expected: expected_return.to_string(),
                     found: returned_type.to_string(),
@@ -3170,45 +3331,114 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
     }
 }
 
-fn is_literal_compatible_with_type(expr: &Expression, target_type: &Type) -> bool {
-    let unwrapped = target_type.unwrap_alias();
-    match (expr, unwrapped) {
+/// Coerces a literal or negated literal expression to a compatible target type,
+/// recording the updated type in `node_types`.
+pub fn coerce_literal_node_type(
+    node_types: &mut HashMap<Span, Type>,
+    expression: &Expression,
+    target_type: &Type,
+) -> bool {
+    if !is_literal_compatible_with_type(expression, target_type) {
+        return false;
+    }
+    let unwrapped_target = target_type.unwrap_alias();
+    match expression {
+        Expression::Literal { span, .. } => {
+            node_types.insert(*span, unwrapped_target.clone());
+            true
+        }
+        Expression::Unary {
+            span,
+            operator: TokenKind::OperatorMinus,
+            operand,
+            ..
+        } => {
+            node_types.insert(*span, unwrapped_target.clone());
+            node_types.insert(operand.span(), unwrapped_target.clone());
+            true
+        }
+        Expression::ArrayLiteral { span, elements } => {
+            if let Type::Array {
+                element_type,
+                depth: 1,
+            } = unwrapped_target
+            {
+                for element in elements {
+                    coerce_literal_node_type(node_types, element, element_type);
+                }
+                node_types.insert(*span, unwrapped_target.clone());
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn is_literal_or_negated_literal(expression: &Expression) -> bool {
+    match expression {
+        Expression::Literal { .. } => true,
+        Expression::Unary {
+            operator: TokenKind::OperatorMinus,
+            operand,
+            ..
+        } => matches!(**operand, Expression::Literal { .. }),
+        _ => false,
+    }
+}
+
+fn is_literal_compatible_with_type(expression: &Expression, target_type: &Type) -> bool {
+    let unwrapped_target = target_type.unwrap_alias();
+    match (expression, unwrapped_target) {
         (
             Expression::Literal {
-                value: LiteralValue::Int(v),
+                value: LiteralValue::Int(literal_val),
                 ..
             },
-            Type::Primitive(kind),
-        ) => match kind {
-            PrimitiveKind::Int8 => *v >= -128 && *v <= 127,
-            PrimitiveKind::UInt8 => *v >= 0 && *v <= 255,
-            PrimitiveKind::Int16 => *v >= -32768 && *v <= 32767,
-            PrimitiveKind::UInt16 => *v >= 0 && *v <= 65535,
-            PrimitiveKind::Int32 => true,
-            PrimitiveKind::UInt32 => *v >= 0,
+            Type::Primitive(primitive_kind),
+        ) => match primitive_kind {
+            PrimitiveKind::Int8 => *literal_val >= -128 && *literal_val <= 127,
+            PrimitiveKind::UInt8 => *literal_val >= 0 && *literal_val <= 255,
+            PrimitiveKind::Int16 => *literal_val >= -32768 && *literal_val <= 32767,
+            PrimitiveKind::UInt16 => *literal_val >= 0 && *literal_val <= 65535,
+            PrimitiveKind::Int32 => {
+                *literal_val >= i32::MIN as i64 && *literal_val <= i32::MAX as i64
+            }
+            PrimitiveKind::UInt32 => *literal_val >= 0 && *literal_val <= u32::MAX as i64,
             PrimitiveKind::Int64 => true,
-            PrimitiveKind::UInt64 => *v >= 0,
-            PrimitiveKind::Float64 => true,
+            PrimitiveKind::UInt64 => *literal_val >= 0,
+            PrimitiveKind::Float32 | PrimitiveKind::Float64 => true,
             _ => false,
         },
         (
             Expression::Literal {
-                value: LiteralValue::UInt(v),
+                value: LiteralValue::UInt(literal_val),
                 ..
             },
-            Type::Primitive(kind),
-        ) => match kind {
-            PrimitiveKind::Int8 => *v <= 127,
-            PrimitiveKind::UInt8 => *v <= 255,
-            PrimitiveKind::Int16 => *v <= 32767,
-            PrimitiveKind::UInt16 => *v <= 65535,
-            PrimitiveKind::Int32 => *v <= i32::MAX as u64,
-            PrimitiveKind::UInt32 => *v <= u32::MAX as u64,
-            PrimitiveKind::Int64 => *v <= i64::MAX as u64,
+            Type::Primitive(primitive_kind),
+        ) => match primitive_kind {
+            PrimitiveKind::Int8 => *literal_val <= 127,
+            PrimitiveKind::UInt8 => *literal_val <= 255,
+            PrimitiveKind::Int16 => *literal_val <= 32767,
+            PrimitiveKind::UInt16 => *literal_val <= 65535,
+            PrimitiveKind::Int32 => *literal_val <= i32::MAX as u64,
+            PrimitiveKind::UInt32 => *literal_val <= u32::MAX as u64,
+            PrimitiveKind::Int64 => *literal_val <= i64::MAX as u64,
             PrimitiveKind::UInt64 => true,
-            PrimitiveKind::Float64 => true,
+            PrimitiveKind::Float32 | PrimitiveKind::Float64 => true,
             _ => false,
         },
+        (
+            Expression::Literal {
+                value: LiteralValue::Float(_),
+                ..
+            },
+            Type::Primitive(primitive_kind),
+        ) => matches!(
+            primitive_kind,
+            PrimitiveKind::Float32 | PrimitiveKind::Float64
+        ),
         (
             Expression::Literal {
                 value: LiteralValue::String(_),
@@ -3225,32 +3455,48 @@ fn is_literal_compatible_with_type(expr: &Expression, target_type: &Type) -> boo
                 operand,
                 ..
             },
-            Type::Primitive(PrimitiveKind::Int32),
+            Type::Primitive(primitive_kind),
         ) => match &**operand {
             Expression::Literal {
-                value: LiteralValue::Int(v),
+                value: LiteralValue::Int(literal_val),
                 ..
-            } => *v <= 2147483648,
+            } => match primitive_kind {
+                PrimitiveKind::Int8 => *literal_val <= 128 && *literal_val >= -127,
+                PrimitiveKind::Int16 => *literal_val <= 32768 && *literal_val >= -32767,
+                PrimitiveKind::Int32 => *literal_val <= 2147483648 && *literal_val >= -2147483647,
+                PrimitiveKind::Int64 => true,
+                PrimitiveKind::Float32 | PrimitiveKind::Float64 => true,
+                _ => false,
+            },
             Expression::Literal {
-                value: LiteralValue::UInt(v),
+                value: LiteralValue::UInt(literal_val),
                 ..
-            } => *v <= 2147483648,
+            } => match primitive_kind {
+                PrimitiveKind::Int8 => *literal_val <= 128,
+                PrimitiveKind::Int16 => *literal_val <= 32768,
+                PrimitiveKind::Int32 => *literal_val <= 2147483648,
+                PrimitiveKind::Int64 => *literal_val <= 9223372036854775808,
+                PrimitiveKind::Float32 | PrimitiveKind::Float64 => true,
+                _ => false,
+            },
+            Expression::Literal {
+                value: LiteralValue::Float(_),
+                ..
+            } => matches!(
+                primitive_kind,
+                PrimitiveKind::Float32 | PrimitiveKind::Float64
+            ),
             _ => false,
         },
         (
-            Expression::Unary {
-                operator: TokenKind::OperatorMinus,
-                operand,
-                ..
+            Expression::ArrayLiteral { elements, .. },
+            Type::Array {
+                element_type,
+                depth: 1,
             },
-            Type::Primitive(PrimitiveKind::Int64),
-        ) => matches!(
-            &**operand,
-            Expression::Literal {
-                value: LiteralValue::Int(_) | LiteralValue::UInt(_),
-                ..
-            }
-        ),
+        ) => elements
+            .iter()
+            .all(|element_node| is_literal_compatible_with_type(element_node, element_type)),
         _ => false,
     }
 }

@@ -146,12 +146,7 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
             });
             serde_json::to_string_pretty(&json_value)?
         } else {
-            format_slxarc_info_summary(
-                &target_path,
-                &inspection,
-                &computed_sha256,
-                &cache_status,
-            )
+            format_slxarc_info_summary(&target_path, &inspection, &computed_sha256, &cache_status)
         };
 
         if let Some(out_path) = &args.output {
@@ -326,11 +321,7 @@ fn format_slxarc_info_summary(
     out
 }
 
-fn format_info_summary(
-    binary_path: &Path,
-    program: &BinaryProgram,
-    sha256_digest: &str,
-) -> String {
+fn format_info_summary(binary_path: &Path, program: &BinaryProgram, sha256_digest: &str) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "=== Solix Binary Container Inspection (.slxb) ===");
     let _ = writeln!(out, "Binary:       {}", binary_path.display());
@@ -358,11 +349,7 @@ fn format_info_summary(
         let _ = writeln!(out, "Description:  {}", program.package_description);
     }
 
-    let _ = writeln!(
-        out,
-        "Static Space: {} bytes",
-        program.static_space_size
-    );
+    let _ = writeln!(out, "Static Space: {} bytes", program.static_space_size);
 
     if !program.native_library_checksums.is_empty() {
         let _ = writeln!(
@@ -375,7 +362,11 @@ fn format_info_summary(
         }
     }
 
-    let _ = writeln!(out, "\n--- Declared Classes ({}) ---", program.classes.len());
+    let _ = writeln!(
+        out,
+        "\n--- Declared Classes ({}) ---",
+        program.classes.len()
+    );
     for class in &program.classes {
         let _ = writeln!(
             out,

@@ -7,9 +7,9 @@ mod common;
 
 use clap::Parser;
 use common::HermeticCliWorkspace;
+use solix_common::project::{ProjectManifest, SlxarcArchive};
 use solix_toolchain::cli::Cli;
 use solix_toolchain::run;
-use solix_common::project::{ProjectManifest, SlxarcArchive};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -45,7 +45,10 @@ fn copy_project_tree(source_directory: &Path, destination_directory: &Path) -> s
 /// Locates the untitled-rust project template inside the crate assets.
 fn locate_template_source() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("assets").join("templates").join("untitled-rust")
+    manifest_dir
+        .join("assets")
+        .join("templates")
+        .join("untitled-rust")
 }
 
 /// Returns the platform-specific shared library filename for a Rust cdylib crate.

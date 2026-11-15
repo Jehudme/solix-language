@@ -55,7 +55,10 @@ fn test_stdio_lsp_server_handshake() {
         }
     }
 
-    assert!(content_length > 0, "Expected non-zero Content-Length from solix-lsp");
+    assert!(
+        content_length > 0,
+        "Expected non-zero Content-Length from solix-lsp"
+    );
 
     // Read JSON payload
     let mut buffer = vec![0u8; content_length];
@@ -64,8 +67,10 @@ fn test_stdio_lsp_server_handshake() {
 
     assert_eq!(response["id"], 1);
     assert_eq!(response["jsonrpc"], "2.0");
-    assert!(response["result"]["capabilities"]["definitionProvider"].is_boolean()
-        || response["result"]["capabilities"]["definitionProvider"].is_object());
+    assert!(
+        response["result"]["capabilities"]["definitionProvider"].is_boolean()
+            || response["result"]["capabilities"]["definitionProvider"].is_object()
+    );
 
     // Send shutdown
     let shutdown_payload = serde_json::json!({

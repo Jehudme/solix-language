@@ -1653,58 +1653,100 @@ impl<'a> Emitter<'a> {
         value: &LiteralValue,
         span: Span,
     ) -> Result<(), EmissionError> {
+        let resolved_type = self.query_type(span);
         match value {
-            LiteralValue::Int(i) => {
-                if *i >= i32::MIN as i64 && *i <= i32::MAX as i64 {
+            LiteralValue::Int(literal_int) => {
+                if matches!(
+                    resolved_type.unwrap_alias(),
+                    Type::Primitive(PrimitiveKind::Float32 | PrimitiveKind::Float64)
+                ) {
+                    let const_idx = self.pool.add_f64(*literal_int as f64)?;
                     self.emit_instruction(
-                        Instruction::format_b_signed(OpCode::LoadI32, 0, dst, *i as i32),
+                        Instruction::format_b(OpCode::LoadF64, 0, dst, const_idx as u32),
+                        Some(span),
+                    );
+                } else if matches!(
+                    resolved_type.unwrap_alias(),
+                    Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                ) {
+                    let const_idx = self.pool.add_i64(*literal_int)?;
+                    self.emit_instruction(
+                        Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
+                        Some(span),
+                    );
+                } else if *literal_int >= i32::MIN as i64 && *literal_int <= i32::MAX as i64 {
+                    self.emit_instruction(
+                        Instruction::format_b_signed(OpCode::LoadI32, 0, dst, *literal_int as i32),
                         Some(span),
                     );
                 } else {
-                    let const_idx = self.pool.add_i64(*i)?;
+                    let const_idx = self.pool.add_i64(*literal_int)?;
                     self.emit_instruction(
                         Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
                         Some(span),
                     );
                 }
             }
-            LiteralValue::UInt(u) => {
-                if *u <= i32::MAX as u64 {
+            LiteralValue::UInt(literal_uint) => {
+                if matches!(
+                    resolved_type.unwrap_alias(),
+                    Type::Primitive(PrimitiveKind::Float32 | PrimitiveKind::Float64)
+                ) {
+                    let const_idx = self.pool.add_f64(*literal_uint as f64)?;
                     self.emit_instruction(
-                        Instruction::format_b_signed(OpCode::LoadI32, 0, dst, *u as i32),
+                        Instruction::format_b(OpCode::LoadF64, 0, dst, const_idx as u32),
+                        Some(span),
+                    );
+                } else if matches!(
+                    resolved_type.unwrap_alias(),
+                    Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                ) {
+                    let const_idx = self.pool.add_i64(*literal_uint as i64)?;
+                    self.emit_instruction(
+                        Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
+                        Some(span),
+                    );
+                } else if *literal_uint <= i32::MAX as u64 {
+                    self.emit_instruction(
+                        Instruction::format_b_signed(OpCode::LoadI32, 0, dst, *literal_uint as i32),
                         Some(span),
                     );
                 } else {
-                    let const_idx = self.pool.add_i64(*u as i64)?;
+                    let const_idx = self.pool.add_i64(*literal_uint as i64)?;
                     self.emit_instruction(
                         Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
                         Some(span),
                     );
                 }
             }
-            LiteralValue::Float(float_val) => {
-                let const_idx = self.pool.add_f64(*float_val)?;
+            LiteralValue::Float(literal_float) => {
+                let const_idx = self.pool.add_f64(*literal_float)?;
                 self.emit_instruction(
                     Instruction::format_b(OpCode::LoadF64, 0, dst, const_idx as u32),
                     Some(span),
                 );
             }
-            LiteralValue::String(s) => {
-                let const_idx = self.pool.add_string(s)?;
+            LiteralValue::String(literal_str) => {
+                let const_idx = self.pool.add_string(literal_str)?;
                 self.emit_instruction(
                     Instruction::format_b(OpCode::LoadConst, 0, dst, const_idx as u32),
                     Some(span),
                 );
             }
-            LiteralValue::Char(c) => {
+            LiteralValue::Char(literal_char) => {
                 self.emit_instruction(
-                    Instruction::format_b(OpCode::LoadI32, 0, dst, *c as u32),
+                    Instruction::format_b(OpCode::LoadI32, 0, dst, *literal_char as u32),
                     Some(span),
                 );
             }
-            LiteralValue::Bool(b) => {
+            LiteralValue::Bool(literal_bool) => {
                 self.emit_instruction(
-                    Instruction::format_b(OpCode::LoadBool, 0, dst, if *b { 1 } else { 0 }),
+                    Instruction::format_b(
+                        OpCode::LoadBool,
+                        0,
+                        dst,
+                        if *literal_bool { 1 } else { 0 },
+                    ),
                     Some(span),
                 );
             }
@@ -1943,18 +1985,37 @@ impl<'a> Emitter<'a> {
             }
         }
 
-        let register_left = self.emit_expression(left, None)?;
-        let register_right = self.emit_expression(right, None)?;
+        let mut register_left = self.emit_expression(left, None)?;
+        let mut register_right = self.emit_expression(right, None)?;
 
         let left_type = self.query_type(left.span());
         let right_type = self.query_type(right.span());
         let operand_type = if left_type.is_floating_point() || right_type.is_floating_point() {
             Type::Primitive(solix_common::types::PrimitiveKind::Float64)
         } else if left_type == Type::Null {
-            right_type
+            right_type.clone()
         } else {
-            left_type
+            left_type.clone()
         };
+
+        if operand_type.is_floating_point() && !left_type.is_floating_point() {
+            let converted_reg = self.allocator.alloc_temp()?;
+            self.emit_instruction(
+                Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, register_left, 0),
+                Some(span),
+            );
+            self.allocator.free_temp(register_left);
+            register_left = converted_reg;
+        }
+        if operand_type.is_floating_point() && !right_type.is_floating_point() {
+            let converted_reg = self.allocator.alloc_temp()?;
+            self.emit_instruction(
+                Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, register_right, 0),
+                Some(span),
+            );
+            self.allocator.free_temp(register_right);
+            register_right = converted_reg;
+        }
         let opcode = if is_null_comparison {
             match operator {
                 TokenKind::OperatorEqual => OpCode::EqRef,
@@ -2578,7 +2639,20 @@ impl<'a> Emitter<'a> {
                     let is_ref = self.function.reference_registers.contains(&local_reg)
                         || self.query_type(target.span()).is_reference_type();
 
-                    let r_val = self.emit_expression(value, None)?;
+                    let mut r_val = self.emit_expression(value, None)?;
+                    let value_type = self.query_type(value.span());
+                    let target_type = self.query_type(target.span());
+                    if target_type.is_floating_point()
+                        && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
+                    {
+                        let converted_reg = self.allocator.alloc_temp()?;
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                            Some(span),
+                        );
+                        self.allocator.free_temp(r_val);
+                        r_val = converted_reg;
+                    }
                     if is_ref && self.is_borrowed_reference(value) {
                         self.emit_instruction(
                             Instruction::format_a(OpCode::IncRef, 0, r_val, 0, 0),
@@ -2689,7 +2763,19 @@ impl<'a> Emitter<'a> {
                         Some(span),
                     );
                 } else {
-                    let r_val = self.emit_expression(value, None)?;
+                    let mut r_val = self.emit_expression(value, None)?;
+                    let value_type = self.query_type(value.span());
+                    if target_type.is_floating_point()
+                        && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
+                    {
+                        let converted_reg = self.allocator.alloc_temp()?;
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                            Some(span),
+                        );
+                        self.allocator.free_temp(r_val);
+                        r_val = converted_reg;
+                    }
                     let op = self.select_compound_opcode(operator, &target_type);
                     self.emit_instruction(
                         Instruction::format_a(op, 0, local_reg, local_reg, r_val),
@@ -2705,7 +2791,20 @@ impl<'a> Emitter<'a> {
                     );
                 }
             } else if let Some(slot) = self.static_layout.and_then(|l| l.lookup_slot(&name)) {
-                let r_val = self.emit_expression(value, None)?;
+                let mut r_val = self.emit_expression(value, None)?;
+                let value_type = self.query_type(value.span());
+                let target_type = self.query_type(target.span());
+                if target_type.is_floating_point()
+                    && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
+                {
+                    let converted_reg = self.allocator.alloc_temp()?;
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                        Some(span),
+                    );
+                    self.allocator.free_temp(r_val);
+                    r_val = converted_reg;
+                }
                 self.emit_instruction(
                     Instruction::format_b(OpCode::SetStatic, 0, r_val, slot),
                     Some(span),
@@ -2720,7 +2819,20 @@ impl<'a> Emitter<'a> {
                 return Ok(());
             } else {
                 let const_idx = self.pool.add_string(&name)?;
-                let r_val = self.emit_expression(value, None)?;
+                let mut r_val = self.emit_expression(value, None)?;
+                let value_type = self.query_type(value.span());
+                let target_type = self.query_type(target.span());
+                if target_type.is_floating_point()
+                    && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
+                {
+                    let converted_reg = self.allocator.alloc_temp()?;
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                        Some(span),
+                    );
+                    self.allocator.free_temp(r_val);
+                    r_val = converted_reg;
+                }
                 self.emit_instruction(
                     Instruction::format_b(OpCode::SetStaticGlobal, 0, r_val, const_idx as u32),
                     Some(span),
@@ -2794,6 +2906,19 @@ impl<'a> Emitter<'a> {
         {
             let r_obj = self.emit_expression(object, None)?;
             let mut r_val = self.emit_expression(value, None)?;
+            let value_type = self.query_type(value.span());
+            let target_type = self.query_type(target.span());
+            if target_type.is_floating_point()
+                && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
+            {
+                let converted_reg = self.allocator.alloc_temp()?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                    Some(span),
+                );
+                self.allocator.free_temp(r_val);
+                r_val = converted_reg;
+            }
             let member_name = self.get_lexeme(*member_span);
             let offset = self.resolve_field_offset(object.span(), member_name);
             let field_tag = self.resolve_field_type_tag(object.span(), member_name);
@@ -2860,6 +2985,19 @@ impl<'a> Emitter<'a> {
             let r_arr = self.emit_expression(array, None)?;
             let r_idx = self.emit_expression(index, None)?;
             let mut r_val = self.emit_expression(value, None)?;
+            let value_type = self.query_type(value.span());
+            let target_type = self.query_type(target.span());
+            if target_type.is_floating_point()
+                && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
+            {
+                let converted_reg = self.allocator.alloc_temp()?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                    Some(span),
+                );
+                self.allocator.free_temp(r_val);
+                r_val = converted_reg;
+            }
 
             if !matches!(operator, TokenKind::OperatorAssign) {
                 let r_cur = self.allocator.alloc_temp()?;

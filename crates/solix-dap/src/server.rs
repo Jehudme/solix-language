@@ -9,12 +9,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use dap::events::{
-    BreakpointEventBody, Event, ExitedEventBody, OutputEventBody, StoppedEventBody,
-};
-use dap::requests::{
-    Command, LaunchRequestArguments, SetBreakpointsArguments,
-};
+use dap::events::{BreakpointEventBody, Event, ExitedEventBody, OutputEventBody, StoppedEventBody};
+use dap::requests::{Command, LaunchRequestArguments, SetBreakpointsArguments};
 use dap::responses::{
     ContinueResponse, DisassembleResponse, EvaluateResponse, ModulesResponse, ResponseBody,
     ScopesResponse, SetBreakpointsResponse, SetExceptionBreakpointsResponse,
@@ -29,7 +25,7 @@ use dap::types::{
 
 use solix_common::bytecode::BinaryProgram;
 use solix_common::project::SlxarcArchive;
-use solix_common::solver::{resolve_package_store_dir, ClientModuleSolver};
+use solix_common::solver::{ClientModuleSolver, resolve_package_store_dir};
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::pipeline::CompilationPipeline;
 use solix_runtime::memory::BlockTag;
@@ -40,7 +36,10 @@ use solix_runtime::{OutputSink, RuntimeContext, RuntimeOptions, VirtualMachine};
 
 use crate::controller::DapController;
 use crate::evaluator::evaluate_expression_in_frame;
-use crate::state::{BreakpointEntry, FunctionBreakpointEntry, SteppingState, VariableReferenceManager, VariableScopeType};
+use crate::state::{
+    BreakpointEntry, FunctionBreakpointEntry, SteppingState, VariableReferenceManager,
+    VariableScopeType,
+};
 
 /// Runs the Solix DAP server on stdio or over a TCP port.
 ///
@@ -115,7 +114,8 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     launch_project_root = Some(PathBuf::from(configured_cwd));
                 }
 
-                let stop_on_entry = extract_launch_boolean(launch_arguments, "stopOnEntry").unwrap_or(false);
+                let stop_on_entry =
+                    extract_launch_boolean(launch_arguments, "stopOnEntry").unwrap_or(false);
                 stop_on_entry_flag = stop_on_entry;
 
                 if let Some(target_program) = parsed_program_path {
@@ -124,7 +124,11 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                         launch_project_root = find_enclosing_project_root(&target_path);
                     }
 
-                    let runtime_options = match setup_runtime_for_target(&target_path, pending_console_outputs.clone(), is_tcp_terminal_mode) {
+                    let runtime_options = match setup_runtime_for_target(
+                        &target_path,
+                        pending_console_outputs.clone(),
+                        is_tcp_terminal_mode,
+                    ) {
                         Ok(options) => options,
                         Err(setup_error) => {
                             server.respond(request.error(&setup_error.to_string()))?;
@@ -143,7 +147,9 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
 
                     // Centralize static initialization (BUG-04)
                     if let Err(init_error) = created_vm.initialize_statics() {
-                        server.respond(request.error(&format!("Static initialization failed: {init_error}")))?;
+                        server.respond(
+                            request.error(&format!("Static initialization failed: {init_error}")),
+                        )?;
                         continue;
                     }
 
@@ -156,7 +162,11 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     for line_breakpoint in &mut controller.line_breakpoints {
                         if line_breakpoint.function_id.is_none() {
                             if let Some((snapped_line, snapped_pc, candidate_function_id)) =
-                                resolve_breakpoint_location(&line_breakpoint.source_path, line_breakpoint.requested_line, &created_vm)
+                                resolve_breakpoint_location(
+                                    &line_breakpoint.source_path,
+                                    line_breakpoint.requested_line,
+                                    &created_vm,
+                                )
                             {
                                 line_breakpoint.verified_line = snapped_line;
                                 line_breakpoint.instruction_pc = snapped_pc;
@@ -169,7 +179,13 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                         verified: true,
                                         message: None,
                                         source: Some(Source {
-                                            name: Some(Path::new(&line_breakpoint.source_path).file_name().unwrap_or_default().to_string_lossy().to_string()),
+                                            name: Some(
+                                                Path::new(&line_breakpoint.source_path)
+                                                    .file_name()
+                                                    .unwrap_or_default()
+                                                    .to_string_lossy()
+                                                    .to_string(),
+                                            ),
                                             path: Some(line_breakpoint.source_path.clone()),
                                             source_reference: None,
                                             presentation_hint: None,
@@ -212,19 +228,27 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                             hit_breakpoint_ids: None,
                         }))?;
                     } else if let Some(vm_ref) = virtual_machine.as_mut() {
-                        run_until_stop(vm_ref, &mut controller, &mut reference_manager, &pending_console_outputs, server)?;
+                        run_until_stop(
+                            vm_ref,
+                            &mut controller,
+                            &mut reference_manager,
+                            &pending_console_outputs,
+                            server,
+                        )?;
                     }
                 }
             }
 
             Command::SetBreakpoints(ref breakpoints_arguments) => {
-                let (source_path, registered_breakpoints) = process_set_breakpoints(
-                    breakpoints_arguments,
-                    virtual_machine.as_ref(),
-                );
+                let (source_path, registered_breakpoints) =
+                    process_set_breakpoints(breakpoints_arguments, virtual_machine.as_ref());
 
-                controller.line_breakpoints.retain(|existing_bp| existing_bp.source_path != source_path);
-                controller.line_breakpoints.extend(registered_breakpoints.clone());
+                controller
+                    .line_breakpoints
+                    .retain(|existing_bp| existing_bp.source_path != source_path);
+                controller
+                    .line_breakpoints
+                    .extend(registered_breakpoints.clone());
 
                 let response_breakpoints: Vec<Breakpoint> = registered_breakpoints
                     .iter()
@@ -233,7 +257,13 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                         verified: entry.function_id.is_some(),
                         message: None,
                         source: Some(Source {
-                            name: Some(Path::new(&entry.source_path).file_name().unwrap_or_default().to_string_lossy().to_string()),
+                            name: Some(
+                                Path::new(&entry.source_path)
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string(),
+                            ),
                             path: Some(entry.source_path.clone()),
                             source_reference: None,
                             presentation_hint: None,
@@ -251,9 +281,11 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     })
                     .collect();
 
-                server.respond(request.success(ResponseBody::SetBreakpoints(SetBreakpointsResponse {
-                    breakpoints: response_breakpoints,
-                })))?;
+                server.respond(request.success(ResponseBody::SetBreakpoints(
+                    SetBreakpointsResponse {
+                        breakpoints: response_breakpoints,
+                    },
+                )))?;
             }
 
             Command::SetFunctionBreakpoints(ref func_breakpoints_args) => {
@@ -284,17 +316,23 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     })
                     .collect();
 
-                server.respond(request.success(ResponseBody::SetFunctionBreakpoints(SetFunctionBreakpointsResponse {
-                    breakpoints: verified_breakpoints,
-                })))?;
+                server.respond(request.success(ResponseBody::SetFunctionBreakpoints(
+                    SetFunctionBreakpointsResponse {
+                        breakpoints: verified_breakpoints,
+                    },
+                )))?;
             }
 
             Command::SetExceptionBreakpoints(ref exception_breakpoints_args) => {
-                controller.break_on_thrown_exceptions = exception_breakpoints_args.filters.contains(&"thrown".to_string());
-                controller.break_on_uncaught_exceptions = exception_breakpoints_args.filters.contains(&"uncaught".to_string());
-                server.respond(request.success(ResponseBody::SetExceptionBreakpoints(SetExceptionBreakpointsResponse {
-                    breakpoints: None,
-                })))?;
+                controller.break_on_thrown_exceptions = exception_breakpoints_args
+                    .filters
+                    .contains(&"thrown".to_string());
+                controller.break_on_uncaught_exceptions = exception_breakpoints_args
+                    .filters
+                    .contains(&"uncaught".to_string());
+                server.respond(request.success(ResponseBody::SetExceptionBreakpoints(
+                    SetExceptionBreakpointsResponse { breakpoints: None },
+                )))?;
             }
 
             Command::Threads => {
@@ -323,17 +361,22 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                             vm_ref,
                             function_id,
                             active_frame.pc,
-                        ).unwrap_or((String::new(), 1));
+                        )
+                        .unwrap_or((String::new(), 1));
 
                         let mut canonical_file_path = raw_file_path;
-                        if !canonical_file_path.is_empty() && !Path::new(&canonical_file_path).is_absolute() {
+                        if !canonical_file_path.is_empty()
+                            && !Path::new(&canonical_file_path).is_absolute()
+                        {
                             if let Some(project_root) = &launch_project_root {
                                 let candidate_path = project_root.join(&canonical_file_path);
                                 if candidate_path.exists() {
                                     if let Ok(canonical) = candidate_path.canonicalize() {
-                                        canonical_file_path = canonical.to_string_lossy().to_string();
+                                        canonical_file_path =
+                                            canonical.to_string_lossy().to_string();
                                     } else {
-                                        canonical_file_path = candidate_path.to_string_lossy().to_string();
+                                        canonical_file_path =
+                                            candidate_path.to_string_lossy().to_string();
                                     }
                                 }
                             }
@@ -371,18 +414,23 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                 }
 
                 let total_frames = stack_frames.len() as i64;
-                server.respond(request.success(ResponseBody::StackTrace(StackTraceResponse {
-                    stack_frames,
-                    total_frames: Some(total_frames),
-                })))?;
+                server.respond(
+                    request.success(ResponseBody::StackTrace(StackTraceResponse {
+                        stack_frames,
+                        total_frames: Some(total_frames),
+                    })),
+                )?;
             }
 
             Command::Scopes(ref scopes_arguments) => {
                 let frame_index = scopes_arguments.frame_id as usize;
 
-                let locals_ref = reference_manager.allocate_reference(VariableScopeType::FrameLocals(frame_index));
-                let statics_ref = reference_manager.allocate_reference(VariableScopeType::GlobalStatics);
-                let registers_ref = reference_manager.allocate_reference(VariableScopeType::VmRegisters(frame_index));
+                let locals_ref = reference_manager
+                    .allocate_reference(VariableScopeType::FrameLocals(frame_index));
+                let statics_ref =
+                    reference_manager.allocate_reference(VariableScopeType::GlobalStatics);
+                let registers_ref = reference_manager
+                    .allocate_reference(VariableScopeType::VmRegisters(frame_index));
 
                 let scopes_list = vec![
                     Scope {
@@ -434,7 +482,9 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
             Command::Variables(ref variables_arguments) => {
                 let mut variables_list = Vec::new();
                 if let Some(vm_ref) = virtual_machine.as_ref() {
-                    let requested_scope = reference_manager.resolve_reference(variables_arguments.variables_reference).cloned();
+                    let requested_scope = reference_manager
+                        .resolve_reference(variables_arguments.variables_reference)
+                        .cloned();
                     if let Some(scope_type) = requested_scope {
                         match scope_type {
                             VariableScopeType::FrameLocals(frame_idx) => {
@@ -442,10 +492,23 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                 for (var_name, var_type, var_val) in locals {
                                     let child_reference = match var_val {
                                         Value::Ref(object_address) if object_address > 0 => {
-                                            if let Ok(header) = vm_ref.heap.read_header(object_address) {
+                                            if let Ok(header) =
+                                                vm_ref.heap.read_header(object_address)
+                                            {
                                                 match header.tag {
-                                                    BlockTag::ArrayRef => reference_manager.allocate_reference(VariableScopeType::ArrayElements(object_address)),
-                                                    BlockTag::Object | BlockTag::ObjectPod => reference_manager.allocate_reference(VariableScopeType::ObjectFields(object_address)),
+                                                    BlockTag::ArrayRef => reference_manager
+                                                        .allocate_reference(
+                                                            VariableScopeType::ArrayElements(
+                                                                object_address,
+                                                            ),
+                                                        ),
+                                                    BlockTag::Object | BlockTag::ObjectPod => {
+                                                        reference_manager.allocate_reference(
+                                                            VariableScopeType::ObjectFields(
+                                                                object_address,
+                                                            ),
+                                                        )
+                                                    }
                                                     _ => 0,
                                                 }
                                             } else {
@@ -469,13 +532,27 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                 }
                             }
                             VariableScopeType::GlobalStatics => {
-                                for (slot_index, slot_val) in vm_ref.static_slots.iter().enumerate() {
+                                for (slot_index, slot_val) in vm_ref.static_slots.iter().enumerate()
+                                {
                                     let child_reference = match slot_val {
                                         Value::Ref(object_address) if *object_address > 0 => {
-                                            if let Ok(header) = vm_ref.heap.read_header(*object_address) {
+                                            if let Ok(header) =
+                                                vm_ref.heap.read_header(*object_address)
+                                            {
                                                 match header.tag {
-                                                    BlockTag::ArrayRef => reference_manager.allocate_reference(VariableScopeType::ArrayElements(*object_address)),
-                                                    BlockTag::Object | BlockTag::ObjectPod => reference_manager.allocate_reference(VariableScopeType::ObjectFields(*object_address)),
+                                                    BlockTag::ArrayRef => reference_manager
+                                                        .allocate_reference(
+                                                            VariableScopeType::ArrayElements(
+                                                                *object_address,
+                                                            ),
+                                                        ),
+                                                    BlockTag::Object | BlockTag::ObjectPod => {
+                                                        reference_manager.allocate_reference(
+                                                            VariableScopeType::ObjectFields(
+                                                                *object_address,
+                                                            ),
+                                                        )
+                                                    }
                                                     _ => 0,
                                                 }
                                             } else {
@@ -502,11 +579,18 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                 if let Some(frame) = vm_ref.call_frames.get(frame_idx) {
                                     for register_idx in 0..16 {
                                         let absolute_idx = frame.register_base + register_idx;
-                                        if let Some(register_val) = vm_ref.register_stack.get(absolute_idx) {
+                                        if let Some(register_val) =
+                                            vm_ref.register_stack.get(absolute_idx)
+                                        {
                                             variables_list.push(Variable {
                                                 name: format!("r{register_idx}"),
-                                                value: format_runtime_value_with_vm(Some(vm_ref), register_val),
-                                                type_field: Some(register_val.type_name().to_string()),
+                                                value: format_runtime_value_with_vm(
+                                                    Some(vm_ref),
+                                                    register_val,
+                                                ),
+                                                type_field: Some(
+                                                    register_val.type_name().to_string(),
+                                                ),
                                                 presentation_hint: None,
                                                 evaluate_name: None,
                                                 variables_reference: 0,
@@ -523,10 +607,23 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                     for (field_name, field_type, field_val) in fields {
                                         let child_reference = match field_val {
                                             Value::Ref(nested_addr) if nested_addr > 0 => {
-                                                if let Ok(header) = vm_ref.heap.read_header(nested_addr) {
+                                                if let Ok(header) =
+                                                    vm_ref.heap.read_header(nested_addr)
+                                                {
                                                     match header.tag {
-                                                        BlockTag::ArrayRef => reference_manager.allocate_reference(VariableScopeType::ArrayElements(nested_addr)),
-                                                        BlockTag::Object | BlockTag::ObjectPod => reference_manager.allocate_reference(VariableScopeType::ObjectFields(nested_addr)),
+                                                        BlockTag::ArrayRef => reference_manager
+                                                            .allocate_reference(
+                                                                VariableScopeType::ArrayElements(
+                                                                    nested_addr,
+                                                                ),
+                                                            ),
+                                                        BlockTag::Object | BlockTag::ObjectPod => {
+                                                            reference_manager.allocate_reference(
+                                                                VariableScopeType::ObjectFields(
+                                                                    nested_addr,
+                                                                ),
+                                                            )
+                                                        }
                                                         _ => 0,
                                                     }
                                                 } else {
@@ -538,7 +635,10 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
 
                                         variables_list.push(Variable {
                                             name: field_name,
-                                            value: format_runtime_value_with_vm(Some(vm_ref), &field_val),
+                                            value: format_runtime_value_with_vm(
+                                                Some(vm_ref),
+                                                &field_val,
+                                            ),
                                             type_field: Some(field_type),
                                             presentation_hint: None,
                                             evaluate_name: None,
@@ -555,10 +655,23 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                     for (element_name, element_type, element_val) in elements {
                                         let child_reference = match element_val {
                                             Value::Ref(nested_addr) if nested_addr > 0 => {
-                                                if let Ok(header) = vm_ref.heap.read_header(nested_addr) {
+                                                if let Ok(header) =
+                                                    vm_ref.heap.read_header(nested_addr)
+                                                {
                                                     match header.tag {
-                                                        BlockTag::ArrayRef => reference_manager.allocate_reference(VariableScopeType::ArrayElements(nested_addr)),
-                                                        BlockTag::Object | BlockTag::ObjectPod => reference_manager.allocate_reference(VariableScopeType::ObjectFields(nested_addr)),
+                                                        BlockTag::ArrayRef => reference_manager
+                                                            .allocate_reference(
+                                                                VariableScopeType::ArrayElements(
+                                                                    nested_addr,
+                                                                ),
+                                                            ),
+                                                        BlockTag::Object | BlockTag::ObjectPod => {
+                                                            reference_manager.allocate_reference(
+                                                                VariableScopeType::ObjectFields(
+                                                                    nested_addr,
+                                                                ),
+                                                            )
+                                                        }
                                                         _ => 0,
                                                     }
                                                 } else {
@@ -570,7 +683,10 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
 
                                         variables_list.push(Variable {
                                             name: element_name,
-                                            value: format_runtime_value_with_vm(Some(vm_ref), &element_val),
+                                            value: format_runtime_value_with_vm(
+                                                Some(vm_ref),
+                                                &element_val,
+                                            ),
                                             type_field: Some(element_type),
                                             presentation_hint: None,
                                             evaluate_name: None,
@@ -596,13 +712,17 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                 let parsed_value = parse_literal_to_value(&updated_value_string);
 
                 if let Some(vm_ref) = virtual_machine.as_mut() {
-                    let requested_scope = reference_manager.resolve_reference(set_variable_arguments.variables_reference).cloned();
+                    let requested_scope = reference_manager
+                        .resolve_reference(set_variable_arguments.variables_reference)
+                        .cloned();
                     if let Some(scope_type) = requested_scope {
                         match scope_type {
                             VariableScopeType::FrameLocals(frame_idx) => {
                                 let mut resolved_register = None;
                                 if let Some(frame) = vm_ref.call_frames.get(frame_idx) {
-                                    if let Some(compiled_func) = vm_ref.context.all_functions.get(frame.function_id as usize) {
+                                    if let Some(compiled_func) =
+                                        vm_ref.context.all_functions.get(frame.function_id as usize)
+                                    {
                                         for local_var in &compiled_func.local_variables {
                                             if local_var.name == set_variable_arguments.name {
                                                 resolved_register = Some(local_var.register);
@@ -611,17 +731,27 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                         }
                                     }
                                 }
-                                if resolved_register.is_none() && set_variable_arguments.name.starts_with('r') {
-                                    resolved_register = set_variable_arguments.name[1..].parse::<u16>().ok();
+                                if resolved_register.is_none()
+                                    && set_variable_arguments.name.starts_with('r')
+                                {
+                                    resolved_register =
+                                        set_variable_arguments.name[1..].parse::<u16>().ok();
                                 }
                                 if let Some(reg_num) = resolved_register {
-                                    let _ = vm_ref.mutate_register(frame_idx, reg_num, parsed_value);
+                                    let _ =
+                                        vm_ref.mutate_register(frame_idx, reg_num, parsed_value);
                                 }
                             }
                             VariableScopeType::VmRegisters(frame_idx) => {
                                 if set_variable_arguments.name.starts_with('r') {
-                                    if let Ok(reg_num) = set_variable_arguments.name[1..].parse::<u16>() {
-                                        let _ = vm_ref.mutate_register(frame_idx, reg_num, parsed_value);
+                                    if let Ok(reg_num) =
+                                        set_variable_arguments.name[1..].parse::<u16>()
+                                    {
+                                        let _ = vm_ref.mutate_register(
+                                            frame_idx,
+                                            reg_num,
+                                            parsed_value,
+                                        );
                                     }
                                 }
                             }
@@ -633,13 +763,25 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                         .get(vtable_id as usize)
                                         .and_then(|class_opt| class_opt.as_ref())
                                     {
-                                        for (field_offset, field_name, _) in &compiled_class.field_names {
+                                        for (field_offset, field_name, _) in
+                                            &compiled_class.field_names
+                                        {
                                             if field_name == &set_variable_arguments.name {
-                                                let field_target_address = object_addr + (*field_offset as u32);
+                                                let field_target_address =
+                                                    object_addr + (*field_offset as u32);
                                                 let _ = match parsed_value {
-                                                    Value::I32(int_val) => vm_ref.heap.write_u32(field_target_address, int_val as u32),
-                                                    Value::I64(long_val) => vm_ref.heap.write_u64(field_target_address, long_val as u64),
-                                                    Value::Bool(bool_val) => vm_ref.heap.write_u8(field_target_address, if bool_val { 1 } else { 0 }),
+                                                    Value::I32(int_val) => vm_ref.heap.write_u32(
+                                                        field_target_address,
+                                                        int_val as u32,
+                                                    ),
+                                                    Value::I64(long_val) => vm_ref.heap.write_u64(
+                                                        field_target_address,
+                                                        long_val as u64,
+                                                    ),
+                                                    Value::Bool(bool_val) => vm_ref.heap.write_u8(
+                                                        field_target_address,
+                                                        if bool_val { 1 } else { 0 },
+                                                    ),
                                                     _ => Ok(()),
                                                 };
                                                 break;
@@ -653,19 +795,25 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     }
                 }
 
-                server.respond(request.success(ResponseBody::SetVariable(SetVariableResponse {
-                    value: updated_value_string,
-                    type_field: Some(parsed_value.type_name().to_string()),
-                    variables_reference: None,
-                    named_variables: None,
-                    indexed_variables: None,
-                })))?;
+                server.respond(request.success(ResponseBody::SetVariable(
+                    SetVariableResponse {
+                        value: updated_value_string,
+                        type_field: Some(parsed_value.type_name().to_string()),
+                        variables_reference: None,
+                        named_variables: None,
+                        indexed_variables: None,
+                    },
+                )))?;
             }
 
             Command::Evaluate(ref evaluate_arguments) => {
                 let frame_index = evaluate_arguments.frame_id.unwrap_or(0) as usize;
                 let evaluation_result = if let Some(vm_ref) = virtual_machine.as_ref() {
-                    evaluate_expression_in_frame(&evaluate_arguments.expression, vm_ref, frame_index)
+                    evaluate_expression_in_frame(
+                        &evaluate_arguments.expression,
+                        vm_ref,
+                        frame_index,
+                    )
                 } else {
                     Err("Virtual machine not running".to_string())
                 };
@@ -677,8 +825,17 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                                 if let Some(vm_ref) = virtual_machine.as_ref() {
                                     if let Ok(header) = vm_ref.heap.read_header(object_address) {
                                         match header.tag {
-                                            BlockTag::ArrayRef => reference_manager.allocate_reference(VariableScopeType::ArrayElements(object_address)),
-                                            BlockTag::Object | BlockTag::ObjectPod => reference_manager.allocate_reference(VariableScopeType::ObjectFields(object_address)),
+                                            BlockTag::ArrayRef => reference_manager
+                                                .allocate_reference(
+                                                    VariableScopeType::ArrayElements(
+                                                        object_address,
+                                                    ),
+                                                ),
+                                            BlockTag::Object | BlockTag::ObjectPod => {
+                                                reference_manager.allocate_reference(
+                                                    VariableScopeType::ObjectFields(object_address),
+                                                )
+                                            }
                                             _ => 0,
                                         }
                                     } else {
@@ -691,15 +848,20 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                             _ => 0,
                         };
 
-                        server.respond(request.success(ResponseBody::Evaluate(EvaluateResponse {
-                            result: format_runtime_value_with_vm(virtual_machine.as_ref(), &evaluated_value),
-                            type_field: Some(evaluated_value.type_name().to_string()),
-                            presentation_hint: None,
-                            variables_reference: child_reference,
-                            named_variables: None,
-                            indexed_variables: None,
-                            memory_reference: None,
-                        })))?;
+                        server.respond(request.success(ResponseBody::Evaluate(
+                            EvaluateResponse {
+                                result: format_runtime_value_with_vm(
+                                    virtual_machine.as_ref(),
+                                    &evaluated_value,
+                                ),
+                                type_field: Some(evaluated_value.type_name().to_string()),
+                                presentation_hint: None,
+                                variables_reference: child_reference,
+                                named_variables: None,
+                                indexed_variables: None,
+                                memory_reference: None,
+                            },
+                        )))?;
                     }
                     Err(error_string) => {
                         server.respond(request.error(&error_string))?;
@@ -714,7 +876,13 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
 
                 if let Some(vm_ref) = virtual_machine.as_mut() {
                     controller.stepping_state = SteppingState::None;
-                    run_until_stop(vm_ref, &mut controller, &mut reference_manager, &pending_console_outputs, server)?;
+                    run_until_stop(
+                        vm_ref,
+                        &mut controller,
+                        &mut reference_manager,
+                        &pending_console_outputs,
+                        server,
+                    )?;
                 }
             }
 
@@ -726,7 +894,13 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     let (current_file, current_line) = vm_ref
                         .call_frames
                         .last()
-                        .and_then(|frame| DapController::resolve_source_location(vm_ref, frame.function_id, frame.pc))
+                        .and_then(|frame| {
+                            DapController::resolve_source_location(
+                                vm_ref,
+                                frame.function_id,
+                                frame.pc,
+                            )
+                        })
                         .unwrap_or((String::new(), 0));
 
                     controller.stepping_state = SteppingState::StepOver {
@@ -734,7 +908,13 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                         start_file_path: current_file,
                         start_line_number: current_line,
                     };
-                    run_until_stop(vm_ref, &mut controller, &mut reference_manager, &pending_console_outputs, server)?;
+                    run_until_stop(
+                        vm_ref,
+                        &mut controller,
+                        &mut reference_manager,
+                        &pending_console_outputs,
+                        server,
+                    )?;
                 }
             }
 
@@ -745,14 +925,26 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     let (current_file, current_line) = vm_ref
                         .call_frames
                         .last()
-                        .and_then(|frame| DapController::resolve_source_location(vm_ref, frame.function_id, frame.pc))
+                        .and_then(|frame| {
+                            DapController::resolve_source_location(
+                                vm_ref,
+                                frame.function_id,
+                                frame.pc,
+                            )
+                        })
                         .unwrap_or((String::new(), 0));
 
                     controller.stepping_state = SteppingState::StepIn {
                         start_file_path: current_file,
                         start_line_number: current_line,
                     };
-                    run_until_stop(vm_ref, &mut controller, &mut reference_manager, &pending_console_outputs, server)?;
+                    run_until_stop(
+                        vm_ref,
+                        &mut controller,
+                        &mut reference_manager,
+                        &pending_console_outputs,
+                        server,
+                    )?;
                 }
             }
 
@@ -764,7 +956,13 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     controller.stepping_state = SteppingState::StepOut {
                         target_call_depth: current_depth,
                     };
-                    run_until_stop(vm_ref, &mut controller, &mut reference_manager, &pending_console_outputs, server)?;
+                    run_until_stop(
+                        vm_ref,
+                        &mut controller,
+                        &mut reference_manager,
+                        &pending_console_outputs,
+                        server,
+                    )?;
                 }
             }
 
@@ -776,8 +974,14 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
             Command::Modules(_) => {
                 let mut modules_list = Vec::new();
                 if let Some(vm_ref) = virtual_machine.as_ref() {
-                    for (binary_idx, loaded_binary) in vm_ref.context.loaded_binaries.iter().enumerate() {
-                        let module_name = loaded_binary.source_files.first().cloned().unwrap_or_else(|| format!("binary_{binary_idx}"));
+                    for (binary_idx, loaded_binary) in
+                        vm_ref.context.loaded_binaries.iter().enumerate()
+                    {
+                        let module_name = loaded_binary
+                            .source_files
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| format!("binary_{binary_idx}"));
                         modules_list.push(Module {
                             id: dap::types::ModuleId::String(format!("mod_{binary_idx}")),
                             name: module_name,
@@ -807,8 +1011,14 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                 let mut instructions = Vec::new();
                 if let Some(vm_ref) = virtual_machine.as_ref() {
                     if let Some(active_frame) = vm_ref.call_frames.last() {
-                        if let Some(compiled_func) = vm_ref.context.all_functions.get(active_frame.function_id as usize) {
-                            for (pc_index, instruction) in compiled_func.instructions.iter().enumerate() {
+                        if let Some(compiled_func) = vm_ref
+                            .context
+                            .all_functions
+                            .get(active_frame.function_id as usize)
+                        {
+                            for (pc_index, instruction) in
+                                compiled_func.instructions.iter().enumerate()
+                            {
                                 instructions.push(DisassembledInstruction {
                                     address: format!("0x{:X}", pc_index),
                                     instruction_bytes: None,
@@ -825,9 +1035,9 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                     }
                 }
 
-                server.respond(request.success(ResponseBody::Disassemble(DisassembleResponse {
-                    instructions,
-                })))?;
+                server.respond(request.success(ResponseBody::Disassemble(
+                    DisassembleResponse { instructions },
+                )))?;
             }
 
             Command::Disconnect(_) => {
@@ -857,7 +1067,9 @@ fn flush_pending_outputs<ReaderType: io::Read, WriterType: io::Write>(
     server: &mut Server<ReaderType, WriterType>,
 ) -> anyhow::Result<()> {
     let output_messages: Vec<String> = {
-        let mut guard = pending_console_outputs.lock().map_err(|poison_err| anyhow::anyhow!("{poison_err}"))?;
+        let mut guard = pending_console_outputs
+            .lock()
+            .map_err(|poison_err| anyhow::anyhow!("{poison_err}"))?;
         guard.drain(..).collect()
     };
     for message in output_messages {
@@ -898,7 +1110,10 @@ fn run_until_stop<ReaderType: io::Read, WriterType: io::Write>(
 
             server.send_event(Event::Stopped(StoppedEventBody {
                 reason: pause_reason,
-                description: Some(format!("Execution paused ({})", controller.last_pause_reason)),
+                description: Some(format!(
+                    "Execution paused ({})",
+                    controller.last_pause_reason
+                )),
                 thread_id: Some(1),
                 preserve_focus_hint: Some(false),
                 text: None,
@@ -1023,13 +1238,17 @@ fn setup_runtime_for_target(
 
         let mut pipeline = CompilationPipeline::standard();
         let mut compilation_context = CompilationContext::new(compilation_options);
-        pipeline.execute(&mut compilation_context).map_err(|diagnostics| {
-            let error_details: Vec<String> = diagnostics
-                .iter()
-                .map(|diag| format!("{diag:?}"))
-                .collect();
-            anyhow::anyhow!("Compilation failed with {} diagnostics: {}", diagnostics.len(), error_details.join(", "))
-        })?;
+        pipeline
+            .execute(&mut compilation_context)
+            .map_err(|diagnostics| {
+                let error_details: Vec<String> =
+                    diagnostics.iter().map(|diag| format!("{diag:?}")).collect();
+                anyhow::anyhow!(
+                    "Compilation failed with {} diagnostics: {}",
+                    diagnostics.len(),
+                    error_details.join(", ")
+                )
+            })?;
 
         let artifacts = compilation_context
             .emission_artifacts
@@ -1066,7 +1285,9 @@ fn resolve_breakpoint_location(
     let mut best_candidate: Option<(u32, u32, u32)> = None;
     let normalized_req_path = source_path.replace('\\', "/");
 
-    for (function_index, compiled_function) in virtual_machine.context.all_functions.iter().enumerate() {
+    for (function_index, compiled_function) in
+        virtual_machine.context.all_functions.iter().enumerate()
+    {
         if compiled_function.source_map.is_empty() {
             continue;
         }
@@ -1075,27 +1296,50 @@ fn resolve_breakpoint_location(
             Some(metadata) => metadata,
             None => continue,
         };
-        let loaded_binary = match virtual_machine.context.loaded_binaries.get(function_metadata.binary_id) {
+        let loaded_binary = match virtual_machine
+            .context
+            .loaded_binaries
+            .get(function_metadata.binary_id)
+        {
             Some(binary) => binary,
             None => continue,
         };
-        let function_source_file = match loaded_binary.source_files.get(compiled_function.source_id as usize) {
+        let function_source_file = match loaded_binary
+            .source_files
+            .get(compiled_function.source_id as usize)
+        {
             Some(file_name) => file_name,
             None => continue,
         };
 
         let normalized_func_path = function_source_file.replace('\\', "/");
         let matches_file = normalized_func_path == normalized_req_path
-            || normalized_req_path.ends_with(&format!("/{}", normalized_func_path.trim_start_matches('/')))
-            || normalized_func_path.ends_with(&format!("/{}", normalized_req_path.trim_start_matches('/')));
+            || normalized_req_path.ends_with(&format!(
+                "/{}",
+                normalized_func_path.trim_start_matches('/')
+            ))
+            || normalized_func_path
+                .ends_with(&format!("/{}", normalized_req_path.trim_start_matches('/')));
         if !matches_file {
             continue;
         }
 
-        let func_min_line = compiled_function.source_map.iter().map(|entry| entry.line).min().unwrap_or(0);
-        let func_max_line = compiled_function.source_map.iter().map(|entry| entry.line).max().unwrap_or(0);
+        let func_min_line = compiled_function
+            .source_map
+            .iter()
+            .map(|entry| entry.line)
+            .min()
+            .unwrap_or(0);
+        let func_max_line = compiled_function
+            .source_map
+            .iter()
+            .map(|entry| entry.line)
+            .max()
+            .unwrap_or(0);
 
-        if requested_line < func_min_line.saturating_sub(1) || requested_line > func_max_line.saturating_add(1) {
+        if requested_line < func_min_line.saturating_sub(1)
+            || requested_line > func_max_line.saturating_add(1)
+        {
             continue;
         }
 

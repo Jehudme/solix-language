@@ -243,9 +243,7 @@ impl PackageCache for FilesystemPackageCache {
     ) -> Result<Option<BinaryProgram>, EmissionError> {
         let entry_dir = self.package_entry_dir(package_name, version);
         let meta_file = entry_dir.join("meta.json");
-        let binary_file = entry_dir
-            .join("bin")
-            .join(format!("{package_name}.slxb"));
+        let binary_file = entry_dir.join("bin").join(format!("{package_name}.slxb"));
 
         if !meta_file.exists() || !binary_file.exists() {
             return Ok(None);
@@ -336,15 +334,14 @@ impl PackageCache for FilesystemPackageCache {
             }
         })?;
 
-        let source_archive_sha256 =
-            sha256_file(source_archive_path).map_err(|io_error| {
-                EmissionError::ContainerSerializationFailed {
-                    reason: format!(
-                        "Failed to hash source archive '{}': {io_error}",
-                        source_archive_path.display()
-                    ),
-                }
-            })?;
+        let source_archive_sha256 = sha256_file(source_archive_path).map_err(|io_error| {
+            EmissionError::ContainerSerializationFailed {
+                reason: format!(
+                    "Failed to hash source archive '{}': {io_error}",
+                    source_archive_path.display()
+                ),
+            }
+        })?;
 
         let cached_binary_sha256 = crate::hash::format_hex_digest(&sha256_bytes(raw_binary_bytes));
 
@@ -377,14 +374,14 @@ impl PackageCache for FilesystemPackageCache {
                         temp_binary.display()
                     ),
                 })?;
-            file_handle
-                .flush()
-                .map_err(|io_error| EmissionError::ContainerSerializationFailed {
+            file_handle.flush().map_err(|io_error| {
+                EmissionError::ContainerSerializationFailed {
                     reason: format!(
                         "Failed to flush temp cache file '{}': {io_error}",
                         temp_binary.display()
                     ),
-                })?;
+                }
+            })?;
         }
 
         fs::rename(&temp_binary, &target_binary).map_err(|io_error| {

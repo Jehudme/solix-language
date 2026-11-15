@@ -2,9 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::bytecode::{
-    BinaryProgram, CompiledFunction, Instruction, OpCode,
-};
+use solix_common::bytecode::{BinaryProgram, CompiledFunction, Instruction, OpCode};
 use solix_common::types::{PrimitiveKind, Type};
 use solix_runtime::context::RuntimeContext;
 use solix_runtime::exceptions::RuntimeError;
@@ -140,8 +138,7 @@ fn test_non_public_or_non_primitive_entrypoint_rejected() {
     ));
 
     // Rejects non-primitive parameter entrypoint
-    let object_res =
-        virtual_machine.invoke_entry("test_pkg::object_entry", &[Value::Ref(1234)]);
+    let object_res = virtual_machine.invoke_entry("test_pkg::object_entry", &[Value::Ref(1234)]);
     assert!(matches!(
         object_res,
         Err(RuntimeError::InvalidEntryPointSignature { .. })

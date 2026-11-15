@@ -462,7 +462,9 @@ impl ClientModuleSolver {
         Self {
             store_directory,
             native_cache_directory,
-            package_cache: std::sync::Arc::new(crate::cache::FilesystemPackageCache::with_root(cache_root)),
+            package_cache: std::sync::Arc::new(crate::cache::FilesystemPackageCache::with_root(
+                cache_root,
+            )),
         }
     }
 
@@ -477,13 +479,18 @@ impl ClientModuleSolver {
         Self {
             store_directory,
             native_cache_directory,
-            package_cache: std::sync::Arc::new(crate::cache::FilesystemPackageCache::with_root(cache_root)),
+            package_cache: std::sync::Arc::new(crate::cache::FilesystemPackageCache::with_root(
+                cache_root,
+            )),
         }
     }
 
     /// Configures an explicit package extraction cache for this solver.
     #[must_use]
-    pub fn with_package_cache(mut self, package_cache: std::sync::Arc<dyn crate::cache::PackageCache>) -> Self {
+    pub fn with_package_cache(
+        mut self,
+        package_cache: std::sync::Arc<dyn crate::cache::PackageCache>,
+    ) -> Self {
         self.package_cache = package_cache;
         self
     }
@@ -519,10 +526,11 @@ impl ClientModuleSolver {
         }
 
         let mut discovered_versions = Vec::new();
-        let read_entries = std::fs::read_dir(&package_folder).map_err(|error| SolverError::IoError {
-            path: package_folder.clone(),
-            reason: error.to_string(),
-        })?;
+        let read_entries =
+            std::fs::read_dir(&package_folder).map_err(|error| SolverError::IoError {
+                path: package_folder.clone(),
+                reason: error.to_string(),
+            })?;
 
         for entry_result in read_entries {
             let entry = entry_result.map_err(|error| SolverError::IoError {
@@ -586,15 +594,16 @@ impl ClientModuleSolver {
             }
 
             // 2. Cache miss: extract archive from scratch
-            let loaded_archive =
-                crate::project::SlxarcArchive::extract_and_load(&slxarc_candidate, &extraction_target).map_err(
-                    |error| SolverError::ExtractionError {
-                        reason: format!(
-                            "Failed to extract '{package_name}' archive at '{}': {error}",
-                            slxarc_candidate.display()
-                        ),
-                    },
-                )?;
+            let loaded_archive = crate::project::SlxarcArchive::extract_and_load(
+                &slxarc_candidate,
+                &extraction_target,
+            )
+            .map_err(|error| SolverError::ExtractionError {
+                reason: format!(
+                    "Failed to extract '{package_name}' archive at '{}': {error}",
+                    slxarc_candidate.display()
+                ),
+            })?;
 
             let primary_program = loaded_archive.binaries.into_iter().next().ok_or_else(|| {
                 SolverError::ExtractionError {
@@ -625,10 +634,11 @@ impl ClientModuleSolver {
 
             Ok(solved_package)
         } else if slxb_candidate.exists() {
-            let binary_bytes = std::fs::read(&slxb_candidate).map_err(|error| SolverError::IoError {
-                path: slxb_candidate.clone(),
-                reason: error.to_string(),
-            })?;
+            let binary_bytes =
+                std::fs::read(&slxb_candidate).map_err(|error| SolverError::IoError {
+                    path: slxb_candidate.clone(),
+                    reason: error.to_string(),
+                })?;
 
             let program = BinaryProgram::from_bytes(&binary_bytes).map_err(|error| {
                 SolverError::ExtractionError {
@@ -703,14 +713,16 @@ impl ModuleSolver for ClientModuleSolver {
             for entry_result in read_dir.flatten() {
                 let package_path = entry_result.path();
                 if package_path.is_dir()
-                    && let Some(folder_name) = package_path.file_name().and_then(|name| name.to_str())
+                    && let Some(folder_name) =
+                        package_path.file_name().and_then(|name| name.to_str())
                     && let Ok(version_read_dir) = fs::read_dir(&package_path)
                 {
                     let mut has_version = false;
                     for version_entry_result in version_read_dir.flatten() {
                         let version_candidate = version_entry_result.path();
                         if version_candidate.is_dir()
-                            && let Some(candidate_name) = version_candidate.file_name().and_then(|name| name.to_str())
+                            && let Some(candidate_name) =
+                                version_candidate.file_name().and_then(|name| name.to_str())
                             && PackageVersion::parse(candidate_name).is_ok()
                         {
                             has_version = true;

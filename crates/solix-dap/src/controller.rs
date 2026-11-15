@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use solix_common::bytecode::SourceMapEntry;
 use solix_runtime::exceptions::RuntimeError;
@@ -11,7 +11,9 @@ use solix_runtime::value::Value;
 use solix_runtime::vm::debug::{DebugSignal, VmDebugHook};
 use solix_runtime::vm::engine::VirtualMachine;
 
-use crate::evaluator::{check_hit_condition, evaluate_expression_in_frame, interpolate_log_template};
+use crate::evaluator::{
+    check_hit_condition, evaluate_expression_in_frame, interpolate_log_template,
+};
 use crate::state::{BreakpointEntry, FunctionBreakpointEntry, SteppingState};
 
 /// Type definition for logpoint output notifications sent to the DAP client.
@@ -63,9 +65,18 @@ impl DapController {
         function_id: u32,
         instruction_pc: u32,
     ) -> Option<(String, u32)> {
-        let compiled_function = virtual_machine.context.all_functions.get(function_id as usize)?;
-        let function_metadata = virtual_machine.context.function_meta.get(function_id as usize)?;
-        let loaded_binary = virtual_machine.context.loaded_binaries.get(function_metadata.binary_id)?;
+        let compiled_function = virtual_machine
+            .context
+            .all_functions
+            .get(function_id as usize)?;
+        let function_metadata = virtual_machine
+            .context
+            .function_meta
+            .get(function_id as usize)?;
+        let loaded_binary = virtual_machine
+            .context
+            .loaded_binaries
+            .get(function_metadata.binary_id)?;
 
         let source_file_path = loaded_binary
             .source_files
@@ -109,17 +120,15 @@ impl VmDebugHook for DapController {
         }
 
         // 2. Resolve source location
-        let (current_file_path, current_line_number) = Self::resolve_source_location(
-            virtual_machine,
-            function_id,
-            instruction_pc,
-        )
-        .unwrap_or_default();
+        let (current_file_path, current_line_number) =
+            Self::resolve_source_location(virtual_machine, function_id, instruction_pc)
+                .unwrap_or_default();
 
         let current_frame_depth = virtual_machine.call_frames.len();
         let active_frame_index = current_frame_depth.saturating_sub(1);
 
-        let is_at_last_hit = self.last_hit_breakpoint_location == Some((function_id, instruction_pc));
+        let is_at_last_hit =
+            self.last_hit_breakpoint_location == Some((function_id, instruction_pc));
         if !is_at_last_hit {
             self.last_hit_breakpoint_location = None;
         }
@@ -190,22 +199,34 @@ impl VmDebugHook for DapController {
 
             // 4. Check function breakpoints on entry (instruction_pc == 0)
             if instruction_pc == 0 {
-                if let Some(compiled_function) = virtual_machine.context.all_functions.get(function_id as usize) {
+                if let Some(compiled_function) = virtual_machine
+                    .context
+                    .all_functions
+                    .get(function_id as usize)
+                {
                     let function_symbol = &compiled_function.symbol;
                     for function_breakpoint in &mut self.function_breakpoints {
                         let matches_name = function_symbol == &function_breakpoint.function_name
-                            || function_symbol.ends_with(&format!("::{}", function_breakpoint.function_name));
+                            || function_symbol
+                                .ends_with(&format!("::{}", function_breakpoint.function_name));
 
                         if matches_name {
                             function_breakpoint.current_hit_count += 1;
 
-                            if let Some(hit_condition) = &function_breakpoint.hit_condition_expression {
-                                if !check_hit_condition(function_breakpoint.current_hit_count, hit_condition) {
+                            if let Some(hit_condition) =
+                                &function_breakpoint.hit_condition_expression
+                            {
+                                if !check_hit_condition(
+                                    function_breakpoint.current_hit_count,
+                                    hit_condition,
+                                ) {
                                     continue;
                                 }
                             }
 
-                            if let Some(guard_expression) = &function_breakpoint.condition_expression {
+                            if let Some(guard_expression) =
+                                &function_breakpoint.condition_expression
+                            {
                                 match evaluate_expression_in_frame(
                                     guard_expression,
                                     virtual_machine,
