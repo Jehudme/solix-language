@@ -192,7 +192,7 @@ Semantic tokens (`textDocument/semanticTokens/full`) utilize LSP 3.17 relative d
 
 ### 7.4 Formal Parameter Preservation for Inlay Hints & Signatures
 Parameter names and types are preserved across all compiler passes (`SymbolEntry::parameter_names`).
-1. **Inlay Hints**: Inlay hints (`textDocument/inlayHint`) display true declared parameter names (`brick_rect:`, `active_color:`) rather than synthesized `arg{index}:` placeholders.
+1. **Inlay Hints**: Inlay hints (`textDocument/inlayHint`) display true declared parameter names (`brick_rect:`, `active_color:`) rather than synthesized `arg{index}:` placeholders, accompanied by hover tooltips providing full type annotations (`Rectangle rec`, `Color color`).
 2. **Signature Help Resilience**: Active typing of unclosed invocations (e.g. `Raylib::DrawRectangleRounded(brick_rect, `) invokes a backward lexical scanner that extracts the callee symbol and active parameter index even when resilient AST generation produces empty call nodes.
 3. **Completion Label Details**: In autocompletion lists (`textDocument/completion`), method and function entries utilize LSP 3.17 `CompletionItemLabelDetails` to render parameter signatures in `detail` (`(Rectangle rec, float32 roundness, int32 segments, Color color)`) and return types in `description` (`void`), while field/variable entries display their evaluated type.
 

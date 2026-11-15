@@ -608,23 +608,37 @@ fn test_semantic_tokens_syntax_error_resilience_and_no_overlap() {
     let result = semantic_tokens_full(&snapshot).unwrap();
     if let SemanticTokensResult::Tokens(tokens) = result {
         assert!(!tokens.data.is_empty());
-        let mut _previous_line = 0u32;
-        let mut previous_start = 0u32;
-        let mut previous_len = 0u32;
+        let lines: Vec<&str> = source.lines().collect();
+        let mut previous_line_index = 0usize;
+        let mut previous_start_char = 0usize;
+        let mut previous_token_length = 0usize;
+
         for token in &tokens.data {
-            if token.delta_line == 0 {
-                let absolute_start = previous_start + token.delta_start;
-                assert!(
-                    absolute_start >= previous_start + previous_len,
-                    "Tokens must NEVER overlap on same line! Prev start: {previous_start}, len: {previous_len}, cur start: {absolute_start}"
-                );
-                previous_start = absolute_start;
-            } else {
-                _previous_line += token.delta_line;
-                previous_start = token.delta_start;
-            }
-            previous_len = token.length;
             assert!(token.length > 0, "Token length must be > 0");
+            let (current_line_index, current_start_char) = if token.delta_line > 0 {
+                (
+                    previous_line_index + token.delta_line as usize,
+                    token.delta_start as usize,
+                )
+            } else {
+                let absolute_start = previous_start_char + token.delta_start as usize;
+                assert!(
+                    absolute_start >= previous_start_char + previous_token_length,
+                    "Tokens must NEVER overlap on same line! Prev start: {previous_start_char}, len: {previous_token_length}, cur start: {absolute_start}"
+                );
+                (previous_line_index, absolute_start)
+            };
+
+            let line_string = lines.get(current_line_index).copied().unwrap_or("");
+            assert!(
+                current_start_char + (token.length as usize) <= line_string.len(),
+                "Token exceeds line boundary: line {current_line_index}, start {current_start_char}, len {}, line: '{line_string}'",
+                token.length
+            );
+
+            previous_line_index = current_line_index;
+            previous_start_char = current_start_char;
+            previous_token_length = token.length as usize;
         }
     } else {
         panic!("Expected full tokens");
@@ -1040,19 +1054,29 @@ fn test_breakout_real_inlay_hints() {
             },
         },
     );
-    if !hints.is_empty() {
-        let has_real_param = hints.iter().any(|hint| match &hint.label {
-            InlayHintLabel::String(label_text) => {
-                label_text.contains("rec: ") || label_text.contains("roundness: ")
-            }
-            _ => false,
-        });
-        assert!(
-            has_real_param,
-            "Inlay hints must show real parameter names, got: {:?}",
-            hints
-        );
-    }
+    assert!(!hints.is_empty(), "Inlay hints must not be empty! Got 0 hints.");
+    let has_real_param = hints.iter().any(|hint| match &hint.label {
+        InlayHintLabel::String(label_text) => {
+            label_text.contains("rec: ") || label_text.contains("roundness: ")
+        }
+        _ => false,
+    });
+    assert!(
+        has_real_param,
+        "Inlay hints must show real parameter names, got: {:?}",
+        hints
+    );
+    let has_tooltip_type = hints.iter().any(|hint| match &hint.tooltip {
+        Some(tower_lsp::lsp_types::InlayHintTooltip::String(tooltip_text)) => {
+            tooltip_text.contains("Rectangle rec") || tooltip_text.contains("float32 roundness")
+        }
+        _ => false,
+    });
+    assert!(
+        has_tooltip_type,
+        "Inlay hints must provide parameter types in tooltips, got: {:?}",
+        hints
+    );
 }
 
 #[test]
@@ -1102,6 +1126,54 @@ fn test_import_wildcard_undeclared_package_fails_with_e0232() {
         "Wildcard import of unimported package must emit E0232, got: {:?}",
         snapshot.diagnostics
     );
+}
+
+#[test]
+fn test_breakout_unimported_solix_collections_list_produces_diagnostic() {
+    use solix_common::solver::ClientModuleSolver;
+    use std::path::{Path, PathBuf};
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let breakout_dir = repo_root.join("examples").join("breakout");
+    let breakout_main = breakout_dir.join("src").join("main.slx");
+    if !breakout_main.exists() {
+        return;
+    }
+
+    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let Ok(uri) = Url::from_file_path(&canonical_main) else {
+        return;
+    };
+    let mut source = std::fs::read_to_string(&canonical_main).unwrap();
+    source = format!("import solix.collections.List;\n{source}");
+
+    let workspace = WorkspaceManager::new(
+        Some(breakout_dir),
+        Some(Arc::new(ClientModuleSolver::new())),
+    );
+    let snapshot = workspace.did_open(uri, 1, source);
+    let has_cannot_resolve = snapshot.diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("Cannot resolve import 'solix.collections.List'")
+    });
+    assert!(
+        has_cannot_resolve,
+        "Breakout must report cannot resolve import 'solix.collections.List', got: {:?}",
+        snapshot.diagnostics
+    );
+}
+
+#[test]
+fn test_unimported_specific_symbol_emits_diagnostic() {
+    let (workspace, test_uri) = create_test_workspace();
+    let test_source = "import solix.collections.List;\n\npublic class Sample {\n    public int32 run() { return 0; }\n}\n";
+    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
+    assert!(!snapshot.diagnostics.is_empty(), "Must produce diagnostic for unimported package/symbol");
 }
 
 #[test]

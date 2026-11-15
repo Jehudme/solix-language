@@ -321,12 +321,15 @@ fn collect_inlay_hints_in_expression(
                                     .filter(|name| !name.is_empty())
                                     .unwrap_or("arg");
                                 let hint_label = format!("{param_name}: ");
+                                let param_type = &parameter_types[index];
                                 hints.push(InlayHint {
                                     position,
                                     label: InlayHintLabel::String(hint_label),
                                     kind: Some(InlayHintKind::PARAMETER),
                                     text_edits: None,
-                                    tooltip: None,
+                                    tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(
+                                        format!("{param_type} {param_name}"),
+                                    )),
                                     padding_left: Some(false),
                                     padding_right: Some(true),
                                     data: None,
@@ -427,12 +430,15 @@ fn collect_inlay_hints_in_expression(
                                         .filter(|name| !name.is_empty())
                                         .unwrap_or("arg");
                                     let hint_label = format!("{param_name}: ");
+                                    let param_type = &parameter_types[index];
                                     hints.push(InlayHint {
                                         position,
                                         label: InlayHintLabel::String(hint_label),
                                         kind: Some(InlayHintKind::PARAMETER),
                                         text_edits: None,
-                                        tooltip: None,
+                                        tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(
+                                            format!("{param_type} {param_name}"),
+                                        )),
                                         padding_left: Some(false),
                                         padding_right: Some(true),
                                         data: None,
