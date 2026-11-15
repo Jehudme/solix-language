@@ -5,7 +5,7 @@
 A `ThrowStatement` (`throw expr;`) raises a runtime exception, interrupting normal execution and transitioning the VM into the exception unwinding state.
 
 In Solix:
-- The thrown value must evaluate to an instance of `std.Exception` (or a subclass). Throwing primitives is illegal.
+- The thrown value must evaluate to an instance of `std::Exception` (or a subclass). Throwing primitives is illegal.
 - The throw instruction jumps directly into the containing block's **Exception Cleanup Segment**, ensuring local variables in the throwing block are deallocated prior to unwinding.
 
 ---
@@ -16,7 +16,7 @@ In Solix:
 ```solix
 // Solix Code
 String msg = new String("error");
-throw new std.Exception("boom");
+throw new std::Exception("boom");
 ```
 
 ```bytecode

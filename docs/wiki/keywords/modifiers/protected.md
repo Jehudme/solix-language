@@ -56,7 +56,7 @@ public class Dog extends Animal {
 
     public override void speak() {
         // 'name' is protected in Animal, accessible here in Dog.
-        solix.io.Console::println(name + " says: Woof!");
+        solix::io::Console::println(name + " says: Woof!");
     }
 }
 ```

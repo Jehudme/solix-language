@@ -17,11 +17,13 @@ Exhaustive reference for every diagnostic code emitted by the compiler and virtu
 * [**Runtime Execution Errors (`R0001`–`R0023`)**](errors/runtime-errors.md): Stack overflow, null reference dereference, division by zero, invalid cast traps, entrypoint signature mismatches.
 
 ### 2. [Built-in Primitive Types (`primitives/`)](primitives/README.md)
-All 14 built-in primitive types, memory layouts, ranges, and conversion rules:
+All built-in primitive scalar and structural types, memory layouts, ranges, and conversion rules:
 * [**Integer Types**](primitives/integers.md): Signed (`int8`, `int16`, `int32`, `int64`) and unsigned (`uint8`, `uint16`, `uint32`, `uint64`), plus friendly aliases (`byte`, `short`, `int`, `long`).
 * [**Floating-Point Types**](primitives/floats.md): IEEE-754 single (`float32` / `float`) and double (`float64` / `double`).
-* [**Booleans & Characters**](primitives/booleans-and-chars.md): `bool` and 32-bit Unicode scalar `char`.
-* [**Strings, Tuples & Void**](primitives/strings-tuples-and-void.md): Heap-allocated primitive `string`, structural anonymous `tuple`, and `void`.
+* [**Booleans**](primitives/booleans.md): `bool` logical truth values.
+* [**Characters**](primitives/chars.md): 32-bit Unicode scalar `char`.
+* [**Tuples**](primitives/tuples.md): Structural anonymous composite values.
+* [**Void**](primitives/void.md): Absence of return values.
 
 ### 3. [CLI Commands & Tooling (`commands/`)](commands/README.md)
 Comprehensive flag descriptions, usage syntax, and output options:

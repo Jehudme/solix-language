@@ -86,6 +86,7 @@ code --install-extension editors/vscode/solix-0.1.0.vsix --force
 ```
 
 > [!IMPORTANT]
+> [!TIP]
 > If you are updating from an earlier version of the Solix extension, reload the VS Code window after installation (`Ctrl+Shift+P` / `Cmd+Shift+P` $\to$ `Developer: Reload Window`) to refresh registered commands and clear any cached extension state.
 
 Alternatively, inside Visual Studio Code:

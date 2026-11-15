@@ -46,7 +46,7 @@ internal class ConnectionPool {
         this.maxConnections = max;
     }
 
-    internal solix.io.Connection acquire() {
+    internal solix::io::Connection acquire() {
         // implementation
         return null;
     }
@@ -70,7 +70,7 @@ public class DatabaseClient {
     }
 
     public string query(string sql) {
-        solix.io.Connection conn = pool.acquire();
+        solix::io::Connection conn = pool.acquire();
         try {
             return conn.execute(sql);
         } finally {

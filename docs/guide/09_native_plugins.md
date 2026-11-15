@@ -149,3 +149,21 @@ solix build --profile release
 ```
 
 During `solix build`, the build orchestrator (`scripts/build.py`) builds all native crates under `natives/`, copies the produced shared objects into `lib/`, and embeds them into the resulting `.slxarc` package.
+
+> [!NOTE]
+> Native libraries are hermetically packaged inside `.slxarc` binaries. When executing or distributing your application, the Solix runtime automatically extracts and loads matching native shared libraries for the host operating system and CPU architecture.
+
+> [!IMPORTANT]
+> All native symbols declared with `native` must be exported and registered via `solix_register_natives`. Unresolved native symbols produce link errors during VM initialization.
+
+---
+
+## 5. Next Steps & Further Reading
+
+- **Next Guide**: Learn how to bundle embedded assets and resources in [Packaging & Resources](packaging_and_resources.md).
+- **Tooling Guide**: Configure your development environment in [VS Code Extension Setup](editors_vscode.md).
+- **Previous Guide**: Review generics and monomorphization in [08 - Generics & Templates](08_generics_and_templates.md).
+- **Further Reading**:
+  - [Native FFI & ABI Specification](../spec/native-ffi-abi.md)
+  - [native Keyword Modifier Reference](../wiki/keywords/modifiers/native.md)
+  - [Binary Packaging Specification](../spec/binary-formats-slxb-and-slxarc.md)

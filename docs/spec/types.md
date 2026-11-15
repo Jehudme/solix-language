@@ -454,12 +454,12 @@ alias BinaryOp = int32(*)(int32, int32);
 
 public class Math {
     public static int32 add(int32 value_a, int32 value_b) {
-        return a + b;
+        return value_a + value_b;
     }
 }
 
 static int32 main() {
-    BinaryOp op = Math.add;
+    BinaryOp op = Math::add;
     int32 result = op(10, 20); // 30
     return result == 30 ? 0 : 1;
 }

@@ -77,14 +77,14 @@ public class MathAlgorithms {
 ### Explicit Type Arguments
 You can explicitly supply the type arguments when calling the method:
 ```solix
-int32 value_a = MathAlgorithms.identity<int32>(55);
+int32 value_a = MathAlgorithms::identity<int32>(55);
 ```
 
 ### Implicit Template Argument Deduction
 Solix automatically deduces template arguments from the passed argument types when unambiguous:
 ```solix
-int32 val = MathAlgorithms.identity(99);              // Inferred as <int32>
-int32 chosen = MathAlgorithms.chooseFirst(100, 200);   // Inferred as <int32>
+int32 val = MathAlgorithms::identity(99);              // Inferred as <int32>
+int32 chosen = MathAlgorithms::chooseFirst(100, 200);   // Inferred as <int32>
 ```
 
 ---
@@ -139,7 +139,7 @@ public class Processor<T> {
 
 public class Main {
     public static int32 main() {
-        Processor<int32> doubler = new Processor<int32>((x) => x * 2);
+        Processor<int32> doubler = new Processor<int32>((number) => number * 2);
         return doubler.execute(21); // 42
     }
 }
@@ -154,8 +154,8 @@ Generic types can be nested to build complex composite data structures:
 ```solix
 public class Cell<T> {
     public T content;
-    public Cell(T c) {
-        this.content = c;
+    public Cell(T initial_content) {
+        this.content = initial_content;
     }
 }
 
@@ -180,6 +180,9 @@ Understanding how Solix compiles generics helps you write more efficient code:
 3. **Separate VTables**:
    - Each unique specialization (e.g., `Holder<int32>` vs `Holder<float64>`) receives its own virtual method table and interface dispatch table (`itable`), ensuring correct polymorphic dispatch.
 
+> [!NOTE]
+> Monomorphization duplicates executable bytecode for distinct type signatures. For massive applications with many generic specializations, consider using interface references or function pointer indirections to balance code size and throughput.
+
 ---
 
 ## 8. Variadic Generics (`<args...>`) & Tuple Lowering
@@ -201,14 +204,29 @@ public class Formatter {
 }
 ```
 
+### Type Checking with `instanceof`
+The [instanceof](../wiki/keywords/expressions/instanceof.md) operator inspects the runtime type tag of any element within the tuple at zero overhead.
+
 ### Compiler Lowering
 1. The parameter `args...` is lowered into a single `tuple` primitive parameter:
    ```solix
    public static int32 print_all(int32 count, tuple args)
    ```
-2. When calling `Formatter.print_all(3, 10, "text", true)`, the compiler bundles the trailing arguments into a `NEW_TUPLE` expression:
+2. When calling `Formatter::print_all(3, 10, "text", true)`, the compiler bundles the trailing arguments into a `NEW_TUPLE` expression:
    ```solix
-   Formatter.print_all(3, new tuple(10, "text", true))
+   Formatter::print_all(3, new tuple(10, "text", true))
    ```
 3. Variadic arguments support full RAII semantics: when `args` exits scope or unwinds during an exception, all contained reference objects are destroyed deterministically.
+
+---
+
+## 9. Next Steps & Further Reading
+
+- **Next Guide**: Learn how to bridge native C and Rust shared libraries in [09 - Native Plugins & FFI](09_native_plugins.md).
+- **Previous Guide**: Review function pointers and closures in [07 - Functions & Lambdas](07_functions_and_lambdas.md).
+- **Further Reading**:
+  - [Generics Specification](../spec/statements/declarations/generic_declaration.md)
+  - [Monomorphization Specification](../spec/binder-and-monomorphization.md)
+  - [instanceof Expression](../wiki/keywords/expressions/instanceof.md)
+  - [Tuples Primitive Reference](../wiki/primitives/tuples.md)
 

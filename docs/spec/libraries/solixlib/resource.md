@@ -50,7 +50,7 @@ Static utilities for inspecting, locating, and reading bundled application resou
 
 ## 3. Virtual URI Scheme: `res://`
 
-All file reading and inspection functions (`File.exists`, `File.read_all_text`, `File.get_size`, `File.get_last_modified_time`) transparently support the `res://` virtual URI scheme.
+All file reading and inspection functions (`File::exists`, `File::read_all_text`, `File::get_size`, `File::get_last_modified_time`) transparently support the `res://` virtual URI scheme.
 
 When a path begins with `res://`:
 - The `res://` prefix is stripped.

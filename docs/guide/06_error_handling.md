@@ -87,8 +87,8 @@ public void safe_parse(String input) {
         int32 value = input.to_int32();
         Console::println(value);
     } catch (FormatException ex) {
-        Console.error("Invalid number format: ");
-        Console.errorln(ex.get_message());
+        Console::error("Invalid number format: ");
+        Console::errorln(ex.get_message());
     } finally {
         Console::println("Parsing attempt complete.");
     }
@@ -117,16 +117,16 @@ public void read_data(int32[] arr, int32 index) {
         int32 value = arr[index];
         Console::println(value);
     } catch (NullPointerException ex) {
-        Console.errorln("Array reference was null.");
+        Console::errorln("Array reference was null.");
     } catch (IndexOutOfBoundsException ex) {
-        Console.error("Index out of range: ");
-        Console.errorln(ex.get_message());
+        Console::error("Index out of range: ");
+        Console::errorln(ex.get_message());
     } catch (RuntimeException ex) {
-        Console.error("Unexpected runtime error: ");
-        Console.errorln(ex.get_message());
+        Console::error("Unexpected runtime error: ");
+        Console::errorln(ex.get_message());
     } catch (Exception error) {
-        Console.error("Unknown error: ");
-        Console.errorln(ex.get_message());
+        Console::error("Unknown error: ");
+        Console::errorln(ex.get_message());
     }
 }
 ```
@@ -148,7 +148,7 @@ public void process_file(String path) {
     try {
         open_and_process(path);
     } catch (IOException ex) {
-        Console.errorln("IO failure — logging and re-throwing.");
+        Console::errorln("IO failure — logging and re-throwing.");
         ex.print_stack_trace();
         throw ex;   // Re-throw the original exception
     }
@@ -243,7 +243,7 @@ public void use_resource() {
     try {
         process(res);
     } catch (RuntimeException ex) {
-        Console.errorln("Error during processing.");
+        Console::errorln("Error during processing.");
     } finally {
         res.release();   // Always called, even if process() throws
     }
@@ -275,8 +275,8 @@ public void main(char[][] args) {
     try {
         process_order(args);
     } catch (InvalidArgumentException ex) {
-        Console.errorln("Invalid order data: ");
-        Console.errorln(ex.get_message());
+        Console::errorln("Invalid order data: ");
+        Console::errorln(ex.get_message());
     }
 }
 
@@ -339,4 +339,17 @@ public void main() {
 ```
 
 This guarantees that resources (file descriptors, locks, sockets, memory buffers) are never leaked during exception handling, without needing boilerplate `try ... catch ... finally` cleanup blocks at every intermediate call site.
+
+---
+
+## Next Steps & Further Reading
+
+### Next Steps
+- [Functions & Lambdas Guide](07_functions_and_lambdas.md): First-class callable values, static method pointers, and variable-capturing closures.
+
+### Further Reading
+- [`try` Keyword Reference](../wiki/keywords/control_flow/try.md): Protected execution scopes and exception interception.
+- [`throw` Keyword Reference](../wiki/keywords/control_flow/throw.md): Raising exceptions and propagating error states.
+- [Runtime Error Directory](../wiki/errors/runtime-errors.md): Complete index of runtime exception codes (`R0001`–`R0023`).
+- [Formal Exception Specification](../spec/statements/control_flow/try_catch_finally_statement.md): VM unwinding tables and cleanup opcodes.
 

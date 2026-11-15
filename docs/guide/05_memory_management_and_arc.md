@@ -307,3 +307,15 @@ This strategy minimizes fragmentation and keeps average allocation cost low for 
 
 > [!TIP]
 > Design hot paths to reuse objects rather than repeatedly allocating and discarding them. While ARC eliminates GC pauses, frequent small allocations still have overhead from heap traversal and reference-count updates.
+
+---
+
+## Next Steps & Further Reading
+
+### Next Steps
+- [Error Handling Guide](06_error_handling.md): Learn how deterministic stack unwinding cleans up ARC objects during exceptions.
+
+### Further Reading
+- [`weak` Modifier Reference](../wiki/keywords/modifiers/weak.md): Non-owning references that prevent cyclic dependency leaks.
+- [Destructors Specification](../spec/statements/declarations/destructors.md): RAII resource cleanup patterns.
+- [Memory Management Specification](../spec/memory-model-and-arc.md): Reference counting opcodes, virtual heap layout, and allocation mechanics.

@@ -75,10 +75,10 @@ import solix.io.Console;
 
 public int32 sum_until_zero() {
     int32 total = 0;
-    int32 input = Console.input_int32();
+    int32 input = Console::input_int32();
     while (input != 0) {
         total = total + input;
-        input = Console.input_int32();
+        input = Console::input_int32();
     }
     return total;
 }
@@ -97,7 +97,7 @@ public int32 read_positive() {
     int32 value;
     do {
         Console::print("Enter a positive number: ");
-        value = Console.input_int32();
+        value = Console::input_int32();
     } while (value <= 0);
     return value;
 }
@@ -267,10 +267,10 @@ In a `for` loop, `continue` causes the **step expression** to execute before re-
 
 ```solix
 public int32 factorial(int32 number) {
-    if (n <= 1) {
+    if (number <= 1) {
         return 1;              // Early exit with base case
     }
-    return n * factorial(n - 1);
+    return number * factorial(number - 1);
 }
 
 public void greet(String name) {
@@ -284,3 +284,17 @@ public void greet(String name) {
 
 > [!IMPORTANT]
 > Every non-`void` code path in a method must end with a `return` statement that provides a value of the declared return type. The compiler enforces this.
+
+---
+
+## Next Steps & Further Reading
+
+### Next Steps
+- [Classes & Object-Oriented Programming](04_classes_and_oop.md): Master classes, single inheritance, abstract methods, and interfaces.
+
+### Further Reading
+- [`if` Keyword Reference](../wiki/keywords/control_flow/if.md): Conditional branching semantics.
+- [`while` Keyword Reference](../wiki/keywords/control_flow/while.md): Pre-condition looping constructs.
+- [`for` Keyword Reference](../wiki/keywords/control_flow/for.md): Counted iterations and range traversal.
+- [`switch` Keyword Reference](../wiki/keywords/control_flow/switch.md): Multi-branch pattern switching.
+- [`return` Keyword Reference](../wiki/keywords/control_flow/return.md): Flow termination and value returns.

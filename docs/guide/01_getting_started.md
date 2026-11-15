@@ -445,8 +445,13 @@ solix run src/main.slx -- --host localhost --port 8080
 
 ## Next Steps & Further Reading
 
-- [Variables & Types Guide](02_variables_and_types.md): Variables, primitive types, operators, and control flow.
+### Next Steps
+- [Variables & Types Guide](02_variables_and_types.md): Learn about variable declarations, primitive types, type coercion, and reference strings.
+
+### Further Reading
 - [Classes & Object-Oriented Programming](04_classes_and_oop.md): Classes, inheritance, abstract methods, and interfaces.
 - [Memory Management & ARC](05_memory_management_and_arc.md): Automatic Reference Counting, weak references, and deterministic destructors.
+- [CLI Reference: compile & build](../wiki/commands/compile-and-build.md): Compiler invocation, options, and archive packaging.
+- [Built-in Primitives Reference](../wiki/primitives/README.md): Bit-exact data types and scalar representations.
 - [Native C & Rust Interop](09_native_plugins.md): Binding C and Rust shared libraries using `SolixCValue` and FFI callbacks.
 - [CLI Command Wiki Reference](../wiki/commands/README.md): Quick reference cheat sheets for all CLI commands and options.

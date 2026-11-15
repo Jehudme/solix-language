@@ -76,7 +76,7 @@ public class Stack {
 
     public int32 pop() {
         if (top == 0) {
-            throw new solix.core.UnderflowException("Stack is empty");
+            throw new solix::core::UnderflowException("Stack is empty");
         }
         top = top - 1;
         return data[top];

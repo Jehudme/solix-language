@@ -513,4 +513,18 @@ public class Worker {
 // 2. Worker.buffer is decremented -> ~Buffer() runs ("Buffer memory released")
 ```
 
+---
+
+## Next Steps & Further Reading
+
+### Next Steps
+- [Memory Management & ARC](05_memory_management_and_arc.md): Learn how Automatic Reference Counting eliminates garbage collection pauses and how weak references prevent cycles.
+
+### Further Reading
+- [`class` Keyword Reference](../wiki/keywords/declarations/class.md): Object definitions, fields, and constructors.
+- [`interface` Keyword Reference](../wiki/keywords/declarations/interface.md): Contract definitions and polymorphic dispatch.
+- [`virtual` Modifier Reference](../wiki/keywords/modifiers/virtual.md): Method overriding prerequisites.
+- [`override` Modifier Reference](../wiki/keywords/modifiers/override.md): Explicit polymorphism validation.
+- [Class Declarations Specification](../spec/statements/declarations/class_declaration.md): VTable layout and method resolution order.
+
 

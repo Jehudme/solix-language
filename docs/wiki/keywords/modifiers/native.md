@@ -65,9 +65,9 @@ public class Os {
 
 public class Diagnostics {
     public static void logEnvironment() {
-        solix.io.Console::println("PID: "  + Os.getpid());
-        solix.io.Console::println("UID: "  + Os.getuid());
-        solix.io.Console::println("HOME: " + Os.getenv("HOME"));
+        solix::io::Console::println("PID: "  + Os.getpid());
+        solix::io::Console::println("UID: "  + Os.getuid());
+        solix::io::Console::println("HOME: " + Os.getenv("HOME"));
     }
 }
 ```

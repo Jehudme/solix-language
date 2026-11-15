@@ -62,7 +62,7 @@ float64 pi       = 3.141592653589793;
 ```
 
 > [!NOTE]
-> Solix does not have a dedicated character literal syntax like `'A'`. Characters are represented as their integer code point value cast to `char`.
+> Character literals can be written directly using single quotes (e.g. `'A'`) or cast from integer Unicode code points (e.g. `(char)65`). Numeric literals coerce to smaller integer and float types automatically when the value fits the target range.
 
 ---
 
@@ -351,10 +351,24 @@ bool third_val      = (bool)record[2];            // true
 
 ### Dynamic Operations on Tuples
 - **Subscript Access**: `record[item_index]` retrieves the element at integer index `item_index`.
-- **`instanceof`**: Evaluates whether an element matches a type (primitive or reference):
+- **[`instanceof`](../wiki/keywords/expressions/instanceof.md)**: Evaluates whether an element matches a type (primitive or reference):
   ```solix
   if (record[0] instanceof int32) { ... }
   ```
 - **Type Casting**: `(Type)record[item_index]` coerces the element to the given type, with runtime validation throwing `TypeCastException` on mismatch.
 - **Automatic Cleanup**: Contained reference objects are managed by ARC and automatically destroyed via RAII when the tuple's ref count drops to zero.
+
+---
+
+## Next Steps & Further Reading
+
+### Next Steps
+- [Control Flow Guide](03_control_flow.md): Learn about `if`/`else`, `while`, `do-while`, `for`, and `switch` statements.
+
+### Further Reading
+- [Built-in Primitives Reference](../wiki/primitives/README.md): Detailed bit-widths, IEEE-754 floats, and integer limits.
+- [`instanceof` Keyword Reference](../wiki/keywords/expressions/instanceof.md): Dynamic type evaluation and runtime queries.
+- [`new` Keyword Reference](../wiki/keywords/expressions/new.md): Object and tuple instantiation mechanics.
+- [`alias` Keyword Reference](../wiki/keywords/declarations/alias.md): Creating semantic type aliases.
+- [Formal Type System Specification](../spec/types.md): Bytecode layouts and register packing laws.
 

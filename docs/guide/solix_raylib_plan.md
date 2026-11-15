@@ -201,14 +201,14 @@ sequenceDiagram
 
 ### Phase 3: Core Graphic Loop Verification (Milestone 1)
 - Verify minimal functional graphic loop:
-  - `Raylib.init_window(800, 450, "Solix Raylib")`
-  - `Raylib.set_target_fps(60)`
-  - `Raylib.window_should_close()`
-  - `Raylib.begin_drawing()`
-  - `Raylib.clear_background(Color.RAYWHITE)`
-  - `Raylib.draw_text("Hello Solix!", 190, 200, 20, Color.LIGHTGRAY)`
-  - `Raylib.end_drawing()`
-  - `Raylib.close_window()`
+  - `Raylib::init_window(800, 450, "Solix Raylib")`
+  - `Raylib::set_target_fps(60)`
+  - `Raylib::window_should_close()`
+  - `Raylib::begin_drawing()`
+  - `Raylib::clear_background(Color::RAYWHITE)`
+  - `Raylib::draw_text("Hello Solix!", 190, 200, 20, Color::LIGHTGRAY)`
+  - `Raylib::end_drawing()`
+  - `Raylib::close_window()`
 - Validate zero memory leaks and proper clean exit.
 
 ### Phase 4: Full API & Advanced Types (Milestone 2)

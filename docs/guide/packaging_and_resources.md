@@ -185,7 +185,7 @@ import solix.system.Console;
 
 class App {
     public static int32 main() {
-        // Transparent read via File.read_all_text
+        // Transparent read via File::read_all_text
         String cfg = File::read_all_text(new String("res://config.json"));
         Console::println(cfg);
 
@@ -440,6 +440,6 @@ The Solix runtime dynamic loader inspects the host operating system:
 3. **Use Zig for Universal Packaging**: Use Zig in `scripts/build_native.py` and hook it into the `release` profile `pre_compile` list to generate cross-platform `.slxarc` archives containing binaries for Linux, Windows, and macOS.
 4. **Use `res://` for Uniform Paths**: Use `res://` URIs for internal assets so that configuration strings and file paths remain clear and distinct from host paths.
 5. **Automate Native Builds with `pre_compile`**: Use `pre_compile` hooks to invoke build tools so native libraries are guaranteed to be compiled and up to date prior to bundling.
-6. **Resources are Read-Only**: Bundled resources in `.slxarc` archives represent static assets. For writable data (user preferences, caches, logs), use standard host filesystem paths obtained via `Path.get_temp_path()` or environment paths.
+6. **Resources are Read-Only**: Bundled resources in `.slxarc` archives represent static assets. For writable data (user preferences, caches, logs), use standard host filesystem paths obtained via `Path::get_temp_path()` or environment paths.
 
 
