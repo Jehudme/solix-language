@@ -273,7 +273,7 @@ def compile_rust_project(
     home_cargo_bin = str(Path.home() / ".cargo" / "bin")
     current_system_path = cargo_environment.get("PATH", "")
     if home_cargo_bin not in current_system_path:
-        cargo_environment["PATH"] = f"{home_cargo_bin}:{current_system_path}"
+        cargo_environment["PATH"] = f"{home_cargo_bin}{os.pathsep}{current_system_path}"
 
     if sys.platform.startswith("linux"):
         cargo_environment["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + cargo_environment.get("RUSTFLAGS", "")

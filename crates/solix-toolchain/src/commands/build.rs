@@ -66,6 +66,7 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
     });
 
     let current_exe = std::env::current_exe().unwrap_or_else(|_| "solix".into());
+    let binary_name = if cfg!(windows) { "solix.exe" } else { "solix" };
     let solix_bin = if let Ok(custom_bin) = std::env::var("SOLIX_BIN") {
         std::path::PathBuf::from(custom_bin)
     } else if current_exe
@@ -74,11 +75,11 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
     {
         current_exe
     } else if let Some(parent_dir) = current_exe.parent() {
-        let sibling_candidate = parent_dir.join("solix");
+        let sibling_candidate = parent_dir.join(binary_name);
         if sibling_candidate.exists() {
             sibling_candidate
         } else if let Some(grandparent_dir) = parent_dir.parent() {
-            let ancestor_candidate = grandparent_dir.join("solix");
+            let ancestor_candidate = grandparent_dir.join(binary_name);
             if ancestor_candidate.exists() {
                 ancestor_candidate
             } else {
@@ -96,7 +97,14 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         project_root.display()
     );
 
-    let mut command = Command::new("python3");
+    let python_binary = std::env::var("PYTHON").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "python".into()
+        } else {
+            "python3".into()
+        }
+    });
+    let mut command = Command::new(python_binary);
     command
         .arg("scripts/build.py")
         .arg("--profile")

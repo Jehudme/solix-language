@@ -20,7 +20,6 @@ license = "Apache-2.0"
 authors = ["Jehud Metellus"]
 description = "The Solix Programming Language Toolchain"
 repository = "https://github.com/Jehudme/solix-language"
-homepage = "https://github.com/Jehudme/solix-language"
 
 [workspace.dependencies]
 # Internal workspace crates

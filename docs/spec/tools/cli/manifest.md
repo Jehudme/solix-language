@@ -165,6 +165,6 @@ my_project/
 ## Role in Build & Distribution Lifecycle
 
 1. **Scaffolding (`solix new`)**: Creates `manifest.toml` populated with CLI arguments (`--name`, `--version`, `--license`, `--author`, `--deps`).
-2. **Building (`solix build`)**: `scripts/build.py` via `solix_build.py` reads `manifest.toml`, extracts metadata and dependencies, forwards configured entrypoints (`--entry`) and linking modes (`SOLIX_LINK_MODE`), invokes `solix compile`, and packages `manifest.toml` at the root of the resulting `.slxarc` archive.
+2. **Building (`solix build`)**: `scripts/build.py` via `solix_build.py` reads `manifest.toml`, extracts metadata and dependencies, forwards configured entrypoints (`--entry`) and linking modes (`SOLIX_LINK_MODE`), invokes `solix compile` (resolving `solix` or `solix.exe` cross-platform, configurable via `SOLIX_BIN` and `PYTHON`), manages native Cargo target path delimiters via `os.pathsep`, and packages `manifest.toml` at the root of the resulting `.slxarc` archive.
 3. **Execution (`solix run`)**: When running a `.slxarc` archive, the VM runtime reads `manifest.toml` from the archive container to determine entry points (`[entrypoints].main` or `[entrypoints].test`), validate visibility/return signatures, and resolve bundled resources.
 4. **Inspection (`solix info`)**: Reads and formats `manifest.toml` when displaying container metadata.
