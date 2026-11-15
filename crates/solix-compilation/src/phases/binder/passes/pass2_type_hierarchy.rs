@@ -688,12 +688,13 @@ pub fn execute_pass2_type_hierarchy(
                             );
                             let mut iface_child_ids = Vec::new();
                             for (slot, method_node) in nested_iface.methods.iter().enumerate() {
-                                let m_name = if method_node.name_span.end as usize <= source_text.len() {
-                                    &source_text
-                                        [method_node.name_span.start as usize..method_node.name_span.end as usize]
-                                } else {
-                                    "method"
-                                };
+                                let m_name =
+                                    if method_node.name_span.end as usize <= source_text.len() {
+                                        &source_text[method_node.name_span.start as usize
+                                            ..method_node.name_span.end as usize]
+                                    } else {
+                                        "method"
+                                    };
                                 let m_ret = resolve_type_annotation(
                                     source_id,
                                     source_text,
