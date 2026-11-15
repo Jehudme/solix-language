@@ -1,8 +1,8 @@
 # The Solix Programming Language
 
-[![CI](https://github.com/solix-lang/solix/actions/workflows/ci.yml/badge.svg)](https://github.com/solix-lang/solix/actions/workflows/ci.yml)
+[![CI](https://github.com/jehudme/solix-language/actions/workflows/ci.yml/badge.svg)](https://github.com/jehudme/solix-language/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v1.0.0-green.svg)](https://github.com/solix-lang/solix/releases)
+[![Version](https://img.shields.io/badge/version-v1.0.0-green.svg)](https://github.com/jehudme/solix-language/releases)
 
 Solix is an expressive, memory-safe, statically typed systems and application programming language. Built entirely in safe Rust (`#![forbid(unsafe_code)]`), Solix combines an Ahead-of-Time AST compiler with a high-throughput **64-bit Register Virtual Machine**, deterministic **Automatic Reference Counting (ARC)** with immediate free-block recycling, and a turnkey hermetic build pipeline.
 
@@ -29,8 +29,8 @@ brew install solix-lang/tap/solix
 
 ### Build from Source (Cargo)
 ```bash
-git clone https://github.com/solix-lang/solix.git
-cd solix
+git clone https://github.com/jehudme/solix-language.git
+cd solix-language
 cargo build --release
 cp target/release/solix ~/.local/bin/
 ```
