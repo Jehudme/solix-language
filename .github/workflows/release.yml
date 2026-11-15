@@ -87,7 +87,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          files: target/distrib/**/*
+          files: |
+            target/distrib/*.tar.gz
+            target/distrib/*.tar.xz
+            target/distrib/*.zip
+            target/distrib/*.sh
+            target/distrib/*.rb
+            target/distrib/*.sha256
+            target/distrib/sha256.sum
+            crates/solix-toolchain/assets/packages/*.slxarc
+          fail_on_unmatched_files: false
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
