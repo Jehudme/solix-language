@@ -18,6 +18,18 @@ impl<'a> Emitter<'a> {
         try_stmt: &TryStatement,
         loop_stack: &mut Vec<LoopContext>,
     ) -> Result<(), EmissionError> {
+        let maybe_pending_exception_register = if try_stmt.finally_block.is_some() {
+            let pending_register = self.allocator.alloc_temp()?;
+            self.emit_instruction(
+                Instruction::format_b(OpCode::LoadNull, 0, pending_register, 0),
+                Some(try_stmt.span),
+            );
+            self.track_reference_register(pending_register);
+            Some(pending_register)
+        } else {
+            None
+        };
+
         // Zero-cost: zero instructions emitted at try entry!
         let try_start_pc = self.function.instructions.len() as u32;
 
@@ -114,13 +126,14 @@ impl<'a> Emitter<'a> {
             }
 
             // Also register an unwinding handler for unhandled exceptions
+            let unwinding_catch_reg = maybe_pending_exception_register.unwrap_or(0);
             self.function
                 .exception_handlers
                 .push(ExceptionHandlerEntry {
                     try_start_pc,
                     try_end_pc,
                     catch_type_symbol: None,
-                    catch_reg: 0,
+                    catch_reg: unwinding_catch_reg,
                     handler_pc: finally_pc,
                     finally_pc: Some(finally_pc),
                     try_ref_regs: try_ref_regs.clone(),
@@ -131,22 +144,37 @@ impl<'a> Emitter<'a> {
             let offset = normal_target - normal_jump as i32;
             self.patch_jump_offset(normal_jump as usize, offset);
 
-            for cj in catch_jumps {
-                let off = normal_target - cj as i32;
-                self.patch_jump_offset(cj, off);
+            for catch_jump_index in catch_jumps {
+                let jump_offset = normal_target - catch_jump_index as i32;
+                self.patch_jump_offset(catch_jump_index, jump_offset);
             }
 
             // Emit inline finally block
             self.emit_block_statement(finally_block, loop_stack)?;
+
+            if let Some(pending_register) = maybe_pending_exception_register {
+                let skip_rethrow_jump = self.emit_instruction(
+                    Instruction::format_c(OpCode::JumpIfFalse, 0, pending_register, 0),
+                    Some(try_stmt.span),
+                );
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Throw, 0, pending_register, 0, 0),
+                    Some(try_stmt.span),
+                );
+                let after_rethrow_pc = self.function.instructions.len() as i32;
+                let skip_offset = after_rethrow_pc - skip_rethrow_jump as i32;
+                self.patch_jump_offset(skip_rethrow_jump as usize, skip_offset);
+                self.allocator.free_temp(pending_register);
+            }
         } else {
             // No finally block: patch normal jumps to point past all catch handlers
             let exit_pc = self.function.instructions.len() as i32;
             let offset = exit_pc - normal_jump as i32;
             self.patch_jump_offset(normal_jump as usize, offset);
 
-            for cj in catch_jumps {
-                let off = exit_pc - cj as i32;
-                self.patch_jump_offset(cj, off);
+            for catch_jump_index in catch_jumps {
+                let jump_offset = exit_pc - catch_jump_index as i32;
+                self.patch_jump_offset(catch_jump_index, jump_offset);
             }
         }
 

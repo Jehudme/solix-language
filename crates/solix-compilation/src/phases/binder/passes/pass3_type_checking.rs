@@ -2,9 +2,13 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::monomorphizer::GenericBlueprintRegistry;
-use crate::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
+use crate::phases::binder::passes::pass1_symbol_discovery::{
+    compute_effective_package, extract_namespace_path,
+};
+use crate::phases::binder::symbols::{LocalSymbolEntry, SymbolEntry, SymbolId, SymbolTable};
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::lexing::{Span, TokenKind};
 use crate::phases::parser::statements::Statement;
@@ -13,7 +17,7 @@ use crate::phases::parser::statements::declarations::*;
 use crate::phases::parser::statements::expressions::*;
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::visitor::AstVisitor;
-use solix_common::{BindingError, PrimitiveKind, Type};
+use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 
 /// Semantic type checking and expression evaluation visitor traversing the parsed AST.
@@ -36,6 +40,32 @@ pub struct TypeCheckingVisitor<'a> {
     pub switch_depth: usize,
     pub next_vtable_id: &'a mut u32,
     pub source_texts: &'a [String],
+}
+
+fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Option<String> {
+    match expression {
+        Expression::Identifier { span } => {
+            if span.end as usize <= source_text.len() {
+                Some(source_text[span.start as usize..span.end as usize].to_string())
+            } else {
+                None
+            }
+        }
+        Expression::MemberAccess {
+            object,
+            member_span,
+            ..
+        } => {
+            let base_path = get_qualified_member_path(object, source_text)?;
+            let member_name = if member_span.end as usize <= source_text.len() {
+                &source_text[member_span.start as usize..member_span.end as usize]
+            } else {
+                return None;
+            };
+            Some(format!("{base_path}::{member_name}"))
+        }
+        _ => None,
+    }
 }
 
 impl<'a> TypeCheckingVisitor<'a> {
@@ -102,6 +132,31 @@ impl<'a> TypeCheckingVisitor<'a> {
                     return Type::Error;
                 }
 
+                // Check "super"
+                if identifier_name == "super" {
+                    if self.is_static_method || self.current_class.is_none() {
+                        self.errors.push(BindingError::InvalidSuperCall {
+                            span: span.to_source_span(),
+                        });
+                        return Type::Error;
+                    }
+                    let class_id = self.current_class.unwrap();
+                    let parent_class_id = self
+                        .symbol_table
+                        .get_symbol(class_id)
+                        .and_then(|class_entry| class_entry.parent_symbol);
+                    if let Some(base_id) = parent_class_id
+                        && let Some(base_entry) = self.symbol_table.get_symbol(base_id)
+                    {
+                        return base_entry.symbol_type.clone();
+                    } else {
+                        self.errors.push(BindingError::InvalidSuperCall {
+                            span: span.to_source_span(),
+                        });
+                        return Type::Error;
+                    }
+                }
+
                 if let Some(symbol_id) = self
                     .symbol_table
                     .resolve_symbol(self.source_id, identifier_name)
@@ -135,9 +190,22 @@ impl<'a> TypeCheckingVisitor<'a> {
                     | TokenKind::OperatorDivide
                     | TokenKind::OperatorModulo => {
                         // String concatenation
+                        let is_string_left = matches!(
+                            &left_type,
+                            Type::Class { symbol_name, .. }
+                                if symbol_name == "std.string"
+                                    || symbol_name == "std::string"
+                                    || symbol_name == "string"
+                        );
+                        let is_string_right = matches!(
+                            &right_type,
+                            Type::Class { symbol_name, .. }
+                                if symbol_name == "std.string"
+                                    || symbol_name == "std::string"
+                                    || symbol_name == "string"
+                        );
                         if *operator == TokenKind::OperatorPlus
-                            && (left_type.to_string() == "std.string"
-                                || right_type.to_string() == "std.string")
+                            && (is_string_left || is_string_right)
                         {
                             Type::Class {
                                 symbol_name: "std.string".to_string(),
@@ -215,10 +283,31 @@ impl<'a> TypeCheckingVisitor<'a> {
                     | TokenKind::OperatorLessEqual
                     | TokenKind::OperatorGreaterThan
                     | TokenKind::OperatorGreaterEqual => {
+                        let is_null_comparison = matches!(
+                            operator,
+                            TokenKind::OperatorEqual | TokenKind::OperatorNotEqual
+                        ) && (left_type == Type::Null
+                            || right_type == Type::Null
+                            || matches!(
+                                left.as_ref(),
+                                Expression::Literal {
+                                    value: LiteralValue::Null,
+                                    ..
+                                }
+                            )
+                            || matches!(
+                                right.as_ref(),
+                                Expression::Literal {
+                                    value: LiteralValue::Null,
+                                    ..
+                                }
+                            ));
+
                         // Check if left class implements operator == or != or < etc.
-                        if let Type::Class {
-                            ref symbol_name, ..
-                        } = left_type
+                        if !is_null_comparison
+                            && let Type::Class {
+                                ref symbol_name, ..
+                            } = left_type
                         {
                             let op_name = format!("operator_{}", operator.as_static_str());
                             if let Some(class_id) = self
@@ -241,13 +330,19 @@ impl<'a> TypeCheckingVisitor<'a> {
                         }
 
                         // Check enum comparison compatibility
-                        if let (Type::Enum { symbol_name: s1 }, Type::Enum { symbol_name: s2 }) =
-                            (&left_type, &right_type)
-                            && s1 != s2
+                        if let (
+                            Type::Enum {
+                                symbol_name: left_enum_name,
+                            },
+                            Type::Enum {
+                                symbol_name: right_enum_name,
+                            },
+                        ) = (&left_type, &right_type)
+                            && left_enum_name != right_enum_name
                         {
                             self.errors.push(BindingError::TypeMismatch {
-                                expected: s1.clone(),
-                                found: s2.clone(),
+                                expected: left_enum_name.clone(),
+                                found: right_enum_name.clone(),
                                 span: right.span().to_source_span(),
                             });
                         }
@@ -428,6 +523,9 @@ impl<'a> TypeCheckingVisitor<'a> {
                                 .unwrap_or(Type::Primitive(PrimitiveKind::Void)),
                         }
                     }
+                    Type::Primitive(PrimitiveKind::TuplePrimitive) => {
+                        Type::Primitive(PrimitiveKind::Int32)
+                    }
                     Type::Class { symbol_name, .. }
                         if symbol_name == "std.string"
                             || symbol_name == "string"
@@ -445,22 +543,81 @@ impl<'a> TypeCheckingVisitor<'a> {
                 }
             }
             Expression::MemberAccess {
+                span: member_access_span,
                 object,
                 member_span,
                 is_scope_resolution,
-                ..
             } => {
-                let target_type = self.evaluate_expression_type(object);
                 let member_name = if member_span.end as usize <= self.source_text.len() {
                     &self.source_text[member_span.start as usize..member_span.end as usize]
                 } else {
                     ""
                 };
 
-                // Array and tuple .length property
+                // Check if this MemberAccess chain represents a package-qualified top-level function or variable
+                if let Some(qualified_path) =
+                    get_qualified_member_path(expression, self.source_text)
+                {
+                    let resolved = self
+                        .symbol_table
+                        .resolve_symbol(self.source_id, &qualified_path)
+                        .or_else(|| {
+                            if let Some((prefix, suffix)) = qualified_path.split_once("::") {
+                                self.symbol_table.resolve_symbol(
+                                    self.source_id,
+                                    &format!("{prefix}::{prefix}::{suffix}"),
+                                )
+                            } else {
+                                None
+                            }
+                        });
+                    if let Some(symbol_id) = resolved
+                        && let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id)
+                        && (symbol_entry.parent_symbol.is_none()
+                            || (*is_scope_resolution && symbol_entry.is_static)
+                            || (symbol_entry.is_static && {
+                                let parent_entry = symbol_entry
+                                    .parent_symbol
+                                    .and_then(|parent_id| self.symbol_table.get_symbol(parent_id));
+                                parent_entry
+                                    .map(|parent_symbol_entry| {
+                                        let fqn_parts: Vec<&str> = parent_symbol_entry
+                                            .fully_qualified_name
+                                            .split("::")
+                                            .collect();
+                                        fqn_parts.len() <= 2
+                                            && fqn_parts
+                                                .first()
+                                                .map(|package_name| {
+                                                    package_name.eq_ignore_ascii_case(
+                                                        &parent_symbol_entry.name,
+                                                    )
+                                                })
+                                                .unwrap_or(false)
+                                    })
+                                    .unwrap_or(false)
+                            }))
+                    {
+                        self.resolved_symbols.insert(*member_span, symbol_id);
+                        self.resolved_symbols.insert(*member_access_span, symbol_id);
+                        return symbol_entry.symbol_type.clone();
+                    }
+                }
+
+                let target_type = self.evaluate_expression_type(object);
+
+                // Array, tuple, and string .length property
+                let is_string_target = matches!(
+                    &target_type,
+                    Type::Class { symbol_name, .. }
+                        if symbol_name == "std.string"
+                            || symbol_name == "std::string"
+                            || symbol_name == "string"
+                );
                 if (matches!(target_type, Type::Array { .. })
                     || matches!(target_type, Type::Tuple(_))
-                    || matches!(target_type, Type::Primitive(PrimitiveKind::TuplePrimitive)))
+                    || matches!(target_type, Type::Primitive(PrimitiveKind::TuplePrimitive))
+                    || is_string_target)
                     && member_name == "length"
                 {
                     if *is_scope_resolution {
@@ -469,6 +626,8 @@ impl<'a> TypeCheckingVisitor<'a> {
                                 member_name: member_name.to_string(),
                                 owner: if matches!(target_type, Type::Array { .. }) {
                                     "array".to_string()
+                                } else if is_string_target {
+                                    "string".to_string()
                                 } else {
                                     "tuple".to_string()
                                 },
@@ -696,6 +855,29 @@ impl<'a> TypeCheckingVisitor<'a> {
                         ref type_arguments,
                     } = obj_type
                     {
+                        let mut class_substitutions = HashMap::new();
+                        if !type_arguments.is_empty() {
+                            let clean_name = symbol_name.replace("::", ".");
+                            if let Some(blueprint) = self
+                                .blueprint_registry
+                                .blueprints
+                                .get(symbol_name)
+                                .or_else(|| self.blueprint_registry.blueprints.get(&clean_name))
+                                .or_else(|| {
+                                    let short_name =
+                                        symbol_name.rsplit("::").next().unwrap_or(symbol_name);
+                                    self.blueprint_registry.blueprints.get(short_name)
+                                })
+                            {
+                                for (param_name, arg_type) in
+                                    blueprint.parameter_names.iter().zip(type_arguments)
+                                {
+                                    class_substitutions
+                                        .insert(param_name.clone(), arg_type.clone());
+                                }
+                            }
+                        }
+
                         let cls_id = if !type_arguments.is_empty() {
                             let mangled =
                                 crate::phases::binder::monomorphizer::GenericBlueprintRegistry::mangle_name(
@@ -731,16 +913,36 @@ impl<'a> TypeCheckingVisitor<'a> {
                                             ref parameter_types,
                                             ref return_type,
                                         } = child_entry.symbol_type
-                                        && let Some(matched_return) = self.match_method_signature(
-                                            parameter_types,
-                                            return_type,
+                                    {
+                                        let effective_params: Vec<Type> =
+                                            if class_substitutions.is_empty() {
+                                                parameter_types.clone()
+                                            } else {
+                                                parameter_types
+                                                    .iter()
+                                                    .map(|param_type| {
+                                                        Self::substitute_type(
+                                                            param_type,
+                                                            &class_substitutions,
+                                                        )
+                                                    })
+                                                    .collect()
+                                            };
+                                        let effective_return = if class_substitutions.is_empty() {
+                                            *return_type.clone()
+                                        } else {
+                                            Self::substitute_type(return_type, &class_substitutions)
+                                        };
+                                        if let Some(matched_return) = self.match_method_signature(
+                                            &effective_params,
+                                            &effective_return,
                                             generic_arguments,
                                             &evaluated_arg_types,
                                             arguments,
-                                        )
-                                    {
-                                        found_method = Some((child_id, matched_return));
-                                        break;
+                                        ) {
+                                            found_method = Some((child_id, matched_return));
+                                            break;
+                                        }
                                     }
                                 }
                                 if found_method.is_some() {
@@ -967,6 +1169,16 @@ impl<'a> TypeCheckingVisitor<'a> {
                     .collect();
 
                 if let Type::Class {
+                    ref symbol_name, ..
+                } = resolved_type
+                    && let Some(class_id) = self
+                        .symbol_table
+                        .resolve_symbol(self.source_id, symbol_name)
+                {
+                    self.resolved_symbols.insert(instance_type.span(), class_id);
+                }
+
+                if let Type::Class {
                     ref symbol_name,
                     ref type_arguments,
                 } = resolved_type
@@ -1151,6 +1363,13 @@ impl<'a> TypeCheckingVisitor<'a> {
                     .map(|element| self.evaluate_expression_type(element))
                     .collect();
                 Type::Tuple(element_types)
+            }
+            Expression::Block { result, .. } => {
+                if let Some(res) = result {
+                    self.evaluate_expression_type(res)
+                } else {
+                    Type::Primitive(PrimitiveKind::Void)
+                }
             }
             Expression::Cast {
                 target_type,
@@ -1607,15 +1826,21 @@ impl<'a> TypeCheckingVisitor<'a> {
             Self::collect_generic_params(parameter_type, &mut generic_param_order);
         }
 
-        if generic_param_order.is_empty() && generic_arguments.is_empty() {
+        let mut generic_params_in_args = Vec::new();
+        for parameter_type in parameter_types {
+            Self::collect_generic_params(parameter_type, &mut generic_params_in_args);
+        }
+
+        if generic_arguments.is_empty() && generic_params_in_args.is_empty() {
             let is_matched = parameter_types
                 .iter()
                 .zip(evaluated_arg_types)
                 .enumerate()
-                .all(|(arg_index, (expected, actual))| {
-                    actual.is_assignable_to(expected, &|src, tgt| self.check_is_subtype(src, tgt))
-                        || actual == expected
-                        || is_literal_compatible_with_type(&arguments[arg_index], expected)
+                .all(|(arg_index, (expected_type, actual_type))| {
+                    actual_type.is_assignable_to(expected_type, &|src, tgt| {
+                        self.check_is_subtype(src, tgt)
+                    }) || actual_type == expected_type
+                        || is_literal_compatible_with_type(&arguments[arg_index], expected_type)
                 });
             if is_matched {
                 Some(return_type.clone())
@@ -1640,12 +1865,18 @@ impl<'a> TypeCheckingVisitor<'a> {
                     substitutions.insert(param_name.clone(), resolved_type);
                 }
             } else {
-                for (param_type, arg_type) in parameter_types.iter().zip(evaluated_arg_types) {
-                    if !Self::deduce_template_argument(param_type, arg_type, &mut substitutions) {
+                for (parameter_type, argument_type) in
+                    parameter_types.iter().zip(evaluated_arg_types)
+                {
+                    if !Self::deduce_template_argument(
+                        parameter_type,
+                        argument_type,
+                        &mut substitutions,
+                    ) {
                         return None;
                     }
                 }
-                for param_name in &generic_param_order {
+                for param_name in &generic_params_in_args {
                     if !substitutions.contains_key(param_name) {
                         return None;
                     }
@@ -1760,6 +1991,103 @@ impl<'a> TypeCheckingVisitor<'a> {
                     false
                 }
             }
+            Type::Class {
+                symbol_name: pattern_symbol_name,
+                type_arguments: pattern_type_arguments,
+            } => {
+                if let Type::Class {
+                    symbol_name: concrete_symbol_name,
+                    type_arguments: concrete_type_arguments,
+                } = concrete_type
+                {
+                    if pattern_symbol_name.replace('.', "::")
+                        != concrete_symbol_name.replace('.', "::")
+                        || pattern_type_arguments.len() != concrete_type_arguments.len()
+                    {
+                        return false;
+                    }
+                    for (pattern_argument, concrete_argument) in
+                        pattern_type_arguments.iter().zip(concrete_type_arguments)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_argument,
+                            concrete_argument,
+                            substitutions,
+                        ) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Type::Interface {
+                symbol_name: pattern_symbol_name,
+                type_arguments: pattern_type_arguments,
+            } => {
+                if let Type::Interface {
+                    symbol_name: concrete_symbol_name,
+                    type_arguments: concrete_type_arguments,
+                } = concrete_type
+                {
+                    if pattern_symbol_name.replace('.', "::")
+                        != concrete_symbol_name.replace('.', "::")
+                        || pattern_type_arguments.len() != concrete_type_arguments.len()
+                    {
+                        return false;
+                    }
+                    for (pattern_argument, concrete_argument) in
+                        pattern_type_arguments.iter().zip(concrete_type_arguments)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_argument,
+                            concrete_argument,
+                            substitutions,
+                        ) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Type::FunctionPointer {
+                parameter_types: pattern_parameters,
+                return_type: pattern_return,
+            } => {
+                if let Type::FunctionPointer {
+                    parameter_types: concrete_parameters,
+                    return_type: concrete_return,
+                } = concrete_type
+                {
+                    if pattern_parameters.len() != concrete_parameters.len() {
+                        return false;
+                    }
+                    if !Self::deduce_template_argument(
+                        pattern_return,
+                        concrete_return,
+                        substitutions,
+                    ) {
+                        return false;
+                    }
+                    for (pattern_param, concrete_param) in
+                        pattern_parameters.iter().zip(concrete_parameters)
+                    {
+                        if !Self::deduce_template_argument(
+                            pattern_param,
+                            concrete_param,
+                            substitutions,
+                        ) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
             _ => pattern_type == concrete_type,
         }
     }
@@ -1826,9 +2154,31 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             "class"
         };
 
+        let file_package = self
+            .symbol_table
+            .file_packages
+            .get(self.source_id as usize)
+            .cloned()
+            .unwrap_or_default();
+        let decl_namespace = extract_namespace_path(&node.namespace_path, self.source_text);
+        let effective_package = compute_effective_package(&file_package, &decl_namespace);
+        let fully_qualified_name = if effective_package.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{effective_package}::{class_name}")
+        };
+
+        let previous_active_package = self.symbol_table.active_package.clone();
+        if !effective_package.is_empty() {
+            self.symbol_table.active_package = Some(effective_package);
+        }
+
         let previous_class = self.current_class;
         let previous_generic_names = self.current_class_generic_names.clone();
-        self.current_class = self.symbol_table.resolve_symbol(self.source_id, class_name);
+        self.current_class = self
+            .symbol_table
+            .lookup_global(&fully_qualified_name)
+            .or_else(|| self.symbol_table.resolve_symbol(self.source_id, class_name));
         self.current_class_generic_names = node
             .generic_params
             .iter()
@@ -1859,11 +2209,25 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
         }
 
+        self.symbol_table.active_package = previous_active_package;
         self.current_class = previous_class;
         self.current_class_generic_names = previous_generic_names;
     }
 
     fn visit_interface_declaration(&mut self, node: &InterfaceDeclaration) {
+        let file_package = self
+            .symbol_table
+            .file_packages
+            .get(self.source_id as usize)
+            .cloned()
+            .unwrap_or_default();
+        let decl_namespace = extract_namespace_path(&node.namespace_path, self.source_text);
+        let effective_package = compute_effective_package(&file_package, &decl_namespace);
+        let previous_active_package = self.symbol_table.active_package.clone();
+        if !effective_package.is_empty() {
+            self.symbol_table.active_package = Some(effective_package);
+        }
+
         let previous_generic_names = self.current_class_generic_names.clone();
         self.current_class_generic_names = node
             .generic_params
@@ -1882,6 +2246,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             self.visit_method_declaration(method);
         }
 
+        self.symbol_table.active_package = previous_active_package;
         self.current_class_generic_names = previous_generic_names;
     }
 
@@ -1965,12 +2330,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 "arg"
             };
 
-            let param_type = resolve_type_annotation(
-                self.source_id,
-                self.source_text,
-                &parameter.param_type,
-                self.symbol_table,
-            );
+            let param_type = if parameter.is_variadic {
+                Type::Primitive(PrimitiveKind::TuplePrimitive)
+            } else {
+                resolve_type_annotation(
+                    self.source_id,
+                    self.source_text,
+                    &parameter.param_type,
+                    self.symbol_table,
+                )
+            };
 
             if param_type == Type::Primitive(PrimitiveKind::Void) {
                 self.errors.push(BindingError::VoidTypeNotAllowedHere {
@@ -2010,7 +2379,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 source_id: self.source_id,
                 span: parameter.span,
                 modifiers: Vec::new(),
-                symbol_type: param_type,
+                symbol_type: param_type.clone(),
                 parent_symbol: None,
                 members: Vec::new(),
                 is_static: false,
@@ -2029,6 +2398,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
+            self.symbol_table.record_local_symbol(LocalSymbolEntry {
+                name: param_name.to_string(),
+                symbol_type: param_type.clone(),
+                decl_span: parameter.name_span,
+                scope_span: node.span,
+                source_id: self.source_id,
+                is_const: false,
+                symbol_id: param_id,
+            });
+            self.resolved_symbols.insert(parameter.name_span, param_id);
+            self.node_types.insert(parameter.name_span, param_type);
         }
 
         if let Some(body) = &node.body {
@@ -2070,12 +2450,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             } else {
                 "arg"
             };
-            let param_type = resolve_type_annotation(
-                self.source_id,
-                self.source_text,
-                &parameter.param_type,
-                self.symbol_table,
-            );
+            let param_type = if parameter.is_variadic {
+                Type::Primitive(PrimitiveKind::TuplePrimitive)
+            } else {
+                resolve_type_annotation(
+                    self.source_id,
+                    self.source_text,
+                    &parameter.param_type,
+                    self.symbol_table,
+                )
+            };
             if param_type == Type::Primitive(PrimitiveKind::Void) {
                 self.errors.push(BindingError::VoidTypeNotAllowedHere {
                     span: parameter.span.to_source_span(),
@@ -2096,7 +2480,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 source_id: self.source_id,
                 span: parameter.span,
                 modifiers: Vec::new(),
-                symbol_type: param_type,
+                symbol_type: param_type.clone(),
                 parent_symbol: None,
                 members: Vec::new(),
                 is_static: false,
@@ -2115,6 +2499,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
+            self.symbol_table.record_local_symbol(LocalSymbolEntry {
+                name: param_name.to_string(),
+                symbol_type: param_type.clone(),
+                decl_span: parameter.name_span,
+                scope_span: node.span,
+                source_id: self.source_id,
+                is_const: false,
+                symbol_id: param_id,
+            });
+            self.resolved_symbols.insert(parameter.name_span, param_id);
+            self.node_types.insert(parameter.name_span, param_type);
         }
 
         if let Some(super_args) = &node.super_call_args {
@@ -2224,12 +2619,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 "param"
             };
 
-            let param_type = resolve_type_annotation(
-                self.source_id,
-                self.source_text,
-                &parameter.param_type,
-                self.symbol_table,
-            );
+            let param_type = if parameter.is_variadic {
+                Type::Primitive(PrimitiveKind::TuplePrimitive)
+            } else {
+                resolve_type_annotation(
+                    self.source_id,
+                    self.source_text,
+                    &parameter.param_type,
+                    self.symbol_table,
+                )
+            };
 
             let param_symbol = SymbolEntry {
                 id: SymbolId(0),
@@ -2238,7 +2637,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 source_id: self.source_id,
                 span: parameter.span,
                 modifiers: Vec::new(),
-                symbol_type: param_type,
+                symbol_type: param_type.clone(),
                 parent_symbol: self.current_class,
                 members: Vec::new(),
                 is_static: false,
@@ -2257,6 +2656,17 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             }
             let param_id = self.symbol_table.insert_symbol(param_symbol);
             self.symbol_table.declare_local(param_name, param_id);
+            self.symbol_table.record_local_symbol(LocalSymbolEntry {
+                name: param_name.to_string(),
+                symbol_type: param_type.clone(),
+                decl_span: parameter.name_span,
+                scope_span: node.span,
+                source_id: self.source_id,
+                is_const: false,
+                symbol_id: param_id,
+            });
+            self.resolved_symbols.insert(parameter.name_span, param_id);
+            self.node_types.insert(parameter.name_span, param_type);
         }
 
         for statement in &node.body.statements {
@@ -2289,6 +2699,16 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             &node.var_type,
             self.symbol_table,
         );
+
+        if let Type::Class {
+            ref symbol_name, ..
+        } = declared_type
+            && let Some(class_id) = self
+                .symbol_table
+                .resolve_symbol(self.source_id, symbol_name)
+        {
+            self.resolved_symbols.insert(node.var_type.span(), class_id);
+        }
 
         if let TypeAnnotation::Named { path, .. } = &node.var_type {
             let segments: Vec<&str> = path
@@ -2410,6 +2830,18 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
         };
         let var_id = self.symbol_table.insert_symbol(var_symbol);
         self.symbol_table.declare_local(var_name, var_id);
+        self.symbol_table.record_local_symbol(LocalSymbolEntry {
+            name: var_name.to_string(),
+            symbol_type: declared_type.clone(),
+            decl_span: node.name_span,
+            scope_span: node.span,
+            source_id: self.source_id,
+            is_const,
+            symbol_id: var_id,
+        });
+        self.resolved_symbols.insert(node.name_span, var_id);
+        self.node_types
+            .insert(node.name_span, declared_type.clone());
         self.node_types.insert(node.span, declared_type);
     }
 
@@ -2627,7 +3059,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             source_id: self.source_id,
             span: node.variable_name,
             modifiers: Vec::new(),
-            symbol_type: exception_type,
+            symbol_type: exception_type.clone(),
             parent_symbol: None,
             members: Vec::new(),
             is_static: false,
@@ -2637,6 +3069,18 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
         let exception_id = self.symbol_table.insert_symbol(exception_symbol);
         self.symbol_table
             .declare_local(exception_name, exception_id);
+        self.symbol_table.record_local_symbol(LocalSymbolEntry {
+            name: exception_name.to_string(),
+            symbol_type: exception_type.clone(),
+            decl_span: node.variable_name,
+            scope_span: node.block.span,
+            source_id: self.source_id,
+            is_const: false,
+            symbol_id: exception_id,
+        });
+        self.resolved_symbols
+            .insert(node.variable_name, exception_id);
+        self.node_types.insert(node.variable_name, exception_type);
 
         for statement in &node.block.statements {
             self.visit_statement(statement);

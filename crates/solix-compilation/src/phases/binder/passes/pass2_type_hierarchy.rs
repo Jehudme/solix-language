@@ -2,7 +2,11 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::phases::binder::layout::ClassLayout;
+use crate::phases::binder::passes::pass1_symbol_discovery::{
+    compute_effective_package, extract_namespace_path,
+};
 use crate::phases::binder::symbols::{SymbolEntry, SymbolId, SymbolTable};
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::parser::statements::ProgramAst;
@@ -10,7 +14,7 @@ use crate::phases::parser::statements::declarations::{
     ClassDeclaration, ClassMember, Declaration, InterfaceDeclaration, Modifier,
 };
 use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
-use solix_common::{BindingError, PrimitiveKind, TokenKind, Type};
+use solix_common::{PrimitiveKind, TokenKind, Type};
 use std::collections::{HashMap, HashSet};
 
 fn evaluate_integer_constant(expr: &Expression) -> Option<i64> {
@@ -63,6 +67,29 @@ fn find_base_method(
 ///
 /// Resolves superclasses, detects cyclic inheritance, constructs VTables, validates interface conformance,
 /// and computes class memory layouts.
+/// Internal diagnostic collector tracking error occurrences per originating source file.
+struct HierarchyErrorCollector {
+    current_source_id: u16,
+    errors: Vec<(u16, BindingError)>,
+}
+
+impl HierarchyErrorCollector {
+    fn new() -> Self {
+        Self {
+            current_source_id: 0,
+            errors: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, error: BindingError) {
+        self.errors.push((self.current_source_id, error));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
 ///
 /// # Errors
 /// Returns an accumulated list of [`BindingError`]s if cyclic inheritance, invalid base types, or
@@ -73,8 +100,8 @@ pub fn execute_pass2_type_hierarchy(
     symbol_table: &mut SymbolTable,
     layouts: &mut HashMap<SymbolId, ClassLayout>,
     next_vtable_id: &mut u32,
-) -> Result<(), Vec<BindingError>> {
-    let mut accumulated_errors = Vec::new();
+) -> Result<(), Vec<(u16, BindingError)>> {
+    let mut accumulated_errors = HierarchyErrorCollector::new();
 
     // Map: class SymbolId -> super class SymbolId
     let mut class_inheritance_edges: HashMap<SymbolId, SymbolId> = HashMap::new();
@@ -84,6 +111,7 @@ pub fn execute_pass2_type_hierarchy(
     // 1. Resolve base classes and interfaces
     for (source_index, ast_option) in source_asts.iter().enumerate() {
         let source_id = source_index as u16;
+        accumulated_errors.current_source_id = source_id;
         let source_text = source_texts
             .get(source_index)
             .map(|text| text.as_str())
@@ -94,6 +122,12 @@ pub fn execute_pass2_type_hierarchy(
             None => continue,
         };
 
+        let file_package = symbol_table
+            .file_packages
+            .get(source_index)
+            .cloned()
+            .unwrap_or_default();
+
         for declaration in &program_ast.declarations {
             if let Declaration::Interface(iface_decl) = declaration {
                 let iface_name = if iface_decl.name_span.end as usize <= source_text.len() {
@@ -102,6 +136,19 @@ pub fn execute_pass2_type_hierarchy(
                 } else {
                     "interface"
                 };
+
+                let decl_namespace =
+                    extract_namespace_path(&iface_decl.namespace_path, source_text);
+                let effective_package = compute_effective_package(&file_package, &decl_namespace);
+                let fqn = if effective_package.is_empty() {
+                    iface_name.to_string()
+                } else {
+                    format!("{effective_package}::{iface_name}")
+                };
+                let previous_active_package = symbol_table.active_package.clone();
+                if !effective_package.is_empty() {
+                    symbol_table.active_package = Some(effective_package);
+                }
 
                 // Check modifiers on interface
                 for modifier in &iface_decl.modifiers {
@@ -149,12 +196,16 @@ pub fn execute_pass2_type_hierarchy(
                     }
                 }
 
-                if let Some(iface_symbol_id) = symbol_table.resolve_symbol(source_id, iface_name) {
+                let iface_symbol_id_opt = symbol_table
+                    .lookup_global(&fqn)
+                    .or_else(|| symbol_table.resolve_symbol(source_id, iface_name));
+
+                if let Some(iface_symbol_id) = iface_symbol_id_opt {
                     let iface_vtable_id = *next_vtable_id;
                     *next_vtable_id += 1;
                     let full_name = symbol_table
                         .get_symbol(iface_symbol_id)
-                        .map(|s| s.fully_qualified_name.clone())
+                        .map(|entry| entry.fully_qualified_name.clone())
                         .unwrap_or_else(|| iface_name.to_string());
                     let mut iface_layout =
                         ClassLayout::new(iface_symbol_id, full_name.clone(), iface_vtable_id);
@@ -175,40 +226,45 @@ pub fn execute_pass2_type_hierarchy(
                         })
                         .collect();
 
-                    for (slot, m) in iface_decl.methods.iter().enumerate() {
-                        let m_name = if m.name_span.end as usize <= source_text.len() {
-                            &source_text[m.name_span.start as usize..m.name_span.end as usize]
+                    for (slot_index, method) in iface_decl.methods.iter().enumerate() {
+                        let method_name = if method.name_span.end as usize <= source_text.len() {
+                            &source_text
+                                [method.name_span.start as usize..method.name_span.end as usize]
                         } else {
                             "method"
                         };
-                        let m_ret = resolve_type_annotation(
+                        let method_return_type = resolve_type_annotation(
                             source_id,
                             source_text,
-                            &m.return_type,
+                            &method.return_type,
                             symbol_table,
                         );
-                        if let Some(unres) = m_ret.first_unresolved_name()
+                        if let Some(unres) = method_return_type.first_unresolved_name()
                             && !iface_generic_names.contains(unres)
                         {
                             accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
                                 type_name: unres.to_string(),
-                                span: m.return_type.span().to_source_span(),
+                                span: method.return_type.span().to_source_span(),
                             });
                         }
-                        let mut m_param_types = Vec::new();
-                        for param in &m.parameters {
-                            let p_type = resolve_type_annotation(
-                                source_id,
-                                source_text,
-                                &param.param_type,
-                                symbol_table,
-                            );
-                            if p_type == Type::Primitive(PrimitiveKind::Void) {
+                        let mut method_param_types = Vec::new();
+                        for param in &method.parameters {
+                            let param_type = if param.is_variadic {
+                                Type::Primitive(PrimitiveKind::TuplePrimitive)
+                            } else {
+                                resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &param.param_type,
+                                    symbol_table,
+                                )
+                            };
+                            if param_type == Type::Primitive(PrimitiveKind::Void) {
                                 accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
                                     span: param.span.to_source_span(),
                                 });
                             }
-                            if let Some(unres) = p_type.first_unresolved_name()
+                            if let Some(unres) = param_type.first_unresolved_name()
                                 && !iface_generic_names.contains(unres)
                             {
                                 accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
@@ -216,9 +272,9 @@ pub fn execute_pass2_type_hierarchy(
                                     span: param.span.to_source_span(),
                                 });
                             }
-                            m_param_types.push(p_type);
+                            method_param_types.push(param_type);
                         }
-                        for modifier in &m.modifiers {
+                        for modifier in &method.modifiers {
                             if matches!(
                                 modifier,
                                 Modifier::Private
@@ -235,32 +291,34 @@ pub fn execute_pass2_type_hierarchy(
                                     BindingError::ModifierNotApplicableToDeclaration {
                                         modifier: modifier.as_str().to_string(),
                                         declaration_kind: "interface method".to_string(),
-                                        span: m.span.to_source_span(),
+                                        span: method.span.to_source_span(),
                                     },
                                 );
                             }
                         }
-                        iface_layout.method_slots.insert(m_name.to_string(), slot);
+                        iface_layout
+                            .method_slots
+                            .insert(method_name.to_string(), slot_index);
 
                         let method_symbol = SymbolEntry {
                             id: SymbolId(0),
-                            name: m_name.to_string(),
-                            fully_qualified_name: format!("{full_name}::{m_name}"),
+                            name: method_name.to_string(),
+                            fully_qualified_name: format!("{full_name}::{method_name}"),
                             source_id,
-                            span: m.span,
-                            modifiers: m.modifiers.clone(),
+                            span: method.span,
+                            modifiers: method.modifiers.clone(),
                             symbol_type: Type::FunctionPointer {
-                                return_type: Box::new(m_ret),
-                                parameter_types: m_param_types,
+                                return_type: Box::new(method_return_type),
+                                parameter_types: method_param_types,
                             },
                             parent_symbol: Some(iface_symbol_id),
                             members: Vec::new(),
                             is_static: false,
                             is_const: false,
-                            slot_index: Some(slot as u32),
+                            slot_index: Some(slot_index as u32),
                         };
-                        let m_id = symbol_table.insert_symbol(method_symbol);
-                        iface_child_ids.push(m_id);
+                        let method_id = symbol_table.insert_symbol(method_symbol);
+                        iface_child_ids.push(method_id);
                     }
 
                     if let Some(iface_sym) = symbol_table.get_symbol_mut(iface_symbol_id) {
@@ -271,6 +329,8 @@ pub fn execute_pass2_type_hierarchy(
                     interface_by_name.insert(full_name, (source_id, iface_decl));
                     layouts.insert(iface_symbol_id, iface_layout);
                 }
+
+                symbol_table.active_package = previous_active_package;
             }
 
             if let Declaration::Method(method_declaration) = declaration {
@@ -281,6 +341,20 @@ pub fn execute_pass2_type_hierarchy(
                 } else {
                     "function"
                 };
+
+                let decl_namespace =
+                    extract_namespace_path(&method_declaration.namespace_path, source_text);
+                let effective_package = compute_effective_package(&file_package, &decl_namespace);
+                let fqn = if effective_package.is_empty() {
+                    method_name.to_string()
+                } else {
+                    format!("{effective_package}::{method_name}")
+                };
+                let previous_active_package = symbol_table.active_package.clone();
+                if !effective_package.is_empty() {
+                    symbol_table.active_package = Some(effective_package);
+                }
+
                 let method_generic_names: HashSet<String> = method_declaration
                     .generic_params
                     .iter()
@@ -310,27 +384,31 @@ pub fn execute_pass2_type_hierarchy(
                 let parameter_types: Vec<Type> = method_declaration
                     .parameters
                     .iter()
-                    .map(|p| {
-                        let ptype = resolve_type_annotation(
-                            source_id,
-                            source_text,
-                            &p.param_type,
-                            symbol_table,
-                        );
-                        if ptype == Type::Primitive(PrimitiveKind::Void) {
+                    .map(|param| {
+                        let param_type = if param.is_variadic {
+                            Type::Primitive(PrimitiveKind::TuplePrimitive)
+                        } else {
+                            resolve_type_annotation(
+                                source_id,
+                                source_text,
+                                &param.param_type,
+                                symbol_table,
+                            )
+                        };
+                        if param_type == Type::Primitive(PrimitiveKind::Void) {
                             accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
-                                span: p.span.to_source_span(),
+                                span: param.span.to_source_span(),
                             });
                         }
-                        if let Some(unres) = ptype.first_unresolved_name()
+                        if let Some(unres) = param_type.first_unresolved_name()
                             && !method_generic_names.contains(unres)
                         {
                             accumulated_errors.push(BindingError::UnknownTypeInDeclaration {
                                 type_name: unres.to_string(),
-                                span: p.span.to_source_span(),
+                                span: param.span.to_source_span(),
                             });
                         }
-                        ptype
+                        param_type
                     })
                     .collect();
 
@@ -355,17 +433,30 @@ pub fn execute_pass2_type_hierarchy(
                     }
                 }
 
-                if let Some(sym_id) = symbol_table.resolve_symbol(source_id, method_name)
+                let method_symbol_id_opt = symbol_table
+                    .lookup_global(&fqn)
+                    .or_else(|| symbol_table.resolve_symbol(source_id, method_name));
+                if let Some(sym_id) = method_symbol_id_opt
                     && let Some(entry) = symbol_table.get_symbol_mut(sym_id)
                 {
                     entry.symbol_type = Type::FunctionPointer {
                         return_type: Box::new(return_type),
-                        parameter_types,
+                        parameter_types: parameter_types.clone(),
                     };
                 }
+
+                symbol_table.active_package = previous_active_package;
             }
 
             if let Declaration::Field(field_declaration) = declaration {
+                let decl_namespace =
+                    extract_namespace_path(&field_declaration.namespace_path, source_text);
+                let effective_package = compute_effective_package(&file_package, &decl_namespace);
+                let previous_active_package = symbol_table.active_package.clone();
+                if !effective_package.is_empty() {
+                    symbol_table.active_package = Some(effective_package);
+                }
+
                 let field_type = resolve_type_annotation(
                     source_id,
                     source_text,
@@ -399,6 +490,8 @@ pub fn execute_pass2_type_hierarchy(
                         });
                     }
                 }
+
+                symbol_table.active_package = previous_active_package;
             }
 
             if let Declaration::Enum(enum_declaration) = declaration {
@@ -408,6 +501,20 @@ pub fn execute_pass2_type_hierarchy(
                 } else {
                     "enum"
                 };
+
+                let decl_namespace =
+                    extract_namespace_path(&enum_declaration.namespace_path, source_text);
+                let effective_package = compute_effective_package(&file_package, &decl_namespace);
+                let fqn = if effective_package.is_empty() {
+                    enum_name.to_string()
+                } else {
+                    format!("{effective_package}::{enum_name}")
+                };
+                let previous_active_package = symbol_table.active_package.clone();
+                if !effective_package.is_empty() {
+                    symbol_table.active_package = Some(effective_package);
+                }
+
                 for modifier in &enum_declaration.modifiers {
                     if *modifier == Modifier::Native {
                         accumulated_errors.push(BindingError::NativeOnNonMethodOrFunction {
@@ -424,8 +531,8 @@ pub fn execute_pass2_type_hierarchy(
                 }
                 let mut seen_values = HashSet::new();
                 let mut current_val = 0i64;
-                for (idx, variant) in enum_declaration.variants.iter().enumerate() {
-                    let v_name = if variant.name_span.end as usize <= source_text.len() {
+                for (variant_index, variant) in enum_declaration.variants.iter().enumerate() {
+                    let variant_name = if variant.name_span.end as usize <= source_text.len() {
                         &source_text
                             [variant.name_span.start as usize..variant.name_span.end as usize]
                     } else {
@@ -436,28 +543,34 @@ pub fn execute_pass2_type_hierarchy(
                             current_val = int_val;
                         } else {
                             accumulated_errors.push(BindingError::EnumExplicitValueNotInteger {
-                                variant_name: v_name.to_string(),
+                                variant_name: variant_name.to_string(),
                                 found: format!("{explicit:?}"),
                                 span: variant.span.to_source_span(),
                             });
                         }
-                    } else if idx > 0 {
+                    } else if variant_index > 0 {
                         current_val += 1;
                     }
                     if !seen_values.insert(current_val) {
                         accumulated_errors.push(BindingError::DuplicateEnumVariant {
-                            variant_name: v_name.to_string(),
+                            variant_name: variant_name.to_string(),
                             enum_name: enum_name.to_string(),
                             span: variant.span.to_source_span(),
                         });
                     }
-                    let sym_name = format!("{enum_name}::{v_name}");
-                    if let Some(v_sym_id) = symbol_table.resolve_symbol(source_id, &sym_name)
-                        && let Some(v_entry) = symbol_table.get_symbol_mut(v_sym_id)
+                    let sym_name = format!("{fqn}::{variant_name}");
+                    let variant_sym_id_opt = symbol_table.lookup_global(&sym_name).or_else(|| {
+                        symbol_table
+                            .resolve_symbol(source_id, &format!("{enum_name}::{variant_name}"))
+                    });
+                    if let Some(variant_sym_id) = variant_sym_id_opt
+                        && let Some(variant_entry) = symbol_table.get_symbol_mut(variant_sym_id)
                     {
-                        v_entry.slot_index = Some(current_val as u32);
+                        variant_entry.slot_index = Some(current_val as u32);
                     }
                 }
+
+                symbol_table.active_package = previous_active_package;
             }
 
             if let Declaration::Class(class_declaration) = declaration {
@@ -466,6 +579,15 @@ pub fn execute_pass2_type_hierarchy(
                         ..class_declaration.name_span.end as usize]
                 } else {
                     "class"
+                };
+
+                let decl_namespace =
+                    extract_namespace_path(&class_declaration.namespace_path, source_text);
+                let effective_package = compute_effective_package(&file_package, &decl_namespace);
+                let fqn = if effective_package.is_empty() {
+                    class_name.to_string()
+                } else {
+                    format!("{effective_package}::{class_name}")
                 };
 
                 // Class modifier checks
@@ -494,7 +616,10 @@ pub fn execute_pass2_type_hierarchy(
                     }
                 }
 
-                let class_symbol_id = match symbol_table.resolve_symbol(source_id, class_name) {
+                let class_symbol_id = match symbol_table
+                    .lookup_global(&fqn)
+                    .or_else(|| symbol_table.resolve_symbol(source_id, class_name))
+                {
                     Some(id) => id,
                     None => continue,
                 };
@@ -563,12 +688,17 @@ pub fn execute_pass2_type_hierarchy(
                                 );
                                 let mut m_param_types = Vec::new();
                                 for param in &m.parameters {
-                                    m_param_types.push(resolve_type_annotation(
-                                        source_id,
-                                        source_text,
-                                        &param.param_type,
-                                        symbol_table,
-                                    ));
+                                    let p_type = if param.is_variadic {
+                                        Type::Primitive(PrimitiveKind::TuplePrimitive)
+                                    } else {
+                                        resolve_type_annotation(
+                                            source_id,
+                                            source_text,
+                                            &param.param_type,
+                                            symbol_table,
+                                        )
+                                    };
+                                    m_param_types.push(p_type);
                                 }
                                 iface_layout.method_slots.insert(m_name.to_string(), slot);
                                 let method_symbol = SymbolEntry {
@@ -677,6 +807,7 @@ pub fn execute_pass2_type_hierarchy(
                     .map(|entry| entry.span)
                     .unwrap_or_default();
 
+                accumulated_errors.current_source_id = span.id;
                 accumulated_errors.push(BindingError::CyclicInheritance {
                     class_name,
                     span: span.to_source_span(),
@@ -690,6 +821,7 @@ pub fn execute_pass2_type_hierarchy(
 
     // Transitively inherit methods from super-interfaces into interface symbols
     for (iface_name, &(source_file_id, iface_decl)) in &interface_by_name {
+        accumulated_errors.current_source_id = source_file_id;
         if let Some(iface_id) = symbol_table.resolve_symbol(source_file_id, iface_name) {
             let mut visited_interfaces = HashSet::new();
             visited_interfaces.insert(iface_name.clone());
@@ -798,6 +930,7 @@ pub fn execute_pass2_type_hierarchy(
 
     for class_symbol_id in sorted_class_ids {
         let (source_id, class_declaration) = class_ast_map[&class_symbol_id];
+        accumulated_errors.current_source_id = source_id;
         let source_text = source_texts
             .get(source_id as usize)
             .map(|text| text.as_str())
@@ -810,6 +943,20 @@ pub fn execute_pass2_type_hierarchy(
 
         let current_vtable_id = *next_vtable_id;
         *next_vtable_id += 1;
+
+        let class_fqn = symbol_table
+            .get_symbol(class_symbol_id)
+            .map(|entry| entry.fully_qualified_name.clone())
+            .unwrap_or_default();
+        let class_package = if let Some((package_prefix, _)) = class_fqn.rsplit_once("::") {
+            Some(package_prefix.to_string())
+        } else {
+            None
+        };
+        let previous_active_package = symbol_table.active_package.clone();
+        if class_package.is_some() {
+            symbol_table.active_package = class_package;
+        }
 
         let mut class_layout =
             ClassLayout::new(class_symbol_id, class_name.clone(), current_vtable_id);
@@ -828,6 +975,7 @@ pub fn execute_pass2_type_hierarchy(
             class_layout.vtable_methods = super_layout.vtable_methods.clone();
             class_layout.method_slots = super_layout.method_slots.clone();
             class_layout.itable_methods = super_layout.itable_methods.clone();
+            class_layout.field_types = super_layout.field_types.clone();
             current_field_offset = super_layout.instance_size_bytes;
         }
 
@@ -908,9 +1056,15 @@ pub fn execute_pass2_type_hierarchy(
                         }
                     }
 
-                    let is_ref = field_type.is_reference_type();
-                    let field_size = match &field_type {
+                    let unwrapped_field_type = field_type.unwrap_alias();
+                    let is_ref = unwrapped_field_type.is_reference_type();
+                    // `std.string` (BlockTag::String) is a raw byte buffer managed by its own
+                    // internal allocator — it is not an ARC object and must not appear in
+                    // `reference_field_offsets` or be passed to `release_reference`.
+                    let is_gc_managed_ref = unwrapped_field_type.is_gc_managed_reference_type();
+                    let field_size = match unwrapped_field_type {
                         Type::Primitive(prim) => prim.byte_size(),
+                        Type::Enum { .. } => 4,
                         _ => 8,
                     };
 
@@ -926,11 +1080,35 @@ pub fn execute_pass2_type_hierarchy(
                                 span: field_declaration.span.to_source_span(),
                             });
                         }
-                    } else if is_ref {
+                    } else if is_gc_managed_ref {
                         class_layout
                             .reference_field_offsets
                             .push(current_field_offset);
                     }
+
+                    let field_type_tag: u8 = match unwrapped_field_type {
+                        Type::Primitive(prim) => match prim {
+                            PrimitiveKind::Int8 => 1,
+                            PrimitiveKind::UInt8 | PrimitiveKind::Char => 2,
+                            PrimitiveKind::Int16 => 3,
+                            PrimitiveKind::UInt16 => 4,
+                            PrimitiveKind::Int32 => 5,
+                            PrimitiveKind::UInt32 => 6,
+                            PrimitiveKind::Int64 => 7,
+                            PrimitiveKind::UInt64 => 8,
+                            PrimitiveKind::Float32 => 9,
+                            PrimitiveKind::Float64 => 10,
+                            PrimitiveKind::Bool => 11,
+                            PrimitiveKind::TuplePrimitive => 12,
+                            PrimitiveKind::Void => 0,
+                        },
+                        Type::Enum { .. } => 5,
+                        _ => 12,
+                    };
+                    class_layout
+                        .field_types
+                        .insert(current_field_offset, field_type_tag);
+
                     current_field_offset += field_size.max(4);
 
                     let field_symbol = SymbolEntry {
@@ -995,12 +1173,16 @@ pub fn execute_pass2_type_hierarchy(
                         .parameters
                         .iter()
                         .map(|parameter| {
-                            let p_type = resolve_type_annotation(
-                                source_id,
-                                source_text,
-                                &parameter.param_type,
-                                symbol_table,
-                            );
+                            let p_type = if parameter.is_variadic {
+                                Type::Primitive(PrimitiveKind::TuplePrimitive)
+                            } else {
+                                resolve_type_annotation(
+                                    source_id,
+                                    source_text,
+                                    &parameter.param_type,
+                                    symbol_table,
+                                )
+                            };
                             if p_type == Type::Primitive(PrimitiveKind::Void) {
                                 accumulated_errors.push(BindingError::VoidTypeNotAllowedHere {
                                     span: parameter.span.to_source_span(),
@@ -1292,6 +1474,18 @@ pub fn execute_pass2_type_hierarchy(
                             {
                                 let old_id = *slot;
                                 *slot = method_id;
+                                let param_sig = parameter_types
+                                    .iter()
+                                    .map(ToString::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                class_layout
+                                    .method_slots
+                                    .insert(format!("{method_name}({param_sig})"), slot_idx);
+                                class_layout.method_slots.insert(
+                                    format!("{method_name}/{}", parameter_types.len()),
+                                    slot_idx,
+                                );
                                 class_layout
                                     .method_slots
                                     .insert(method_name.to_string(), slot_idx);
@@ -1499,7 +1693,7 @@ pub fn execute_pass2_type_hierarchy(
                         modifiers: operator_declaration.modifiers.clone(),
                         symbol_type: Type::FunctionPointer {
                             return_type: Box::new(return_type),
-                            parameter_types,
+                            parameter_types: parameter_types.clone(),
                         },
                         parent_symbol: Some(class_symbol_id),
                         members: Vec::new(),
@@ -1512,6 +1706,18 @@ pub fn execute_pass2_type_hierarchy(
 
                     let slot_idx = class_layout.vtable_methods.len();
                     class_layout.vtable_methods.push(operator_id);
+                    let param_sig = parameter_types
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    class_layout
+                        .method_slots
+                        .insert(format!("{operator_name}({param_sig})"), slot_idx);
+                    class_layout.method_slots.insert(
+                        format!("{operator_name}/{}", parameter_types.len()),
+                        slot_idx,
+                    );
                     class_layout.method_slots.insert(operator_name, slot_idx);
                 }
                 ClassMember::Enum(enum_declaration) => {
@@ -1796,10 +2002,12 @@ pub fn execute_pass2_type_hierarchy(
             class_entry.parent_symbol = class_inheritance_edges.get(&class_symbol_id).copied();
             class_entry.members = child_symbol_ids;
         }
+
+        symbol_table.active_package = previous_active_package;
     }
 
     if !accumulated_errors.is_empty() {
-        return Err(accumulated_errors);
+        return Err(accumulated_errors.errors);
     }
 
     Ok(())

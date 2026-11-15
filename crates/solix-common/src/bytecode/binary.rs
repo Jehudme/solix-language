@@ -3,7 +3,9 @@
 #![forbid(unsafe_code)]
 
 use crate::bytecode::class::CompiledClass;
-use crate::bytecode::function::{CompiledFunction, ExceptionHandlerEntry, SourceMapEntry};
+use crate::bytecode::function::{
+    CompiledFunction, ExceptionHandlerEntry, LocalVariableDebugInfo, SourceMapEntry,
+};
 use crate::bytecode::instruction::Instruction;
 use crate::bytecode::manifest::ExportManifest;
 use crate::diagnostics::EmissionError;
@@ -145,14 +147,26 @@ pub struct BinaryProgram {
     pub classes: Vec<CompiledClass>,
     /// Vector of compiled functions and instruction chunks.
     pub functions: Vec<CompiledFunction>,
+    /// Optional default entrypoint symbol embedded in the binary container.
+    #[serde(default)]
+    pub entry_point: Option<String>,
     /// Package name for modular libraries.
     pub package_name: String,
     /// Semantic version string.
     pub package_version: String,
     /// Human-readable package description.
     pub package_description: String,
+    /// Build profile recorded during compilation ("debug", "release", or "test").
+    pub build_profile: String,
+    /// Cryptographic SHA-256 digests of bundled native shared libraries.
+    pub native_library_checksums: std::collections::HashMap<String, String>,
+    /// Pre-parsed AST binary bytes for instant dependency ingestion.
+    pub exported_ast_bytes: Vec<u8>,
     /// Full export manifest for dynamic linking and API reflection.
     pub export_manifest: ExportManifest,
+    /// Canonical source file paths indexed by `source_id`.
+    #[serde(default)]
+    pub source_files: Vec<String>,
 }
 
 impl Default for BinaryProgram {
@@ -177,11 +191,22 @@ impl BinaryProgram {
             constant_pool: ConstantPool::new(),
             classes: Vec::new(),
             functions: Vec::new(),
+            entry_point: None,
             package_name: String::new(),
             package_version: "0.1.0".to_string(),
             package_description: String::new(),
+            build_profile: "debug".to_string(),
+            native_library_checksums: std::collections::HashMap::new(),
+            exported_ast_bytes: Vec::new(),
             export_manifest: ExportManifest::default(),
+            source_files: Vec::new(),
         }
+    }
+
+    /// Computes the canonical 64-character lowercase hexadecimal SHA-256 digest of this binary container.
+    #[must_use]
+    pub fn compute_sha256(&self) -> String {
+        crate::hash::sha256_hex(&self.to_bytes())
     }
 
     /// Serializes the binary program into raw bytes in the `SLXB` format.
@@ -289,6 +314,21 @@ impl BinaryProgram {
                 }
                 None => buffer.push(0),
             }
+
+            // Field types
+            buffer.extend_from_slice(&(cls.field_types.len() as u32).to_le_bytes());
+            for &(offset, tag) in &cls.field_types {
+                buffer.extend_from_slice(&(offset as u64).to_le_bytes());
+                buffer.push(tag);
+            }
+
+            // Field names (offset, name, type_name)
+            buffer.extend_from_slice(&(cls.field_names.len() as u32).to_le_bytes());
+            for (field_offset, field_name, field_type_name) in &cls.field_names {
+                buffer.extend_from_slice(&(*field_offset as u64).to_le_bytes());
+                write_string(&mut buffer, field_name);
+                write_string(&mut buffer, field_type_name);
+            }
         }
 
         // 5. Functions
@@ -346,6 +386,29 @@ impl BinaryProgram {
                 buffer.extend_from_slice(&entry.span.id.to_le_bytes());
                 buffer.extend_from_slice(&entry.span.start.to_le_bytes());
                 buffer.extend_from_slice(&entry.span.end.to_le_bytes());
+                buffer.extend_from_slice(&entry.line.to_le_bytes());
+                buffer.extend_from_slice(&entry.column.to_le_bytes());
+            }
+
+            // Local variables
+            buffer.extend_from_slice(&(func.local_variables.len() as u32).to_le_bytes());
+            for var_entry in &func.local_variables {
+                buffer.extend_from_slice(&var_entry.register.to_le_bytes());
+                write_string(&mut buffer, &var_entry.name);
+                write_string(&mut buffer, &var_entry.type_name);
+                buffer.extend_from_slice(&var_entry.start_pc.to_le_bytes());
+                buffer.extend_from_slice(&var_entry.end_pc.to_le_bytes());
+                buffer.push(if var_entry.is_parameter { 1 } else { 0 });
+            }
+
+            // Function visibility & signature
+            buffer.push(if func.is_public { 1 } else { 0 });
+            let return_type_json = serde_json::to_string(&func.return_type).unwrap_or_default();
+            write_string(&mut buffer, &return_type_json);
+            buffer.extend_from_slice(&(func.parameter_types.len() as u32).to_le_bytes());
+            for parameter_type in &func.parameter_types {
+                let parameter_type_json = serde_json::to_string(parameter_type).unwrap_or_default();
+                write_string(&mut buffer, &parameter_type_json);
             }
         }
 
@@ -354,9 +417,29 @@ impl BinaryProgram {
         write_string(&mut buffer, &self.package_version);
         write_string(&mut buffer, &self.package_description);
 
-        let manifest_bytes = serde_json::to_vec(&self.export_manifest).unwrap_or_default();
+        let mut manifest_to_serialize = self.export_manifest.clone();
+        if manifest_to_serialize.entry_point.is_none() {
+            manifest_to_serialize.entry_point = self.entry_point.clone();
+        }
+        if manifest_to_serialize.build_profile.is_empty() {
+            manifest_to_serialize.build_profile = self.build_profile.clone();
+        }
+        if manifest_to_serialize.native_library_checksums.is_empty() {
+            manifest_to_serialize.native_library_checksums = self.native_library_checksums.clone();
+        }
+
+        let manifest_bytes = serde_json::to_vec(&manifest_to_serialize).unwrap_or_default();
         buffer.extend_from_slice(&(manifest_bytes.len() as u32).to_le_bytes());
         buffer.extend_from_slice(&manifest_bytes);
+
+        // 7. Section 7: Exported AST (raw binary bytes)
+        let ast_slice = if !self.exported_ast_bytes.is_empty() {
+            &self.exported_ast_bytes
+        } else {
+            &self.export_manifest.exported_ast_bytes
+        };
+        buffer.extend_from_slice(&(ast_slice.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(ast_slice);
 
         buffer
     }
@@ -490,6 +573,26 @@ impl BinaryProgram {
             class.vtable = vtable;
             class.itable = itable;
             class.destructor_id = destructor_id;
+
+            let field_types_len = reader.read_u32("Classes")? as usize;
+            let mut field_types = Vec::with_capacity(field_types_len);
+            for _ in 0..field_types_len {
+                let offset = reader.read_u64("Classes")? as usize;
+                let tag = reader.read_u8("Classes")?;
+                field_types.push((offset, tag));
+            }
+            class.field_types = field_types;
+
+            let field_names_len = reader.read_u32("Classes")? as usize;
+            let mut field_names = Vec::with_capacity(field_names_len);
+            for _ in 0..field_names_len {
+                let offset = reader.read_u64("Classes")? as usize;
+                let name = reader.read_string("Classes")?;
+                let type_name = reader.read_string("Classes")?;
+                field_names.push((offset, name, type_name));
+            }
+            class.field_names = field_names;
+
             classes.push(class);
         }
 
@@ -562,10 +665,45 @@ impl BinaryProgram {
                 let id = reader.read_u16("Functions")?;
                 let start = reader.read_u32("Functions")?;
                 let end = reader.read_u32("Functions")?;
+                let line = reader.read_u32("Functions")?;
+                let column = reader.read_u32("Functions")?;
                 source_map.push(SourceMapEntry {
                     instruction_pc,
                     span: Span { id, start, end },
+                    line,
+                    column,
                 });
+            }
+
+            let local_vars_len = reader.read_u32("Functions")? as usize;
+            let mut local_variables = Vec::with_capacity(local_vars_len);
+            for _ in 0..local_vars_len {
+                let register = reader.read_u16("Functions")?;
+                let name = reader.read_string("Functions")?;
+                let type_name = reader.read_string("Functions")?;
+                let start_pc = reader.read_u32("Functions")?;
+                let end_pc = reader.read_u32("Functions")?;
+                let is_parameter = reader.read_u8("Functions")? == 1;
+                local_variables.push(LocalVariableDebugInfo {
+                    register,
+                    name,
+                    type_name,
+                    var_type: crate::types::Type::Primitive(crate::types::PrimitiveKind::Void),
+                    start_pc,
+                    end_pc,
+                    is_parameter,
+                });
+            }
+
+            let is_public = reader.read_u8("Functions")? == 1;
+            let return_type_str = reader.read_string("Functions")?;
+            let return_type = serde_json::from_str(&return_type_str).unwrap_or_default();
+            let parameter_types_len = reader.read_u32("Functions")? as usize;
+            let mut parameter_types = Vec::with_capacity(parameter_types_len);
+            for _ in 0..parameter_types_len {
+                let param_type_str = reader.read_string("Functions")?;
+                let param_type = serde_json::from_str(&param_type_str).unwrap_or_default();
+                parameter_types.push(param_type);
             }
 
             let mut func = CompiledFunction::new(symbol, source_id, param_count, num_registers);
@@ -574,11 +712,15 @@ impl BinaryProgram {
             func.reference_registers = reference_registers;
             func.exception_handlers = exception_handlers;
             func.source_map = source_map;
+            func.local_variables = local_variables;
+            func.is_public = is_public;
+            func.return_type = return_type;
+            func.parameter_types = parameter_types;
             functions.push(func);
         }
 
         // 6. Metadata and Export Manifest
-        let (package_name, package_version, package_description, export_manifest) = if reader
+        let (package_name, package_version, package_description, mut export_manifest) = if reader
             .has_remaining()
         {
             let pkg_name = reader.read_string("Metadata")?;
@@ -601,6 +743,23 @@ impl BinaryProgram {
             )
         };
 
+        // 7. Section 7: Exported AST
+        let exported_ast_bytes = if reader.has_remaining() {
+            let ast_len = reader.read_u32("ExportedAst")? as usize;
+            reader.read_bytes(ast_len, "ExportedAst")?.to_vec()
+        } else {
+            export_manifest.exported_ast_bytes.clone()
+        };
+        export_manifest.exported_ast_bytes = exported_ast_bytes.clone();
+
+        let build_profile = if !export_manifest.build_profile.is_empty() {
+            export_manifest.build_profile.clone()
+        } else {
+            "debug".to_string()
+        };
+        let native_library_checksums = export_manifest.native_library_checksums.clone();
+        let source_files = export_manifest.source_files.clone();
+
         Ok(BinaryProgram {
             magic,
             version_major,
@@ -613,10 +772,15 @@ impl BinaryProgram {
             constant_pool,
             classes,
             functions,
+            entry_point: export_manifest.entry_point.clone(),
             package_name,
             package_version,
             package_description,
+            build_profile,
+            native_library_checksums,
+            exported_ast_bytes,
             export_manifest,
+            source_files,
         })
     }
 }

@@ -1,0 +1,739 @@
+package solix.core;
+
+public class String implements IStringable, IHashable, IEquatable<String>, IComparable<String>, ICloneable<String> {
+    public string data;
+
+    // Native helpers
+    private static native string native_from_int(int64 value);
+    private static native string native_from_double(float64 value, int32 precision);
+    private static native string native_from_bool(bool value);
+    private static native int32 native_try_parse_int(string text, int64[] out_box);
+    private static native int32 native_try_parse_double(string text, float64[] out_box);
+    private static native string native_to_lower(string text);
+    private static native string native_to_upper(string text);
+    private static native string native_replace(string text, string old_token, string new_token);
+    private static native int64 native_index_of(string haystack, string needle, int32 start_index);
+    private static native int64 native_last_index_of(string haystack, string needle);
+    private static native string native_chars_to_string(char[] characters);
+    private static native char[] native_string_to_chars(string text);
+
+    // Constructors
+    public String() {
+        this.data = "";
+    }
+
+    public String(string text) {
+        if (text == null) {
+            this.data = "";
+        } else {
+            this.data = text;
+        }
+    }
+
+    public String(String other) {
+        if (other == null || other.data == null) {
+            this.data = "";
+        } else {
+            this.data = other.data;
+        }
+    }
+
+    public String(char[] characters) {
+        if (characters == null || characters.length == 0) {
+            this.data = "";
+        } else {
+            this.data = String::native_chars_to_string(characters);
+        }
+    }
+
+    public String(char[] characters, int32 offset, int32 count) {
+        if (characters == null) {
+            throw new ArgumentNullException("characters", "Character array cannot be null");
+        }
+        if (offset < 0 || count < 0 || offset + count > characters.length) {
+            throw new IndexOutOfBoundsException("Sub-array range is out of bounds", offset, 0, characters.length);
+        }
+        char[] slice_buffer = new char[count];
+        int32 copy_index = 0;
+        while (copy_index < count) {
+            slice_buffer[copy_index] = characters[offset + copy_index];
+            copy_index = copy_index + 1;
+        }
+        this.data = String::native_chars_to_string(slice_buffer);
+    }
+
+    public String(int32 value) {
+        this.data = String::native_from_int((int64)value);
+    }
+
+    public String(int64 value) {
+        this.data = String::native_from_int(value);
+    }
+
+    public String(float64 value) {
+        this.data = String::native_from_double(value, 6);
+    }
+
+    public String(bool value) {
+        this.data = String::native_from_bool(value);
+    }
+
+    public String(char character) {
+        char[] single_buffer = new char[1];
+        single_buffer[0] = character;
+        this.data = String::native_chars_to_string(single_buffer);
+    }
+
+    // Properties
+    public int32 length() {
+        return this.data.length;
+    }
+
+    public bool is_empty() {
+        return this.data.length == 0;
+    }
+
+    public bool is_blank() {
+        if (this.data.length == 0) {
+            return true;
+        }
+        int32 scan_index = 0;
+        while (scan_index < this.data.length) {
+            char current_char = this.data[scan_index];
+            if (!Primitives::is_whitespace(current_char)) {
+                return false;
+            }
+            scan_index = scan_index + 1;
+        }
+        return true;
+    }
+
+    public char char_at(int32 index) {
+        if (index < 0 || index >= this.data.length) {
+            throw new IndexOutOfBoundsException("String index out of bounds", index, 0, this.data.length);
+        }
+        return this.data[index];
+    }
+
+    public String substring(int32 start_index) {
+        return this.substring(start_index, this.data.length - start_index);
+    }
+
+    public String substring(int32 start_index, int32 count) {
+        if (start_index < 0 || count < 0 || start_index + count > this.data.length) {
+            throw new IndexOutOfBoundsException("Substring range out of bounds", start_index, 0, this.data.length);
+        }
+        char[] result_buffer = new char[count];
+        int32 copy_index = 0;
+        while (copy_index < count) {
+            result_buffer[copy_index] = this.data[start_index + copy_index];
+            copy_index = copy_index + 1;
+        }
+        return new String(result_buffer);
+    }
+
+    public String slice(int32 start_index, int32 end_index) {
+        if (start_index < 0) {
+            start_index = 0;
+        }
+        if (end_index > this.data.length) {
+            end_index = this.data.length;
+        }
+        if (start_index >= end_index) {
+            return new String("");
+        }
+        return this.substring(start_index, end_index - start_index);
+    }
+
+    public String to_upper() {
+        return new String(String::native_to_upper(this.data));
+    }
+
+    public String to_lower() {
+        return new String(String::native_to_lower(this.data));
+    }
+
+    public String trim() {
+        int32 start_index = 0;
+        int32 end_index = this.data.length;
+        while (start_index < end_index && Primitives::is_whitespace(this.data[start_index])) {
+            start_index = start_index + 1;
+        }
+        while (end_index > start_index && Primitives::is_whitespace(this.data[end_index - 1])) {
+            end_index = end_index - 1;
+        }
+        return this.slice(start_index, end_index);
+    }
+
+    public String trim_start() {
+        int32 start_index = 0;
+        int32 end_index = this.data.length;
+        while (start_index < end_index && Primitives::is_whitespace(this.data[start_index])) {
+            start_index = start_index + 1;
+        }
+        return this.slice(start_index, end_index);
+    }
+
+    public String trim_end() {
+        int32 start_index = 0;
+        int32 end_index = this.data.length;
+        while (end_index > start_index && Primitives::is_whitespace(this.data[end_index - 1])) {
+            end_index = end_index - 1;
+        }
+        return this.slice(start_index, end_index);
+    }
+
+    public bool starts_with(String prefix) {
+        if (prefix == null) {
+            return false;
+        }
+        int32 prefix_length = prefix.data.length;
+        if (prefix_length > this.data.length) {
+            return false;
+        }
+        int32 compare_index = 0;
+        while (compare_index < prefix_length) {
+            if (this.data[compare_index] != prefix.data[compare_index]) {
+                return false;
+            }
+            compare_index = compare_index + 1;
+        }
+        return true;
+    }
+
+    public bool starts_with(string prefix) {
+        if (prefix == null) {
+            return false;
+        }
+        int32 prefix_length = prefix.length;
+        if (prefix_length > this.data.length) {
+            return false;
+        }
+        int32 compare_index = 0;
+        while (compare_index < prefix_length) {
+            if (this.data[compare_index] != prefix[compare_index]) {
+                return false;
+            }
+            compare_index = compare_index + 1;
+        }
+        return true;
+    }
+
+    public bool ends_with(String suffix) {
+        if (suffix == null) {
+            return false;
+        }
+        int32 suffix_length = suffix.data.length;
+        int32 start_index = this.data.length - suffix_length;
+        if (start_index < 0) {
+            return false;
+        }
+        int32 compare_index = 0;
+        while (compare_index < suffix_length) {
+            if (this.data[start_index + compare_index] != suffix.data[compare_index]) {
+                return false;
+            }
+            compare_index = compare_index + 1;
+        }
+        return true;
+    }
+
+    public bool ends_with(string suffix) {
+        if (suffix == null) {
+            return false;
+        }
+        int32 suffix_length = suffix.length;
+        int32 source_length = this.data.length;
+        if (suffix_length > source_length) {
+            return false;
+        }
+        int32 offset_index = source_length - suffix_length;
+        int32 compare_index = 0;
+        while (compare_index < suffix_length) {
+            if (this.data[offset_index + compare_index] != suffix[compare_index]) {
+                return false;
+            }
+            compare_index = compare_index + 1;
+        }
+        return true;
+    }
+
+    public bool contains(String needle) {
+        if (needle == null) {
+            return false;
+        }
+        return String::native_index_of(this.data, needle.data, 0) >= 0;
+    }
+
+    public bool contains(string needle) {
+        if (needle == null) {
+            return false;
+        }
+        return this.index_of(needle) >= 0;
+    }
+
+    public int32 index_of(String needle) {
+        if (needle == null) {
+            return -1;
+        }
+        return (int32)String::native_index_of(this.data, needle.data, 0);
+    }
+
+    public int32 index_of(string needle) {
+        if (needle == null) {
+            return -1;
+        }
+        return (int32)String::native_index_of(this.data, needle, 0);
+    }
+
+    public int32 index_of(String needle, int32 start_index) {
+        if (needle == null) {
+            return -1;
+        }
+        return (int32)String::native_index_of(this.data, needle.data, start_index);
+    }
+
+    public int32 index_of(string needle, int32 start_index) {
+        if (needle == null) {
+            return -1;
+        }
+        return (int32)String::native_index_of(this.data, needle, start_index);
+    }
+
+    public int32 index_of(char needle) {
+        return this.index_of(needle, 0);
+    }
+
+    public int32 index_of(char needle, int32 start_index) {
+        char[] chars_array = this.to_chars();
+        int32 current_position = start_index;
+        while (current_position < chars_array.length) {
+            if (chars_array[current_position] == needle) {
+                return current_position;
+            }
+            current_position = current_position + 1;
+        }
+        return -1;
+    }
+
+    public int32 last_index_of(char needle) {
+        char[] chars_array = this.to_chars();
+        int32 current_position = chars_array.length - 1;
+        while (current_position >= 0) {
+            if (chars_array[current_position] == needle) {
+                return current_position;
+            }
+            current_position = current_position - 1;
+        }
+        return -1;
+    }
+
+    public int32 last_index_of(String needle) {
+        if (needle == null) {
+            return -1;
+        }
+        return (int32)String::native_last_index_of(this.data, needle.data);
+    }
+
+    public int32 last_index_of(string needle) {
+        if (needle == null) {
+            return -1;
+        }
+        return (int32)String::native_last_index_of(this.data, needle);
+    }
+
+    public int32 count(String needle) {
+        if (needle == null || needle.data.length == 0 || this.data.length == 0) {
+            return 0;
+        }
+        int32 occurrences = 0;
+        int32 search_offset = 0;
+        while (search_offset <= this.data.length - needle.data.length) {
+            int32 found_pos = (int32)String::native_index_of(this.data, needle.data, search_offset);
+            if (found_pos < 0) {
+                break;
+            }
+            occurrences = occurrences + 1;
+            search_offset = found_pos + needle.data.length;
+        }
+        return occurrences;
+    }
+
+    public String replace(String old_token, String new_token) {
+        if (old_token == null || new_token == null) {
+            return this;
+        }
+        return new String(String::native_replace(this.data, old_token.data, new_token.data));
+    }
+
+    public String replace(string old_token, string new_token) {
+        if (old_token == null || new_token == null) {
+            return this;
+        }
+        return new String(String::native_replace(this.data, old_token, new_token));
+    }
+
+    public String replace_first(String old_token, String new_token) {
+        if (old_token == null || new_token == null || old_token.data.length == 0) {
+            return this;
+        }
+        int32 found_position = this.index_of(old_token);
+        if (found_position < 0) {
+            return this;
+        }
+        String prefix_part = this.substring(0, found_position);
+        String suffix_part = this.substring(found_position + old_token.data.length);
+        return prefix_part + new_token + suffix_part;
+    }
+
+    public String repeat(int32 repetitions) {
+        if (repetitions <= 0) {
+            return new String("");
+        }
+        if (repetitions == 1) {
+            return this;
+        }
+        StringBuilder builder = new StringBuilder(this.data.length * repetitions);
+        int32 repeat_index = 0;
+        while (repeat_index < repetitions) {
+            builder.append(this.data);
+            repeat_index = repeat_index + 1;
+        }
+        return builder.to_string();
+    }
+
+    public String pad_left(int32 total_width, char pad_char) {
+        int32 current_len = this.data.length;
+        if (current_len >= total_width) {
+            return this;
+        }
+        int32 pad_count = total_width - current_len;
+        StringBuilder builder = new StringBuilder(total_width);
+        int32 pad_index = 0;
+        while (pad_index < pad_count) {
+            builder.append_char(pad_char);
+            pad_index = pad_index + 1;
+        }
+        builder.append(this.data);
+        return builder.to_string();
+    }
+
+    public String pad_right(int32 total_width, char pad_char) {
+        int32 current_len = this.data.length;
+        if (current_len >= total_width) {
+            return this;
+        }
+        int32 pad_count = total_width - current_len;
+        StringBuilder builder = new StringBuilder(total_width);
+        builder.append(this.data);
+        int32 pad_index = 0;
+        while (pad_index < pad_count) {
+            builder.append_char(pad_char);
+            pad_index = pad_index + 1;
+        }
+        return builder.to_string();
+    }
+
+    public String reverse() {
+        if (this.data.length <= 1) {
+            return this;
+        }
+        char[] reversed_buffer = new char[this.data.length];
+        int32 source_index = this.data.length - 1;
+        int32 target_index = 0;
+        while (source_index >= 0) {
+            reversed_buffer[target_index] = this.data[source_index];
+            source_index = source_index - 1;
+            target_index = target_index + 1;
+        }
+        return new String(reversed_buffer);
+    }
+
+    public String[] split(char delimiter) {
+        if (this.data.length == 0) {
+            String[] empty_result = new String[1];
+            empty_result[0] = new String("");
+            return empty_result;
+        }
+        int32 segment_count = 1;
+        int32 scan_index = 0;
+        while (scan_index < this.data.length) {
+            if (this.data[scan_index] == delimiter) {
+                segment_count = segment_count + 1;
+            }
+            scan_index = scan_index + 1;
+        }
+        String[] segments = new String[segment_count];
+        int32 segment_index = 0;
+        int32 start_pos = 0;
+        scan_index = 0;
+        while (scan_index < this.data.length) {
+            if (this.data[scan_index] == delimiter) {
+                segments[segment_index] = this.substring(start_pos, scan_index - start_pos);
+                segment_index = segment_index + 1;
+                start_pos = scan_index + 1;
+            }
+            scan_index = scan_index + 1;
+        }
+        segments[segment_index] = this.substring(start_pos, this.data.length - start_pos);
+        return segments;
+    }
+
+    public String[] lines() {
+        return this.split('\n');
+    }
+
+    public static String join(String delimiter, String[] elements) {
+        if (elements == null || elements.length == 0) {
+            return new String("");
+        }
+        StringBuilder builder = new StringBuilder();
+        int32 element_index = 0;
+        while (element_index < elements.length) {
+            if (element_index > 0 && delimiter != null) {
+                builder.append(delimiter.data);
+            }
+            if (elements[element_index] != null) {
+                builder.append(elements[element_index].data);
+            }
+            element_index = element_index + 1;
+        }
+        return builder.to_string();
+    }
+
+    public static String format_array(String format_string, String[] arguments) {
+        if (format_string == null) {
+            return new String("");
+        }
+        if (arguments == null || arguments.length == 0) {
+            return format_string;
+        }
+        StringBuilder builder = new StringBuilder(format_string.data.length + 32);
+        int32 cursor_index = 0;
+        int32 sequential_arg_index = 0;
+        int32 format_len = format_string.data.length;
+
+        while (cursor_index < format_len) {
+            char current_char = format_string.data[cursor_index];
+            if (current_char == '{') {
+                if (cursor_index + 1 < format_len && format_string.data[cursor_index + 1] == '{') {
+                    builder.append_char('{');
+                    cursor_index = cursor_index + 2;
+                } else if (cursor_index + 1 < format_len && format_string.data[cursor_index + 1] == '}') {
+                    if (sequential_arg_index < arguments.length && arguments[sequential_arg_index] != null) {
+                        builder.append(arguments[sequential_arg_index].data);
+                    }
+                    sequential_arg_index = sequential_arg_index + 1;
+                    cursor_index = cursor_index + 2;
+                } else {
+                    int32 closing_brace = cursor_index + 1;
+                    while (closing_brace < format_len && format_string.data[closing_brace] != '}') {
+                        closing_brace = closing_brace + 1;
+                    }
+                    if (closing_brace < format_len) {
+                        String index_str = format_string.substring(cursor_index + 1, closing_brace - (cursor_index + 1));
+                        int32 parsed_index = String::parse_int(index_str);
+                        if (parsed_index >= 0 && parsed_index < arguments.length && arguments[parsed_index] != null) {
+                            builder.append(arguments[parsed_index].data);
+                        }
+                        cursor_index = closing_brace + 1;
+                    } else {
+                        builder.append_char('{');
+                        cursor_index = cursor_index + 1;
+                    }
+                }
+            } else if (current_char == '}') {
+                if (cursor_index + 1 < format_len && format_string.data[cursor_index + 1] == '}') {
+                    builder.append_char('}');
+                    cursor_index = cursor_index + 2;
+                } else {
+                    builder.append_char('}');
+                    cursor_index = cursor_index + 1;
+                }
+            } else {
+                builder.append_char(current_char);
+                cursor_index = cursor_index + 1;
+            }
+        }
+        return builder.to_string();
+    }
+
+    public static String format<args...>(String format_string, args... arguments) {
+        tuple arguments_tuple = arguments;
+        String[] arguments_array = new String[arguments_tuple.length];
+        int32 tuple_index = 0;
+        while (tuple_index < arguments_tuple.length) {
+            arguments_array[tuple_index] = String::from_any(arguments_tuple[tuple_index]);
+            tuple_index = tuple_index + 1;
+        }
+        return String::format_array(format_string, arguments_array);
+    }
+
+    public static String from_int32(int32 value) {
+        return new String(value);
+    }
+
+    public static String from_int64(int64 value) {
+        return new String(value);
+    }
+
+    public static String from_float64(float64 value) {
+        return new String(value);
+    }
+
+    public static String from_bool(bool value) {
+        return new String(value);
+    }
+
+    public static String from_any<T>(T value) {
+        if (value == null) {
+            return new String("null");
+        }
+        return new String("" + value);
+    }
+
+    public int32 to_int32() {
+        return String::parse_int(this);
+    }
+
+    public int64 to_int64() {
+        int64[] out_box = new int64[1];
+        if (String::native_try_parse_int(this.data, out_box) != 1) {
+            throw new NumberFormatException("Failed to parse int64 from '" + this.data + "'");
+        }
+        return out_box[0];
+    }
+
+    public float64 to_float64() {
+        return String::parse_double(this);
+    }
+
+    public bool to_bool() {
+        return String::parse_bool(this);
+    }
+
+    public static int32 parse_int(String text) {
+        if (text == null) {
+            throw new NumberFormatException("Cannot parse int32 from null");
+        }
+        int64[] out_box = new int64[1];
+        if (String::native_try_parse_int(text.data, out_box) != 1) {
+            throw new NumberFormatException("Failed to parse integer from '" + text.data + "'");
+        }
+        return (int32)out_box[0];
+    }
+
+    public static float64 parse_double(String text) {
+        if (text == null) {
+            throw new NumberFormatException("Cannot parse double from null");
+        }
+        float64[] out_box = new float64[1];
+        if (String::native_try_parse_double(text.data, out_box) != 1) {
+            throw new NumberFormatException("Failed to parse double from '" + text.data + "'");
+        }
+        return out_box[0];
+    }
+
+    public static bool parse_bool(String text) {
+        if (text == null) {
+            return false;
+        }
+        if (text.data == "true" || text.data == "True" || text.data == "1") {
+            return true;
+        }
+        return false;
+    }
+
+    public char[] to_chars() {
+        return String::native_string_to_chars(this.data);
+    }
+
+    public int32 hash_code() {
+        int32 computed_hash = 0;
+        int32 char_index = 0;
+        while (char_index < this.data.length) {
+            computed_hash = (computed_hash * 31) + (int32)this.data[char_index];
+            char_index = char_index + 1;
+        }
+        return computed_hash;
+    }
+
+    public bool equals(String other) {
+        if (other == null) {
+            return false;
+        }
+        return this.data == other.data;
+    }
+
+    public int32 compare_to(String other) {
+        if (other == null) {
+            return 1;
+        }
+        int32 self_length = this.data.length;
+        int32 other_length = other.data.length;
+        int32 minimum_length = (self_length < other_length) ? self_length : other_length;
+        int32 compare_index = 0;
+        while (compare_index < minimum_length) {
+            char self_char = this.data[compare_index];
+            char other_char = other.data[compare_index];
+            if (self_char != other_char) {
+                return (int32)self_char - (int32)other_char;
+            }
+            compare_index = compare_index + 1;
+        }
+        return self_length - other_length;
+    }
+
+    public String clone() {
+        return new String(this.data);
+    }
+
+    public String to_string() {
+        return this;
+    }
+
+    // Operator Overloads
+    public String operator+(String other) {
+        if (other == null) {
+            return this;
+        }
+        return new String(this.data + other.data);
+    }
+
+    public String operator+(string other) {
+        if (other == null) {
+            return this;
+        }
+        return new String(this.data + other);
+    }
+
+    public bool operator==(String other) {
+        if (other == null) {
+            return false;
+        }
+        return this.data == other.data;
+    }
+
+    public bool operator!=(String other) {
+        if (other == null) {
+            return true;
+        }
+        return this.data != other.data;
+    }
+
+    public bool operator<(String other) {
+        return this.compare_to(other) < 0;
+    }
+
+    public bool operator<=(String other) {
+        return this.compare_to(other) <= 0;
+    }
+
+    public bool operator>(String other) {
+        return this.compare_to(other) > 0;
+    }
+
+    public bool operator>=(String other) {
+        return this.compare_to(other) >= 0;
+    }
+}

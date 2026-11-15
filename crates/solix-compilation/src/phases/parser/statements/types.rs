@@ -3,9 +3,10 @@
 #![forbid(unsafe_code)]
 
 use crate::phases::lexing::{Span, TokenKind};
+use serde::{Deserialize, Serialize};
 
 /// Represents a parsed type annotation in Solix source code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeAnnotation {
     /// Primitive type keyword (`void`, `bool`, `int8`..`int64`, `uint8`..`uint64`, `float32`, `float64`, `char`).
     Primitive {

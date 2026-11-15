@@ -68,6 +68,9 @@ pub struct ExportedFunction {
     pub is_constructor: bool,
     /// Whether this function is a destructor.
     pub is_destructor: bool,
+    /// Whether this function is an operator overload.
+    #[serde(default)]
+    pub is_operator: bool,
 }
 
 /// Metadata describing an exported static global variable.
@@ -96,6 +99,17 @@ pub struct ExportedField {
     pub modifiers: Vec<DeclarationModifier>,
     /// Byte offset within the class heap object layout.
     pub offset: usize,
+}
+
+/// Metadata describing an exported enumeration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportedEnum {
+    /// Identifier name of the enum.
+    pub name: String,
+    /// Declaration modifiers applied to the enum.
+    pub modifiers: Vec<DeclarationModifier>,
+    /// Enumeration variants with optional explicit integer discriminator values.
+    pub variants: Vec<(String, Option<i64>)>,
 }
 
 /// Metadata describing an exported nominal class or interface.
@@ -142,14 +156,39 @@ pub struct ExportManifest {
     pub package_version: String,
     /// Human-readable package description.
     pub package_description: String,
+    /// Build profile recorded during compilation ("debug", "release", or "test").
+    #[serde(default)]
+    pub build_profile: String,
+    /// Cryptographic SHA-256 digests of bundled native shared libraries.
+    #[serde(default)]
+    pub native_library_checksums: std::collections::HashMap<String, String>,
+    /// Explicit package dependencies recorded during compilation.
+    #[serde(default)]
+    pub dependencies: Vec<crate::solver::DependencyRequirement>,
     /// Exported nominal classes and interfaces.
     pub exported_classes: Vec<ExportedClass>,
+    /// Exported nominal enumerations.
+    #[serde(default)]
+    pub exported_enums: Vec<ExportedEnum>,
     /// Exported top-level functions.
     pub exported_functions: Vec<ExportedFunction>,
     /// Exported static variables.
     pub exported_statics: Vec<ExportedStatic>,
     /// Uninstantiated generic templates for downstream monomorphization.
     pub generic_templates: Vec<ExportedGenericTemplate>,
+    /// Compact generated Solix API declaration source (using `pkg::Class` syntax).
+    #[serde(default)]
+    pub api_header: String,
+    /// Canonical source file paths indexed by `source_id`.
+    #[serde(default)]
+    pub source_files: Vec<String>,
+    /// Pre-parsed AST bytes for instant dependency injection without re-parsing.
+    /// Skipped from JSON serialization in favour of BinaryProgram Section 7.
+    #[serde(default, skip_serializing)]
+    pub exported_ast_bytes: Vec<u8>,
+    /// Optional default entrypoint symbol embedded in the binary manifest.
+    #[serde(default)]
+    pub entry_point: Option<String>,
 }
 
 /// Extracts the public API manifest from a compiled binary program as a formatted JSON string.

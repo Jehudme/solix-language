@@ -1,0 +1,46 @@
+# ClassDeclaration
+
+## 1. Overview & Purpose
+
+A `ClassDeclaration` defines a reference type with encapsulated fields, constructors, methods, and operators. Solix supports single class inheritance (`extends`), multiple interface implementation (`implements`), and abstract classes.
+
+Class instances are allocated on the heap as reference-counted objects managed by Automatic Reference Counting (ARC). Methods participate in dynamic virtual dispatch via Virtual Method Tables (VTables).
+
+---
+
+## 2. Compilation & Runtime Mechanics (With Real Bytecode)
+
+### Memory Layout
+An instance has an 8-byte header followed by contiguous field offsets:
+```text
++-------------------------------------------------------------+
+| Header (8 bytes): [ size: u32 ] | [ tag: 4b | ref: 28b ]    |
++-------------------------------------------------------------+
+| Address + 0:  u64 VTable ID                                 |
+| Address + 8:  Field 0 (Superclass fields...)                |
+| Address + 16: Field 1 (Declared fields...)                  |
++-------------------------------------------------------------+
+```
+
+### Bytecode Disassembly Example
+```solix
+// Solix Code
+class Dog extends Animal {
+    void speak() { Console::println("Woof"); }
+}
+Animal a = new Dog();
+a.speak();
+```
+
+```bytecode
+// Compiled VM Bytecode
+// 1. Instantiation
+ALLOC_DYNAMIC 16            // Allocates header + fields
+SET_VTABLE <Dog_vtable_id>  // Sets vtable pointer
+CALL Dog.init()             // Runs constructor (ref_count = 1)
+Mov r1, r7                 // Stored into 'a'
+
+// 2. Virtual Method Dispatch
+// (Register r1 holds local variable)                 // Load 'a'
+CALL_VIRTUAL <speak_slot_id>// Dynamic dispatch queries Dog VTable!
+```

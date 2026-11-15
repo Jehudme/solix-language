@@ -60,10 +60,36 @@ impl Value {
         }
     }
 
+    /// Evaluates equality between two values with support for mixed primitive/reference types.
+    #[must_use]
+    pub fn is_equal_to(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Null, Self::Null) => true,
+            (Self::Ref(target_address), Self::Null) | (Self::Null, Self::Ref(target_address)) => {
+                *target_address == 0
+            }
+            (Self::Ref(first_address), Self::Ref(second_address)) => {
+                first_address == second_address
+            }
+            (Self::I32(first_int), Self::I32(second_int)) => first_int == second_int,
+            (Self::I64(first_long), Self::I64(second_long)) => first_long == second_long,
+            (Self::I32(first_int), Self::I64(second_long)) => {
+                (*first_int as i64) == *second_long || (*first_int as u32 as i64) == *second_long
+            }
+            (Self::I64(first_long), Self::I32(second_int)) => {
+                *first_long == (*second_int as i64) || *first_long == (*second_int as u32 as i64)
+            }
+            (Self::Bool(first_bool), Self::Bool(second_bool)) => first_bool == second_bool,
+            (Self::F64(first_float), Self::F64(second_float)) => first_float == second_float,
+            (Self::FnPtr(first_fn), Self::FnPtr(second_fn)) => first_fn == second_fn,
+            _ => false,
+        }
+    }
+
     /// Extracts a boolean value or returns a `TypeMismatch` error.
     pub fn as_bool(&self) -> Result<bool, RuntimeError> {
         match self {
-            Self::Bool(b) => Ok(*b),
+            Self::Bool(boolean_value) => Ok(*boolean_value),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "bool".to_string(),
                 found: self.type_name().to_string(),
@@ -74,8 +100,8 @@ impl Value {
     /// Extracts a 32-bit signed integer or returns a `TypeMismatch` error.
     pub fn as_i32(&self) -> Result<i32, RuntimeError> {
         match self {
-            Self::I32(n) => Ok(*n),
-            Self::I64(n) => Ok(*n as i32),
+            Self::I32(primitive_number) => Ok(*primitive_number),
+            Self::I64(primitive_number) => Ok(*primitive_number as i32),
             _ => Err(RuntimeError::TypeMismatch {
                 expected: "int32".to_string(),
                 found: self.type_name().to_string(),
@@ -137,23 +163,125 @@ impl Value {
         matches!(self, Self::Null)
     }
 
-    /// Raw 64-bit word representation used for flat byte memory storage.
+    pub const TAG_NULL: u64 = 0x7FFC_0000_0000_0000;
+    pub const TAG_BOOL: u64 = 0x7FFD_0000_0000_0000;
+    pub const TAG_I32: u64 = 0x7FFE_0000_0000_0000;
+    pub const TAG_REF: u64 = 0x7FFF_0000_0000_0000;
+    pub const TAG_FNPTR: u64 = 0x7FFB_0000_0000_0000;
+    pub const TAG_MASK: u64 = 0xFFFF_0000_0000_0000;
+    pub const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
+
+    /// Returns the raw unwrapped 64-bit integer or bit pattern for static memory storage.
     #[must_use]
-    pub fn to_raw_u64(&self) -> u64 {
+    pub fn to_primitive_u64(&self) -> u64 {
         match self {
             Self::Null => 0,
-            Self::Bool(b) => {
-                if *b {
+            Self::Bool(is_true) => {
+                if *is_true {
                     1
                 } else {
                     0
                 }
             }
-            Self::I32(n) => *n as u32 as u64,
-            Self::I64(n) => *n as u64,
-            Self::F64(f) => f.to_bits(),
+            Self::I32(int_val) => *int_val as u32 as u64,
+            Self::I64(int_val) => *int_val as u64,
+            Self::F64(float_val) => float_val.to_bits(),
             Self::Ref(addr) => *addr as u64,
-            Self::FnPtr(id) => *id as u64,
+            Self::FnPtr(func_id) => *func_id as u64,
+        }
+    }
+
+    /// Encodes this value into a 2-word (16-byte) tagged representation: `(tag, payload)`.
+    #[must_use]
+    pub fn to_tagged_parts(&self) -> (u64, u64) {
+        match self {
+            Self::Null => (0, 0),
+            Self::Bool(is_boolean) => (1, if *is_boolean { 1 } else { 0 }),
+            Self::I32(integer_val) => (2, *integer_val as u32 as u64),
+            Self::I64(integer_val) => (3, *integer_val as u64),
+            Self::F64(float_val) => (4, float_val.to_bits()),
+            Self::Ref(address_val) => (5, *address_val as u64),
+            Self::FnPtr(function_id) => (6, *function_id as u64),
+        }
+    }
+
+    /// Decodes a value from a 2-word (16-byte) tagged representation.
+    #[must_use]
+    pub fn from_tagged_parts(tag_id: u64, payload_word: u64) -> Self {
+        match tag_id {
+            1 => Self::Bool((payload_word & 1) != 0),
+            2 => Self::I32(payload_word as i32),
+            3 => Self::I64(payload_word as i64),
+            4 => Self::F64(f64::from_bits(payload_word)),
+            5 => {
+                let address_val = payload_word as u32;
+                if address_val == 0 {
+                    Self::Null
+                } else {
+                    Self::Ref(address_val)
+                }
+            }
+            6 => Self::FnPtr(payload_word as u32),
+            _ => Self::Null,
+        }
+    }
+
+    /// Encodes this value into a raw 64-bit NaN-boxed word representation for memory storage.
+    #[must_use]
+    pub fn to_raw_u64(&self) -> u64 {
+        match self {
+            Self::Null => Self::TAG_NULL,
+            Self::Bool(is_true) => Self::TAG_BOOL | (*is_true as u64),
+            Self::I32(int_val) => Self::TAG_I32 | (*int_val as u32 as u64),
+            Self::Ref(addr) => {
+                if *addr == 0 {
+                    Self::TAG_NULL
+                } else {
+                    Self::TAG_REF | (*addr as u64)
+                }
+            }
+            Self::FnPtr(func_id) => Self::TAG_FNPTR | (*func_id as u64),
+            Self::F64(float_val) => {
+                if float_val.is_nan() {
+                    Self::CANONICAL_NAN
+                } else {
+                    float_val.to_bits()
+                }
+            }
+            Self::I64(int_val) => {
+                if *int_val >= i32::MIN as i64 && *int_val <= i32::MAX as i64 {
+                    Self::TAG_I32 | (*int_val as i32 as u32 as u64)
+                } else {
+                    *int_val as u64
+                }
+            }
+        }
+    }
+
+    /// Decodes a value from its raw 64-bit NaN-boxed word representation.
+    #[must_use]
+    pub fn from_raw_u64(raw: u64) -> Self {
+        if raw == 0 || raw == Self::TAG_NULL {
+            Self::Null
+        } else if (raw & Self::TAG_MASK) == Self::TAG_BOOL {
+            Self::Bool((raw & 1) != 0)
+        } else if (raw & Self::TAG_MASK) == Self::TAG_I32 {
+            Self::I32(raw as i32)
+        } else if (raw & Self::TAG_MASK) == Self::TAG_REF {
+            let addr = raw as u32;
+            if addr == 0 {
+                Self::Null
+            } else {
+                Self::Ref(addr)
+            }
+        } else if (raw & Self::TAG_MASK) == Self::TAG_FNPTR {
+            Self::FnPtr(raw as u32)
+        } else if raw == Self::CANONICAL_NAN {
+            Self::F64(f64::NAN)
+        } else if (raw & 0x7FF8_0000_0000_0000) != 0x7FF8_0000_0000_0000 {
+            Self::F64(f64::from_bits(raw))
+        } else {
+            Self::I64(raw as i64)
         }
     }
 }

@@ -1,0 +1,45 @@
+import blt.io.println;
+
+class Node {
+    public int32 item;
+    public Node left;
+    public Node right;
+
+    public Node(int32 item) {
+        this.item = item;
+        this.left = null;
+        this.right = null;
+    }
+}
+
+class BinaryTreesApp {
+    public static Node build_tree(int32 depth, int32 item) {
+        Node node = new Node(item);
+        if (depth > 0) {
+            node.left = BinaryTreesApp::build_tree(depth - 1, item * 2);
+            node.right = BinaryTreesApp::build_tree(depth - 1, item * 2 + 1);
+        }
+        return node;
+    }
+
+    public static int32 check_tree(Node node) {
+        if (node == null) {
+            return 0;
+        }
+        return (node.item + BinaryTreesApp::check_tree(node.left) + BinaryTreesApp::check_tree(node.right)) & 0x7FFFFFFF;
+    }
+
+    public static void main() {
+        int32 total = 0;
+        for (int32 i = 0; i < 10; i = i + 1) {
+            Node root = BinaryTreesApp::build_tree(10, i + 1);
+            total = (total + BinaryTreesApp::check_tree(root)) & 0x7FFFFFFF;
+        }
+
+        if (total == 83875825) {
+            println("RESULT: 83875825");
+        } else {
+            println("FAIL");
+        }
+    }
+}

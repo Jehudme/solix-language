@@ -1,0 +1,103 @@
+package solix.io;
+
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.core.IOException;
+
+public class BufferedReader {
+    private IStream underlying_stream;
+    private int8[] internal_buffer;
+    private int32 buffer_capacity;
+    private int32 buffer_position;
+    private int32 buffer_length;
+    private bool closed_flag;
+
+    public BufferedReader(IStream stream) {
+        this.initialize_reader(stream, 4096);
+    }
+
+    public BufferedReader(IStream stream, int32 buffer_size) {
+        int32 chosen_size = (buffer_size > 0) ? buffer_size : 4096;
+        this.initialize_reader(stream, chosen_size);
+    }
+
+    private void initialize_reader(IStream stream, int32 buffer_size) {
+        this.underlying_stream = stream;
+        this.buffer_capacity = buffer_size;
+        this.internal_buffer = new int8[this.buffer_capacity];
+        this.buffer_position = 0;
+        this.buffer_length = 0;
+        this.closed_flag = false;
+    }
+
+    ~BufferedReader() {
+        this.close();
+    }
+
+    public int32 read() {
+        if (this.closed_flag) {
+            throw new IOException("Reader is closed");
+        }
+        if (this.buffer_position >= this.buffer_length) {
+            this.fill_buffer();
+            if (this.buffer_length <= 0) {
+                return -1;
+            }
+        }
+        int32 character_value = (int32)this.internal_buffer[this.buffer_position];
+        if (character_value < 0) {
+            character_value = character_value + 256;
+        }
+        this.buffer_position = this.buffer_position + 1;
+        return character_value;
+    }
+
+    public String read_line() {
+        if (this.closed_flag) {
+            throw new IOException("Reader is closed");
+        }
+        StringBuilder line_builder = new StringBuilder();
+        bool has_characters = false;
+
+        while (true) {
+            int32 current_char = this.read();
+            if (current_char == -1) {
+                if (has_characters) {
+                    return line_builder.to_string();
+                } else {
+                    return null;
+                }
+            }
+            has_characters = true;
+            if (current_char == 10) { // '\n'
+                return line_builder.to_string();
+            } else if (current_char == 13) { // '\r'
+                if (this.buffer_position < this.buffer_length) {
+                    int32 next_char = (int32)this.internal_buffer[this.buffer_position];
+                    if (next_char < 0) {
+                        next_char = next_char + 256;
+                    }
+                    if (next_char == 10) {
+                        this.buffer_position = this.buffer_position + 1;
+                    }
+                }
+                return line_builder.to_string();
+            } else {
+                line_builder.append_char((char)current_char);
+            }
+        }
+        return null;
+    }
+
+    private void fill_buffer() {
+        this.buffer_position = 0;
+        this.buffer_length = this.underlying_stream.read(this.internal_buffer, 0, this.buffer_capacity);
+    }
+
+    public void close() {
+        if (!this.closed_flag) {
+            this.underlying_stream.close();
+            this.closed_flag = true;
+        }
+    }
+}

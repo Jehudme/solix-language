@@ -1,0 +1,3 @@
+# Solix Application Runtime Assets Configuration
+theme = "dark"
+max_fps = 60

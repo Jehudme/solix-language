@@ -1,0 +1,252 @@
+package solix.core;
+
+public class StringBuilder implements IStringable {
+    private char[] buffer;
+    private int32 count;
+
+    public StringBuilder() {
+        this.buffer = new char[16];
+        this.count = 0;
+    }
+
+    public StringBuilder(int32 initial_capacity) {
+        if (initial_capacity < 16) {
+            initial_capacity = 16;
+        }
+        this.buffer = new char[initial_capacity];
+        this.count = 0;
+    }
+
+    public StringBuilder(String initial_text) {
+        int32 initial_length = initial_text != null ? initial_text.length() : 0;
+        int32 capacity_needed = initial_length > 16 ? initial_length * 2 : 16;
+        this.buffer = new char[capacity_needed];
+        this.count = 0;
+        if (initial_text != null) {
+            this.append(initial_text);
+        }
+    }
+
+    public StringBuilder(string initial_text) {
+        int32 initial_length = initial_text != null ? initial_text.length : 0;
+        int32 capacity_needed = initial_length > 16 ? initial_length * 2 : 16;
+        this.buffer = new char[capacity_needed];
+        this.count = 0;
+        if (initial_text != null) {
+            this.append(initial_text);
+        }
+    }
+
+    public void ensure_capacity(int32 minimum_capacity) {
+        if (minimum_capacity > this.buffer.length) {
+            int32 new_capacity = this.buffer.length * 2;
+            if (new_capacity < minimum_capacity) {
+                new_capacity = minimum_capacity;
+            }
+            char[] new_buffer = new char[new_capacity];
+            int32 copy_index = 0;
+            while (copy_index < this.count) {
+                new_buffer[copy_index] = this.buffer[copy_index];
+                copy_index = copy_index + 1;
+            }
+            this.buffer = new_buffer;
+        }
+    }
+
+    public StringBuilder append(String text) {
+        if (text == null || text.data == null) {
+            return this;
+        }
+        string raw_text = text.data;
+        if (raw_text.length == 0) {
+            return this;
+        }
+        this.ensure_capacity(this.count + raw_text.length);
+        int32 copy_index = 0;
+        while (copy_index < raw_text.length) {
+            this.buffer[this.count + copy_index] = raw_text[copy_index];
+            copy_index = copy_index + 1;
+        }
+        this.count = this.count + raw_text.length;
+        return this;
+    }
+
+    public StringBuilder append(string text) {
+        if (text == null || text.length == 0) {
+            return this;
+        }
+        this.ensure_capacity(this.count + text.length);
+        int32 copy_index = 0;
+        while (copy_index < text.length) {
+            this.buffer[this.count + copy_index] = text[copy_index];
+            copy_index = copy_index + 1;
+        }
+        this.count = this.count + text.length;
+        return this;
+    }
+
+    public StringBuilder append(char[] characters) {
+        if (characters == null || characters.length == 0) {
+            return this;
+        }
+        this.ensure_capacity(this.count + characters.length);
+        int32 copy_index = 0;
+        while (copy_index < characters.length) {
+            this.buffer[this.count + copy_index] = characters[copy_index];
+            copy_index = copy_index + 1;
+        }
+        this.count = this.count + characters.length;
+        return this;
+    }
+
+    public StringBuilder append_char(char character) {
+        this.ensure_capacity(this.count + 1);
+        this.buffer[this.count] = character;
+        this.count = this.count + 1;
+        return this;
+    }
+
+    public StringBuilder append_int(int32 value) {
+        return this.append(String::from_int32(value));
+    }
+
+    public StringBuilder append_long(int64 value) {
+        return this.append(String::from_int64(value));
+    }
+
+    public StringBuilder append_double(float64 value) {
+        return this.append(String::from_float64(value));
+    }
+
+    public StringBuilder append_bool(bool value) {
+        return this.append(String::from_bool(value));
+    }
+
+    public StringBuilder append_line(String text) {
+        this.append(text);
+        return this.append_char('\n');
+    }
+
+    public StringBuilder append_line(string text) {
+        this.append(text);
+        return this.append_char('\n');
+    }
+
+    public StringBuilder append_line() {
+        return this.append_char('\n');
+    }
+
+    public StringBuilder insert(int32 index, String text) {
+        if (text == null) {
+            return this;
+        }
+        return this.insert(index, text.data);
+    }
+
+    public StringBuilder insert(int32 index, string text) {
+        if (index < 0 || index > this.count) {
+            index = this.count;
+        }
+        if (text == null || text.length == 0) {
+            return this;
+        }
+        int32 text_length = text.length;
+        this.ensure_capacity(this.count + text_length);
+        int32 shift_index = this.count - 1;
+        while (shift_index >= index) {
+            this.buffer[shift_index + text_length] = this.buffer[shift_index];
+            shift_index = shift_index - 1;
+        }
+        int32 insert_index = 0;
+        while (insert_index < text_length) {
+            this.buffer[index + insert_index] = text[insert_index];
+            insert_index = insert_index + 1;
+        }
+        this.count = this.count + text_length;
+        return this;
+    }
+
+    public StringBuilder delete_range(int32 start_index, int32 length_to_remove) {
+        if (start_index < 0 || length_to_remove <= 0 || start_index >= this.count) {
+            return this;
+        }
+        if (start_index + length_to_remove > this.count) {
+            length_to_remove = this.count - start_index;
+        }
+        int32 copy_index = start_index;
+        while (copy_index < this.count - length_to_remove) {
+            this.buffer[copy_index] = this.buffer[copy_index + length_to_remove];
+            copy_index = copy_index + 1;
+        }
+        this.count = this.count - length_to_remove;
+        return this;
+    }
+
+    public StringBuilder remove(int32 start_index, int32 length_to_remove) {
+        return this.delete_range(start_index, length_to_remove);
+    }
+
+    public StringBuilder replace(char old_character, char new_character) {
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (this.buffer[scan_index] == old_character) {
+                this.buffer[scan_index] = new_character;
+            }
+            scan_index = scan_index + 1;
+        }
+        return this;
+    }
+
+    public StringBuilder reverse() {
+        int32 left_index = 0;
+        int32 right_index = this.count - 1;
+        while (left_index < right_index) {
+            char temporary = this.buffer[left_index];
+            this.buffer[left_index] = this.buffer[right_index];
+            this.buffer[right_index] = temporary;
+            left_index = left_index + 1;
+            right_index = right_index - 1;
+        }
+        return this;
+    }
+
+    public char char_at(int32 index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException("Index out of bounds in StringBuilder.char_at", index, 0, this.count);
+        }
+        return this.buffer[index];
+    }
+
+    public void set_char_at(int32 index, char character) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException("Index out of bounds in StringBuilder.set_char_at", index, 0, this.count);
+        }
+        this.buffer[index] = character;
+    }
+
+    public int32 length() {
+        return this.count;
+    }
+
+    public int32 capacity() {
+        return this.buffer.length;
+    }
+
+    public void clear() {
+        this.count = 0;
+    }
+
+    public char[] to_chars() {
+        char[] result_chars = new char[this.count];
+        int32 copy_index = 0;
+        while (copy_index < this.count) {
+            result_chars[copy_index] = this.buffer[copy_index];
+            copy_index = copy_index + 1;
+        }
+        return result_chars;
+    }
+
+    public String to_string() {
+        return new String(this.to_chars());
+    }
+}

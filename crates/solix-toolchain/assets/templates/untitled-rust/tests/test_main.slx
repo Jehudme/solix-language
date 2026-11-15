@@ -1,0 +1,10 @@
+import blt.io.println;
+
+public class TestRunner {
+    public static int32 test() {
+        int32 result = MathBridge::fast_add(15, 27);
+        assert(result == 42);
+        println("Test passed: MathBridge::fast_add(15, 27) == 42");
+        return 0;
+    }
+}

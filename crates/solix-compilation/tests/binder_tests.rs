@@ -2,7 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::{BindingError, PrimitiveKind, Span, Type};
+use solix_common::{PrimitiveKind, Span, Type};
+use solix_compilation::BindingError;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::phases::binder::bind;
 use solix_compilation::phases::binder::symbols::{SymbolEntry, SymbolId};
@@ -273,6 +274,89 @@ fn test_symbol_signature_string_canonical_format() {
 
     assert_eq!(
         symbol.to_signature_string(),
-        "solix::models::User find_user_by_email(int64, std::string, bool)"
+        "solix::models::User find_user_by_email(int64, string, bool)"
+    );
+}
+
+#[test]
+fn test_namespace_qualified_declarations_binding_and_emission() {
+    let source_header = r#"
+alias solix::types::Count = int32;
+
+enum solix::io::FileMode {
+    Read,
+    Write
+}
+
+interface solix::io::IStream {
+    void close();
+}
+
+class solix::io::Console {
+    public static void print_message(string message) {
+    }
+}
+"#;
+
+    let source_consumer = r#"
+import solix.io.Console;
+import solix.io.FileMode;
+import solix.types.Count;
+
+public int32 main() {
+    Console::print_message("Hello from qualified namespace!");
+    Count counter = 42;
+    FileMode mode = FileMode.Read;
+    return counter;
+}
+"#;
+
+    let options = CompilationOptions::new()
+        .with_source("header.slx", source_header)
+        .with_source("consumer.slx", source_consumer);
+
+    let mut context = CompilationContext::new(options);
+
+    let lex_result = lex(&mut context).expect("Lexing qualified declarations must succeed");
+    assert!(lex_result.tokens_count > 0);
+
+    let parse_result = parse(&mut context).expect("Parsing qualified declarations must succeed");
+    assert_eq!(parse_result.files_parsed, 2);
+
+    let bind_result = bind(&mut context).expect("Binding qualified declarations must succeed");
+    assert!(bind_result.symbols_bound > 0);
+
+    let artifacts = context
+        .binding_artifacts
+        .as_ref()
+        .expect("Binding artifacts must be present");
+
+    assert!(
+        artifacts
+            .symbol_table
+            .lookup_global("solix::io::Console")
+            .is_some(),
+        "solix::io::Console must be registered globally"
+    );
+    assert!(
+        artifacts
+            .symbol_table
+            .lookup_global("solix::io::IStream")
+            .is_some(),
+        "solix::io::IStream must be registered globally"
+    );
+    assert!(
+        artifacts
+            .symbol_table
+            .lookup_global("solix::io::FileMode")
+            .is_some(),
+        "solix::io::FileMode must be registered globally"
+    );
+    assert!(
+        artifacts
+            .symbol_table
+            .lookup_global("solix::types::Count")
+            .is_some(),
+        "solix::types::Count must be registered globally"
     );
 }

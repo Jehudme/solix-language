@@ -5,6 +5,9 @@
 use crate::CompilationContext::CompilationContext;
 use crate::phases::binder::SymbolId;
 use crate::phases::binder::layout::ClassLayout;
+use crate::phases::binder::passes::pass1_symbol_discovery::{
+    compute_effective_package, extract_namespace_path,
+};
 use crate::phases::binder::symbols::SymbolTable;
 use crate::phases::binder::type_resolver::resolve_type_annotation;
 use crate::phases::emitter::constant_pool::ConstantPoolBuilder;
@@ -16,16 +19,17 @@ use crate::phases::emitter::static_layout::{
     StaticLayout, StaticVariableDecl, synthesize_module_init,
 };
 use crate::phases::lexing::TokenKind;
-use crate::phases::parser::statements::ProgramAst;
 use crate::phases::parser::statements::declarations::{
     ClassDeclaration, ClassMember, ConstructorDeclaration, Declaration, DestructorDeclaration,
     MethodDeclaration, Modifier, OperatorDeclaration,
 };
 use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
+use crate::phases::parser::statements::types::TypeAnnotation;
+use crate::phases::parser::statements::{ProgramAst, Statement};
 use solix_common::bytecode::{
     BinaryProgram, CompiledFunction, DeclarationModifier, ExportManifest, ExportedClass,
-    ExportedField, ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic,
-    Instruction, OpCode,
+    ExportedEnum, ExportedField, ExportedFunction, ExportedGenericTemplate, ExportedParameter,
+    ExportedStatic, Instruction, OpCode,
 };
 use solix_common::diagnostics::EmissionError;
 use solix_common::types::{PrimitiveKind, Type};
@@ -141,9 +145,20 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     function_ids.insert("@init".to_string(), 0);
     let mut next_func_id = 1u32;
 
+    let mut generic_invocations: HashMap<(String, String), Vec<String>> = HashMap::new();
+    for ast in context.ast.iter().flatten() {
+        collect_generic_calls_in_ast(ast, &context.sources, &mut generic_invocations);
+    }
+
     // Index function symbols to allocate deterministic function IDs
     for ast in context.ast.iter().flatten() {
-        index_function_symbols(ast, &context.sources, &mut function_ids, &mut next_func_id);
+        index_function_symbols(
+            ast,
+            &context.sources,
+            &mut function_ids,
+            &mut next_func_id,
+            &generic_invocations,
+        );
     }
 
     if let Some(artifacts) = &context.binding_artifacts {
@@ -242,6 +257,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 &mut pool,
                 &mut functions_by_source[source_id as usize],
                 &mut synthesized_lambdas,
+                &generic_invocations,
             )?;
         }
     }
@@ -270,13 +286,43 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     let mut sym_to_func = HashMap::<SymbolId, u32>::new();
     if let Some(artifacts) = &context.binding_artifacts {
         for entry in &artifacts.symbol_table.symbols {
-            if let Some(&func_id) = function_ids.get(&entry.fully_qualified_name) {
+            let signature = if let Type::FunctionPointer {
+                parameter_types, ..
+            } = &entry.symbol_type
+            {
+                Some(
+                    parameter_types
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                )
+            } else {
+                None
+            };
+            let mangled_name = signature
+                .as_ref()
+                .map(|parameters| format!("{}({parameters})", entry.fully_qualified_name));
+            if let Some(func_id) = mangled_name
+                .as_ref()
+                .and_then(|name| function_ids.get(name))
+                .or_else(|| function_ids.get(&entry.fully_qualified_name))
+                .copied()
+            {
                 sym_to_func.insert(entry.id, func_id);
             } else if let Some(parent_id) = entry.parent_symbol
                 && let Some(parent) = artifacts.symbol_table.get_symbol(parent_id)
             {
                 let short_full = format!("{}::{}", parent.name, entry.name);
-                if let Some(&func_id) = function_ids.get(&short_full) {
+                let short_mangled = signature
+                    .as_ref()
+                    .map(|parameters| format!("{short_full}({parameters})"));
+                if let Some(func_id) = short_mangled
+                    .as_ref()
+                    .and_then(|name| function_ids.get(name))
+                    .or_else(|| function_ids.get(&short_full))
+                    .copied()
+                {
                     sym_to_func.insert(entry.id, func_id);
                 }
             }
@@ -330,6 +376,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
     // 7. Collect public export manifest and metadata
     let mut exported_classes = Vec::new();
+    let mut exported_enums = Vec::new();
     let mut exported_functions = Vec::new();
     let mut exported_statics = Vec::new();
     let mut generic_templates = Vec::new();
@@ -340,9 +387,27 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         .map(|ba| &ba.symbol_table)
         .unwrap_or(&dummy_sym_table);
 
-    for (src_id, ast_opt) in context.ast.iter().enumerate() {
+    for (source_index, ast_opt) in context.ast.iter().enumerate() {
+        let source_id = source_index as u16;
+        if context.is_external_source(source_id) {
+            continue;
+        }
         if let Some(ast) = ast_opt {
-            let code = &context.sources[src_id];
+            let code = &context.sources[source_index];
+            let current_package_prefix = if let Some(package_statement) = &ast.package {
+                let mut segments = Vec::new();
+                for span in &package_statement.path {
+                    let start_index = span.start as usize;
+                    let end_index = span.end as usize;
+                    if end_index <= code.len() {
+                        segments.push(&code[start_index..end_index]);
+                    }
+                }
+                segments.join("::")
+            } else {
+                String::new()
+            };
+
             for decl in &ast.declarations {
                 match decl {
                     Declaration::Class(cls) => {
@@ -350,15 +415,22 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             continue;
                         }
                         let cls_name = get_span_text(cls.name_span, code);
+                        let qualified_class_symbol = if current_package_prefix.is_empty() {
+                            cls_name.to_string()
+                        } else {
+                            format!("{current_package_prefix}::{cls_name}")
+                        };
                         if !cls.generic_params.is_empty() {
                             let template_src = get_span_text(cls.span, code).to_string();
                             let param_names = cls
                                 .generic_params
                                 .iter()
-                                .map(|p| get_span_text(p.name_span, code).to_string())
+                                .map(|param_node| {
+                                    get_span_text(param_node.name_span, code).to_string()
+                                })
                                 .collect();
                             generic_templates.push(ExportedGenericTemplate {
-                                name: cls_name.to_string(),
+                                name: qualified_class_symbol,
                                 parameter_names: param_names,
                                 template_source: template_src,
                             });
@@ -397,46 +469,78 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             offset,
                                         });
                                     }
-                                    ClassMember::Method(m) => {
-                                        let m_name = get_span_text(m.name_span, code).to_string();
-                                        let full_sym = format!("{cls_name}::{m_name}");
+                                    ClassMember::Method(method_declaration) => {
+                                        let method_name =
+                                            get_span_text(method_declaration.name_span, code)
+                                                .to_string();
+
+                                        // Skip private methods — they are implementation details
+                                        // and must not appear in the extern class header.
+                                        if method_declaration.modifiers.contains(&Modifier::Private)
+                                        {
+                                            continue;
+                                        }
+
+                                        // Skip destructor-named methods from extern headers;
+                                        // destructors are not callable from extern code.
+                                        if method_name.starts_with('~') {
+                                            continue;
+                                        }
+
+                                        // Generic or variadic methods cannot be expressed as
+                                        // bodiless extern prototypes — skip them from the class
+                                        // stub and emit the whole class source as a generic
+                                        // template so callers can use them via monomorphization.
+                                        let has_variadic_param = method_declaration
+                                            .parameters
+                                            .iter()
+                                            .any(|param| param.is_variadic);
+                                        if !method_declaration.generic_params.is_empty()
+                                            || has_variadic_param
+                                        {
+                                            continue;
+                                        }
+
+                                        let full_sym = format!("{cls_name}::{method_name}");
                                         let ret_type = resolve_type_annotation(
                                             ast.source_id,
                                             code,
-                                            &m.return_type,
+                                            &method_declaration.return_type,
                                             sym_table,
                                         );
-                                        let params = m
+                                        let params = method_declaration
                                             .parameters
                                             .iter()
-                                            .map(|p| {
-                                                let p_name =
-                                                    get_span_text(p.name_span, code).to_string();
-                                                let p_type = resolve_type_annotation(
+                                            .map(|param| {
+                                                let param_name =
+                                                    get_span_text(param.name_span, code)
+                                                        .to_string();
+                                                let param_type = resolve_type_annotation(
                                                     ast.source_id,
                                                     code,
-                                                    &p.param_type,
+                                                    &param.param_type,
                                                     sym_table,
                                                 );
                                                 ExportedParameter {
-                                                    name: p_name,
-                                                    param_type: p_type,
+                                                    name: param_name,
+                                                    param_type,
                                                 }
                                             })
                                             .collect();
-                                        let mods = m
+                                        let mods = method_declaration
                                             .modifiers
                                             .iter()
                                             .filter_map(|&modifier| to_decl_modifier(modifier))
                                             .collect();
                                         methods.push(ExportedFunction {
                                             symbol: full_sym,
-                                            simple_name: m_name,
+                                            simple_name: method_name,
                                             modifiers: mods,
                                             parameters: params,
                                             return_type: ret_type,
                                             is_constructor: false,
                                             is_destructor: false,
+                                            is_operator: false,
                                         });
                                     }
                                     ClassMember::Constructor(ctor) => {
@@ -473,18 +577,61 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             return_type: Type::Primitive(PrimitiveKind::Void),
                                             is_constructor: true,
                                             is_destructor: false,
+                                            is_operator: false,
                                         });
                                     }
                                     ClassMember::Destructor(_) => {
-                                        let full_sym = format!("{cls_name}::~destructor");
+                                        // Destructors are implementation details and must not be
+                                        // exported into extern class headers — they are not
+                                        // callable from external code and would cause syntax
+                                        // errors if emitted as bodiless extern declarations.
+                                    }
+                                    ClassMember::Operator(operator_declaration) => {
+                                        let operator_text =
+                                            get_span_text(operator_declaration.operator_span, code)
+                                                .to_string();
+                                        let arity = operator_declaration.parameters.len();
+                                        let full_sym =
+                                            format!("{cls_name}::operator{operator_text}/{arity}");
+                                        let ret_type = resolve_type_annotation(
+                                            ast.source_id,
+                                            code,
+                                            &operator_declaration.return_type,
+                                            sym_table,
+                                        );
+                                        let params = operator_declaration
+                                            .parameters
+                                            .iter()
+                                            .map(|param| {
+                                                let param_name =
+                                                    get_span_text(param.name_span, code)
+                                                        .to_string();
+                                                let param_type = resolve_type_annotation(
+                                                    ast.source_id,
+                                                    code,
+                                                    &param.param_type,
+                                                    sym_table,
+                                                );
+                                                ExportedParameter {
+                                                    name: param_name,
+                                                    param_type,
+                                                }
+                                            })
+                                            .collect();
+                                        let mods = operator_declaration
+                                            .modifiers
+                                            .iter()
+                                            .filter_map(|&modifier| to_decl_modifier(modifier))
+                                            .collect();
                                         methods.push(ExportedFunction {
                                             symbol: full_sym,
-                                            simple_name: "destructor".to_string(),
-                                            modifiers: vec![DeclarationModifier::Public],
-                                            parameters: Vec::new(),
-                                            return_type: Type::Primitive(PrimitiveKind::Void),
+                                            simple_name: format!("operator{operator_text}"),
+                                            modifiers: mods,
+                                            parameters: params,
+                                            return_type: ret_type,
                                             is_constructor: false,
-                                            is_destructor: true,
+                                            is_destructor: false,
+                                            is_operator: true,
                                         });
                                     }
                                     _ => {}
@@ -507,7 +654,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                 .collect();
 
                             exported_classes.push(ExportedClass {
-                                symbol: cls_name.to_string(),
+                                symbol: qualified_class_symbol,
                                 name: cls_name.to_string(),
                                 modifiers: mods,
                                 is_interface: false,
@@ -519,33 +666,47 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             });
                         }
                     }
-                    Declaration::Method(m) => {
-                        if m.modifiers.contains(&Modifier::Extern) {
+                    Declaration::Method(method_declaration) => {
+                        if method_declaration.modifiers.contains(&Modifier::Extern) {
                             continue;
                         }
-                        let func_name = get_span_text(m.name_span, code).to_string();
-                        let arity = m.parameters.len();
-                        let full_sym = format!("{func_name}/{arity}");
-                        let ret_type =
-                            resolve_type_annotation(ast.source_id, code, &m.return_type, sym_table);
-                        let params = m
+                        // Skip private top-level functions from the export manifest.
+                        if method_declaration.modifiers.contains(&Modifier::Private) {
+                            continue;
+                        }
+                        let func_name =
+                            get_span_text(method_declaration.name_span, code).to_string();
+                        let arity = method_declaration.parameters.len();
+                        let full_sym = if current_package_prefix.is_empty() {
+                            format!("{func_name}/{arity}")
+                        } else {
+                            format!("{current_package_prefix}::{func_name}/{arity}")
+                        };
+                        let ret_type = resolve_type_annotation(
+                            ast.source_id,
+                            code,
+                            &method_declaration.return_type,
+                            sym_table,
+                        );
+                        let params = method_declaration
                             .parameters
                             .iter()
-                            .map(|p| {
-                                let p_name = get_span_text(p.name_span, code).to_string();
-                                let p_type = resolve_type_annotation(
+                            .map(|param_node| {
+                                let param_name =
+                                    get_span_text(param_node.name_span, code).to_string();
+                                let param_type = resolve_type_annotation(
                                     ast.source_id,
                                     code,
-                                    &p.param_type,
+                                    &param_node.param_type,
                                     sym_table,
                                 );
                                 ExportedParameter {
-                                    name: p_name,
-                                    param_type: p_type,
+                                    name: param_name,
+                                    param_type,
                                 }
                             })
                             .collect();
-                        let mods = m
+                        let mods = method_declaration
                             .modifiers
                             .iter()
                             .filter_map(|&modifier| to_decl_modifier(modifier))
@@ -558,27 +719,172 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             return_type: ret_type,
                             is_constructor: false,
                             is_destructor: false,
+                            is_operator: false,
                         });
                     }
-                    Declaration::Field(f) => {
-                        if f.modifiers.contains(&Modifier::Extern) {
+                    Declaration::Field(field_declaration) => {
+                        if field_declaration.modifiers.contains(&Modifier::Extern) {
                             continue;
                         }
-                        let var_name = get_span_text(f.name_span, code).to_string();
-                        let var_type =
-                            resolve_type_annotation(ast.source_id, code, &f.field_type, sym_table);
+                        let var_name = get_span_text(field_declaration.name_span, code).to_string();
+                        let var_type = resolve_type_annotation(
+                            ast.source_id,
+                            code,
+                            &field_declaration.field_type,
+                            sym_table,
+                        );
                         let slot = static_layout.lookup_slot(&var_name).unwrap_or(0);
-                        let mods = f
+                        let mods = field_declaration
                             .modifiers
                             .iter()
                             .filter_map(|&modifier| to_decl_modifier(modifier))
                             .collect();
+                        let qualified_static_symbol = if current_package_prefix.is_empty() {
+                            var_name.clone()
+                        } else {
+                            format!("{current_package_prefix}::{var_name}")
+                        };
                         exported_statics.push(ExportedStatic {
-                            symbol: var_name.clone(),
+                            symbol: qualified_static_symbol,
                             name: var_name,
                             var_type,
                             modifiers: mods,
                             slot,
+                        });
+                    }
+                    Declaration::Interface(interface_declaration) => {
+                        if interface_declaration.modifiers.contains(&Modifier::Extern) {
+                            continue;
+                        }
+                        let iface_name =
+                            get_span_text(interface_declaration.name_span, code).to_string();
+
+                        // Generic interfaces (e.g. IIterator<T>, IMap<K,V>) cannot be represented
+                        // as non-generic extern class stubs — emit their full source as a generic
+                        // template so downstream consumers can monomorphize them correctly.
+                        if !interface_declaration.generic_params.is_empty() {
+                            let template_source =
+                                get_span_text(interface_declaration.span, code).to_string();
+                            let parameter_names = interface_declaration
+                                .generic_params
+                                .iter()
+                                .map(|generic_param| {
+                                    get_span_text(generic_param.name_span, code).to_string()
+                                })
+                                .collect();
+                            let qualified_template_name = if current_package_prefix.is_empty() {
+                                iface_name.clone()
+                            } else {
+                                format!("{current_package_prefix}::{iface_name}")
+                            };
+                            generic_templates.push(ExportedGenericTemplate {
+                                name: qualified_template_name,
+                                parameter_names,
+                                template_source,
+                            });
+                            continue;
+                        }
+
+                        let mut methods = Vec::new();
+                        for method_declaration in &interface_declaration.methods {
+                            let func_name =
+                                get_span_text(method_declaration.name_span, code).to_string();
+                            let arity = method_declaration.parameters.len();
+                            let full_sym = format!("{iface_name}::{func_name}/{arity}");
+                            let ret_type = resolve_type_annotation(
+                                ast.source_id,
+                                code,
+                                &method_declaration.return_type,
+                                sym_table,
+                            );
+                            let params = method_declaration
+                                .parameters
+                                .iter()
+                                .map(|param| {
+                                    let param_name =
+                                        get_span_text(param.name_span, code).to_string();
+                                    let param_type = resolve_type_annotation(
+                                        ast.source_id,
+                                        code,
+                                        &param.param_type,
+                                        sym_table,
+                                    );
+                                    ExportedParameter {
+                                        name: param_name,
+                                        param_type,
+                                    }
+                                })
+                                .collect();
+                            let mods = method_declaration
+                                .modifiers
+                                .iter()
+                                .filter_map(|&modifier| to_decl_modifier(modifier))
+                                .collect();
+                            methods.push(ExportedFunction {
+                                symbol: full_sym,
+                                simple_name: func_name,
+                                modifiers: mods,
+                                parameters: params,
+                                return_type: ret_type,
+                                is_constructor: false,
+                                is_destructor: false,
+                                is_operator: false,
+                            });
+                        }
+                        let mods = interface_declaration
+                            .modifiers
+                            .iter()
+                            .filter_map(|&modifier| to_decl_modifier(modifier))
+                            .collect();
+                        let qualified_iface_symbol = if current_package_prefix.is_empty() {
+                            iface_name.clone()
+                        } else {
+                            format!("{current_package_prefix}::{iface_name}")
+                        };
+                        exported_classes.push(ExportedClass {
+                            symbol: qualified_iface_symbol,
+                            name: iface_name,
+                            modifiers: mods,
+                            is_interface: true,
+                            base_class: None,
+                            interfaces: Vec::new(),
+                            generic_parameters: Vec::new(),
+                            fields: Vec::new(),
+                            methods,
+                        });
+                    }
+                    Declaration::Enum(enum_declaration) => {
+                        if enum_declaration.modifiers.contains(&Modifier::Extern) {
+                            continue;
+                        }
+                        let enum_name = get_span_text(enum_declaration.name_span, code).to_string();
+                        let mut variants = Vec::new();
+                        for variant in &enum_declaration.variants {
+                            let variant_name = get_span_text(variant.name_span, code).to_string();
+                            let explicit_disc =
+                                variant.explicit_value.as_ref().and_then(|expr| match expr {
+                                    Expression::Literal {
+                                        value: LiteralValue::Int(val),
+                                        ..
+                                    } => Some(*val),
+                                    _ => None,
+                                });
+                            variants.push((variant_name, explicit_disc));
+                        }
+                        let mods = enum_declaration
+                            .modifiers
+                            .iter()
+                            .filter_map(|&modifier| to_decl_modifier(modifier))
+                            .collect();
+                        let qualified_enum_name = if current_package_prefix.is_empty() {
+                            enum_name.clone()
+                        } else {
+                            format!("{current_package_prefix}::{enum_name}")
+                        };
+                        exported_enums.push(ExportedEnum {
+                            name: qualified_enum_name,
+                            modifiers: mods,
+                            variants,
                         });
                     }
                     _ => {}
@@ -591,28 +897,110 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     let mut program = BinaryProgram::new();
     program.functions = all_functions;
     program.classes = compiled_classes;
+    program.source_files = context.source_names.clone();
     program.static_space_size = static_layout.static_space_size;
     program.static_symbols_map = static_layout.static_symbols_map;
     program.constant_pool = constant_pool;
-    for (function_index, function) in program.functions.iter().enumerate() {
-        if function.symbol == "main" || function.symbol.ends_with("::main") {
-            program.entry_point_id = Some(function_index as u32);
-            program.entry_point_symbol = Some(function.symbol.clone());
-            break;
+    program.entry_point = context.options.entry_point.clone();
+    if let Some(target_entry) = &context.options.entry_point {
+        for (function_index, function) in program.functions.iter().enumerate() {
+            if function.symbol == *target_entry
+                || function.symbol.ends_with(&format!("::{target_entry}"))
+                || target_entry.ends_with(&format!("::{}", function.symbol))
+            {
+                program.entry_point_id = Some(function_index as u32);
+                program.entry_point_symbol = Some(function.symbol.clone());
+                break;
+            }
         }
     }
+    if program.entry_point_id.is_none() {
+        for (function_index, function) in program.functions.iter().enumerate() {
+            if function.symbol == "main" || function.symbol.ends_with("::main") {
+                program.entry_point_id = Some(function_index as u32);
+                program.entry_point_symbol = Some(function.symbol.clone());
+                break;
+            }
+        }
+    }
+
+    let is_static_mode = context.options.link_mode == crate::CompilationContext::LinkMode::Static;
+    super::reachability::apply_reachability_and_static_linking(
+        &mut program,
+        &context.options.dependency_binaries,
+        is_static_mode,
+    );
+
     program.package_name = context.options.package_name.clone();
     program.package_version = context.options.package_version.clone();
     program.package_description = context.options.package_description.clone();
+
+    let dependencies: Vec<solix_common::solver::DependencyRequirement> = if is_static_mode {
+        Vec::new()
+    } else {
+        let mut dynamic_dependencies: Vec<solix_common::solver::DependencyRequirement> =
+            context.dependencies_map.values().cloned().collect();
+        dynamic_dependencies
+            .sort_by(|requirement_a, requirement_b| requirement_a.name.cmp(&requirement_b.name));
+        dynamic_dependencies
+    };
+
+    let (api_header, exported_ast_bytes) =
+        crate::phases::export_api::generate_api_header_and_ast(context);
+
+    program.build_profile = context.options.profile.to_string();
+    program.exported_ast_bytes = exported_ast_bytes.clone();
+
     program.export_manifest = ExportManifest {
+        entry_point: program.entry_point.clone(),
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
+        build_profile: program.build_profile.clone(),
+        native_library_checksums: program.native_library_checksums.clone(),
+        dependencies,
         exported_classes,
+        exported_enums,
         exported_functions,
         exported_statics,
         generic_templates,
+        api_header,
+        source_files: context.source_names.clone(),
+        exported_ast_bytes,
     };
+
+    // Pre-calculate exact 1-based line and column coordinates for all source map entries
+    for compiled_function in &mut program.functions {
+        let source_index = compiled_function.source_id as usize;
+        if let Some(source_content) = context.sources.get(source_index) {
+            let mut line_starting_offsets = Vec::new();
+            line_starting_offsets.push(0);
+            for (byte_offset, character_byte) in source_content.bytes().enumerate() {
+                if character_byte == b'\n' {
+                    line_starting_offsets.push(byte_offset + 1);
+                }
+            }
+
+            for source_entry in &mut compiled_function.source_map {
+                let token_start_offset = source_entry.span.start as usize;
+                let found_line_index =
+                    match line_starting_offsets.binary_search(&token_start_offset) {
+                        Ok(exact_line) => exact_line,
+                        Err(insertion_point) => insertion_point.saturating_sub(1),
+                    };
+                source_entry.line = (found_line_index + 1) as u32;
+                source_entry.column = (token_start_offset
+                    .saturating_sub(line_starting_offsets[found_line_index])
+                    + 1) as u32;
+            }
+        }
+
+        for local_debug_entry in &mut compiled_function.local_variables {
+            if local_debug_entry.end_pc == u32::MAX {
+                local_debug_entry.end_pc = compiled_function.instructions.len() as u32;
+            }
+        }
+    }
 
     Ok(EmissionArtifacts {
         functions_by_source,
@@ -685,136 +1073,572 @@ fn collect_classes(declarations: &[Declaration]) -> Vec<&ClassDeclaration> {
     classes
 }
 
+fn collect_generic_calls_in_expression(
+    expression: &Expression,
+    sources: &[String],
+    invocations: &mut HashMap<(String, String), Vec<String>>,
+) {
+    match expression {
+        Expression::MethodCall {
+            callee,
+            generic_arguments,
+            arguments,
+            ..
+        } => {
+            if !generic_arguments.is_empty() {
+                let argument_strings: Vec<String> = generic_arguments
+                    .iter()
+                    .map(|argument| {
+                        get_span_text(argument.span(), &sources[argument.span().id as usize])
+                            .to_string()
+                    })
+                    .collect();
+                let joined_arguments = argument_strings.join(", ");
+                match callee.as_ref() {
+                    Expression::MemberAccess {
+                        object,
+                        member_span,
+                        ..
+                    } => {
+                        let object_name =
+                            get_span_text(object.span(), &sources[object.span().id as usize]);
+                        let method_name =
+                            get_span_text(*member_span, &sources[member_span.id as usize]);
+                        let entry = invocations
+                            .entry((object_name.to_string(), method_name.to_string()))
+                            .or_default();
+                        if !entry.contains(&joined_arguments) {
+                            entry.push(joined_arguments);
+                        }
+                    }
+                    Expression::Identifier { span } => {
+                        let method_name = get_span_text(*span, &sources[span.id as usize]);
+                        let entry = invocations
+                            .entry((String::new(), method_name.to_string()))
+                            .or_default();
+                        if !entry.contains(&joined_arguments) {
+                            entry.push(joined_arguments);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            collect_generic_calls_in_expression(callee, sources, invocations);
+            for argument in arguments {
+                collect_generic_calls_in_expression(argument, sources, invocations);
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            collect_generic_calls_in_expression(left, sources, invocations);
+            collect_generic_calls_in_expression(right, sources, invocations);
+        }
+        Expression::Unary { operand, .. } => {
+            collect_generic_calls_in_expression(operand, sources, invocations);
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_generic_calls_in_expression(target, sources, invocations);
+            collect_generic_calls_in_expression(value, sources, invocations);
+        }
+        Expression::MemberAccess { object, .. } => {
+            collect_generic_calls_in_expression(object, sources, invocations);
+        }
+        Expression::ArrayAccess { array, index, .. } => {
+            collect_generic_calls_in_expression(array, sources, invocations);
+            collect_generic_calls_in_expression(index, sources, invocations);
+        }
+        Expression::ArrayCreation { size, .. } => {
+            collect_generic_calls_in_expression(size, sources, invocations);
+        }
+        Expression::ArrayLiteral { elements, .. } | Expression::TupleCreation { elements, .. } => {
+            for element in elements {
+                collect_generic_calls_in_expression(element, sources, invocations);
+            }
+        }
+        Expression::NewInstance { arguments, .. } => {
+            for argument in arguments {
+                collect_generic_calls_in_expression(argument, sources, invocations);
+            }
+        }
+        Expression::Cast {
+            expression: inner, ..
+        }
+        | Expression::Instanceof {
+            expression: inner, ..
+        } => {
+            collect_generic_calls_in_expression(inner, sources, invocations);
+        }
+        Expression::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_generic_calls_in_expression(condition, sources, invocations);
+            collect_generic_calls_in_expression(then_branch, sources, invocations);
+            collect_generic_calls_in_expression(else_branch, sources, invocations);
+        }
+        Expression::Block {
+            statements, result, ..
+        } => {
+            for statement in statements {
+                collect_generic_calls_in_statement(statement, sources, invocations);
+            }
+            if let Some(result_expression) = result {
+                collect_generic_calls_in_expression(result_expression, sources, invocations);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_generic_calls_in_statement(
+    statement: &Statement,
+    sources: &[String],
+    invocations: &mut HashMap<(String, String), Vec<String>>,
+) {
+    match statement {
+        Statement::Block(block_statement) => {
+            for nested in &block_statement.statements {
+                collect_generic_calls_in_statement(nested, sources, invocations);
+            }
+        }
+        Statement::If(if_statement) => {
+            collect_generic_calls_in_expression(&if_statement.condition, sources, invocations);
+            collect_generic_calls_in_statement(&if_statement.then_branch, sources, invocations);
+            if let Some(ref else_branch) = if_statement.else_branch {
+                collect_generic_calls_in_statement(else_branch, sources, invocations);
+            }
+        }
+        Statement::While(while_statement) => {
+            collect_generic_calls_in_expression(&while_statement.condition, sources, invocations);
+            collect_generic_calls_in_statement(&while_statement.body, sources, invocations);
+        }
+        Statement::DoWhile(do_while_statement) => {
+            collect_generic_calls_in_statement(&do_while_statement.body, sources, invocations);
+            collect_generic_calls_in_expression(
+                &do_while_statement.condition,
+                sources,
+                invocations,
+            );
+        }
+        Statement::For(for_statement) => {
+            if let Some(ref initializer) = for_statement.initializer {
+                collect_generic_calls_in_statement(initializer, sources, invocations);
+            }
+            if let Some(ref condition) = for_statement.condition {
+                collect_generic_calls_in_expression(condition, sources, invocations);
+            }
+            if let Some(ref update) = for_statement.update {
+                collect_generic_calls_in_expression(update, sources, invocations);
+            }
+            collect_generic_calls_in_statement(&for_statement.body, sources, invocations);
+        }
+        Statement::Switch(switch_statement) => {
+            collect_generic_calls_in_expression(
+                &switch_statement.discriminant,
+                sources,
+                invocations,
+            );
+            for switch_case in &switch_statement.cases {
+                collect_generic_calls_in_expression(&switch_case.case_value, sources, invocations);
+                for case_statement in &switch_case.statements {
+                    collect_generic_calls_in_statement(case_statement, sources, invocations);
+                }
+            }
+        }
+        Statement::Try(try_statement) => {
+            for try_stmt in &try_statement.try_block.statements {
+                collect_generic_calls_in_statement(try_stmt, sources, invocations);
+            }
+            for catch_clause in &try_statement.catch_clauses {
+                for catch_stmt in &catch_clause.block.statements {
+                    collect_generic_calls_in_statement(catch_stmt, sources, invocations);
+                }
+            }
+            if let Some(ref finally_block) = try_statement.finally_block {
+                for finally_stmt in &finally_block.statements {
+                    collect_generic_calls_in_statement(finally_stmt, sources, invocations);
+                }
+            }
+        }
+        Statement::Throw(throw_statement) => {
+            collect_generic_calls_in_expression(&throw_statement.expression, sources, invocations);
+        }
+        Statement::Return(return_statement) => {
+            if let Some(ref value) = return_statement.value {
+                collect_generic_calls_in_expression(value, sources, invocations);
+            }
+        }
+        Statement::VariableDeclaration(variable_statement) => {
+            if let Some(ref initializer) = variable_statement.initializer {
+                collect_generic_calls_in_expression(initializer, sources, invocations);
+            }
+        }
+        Statement::Expression(expression_statement) => {
+            collect_generic_calls_in_expression(
+                &expression_statement.expression,
+                sources,
+                invocations,
+            );
+        }
+        Statement::Assert(assert_statement) => {
+            collect_generic_calls_in_expression(&assert_statement.condition, sources, invocations);
+            if let Some(ref message) = assert_statement.message {
+                collect_generic_calls_in_expression(message, sources, invocations);
+            }
+        }
+        Statement::Exit(exit_statement) => {
+            collect_generic_calls_in_expression(&exit_statement.code, sources, invocations);
+        }
+        Statement::Declaration(declaration) => match declaration {
+            Declaration::Method(method_declaration) => {
+                if let Some(ref body) = method_declaration.body {
+                    for stmt in &body.statements {
+                        collect_generic_calls_in_statement(stmt, sources, invocations);
+                    }
+                }
+            }
+            Declaration::Class(class_declaration) => {
+                for member in &class_declaration.members {
+                    match member {
+                        ClassMember::Method(method_declaration) => {
+                            if let Some(ref body) = method_declaration.body {
+                                for stmt in &body.statements {
+                                    collect_generic_calls_in_statement(stmt, sources, invocations);
+                                }
+                            }
+                        }
+                        ClassMember::Constructor(constructor_declaration) => {
+                            for stmt in &constructor_declaration.body.statements {
+                                collect_generic_calls_in_statement(stmt, sources, invocations);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn collect_generic_calls_in_ast(
+    ast: &ProgramAst,
+    sources: &[String],
+    invocations: &mut HashMap<(String, String), Vec<String>>,
+) {
+    for declaration in &ast.declarations {
+        match declaration {
+            Declaration::Method(method_declaration) => {
+                if let Some(ref body) = method_declaration.body {
+                    for statement in &body.statements {
+                        collect_generic_calls_in_statement(statement, sources, invocations);
+                    }
+                }
+            }
+            Declaration::Class(class_declaration) => {
+                for member in &class_declaration.members {
+                    match member {
+                        ClassMember::Method(method_declaration) => {
+                            if let Some(ref body) = method_declaration.body {
+                                for statement in &body.statements {
+                                    collect_generic_calls_in_statement(
+                                        statement,
+                                        sources,
+                                        invocations,
+                                    );
+                                }
+                            }
+                        }
+                        ClassMember::Constructor(constructor_declaration) => {
+                            for statement in &constructor_declaration.body.statements {
+                                collect_generic_calls_in_statement(statement, sources, invocations);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn index_function_symbols(
     ast: &ProgramAst,
     sources: &[String],
     function_ids: &mut HashMap<String, u32>,
     next_func_id: &mut u32,
+    generic_invocations: &HashMap<(String, String), Vec<String>>,
 ) {
-    let src_idx = ast.source_id as usize;
-    if src_idx >= sources.len() {
+    let source_index = ast.source_id as usize;
+    if source_index >= sources.len() {
         return;
     }
-    let code = &sources[src_idx];
+    let source_code = &sources[source_index];
 
-    let pkg_prefix = ast.package.as_ref().map(|pkg| {
-        pkg.path
-            .iter()
-            .map(|s| get_span_text(*s, code))
-            .collect::<Vec<_>>()
-            .join(".")
-    });
+    let raw_file_package = ast
+        .package
+        .as_ref()
+        .map(|pkg| {
+            pkg.path
+                .iter()
+                .map(|span| get_span_text(*span, source_code))
+                .collect::<Vec<_>>()
+                .join("::")
+        })
+        .unwrap_or_default();
 
-    for decl in &ast.declarations {
-        if let Declaration::Method(m) = decl {
-            if m.modifiers.contains(&Modifier::Extern) {
+    for declaration in &ast.declarations {
+        if let Declaration::Method(method_declaration) = declaration {
+            if method_declaration.modifiers.contains(&Modifier::Extern) {
                 continue;
             }
-            let name = get_span_text(m.name_span, code);
+            let method_name = get_span_text(method_declaration.name_span, source_code);
+            let decl_namespace =
+                extract_namespace_path(&method_declaration.namespace_path, source_code);
+            let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
+
             let func_id = *next_func_id;
             *next_func_id += 1;
-            function_ids.insert(name.to_string(), func_id);
-            if let Some(ref pkg) = pkg_prefix {
-                let full_pkg_name = format!("{pkg}.{name}");
-                function_ids.insert(full_pkg_name, func_id);
+            function_ids.insert(method_name.to_string(), func_id);
+            if !effective_package.is_empty() {
+                let full_colon_name = format!("{effective_package}::{method_name}");
+                let full_dot_name =
+                    format!("{}.{method_name}", effective_package.replace("::", "."));
+                function_ids.insert(full_colon_name, func_id);
+                function_ids.insert(full_dot_name, func_id);
+            }
+            if !method_declaration.generic_params.is_empty()
+                && let Some(specialization_args) =
+                    generic_invocations.get(&(String::new(), method_name.to_string()))
+            {
+                for args_str in specialization_args {
+                    let specialized_sym = format!("{method_name}<{args_str}>");
+                    let spec_id = *next_func_id;
+                    *next_func_id += 1;
+                    function_ids.insert(specialized_sym.clone(), spec_id);
+                    if !effective_package.is_empty() {
+                        let full_spec = format!("{effective_package}::{method_name}<{args_str}>");
+                        function_ids.insert(full_spec, spec_id);
+                    }
+                }
             }
         }
     }
 
-    for cls in collect_classes(&ast.declarations) {
-        if cls.modifiers.contains(&Modifier::Extern) {
+    for class_declaration in collect_classes(&ast.declarations) {
+        if class_declaration.modifiers.contains(&Modifier::Extern) {
             continue;
         }
-        let cls_name = get_span_text(cls.name_span, code);
-        for member in &cls.members {
+        let class_name = get_span_text(class_declaration.name_span, source_code);
+        let decl_namespace = extract_namespace_path(&class_declaration.namespace_path, source_code);
+        let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
+        let qualified_class_name = if effective_package.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{effective_package}::{class_name}")
+        };
+        let dot_class_name = if effective_package.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{}.{class_name}", effective_package.replace("::", "."))
+        };
+
+        for member in &class_declaration.members {
             match member {
-                ClassMember::Method(m) => {
-                    if m.modifiers.contains(&Modifier::Extern) {
+                ClassMember::Method(method_declaration) => {
+                    if method_declaration.modifiers.contains(&Modifier::Extern) {
                         continue;
                     }
-                    let method_name = get_span_text(m.name_span, code);
-                    let param_sig = m
+                    let method_name = get_span_text(method_declaration.name_span, source_code);
+                    let param_sig = method_declaration
                         .parameters
                         .iter()
-                        .map(|p| get_span_text(p.param_type.span(), code))
+                        .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
                         .collect::<Vec<_>>()
                         .join(",");
                     let full_sym_mangled = if param_sig.is_empty() {
-                        format!("{cls_name}::{method_name}")
+                        format!("{class_name}::{method_name}")
                     } else {
-                        format!("{cls_name}::{method_name}({param_sig})")
+                        format!("{class_name}::{method_name}({param_sig})")
                     };
-                    let full_sym = format!("{cls_name}::{method_name}");
+                    let full_sym = format!("{class_name}::{method_name}");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym_mangled.clone(), func_id);
                     function_ids.entry(full_sym.clone()).or_insert(func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name_mangled = format!("{pkg}.{full_sym_mangled}");
-                        let full_pkg_name = format!("{pkg}.{full_sym}");
-                        function_ids.insert(full_pkg_name_mangled, func_id);
-                        function_ids.entry(full_pkg_name).or_insert(func_id);
+
+                    if !effective_package.is_empty() {
+                        let qualified_sym_mangled = if param_sig.is_empty() {
+                            format!("{qualified_class_name}::{method_name}")
+                        } else {
+                            format!("{qualified_class_name}::{method_name}({param_sig})")
+                        };
+                        let qualified_sym = format!("{qualified_class_name}::{method_name}");
+                        function_ids.insert(qualified_sym_mangled, func_id);
+                        function_ids.entry(qualified_sym).or_insert(func_id);
+
+                        let dot_sym_mangled = if param_sig.is_empty() {
+                            format!("{dot_class_name}::{method_name}")
+                        } else {
+                            format!("{dot_class_name}::{method_name}({param_sig})")
+                        };
+                        let dot_sym = format!("{dot_class_name}::{method_name}");
+                        function_ids.insert(dot_sym_mangled, func_id);
+                        function_ids.entry(dot_sym).or_insert(func_id);
+                    }
+
+                    if !method_declaration.generic_params.is_empty()
+                        && let Some(specialization_args) = generic_invocations
+                            .get(&(class_name.to_string(), method_name.to_string()))
+                    {
+                        for args_str in specialization_args {
+                            let specialized_sym =
+                                format!("{class_name}::{method_name}<{args_str}>");
+                            let spec_id = *next_func_id;
+                            *next_func_id += 1;
+                            function_ids.insert(specialized_sym.clone(), spec_id);
+                            function_ids.insert(format!("{method_name}<{args_str}>"), spec_id);
+                            if !effective_package.is_empty() {
+                                function_ids.insert(
+                                    format!("{qualified_class_name}::{method_name}<{args_str}>"),
+                                    spec_id,
+                                );
+                            }
+                        }
                     }
                 }
-                ClassMember::Constructor(ctor) => {
-                    if ctor.modifiers.contains(&Modifier::Extern) {
+                ClassMember::Constructor(constructor_declaration) => {
+                    if constructor_declaration
+                        .modifiers
+                        .contains(&Modifier::Extern)
+                    {
                         continue;
                     }
-                    let arity = ctor.parameters.len();
-                    let full_sym_arity = format!("{cls_name}::constructor/{arity}");
-                    let full_sym = format!("{cls_name}::constructor");
+                    let arity = constructor_declaration.parameters.len();
+                    let param_sig = constructor_declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym_mangled = if param_sig.is_empty() {
+                        format!("{class_name}::constructor")
+                    } else {
+                        format!("{class_name}::constructor({param_sig})")
+                    };
+                    let full_sym_arity = format!("{class_name}::constructor/{arity}");
+                    let full_sym = format!("{class_name}::constructor");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
-                    function_ids.insert(full_sym_arity, func_id);
-                    function_ids.entry(full_sym).or_insert(func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/{arity}");
-                        let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
-                        function_ids.insert(full_pkg_name_arity, func_id);
-                        function_ids.entry(full_pkg_name).or_insert(func_id);
+                    function_ids.insert(full_sym_mangled.clone(), func_id);
+                    function_ids
+                        .entry(full_sym_arity.clone())
+                        .or_insert(func_id);
+                    function_ids.entry(full_sym.clone()).or_insert(func_id);
+
+                    if !effective_package.is_empty() {
+                        let qualified_sym_mangled = if param_sig.is_empty() {
+                            format!("{qualified_class_name}::constructor")
+                        } else {
+                            format!("{qualified_class_name}::constructor({param_sig})")
+                        };
+                        let qualified_sym_arity =
+                            format!("{qualified_class_name}::constructor/{arity}");
+                        let qualified_sym = format!("{qualified_class_name}::constructor");
+                        function_ids.insert(qualified_sym_mangled, func_id);
+                        function_ids.entry(qualified_sym_arity).or_insert(func_id);
+                        function_ids.entry(qualified_sym).or_insert(func_id);
+
+                        let dot_sym_mangled = if param_sig.is_empty() {
+                            format!("{dot_class_name}::constructor")
+                        } else {
+                            format!("{dot_class_name}::constructor({param_sig})")
+                        };
+                        let dot_sym_arity = format!("{dot_class_name}::constructor/{arity}");
+                        let dot_sym = format!("{dot_class_name}::constructor");
+                        function_ids.insert(dot_sym_mangled, func_id);
+                        function_ids.entry(dot_sym_arity).or_insert(func_id);
+                        function_ids.entry(dot_sym).or_insert(func_id);
                     }
                 }
                 ClassMember::Destructor(_) => {
-                    let full_sym = format!("{cls_name}::~destructor");
+                    let full_sym = format!("{class_name}::~destructor");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym, func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name = format!("{pkg}.{cls_name}::~destructor");
-                        function_ids.insert(full_pkg_name, func_id);
+                    if !effective_package.is_empty() {
+                        let qualified_sym = format!("{qualified_class_name}::~destructor");
+                        let dot_sym = format!("{dot_class_name}::~destructor");
+                        function_ids.insert(qualified_sym, func_id);
+                        function_ids.insert(dot_sym, func_id);
                     }
                 }
-                ClassMember::Operator(op) => {
-                    let op_str = op.operator_token.as_static_str();
-                    let full_sym = format!("{cls_name}::operator_{op_str}");
+                ClassMember::Operator(operator_declaration) => {
+                    let op_str = operator_declaration.operator_token.as_static_str();
+                    let param_sig = operator_declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym = if param_sig.is_empty() {
+                        format!("{class_name}::operator_{op_str}")
+                    } else {
+                        format!("{class_name}::operator_{op_str}({param_sig})")
+                    };
+                    let unsuffixed_sym = format!("{class_name}::operator_{op_str}");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
                     function_ids.insert(full_sym, func_id);
-                    if let Some(ref pkg) = pkg_prefix {
-                        let full_pkg_name = format!("{pkg}.{cls_name}::operator_{op_str}");
-                        function_ids.insert(full_pkg_name, func_id);
+                    function_ids.entry(unsuffixed_sym).or_insert(func_id);
+                    if !effective_package.is_empty() {
+                        let qualified_sym = format!("{qualified_class_name}::operator_{op_str}");
+                        let qualified_sym_mangled = if param_sig.is_empty() {
+                            qualified_sym.clone()
+                        } else {
+                            format!("{qualified_sym}({param_sig})")
+                        };
+                        function_ids.insert(qualified_sym_mangled, func_id);
+                        function_ids.entry(qualified_sym).or_insert(func_id);
+
+                        let dot_sym = format!("{dot_class_name}::operator_{op_str}");
+                        let dot_sym_mangled = if param_sig.is_empty() {
+                            dot_sym.clone()
+                        } else {
+                            format!("{dot_sym}({param_sig})")
+                        };
+                        function_ids.insert(dot_sym_mangled, func_id);
+                        function_ids.entry(dot_sym).or_insert(func_id);
                     }
                 }
                 _ => {}
             }
         }
 
-        let has_explicit_ctor = cls
+        let has_explicit_ctor = class_declaration
             .members
             .iter()
-            .any(|m| matches!(m, ClassMember::Constructor(_)));
+            .any(|member| matches!(member, ClassMember::Constructor(_)));
         if !has_explicit_ctor {
-            let full_sym_arity = format!("{cls_name}::constructor/0");
-            let full_sym = format!("{cls_name}::constructor");
+            let full_sym_arity = format!("{class_name}::constructor/0");
+            let full_sym = format!("{class_name}::constructor");
             let func_id = *next_func_id;
             *next_func_id += 1;
             function_ids.insert(full_sym_arity, func_id);
             function_ids.entry(full_sym).or_insert(func_id);
-            if let Some(ref pkg) = pkg_prefix {
-                let full_pkg_name_arity = format!("{pkg}.{cls_name}::constructor/0");
-                let full_pkg_name = format!("{pkg}.{cls_name}::constructor");
-                function_ids.insert(full_pkg_name_arity, func_id);
-                function_ids.entry(full_pkg_name).or_insert(func_id);
+            if !effective_package.is_empty() {
+                let qualified_sym_arity = format!("{qualified_class_name}::constructor/0");
+                let qualified_sym = format!("{qualified_class_name}::constructor");
+                function_ids.insert(qualified_sym_arity, func_id);
+                function_ids.entry(qualified_sym).or_insert(func_id);
+
+                let dot_sym_arity = format!("{dot_class_name}::constructor/0");
+                let dot_sym = format!("{dot_class_name}::constructor");
+                function_ids.insert(dot_sym_arity, func_id);
+                function_ids.entry(dot_sym).or_insert(func_id);
             }
         }
     }
@@ -839,6 +1663,7 @@ fn compile_source_functions(
     pool: &mut ConstantPoolBuilder,
     output: &mut Vec<CompiledFunction>,
     synthesized_lambdas: &mut Vec<CompiledFunction>,
+    generic_invocations: &HashMap<(String, String), Vec<String>>,
 ) -> Result<(), EmissionError> {
     let src_idx = ast.source_id as usize;
     if src_idx >= sources.len() {
@@ -846,14 +1671,33 @@ fn compile_source_functions(
     }
     let code = &sources[src_idx];
 
+    let raw_file_package = ast
+        .package
+        .as_ref()
+        .map(|pkg| {
+            pkg.path
+                .iter()
+                .map(|span| get_span_text(*span, code))
+                .collect::<Vec<_>>()
+                .join("::")
+        })
+        .unwrap_or_default();
+
     for decl in &ast.declarations {
         if let Declaration::Method(m) = decl {
             if m.modifiers.contains(&Modifier::Extern) {
                 continue;
             }
             let name = get_span_text(m.name_span, code).to_string();
+            let decl_namespace = extract_namespace_path(&m.namespace_path, code);
+            let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
+            let symbol_name = if effective_package.is_empty() {
+                name.clone()
+            } else {
+                format!("{effective_package}::{name}")
+            };
             let func = compile_single_method(
-                &name,
+                &symbol_name,
                 ast.source_id,
                 m,
                 false,
@@ -867,6 +1711,34 @@ fn compile_source_functions(
                 synthesized_lambdas,
             )?;
             output.push(func);
+
+            if !m.generic_params.is_empty()
+                && let Some(specialization_args) =
+                    generic_invocations.get(&(String::new(), name.clone()))
+            {
+                for args_str in specialization_args {
+                    let specialized_sym = if effective_package.is_empty() {
+                        format!("{name}<{args_str}>")
+                    } else {
+                        format!("{effective_package}::{name}<{args_str}>")
+                    };
+                    let func = compile_single_method(
+                        &specialized_sym,
+                        ast.source_id,
+                        m,
+                        false,
+                        sources,
+                        class_layouts,
+                        function_ids,
+                        enum_variants,
+                        static_layout,
+                        node_types,
+                        pool,
+                        synthesized_lambdas,
+                    )?;
+                    output.push(func);
+                }
+            }
         }
     }
 
@@ -909,13 +1781,46 @@ fn compile_source_functions(
                         synthesized_lambdas,
                     )?;
                     output.push(func);
+
+                    if !m.generic_params.is_empty()
+                        && let Some(specialization_args) = generic_invocations
+                            .get(&(cls_name.to_string(), method_name.to_string()))
+                    {
+                        for args_str in specialization_args {
+                            let specialized_sym = format!("{cls_name}::{method_name}<{args_str}>");
+                            let func = compile_single_method(
+                                &specialized_sym,
+                                ast.source_id,
+                                m,
+                                is_instance,
+                                sources,
+                                class_layouts,
+                                function_ids,
+                                enum_variants,
+                                static_layout,
+                                node_types,
+                                pool,
+                                synthesized_lambdas,
+                            )?;
+                            output.push(func);
+                        }
+                    }
                 }
                 ClassMember::Constructor(ctor) => {
                     if ctor.modifiers.contains(&Modifier::Extern) {
                         continue;
                     }
-                    let arity = ctor.parameters.len();
-                    let full_sym = format!("{cls_name}::constructor/{arity}");
+                    let param_sig = ctor
+                        .parameters
+                        .iter()
+                        .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let full_sym = if param_sig.is_empty() {
+                        format!("{cls_name}::constructor")
+                    } else {
+                        format!("{cls_name}::constructor({param_sig})")
+                    };
                     let func = compile_constructor(
                         &full_sym,
                         ast.source_id,
@@ -996,6 +1901,9 @@ fn compile_source_functions(
     if !ast.root_statements.is_empty() {
         let entry_sym = format!("<entry_{}>", ast.source_id);
         let mut func = CompiledFunction::new(entry_sym, ast.source_id, 0, 0);
+        func.is_public = false;
+        func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+        func.parameter_types = Vec::new();
         let mut allocator = RegisterAllocator::new(0);
         allocator.enter_scope();
 
@@ -1033,6 +1941,120 @@ fn compile_source_functions(
     Ok(())
 }
 
+fn resolve_annotation_type(
+    annotation: &TypeAnnotation,
+    node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
+    sources: &[String],
+) -> solix_common::types::Type {
+    if let Some(resolved_type) = node_types.get(&annotation.span()) {
+        return resolved_type.clone();
+    }
+    match annotation {
+        TypeAnnotation::Primitive { kind, .. } => {
+            let primitive_kind = match kind {
+                TokenKind::PrimitiveVoid => PrimitiveKind::Void,
+                TokenKind::PrimitiveBool => PrimitiveKind::Bool,
+                TokenKind::PrimitiveChar => PrimitiveKind::Char,
+                TokenKind::PrimitiveInt8 => PrimitiveKind::Int8,
+                TokenKind::PrimitiveInt16 => PrimitiveKind::Int16,
+                TokenKind::PrimitiveInt32 => PrimitiveKind::Int32,
+                TokenKind::PrimitiveInt64 => PrimitiveKind::Int64,
+                TokenKind::PrimitiveUint8 => PrimitiveKind::UInt8,
+                TokenKind::PrimitiveUint16 => PrimitiveKind::UInt16,
+                TokenKind::PrimitiveUint32 => PrimitiveKind::UInt32,
+                TokenKind::PrimitiveUint64 => PrimitiveKind::UInt64,
+                TokenKind::PrimitiveFloat32 => PrimitiveKind::Float32,
+                TokenKind::PrimitiveFloat64 => PrimitiveKind::Float64,
+                _ => PrimitiveKind::Void,
+            };
+            solix_common::types::Type::Primitive(primitive_kind)
+        }
+        TypeAnnotation::Named { path, span } => {
+            let source_index = span.id as usize;
+            let code_content = if source_index < sources.len() {
+                &sources[source_index]
+            } else {
+                ""
+            };
+            let segments: Vec<&str> = path
+                .iter()
+                .map(|path_span| get_span_text(*path_span, code_content))
+                .collect();
+            let symbol_name = segments.join("::");
+            match symbol_name.as_str() {
+                "string" | "std.string" | "std::string" => solix_common::types::Type::Class {
+                    symbol_name: "std.string".to_string(),
+                    type_arguments: Vec::new(),
+                },
+                "void" => solix_common::types::Type::Primitive(PrimitiveKind::Void),
+                "bool" => solix_common::types::Type::Primitive(PrimitiveKind::Bool),
+                "char" => solix_common::types::Type::Primitive(PrimitiveKind::Char),
+                "int8" => solix_common::types::Type::Primitive(PrimitiveKind::Int8),
+                "int16" => solix_common::types::Type::Primitive(PrimitiveKind::Int16),
+                "int32" => solix_common::types::Type::Primitive(PrimitiveKind::Int32),
+                "int64" => solix_common::types::Type::Primitive(PrimitiveKind::Int64),
+                "uint8" => solix_common::types::Type::Primitive(PrimitiveKind::UInt8),
+                "uint16" => solix_common::types::Type::Primitive(PrimitiveKind::UInt16),
+                "uint32" => solix_common::types::Type::Primitive(PrimitiveKind::UInt32),
+                "uint64" => solix_common::types::Type::Primitive(PrimitiveKind::UInt64),
+                "float32" => solix_common::types::Type::Primitive(PrimitiveKind::Float32),
+                "float64" => solix_common::types::Type::Primitive(PrimitiveKind::Float64),
+                _ => solix_common::types::Type::Class {
+                    symbol_name,
+                    type_arguments: Vec::new(),
+                },
+            }
+        }
+        TypeAnnotation::Array { element_type, .. } => {
+            let inner_type = resolve_annotation_type(element_type, node_types, sources);
+            solix_common::types::Type::Array {
+                element_type: Box::new(inner_type),
+                depth: 1,
+            }
+        }
+        TypeAnnotation::Generic {
+            base, arguments, ..
+        } => {
+            let base_type = resolve_annotation_type(base, node_types, sources);
+            let argument_types = arguments
+                .iter()
+                .map(|argument_node| resolve_annotation_type(argument_node, node_types, sources))
+                .collect();
+            match base_type {
+                solix_common::types::Type::Class { symbol_name, .. } => {
+                    solix_common::types::Type::Class {
+                        symbol_name,
+                        type_arguments: argument_types,
+                    }
+                }
+                other_type => other_type,
+            }
+        }
+        TypeAnnotation::Tuple { elements, .. } => {
+            let element_types = elements
+                .iter()
+                .map(|element_node| resolve_annotation_type(element_node, node_types, sources))
+                .collect();
+            solix_common::types::Type::Tuple(element_types)
+        }
+        TypeAnnotation::FunctionPointer {
+            return_type,
+            parameters,
+            ..
+        } => {
+            let ret_type = resolve_annotation_type(return_type, node_types, sources);
+            let parameter_types = parameters
+                .iter()
+                .map(|parameter_node| resolve_annotation_type(parameter_node, node_types, sources))
+                .collect();
+            solix_common::types::Type::FunctionPointer {
+                return_type: Box::new(ret_type),
+                parameter_types,
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_single_method(
     symbol: &str,
@@ -1051,15 +2073,61 @@ fn compile_single_method(
     let param_offset = if is_instance { 1 } else { 0 };
     let param_count = (param_offset + m.parameters.len()) as u16;
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = m.modifiers.contains(&Modifier::Public)
+        || (!m.modifiers.contains(&Modifier::Private)
+            && !m.modifiers.contains(&Modifier::Internal)
+            && !m.modifiers.contains(&Modifier::Protected));
+    func.return_type = resolve_annotation_type(&m.return_type, node_types, sources);
+    for parameter_decl in &m.parameters {
+        let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
+            semantic_type.clone()
+        } else {
+            resolve_annotation_type(&parameter_decl.param_type, node_types, sources)
+        };
+        func.parameter_types.push(param_type);
+    }
     let mut allocator = RegisterAllocator::new(param_count);
 
     if is_instance {
-        allocator.alloc_param("this")?;
+        let this_register = allocator.alloc_param("this")?;
+        let class_identifier = symbol.split("::").next().unwrap_or("Object");
+        func.local_variables
+            .push(solix_common::bytecode::LocalVariableDebugInfo {
+                register: this_register,
+                name: "this".to_string(),
+                type_name: class_identifier.to_string(),
+                var_type: solix_common::types::Type::Class {
+                    symbol_name: class_identifier.to_string(),
+                    type_arguments: Vec::new(),
+                },
+                start_pc: 0,
+                end_pc: u32::MAX,
+                is_parameter: true,
+            });
     }
 
-    for param in &m.parameters {
-        let name = get_span_text(param.name_span, &sources[param.name_span.id as usize]);
-        allocator.alloc_param(name)?;
+    for parameter_decl in &m.parameters {
+        let param_name = get_span_text(
+            parameter_decl.name_span,
+            &sources[parameter_decl.name_span.id as usize],
+        );
+        let param_register = allocator.alloc_param(param_name)?;
+        let param_type_string = get_span_text(
+            parameter_decl.param_type.span(),
+            &sources[parameter_decl.param_type.span().id as usize],
+        );
+        func.local_variables
+            .push(solix_common::bytecode::LocalVariableDebugInfo {
+                register: param_register,
+                name: param_name.to_string(),
+                type_name: param_type_string.to_string(),
+                var_type: solix_common::types::Type::Primitive(
+                    solix_common::types::PrimitiveKind::Void,
+                ),
+                start_pc: 0,
+                end_pc: u32::MAX,
+                is_parameter: true,
+            });
     }
 
     allocator.enter_scope();
@@ -1093,6 +2161,29 @@ fn compile_single_method(
             emitter.emit_return_arc_cleanup(None);
             emitter.emit_instruction(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
         }
+    } else if m.modifiers.contains(&Modifier::Native) {
+        let clean_symbol = symbol.split('(').next().unwrap_or(symbol);
+        let sym_idx = pool.add_string(clean_symbol)?;
+        let dst = allocator.alloc_temp()?;
+        func.emit(
+            Instruction::format_call(OpCode::CallSymbol, dst, sym_idx, 0, param_count as u8),
+            None,
+        );
+        let is_void = matches!(
+            m.return_type,
+            TypeAnnotation::Primitive {
+                kind: TokenKind::PrimitiveVoid,
+                ..
+            }
+        );
+        if is_void {
+            func.emit(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
+        } else {
+            func.emit(
+                Instruction::format_a(OpCode::ReturnValue, 0, dst, 0, 0),
+                None,
+            );
+        }
     } else {
         func.emit(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
     }
@@ -1117,6 +2208,19 @@ fn compile_constructor(
 ) -> Result<CompiledFunction, EmissionError> {
     let param_count = (1 + ctor.parameters.len()) as u16; // this is r0
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = ctor.modifiers.contains(&Modifier::Public)
+        || (!ctor.modifiers.contains(&Modifier::Private)
+            && !ctor.modifiers.contains(&Modifier::Internal)
+            && !ctor.modifiers.contains(&Modifier::Protected));
+    func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+    for parameter_decl in &ctor.parameters {
+        let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
+            semantic_type.clone()
+        } else {
+            resolve_annotation_type(&parameter_decl.param_type, node_types, sources)
+        };
+        func.parameter_types.push(param_type);
+    }
     let mut allocator = RegisterAllocator::new(param_count);
 
     allocator.alloc_param("this")?;
@@ -1221,6 +2325,12 @@ fn compile_default_constructor(
     synthesized_lambdas: &mut Vec<CompiledFunction>,
 ) -> Result<CompiledFunction, EmissionError> {
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, 1, 0);
+    func.is_public = cls.modifiers.contains(&Modifier::Public)
+        || (!cls.modifiers.contains(&Modifier::Private)
+            && !cls.modifiers.contains(&Modifier::Internal)
+            && !cls.modifiers.contains(&Modifier::Protected));
+    func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+    func.parameter_types = Vec::new();
     let mut allocator = RegisterAllocator::new(1);
     allocator.alloc_param("this")?;
     allocator.enter_scope();
@@ -1331,6 +2441,9 @@ fn compile_destructor(
 ) -> Result<CompiledFunction, EmissionError> {
     let param_count = 1; // this is r0
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = false;
+    func.return_type = solix_common::types::Type::Primitive(PrimitiveKind::Void);
+    func.parameter_types = Vec::new();
     let mut allocator = RegisterAllocator::new(param_count);
 
     allocator.alloc_param("this")?;
@@ -1422,6 +2535,19 @@ fn compile_operator(
 ) -> Result<CompiledFunction, EmissionError> {
     let param_count = (1 + op.parameters.len()) as u16;
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
+    func.is_public = op.modifiers.contains(&Modifier::Public)
+        || (!op.modifiers.contains(&Modifier::Private)
+            && !op.modifiers.contains(&Modifier::Internal)
+            && !op.modifiers.contains(&Modifier::Protected));
+    func.return_type = resolve_annotation_type(&op.return_type, node_types, sources);
+    for parameter_decl in &op.parameters {
+        let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
+            semantic_type.clone()
+        } else {
+            resolve_annotation_type(&parameter_decl.param_type, node_types, sources)
+        };
+        func.parameter_types.push(param_type);
+    }
     let mut allocator = RegisterAllocator::new(param_count);
 
     allocator.alloc_param("this")?;
@@ -1526,17 +2652,45 @@ fn index_monomorphized_class_symbols(
                 function_ids.insert(simple_sym_mangled, func_id);
                 function_ids.entry(full_sym).or_insert(func_id);
                 function_ids.entry(simple_sym).or_insert(func_id);
+                if let Some((generic_base, generic_args)) = simple_name.split_once('<') {
+                    let generic_suffix = format!("<{generic_args}");
+                    let generic_sym = format!("{generic_base}::{method_name}{generic_suffix}");
+                    let generic_arity = format!(
+                        "{generic_base}::{method_name}{generic_suffix}/{}",
+                        m.parameters.len()
+                    );
+                    function_ids.insert(generic_sym, func_id);
+                    function_ids.insert(generic_arity, func_id);
+                }
             }
             ClassMember::Constructor(ctor) => {
                 let arity = ctor.parameters.len();
+                let param_sig = ctor
+                    .parameters
+                    .iter()
+                    .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let full_sym_mangled = if param_sig.is_empty() {
+                    format!("{mangled_name}::constructor")
+                } else {
+                    format!("{mangled_name}::constructor({param_sig})")
+                };
+                let simple_sym_mangled = if param_sig.is_empty() {
+                    format!("{simple_name}::constructor")
+                } else {
+                    format!("{simple_name}::constructor({param_sig})")
+                };
                 let full_sym_arity = format!("{mangled_name}::constructor/{arity}");
                 let simple_sym_arity = format!("{simple_name}::constructor/{arity}");
                 let full_sym = format!("{mangled_name}::constructor");
                 let simple_sym = format!("{simple_name}::constructor");
                 let func_id = *next_func_id;
                 *next_func_id += 1;
-                function_ids.insert(full_sym_arity, func_id);
-                function_ids.insert(simple_sym_arity, func_id);
+                function_ids.insert(full_sym_mangled, func_id);
+                function_ids.insert(simple_sym_mangled, func_id);
+                function_ids.entry(full_sym_arity).or_insert(func_id);
+                function_ids.entry(simple_sym_arity).or_insert(func_id);
                 function_ids.entry(full_sym).or_insert(func_id);
                 function_ids.entry(simple_sym).or_insert(func_id);
             }
@@ -1550,12 +2704,32 @@ fn index_monomorphized_class_symbols(
             }
             ClassMember::Operator(op) => {
                 let op_str = op.operator_token.as_static_str();
-                let full_sym = format!("{mangled_name}::operator_{op_str}");
-                let simple_sym = format!("{simple_name}::operator_{op_str}");
+                let param_sig = op
+                    .parameters
+                    .iter()
+                    .map(|parameter| get_span_text(parameter.param_type.span(), code))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let full_sym = if param_sig.is_empty() {
+                    format!("{mangled_name}::operator_{op_str}")
+                } else {
+                    format!("{mangled_name}::operator_{op_str}({param_sig})")
+                };
+                let simple_sym = if param_sig.is_empty() {
+                    format!("{simple_name}::operator_{op_str}")
+                } else {
+                    format!("{simple_name}::operator_{op_str}({param_sig})")
+                };
                 let func_id = *next_func_id;
                 *next_func_id += 1;
                 function_ids.insert(full_sym, func_id);
                 function_ids.insert(simple_sym, func_id);
+                function_ids
+                    .entry(format!("{mangled_name}::operator_{op_str}"))
+                    .or_insert(func_id);
+                function_ids
+                    .entry(format!("{simple_name}::operator_{op_str}"))
+                    .or_insert(func_id);
             }
             _ => {}
         }
@@ -1605,7 +2779,11 @@ fn compile_monomorphized_class_functions(
                     .map(|p| get_span_text(p.param_type.span(), code))
                     .collect::<Vec<_>>()
                     .join(",");
-                let full_sym = format!("{mangled_name}::{method_name}({param_sig})");
+                let full_sym = m
+                    .resolved_symbol_id
+                    .and_then(|id| symbol_table.get_symbol(SymbolId(id)))
+                    .map(|symbol| symbol.fully_qualified_name.clone())
+                    .unwrap_or_else(|| format!("{mangled_name}::{method_name}({param_sig})"));
                 let is_instance = !m.modifiers.contains(&Modifier::Static);
                 let func = compile_single_method(
                     &full_sym,

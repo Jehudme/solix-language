@@ -25,6 +25,11 @@ pub struct CompiledClass {
     pub itable: Vec<(u32, Vec<u32>)>,
     /// Optional function index of the user-defined destructor (`~Class()`).
     pub destructor_id: Option<u32>,
+    /// Explicit mapping of field byte offsets to their primitive or reference type tags.
+    pub field_types: Vec<(usize, u8)>,
+    /// Explicit mapping of field byte offsets to their source name and type name `(byte_offset, field_name, field_type_name)`.
+    #[serde(default)]
+    pub field_names: Vec<(usize, String, String)>,
 }
 
 impl CompiledClass {
@@ -46,6 +51,23 @@ impl CompiledClass {
             vtable: Vec::new(),
             itable: Vec::new(),
             destructor_id: None,
+            field_types: Vec::new(),
+            field_names: Vec::new(),
         }
+    }
+
+    /// Returns `true` if this class has no destructor and holds no owning reference fields.
+    #[must_use]
+    pub fn is_pod(&self) -> bool {
+        self.destructor_id.is_none() && self.reference_field_offsets.is_empty()
+    }
+
+    /// Looks up the type tag for the field at `offset`.
+    #[must_use]
+    pub fn get_field_type(&self, offset: usize) -> Option<u8> {
+        self.field_types
+            .iter()
+            .find(|(field_offset, _)| *field_offset == offset)
+            .map(|(_, tag)| *tag)
     }
 }

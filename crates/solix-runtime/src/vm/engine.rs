@@ -8,7 +8,24 @@ use crate::frame::CallFrame;
 use crate::memory::{BlockTag, VirtualHeap};
 use crate::native::NativeRegistry;
 use crate::value::Value;
-use std::collections::{HashMap, HashSet};
+use solix_common::bytecode::Instruction;
+use solix_common::types::{PrimitiveKind, Type};
+use std::collections::HashSet;
+
+/// Telemetry metrics recorded across virtual machine execution.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VmTelemetry {
+    /// Pure VM bytecode execution elapsed time in nanoseconds (excluding setup/teardown).
+    pub pure_execution_time_ns: u64,
+    /// Total count of bytecode instructions dispatched across all frames.
+    pub instructions_dispatched: u64,
+    /// Peak activation call stack depth reached during execution.
+    pub peak_call_stack_depth: usize,
+    /// Total count of native host or builtin function calls dispatched.
+    pub native_calls_count: u64,
+    /// Total count of dynamically quickened instructions.
+    pub quickened_instructions_count: u64,
+}
 
 /// Register-based virtual machine execution coordinator.
 #[derive(Debug)]
@@ -23,18 +40,20 @@ pub struct VirtualMachine {
     pub active_destructors: HashSet<u32>,
     /// Static variable slot storage preserving strongly-typed `Value` instances.
     pub static_slots: Vec<Value>,
-    /// Strongly-typed storage mapping `(object_payload_addr, field_byte_offset) -> Value`.
-    pub object_fields: HashMap<(u32, usize), Value>,
-    /// Strongly-typed storage mapping `(array_payload_addr, element_index) -> Value`.
-    pub array_elements: HashMap<(u32, usize), Value>,
-    /// Strongly-typed storage mapping `(closure_payload_addr, capture_index) -> Value`.
-    pub closure_captures: HashMap<(u32, usize), Value>,
+    /// Pre-allocated cached constant pool values across all loaded binaries.
+    pub const_pool_cache: Vec<Vec<Value>>,
+    /// Tracked payload addresses of interned immutable string constants.
+    pub interned_string_addrs: Vec<u32>,
     /// Contiguous register window buffer backing in-flight call frames.
     pub register_stack: Vec<Value>,
     /// Activation call frame stack tracking nested function calls.
     pub call_frames: Vec<CallFrame>,
     /// Termination flag set when an `Exit` opcode is dispatched or program halts.
     pub halted: bool,
+    /// Whether module-level `@init` static initializers have completed execution.
+    pub statics_initialized: bool,
+    /// Whether the virtual machine has executed shutdown cleanup.
+    pub is_shut_down: bool,
     /// Process exit status code, if explicitly terminated via `exit(code)`.
     pub exit_code: Option<i32>,
     /// Return value produced by the top-level entry point function.
@@ -43,6 +62,18 @@ pub struct VirtualMachine {
     pub safe_mode: bool,
     /// Output buffer of lines printed via standard print/println builtins.
     pub stdout: Vec<String>,
+    /// Pure VM bytecode execution elapsed time in nanoseconds.
+    pub pure_execution_time_ns: u64,
+    /// Total count of bytecode instructions dispatched across all frames.
+    pub instructions_dispatched: u64,
+    /// Peak activation call stack depth reached during execution.
+    pub peak_call_stack_depth: usize,
+    /// Total count of native host or builtin function calls dispatched.
+    pub native_calls_count: u64,
+    /// Total count of dynamically quickened instructions.
+    pub quickened_instructions_count: u64,
+    /// Optional thread-safe output sink for capturing guest standard output.
+    pub output_sink: Option<crate::options::OutputSink>,
 }
 
 impl VirtualMachine {
@@ -51,15 +82,47 @@ impl VirtualMachine {
     pub fn new(context: RuntimeContext) -> Self {
         let total_static = context.total_static_space;
         let heap_size = context.options.heap_size;
-        let heap = VirtualHeap::new(total_static, heap_size);
+        let mut heap = VirtualHeap::new(total_static, heap_size);
+        heap.set_safe_mode(context.options.safe_mode);
         let static_slots = vec![Value::Null; total_static as usize];
 
-        let mut native_registry = NativeRegistry::with_builtins();
-        for (name, func) in &context.options.native_functions {
-            native_registry.register(name, *func);
+        let native_registry = context.native_registry.clone();
+
+        let mut interned_string_addrs = Vec::new();
+        let mut const_pool_cache: Vec<Vec<Value>> =
+            Vec::with_capacity(context.loaded_binaries.len());
+        for loaded_binary in &context.loaded_binaries {
+            let mut cached_values = Vec::with_capacity(loaded_binary.constant_pool.values.len());
+            for pool_val in &loaded_binary.constant_pool.values {
+                match pool_val {
+                    solix_common::bytecode::ConstantPoolValue::Int64(int_val) => {
+                        cached_values.push(Value::I64(*int_val));
+                    }
+                    solix_common::bytecode::ConstantPoolValue::Float64(bits) => {
+                        cached_values.push(Value::F64(f64::from_bits(*bits)));
+                    }
+                    solix_common::bytecode::ConstantPoolValue::String(string_literal) => {
+                        let bytes = string_literal.as_bytes();
+                        let addr = heap.allocate(bytes.len(), BlockTag::String).unwrap_or(0);
+                        if addr > 0 {
+                            let _ = heap.write_bytes(addr, bytes);
+                            if let Ok(mut header) = heap.read_header(addr) {
+                                header.ref_count = crate::memory::layout::MAX_REF_COUNT;
+                                let _ = heap.write_header(addr, header);
+                            }
+                            interned_string_addrs.push(addr);
+                            cached_values.push(Value::Ref(addr));
+                        } else {
+                            cached_values.push(Value::Null);
+                        }
+                    }
+                }
+            }
+            const_pool_cache.push(cached_values);
         }
 
         let safe_mode = context.options.safe_mode;
+        let output_sink = context.options.output_sink.clone();
 
         Self {
             context,
@@ -67,17 +130,255 @@ impl VirtualMachine {
             native_registry,
             active_destructors: HashSet::new(),
             static_slots,
-            object_fields: HashMap::new(),
-            array_elements: HashMap::new(),
-            closure_captures: HashMap::new(),
-            register_stack: Vec::with_capacity(1024),
+            const_pool_cache,
+            interned_string_addrs,
+            register_stack: vec![Value::Null; 65536],
             call_frames: Vec::with_capacity(64),
             halted: false,
+            statics_initialized: false,
+            is_shut_down: false,
             exit_code: None,
             last_return_value: Value::Null,
             safe_mode,
             stdout: Vec::new(),
+            pure_execution_time_ns: 0,
+            instructions_dispatched: 0,
+            peak_call_stack_depth: 0,
+            native_calls_count: 0,
+            quickened_instructions_count: 0,
+            output_sink,
         }
+    }
+
+    /// Constructs and initializes a `VirtualMachine`, executing all static `@init` initializers.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if static initialization fails.
+    pub fn new_initialized(context: RuntimeContext) -> Result<Self, RuntimeError> {
+        let mut virtual_machine = Self::new(context);
+        virtual_machine.initialize_statics()?;
+        Ok(virtual_machine)
+    }
+
+    /// Executes all module `@init` static initializer functions once.
+    /// Subsequent calls are no-ops.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if an `@init` function fails or traps.
+    pub fn initialize_statics(&mut self) -> Result<(), RuntimeError> {
+        if self.statics_initialized {
+            return Ok(());
+        }
+
+        let init_ids = self.context.init_function_ids.clone();
+        for init_id in init_ids {
+            self.push_frame(init_id, 0, &[])?;
+            let target_depth = self.call_frames.len().saturating_sub(1);
+            self.run_loop(target_depth)?;
+            if self.halted {
+                break;
+            }
+        }
+
+        self.statics_initialized = true;
+        Ok(())
+    }
+
+    /// Validates the CLI entry point signature contract for `solix run`.
+    ///
+    /// Requires `public` visibility, `int32` or `void` return type, and either
+    /// `()` (0 parameters) or `(char[] args)` / `(string[] args)` / `(char[][] args)` (1 parameter).
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::InvalidEntryPointSignature` if any constraint is violated.
+    pub fn validate_cli_entry_point(&self, func_id: u32) -> Result<(), RuntimeError> {
+        let func = self.context.get_function(func_id).ok_or_else(|| {
+            RuntimeError::EntryPointNotFound {
+                symbol: format!("#{func_id}"),
+            }
+        })?;
+
+        // Must be public
+        if !func.is_public {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: func.symbol.clone(),
+                param_count: func.param_count,
+                reason: "CLI entry point function must have 'public' visibility".to_string(),
+            });
+        }
+
+        // Return type must be int32 or void
+        let is_valid_return = matches!(
+            func.return_type,
+            Type::Primitive(PrimitiveKind::Int32 | PrimitiveKind::Void)
+        );
+        if !is_valid_return {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: func.symbol.clone(),
+                param_count: func.param_count,
+                reason: format!(
+                    "CLI entry point return type must be 'int32' or 'void', found '{:?}'",
+                    func.return_type
+                ),
+            });
+        }
+
+        // Parameters must be empty () or single string/char array
+        if func.param_count == 0 {
+            return Ok(());
+        }
+
+        if func.param_count == 1 {
+            if func.parameter_types.is_empty() {
+                return Ok(());
+            }
+            let param_type = func
+                .parameter_types
+                .first()
+                .cloned()
+                .unwrap_or(Type::Primitive(PrimitiveKind::Void));
+            let is_valid_cli_param = match &param_type {
+                Type::Array { element_type, depth } => {
+                    if *depth == 1 {
+                        matches!(&**element_type, Type::Primitive(PrimitiveKind::Char))
+                            || matches!(
+                                &**element_type,
+                                Type::Class { symbol_name, .. }
+                                    if symbol_name == "std.string" || symbol_name == "string"
+                            )
+                    } else if *depth == 2 {
+                        matches!(&**element_type, Type::Primitive(PrimitiveKind::Char))
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+
+            if is_valid_cli_param {
+                return Ok(());
+            }
+        }
+
+        Err(RuntimeError::InvalidEntryPointSignature {
+            symbol: func.symbol.clone(),
+            param_count: func.param_count,
+            reason: "CLI entry point parameters must be empty () or a single CLI string/char array (char[] args / string[] args)".to_string(),
+        })
+    }
+
+    /// Invokes an arbitrary public entry point function by symbol with primitive arguments,
+    /// sharing static slots and heap across multiple successive invocations.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if the function is not found, is private, has non-primitive
+    /// parameters/return type, or encounters a runtime exception during execution.
+    pub fn invoke_entry(&mut self, symbol: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+        if !self.statics_initialized {
+            self.initialize_statics()?;
+        }
+
+        let func_id = self.context.resolve_entry_function_id(symbol)?;
+        let func = self.context.get_function(func_id).ok_or_else(|| {
+            RuntimeError::EntryPointNotFound {
+                symbol: symbol.to_string(),
+            }
+        })?;
+
+        if !func.is_public {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: symbol.to_string(),
+                param_count: func.param_count,
+                reason: "Entry point function must have 'public' visibility".to_string(),
+            });
+        }
+
+        fn is_supported_entry_type(entry_type: &Type, is_return: bool) -> bool {
+            match entry_type {
+                Type::Primitive(prim) => {
+                    if *prim == PrimitiveKind::Void {
+                        is_return
+                    } else {
+                        true
+                    }
+                }
+                Type::Class { symbol_name, .. } => {
+                    symbol_name == "std.string" || symbol_name == "string"
+                }
+                Type::Array { element_type, depth } if *depth == 1 => {
+                    matches!(
+                        &**element_type,
+                        Type::Primitive(_) | Type::Class { .. }
+                    )
+                }
+                Type::Array { .. } => false,
+                _ => false,
+            }
+        }
+
+        if !is_supported_entry_type(&func.return_type, true) {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: symbol.to_string(),
+                param_count: func.param_count,
+                reason: format!(
+                    "Return type '{:?}' is not a supported entry point primitive/string/array type",
+                    func.return_type
+                ),
+            });
+        }
+
+        for param_type in &func.parameter_types {
+            if !is_supported_entry_type(param_type, false) {
+                return Err(RuntimeError::InvalidEntryPointSignature {
+                    symbol: symbol.to_string(),
+                    param_count: func.param_count,
+                    reason: format!(
+                        "Parameter type '{:?}' is not a supported entry point primitive/string/array type",
+                        param_type
+                    ),
+                });
+            }
+        }
+
+        if args.len() != func.param_count as usize {
+            return Err(RuntimeError::InvalidEntryPointSignature {
+                symbol: symbol.to_string(),
+                param_count: func.param_count,
+                reason: format!(
+                    "Expected {} arguments, but received {}",
+                    func.param_count,
+                    args.len()
+                ),
+            });
+        }
+
+        self.push_frame(func_id, 0, args)?;
+        let target_depth = self.call_frames.len().saturating_sub(1);
+        self.run_loop(target_depth)?;
+
+        Ok(self.last_return_value)
+    }
+
+    /// Releases static slot object references (invoking destructors) and cleans up heap constants.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if a destructor fails during execution.
+    pub fn shutdown(&mut self) -> Result<(), RuntimeError> {
+        if self.is_shut_down {
+            return Ok(());
+        }
+        self.is_shut_down = true;
+
+        for slot_idx in 0..self.static_slots.len() {
+            if let Value::Ref(addr) = self.static_slots[slot_idx]
+                && addr > 0
+            {
+                self.static_slots[slot_idx] = Value::Null;
+                let _ = self.release_reference(addr);
+            }
+        }
+
+        Ok(())
     }
 
     /// Releases a reference to the heap block at `addr`, executing its destructor and cascading drops if `ref_count` hits 0.
@@ -89,85 +390,115 @@ impl VirtualMachine {
             return Ok(());
         }
 
-        let rc = crate::memory::arc::dec_ref(&mut self.heap, addr)?;
-        if rc == 0 {
-            if self.active_destructors.contains(&addr) {
-                return Ok(());
-            }
-            self.active_destructors.insert(addr);
-
-            let header = self.heap.read_header(addr)?;
-            if header.tag == BlockTag::Object {
-                let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
-                let destructor_id = self
-                    .context
-                    .all_classes
-                    .iter()
-                    .find(|c| c.vtable_id == vtable_id)
-                    .and_then(|c| c.destructor_id);
-
-                // 1. Execute class destructor if defined
-                if let Some(dtor_id) = destructor_id {
-                    let dtor_res = (|| -> Result<(), RuntimeError> {
-                        self.push_frame(dtor_id, 0, &[Value::Ref(addr)])?;
-                        let target_depth = self.call_frames.len() - 1;
-                        self.run_loop(target_depth)?;
-                        Ok(())
-                    })();
-                    if let Err(ref e) = dtor_res {
-                        eprintln!("DTOR ERROR: {e:?}");
-                    }
-                }
-
-                let weak_offsets = self
-                    .context
-                    .all_classes
-                    .iter()
-                    .find(|c| c.vtable_id == vtable_id)
-                    .map(|c| c.weak_field_offsets.clone())
-                    .unwrap_or_default();
-
-                // 2. Cascade drops to child reference fields
-                let keys: Vec<(u32, usize)> = self
-                    .object_fields
-                    .keys()
-                    .filter(|(obj_addr, _)| *obj_addr == addr)
-                    .copied()
-                    .collect();
-                for key in keys {
-                    if let Some(val) = self.object_fields.remove(&key)
-                        && !weak_offsets.contains(&key.1)
-                        && let Value::Ref(child_addr) = val
-                        && child_addr > 0
-                    {
-                        self.release_reference(child_addr)?;
-                    }
-                }
-            } else if header.tag == BlockTag::ArrayRef || header.tag == BlockTag::Tuple {
-                let len = self.heap.read_u32(addr).unwrap_or(0);
-                for i in 0..len {
-                    if let Some(val) = self.array_elements.remove(&(addr, i as usize))
-                        && let Value::Ref(child_addr) = val
-                        && child_addr > 0
-                    {
-                        self.release_reference(child_addr)?;
-                    }
-                }
-            } else if header.tag == BlockTag::Closure {
-                let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
-                for i in 0..cap_count {
-                    if let Some(val) = self.closure_captures.remove(&(addr, i as usize))
-                        && let Value::Ref(child_addr) = val
-                        && child_addr > 0
-                    {
-                        self.release_reference(child_addr)?;
-                    }
-                }
-            }
-
-            self.heap.deallocate(addr)?;
-            self.active_destructors.remove(&addr);
+        let header = self.heap.read_header(addr)?;
+        if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
+            return Ok(());
         }
+
+        if header.ref_count > 1 {
+            let mut updated_header = header;
+            updated_header.ref_count -= 1;
+            self.heap.write_header(addr, updated_header)?;
+            return Ok(());
+        }
+
+        // ref_count hit 0!
+        if self.active_destructors.contains(&addr) {
+            return Ok(());
+        }
+
+        if header.tag == BlockTag::ObjectPod {
+            return self.heap.deallocate_pod_fast(addr, header.size);
+        }
+
+        self.active_destructors.insert(addr);
+
+        if header.tag == BlockTag::Object {
+            let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
+            let (maybe_destructor_id, offset_count) = {
+                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
+                match maybe_class {
+                    Some(class_item) => (
+                        class_item.destructor_id,
+                        class_item.reference_field_offsets.len(),
+                    ),
+                    None => (None, 0),
+                }
+            };
+
+            // 1. Execute class destructor if defined
+            if let Some(destructor_id) = maybe_destructor_id {
+                let destructor_result = (|| -> Result<(), RuntimeError> {
+                    self.push_frame(destructor_id, 0, &[Value::Ref(addr)])?;
+                    let target_depth = self.call_frames.len() - 1;
+                    self.run_loop(target_depth)?;
+                    Ok(())
+                })();
+                if let Err(destructor_error) = destructor_result {
+                    self.active_destructors.remove(&addr);
+                    return Err(destructor_error);
+                }
+            }
+
+            // 2. Cascade drops to child reference fields directly from VirtualHeap in O(ref_fields)
+            for offset_idx in 0..offset_count {
+                let field_offset = self
+                    .context
+                    .get_class_by_vtable_id(vtable_id)
+                    .map_or(0, |class_item| {
+                        class_item.reference_field_offsets[offset_idx]
+                    });
+                let field_addr = addr + field_offset as u32;
+                let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
+                    && child_addr > 0
+                {
+                    self.release_reference(child_addr)?;
+                }
+            }
+        } else if header.tag == BlockTag::ArrayRef {
+            let len = self.heap.read_u32(addr).unwrap_or(0);
+            let elem_type_tag = self.heap.read_u8(addr + 7).unwrap_or(0);
+            if elem_type_tag == 13 || elem_type_tag >= 0x80 {
+                let elem_size = self.heap.read_u8(addr + 4).unwrap_or(8) as usize;
+                for index in 0..len {
+                    let elem_addr = addr + 8 + (index as usize * elem_size) as u32;
+                    let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
+                    if child_addr > 0 {
+                        self.release_reference(child_addr)?;
+                    }
+                }
+            }
+        } else if header.tag == BlockTag::Tuple {
+            let count = self.heap.read_u32(addr).unwrap_or(0);
+            for index in 0..count {
+                let elem_addr = addr + 8 + (index as usize * 16) as u32;
+                let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
+                let element_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                if let Value::Ref(child_addr) = element_val
+                    && child_addr > 0
+                {
+                    self.release_reference(child_addr)?;
+                }
+            }
+        } else if header.tag == BlockTag::Closure {
+            let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
+            for index in 0..cap_count {
+                let cell_addr = addr + 8 + (index as usize * 16) as u32;
+                let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
+                let capture_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                if let Value::Ref(child_addr) = capture_val
+                    && child_addr > 0
+                {
+                    self.release_reference(child_addr)?;
+                }
+            }
+        }
+
+        self.heap.deallocate(addr)?;
+        self.active_destructors.remove(&addr);
 
         Ok(())
     }
@@ -197,12 +528,7 @@ impl VirtualMachine {
             return true;
         }
 
-        while let Some(class) = self
-            .context
-            .all_classes
-            .iter()
-            .find(|c| c.vtable_id == current_vtable_id)
-        {
+        while let Some(class) = self.context.get_class_by_vtable_id(current_vtable_id) {
             // Check implemented interfaces
             if class
                 .itable
@@ -326,7 +652,7 @@ impl VirtualMachine {
         }
         let old_val = self.static_slots[idx];
         self.static_slots[idx] = val;
-        let _ = self.heap.write_static_u64(slot, val.to_raw_u64());
+        let _ = self.heap.write_static_u64(slot, val.to_primitive_u64());
         if let Value::Ref(addr) = val
             && addr > 0
         {
@@ -364,27 +690,28 @@ impl VirtualMachine {
             }
         })?;
 
-        // Determine which binary owns this function
-        let binary_id = self
-            .context
-            .loaded_binaries
-            .iter()
-            .position(|b| {
-                function_id >= b.function_id_offset
-                    && function_id < b.function_id_offset + b.function_count as u32
-            })
-            .unwrap_or(0);
+        let meta = &self.context.function_meta[function_id as usize];
+        let binary_id = meta.binary_id;
+        let func_id_offset = meta.func_id_offset;
 
-        let func_id_offset = self
-            .context
-            .loaded_binaries
-            .get(binary_id)
-            .map_or(0, |b| b.function_id_offset);
-
-        let reg_base = self.register_stack.len();
+        let reg_base = self.call_frames.last().map_or(0, |last_frame| {
+            last_frame.register_base + last_frame.register_count
+        });
         let num_regs = (func.num_registers as usize).max(args.len());
 
-        self.register_stack.resize(reg_base + num_regs, Value::Null);
+        if reg_base + num_regs > self.register_stack.len() {
+            self.register_stack
+                .resize(reg_base + num_regs + 4096, Value::Null);
+        }
+
+        if meta.has_references {
+            for &ref_reg in &func.reference_registers {
+                let reg_index = ref_reg as usize;
+                if reg_index >= args.len() && reg_index < num_regs {
+                    self.register_stack[reg_base + reg_index] = Value::Null;
+                }
+            }
+        }
         self.register_stack[reg_base..reg_base + args.len()].copy_from_slice(args);
 
         let frame = CallFrame::new(
@@ -398,6 +725,9 @@ impl VirtualMachine {
         );
 
         self.call_frames.push(frame);
+        if self.call_frames.len() > self.peak_call_stack_depth {
+            self.peak_call_stack_depth = self.call_frames.len();
+        }
         Ok(())
     }
 
@@ -411,8 +741,6 @@ impl VirtualMachine {
             .pop()
             .ok_or(RuntimeError::NullReferenceAccess)?;
 
-        self.register_stack.truncate(frame.register_base);
-
         if self.call_frames.is_empty() {
             self.last_return_value = return_val;
         } else {
@@ -423,19 +751,12 @@ impl VirtualMachine {
         Ok(())
     }
 
-    /// Executes the VM instruction loop down to `target_depth` using either fast or safe mode.
+    /// Executes the VM instruction loop down to `target_depth`.
     ///
     /// # Errors
     /// Returns `RuntimeError` if an execution error occurs.
     pub fn run_loop(&mut self, target_depth: usize) -> Result<(), RuntimeError> {
-        if self.safe_mode {
-            while !self.halted && self.call_frames.len() > target_depth {
-                self.step()?;
-            }
-            Ok(())
-        } else {
-            self.run_fast(target_depth)
-        }
+        self.run_fast(target_depth)
     }
 
     /// Fetches and dispatches a single virtual machine instruction.
@@ -444,28 +765,7 @@ impl VirtualMachine {
             return Ok(());
         }
 
-        let (inst, _func_id) = {
-            let (func_id, pc) = {
-                let frame = self.current_frame()?;
-                (frame.function_id, frame.pc)
-            };
-            let func = self.context.get_function(func_id).ok_or_else(|| {
-                RuntimeError::FunctionNotFound {
-                    symbol_or_id: format!("#{func_id}"),
-                }
-            })?;
-
-            if (pc as usize) >= func.instructions.len() {
-                return self.pop_frame(Value::Null);
-            }
-
-            let inst = func.instructions[pc as usize];
-            let frame = self.current_frame_mut()?;
-            frame.pc += 1;
-            (inst, func_id)
-        };
-
-        self.dispatch_instruction(inst)
+        self.run_fast_step()
     }
 
     /// Executes the loaded program: runs module `@init` initializers then the entry point.
@@ -474,116 +774,107 @@ impl VirtualMachine {
     /// Returns `RuntimeError` on execution errors or unhandled exceptions.
     pub fn run(&mut self) -> Result<Value, RuntimeError> {
         let res = self.run_internal();
-        if let Err(ref e) = res {
-            self.exit_code = Some(e.error_code().as_i32());
+        if let Err(ref error) = res {
+            self.exit_code = Some(error.error_code().as_i32());
             self.halted = true;
         }
         res
     }
 
     fn run_internal(&mut self) -> Result<Value, RuntimeError> {
-        // 1. Static synthesis initialization: execute all @init functions
-        let init_ids = self.context.init_function_ids.clone();
-        for init_id in init_ids {
-            self.push_frame(init_id, 0, &[])?;
-            let target_depth = self.call_frames.len() - 1;
-            self.run_loop(target_depth)?;
+        let execution_start = std::time::Instant::now();
+        let execution_result = (|| -> Result<Value, RuntimeError> {
+            // 1. Static synthesis initialization: execute all @init functions
+            self.initialize_statics()?;
+
             if self.halted {
-                break;
-            }
-        }
-
-        if self.halted {
-            return Ok(self.exit_code.map_or(self.last_return_value, Value::I32));
-        }
-
-        // 2. Program entry point execution
-        let entry_id = self.context.entry_point_function_id.ok_or_else(|| {
-            RuntimeError::EntryPointNotFound {
-                symbol: self
-                    .context
-                    .options
-                    .entry_point
-                    .clone()
-                    .unwrap_or_else(|| "main".to_string()),
-            }
-        })?;
-
-        let entry_func = self.context.get_function(entry_id).ok_or_else(|| {
-            RuntimeError::EntryPointNotFound {
-                symbol: format!("#{entry_id}"),
-            }
-        })?;
-
-        // Entry point signature validation: parameter count must be 0 or 1
-        if entry_func.param_count > 1 {
-            return Err(RuntimeError::InvalidEntryPointSignature {
-                symbol: entry_func.symbol.clone(),
-                param_count: entry_func.param_count,
-            });
-        }
-
-        let mut entry_args = Vec::new();
-        if entry_func.param_count == 1 {
-            // Pack CLI arguments as ArrayRef of String
-            let args_len = self.context.options.args.len();
-            let args_arr_addr = self.heap.allocate(8 + args_len * 8, BlockTag::ArrayRef)?;
-            self.heap.write_u32(args_arr_addr, args_len as u32)?;
-            self.heap.write_u32(args_arr_addr + 4, 8)?;
-
-            for (i, arg_str) in self.context.options.args.iter().enumerate() {
-                let bytes = arg_str.as_bytes();
-                let str_addr = self.heap.allocate(bytes.len(), BlockTag::String)?;
-                self.heap.write_bytes(str_addr, bytes)?;
-                self.array_elements
-                    .insert((args_arr_addr, i), Value::Ref(str_addr));
-                let elem_addr = args_arr_addr + 8 + (i * 8) as u32;
-                self.heap
-                    .write_u64(elem_addr, Value::Ref(str_addr).to_raw_u64())?;
+                return Ok(self.exit_code.map_or(self.last_return_value, Value::I32));
             }
 
-            entry_args.push(Value::Ref(args_arr_addr));
-        }
-
-        self.push_frame(entry_id, 0, &entry_args)?;
-        self.run_loop(0)?;
-
-        for arg in entry_args {
-            if let Ok(addr) = arg.as_ref()
-                && addr != 0
-            {
-                let _ = self.release_reference(addr);
-            }
-        }
-
-        for i in 0..self.static_slots.len() {
-            if let Value::Ref(addr) = self.static_slots[i]
-                && addr > 0
-            {
-                self.static_slots[i] = Value::Null;
-                let _ = self.release_reference(addr);
-            }
-        }
-
-        if let Some(code) = self.exit_code {
-            Ok(Value::I32(code))
-        } else {
-            match self.last_return_value {
-                Value::Null => {
-                    self.exit_code = Some(0);
-                    Ok(Value::I32(0))
+            // 2. Program entry point execution
+            let entry_id = self.context.entry_point_function_id.ok_or_else(|| {
+                RuntimeError::EntryPointNotFound {
+                    symbol: self
+                        .context
+                        .options
+                        .entry_point
+                        .clone()
+                        .unwrap_or_else(|| "main".to_string()),
                 }
-                Value::I32(code) => {
-                    self.exit_code = Some(code);
-                    Ok(Value::I32(code))
+            })?;
+
+            self.validate_cli_entry_point(entry_id)?;
+
+            let entry_func = self.context.get_function(entry_id).ok_or_else(|| {
+                RuntimeError::EntryPointNotFound {
+                    symbol: format!("#{entry_id}"),
                 }
-                Value::I64(code) => {
-                    self.exit_code = Some(code as i32);
-                    Ok(Value::I64(code))
+            })?;
+
+            let mut entry_args = Vec::new();
+            if entry_func.param_count == 1 {
+                // Pack CLI arguments as ArrayRef of String
+                let args_len = self.context.options.args.len();
+                let args_arr_addr = self.heap.allocate(8 + args_len * 8, BlockTag::ArrayRef)?;
+                self.heap.write_u32(args_arr_addr, args_len as u32)?;
+                self.heap.write_u8(args_arr_addr + 4, 8)?;
+                self.heap.write_u8(args_arr_addr + 7, 13)?; // 13 is String ref tag
+
+                for (arg_idx, arg_str) in self.context.options.args.iter().enumerate() {
+                    let bytes = arg_str.as_bytes();
+                    let str_addr = self.heap.allocate(bytes.len(), BlockTag::String)?;
+                    self.heap.write_bytes(str_addr, bytes)?;
+                    let elem_addr = args_arr_addr + 8 + (arg_idx * 8) as u32;
+                    self.heap
+                        .write_u64(elem_addr, Value::Ref(str_addr).to_raw_u64())?;
                 }
-                other => Ok(other),
+
+                entry_args.push(Value::Ref(args_arr_addr));
             }
-        }
+
+            self.push_frame(entry_id, 0, &entry_args)?;
+            self.run_loop(0)?;
+
+            for arg in entry_args {
+                if let Ok(addr) = arg.as_ref()
+                    && addr != 0
+                {
+                    let _ = self.release_reference(addr);
+                }
+            }
+
+            for slot_idx in 0..self.static_slots.len() {
+                if let Value::Ref(addr) = self.static_slots[slot_idx]
+                    && addr > 0
+                {
+                    self.static_slots[slot_idx] = Value::Null;
+                    let _ = self.release_reference(addr);
+                }
+            }
+
+            if let Some(code) = self.exit_code {
+                Ok(Value::I32(code))
+            } else {
+                match self.last_return_value {
+                    Value::Null => {
+                        self.exit_code = Some(0);
+                        Ok(Value::I32(0))
+                    }
+                    Value::I32(code) => {
+                        self.exit_code = Some(code);
+                        Ok(Value::I32(code))
+                    }
+                    Value::I64(code) => {
+                        self.exit_code = Some(code as i32);
+                        Ok(Value::I64(code))
+                    }
+                    other => Ok(other),
+                }
+            }
+        })();
+
+        self.pure_execution_time_ns = execution_start.elapsed().as_nanos() as u64;
+        execution_result
     }
 
     /// Executes the loaded program and returns the final process exit code.
@@ -596,8 +887,8 @@ impl VirtualMachine {
             Ok(Value::I64(code)) => code as i32,
             Ok(Value::Null) => self.exit_code.unwrap_or(0),
             Ok(_) => self.exit_code.unwrap_or(0),
-            Err(e) => {
-                let code = e.error_code().as_i32();
+            Err(runtime_err) => {
+                let code = runtime_err.error_code().as_i32();
                 self.exit_code = Some(code);
                 code
             }
@@ -608,7 +899,46 @@ impl VirtualMachine {
     ///
     /// # Errors
     /// Returns `RuntimeError::MemoryLeak` if memory leaks or fragmentation exist.
-    pub fn verify_clean_memory(&self) -> Result<(), RuntimeError> {
+    pub fn verify_clean_memory(&mut self) -> Result<(), RuntimeError> {
+        let interned_addrs = std::mem::take(&mut self.interned_string_addrs);
+        for addr in interned_addrs {
+            let _ = self.heap.deallocate(addr);
+        }
         self.heap.verify_clean_memory()
+    }
+
+    /// Returns the live telemetry metrics of the virtual machine execution.
+    #[must_use]
+    pub fn telemetry(&self) -> VmTelemetry {
+        VmTelemetry {
+            pure_execution_time_ns: self.pure_execution_time_ns,
+            instructions_dispatched: self.instructions_dispatched,
+            peak_call_stack_depth: self.peak_call_stack_depth,
+            native_calls_count: self.native_calls_count,
+            quickened_instructions_count: self.quickened_instructions_count,
+        }
+    }
+
+    /// Records the dispatch of a native host or builtin function call.
+    pub(crate) fn record_native_call(&mut self) {
+        self.native_calls_count += 1;
+    }
+
+    /// Modifies a compiled instruction in-place and records the quickening operation.
+    pub(crate) fn patch_instruction(
+        &mut self,
+        function_id: u32,
+        instruction_pc: usize,
+        new_instruction: Instruction,
+    ) {
+        self.context
+            .patch_instruction(function_id, instruction_pc, new_instruction);
+        self.quickened_instructions_count += 1;
+    }
+}
+
+impl Drop for VirtualMachine {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
     }
 }

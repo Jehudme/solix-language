@@ -1,0 +1,278 @@
+package solix.io;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.NumberFormatException;
+
+public class Console {
+    // Low-level native bindings
+    private static native void native_print_string(char[] text);
+    private static native void native_print_int(int64 value);
+    private static native void native_print_double(float64 value);
+    private static native void native_print_bool(bool value);
+    private static native void native_print_char(char character);
+    private static native void native_println();
+
+    private static native void native_error_string(char[] text);
+    private static native void native_error_int(int64 value);
+    private static native void native_warning_string(char[] text);
+    private static native void native_warning_int(int64 value);
+    private static native void native_info_string(char[] text);
+    private static native void native_info_int(int64 value);
+    private static native void native_success_string(char[] text);
+    private static native void native_success_int(int64 value);
+
+    private static native char[] native_read_line();
+    private static native char native_read_char();
+
+    private static native void native_clear();
+    private static native void native_flush();
+    private static native void native_set_color(int32 ansi_code);
+    private static native void native_reset_color();
+    private static native void native_set_cursor_position(int32 row, int32 col);
+    private static native void native_set_title(char[] title);
+
+    // Basic printing
+    public static void print(string text) {
+        if (text != null) {
+            String wrapped_text = new String(text);
+            Console::native_print_string(wrapped_text.to_chars());
+        }
+    }
+
+    public static void print(String text) {
+        if (text != null && text.data != null) {
+            Console::native_print_string(text.to_chars());
+        }
+    }
+
+    public static void print(char[] text) {
+        if (text != null) {
+            Console::native_print_string(text);
+        }
+    }
+
+    public static void print(int32 value) {
+        Console::native_print_int((int64)value);
+    }
+
+    public static void print(int64 value) {
+        Console::native_print_int(value);
+    }
+
+    public static void print(float64 value) {
+        Console::native_print_double(value);
+    }
+
+    public static void print(bool value) {
+        Console::native_print_bool(value);
+    }
+
+    public static void print(char character) {
+        Console::native_print_char(character);
+    }
+
+    public static void print(IStringable item) {
+        if (item != null) {
+            String representation = item.to_string();
+            if (representation != null) {
+                Console::print(representation);
+            }
+        }
+    }
+
+    // Newline printing
+    public static void println() {
+        Console::native_println();
+    }
+
+    public static void println(string text) {
+        Console::print(text);
+        Console::native_println();
+    }
+
+    public static void println(String text) {
+        Console::print(text);
+        Console::native_println();
+    }
+
+    public static void println(char[] text) {
+        Console::print(text);
+        Console::native_println();
+    }
+
+    public static void println(int32 value) {
+        Console::print(value);
+        Console::native_println();
+    }
+
+    public static void println(int64 value) {
+        Console::print(value);
+        Console::native_println();
+    }
+
+    public static void println(float64 value) {
+        Console::print(value);
+        Console::native_println();
+    }
+
+    public static void println(bool value) {
+        Console::print(value);
+        Console::native_println();
+    }
+
+    public static void println(char character) {
+        Console::print(character);
+        Console::native_println();
+    }
+
+    public static void println(IStringable item) {
+        Console::print(item);
+        Console::native_println();
+    }
+
+    // Variadic printf
+    public static void printf<args...>(string format_template, args...) {
+        String wrapped_template = (format_template != null) ? new String(format_template) : new String("");
+        Console::printf(wrapped_template, args);
+    }
+
+    public static void printf<args...>(String format_template, args...) {
+        if (format_template == null) {
+            return;
+        }
+        String[] arguments_array = new String[args.length];
+        for (int32 argument_index = 0; argument_index < args.length; argument_index = argument_index + 1) {
+            arguments_array[argument_index] = String::from_any(args[argument_index]);
+        }
+        String formatted_message = String::format_array(format_template, arguments_array);
+        Console::print(formatted_message);
+    }
+
+    // Diagnostics (Colorized)
+    public static void error(string message) {
+        if (message != null) {
+            String wrapped_msg = new String(message);
+            Console::native_error_string(wrapped_msg.to_chars());
+        }
+    }
+
+    public static void error(String message) {
+        if (message != null && message.data != null) {
+            Console::native_error_string(message.to_chars());
+        }
+    }
+
+    public static void warning(string message) {
+        if (message != null) {
+            String wrapped_msg = new String(message);
+            Console::native_warning_string(wrapped_msg.to_chars());
+        }
+    }
+
+    public static void warning(String message) {
+        if (message != null && message.data != null) {
+            Console::native_warning_string(message.to_chars());
+        }
+    }
+
+    public static void info(string message) {
+        if (message != null) {
+            String wrapped_msg = new String(message);
+            Console::native_info_string(wrapped_msg.to_chars());
+        }
+    }
+
+    public static void info(String message) {
+        if (message != null && message.data != null) {
+            Console::native_info_string(message.to_chars());
+        }
+    }
+
+    public static void success(string message) {
+        if (message != null) {
+            String wrapped_msg = new String(message);
+            Console::native_success_string(wrapped_msg.to_chars());
+        }
+    }
+
+    public static void success(String message) {
+        if (message != null && message.data != null) {
+            Console::native_success_string(message.to_chars());
+        }
+    }
+
+    // Input methods
+    public static String read_line() {
+        char[] raw_chars = Console::native_read_line();
+        if (raw_chars == null) {
+            return new String("");
+        }
+        return new String(raw_chars);
+    }
+
+    public static char read_char() {
+        return Console::native_read_char();
+    }
+
+    public static int32 input_int() {
+        String raw_input = Console::read_line().trim();
+        if (raw_input.is_empty()) {
+            throw new NumberFormatException("Empty input encountered for integer parsing");
+        }
+        return raw_input.to_int32();
+    }
+
+    public static float64 input_double() {
+        String raw_input = Console::read_line().trim();
+        if (raw_input.is_empty()) {
+            throw new NumberFormatException("Empty input encountered for double parsing");
+        }
+        return raw_input.to_float64();
+    }
+
+    public static bool input_bool() {
+        String raw_input = Console::read_line().trim().to_lower();
+        if (raw_input.equals(new String("true")) || raw_input.equals(new String("1"))) {
+            return true;
+        }
+        if (raw_input.equals(new String("false")) || raw_input.equals(new String("0"))) {
+            return false;
+        }
+        throw new NumberFormatException("Input string was not recognized as a valid boolean");
+    }
+
+    // Terminal Control
+    public static void clear() {
+        Console::native_clear();
+    }
+
+    public static void flush() {
+        Console::native_flush();
+    }
+
+    public static void set_color(ConsoleColor color) {
+        Console::native_set_color((int32)color);
+    }
+
+    public static void reset_color() {
+        Console::native_reset_color();
+    }
+
+    public static void set_cursor_position(int32 row, int32 col) {
+        Console::native_set_cursor_position(row, col);
+    }
+
+    public static void set_title(string title_text) {
+        if (title_text != null) {
+            String wrapped_title = new String(title_text);
+            Console::native_set_title(wrapped_title.to_chars());
+        }
+    }
+
+    public static void set_title(String title_text) {
+        if (title_text != null && title_text.data != null) {
+            Console::native_set_title(title_text.to_chars());
+        }
+    }
+}

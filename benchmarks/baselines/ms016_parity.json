@@ -1,0 +1,267 @@
+{
+  "metadata": {
+    "os": "Linux",
+    "mode": "parity",
+    "warmup": 2,
+    "iterations": 5,
+    "timestamp": 1793782289.3300567
+  },
+  "workloads": {
+    "01_fib_recursive": {
+      "solix_fast": {
+        "median_ms": 281.74,
+        "min_ms": 278.01,
+        "max_ms": 286.02,
+        "stdev_ms": 3.2,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 567.77,
+        "min_ms": 551.57,
+        "max_ms": 598.33,
+        "stdev_ms": 18.59,
+        "rss_kb": 20524
+      }
+    },
+    "02_tight_loop_int": {
+      "solix_fast": {
+        "median_ms": 221.3,
+        "min_ms": 206.7,
+        "max_ms": 249.53,
+        "stdev_ms": 16.54,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 800.99,
+        "min_ms": 783.13,
+        "max_ms": 844.89,
+        "stdev_ms": 24.01,
+        "rss_kb": 20524
+      }
+    },
+    "03_nbody_float64": {
+      "solix_fast": {
+        "median_ms": 33.27,
+        "min_ms": 26.39,
+        "max_ms": 38.16,
+        "stdev_ms": 5.41,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 92.46,
+        "min_ms": 83.81,
+        "max_ms": 96.62,
+        "stdev_ms": 5.11,
+        "rss_kb": 20524
+      }
+    },
+    "04_ackermann_stack": {
+      "solix_fast": {
+        "median_ms": 61.69,
+        "min_ms": 55.51,
+        "max_ms": 63.99,
+        "stdev_ms": 3.19,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 124.39,
+        "min_ms": 121.15,
+        "max_ms": 132.8,
+        "stdev_ms": 4.73,
+        "rss_kb": 20524
+      }
+    },
+    "05_object_churn_pod": {
+      "solix_fast": {
+        "median_ms": 96.6,
+        "min_ms": 88.56,
+        "max_ms": 103.14,
+        "stdev_ms": 6.09,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 130.27,
+        "min_ms": 124.13,
+        "max_ms": 169.88,
+        "stdev_ms": 19.07,
+        "rss_kb": 20524
+      }
+    },
+    "06_binary_trees_arc": {
+      "solix_fast": {
+        "median_ms": 77.53,
+        "min_ms": 75.53,
+        "max_ms": 84.25,
+        "stdev_ms": 3.35,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 105.08,
+        "min_ms": 104.37,
+        "max_ms": 107.84,
+        "stdev_ms": 1.42,
+        "rss_kb": 20524
+      }
+    },
+    "07_virtual_dispatch": {
+      "solix_fast": {
+        "median_ms": 92.95,
+        "min_ms": 85.15,
+        "max_ms": 99.41,
+        "stdev_ms": 6.18,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 165.59,
+        "min_ms": 160.39,
+        "max_ms": 172.53,
+        "stdev_ms": 4.9,
+        "rss_kb": 20524
+      }
+    },
+    "08_interface_dispatch": {
+      "solix_fast": {
+        "median_ms": 83.41,
+        "min_ms": 79.85,
+        "max_ms": 88.6,
+        "stdev_ms": 3.72,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 183.86,
+        "min_ms": 176.25,
+        "max_ms": 189.96,
+        "stdev_ms": 5.77,
+        "rss_kb": 20524
+      }
+    },
+    "09_sieve_bool_array": {
+      "solix_fast": {
+        "median_ms": 133.2,
+        "min_ms": 128.99,
+        "max_ms": 137.78,
+        "stdev_ms": 3.2,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 245.44,
+        "min_ms": 235.95,
+        "max_ms": 252.79,
+        "stdev_ms": 7.18,
+        "rss_kb": 20524
+      }
+    },
+    "10_matrix_multiply_2d": {
+      "solix_fast": {
+        "median_ms": 19.13,
+        "min_ms": 14.97,
+        "max_ms": 19.7,
+        "stdev_ms": 2.09,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 23.45,
+        "min_ms": 12.84,
+        "max_ms": 25.16,
+        "stdev_ms": 5.18,
+        "rss_kb": 20524
+      }
+    },
+    "11_generic_containers": {
+      "solix_fast": {
+        "median_ms": 171.46,
+        "min_ms": 167.92,
+        "max_ms": 173.41,
+        "stdev_ms": 2.53,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 217.7,
+        "min_ms": 215.08,
+        "max_ms": 225.16,
+        "stdev_ms": 3.98,
+        "rss_kb": 20524
+      }
+    },
+    "12_closures_capture": {
+      "solix_fast": {
+        "median_ms": 34.62,
+        "min_ms": 32.16,
+        "max_ms": 35.74,
+        "stdev_ms": 1.58,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 62.6,
+        "min_ms": 60.71,
+        "max_ms": 63.53,
+        "stdev_ms": 1.24,
+        "rss_kb": 20524
+      }
+    },
+    "13_function_pointers": {
+      "solix_fast": {
+        "median_ms": 117.52,
+        "min_ms": 111.19,
+        "max_ms": 120.56,
+        "stdev_ms": 3.92,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 214.37,
+        "min_ms": 202.98,
+        "max_ms": 220.76,
+        "stdev_ms": 7.1,
+        "rss_kb": 20524
+      }
+    },
+    "14_exception_zero_cost": {
+      "solix_fast": {
+        "median_ms": 25.81,
+        "min_ms": 24.81,
+        "max_ms": 26.24,
+        "stdev_ms": 0.59,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 48.42,
+        "min_ms": 43.0,
+        "max_ms": 51.66,
+        "stdev_ms": 3.36,
+        "rss_kb": 20524
+      }
+    },
+    "15_string_processing": {
+      "solix_fast": {
+        "median_ms": 209.3,
+        "min_ms": 207.75,
+        "max_ms": 211.31,
+        "stdev_ms": 1.49,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 297.76,
+        "min_ms": 294.87,
+        "max_ms": 303.65,
+        "stdev_ms": 3.94,
+        "rss_kb": 20524
+      }
+    },
+    "16_multi_binary_link": {
+      "solix_fast": {
+        "median_ms": 40.77,
+        "min_ms": 39.62,
+        "max_ms": 41.28,
+        "stdev_ms": 0.75,
+        "rss_kb": 20524
+      },
+      "solix_safe": {
+        "median_ms": 82.34,
+        "min_ms": 82.19,
+        "max_ms": 84.18,
+        "stdev_ms": 1.05,
+        "rss_kb": 20524
+      }
+    }
+  }
+}

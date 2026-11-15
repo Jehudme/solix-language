@@ -11,6 +11,7 @@ use crate::phases::parser::statements::control_flow::{
 use crate::phases::parser::statements::expressions::Expression;
 use solix_common::bytecode::{Instruction, OpCode};
 use solix_common::diagnostics::EmissionError;
+use solix_common::types::{PrimitiveKind, Type};
 
 /// Active loop context tracking forward break jumps and loop continue targets.
 #[derive(Debug, Clone, Default)]
@@ -95,6 +96,7 @@ impl<'a> Emitter<'a> {
                             | Expression::ArrayLiteral { .. }
                             | Expression::TupleCreation { .. }
                             | Expression::Lambda { .. }
+                            | Expression::Block { .. }
                     )
                 {
                     self.emit_instruction(
@@ -394,11 +396,31 @@ impl<'a> Emitter<'a> {
 
         loop_stack.push(switch_break_ctx);
 
+        let discriminant_type = self.query_type(switch_stmt.discriminant.span());
+        let comparison_opcode = if matches!(
+            &discriminant_type,
+            Type::Class { symbol_name, .. }
+                if symbol_name == "std::string"
+                    || symbol_name == "std.string"
+                    || symbol_name == "string"
+        ) {
+            OpCode::EqString
+        } else if matches!(
+            &discriminant_type,
+            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+        ) {
+            OpCode::EqI64
+        } else if discriminant_type.is_floating_point() {
+            OpCode::EqF64
+        } else {
+            OpCode::EqI32
+        };
+
         for case in &switch_stmt.cases {
             let r_val = self.emit_expression(&case.case_value, None)?;
             let r_cmp = self.allocator.alloc_temp()?;
             self.emit_instruction(
-                Instruction::format_a(OpCode::EqI32, 0, r_cmp, r_disc, r_val),
+                Instruction::format_a(comparison_opcode, 0, r_cmp, r_disc, r_val),
                 Some(case.span),
             );
             self.allocator.free_temp(r_val);
@@ -455,7 +477,14 @@ impl<'a> Emitter<'a> {
 
         if let Some(val) = &return_stmt.value {
             let r_val = self.emit_expression(val, None)?;
-            if self.query_type(val.span()).is_reference_type() && self.is_borrowed_reference(val) {
+            if (self.query_type(val.span()).is_reference_type()
+                || matches!(
+                    self.query_type(val.span()),
+                    solix_common::types::Type::GenericParameter { .. }
+                        | solix_common::types::Type::Unresolved(_)
+                ))
+                && self.is_borrowed_reference(val)
+            {
                 self.emit_instruction(
                     Instruction::format_a(OpCode::IncRef, 0, r_val, 0, 0),
                     Some(return_stmt.span),
@@ -483,10 +512,22 @@ impl<'a> Emitter<'a> {
         var_decl: &VariableDeclarationStatement,
     ) -> Result<(), EmissionError> {
         let name = self.get_lexeme(var_decl.name_span).to_string();
-        let local_reg = self.allocator.alloc_local(name)?;
+        let local_reg = self.allocator.alloc_local(name.clone())?;
 
         let var_type = self.query_type(var_decl.span);
-        let type_name = self.get_lexeme(var_decl.var_type.span());
+        let type_name_string = self.get_lexeme(var_decl.var_type.span()).to_string();
+
+        self.function
+            .local_variables
+            .push(solix_common::bytecode::LocalVariableDebugInfo {
+                register: local_reg,
+                name,
+                type_name: type_name_string.clone(),
+                var_type: var_type.clone(),
+                start_pc: self.function.instructions.len() as u32,
+                end_pc: u32::MAX,
+                is_parameter: false,
+            });
         let is_ref = var_type.is_reference_type()
             || matches!(
                 var_decl.var_type,
@@ -495,9 +536,9 @@ impl<'a> Emitter<'a> {
                     | crate::phases::parser::statements::types::TypeAnnotation::Tuple { .. }
                     | crate::phases::parser::statements::types::TypeAnnotation::FunctionPointer { .. }
             )
-            || (!type_name.is_empty()
+            || (!type_name_string.is_empty()
                 && !matches!(
-                    type_name,
+                    type_name_string.as_str(),
                     "int8"
                         | "int16"
                         | "int32"

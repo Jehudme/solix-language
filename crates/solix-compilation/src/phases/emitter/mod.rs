@@ -11,6 +11,7 @@ pub mod emitter;
 pub mod exceptions;
 pub mod object_model;
 pub mod pipeline;
+pub mod reachability;
 pub mod register_allocator;
 pub mod static_layout;
 
@@ -21,5 +22,6 @@ pub use disassembler::{disassemble_function, disassemble_instruction, disassembl
 pub use emitter::Emitter;
 pub use object_model::compile_class_layout;
 pub use pipeline::{EmissionArtifacts, emit_context};
+pub use reachability::apply_reachability_and_static_linking;
 pub use register_allocator::{MAX_ARGUMENTS_PER_CALL, MAX_REGISTERS_PER_FRAME, RegisterAllocator};
 pub use static_layout::{StaticLayout, StaticVariableDecl, synthesize_module_init};

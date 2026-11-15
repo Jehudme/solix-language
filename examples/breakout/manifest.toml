@@ -1,0 +1,13 @@
+[info]
+name = "breakout"
+version = "0.1.0"
+description = "Modern neon Breakout showcase game built with Solix and Raylib"
+license = "Apache-2.0"
+authors = []
+
+[entrypoints]
+main = "BreakoutGame::main"
+test = "TestRunner::test"
+
+[dependencies]
+raylib = "5.5.0"

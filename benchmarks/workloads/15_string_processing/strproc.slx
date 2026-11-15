@@ -1,0 +1,35 @@
+import blt.io.println;
+
+class StrProcApp {
+    public static int32 process(string s, int32 factor) {
+        if (s == "alpha") {
+            return factor * 2;
+        }
+        if (s == "beta") {
+            return factor * 3;
+        }
+        if (s == "gamma") {
+            return factor * 5;
+        }
+        return factor;
+    }
+
+    public static void main() {
+        string[] words = new string[3];
+        words[0] = "alpha";
+        words[1] = "beta";
+        words[2] = "gamma";
+
+        int32 total = 0;
+        for (int32 i = 0; i < 100000; i = i + 1) {
+            string w = words[i % 3];
+            total = (total + StrProcApp::process(w, i % 20)) & 0x7FFFFFFF;
+        }
+
+        if (total == 3166647) {
+            println("RESULT: 3166647");
+        } else {
+            println("FAIL");
+        }
+    }
+}

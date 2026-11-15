@@ -1,0 +1,76 @@
+package solix.crypto;
+
+import solix.core.String;
+import solix.core.FormatException;
+
+public class Base64 {
+    public static String encode(int8[] byte_data) {
+        if (byte_data == null) {
+            return new String("");
+        }
+        char[] encoded_chars = Base64::native_encode(byte_data);
+        if (encoded_chars == null) {
+            return new String("");
+        }
+        return new String(encoded_chars);
+    }
+
+    public static String encode_string(String input_text) {
+        if (input_text == null || input_text.data == null) {
+            return new String("");
+        }
+        char[] encoded_chars = Base64::native_encode_string(input_text.to_chars());
+        if (encoded_chars == null) {
+            return new String("");
+        }
+        return new String(encoded_chars);
+    }
+
+    public static String encode_string(string input_text) {
+        if (input_text == null) {
+            return new String("");
+        }
+        return Base64::encode_string(new String(input_text));
+    }
+
+    public static int8[] decode(String base64_text) {
+        if (base64_text == null || base64_text.data == null) {
+            return new int8[0];
+        }
+        int8[] decoded_bytes = Base64::native_decode(base64_text.to_chars());
+        if (decoded_bytes == null) {
+            throw new FormatException("Invalid Base64 sequence: " + base64_text.to_string());
+        }
+        return decoded_bytes;
+    }
+
+    public static int8[] decode(string base64_text) {
+        if (base64_text == null) {
+            return new int8[0];
+        }
+        return Base64::decode(new String(base64_text));
+    }
+
+    public static String decode_to_string(String base64_text) {
+        if (base64_text == null || base64_text.data == null) {
+            return new String("");
+        }
+        char[] decoded_chars = Base64::native_decode_to_string(base64_text.to_chars());
+        if (decoded_chars == null) {
+            throw new FormatException("Invalid Base64 sequence: " + base64_text.to_string());
+        }
+        return new String(decoded_chars);
+    }
+
+    public static String decode_to_string(string base64_text) {
+        if (base64_text == null) {
+            return new String("");
+        }
+        return Base64::decode_to_string(new String(base64_text));
+    }
+
+    private static native char[] native_encode(int8[] byte_data);
+    private static native char[] native_encode_string(char[] text_chars);
+    private static native int8[] native_decode(char[] base64_chars);
+    private static native char[] native_decode_to_string(char[] base64_chars);
+}

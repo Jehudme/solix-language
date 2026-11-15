@@ -1,0 +1,290 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.NoSuchElementException;
+
+public class TreeSetIterator<T> implements IIterator<T> {
+    private List<T> key_items;
+    private int32 iteration_index;
+
+    public TreeSetIterator(List<T> keys) {
+        this.key_items = keys;
+        this.iteration_index = 0;
+    }
+
+    public bool has_next() {
+        return this.iteration_index < this.key_items.size();
+    }
+
+    public T next() {
+        if (this.iteration_index >= this.key_items.size()) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T item_value = this.key_items.get(this.iteration_index);
+        this.iteration_index = this.iteration_index + 1;
+        return item_value;
+    }
+}
+
+public class TreeSet<T> implements ISet<T>, IReadOnlyCollection<T>, IIterable<T>, IStringable {
+    private TreeMap<T, bool> internal_map;
+    private int32(*)(T, T) custom_comparator;
+
+    public TreeSet() {
+        this.internal_map = new TreeMap<T, bool>();
+        this.custom_comparator = null;
+    }
+
+    public TreeSet(int32(*)(T, T) comparator) {
+        this.internal_map = new TreeMap<T, bool>(comparator);
+        this.custom_comparator = comparator;
+    }
+
+    public TreeSet(T[] items) {
+        this.internal_map = new TreeMap<T, bool>();
+        this.custom_comparator = null;
+        if (items != null) {
+            for (int32 array_index = 0; array_index < items.length; array_index = array_index + 1) {
+                this.add(items[array_index]);
+            }
+        }
+    }
+
+    public TreeSet(ICollection<T> other_collection) {
+        this.internal_map = new TreeMap<T, bool>();
+        this.custom_comparator = null;
+        if (other_collection != null) {
+            IIterator<T> iterator_instance = other_collection.iterator();
+            while (iterator_instance.has_next()) {
+                this.add(iterator_instance.next());
+            }
+        }
+    }
+
+    public int32 size() {
+        return this.internal_map.size();
+    }
+
+    public bool is_empty() {
+        return this.internal_map.is_empty();
+    }
+
+    public void clear() {
+        this.internal_map.clear();
+    }
+
+    public bool contains(T item) {
+        return this.internal_map.contains_key(item);
+    }
+
+    public bool add(T item) {
+        if (this.internal_map.contains_key(item)) {
+            return false;
+        }
+        this.internal_map.put(item, true);
+        return true;
+    }
+
+    public bool remove(T item) {
+        if (!this.internal_map.contains_key(item)) {
+            return false;
+        }
+        this.internal_map.remove(item);
+        return true;
+    }
+
+    public T first() {
+        if (this.is_empty()) {
+            throw new NoSuchElementException("TreeSet is empty");
+        }
+        return this.internal_map.first_key();
+    }
+
+    public T last() {
+        if (this.is_empty()) {
+            throw new NoSuchElementException("TreeSet is empty");
+        }
+        return this.internal_map.last_key();
+    }
+
+    public TreeSet<T> subset(T from_element, T to_element) {
+        TreeSet<T> result_subset = new TreeSet<T>(this.custom_comparator);
+        List<T> all_elements = this.internal_map.keys();
+        for (int32 element_index = 0; element_index < all_elements.size(); element_index = element_index + 1) {
+            T current_element = all_elements.get(element_index);
+            bool is_ge_from = false;
+            bool is_lt_to = false;
+            if (this.custom_comparator != null) {
+                is_ge_from = this.custom_comparator(current_element, from_element) >= 0;
+                is_lt_to = this.custom_comparator(current_element, to_element) < 0;
+            } else {
+                is_ge_from = current_element >= from_element;
+                is_lt_to = current_element < to_element;
+            }
+            if (is_ge_from && is_lt_to) {
+                result_subset.add(current_element);
+            }
+        }
+        return result_subset;
+    }
+
+    public T[] to_array() {
+        List<T> key_list = this.internal_map.keys();
+        return key_list.to_array();
+    }
+
+    public List<T> to_list() {
+        return this.internal_map.keys();
+    }
+
+    public IIterator<T> iterator() {
+        return new TreeSetIterator<T>(this.internal_map.keys());
+    }
+
+    public void for_each(void(*)(T) action_callback) {
+        if (action_callback == null) {
+            return;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            action_callback(key_list.get(item_index));
+        }
+    }
+
+    public void union_with(TreeSet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        List<T> other_keys = other_set.to_list();
+        for (int32 item_index = 0; item_index < other_keys.size(); item_index = item_index + 1) {
+            this.add(other_keys.get(item_index));
+        }
+    }
+
+    public void union_with(ISet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        IIterator<T> iterator_instance = other_set.iterator();
+        while (iterator_instance != null && iterator_instance.has_next()) {
+            this.add(iterator_instance.next());
+        }
+    }
+
+    public void intersect_with(TreeSet<T> other_set) {
+        if (other_set == null) {
+            this.clear();
+            return;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            T item_val = key_list.get(item_index);
+            if (!other_set.contains(item_val)) {
+                this.remove(item_val);
+            }
+        }
+    }
+
+    public void intersect_with(ISet<T> other_set) {
+        if (other_set == null) {
+            this.clear();
+            return;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            T item_val = key_list.get(item_index);
+            if (!other_set.contains(item_val)) {
+                this.remove(item_val);
+            }
+        }
+    }
+
+    public void difference_with(TreeSet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        List<T> other_keys = other_set.to_list();
+        for (int32 item_index = 0; item_index < other_keys.size(); item_index = item_index + 1) {
+            this.remove(other_keys.get(item_index));
+        }
+    }
+
+    public void difference_with(ISet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        IIterator<T> iterator_instance = other_set.iterator();
+        while (iterator_instance != null && iterator_instance.has_next()) {
+            this.remove(iterator_instance.next());
+        }
+    }
+
+    public bool is_subset_of(TreeSet<T> other_set) {
+        if (other_set == null) {
+            return false;
+        }
+        if (this.size() > other_set.size()) {
+            return false;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            if (!other_set.contains(key_list.get(item_index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public bool is_subset_of(ISet<T> other_set) {
+        if (other_set == null) {
+            return false;
+        }
+        if (this.size() > other_set.size()) {
+            return false;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            if (!other_set.contains(key_list.get(item_index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public bool is_superset_of(TreeSet<T> other_set) {
+        if (other_set == null) {
+            return true;
+        }
+        if (other_set.size() > this.size()) {
+            return false;
+        }
+        List<T> other_keys = other_set.to_list();
+        for (int32 item_index = 0; item_index < other_keys.size(); item_index = item_index + 1) {
+            if (!this.contains(other_keys.get(item_index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public bool is_superset_of(ISet<T> other_set) {
+        if (other_set == null) {
+            return true;
+        }
+        if (other_set.size() > this.size()) {
+            return false;
+        }
+        IIterator<T> iterator_instance = other_set.iterator();
+        while (iterator_instance != null && iterator_instance.has_next()) {
+            if (!this.contains(iterator_instance.next())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this.to_list());
+    }
+}

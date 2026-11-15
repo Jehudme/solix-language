@@ -5230,7 +5230,7 @@ public class BadGeneric {
 
 ### Positive Test Scenarios (Valid Variations)
 
-### Case 49.1: Static Native Function Call [NOT IMPLEMENTED]
+### Case 49.1: Static Native Function Call [IMPLEMENTED]
 ```solix
 public class NativeMath {
     public static native int32 add(int32 a, int32 b);
@@ -5246,7 +5246,7 @@ public class Main {
 
 ---
 
-### Case 49.2: Instance Native Function Call with Object Context [NOT IMPLEMENTED]
+### Case 49.2: Instance Native Function Call with Object Context [IMPLEMENTED]
 ```solix
 public class Counter {
     public int32 value;
@@ -5266,7 +5266,7 @@ public class Main {
 
 ---
 
-### Case 49.3: Batch Registration Hook via `solix_register_natives` [NOT IMPLEMENTED]
+### Case 49.3: Batch Registration Hook via `solix_register_natives` [IMPLEMENTED]
 ```solix
 public class BatchPlugin {
     public static native int32 multiply(int32 a, int32 b);
@@ -5285,7 +5285,7 @@ public class Main {
 
 ---
 
-### Case 49.4: Direct Dynamic Symbol Resolution Fallback [NOT IMPLEMENTED]
+### Case 49.4: Direct Dynamic Symbol Resolution Fallback [IMPLEMENTED]
 ```solix
 public class DynamicLib {
     public static native int32 direct_export(int32 x);
@@ -5301,7 +5301,7 @@ public class Main {
 
 ---
 
-### Case 49.5: Multiple Shared Libraries Loaded Concurrently [NOT IMPLEMENTED]
+### Case 49.5: Multiple Shared Libraries Loaded Concurrently [IMPLEMENTED]
 ```solix
 public class LibA {
     public static native int32 funcA();
@@ -5323,7 +5323,7 @@ public class Main {
 
 ### Negative Test Scenarios
 
-### Case 49.6: Missing / Non-Existent Shared Library Path [NOT IMPLEMENTED]
+### Case 49.6: Missing / Non-Existent Shared Library Path [IMPLEMENTED]
 ```cpp
 // Runtime options specifying a non-existent shared library file path
 options.native_libraries.push_back("non_existent_plugin.dll");
@@ -5332,7 +5332,7 @@ options.native_libraries.push_back("non_existent_plugin.dll");
 
 ---
 
-### Case 49.7: Corrupted or Non-Binary File Loaded as Shared Library [NOT IMPLEMENTED]
+### Case 49.7: Corrupted or Non-Binary File Loaded as Shared Library [IMPLEMENTED]
 ```cpp
 // Runtime options specifying a plain text or corrupted binary file
 options.native_libraries.push_back("corrupt_dummy.txt");
@@ -5341,7 +5341,7 @@ options.native_libraries.push_back("corrupt_dummy.txt");
 
 ---
 
-### Case 49.8: Unresolved Native Method Symbol at Invocation [NOT IMPLEMENTED]
+### Case 49.8: Unresolved Native Method Symbol at Invocation [IMPLEMENTED]
 ```solix
 public class MissingNative {
     public static native int32 non_existent_function();
@@ -5357,7 +5357,7 @@ public class Main {
 
 ---
 
-### Case 49.9: Reject Foreign Platform Native Library Format [NOT IMPLEMENTED]
+### Case 49.9: Reject Foreign Platform Native Library Format [IMPLEMENTED]
 ```cpp
 // Runtime options specifying a foreign platform library format (e.g. .dll on Linux or .so on Windows)
 #ifdef _WIN32
@@ -5700,7 +5700,7 @@ int32 main() {
 
 ---
 
-### Case 55.5: Function Template Lowering with `<args...>` [NOT IMPLEMENTED]
+### Case 55.5: Function Template Lowering with `<args...>` [IMPLEMENTED]
 ```solix
 int32 sum_all<args...>(int32 first, args...) {
     int32 total = first;
@@ -5719,7 +5719,7 @@ int32 main() {
 
 ---
 
-### Case 55.6: Automatic Call-Site Argument Bundling [NOT IMPLEMENTED]
+### Case 55.6: Automatic Call-Site Argument Bundling [IMPLEMENTED]
 ```solix
 int32 count_args<args...>(int32 label, args...) {
     return args.length;

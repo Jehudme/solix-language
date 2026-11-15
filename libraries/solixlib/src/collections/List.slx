@@ -1,0 +1,373 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.Optional;
+import solix.core.IndexOutOfBoundsException;
+import solix.core.IllegalArgumentException;
+import solix.core.NoSuchElementException;
+
+public class ListIterator<T> implements IIterator<T> {
+    private T[] data;
+    private int32 count;
+    private int32 cursor;
+
+    public ListIterator(T[] data_array, int32 element_count) {
+        this.data = data_array;
+        this.count = element_count;
+        this.cursor = 0;
+    }
+
+    public bool has_next() {
+        return this.cursor < this.count;
+    }
+
+    public T next() {
+        if (this.cursor >= this.count) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T element_value = this.data[this.cursor];
+        this.cursor = this.cursor + 1;
+        return element_value;
+    }
+}
+
+public class List<T> implements IList<T>, ICollection<T>, IIterable<T>, IStringable {
+    public T[] data;
+    public int32 count;
+
+    public List() {
+        this.data = new T[16];
+        this.count = 0;
+    }
+
+    public List(int32 initial_capacity) {
+        if (initial_capacity < 0) {
+            throw new IllegalArgumentException("initial_capacity", "Initial capacity cannot be negative");
+        }
+        if (initial_capacity < 4) {
+            initial_capacity = 4;
+        }
+        this.data = new T[initial_capacity];
+        this.count = 0;
+    }
+
+    public List(T[] initial_items) {
+        if (initial_items == null) {
+            this.data = new T[16];
+            this.count = 0;
+        } else {
+            int32 initial_capacity = initial_items.length;
+            if (initial_capacity < 4) {
+                initial_capacity = 4;
+            }
+            this.data = new T[initial_capacity];
+            this.count = initial_items.length;
+            int32 copy_index = 0;
+            while (copy_index < initial_items.length) {
+                this.data[copy_index] = initial_items[copy_index];
+                copy_index = copy_index + 1;
+            }
+        }
+    }
+
+    public List(ICollection<T> other_collection) {
+        if (other_collection == null) {
+            this.data = new T[16];
+            this.count = 0;
+        } else {
+            int32 initial_capacity = other_collection.size();
+            if (initial_capacity < 4) {
+                initial_capacity = 4;
+            }
+            this.data = new T[initial_capacity];
+            this.count = 0;
+            IIterator<T> iterator = other_collection.iterator();
+            while (iterator.has_next()) {
+                this.data[this.count] = iterator.next();
+                this.count = this.count + 1;
+            }
+        }
+    }
+
+    public static List<T> of<T, args...>(args... items) {
+        tuple items_tuple = items;
+        List<T> list_result = new List<T>(items_tuple.length);
+        int32 tuple_index = 0;
+        while (tuple_index < items_tuple.length) {
+            list_result.add((T)items_tuple[tuple_index]);
+            tuple_index = tuple_index + 1;
+        }
+        return list_result;
+    }
+
+    public int32 size() {
+        return this.count;
+    }
+
+    public int32 capacity() {
+        return this.data.length;
+    }
+
+    public bool is_empty() {
+        return this.count == 0;
+    }
+
+    public void clear() {
+        int32 clear_index = 0;
+        while (clear_index < this.count) {
+            this.data[clear_index] = default(T);
+            clear_index = clear_index + 1;
+        }
+        this.count = 0;
+    }
+
+    public T[] to_array() {
+        T[] array_copy = new T[this.count];
+        int32 copy_index = 0;
+        while (copy_index < this.count) {
+            array_copy[copy_index] = this.data[copy_index];
+            copy_index = copy_index + 1;
+        }
+        return array_copy;
+    }
+
+    public void ensure_capacity(int32 minimum_capacity) {
+        if (minimum_capacity > this.data.length) {
+            int32 new_capacity = this.data.length * 2;
+            if (new_capacity < minimum_capacity) {
+                new_capacity = minimum_capacity;
+            }
+            T[] new_array = new T[new_capacity];
+            int32 copy_index = 0;
+            while (copy_index < this.count) {
+                new_array[copy_index] = this.data[copy_index];
+                copy_index = copy_index + 1;
+            }
+            this.data = new_array;
+        }
+    }
+
+    public void shrink_to_fit() {
+        if (this.data.length > this.count) {
+            int32 new_capacity = this.count > 4 ? this.count : 4;
+            T[] new_array = new T[new_capacity];
+            int32 copy_index = 0;
+            while (copy_index < this.count) {
+                new_array[copy_index] = this.data[copy_index];
+                copy_index = copy_index + 1;
+            }
+            this.data = new_array;
+        }
+    }
+
+    public T get(int32 index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException("List index out of bounds", index, 0, this.count);
+        }
+        return this.data[index];
+    }
+
+    public T set(int32 index, T item) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException("List index out of bounds", index, 0, this.count);
+        }
+        T old_element = this.data[index];
+        this.data[index] = item;
+        return old_element;
+    }
+
+    public void add(T item) {
+        this.ensure_capacity(this.count + 1);
+        this.data[this.count] = item;
+        this.count = this.count + 1;
+    }
+
+    public void insert(int32 index, T item) {
+        if (index < 0 || index > this.count) {
+            throw new IndexOutOfBoundsException("List insert index out of bounds", index, 0, this.count);
+        }
+        this.ensure_capacity(this.count + 1);
+        int32 shift_index = this.count - 1;
+        while (shift_index >= index) {
+            this.data[shift_index + 1] = this.data[shift_index];
+            shift_index = shift_index - 1;
+        }
+        this.data[index] = item;
+        this.count = this.count + 1;
+    }
+
+    public T remove_at(int32 index) {
+        if (index < 0 || index >= this.count) {
+            throw new IndexOutOfBoundsException("List remove_at index out of bounds", index, 0, this.count);
+        }
+        T removed_element = this.data[index];
+        int32 shift_index = index;
+        while (shift_index < this.count - 1) {
+            this.data[shift_index] = this.data[shift_index + 1];
+            shift_index = shift_index + 1;
+        }
+        this.data[this.count - 1] = default(T);
+        this.count = this.count - 1;
+        return removed_element;
+    }
+
+    public bool remove(T item) {
+        int32 found_index = this.index_of(item);
+        if (found_index != -1) {
+            this.remove_at(found_index);
+            return true;
+        }
+        return false;
+    }
+
+    public int32 index_of(T item) {
+        int32 search_index = 0;
+        while (search_index < this.count) {
+            if (this.data[search_index] == item) {
+                return search_index;
+            }
+            search_index = search_index + 1;
+        }
+        return -1;
+    }
+
+    public bool contains(T item) {
+        return this.index_of(item) != -1;
+    }
+
+    public List<T> sub_list(int32 start_index, int32 count_to_take) {
+        if (start_index < 0 || count_to_take < 0 || start_index + count_to_take > this.count) {
+            throw new IndexOutOfBoundsException("sub_list range out of bounds", start_index, 0, this.count);
+        }
+        List<T> sub_result = new List<T>(count_to_take);
+        int32 copy_index = 0;
+        while (copy_index < count_to_take) {
+            sub_result.add(this.data[start_index + copy_index]);
+            copy_index = copy_index + 1;
+        }
+        return sub_result;
+    }
+
+    public void reverse() {
+        int32 left_index = 0;
+        int32 right_index = this.count - 1;
+        while (left_index < right_index) {
+            T temporary = this.data[left_index];
+            this.data[left_index] = this.data[right_index];
+            this.data[right_index] = temporary;
+            left_index = left_index + 1;
+            right_index = right_index - 1;
+        }
+    }
+
+    public void for_each(void(*)(T) action) {
+        int32 walk_index = 0;
+        while (walk_index < this.count) {
+            action(this.data[walk_index]);
+            walk_index = walk_index + 1;
+        }
+    }
+
+    public List<T> filter(bool(*)(T) predicate) {
+        List<T> filtered_result = new List<T>();
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (predicate(this.data[scan_index])) {
+                filtered_result.add(this.data[scan_index]);
+            }
+            scan_index = scan_index + 1;
+        }
+        return filtered_result;
+    }
+
+    public List<U> map<U>(U(*)(T) transform) {
+        List<U> mapped_result = new List<U>(this.count);
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            mapped_result.add(transform(this.data[scan_index]));
+            scan_index = scan_index + 1;
+        }
+        return mapped_result;
+    }
+
+    public T reduce(T initial_value, T(*)(T, T) accumulator) {
+        T current_value = initial_value;
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            current_value = accumulator(current_value, this.data[scan_index]);
+            scan_index = scan_index + 1;
+        }
+        return current_value;
+    }
+
+    public T reduce(T(*)(T, T) accumulator) {
+        if (this.count == 0) {
+            throw new NoSuchElementException("Cannot reduce an empty list");
+        }
+        T current_value = this.data[0];
+        int32 scan_index = 1;
+        while (scan_index < this.count) {
+            current_value = accumulator(current_value, this.data[scan_index]);
+            scan_index = scan_index + 1;
+        }
+        return current_value;
+    }
+
+    public bool any(bool(*)(T) predicate) {
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (predicate(this.data[scan_index])) {
+                return true;
+            }
+            scan_index = scan_index + 1;
+        }
+        return false;
+    }
+
+    public bool all(bool(*)(T) predicate) {
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (!predicate(this.data[scan_index])) {
+                return false;
+            }
+            scan_index = scan_index + 1;
+        }
+        return true;
+    }
+
+    public int32 count_if(bool(*)(T) predicate) {
+        int32 matched_count = 0;
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (predicate(this.data[scan_index])) {
+                matched_count = matched_count + 1;
+            }
+            scan_index = scan_index + 1;
+        }
+        return matched_count;
+    }
+
+    public Optional<T> find(bool(*)(T) predicate) {
+        int32 scan_index = 0;
+        while (scan_index < this.count) {
+            if (predicate(this.data[scan_index])) {
+                return Optional::of(this.data[scan_index]);
+            }
+            scan_index = scan_index + 1;
+        }
+        return Optional::empty();
+    }
+
+    public void sort(int32(*)(T, T) comparator) {
+        Algorithms::sort<T>(this, comparator);
+    }
+
+    public IIterator<T> iterator() {
+        return new ListIterator<T>(this.data, this.count);
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this);
+    }
+}

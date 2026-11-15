@@ -9,6 +9,9 @@ pub mod statements;
 pub mod visitor;
 
 pub use errors::ParsingError;
-pub use parser::{AstMetaData, parse, parse_context, parse_source};
+pub use parser::{
+    AstMetaData, parse, parse_context, parse_context_resilient, parse_source,
+    parse_source_resilient,
+};
 pub use statements::*;
 pub use visitor::{AstVisitor, Visitable};

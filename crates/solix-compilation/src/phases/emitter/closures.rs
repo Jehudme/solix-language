@@ -318,6 +318,34 @@ fn collect_identifiers_expr(
                 }
             }
         }
+        Expression::Block {
+            span,
+            statements,
+            result,
+        } => {
+            let mut block_scope = local_scope.clone();
+            collect_identifiers_block(
+                &crate::phases::parser::statements::control_flow::BlockStatement {
+                    span: *span,
+                    statements: statements.clone(),
+                },
+                &mut block_scope,
+                outer_allocator,
+                sources,
+                captured,
+                visited,
+            );
+            if let Some(res) = result {
+                collect_identifiers_expr(
+                    res,
+                    &block_scope,
+                    outer_allocator,
+                    sources,
+                    captured,
+                    visited,
+                );
+            }
+        }
         _ => {}
     }
 }

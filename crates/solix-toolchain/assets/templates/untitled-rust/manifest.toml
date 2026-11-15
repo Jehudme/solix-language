@@ -1,0 +1,10 @@
+[info]
+name = "untitled"
+version = "0.1.0"
+description = "An untitled Solix project with Rust native interoperability"
+license = "Apache-2.0"
+authors = ["Jehud Metellus"]
+
+[entrypoints]
+main = "Main::main"
+test = "TestRunner::test"

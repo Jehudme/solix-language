@@ -5,8 +5,10 @@
 use crate::exceptions::RuntimeError;
 use crate::native::NativeFunction;
 use solix_common::bytecode::BinaryProgram;
+use solix_common::solver::ModuleSolver;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Default dynamic heap size: 64 megabytes.
 pub const DEFAULT_HEAP_SIZE: usize = 64 * 1024 * 1024;
@@ -15,7 +17,7 @@ pub const DEFAULT_HEAP_SIZE: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_CALL_STACK_DEPTH: usize = 65_536;
 
 /// Configuration options governing virtual machine execution.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RuntimeOptions {
     /// Optional symbol override for the entry point function (e.g. `"main"` or `"my_module::run"`).
     pub entry_point: Option<String>,
@@ -23,6 +25,8 @@ pub struct RuntimeOptions {
     pub binaries: Vec<BinaryProgram>,
     /// File paths of `.slxb` compiled binaries to load upon context creation.
     pub binary_paths: Vec<PathBuf>,
+    /// File paths of native dynamic shared libraries (`.so`, `.dll`, `.dylib`) to load upon context creation.
+    pub native_libraries: Vec<PathBuf>,
     /// Dynamic heap memory capacity in bytes.
     pub heap_size: usize,
     /// Maximum allowable call frame recursion depth before triggering a stack overflow.
@@ -36,6 +40,52 @@ pub struct RuntimeOptions {
     pub sandboxed: bool,
     /// Custom host native Rust functions registered for execution.
     pub native_functions: HashMap<String, NativeFunction>,
+    /// Optional pluggable module solver for auto-fetching dependencies on PC B.
+    pub solver: Option<Arc<dyn ModuleSolver>>,
+    /// Whether to verify cryptographic SHA-256 checksums on dependencies and native libraries (default true; false when --yolo).
+    pub verify_checksums: bool,
+    /// Optional thread-safe output sink for capturing guest standard output.
+    pub output_sink: Option<OutputSink>,
+}
+
+/// Callback type for capturing guest standard output streams.
+pub type OutputCallback = Arc<dyn Fn(&str, bool) + Send + Sync>;
+
+/// Thread-safe sink for capturing guest standard output streams (e.g. for DAP events).
+#[derive(Clone)]
+pub struct OutputSink(pub OutputCallback);
+
+impl std::fmt::Debug for OutputSink {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "OutputSink(<closure>)")
+    }
+}
+
+impl PartialEq for OutputSink {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl PartialEq for RuntimeOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.entry_point == other.entry_point
+            && self.binaries == other.binaries
+            && self.binary_paths == other.binary_paths
+            && self.native_libraries == other.native_libraries
+            && self.heap_size == other.heap_size
+            && self.max_call_stack_depth == other.max_call_stack_depth
+            && self.args == other.args
+            && self.safe_mode == other.safe_mode
+            && self.sandboxed == other.sandboxed
+            && self.native_functions == other.native_functions
+            && self.verify_checksums == other.verify_checksums
+            && match (&self.solver, &other.solver) {
+                (Some(solver_a), Some(solver_b)) => Arc::ptr_eq(solver_a, solver_b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 impl Default for RuntimeOptions {
@@ -44,12 +94,16 @@ impl Default for RuntimeOptions {
             entry_point: None,
             binaries: Vec::new(),
             binary_paths: Vec::new(),
+            native_libraries: Vec::new(),
             heap_size: DEFAULT_HEAP_SIZE,
             max_call_stack_depth: DEFAULT_MAX_CALL_STACK_DEPTH,
             args: Vec::new(),
             safe_mode: false,
             sandboxed: false,
             native_functions: HashMap::new(),
+            solver: None,
+            verify_checksums: true,
+            output_sink: None,
         }
     }
 }
@@ -116,6 +170,31 @@ impl RuntimeOptions {
         self
     }
 
+    /// Appends a native dynamic shared library path to load during context creation.
+    #[must_use]
+    pub fn with_native_library(mut self, path: impl AsRef<Path>) -> Self {
+        self.native_libraries.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// Appends multiple native dynamic shared library paths to load during context creation.
+    #[must_use]
+    pub fn with_native_libraries(
+        mut self,
+        paths: impl IntoIterator<Item = impl AsRef<Path>>,
+    ) -> Self {
+        self.native_libraries
+            .extend(paths.into_iter().map(|path| path.as_ref().to_path_buf()));
+        self
+    }
+
+    /// Configures whether to enforce cryptographic checksum validation.
+    #[must_use]
+    pub fn with_verify_checksums(mut self, verify: bool) -> Self {
+        self.verify_checksums = verify;
+        self
+    }
+
     /// Configures the dynamic heap memory capacity in bytes.
     #[must_use]
     pub fn with_heap_size(mut self, heap_size: usize) -> Self {
@@ -148,6 +227,20 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_sandboxed(mut self, sandboxed: bool) -> Self {
         self.sandboxed = sandboxed;
+        self
+    }
+
+    /// Configures the pluggable module solver for runtime dependency resolution.
+    #[must_use]
+    pub fn with_solver(mut self, solver: Arc<dyn ModuleSolver>) -> Self {
+        self.solver = Some(solver);
+        self
+    }
+
+    /// Configures the thread-safe output sink for capturing guest standard output streams.
+    #[must_use]
+    pub fn with_output_sink(mut self, sink: OutputSink) -> Self {
+        self.output_sink = Some(sink);
         self
     }
 }

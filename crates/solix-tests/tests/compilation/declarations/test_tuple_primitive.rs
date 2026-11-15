@@ -88,6 +88,44 @@ fn test_case_55_4_runtime_instanceof_with_classes_and_interfaces() {
 }
 
 #[test]
+fn test_case_55_5_function_template_lowering_with_args() {
+    let code = r#"
+        int32 sum_all<args...>(int32 first, args...) {
+            int32 total = first;
+            for (int32 i = 0; i < args.length; i++) {
+                total = total + cast(args[i], int32);
+            }
+            return total;
+        }
+
+        int32 main() {
+            int32 res = sum_all(10, 20, 30, 40);
+            return res == 100 ? 0 : 1;
+        }
+    "#;
+    let (res, _) = compile_and_run(code);
+    assert_eq!(res, Value::I32(0));
+}
+
+#[test]
+fn test_case_55_6_automatic_call_site_argument_bundling() {
+    let code = r#"
+        int32 count_args<args...>(int32 label, args...) {
+            return args.length;
+        }
+
+        int32 main() {
+            if (count_args(0) != 0) return 1;
+            if (count_args(1, 100) != 1) return 2;
+            if (count_args(3, 1, 'b', true) != 3) return 3;
+            return 0;
+        }
+    "#;
+    let (res, _) = compile_and_run(code);
+    assert_eq!(res, Value::I32(0));
+}
+
+#[test]
 fn test_case_55_7_destructor_trigger_on_tuple_scope_exit() {
     let code = r#"
         class Tracker {

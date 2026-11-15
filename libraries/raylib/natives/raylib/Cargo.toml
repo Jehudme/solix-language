@@ -1,0 +1,13 @@
+[package]
+name = "raylib_native"
+version = "5.5.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+
+[build-dependencies]

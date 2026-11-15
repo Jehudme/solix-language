@@ -681,6 +681,16 @@ pub fn walk_expression<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, n
                 visitor.visit_expression(element);
             }
         }
+        Expression::Block {
+            statements, result, ..
+        } => {
+            for statement in statements {
+                visitor.visit_statement(statement);
+            }
+            if let Some(res) = result {
+                visitor.visit_expression(res);
+            }
+        }
     }
 }
 

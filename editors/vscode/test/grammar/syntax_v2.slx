@@ -1,0 +1,33 @@
+// SYNTAX TEST "source.solix"
+package my_app;
+// <------- keyword.declaration.solix
+
+extern import raylib;
+// <---- storage.modifier.solix
+//     ^^^^^^ keyword.declaration.solix
+
+class Calculator {
+// <--- keyword.declaration.solix
+//    ^^^^^^^^^^ entity.name.type.class.solix
+
+    public static int32 compute() {
+//  ^^^^^^ storage.modifier.solix
+//         ^^^^^^ storage.modifier.solix
+//                ^^^^^ storage.type.primitive.solix
+        return 42;
+//      ^^^^^^ keyword.control.solix
+    }
+
+    public ~Calculator() {
+//         ^^^^^^^^^^^ entity.name.function.destructor.solix
+    }
+}
+
+void main() {
+// <--- storage.type.primitive.solix
+//   ^^^^ entity.name.function.solix
+    int32 val = Calculator::compute();
+//  ^^^^^ storage.type.primitive.solix
+//              ^^^^^^^^^^ entity.name.type.class.solix
+//                        ^^ punctuation.accessor.colon.solix
+}

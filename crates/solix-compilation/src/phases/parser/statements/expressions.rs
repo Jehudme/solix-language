@@ -6,9 +6,10 @@ use crate::phases::lexing::{Span, TokenKind};
 use crate::phases::parser::statements::control_flow::BlockStatement;
 use crate::phases::parser::statements::declarations::Parameter;
 use crate::phases::parser::statements::types::TypeAnnotation;
+use serde::{Deserialize, Serialize};
 
 /// Evaluated literal constant value parsed from source code.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LiteralValue {
     /// 64-bit signed integer value.
     Int(i64),
@@ -27,7 +28,7 @@ pub enum LiteralValue {
 }
 
 /// Body representation for a lambda closure expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LambdaBody {
     /// Single expression body (e.g. `(x) => x + 1`).
     Expression(Box<Expression>),
@@ -36,7 +37,7 @@ pub enum LambdaBody {
 }
 
 /// Abstract Syntax Tree node representing a Solix expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expression {
     /// Literal constant value (numbers, strings, booleans, null).
     Literal {
@@ -200,6 +201,15 @@ pub enum Expression {
         /// Element expressions composing the tuple.
         elements: Vec<Expression>,
     },
+    /// Inlined block expression evaluating a sequence of statements and a final expression.
+    Block {
+        /// Overall source coordinate span.
+        span: Span,
+        /// Inlined statements executed in a new lexical scope.
+        statements: Vec<super::Statement>,
+        /// Optional final expression value produced by the block.
+        result: Option<Box<Expression>>,
+    },
 }
 
 impl Expression {
@@ -224,7 +234,8 @@ impl Expression {
             | Self::Lambda { span, .. }
             | Self::Sizeof { span, .. }
             | Self::Default { span, .. }
-            | Self::TupleCreation { span, .. } => *span,
+            | Self::TupleCreation { span, .. }
+            | Self::Block { span, .. } => *span,
         }
     }
 }

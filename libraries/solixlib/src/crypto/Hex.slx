@@ -1,0 +1,38 @@
+package solix.crypto;
+
+import solix.core.String;
+import solix.core.FormatException;
+
+public class Hex {
+    public static String encode(int8[] byte_data) {
+        if (byte_data == null) {
+            return new String("");
+        }
+        char[] encoded_chars = Hex::native_encode(byte_data);
+        if (encoded_chars == null) {
+            return new String("");
+        }
+        return new String(encoded_chars);
+    }
+
+    public static int8[] decode(String hex_string) {
+        if (hex_string == null || hex_string.data == null) {
+            return new int8[0];
+        }
+        int8[] decoded_bytes = Hex::native_decode(hex_string.to_chars());
+        if (decoded_bytes == null) {
+            throw new FormatException("Invalid hexadecimal string format: " + hex_string.to_string());
+        }
+        return decoded_bytes;
+    }
+
+    public static int8[] decode(string hex_string) {
+        if (hex_string == null) {
+            return new int8[0];
+        }
+        return Hex::decode(new String(hex_string));
+    }
+
+    private static native char[] native_encode(int8[] byte_data);
+    private static native int8[] native_decode(char[] hex_characters);
+}

@@ -26,7 +26,7 @@ All contributors and documentation authors **MUST** adhere to the following bind
 1. **The Zero-Drift Mandate:** Code and documentation **MUST** be authored, updated, and committed within the exact same Git commit or pull request. Any PR that alters grammar syntax, AST nodes, bytecode opcodes, VM dispatch behavior, or CLI flags without updating the corresponding specifications and guides **SHALL NOT** be approved or merged.
 2. **Compiler-Verified Language Snippets:** Every Solix (`.slx`) code snippet, grammar production, or compilation example in `docs/guides/` and `docs/wikipedia/` **MUST** be directly validated against the Solix compiler via automated test fixtures or integration tests. Hand-typed, uncompiled code snippets in documentation are strictly prohibited.
 3. **Comprehensive Rustdoc API Documentation:** All public modules, structs, enums, traits, functions, and type aliases across all workspace crates (`crates/*`) **MUST** be documented using Rustdoc (`///`). Public API items **MUST** include `# Examples`, `# Errors`, and `# Panics` sections where applicable. All code examples in Rustdoc **MUST** compile cleanly under `cargo test --doc`.
-4. **CLI Flag Synchronicity with `clap`:** Every documented CLI command, subcommand, flag, argument, and default value in `docs/internals/specs/cli/` or user guides **MUST** match the actual `clap` derive definitions in `crates/solix-client/src/` byte-for-byte.
+4. **CLI Flag Synchronicity with `clap`:** Every documented CLI command, subcommand, flag, argument, and default value in `docs/internals/specs/cli/` or user guides **MUST** match the actual `clap` derive definitions in `crates/solix-toolchain/src/` byte-for-byte.
 5. **Diagnostic Code Synchronicity with `miette`:** Every documented compiler error code, diagnostic category, and suggested fix in documentation **MUST** match the structured diagnostic definitions in `solix-common` and `solix-compilation`.
 6. **No Speculative or Unimplemented Features:** User guides (`docs/guides/`) and language wiki (`docs/wikipedia/`) **MUST NOT** describe future, planned, or unmerged language syntax as if currently functional. Features under active proposal or development **MUST** be confined to `docs/internals/specs/` or `docs/internals/milestones/` and prominently flagged with a `> [!WARNING] Experimental / Unimplemented` alert.
 7. **Methodical Archival of Superseded Knowledge:** Obsolete language syntax, retired opcodes, and superseded architectural RFCs **MUST NOT** linger in active documentation directories. Superseded documents **MUST** be moved to `docs/archive/` with an authoritative deprecation header linking to the current standard.
@@ -35,30 +35,49 @@ All contributors and documentation authors **MUST** adhere to the following bind
 
 ## 3. Structural Specification & Schema
 
-### 3.1 Documentation Directory Taxonomy
+### 3.1 Tripartite Documentation Directory Taxonomy
 
-The `docs/` repository hierarchy is strictly partitioned by scope and target audience:
+The `docs/` repository hierarchy enforces a strict tripartite separation of concerns (`guide/` vs. `spec/` vs. `wiki/`):
 
 ```text
 docs/
-├── overview/               # High-level architecture, compiler pipeline, VM design, memory model
-│   ├── architecture.md     # System overview and crate dependency topology
-│   └── memory_model.md     # Automatic Reference Counting (ARC) and memory layout
-├── guides/                 # User-facing language tutorials and developer operational guides
-│   ├── 01_getting_started.md
-│   ├── 02_variables_and_types.md
-│   ├── 03_control_flow.md
-│   ├── 04_classes_and_oop.md
-│   ├── 05_memory_management_and_arc.md
-│   └── 06_error_handling.md
-├── wikipedia/              # Formal encyclopedia of language keywords, statements, and expressions
-│   ├── keywords/           # Individual keyword specifications (e.g., class, while, match)
-│   ├── statements/         # Statement syntax, semantics, and AST representations
-│   └── expressions/        # Expression syntax, evaluation order, and precedence
-├── internals/              # Core engineering standards and architectural blueprints
-│   ├── guidelines/         # Engineering guidelines suite (GL-0001 - GL-0011)
-│   ├── milestones/         # Phased delivery plans, blocker tracking, and DoD sign-offs
-│   └── specs/              # Subsystem specifications (statements, VM ISA, runtime, CLI)
+├── README.md               # Master Documentation Hub & Tripartite Navigation Index
+├── guide/                  # User Guides ("How to Use It" — task tutorials linking to spec & wiki)
+│   ├── README.md           # Learning Path & Guide Index
+│   ├── 01-getting-started-and-toolchain.md
+│   ├── 02-variables-primitives-and-strings.md
+│   ├── 03-control-flow-and-functions.md
+│   ├── 04-classes-oop-and-namespaces.md
+│   ├── 05-memory-management-arc-and-raii.md
+│   ├── 06-error-handling-and-assertions.md
+│   ├── 07-generics-and-variadic-templates.md
+│   ├── 08-packages-dependencies-and-linking.md
+│   ├── 09-native-rust-extensions.md
+│   └── 10-standard-library-tour.md
+├── spec/                   # Formal & Internal Specifications ("How It Works Under the Hood")
+│   ├── README.md           # Master Specifications Index
+│   ├── lexical-grammar.md
+│   ├── type-system-and-semantics.md
+│   ├── compilation-pipeline.md
+│   ├── binder-and-monomorphization.md
+│   ├── optimizer-and-inliner.md
+│   ├── vm-isa-and-execution.md
+│   ├── memory-model-and-arc.md
+│   ├── exception-unwinding.md
+│   ├── binary-formats-slxb-and-slxarc.md
+│   ├── package-solver-and-linking.md
+│   ├── native-ffi-abi.md
+│   ├── statements/         # Statement & Expression Compilation Mechanics with Bytecode
+│   └── solixlib/           # Standard Library v2.0.0 Formal Specifications
+├── wiki/                   # Atomic Reference Wiki ("Fast Dictionary Reference")
+│   ├── README.md           # Master Wiki Index
+│   ├── errors/             # E0000..E0350 compiler errors & R0001..R0023 runtime traps
+│   ├── primitives/         # All 14 built-in primitive types & aliases
+│   ├── commands/           # solix compile, build, run, new, install, list, info
+│   └── keywords/           # 45+ reserved keywords grouped by syntactic category
+├── internals/              # Core Engineering Standards, Milestones & Protocol Governance
+│   ├── guidelines/         # Engineering guidelines suite (GL-0001 - GL-0013)
+│   └── milestones/         # Phased delivery plans, blocker tracking, and DoD sign-offs
 └── archive/                # Historical, deprecated, or superseded specifications
 ```
 
@@ -74,7 +93,7 @@ while counter < 10 {
     counter = counter + 1;
 }
 ```
-*Verifying Test:* [`tests/fixtures/control_flow/while_basic.slx`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/tests/fixtures/control_flow/while_basic.slx)
+*Verifying Test:* [`tests/fixtures/control_flow/while_basic.slx`](crates/solix-compilation/tests/fixtures/parser/while_basic.slx)
 ````
 
 ### 3.3 Archival Header Specification
@@ -85,7 +104,7 @@ When moving superseded documents to `docs/archive/`, authors **MUST** prepend th
 > [!CAUTION] ARCHIVED DOCUMENT
 > This document was officially superseded on **YYYY-MM-DD**. It is preserved exclusively 
 > for historical reference and compiler archaeology. It no longer represents active language semantics.
-> **Current Authoritative Standard:** [Current Specification Name](file:///path/to/current.md)
+> **Current Authoritative Standard:** [Current Specification Name](`path/to/current.md`)
 ```
 
 ---
@@ -161,20 +180,20 @@ solix compile <input_file> [-o <output_file>] [--optimization-level <level>] [--
 
 | Flag / Option | Type | Default | `clap` Source Reference | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `<input_file>` | `PathBuf` | *(Required)* | `crates/solix-client/src/commands/compile.rs#L18` | Path to entrypoint Solix source file (`.slx`). |
-| `-o, --output` | `PathBuf` | `out.slxbin` | `crates/solix-client/src/commands/compile.rs#L22` | Path to target bytecode binary output file. |
-| `-O, --opt-level`| `u8` | `1` | `crates/solix-client/src/commands/compile.rs#L26` | Bytecode optimization tier: `0` (none), `1` (standard), `2` (aggressive). |
-| `--emit-asm` | `bool` | `false` | `crates/solix-client/src/commands/compile.rs#L30` | Emit human-readable `.slxasm` disassembly alongside binary. |
-| `--verbose, -v`| `bool` | `false` | `crates/solix-client/src/commands/compile.rs#L34` | Enable verbose compilation logs and timing metrics. |
+| `<input_file>` | `PathBuf` | *(Required)* | `crates/solix-toolchain/src/commands/compile.rs#L18` | Path to entrypoint Solix source file (`.slx`). |
+| `-o, --output` | `PathBuf` | `out.slxbin` | `crates/solix-toolchain/src/commands/compile.rs#L22` | Path to target bytecode binary output file. |
+| `-O, --opt-level`| `u8` | `1` | `crates/solix-toolchain/src/commands/compile.rs#L26` | Bytecode optimization tier: `0` (none), `1` (standard), `2` (aggressive). |
+| `--emit-asm` | `bool` | `false` | `crates/solix-toolchain/src/commands/compile.rs#L30` | Emit human-readable `.slxasm` disassembly alongside binary. |
+| `--verbose, -v`| `bool` | `false` | `crates/solix-toolchain/src/commands/compile.rs#L34` | Enable verbose compilation logs and timing metrics. |
 ```
 
-#### Automated CLI Verification Test (`crates/solix-client/tests/test_cli_docs.rs`)
+#### Automated CLI Verification Test (`crates/solix-toolchain/tests/test_cli_docs.rs`)
 ```rust
-// Verified via crates/solix-client/tests/test_cli_docs.rs
+// Verified via crates/solix-toolchain/tests/test_cli_docs.rs
 #[test]
 fn verify_compile_cli_options_match_documentation() {
     use clap::CommandFactory;
-    use solix_client::cli::CommandLineArguments;
+    use solix_toolchain::cli::CommandLineArguments;
 
     let command_app = CommandLineArguments::command();
     let compile_subcommand = command_app.find_subcommand("compile")
@@ -191,7 +210,7 @@ fn verify_compile_cli_options_match_documentation() {
 ## 6. Anti-Patterns & Counter-Examples (What NOT to Do)
 
 ### Anti-Pattern 1: The "I'll Document It Later" Fallacy
-* **Flawed Practice:** An engineer adds a new `--emit-ast` flag to `solix-client` without updating `docs/internals/specs/cli/compile.md`, stating: "I'll open a separate docs PR later."
+* **Flawed Practice:** An engineer adds a new `--emit-ast` flag to `solix-toolchain` without updating `docs/internals/specs/cli/compile.md`, stating: "I'll open a separate docs PR later."
 * **Failure Mode:** The separate PR is never opened. Tooling authors and language developers have no record of the flag. When users query CLI capabilities, documentation contradicts binary `--help` output, damaging project credibility.
 * **Corrected Approach:** Reject the PR immediately at review time. Code changes, unit tests, and documentation updates **MUST** be submitted in the same PR.
 

@@ -1,0 +1,258 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.NoSuchElementException;
+
+public class HashSetIterator<T> implements IIterator<T> {
+    private List<T> key_items;
+    private int32 iteration_index;
+
+    public HashSetIterator(List<T> keys) {
+        this.key_items = keys;
+        this.iteration_index = 0;
+    }
+
+    public bool has_next() {
+        return this.iteration_index < this.key_items.size();
+    }
+
+    public T next() {
+        if (this.iteration_index >= this.key_items.size()) {
+            throw new NoSuchElementException("Iterator exhausted");
+        }
+        T item_value = this.key_items.get(this.iteration_index);
+        this.iteration_index = this.iteration_index + 1;
+        return item_value;
+    }
+}
+
+public class HashSet<T> implements ISet<T>, IReadOnlyCollection<T>, IIterable<T>, IStringable {
+    private HashMap<T, bool> internal_map;
+
+    public HashSet() {
+        this.internal_map = new HashMap<T, bool>();
+    }
+
+    public HashSet(int32 initial_capacity) {
+        this.internal_map = new HashMap<T, bool>(initial_capacity);
+    }
+
+    public HashSet(int32(*)(T) hasher) {
+        this.internal_map = new HashMap<T, bool>(hasher);
+    }
+
+    public HashSet(int32 initial_capacity, int32(*)(T) hasher) {
+        this.internal_map = new HashMap<T, bool>(initial_capacity, hasher);
+    }
+
+    public HashSet(T[] items) {
+        this.internal_map = new HashMap<T, bool>();
+        if (items != null) {
+            for (int32 array_index = 0; array_index < items.length; array_index = array_index + 1) {
+                this.add(items[array_index]);
+            }
+        }
+    }
+
+    public HashSet(ICollection<T> other_collection) {
+        this.internal_map = new HashMap<T, bool>();
+        if (other_collection != null) {
+            IIterator<T> iterator_instance = other_collection.iterator();
+            while (iterator_instance.has_next()) {
+                this.add(iterator_instance.next());
+            }
+        }
+    }
+
+    public int32 size() {
+        return this.internal_map.size();
+    }
+
+    public bool is_empty() {
+        return this.internal_map.is_empty();
+    }
+
+    public void clear() {
+        this.internal_map.clear();
+    }
+
+    public bool contains(T item) {
+        return this.internal_map.contains_key(item);
+    }
+
+    public bool add(T item) {
+        if (this.internal_map.contains_key(item)) {
+            return false;
+        }
+        this.internal_map.put(item, true);
+        return true;
+    }
+
+    public bool remove(T item) {
+        if (!this.internal_map.contains_key(item)) {
+            return false;
+        }
+        this.internal_map.remove(item);
+        return true;
+    }
+
+    public T[] to_array() {
+        List<T> key_list = this.internal_map.keys();
+        return key_list.to_array();
+    }
+
+    public List<T> to_list() {
+        return this.internal_map.keys();
+    }
+
+    public IIterator<T> iterator() {
+        return new HashSetIterator<T>(this.internal_map.keys());
+    }
+
+    public void for_each(void(*)(T) action_callback) {
+        if (action_callback == null) {
+            return;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            action_callback(key_list.get(item_index));
+        }
+    }
+
+    public void union_with(HashSet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        List<T> other_keys = other_set.to_list();
+        for (int32 item_index = 0; item_index < other_keys.size(); item_index = item_index + 1) {
+            this.add(other_keys.get(item_index));
+        }
+    }
+
+    public void union_with(ISet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        IIterator<T> iterator_instance = other_set.iterator();
+        while (iterator_instance != null && iterator_instance.has_next()) {
+            this.add(iterator_instance.next());
+        }
+    }
+
+    public void intersect_with(HashSet<T> other_set) {
+        if (other_set == null) {
+            this.clear();
+            return;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            T item_val = key_list.get(item_index);
+            if (!other_set.contains(item_val)) {
+                this.remove(item_val);
+            }
+        }
+    }
+
+    public void intersect_with(ISet<T> other_set) {
+        if (other_set == null) {
+            this.clear();
+            return;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            T item_val = key_list.get(item_index);
+            if (!other_set.contains(item_val)) {
+                this.remove(item_val);
+            }
+        }
+    }
+
+    public void difference_with(HashSet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        List<T> other_keys = other_set.to_list();
+        for (int32 item_index = 0; item_index < other_keys.size(); item_index = item_index + 1) {
+            this.remove(other_keys.get(item_index));
+        }
+    }
+
+    public void difference_with(ISet<T> other_set) {
+        if (other_set == null) {
+            return;
+        }
+        IIterator<T> iterator_instance = other_set.iterator();
+        while (iterator_instance != null && iterator_instance.has_next()) {
+            this.remove(iterator_instance.next());
+        }
+    }
+
+    public bool is_subset_of(HashSet<T> other_set) {
+        if (other_set == null) {
+            return false;
+        }
+        if (this.size() > other_set.size()) {
+            return false;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            if (!other_set.contains(key_list.get(item_index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public bool is_subset_of(ISet<T> other_set) {
+        if (other_set == null) {
+            return false;
+        }
+        if (this.size() > other_set.size()) {
+            return false;
+        }
+        List<T> key_list = this.internal_map.keys();
+        for (int32 item_index = 0; item_index < key_list.size(); item_index = item_index + 1) {
+            if (!other_set.contains(key_list.get(item_index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public bool is_superset_of(HashSet<T> other_set) {
+        if (other_set == null) {
+            return true;
+        }
+        if (other_set.size() > this.size()) {
+            return false;
+        }
+        List<T> other_keys = other_set.to_list();
+        for (int32 item_index = 0; item_index < other_keys.size(); item_index = item_index + 1) {
+            if (!this.contains(other_keys.get(item_index))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public bool is_superset_of(ISet<T> other_set) {
+        if (other_set == null) {
+            return true;
+        }
+        if (other_set.size() > this.size()) {
+            return false;
+        }
+        IIterator<T> iterator_instance = other_set.iterator();
+        while (iterator_instance != null && iterator_instance.has_next()) {
+            if (!this.contains(iterator_instance.next())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this.to_list());
+    }
+}

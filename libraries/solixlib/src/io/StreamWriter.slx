@@ -1,0 +1,73 @@
+package solix.io;
+
+import solix.core.String;
+import solix.core.IOException;
+
+public class StreamWriter {
+    private IStream underlying_stream;
+    private bool closed_flag;
+
+    public StreamWriter(IStream stream) {
+        this.underlying_stream = stream;
+        this.closed_flag = false;
+    }
+
+    ~StreamWriter() {
+        this.close();
+    }
+
+    public void write(string text) {
+        if (text != null) {
+            String wrapped_string = new String(text);
+            this.write(wrapped_string);
+        }
+    }
+
+    public void write(String text) {
+        if (this.closed_flag) {
+            throw new IOException("Writer is closed");
+        }
+        if (text == null || text.data == null) {
+            return;
+        }
+        int32 text_length = text.length();
+        int8[] byte_buffer = new int8[text_length];
+        for (int32 char_index = 0; char_index < text_length; char_index = char_index + 1) {
+            byte_buffer[char_index] = (int8)text.char_at(char_index);
+        }
+        this.underlying_stream.write(byte_buffer, 0, text_length);
+    }
+
+    public void write_line(string text) {
+        this.write(text);
+        this.write_line();
+    }
+
+    public void write_line(String text) {
+        this.write(text);
+        this.write_line();
+    }
+
+    public void write_line() {
+        if (this.closed_flag) {
+            throw new IOException("Writer is closed");
+        }
+        int8[] newline_bytes = new int8[1];
+        newline_bytes[0] = (int8)10; // '\n'
+        this.underlying_stream.write(newline_bytes, 0, 1);
+    }
+
+    public void flush() {
+        if (!this.closed_flag) {
+            this.underlying_stream.flush();
+        }
+    }
+
+    public void close() {
+        if (!this.closed_flag) {
+            this.underlying_stream.flush();
+            this.underlying_stream.close();
+            this.closed_flag = true;
+        }
+    }
+}

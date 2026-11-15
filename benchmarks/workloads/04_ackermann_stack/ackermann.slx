@@ -1,0 +1,22 @@
+import blt.io.println;
+
+class AckermannApp {
+    public static int32 ack(int32 m, int32 n) {
+        if (m == 0) {
+            return n + 1;
+        }
+        if (n == 0) {
+            return AckermannApp::ack(m - 1, 1);
+        }
+        return AckermannApp::ack(m - 1, AckermannApp::ack(m, n - 1));
+    }
+
+    public static void main() {
+        int32 result = AckermannApp::ack(3, 6);
+        if (result == 509) {
+            println("RESULT: 509");
+        } else {
+            println("FAIL");
+        }
+    }
+}

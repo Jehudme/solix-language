@@ -4,7 +4,10 @@
 
 use super::phase::CompilationPhase;
 use crate::CompilationContext::CompilationContext;
-use solix_common::CompilationDiagnostic;
+use crate::CompilationDiagnostic;
+
+pub use super::dependency::DependencyResolutionPhase;
+pub use super::optimizer::{AstInlinerPhase, BytecodeOptimizerPhase};
 
 /// Lexical analysis phase tokenizing all registered sources in the context.
 #[derive(Debug, Default, Clone)]
@@ -33,6 +36,14 @@ impl CompilationPhase for LexerPhase {
 
         for source_index in 0..sources_count {
             let source_id = source_index as u16;
+            if context
+                .ast
+                .get(source_index)
+                .and_then(|ast_option| ast_option.as_ref())
+                .is_some()
+            {
+                continue;
+            }
             let source_text = &context.sources[source_index];
 
             match crate::phases::lexing::lex_source(source_id, source_text) {
@@ -40,9 +51,9 @@ impl CompilationPhase for LexerPhase {
                     context.tokens[source_index] = tokens;
                 }
                 Err(errors) => {
-                    for err in errors {
+                    for error in errors {
                         accumulated_diagnostics
-                            .push(CompilationDiagnostic::from(err).with_source_id(source_id));
+                            .push(CompilationDiagnostic::from(error).with_source_id(source_id));
                     }
                 }
             }
@@ -83,6 +94,14 @@ impl CompilationPhase for ParserPhase {
 
         for source_index in 0..sources_count {
             let source_id = source_index as u16;
+            if context
+                .ast
+                .get(source_index)
+                .and_then(|ast_option| ast_option.as_ref())
+                .is_some()
+            {
+                continue;
+            }
             let source_text = &context.sources[source_index];
             let tokens = context
                 .tokens
@@ -96,10 +115,44 @@ impl CompilationPhase for ParserPhase {
                 }
                 Err(errors) => {
                     context.ast[source_index] = None;
-                    for err in errors {
+                    for error in errors {
                         accumulated_diagnostics
-                            .push(CompilationDiagnostic::from(err).with_source_id(source_id));
+                            .push(CompilationDiagnostic::from(error).with_source_id(source_id));
                     }
+                }
+            }
+        }
+
+        let mut resolved_packages = std::collections::HashSet::new();
+        let mut ast_cursor = 0;
+        while ast_cursor < context.ast.len() {
+            let mut new_extern_imports = Vec::new();
+            if let Some(ast) = &context.ast[ast_cursor] {
+                for import_statement in &ast.imports {
+                    if import_statement.is_extern {
+                        let package_name =
+                            if let Some(first_segment) = import_statement.path.first() {
+                                context.get_lexeme(*first_segment).to_string()
+                            } else {
+                                String::new()
+                            };
+                        if !package_name.is_empty()
+                            && resolved_packages.insert(package_name.clone())
+                        {
+                            new_extern_imports.push((package_name, import_statement.span));
+                        }
+                    }
+                }
+            }
+            ast_cursor += 1;
+
+            for (package_name, import_span) in new_extern_imports {
+                if let Err(resolution_errors) = crate::phases::dependency::resolve_extern_import(
+                    &package_name,
+                    import_span,
+                    context,
+                ) {
+                    accumulated_diagnostics.extend(resolution_errors);
                 }
             }
         }
@@ -132,10 +185,16 @@ impl CompilationPhase for BinderPhase {
     fn run(&mut self, context: &mut CompilationContext) -> Result<(), Vec<CompilationDiagnostic>> {
         match crate::phases::binder::bind_context(context) {
             Ok(_) => Ok(()),
-            Err(errors) => Err(errors
-                .into_iter()
-                .map(CompilationDiagnostic::from)
-                .collect()),
+            Err(_) => {
+                let diagnostics = context
+                    .binding_errors
+                    .iter()
+                    .map(|(source_id, error)| {
+                        CompilationDiagnostic::from(error.clone()).with_source_id(*source_id)
+                    })
+                    .collect();
+                Err(diagnostics)
+            }
         }
     }
 }

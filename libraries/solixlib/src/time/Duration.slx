@@ -1,0 +1,186 @@
+package solix.time;
+
+import solix.core.IStringable;
+import solix.core.IEquatable;
+import solix.core.IComparable;
+import solix.core.ICloneable;
+import solix.core.String;
+import solix.core.StringBuilder;
+
+public class Duration implements IStringable, IEquatable<Duration>, IComparable<Duration>, ICloneable<Duration> {
+    public int64 nanoseconds;
+
+    public Duration() {
+        this.nanoseconds = 0L;
+    }
+
+    public Duration(int64 nanos) {
+        this.nanoseconds = nanos;
+    }
+
+    // Static factories
+    public static Duration from_nanos(int64 nanos) {
+        return new Duration(nanos);
+    }
+
+    public static Duration from_millis(int64 millis) {
+        return new Duration(millis * 1000000L);
+    }
+
+    public static Duration from_seconds(int64 seconds) {
+        return new Duration(seconds * 1000000000L);
+    }
+
+    public static Duration from_minutes(int64 minutes) {
+        return Duration::from_seconds(minutes * 60L);
+    }
+
+    public static Duration from_hours(int64 hours) {
+        return Duration::from_minutes(hours * 60L);
+    }
+
+    public static Duration from_days(int64 days) {
+        return Duration::from_hours(days * 24L);
+    }
+
+    public static Duration zero() {
+        return new Duration(0L);
+    }
+
+    // Unit conversions
+    public int64 to_nanoseconds() {
+        return this.nanoseconds;
+    }
+
+    public int64 to_milliseconds() {
+        return this.nanoseconds / 1000000L;
+    }
+
+    public int64 to_seconds() {
+        return this.nanoseconds / 1000000000L;
+    }
+
+    public int64 to_minutes() {
+        return this.to_seconds() / 60L;
+    }
+
+    public int64 to_hours() {
+        return this.to_minutes() / 60L;
+    }
+
+    public int64 to_days() {
+        return this.to_hours() / 24L;
+    }
+
+    // Arithmetic methods
+    public Duration add(Duration other_duration) {
+        if (other_duration == null) {
+            return this;
+        }
+        return new Duration(this.nanoseconds + other_duration.nanoseconds);
+    }
+
+    public Duration subtract(Duration other_duration) {
+        if (other_duration == null) {
+            return this;
+        }
+        return new Duration(this.nanoseconds - other_duration.nanoseconds);
+    }
+
+    public Duration multiply(int64 scale_factor) {
+        return new Duration(this.nanoseconds * scale_factor);
+    }
+
+    public Duration divide(int64 divisor_factor) {
+        if (divisor_factor == 0L) {
+            return new Duration(0L);
+        }
+        return new Duration(this.nanoseconds / divisor_factor);
+    }
+
+    // Operator overloads
+    public Duration operator+(Duration other_duration) {
+        return this.add(other_duration);
+    }
+
+    public Duration operator-(Duration other_duration) {
+        return this.subtract(other_duration);
+    }
+
+    public Duration operator*(int64 scale_factor) {
+        return this.multiply(scale_factor);
+    }
+
+    public Duration operator/(int64 divisor_factor) {
+        return this.divide(divisor_factor);
+    }
+
+    public bool equals(Duration other_duration) {
+        if (other_duration == null) {
+            return false;
+        }
+        return this.nanoseconds == other_duration.nanoseconds;
+    }
+
+    public bool operator==(Duration other_duration) {
+        return this.equals(other_duration);
+    }
+
+    public bool operator!=(Duration other_duration) {
+        return !this.equals(other_duration);
+    }
+
+    public int32 compare_to(Duration other_duration) {
+        if (other_duration == null) {
+            return 1;
+        }
+        if (this.nanoseconds < other_duration.nanoseconds) {
+            return -1;
+        }
+        if (this.nanoseconds > other_duration.nanoseconds) {
+            return 1;
+        }
+        return 0;
+    }
+
+    public bool operator<(Duration other_duration) {
+        return this.compare_to(other_duration) < 0;
+    }
+
+    public bool operator<=(Duration other_duration) {
+        return this.compare_to(other_duration) <= 0;
+    }
+
+    public bool operator>(Duration other_duration) {
+        return this.compare_to(other_duration) > 0;
+    }
+
+    public bool operator>=(Duration other_duration) {
+        return this.compare_to(other_duration) >= 0;
+    }
+
+    public Duration clone() {
+        return new Duration(this.nanoseconds);
+    }
+
+    public String to_string() {
+        StringBuilder string_builder = new StringBuilder(32);
+        int64 total_sec = this.to_seconds();
+        int64 rem_nanos = this.nanoseconds % 1000000000L;
+        if (rem_nanos < 0L) {
+            rem_nanos = -rem_nanos;
+        }
+        string_builder.append_long(total_sec);
+        string_builder.append_char('.');
+        String rem_str = String::from_int64(rem_nanos);
+        int32 pad_zeros = 9 - rem_str.length();
+        int32 zero_index = 0;
+        while (zero_index < pad_zeros) {
+            string_builder.append_char('0');
+            zero_index = zero_index + 1;
+        }
+        string_builder.append(rem_str);
+        string_builder.append_char('s');
+        return string_builder.to_string();
+    }
+}

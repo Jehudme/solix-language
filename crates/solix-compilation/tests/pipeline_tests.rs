@@ -2,8 +2,8 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::CompilationDiagnostic;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_compilation::CompilationDiagnostic;
 use solix_compilation::CompilationPipeline;
 use solix_compilation::phases::phase::{CompilationPhase, PhaseDecision};
 use solix_compilation::phases::standard::{BinderPhase, EmitterPhase, LexerPhase, ParserPhase};
@@ -230,4 +230,44 @@ fn test_builtins_inclusion_and_compilation() {
     let mut context = CompilationContext::new(options);
     assert!(context.execute().is_ok());
     assert!(context.emission_artifacts.is_some());
+}
+
+#[test]
+fn test_pipeline_telemetry_recording() {
+    let source_code = r#"
+        class MathUtils {
+            public static int32 add(int32 left_operand, int32 right_operand) {
+                return left_operand + right_operand;
+            }
+        }
+    "#;
+    let options = CompilationOptions::new()
+        .with_package_metadata("math_pkg", "1.0.0", "Math utilities")
+        .with_source("math.slx", source_code);
+
+    let mut context = CompilationContext::new(options);
+    let mut pipeline = CompilationPipeline::standard();
+    let result = pipeline.execute(&mut context);
+    assert!(result.is_ok());
+
+    let telemetry = context
+        .telemetry
+        .as_ref()
+        .expect("telemetry should be populated");
+    assert_eq!(telemetry.package_name, "math_pkg");
+    assert!(telemetry.source_bytes > 0);
+    assert!(telemetry.total_tokens > 0);
+    assert!(telemetry.total_instructions > 0);
+    assert!(telemetry.binary_size_bytes > 0);
+    assert_eq!(telemetry.phases.len(), 7);
+    assert_eq!(telemetry.phases[0].name, "Dependency Resolution");
+    assert_eq!(telemetry.phases[1].name, "Lexical Analysis");
+    assert_eq!(telemetry.phases[2].name, "Syntax Parsing");
+    assert_eq!(telemetry.phases[3].name, "Semantic Analysis & Type Binding");
+    assert_eq!(telemetry.phases[4].name, "AST Function & Method Inliner");
+    assert_eq!(telemetry.phases[5].name, "Bytecode Emission");
+    assert_eq!(
+        telemetry.phases[6].name,
+        "Bytecode Peephole & Superinstruction Optimizer"
+    );
 }

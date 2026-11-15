@@ -1,0 +1,128 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.time.Duration;
+import solix.time.Instant;
+import solix.time.DateTime;
+import solix.time.Stopwatch;
+
+public class TestTime {
+    public static int32 run_all_tests() {
+        if (!TestTime::test_duration()) {
+            return 1;
+        }
+        if (!TestTime::test_instant()) {
+            return 2;
+        }
+        if (!TestTime::test_datetime()) {
+            return 3;
+        }
+        if (!TestTime::test_stopwatch()) {
+            return 4;
+        }
+        return 0;
+    }
+
+    public static bool test_duration() {
+        Duration five_seconds = Duration::from_seconds(5L);
+        Duration ten_seconds = Duration::from_seconds(10L);
+
+        Duration combined = five_seconds + ten_seconds;
+        if (combined.to_seconds() != 15L) {
+            return false;
+        }
+
+        Duration difference = ten_seconds - five_seconds;
+        if (difference.to_seconds() != 5L) {
+            return false;
+        }
+
+        Duration multiplied = five_seconds * 3L;
+        if (multiplied.to_seconds() != 15L) {
+            return false;
+        }
+
+        Duration divided = ten_seconds / 2L;
+        if (divided.to_seconds() != 5L) {
+            return false;
+        }
+
+        if (!(five_seconds < ten_seconds)) {
+            return false;
+        }
+        if (five_seconds > ten_seconds) {
+            return false;
+        }
+        if (five_seconds == ten_seconds) {
+            return false;
+        }
+        if (five_seconds != Duration::from_seconds(5L)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_instant() {
+        Instant first_instant = Instant::now();
+        Instant second_instant = Instant::now();
+
+        if (second_instant < first_instant) {
+            return false;
+        }
+
+        Duration elapsed_duration = first_instant.elapsed();
+        if (elapsed_duration.to_nanoseconds() < 0L) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_datetime() {
+        // Epoch millisecond 0 corresponds to 1970-01-01T00:00:00.000Z
+        DateTime epoch_time = DateTime::from_epoch_millis(0L, true);
+        if (epoch_time.year() != 1970 || epoch_time.month() != 1 || epoch_time.day() != 1) {
+            return false;
+        }
+        if (epoch_time.hour() != 0 || epoch_time.minute() != 0 || epoch_time.second() != 0) {
+            return false;
+        }
+
+        String iso_formatted = epoch_time.to_iso_string();
+        if (!iso_formatted.starts_with(new String("1970-01-01"))) {
+            return false;
+        }
+
+        DateTime now_time = DateTime::now_utc();
+        if (now_time.year() < 2026) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_stopwatch() {
+        Stopwatch watch = Stopwatch::start_new();
+        if (!watch.is_running()) {
+            return false;
+        }
+
+        watch.stop();
+        if (watch.is_running()) {
+            return false;
+        }
+
+        Duration elapsed_duration = watch.elapsed();
+        if (elapsed_duration.to_nanoseconds() < 0L) {
+            return false;
+        }
+
+        watch.reset();
+        if (watch.elapsed().to_nanoseconds() != 0L) {
+            return false;
+        }
+
+        return true;
+    }
+}

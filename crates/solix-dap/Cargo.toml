@@ -1,0 +1,23 @@
+[package]
+name = "solix-dap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "solix_dap"
+path = "src/lib.rs"
+
+[dependencies]
+solix-common.workspace = true
+solix-runtime.workspace = true
+solix-compilation.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+dap = "0.4.1-alpha1"
+
+[dev-dependencies]
+tempfile.workspace = true

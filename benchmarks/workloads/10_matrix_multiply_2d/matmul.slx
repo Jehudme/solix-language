@@ -1,0 +1,32 @@
+import blt.io.println;
+
+class MatMulApp {
+    public static void main() {
+        int32 n = 60;
+        int32 total_elements = 3600;
+        int32[] a = new int32[3600];
+        int32[] b = new int32[3600];
+
+        for (int32 i = 0; i < n; i = i + 1) {
+            for (int32 j = 0; j < n; j = j + 1) {
+                a[i * n + j] = (i + j) % 100;
+                b[i * n + j] = (i * j) % 100;
+            }
+        }
+
+        int32 trace = 0;
+        for (int32 i = 0; i < n; i = i + 1) {
+            int32 c_ii = 0;
+            for (int32 k = 0; k < n; k = k + 1) {
+                c_ii = (c_ii + a[i * n + k] * b[k * n + i]) & 0x7FFFFFFF;
+            }
+            trace = (trace + c_ii) & 0x7FFFFFFF;
+        }
+
+        if (trace == 9118300) {
+            println("RESULT: 9118300");
+        } else {
+            println("FAIL");
+        }
+    }
+}

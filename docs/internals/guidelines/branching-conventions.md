@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary & Purpose
 
-In a programming language repository comprising multiple tightly-coupled Rust crates (`solix-compilation`, `solix-runtime`, `solix-common`, `solix-client`, `solix-lsp`, `solix-dbg`), branch mismanagement is a primary cause of compiler instability, syntax regressions, and release gridlock. Long-lived feature branches foster overwhelming merge conflicts, break incremental type checking assumptions, and obscure Git bisect investigations.
+In a programming language repository comprising multiple tightly-coupled Rust crates (`solix-compilation`, `solix-runtime`, `solix-common`, `solix-toolchain`, `solix-lsp`, `solix-dbg`), branch mismanagement is a primary cause of compiler instability, syntax regressions, and release gridlock. Long-lived feature branches foster overwhelming merge conflicts, break incremental type checking assumptions, and obscure Git bisect investigations.
 
 This specification formalizes the **Trunk-Based and Milestone-Bounded Branching Model** for the Solix project. It establishes `master` as the sole protected trunk of truth, mandates dedicated milestone integration branches, dictates strict branch taxonomy and naming rules, enforces short-lived topic branches, and mandates non-fast-forward (`--no-ff`) merges to guarantee a fully auditable, bisectable Git history.
 

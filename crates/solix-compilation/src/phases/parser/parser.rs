@@ -100,6 +100,43 @@ pub fn parse_source(
     Ok(ast)
 }
 
+/// Parses a token stream from a single source file in resilient mode, always returning the parsed AST.
+#[must_use]
+pub fn parse_source_resilient(
+    source_id: u16,
+    tokens: &[Token],
+    source_text: &str,
+) -> (ProgramAst, Vec<ParsingError>) {
+    let mut state = ParserState::new(source_id, tokens, source_text);
+    let ast = state.parse_program();
+    (ast, state.errors)
+}
+
+/// Parses all sources in the compilation context in resilient mode, always populating `context.ast`.
+pub fn parse_context_resilient(context: &mut CompilationContext) -> Vec<ParsingError> {
+    let mut accumulated_errors = Vec::new();
+    let sources_count = context.sources.len();
+    if context.ast.len() < sources_count {
+        context.ast.resize_with(sources_count, || None);
+    }
+
+    for source_index in 0..sources_count {
+        let source_id = source_index as u16;
+        let source_text = &context.sources[source_index];
+        let tokens: &[Token] = context
+            .tokens
+            .get(source_index)
+            .map(|tok_vec| tok_vec.as_slice())
+            .unwrap_or(&[]);
+
+        let (ast, errors) = parse_source_resilient(source_id, tokens, source_text);
+        context.ast[source_index] = Some(ast);
+        accumulated_errors.extend(errors);
+    }
+
+    accumulated_errors
+}
+
 /// Token stream cursor providing checked lookahead and consumption.
 struct TokenCursor<'tokens> {
     tokens: &'tokens [Token],
@@ -254,6 +291,7 @@ struct ParserState<'tokens, 'source> {
     scope_depth: usize,
     inside_class: bool,
     inside_extern_class: bool,
+    inside_generic_class: bool,
     inside_interface: bool,
     enclosing_class_name: Option<String>,
     has_parsed_package: bool,
@@ -271,6 +309,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             scope_depth: 0,
             inside_class: false,
             inside_extern_class: false,
+            inside_generic_class: false,
             inside_interface: false,
             enclosing_class_name: None,
             has_parsed_package: false,
@@ -294,6 +333,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
     }
 
     fn synchronize(&mut self) {
+        if self.cursor.check(TokenKind::PunctuationCloseBrace) {
+            return;
+        }
         self.cursor.advance();
         while !self.cursor.is_at_end() {
             if matches!(self.cursor.previous(), Some(prev) if prev.kind == TokenKind::PunctuationSemicolon)
@@ -348,7 +390,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         self.synchronize();
                     }
                 },
-                TokenKind::KeywordImport => match self.parse_import_statement() {
+                TokenKind::KeywordImport => match self.parse_import_statement(false, None) {
                     Ok(import_stmt) => {
                         if self.has_parsed_declaration {
                             self.record_error(ParsingError::ImportAfterDeclaration {
@@ -378,6 +420,14 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     }
                     Ok(TopLevelElement::Statement(stmt)) => {
                         program.root_statements.push(stmt);
+                    }
+                    Ok(TopLevelElement::Import(import_stmt)) => {
+                        if self.has_parsed_declaration {
+                            self.record_error(ParsingError::ImportAfterDeclaration {
+                                span: import_stmt.span.to_source_span(),
+                            });
+                        }
+                        program.imports.push(import_stmt);
                     }
                     Err(error) => {
                         self.record_error(error);
@@ -409,8 +459,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         Ok(PackageStatement { span, path })
     }
 
-    fn parse_import_statement(&mut self) -> Result<ImportStatement, ParsingError> {
-        let start_span = self.cursor.current_span();
+    fn parse_import_statement(
+        &mut self,
+        is_extern: bool,
+        extern_span: Option<Span>,
+    ) -> Result<ImportStatement, ParsingError> {
+        let start_span = extern_span.unwrap_or_else(|| self.cursor.current_span());
         self.cursor.advance(); // consume 'import'
 
         let mut path = Vec::new();
@@ -449,6 +503,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             path,
             is_wildcard,
             alias,
+            is_extern,
         })
     }
 
@@ -456,7 +511,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let start_span = self.cursor.current_span();
         self.cursor.advance(); // consume 'alias'
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
         let mut generic_params = Vec::new();
 
         if self
@@ -497,6 +552,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(AliasStatement {
             span,
+            namespace_path,
             name_span,
             generic_params,
             target_type,
@@ -512,6 +568,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 TokenKind::KeywordPackage | TokenKind::KeywordImport | TokenKind::KeywordAlias
             )
         {
+            if modifiers.len() == 1
+                && modifiers[0] == Modifier::Extern
+                && self.cursor.peek_kind() == TokenKind::KeywordImport
+            {
+                let import_statement = self.parse_import_statement(true, None)?;
+                return Ok(TopLevelElement::Import(import_statement));
+            }
             let span = self.cursor.current_span();
             return Err(ParsingError::ModifierOnModuleStatement {
                 span: span.to_source_span(),
@@ -615,7 +678,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             span: op_decl.span.to_source_span(),
                         });
                     }
-                    let name_span = self.consume_identifier()?;
+                    let (namespace_path, name_span) = self.parse_qualified_name()?;
 
                     // Check for method declaration: ( or <
                     if self.cursor.check(TokenKind::PunctuationOpenParen)
@@ -633,8 +696,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             "free_function",
                             name_span,
                         );
-                        let method_decl =
-                            self.parse_method_declaration(modifiers, type_annot, name_span)?;
+                        let method_decl = self.parse_method_declaration(
+                            modifiers,
+                            type_annot,
+                            namespace_path,
+                            name_span,
+                        )?;
                         return Ok(TopLevelElement::Declaration(Declaration::Method(
                             method_decl,
                         )));
@@ -670,8 +737,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     }
 
                     if modifiers.contains(&Modifier::Extern) {
-                        for m in &modifiers {
-                            match m {
+                        for modifier in &modifiers {
+                            match modifier {
                                 Modifier::Native => {
                                     self.record_error(ParsingError::InvalidExternModifier {
                                         modifier: "native".to_string(),
@@ -701,6 +768,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     return Ok(TopLevelElement::Declaration(Declaration::Field(
                         FieldDeclaration {
                             span,
+                            namespace_path,
                             name_span,
                             modifiers,
                             field_type: type_annot,
@@ -866,7 +934,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
         let class_name = self.get_lexeme(name_span).to_string();
 
         let generic_params = self.parse_generic_params()?;
@@ -910,9 +978,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let previous_class_name = self.enclosing_class_name.replace(class_name);
         let previous_inside_class = self.inside_class;
         let previous_inside_extern = self.inside_extern_class;
+        let previous_inside_generic = self.inside_generic_class;
         let previous_destructors = self.destructors_in_class;
         self.inside_class = true;
         self.inside_extern_class = modifiers.contains(&Modifier::Extern);
+        self.inside_generic_class = !generic_params.is_empty();
         self.destructors_in_class = 0;
 
         let mut members = Vec::new();
@@ -932,10 +1002,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         self.enclosing_class_name = previous_class_name;
         self.inside_class = previous_inside_class;
         self.inside_extern_class = previous_inside_extern;
+        self.inside_generic_class = previous_inside_generic;
         self.destructors_in_class = previous_destructors;
 
         Ok(ClassDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             generic_params,
@@ -1062,7 +1134,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             || self.cursor.check(TokenKind::OperatorLessThan)
             || self.cursor.check(TokenKind::PunctuationOpenBrace)
         {
-            let method = self.parse_method_declaration(member_modifiers, type_annot, name_span)?;
+            let method =
+                self.parse_method_declaration(member_modifiers, type_annot, Vec::new(), name_span)?;
             return Ok(ClassMember::Method(method));
         }
 
@@ -1100,6 +1173,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(ClassMember::Field(FieldDeclaration {
             span,
+            namespace_path: Vec::new(),
             name_span,
             modifiers: member_modifiers,
             field_type: type_annot,
@@ -1128,7 +1202,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
 
         let generic_params = self.parse_generic_params()?;
 
@@ -1185,7 +1259,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 continue;
             }
 
-            let method = self.parse_method_declaration(member_mods, return_type, method_name)?;
+            let method =
+                self.parse_method_declaration(member_mods, return_type, Vec::new(), method_name)?;
             if method.body.is_some() {
                 self.record_error(ParsingError::InterfaceMethodWithBody {
                     span: method.span.to_source_span(),
@@ -1200,6 +1275,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(InterfaceDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             generic_params,
@@ -1229,7 +1305,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
 
-        let name_span = self.consume_identifier()?;
+        let (namespace_path, name_span) = self.parse_qualified_name()?;
 
         if self
             .cursor
@@ -1280,6 +1356,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(EnumDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             variants,
@@ -1291,6 +1368,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         &mut self,
         modifiers: Vec<Modifier>,
         return_type: TypeAnnotation,
+        namespace_path: Vec<Span>,
         name_span: Span,
     ) -> Result<MethodDeclaration, ParsingError> {
         if self.inside_function() {
@@ -1358,7 +1436,10 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     span: name_span.to_source_span(),
                 });
             }
-            if is_extern {
+            let has_variadic_param = parameters.iter().any(|param| param.is_variadic);
+            let is_generic_method =
+                !generic_params.is_empty() || has_variadic_param || self.inside_generic_class;
+            if is_extern && !is_generic_method && !modifiers.contains(&Modifier::Inline) {
                 self.record_error(ParsingError::ExternWithBody {
                     span: name_span.to_source_span(),
                 });
@@ -1375,6 +1456,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         Ok(MethodDeclaration {
             span,
+            namespace_path,
             name_span,
             modifiers,
             return_type,
@@ -1428,7 +1510,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let is_extern = self.inside_extern_class || modifiers.contains(&Modifier::Extern);
         let body = if self.cursor.check(TokenKind::PunctuationOpenBrace) {
-            if is_extern {
+            let has_variadic_param = parameters.iter().any(|param| param.is_variadic);
+            if is_extern
+                && !has_variadic_param
+                && !self.inside_generic_class
+                && !modifiers.contains(&Modifier::Inline)
+            {
                 self.record_error(ParsingError::ExternWithBody {
                     span: name_span.to_source_span(),
                 });
@@ -1561,7 +1648,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
         };
 
-        let body = self.parse_block()?;
+        let body = if self.cursor.check(TokenKind::PunctuationSemicolon) {
+            let semi_span = self.cursor.current_span();
+            self.cursor.advance();
+            BlockStatement {
+                span: semi_span,
+                statements: Vec::new(),
+            }
+        } else {
+            self.parse_block()?
+        };
         let span = op_kw_span.combine(body.span);
 
         Ok(OperatorDeclaration {
@@ -1696,7 +1792,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 self.record_error(ParsingError::ImportAfterDeclaration {
                     span: span.to_source_span(),
                 });
-                let imp = self.parse_import_statement()?;
+                let imp = self.parse_import_statement(false, None)?;
                 Ok(vec![Statement::Block(BlockStatement {
                     span: imp.span,
                     statements: Vec::new(),
@@ -1712,19 +1808,19 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
             _ => {
                 let mut had_modifier = false;
-                // Check if it starts with access modifiers or extern
-                if self.cursor.check(TokenKind::KeywordExtern) {
+                while self.cursor.check(TokenKind::KeywordExtern)
+                    || self.is_non_const_modifier(self.cursor.peek_kind())
+                {
                     let mod_span = self.cursor.current_span();
-                    self.record_error(ParsingError::ExternInsideFunction {
-                        span: mod_span.to_source_span(),
-                    });
-                    self.cursor.advance();
-                    had_modifier = true;
-                } else if self.is_access_modifier(self.cursor.peek_kind()) {
-                    let mod_span = self.cursor.current_span();
-                    self.record_error(ParsingError::ModifierOnLocalVariable {
-                        span: mod_span.to_source_span(),
-                    });
+                    if self.cursor.check(TokenKind::KeywordExtern) {
+                        self.record_error(ParsingError::ExternInsideFunction {
+                            span: mod_span.to_source_span(),
+                        });
+                    } else {
+                        self.record_error(ParsingError::ModifierOnLocalVariable {
+                            span: mod_span.to_source_span(),
+                        });
+                    }
                     self.cursor.advance();
                     had_modifier = true;
                 }
@@ -1749,8 +1845,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         self.record_error(ParsingError::MethodInsideMethod {
                             span: name_span.to_source_span(),
                         });
-                        let method =
-                            self.parse_method_declaration(Vec::new(), var_type, name_span)?;
+                        let method = self.parse_method_declaration(
+                            Vec::new(),
+                            var_type,
+                            Vec::new(),
+                            name_span,
+                        )?;
                         return Ok(vec![Statement::Block(method.body.unwrap_or(
                             BlockStatement {
                                 span: name_span,
@@ -1856,9 +1956,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
         }
 
-        let close_brace = self.consume_close_brace()?;
+        let close_brace_span = if self.cursor.check(TokenKind::PunctuationCloseBrace) {
+            self.cursor.advance().copied().unwrap_or_default().span
+        } else {
+            self.record_error(ParsingError::ExpectedCloseBrace {
+                span: self.cursor.current_span().to_source_span(),
+            });
+            self.cursor.current_span()
+        };
         self.scope_depth -= 1;
-        let span = open_brace.combine(close_brace.span);
+        let span = open_brace.combine(close_brace_span);
 
         Ok(BlockStatement { span, statements })
     }
@@ -2936,6 +3043,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                 }
                 let close_paren = self.consume_close_paren()?;
@@ -2982,6 +3092,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                 }
                 let close_paren = self.consume_close_paren()?;
@@ -2992,9 +3105,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     generic_arguments,
                     arguments,
                 };
-            } else if self.cursor.match_token(TokenKind::PunctuationDot).is_some() {
+            } else if let Some(dot_token) = self.cursor.match_token(TokenKind::PunctuationDot) {
+                let dot_span = dot_token.span;
                 // Member access
-                let member_span = self.consume_identifier()?;
+                let member_span = match self.consume_identifier() {
+                    Ok(ident_span) => ident_span,
+                    Err(parsing_error) => {
+                        self.errors.push(parsing_error);
+                        Span::new(dot_span.id, dot_span.end, dot_span.end)
+                    }
+                };
                 let span = expression.span().combine(member_span);
                 expression = Expression::MemberAccess {
                     span,
@@ -3002,13 +3122,18 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     member_span,
                     is_scope_resolution: false,
                 };
-            } else if self
-                .cursor
-                .match_token(TokenKind::PunctuationDoubleColon)
-                .is_some()
+            } else if let Some(colon_token) =
+                self.cursor.match_token(TokenKind::PunctuationDoubleColon)
             {
+                let colon_span = colon_token.span;
                 // Static member access
-                let member_span = self.consume_identifier()?;
+                let member_span = match self.consume_identifier() {
+                    Ok(ident_span) => ident_span,
+                    Err(parsing_error) => {
+                        self.errors.push(parsing_error);
+                        Span::new(colon_span.id, colon_span.end, colon_span.end)
+                    }
+                };
                 let span = expression.span().combine(member_span);
                 expression = Expression::MemberAccess {
                     span,
@@ -3279,6 +3404,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                 }
                 let close_bracket = self.consume_close_bracket()?;
@@ -3298,6 +3426,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -3362,6 +3493,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -3502,6 +3636,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -3781,6 +3918,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         {
                             break;
                         }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                            break;
+                        }
                     }
                     if self
                         .cursor
@@ -3831,6 +3971,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             .match_token(TokenKind::PunctuationComma)
                             .is_none()
                         {
+                            break;
+                        }
+                        if self.cursor.check(TokenKind::PunctuationCloseParen) {
                             break;
                         }
                     }
@@ -4086,6 +4229,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
     fn parse_numeric_literal(&mut self, span: Span) -> Result<LiteralValue, ParsingError> {
         let raw = self.get_lexeme(span);
+        let stripped_lexeme;
+        let raw = if raw.contains('_') {
+            stripped_lexeme = raw.replace('_', "");
+            stripped_lexeme.as_str()
+        } else {
+            raw
+        };
 
         // Check for float
         if raw.contains('.')
@@ -4272,6 +4422,34 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
     }
 
+    /// Parses a potentially namespace-qualified identifier sequence (`a::b::Name`).
+    ///
+    /// Returns `(namespace_path, name_span)` where `namespace_path` contains the leading
+    /// namespace segments and `name_span` points to the final declared identifier.
+    fn parse_qualified_name(&mut self) -> Result<(Vec<Span>, Span), ParsingError> {
+        let mut segments = Vec::new();
+        let first_segment = self.consume_identifier()?;
+        segments.push(first_segment);
+        while self
+            .cursor
+            .match_token(TokenKind::PunctuationDoubleColon)
+            .is_some()
+        {
+            let next_segment = self.consume_identifier()?;
+            segments.push(next_segment);
+        }
+        let name_span = match segments.pop() {
+            Some(last_span) => last_span,
+            None => {
+                return Err(ParsingError::ExpectedIdentifier {
+                    span: self.cursor.current_span().to_source_span(),
+                });
+            }
+        };
+        let namespace_path = segments;
+        Ok((namespace_path, name_span))
+    }
+
     fn consume_semicolon(&mut self) -> Result<Token, ParsingError> {
         if self.cursor.check(TokenKind::PunctuationSemicolon) {
             Ok(self.cursor.advance().copied().unwrap_or_default())
@@ -4445,13 +4623,20 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         )
     }
 
-    fn is_access_modifier(&self, kind: TokenKind) -> bool {
+    fn is_non_const_modifier(&self, kind: TokenKind) -> bool {
         matches!(
             kind,
             TokenKind::KeywordPublic
                 | TokenKind::KeywordProtected
                 | TokenKind::KeywordPrivate
                 | TokenKind::KeywordInternal
+                | TokenKind::KeywordStatic
+                | TokenKind::KeywordInline
+                | TokenKind::KeywordNative
+                | TokenKind::KeywordVirtual
+                | TokenKind::KeywordOverride
+                | TokenKind::KeywordWeak
+                | TokenKind::KeywordAbstract
         )
     }
 
@@ -4463,4 +4648,5 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 enum TopLevelElement {
     Declaration(Declaration),
     Statement(Statement),
+    Import(ImportStatement),
 }

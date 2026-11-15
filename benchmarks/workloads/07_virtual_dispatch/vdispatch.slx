@@ -1,0 +1,46 @@
+import blt.io.println;
+
+class Shape {
+    public virtual int32 get_area(int32 factor) {
+        return factor;
+    }
+}
+
+class Circle extends Shape {
+    public override int32 get_area(int32 factor) {
+        return factor * 2;
+    }
+}
+
+class Square extends Shape {
+    public override int32 get_area(int32 factor) {
+        return factor * 3;
+    }
+}
+
+class Triangle extends Shape {
+    public override int32 get_area(int32 factor) {
+        return factor * 4;
+    }
+}
+
+class VDispatchApp {
+    public static void main() {
+        Shape[] shapes = new Shape[3];
+        shapes[0] = new Circle();
+        shapes[1] = new Square();
+        shapes[2] = new Triangle();
+
+        int32 total = 0;
+        for (int32 i = 0; i < 100000; i = i + 1) {
+            Shape s = shapes[i % 3];
+            total = (total + s.get_area(i % 10)) & 0x7FFFFFFF;
+        }
+
+        if (total == 1349997) {
+            println("RESULT: 1349997");
+        } else {
+            println("FAIL");
+        }
+    }
+}

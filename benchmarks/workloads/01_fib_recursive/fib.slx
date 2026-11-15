@@ -1,0 +1,19 @@
+import blt.io.println;
+
+class FibApp {
+    public static int32 fib(int32 n) {
+        if (n <= 1) {
+            return n;
+        }
+        return FibApp::fib(n - 1) + FibApp::fib(n - 2);
+    }
+
+    public static void main() {
+        int32 result = FibApp::fib(28);
+        if (result == 317811) {
+            println("RESULT: 317811");
+        } else {
+            println("FAIL");
+        }
+    }
+}

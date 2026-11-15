@@ -1,0 +1,337 @@
+package solix.collections;
+
+public class Algorithms {
+    public static void reverse<T>(List<T> list) {
+        if (list == null) {
+            return;
+        }
+        int32 left_index = 0;
+        int32 right_index = list.size() - 1;
+        while (left_index < right_index) {
+            T temporary = list.get(left_index);
+            list.set(left_index, (T)list.get(right_index));
+            list.set(right_index, temporary);
+            left_index = left_index + 1;
+            right_index = right_index - 1;
+        }
+    }
+
+    public static void swap<T>(List<T> list, int32 first_index, int32 second_index) {
+        if (list == null) {
+            return;
+        }
+        T temporary = list.get(first_index);
+        list.set(first_index, (T)list.get(second_index));
+        list.set(second_index, temporary);
+    }
+
+    public static void fill<T>(List<T> list, T value) {
+        if (list == null) {
+            return;
+        }
+        int32 fill_index = 0;
+        while (fill_index < list.size()) {
+            list.set(fill_index, value);
+            fill_index = fill_index + 1;
+        }
+    }
+
+    public static void copy<T>(List<T> source, List<T> destination) {
+        if (source == null || destination == null) {
+            return;
+        }
+        int32 copy_count = source.size();
+        if (destination.size() < copy_count) {
+            copy_count = destination.size();
+        }
+        int32 copy_index = 0;
+        while (copy_index < copy_count) {
+            destination.set(copy_index, (T)source.get(copy_index));
+            copy_index = copy_index + 1;
+        }
+    }
+
+    // $O(N \log N)$ QuickSort for int32
+    public static void sort_int32(List<int32> list) {
+        if (list == null || list.size() <= 1) {
+            return;
+        }
+        Algorithms::quicksort_int32(list, 0, list.size() - 1);
+    }
+
+    private static void quicksort_int32(List<int32> list, int32 low_index, int32 high_index) {
+        if (low_index < high_index) {
+            int32 pivot_position = Algorithms::partition_int32(list, low_index, high_index);
+            Algorithms::quicksort_int32(list, low_index, pivot_position - 1);
+            Algorithms::quicksort_int32(list, pivot_position + 1, high_index);
+        }
+    }
+
+    private static int32 partition_int32(List<int32> list, int32 low_index, int32 high_index) {
+        int32 pivot_value = list.get(high_index);
+        int32 store_index = low_index - 1;
+        int32 scan_index = low_index;
+        while (scan_index < high_index) {
+            if (list.get(scan_index) <= pivot_value) {
+                store_index = store_index + 1;
+                int32 temporary = list.get(store_index);
+                list.set(store_index, list.get(scan_index));
+                list.set(scan_index, temporary);
+            }
+            scan_index = scan_index + 1;
+        }
+        int32 temporary = list.get(store_index + 1);
+        list.set(store_index + 1, list.get(high_index));
+        list.set(high_index, temporary);
+        return store_index + 1;
+    }
+
+    // $O(N \log N)$ QuickSort for int64
+    public static void sort_int64(List<int64> list) {
+        if (list == null || list.size() <= 1) {
+            return;
+        }
+        Algorithms::quicksort_int64(list, 0, list.size() - 1);
+    }
+
+    private static void quicksort_int64(List<int64> list, int32 low_index, int32 high_index) {
+        if (low_index < high_index) {
+            int32 pivot_position = Algorithms::partition_int64(list, low_index, high_index);
+            Algorithms::quicksort_int64(list, low_index, pivot_position - 1);
+            Algorithms::quicksort_int64(list, pivot_position + 1, high_index);
+        }
+    }
+
+    private static int32 partition_int64(List<int64> list, int32 low_index, int32 high_index) {
+        int64 pivot_value = list.get(high_index);
+        int32 store_index = low_index - 1;
+        int32 scan_index = low_index;
+        while (scan_index < high_index) {
+            if (list.get(scan_index) <= pivot_value) {
+                store_index = store_index + 1;
+                int64 temporary = list.get(store_index);
+                list.set(store_index, list.get(scan_index));
+                list.set(scan_index, temporary);
+            }
+            scan_index = scan_index + 1;
+        }
+        int64 temporary = list.get(store_index + 1);
+        list.set(store_index + 1, list.get(high_index));
+        list.set(high_index, temporary);
+        return store_index + 1;
+    }
+
+    // $O(N \log N)$ QuickSort for float64
+    public static void sort_float64(List<float64> list) {
+        if (list == null || list.size() <= 1) {
+            return;
+        }
+        Algorithms::quicksort_float64(list, 0, list.size() - 1);
+    }
+
+    private static void quicksort_float64(List<float64> list, int32 low_index, int32 high_index) {
+        if (low_index < high_index) {
+            int32 pivot_position = Algorithms::partition_float64(list, low_index, high_index);
+            Algorithms::quicksort_float64(list, low_index, pivot_position - 1);
+            Algorithms::quicksort_float64(list, pivot_position + 1, high_index);
+        }
+    }
+
+    private static int32 partition_float64(List<float64> list, int32 low_index, int32 high_index) {
+        float64 pivot_value = list.get(high_index);
+        int32 store_index = low_index - 1;
+        int32 scan_index = low_index;
+        while (scan_index < high_index) {
+            if (list.get(scan_index) <= pivot_value) {
+                store_index = store_index + 1;
+                float64 temporary = list.get(store_index);
+                list.set(store_index, list.get(scan_index));
+                list.set(scan_index, temporary);
+            }
+            scan_index = scan_index + 1;
+        }
+        float64 temporary = list.get(store_index + 1);
+        list.set(store_index + 1, list.get(high_index));
+        list.set(high_index, temporary);
+        return store_index + 1;
+    }
+
+    // $O(N \log N)$ QuickSort for generic types
+    public static void sort<T>(List<T> list, int32(*)(T, T) comparator) {
+        if (list == null || list.size() <= 1) {
+            return;
+        }
+        Algorithms::quicksort_generic<T>(list, 0, list.size() - 1, comparator);
+    }
+
+    private static void quicksort_generic<T>(List<T> list, int32 low_index, int32 high_index, int32(*)(T, T) comparator) {
+        if (low_index < high_index) {
+            int32 pivot_position = Algorithms::partition_generic<T>(list, low_index, high_index, comparator);
+            Algorithms::quicksort_generic<T>(list, low_index, pivot_position - 1, comparator);
+            Algorithms::quicksort_generic<T>(list, pivot_position + 1, high_index, comparator);
+        }
+    }
+
+    private static int32 partition_generic<T>(List<T> list, int32 low_index, int32 high_index, int32(*)(T, T) comparator) {
+        T pivot_value = list.get(high_index);
+        int32 store_index = low_index - 1;
+        int32 scan_index = low_index;
+        while (scan_index < high_index) {
+            if (comparator(list.get(scan_index), pivot_value) <= 0) {
+                store_index = store_index + 1;
+                T temporary = list.get(store_index);
+                list.set(store_index, list.get(scan_index));
+                list.set(scan_index, temporary);
+            }
+            scan_index = scan_index + 1;
+        }
+        T temporary = list.get(store_index + 1);
+        list.set(store_index + 1, list.get(high_index));
+        list.set(high_index, temporary);
+        return store_index + 1;
+    }
+
+    public static int32 binary_search_int32(List<int32> list, int32 target_value) {
+        if (list == null) {
+            return -1;
+        }
+        int32 low_index = 0;
+        int32 high_index = list.size() - 1;
+        while (low_index <= high_index) {
+            int32 middle_index = low_index + (high_index - low_index) / 2;
+            int32 middle_value = list.get(middle_index);
+            if (middle_value == target_value) {
+                return middle_index;
+            }
+            if (middle_value < target_value) {
+                low_index = middle_index + 1;
+            } else {
+                high_index = middle_index - 1;
+            }
+        }
+        return -1;
+    }
+
+    public static int32 binary_search_int64(List<int64> list, int64 target_value) {
+        if (list == null) {
+            return -1;
+        }
+        int32 low_index = 0;
+        int32 high_index = list.size() - 1;
+        while (low_index <= high_index) {
+            int32 middle_index = low_index + (high_index - low_index) / 2;
+            int64 middle_value = list.get(middle_index);
+            if (middle_value == target_value) {
+                return middle_index;
+            }
+            if (middle_value < target_value) {
+                low_index = middle_index + 1;
+            } else {
+                high_index = middle_index - 1;
+            }
+        }
+        return -1;
+    }
+
+    public static int32 binary_search<T>(List<T> list, T target_value, int32(*)(T, T) comparator) {
+        if (list == null) {
+            return -1;
+        }
+        int32 low_index = 0;
+        int32 high_index = list.size() - 1;
+        while (low_index <= high_index) {
+            int32 middle_index = low_index + (high_index - low_index) / 2;
+            T middle_value = list.get(middle_index);
+            int32 comparison = comparator(middle_value, target_value);
+            if (comparison == 0) {
+                return middle_index;
+            }
+            if (comparison < 0) {
+                low_index = middle_index + 1;
+            } else {
+                high_index = middle_index - 1;
+            }
+        }
+        return -1;
+    }
+
+    public static T min<T>(List<T> list, int32(*)(T, T) comparator) {
+        if (list == null || list.size() == 0) {
+            return default(T);
+        }
+        T minimum_element = list.get(0);
+        int32 scan_index = 1;
+        while (scan_index < list.size()) {
+            T candidate_element = list.get(scan_index);
+            if (comparator(candidate_element, minimum_element) < 0) {
+                minimum_element = candidate_element;
+            }
+            scan_index = scan_index + 1;
+        }
+        return minimum_element;
+    }
+
+    public static T max<T>(List<T> list, int32(*)(T, T) comparator) {
+        if (list == null || list.size() == 0) {
+            return default(T);
+        }
+        T maximum_element = list.get(0);
+        int32 scan_index = 1;
+        while (scan_index < list.size()) {
+            T candidate_element = list.get(scan_index);
+            if (comparator(candidate_element, maximum_element) > 0) {
+                maximum_element = candidate_element;
+            }
+            scan_index = scan_index + 1;
+        }
+        return maximum_element;
+    }
+
+    public static bool equals<T>(List<T> first_list, List<T> second_list, bool(*)(T, T) equality_checker) {
+        if (first_list == null && second_list == null) {
+            return true;
+        }
+        if (first_list == null || second_list == null) {
+            return false;
+        }
+        if (first_list.size() != second_list.size()) {
+            return false;
+        }
+        int32 scan_index = 0;
+        while (scan_index < first_list.size()) {
+            if (!equality_checker(first_list.get(scan_index), second_list.get(scan_index))) {
+                return false;
+            }
+            scan_index = scan_index + 1;
+        }
+        return true;
+    }
+
+    public static bool is_sorted<T>(List<T> list, int32(*)(T, T) comparator) {
+        if (list == null || list.size() <= 1) {
+            return true;
+        }
+        int32 scan_index = 1;
+        while (scan_index < list.size()) {
+            if (comparator(list.get(scan_index - 1), list.get(scan_index)) > 0) {
+                return false;
+            }
+            scan_index = scan_index + 1;
+        }
+        return true;
+    }
+
+    public static void shuffle<T>(List<T> list) {
+        if (list == null || list.size() <= 1) {
+            return;
+        }
+        int32 current_index = list.size() - 1;
+        while (current_index > 0) {
+            // Simple Linear Congruential shuffle step
+            int32 random_target = (current_index * 1103515245 + 12345) & 0x7FFFFFFF;
+            random_target = random_target % (current_index + 1);
+            Algorithms::swap<T>(list, current_index, random_target);
+            current_index = current_index - 1;
+        }
+    }
+}

@@ -1,0 +1,121 @@
+import raylib.*;
+
+public class TestRunner {
+    public static int32 test() {
+        // Test 1: Vector2 struct creation and field values
+        Vector2 position_2d = new Vector2((float32)100.0, (float32)200.0);
+        if (position_2d.x != (float32)100.0) {
+            return 1;
+        }
+        if (position_2d.y != (float32)200.0) {
+            return 2;
+        }
+
+        // Test 2: Vector3 struct creation
+        Vector3 position_3d = new Vector3((float32)1.0, (float32)2.0, (float32)3.0);
+        if (position_3d.z != (float32)3.0) {
+            return 3;
+        }
+
+        // Test 3: Rectangle struct creation
+        Rectangle test_rect = new Rectangle((float32)10.0, (float32)20.0, (float32)300.0, (float32)200.0);
+        if (test_rect.width != (float32)300.0 || test_rect.height != (float32)200.0) {
+            return 4;
+        }
+
+        // Test 4: Color presets and fields
+        Color color_red = Color::RED;
+        if (color_red.r != (uint8)230 || color_red.g != (uint8)41 || color_red.b != (uint8)55) {
+            return 5;
+        }
+
+        // Test 5: KeyboardKey enum constant
+        int32 key_space = KeyboardKey::KEY_SPACE;
+        if (key_space != 32) {
+            return 6;
+        }
+
+        // Test 6: CheckCollisionPointRec with Vector2 and Rectangle (verifies float32 IEEE-754 bit-encoding)
+        Vector2 test_point = new Vector2((float32)50.0, (float32)50.0);
+        Rectangle collision_rect = new Rectangle((float32)0.0, (float32)0.0, (float32)100.0, (float32)100.0);
+        bool collision_result = Raylib::CheckCollisionPointRec(test_point, collision_rect);
+        if (!collision_result) {
+            return 7;
+        }
+        Vector2 outside_point = new Vector2((float32)150.0, (float32)50.0);
+        bool outside_result = Raylib::CheckCollisionPointRec(outside_point, collision_rect);
+        if (outside_result) {
+            return 12;
+        }
+
+        // Test 7: Raylib version constants
+        int32 version_major = Raylib::RAYLIB_VERSION_MAJOR;
+        if (version_major != 6) {
+            return 8;
+        }
+
+        // Test 8: Native Raylib API calls (Trace log level & window querying)
+        Raylib::SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+        bool window_ready_before = Raylib::IsWindowReady();
+        if (window_ready_before) {
+            return 9;
+        }
+
+        // Test 9: Top-level free-function binding aliases
+        set_trace_log_level(TraceLogLevel::LOG_NONE);
+        bool window_ready_alias = is_window_ready();
+        if (window_ready_alias) {
+            return 10;
+        }
+
+        // Test 10: Window lifecycle initialization and closure
+        Raylib::InitWindow(320, 240, "Solix Raylib Conformance Test");
+        bool window_ready_after = Raylib::IsWindowReady();
+        if (!window_ready_after) {
+            Raylib::CloseWindow();
+            return 11;
+        }
+
+        Raylib::CloseWindow();
+
+        // Test 11: float32 array allocation and indexing
+        float32[] float_elements = new float32[4];
+        float_elements[0] = (float32)1.5;
+        float_elements[1] = (float32)2.5;
+        float_elements[2] = (float32)3.5;
+        float_elements[3] = (float32)4.5;
+        if (float_elements[0] != (float32)1.5 || float_elements[1] != (float32)2.5) {
+            return 13;
+        }
+
+        // Test 12: Nested struct marshalling (Ray -> GetRayCollisionSphere -> RayCollision)
+        Ray test_ray = new Ray();
+        test_ray.position.x = (float32)0.0;
+        test_ray.position.y = (float32)0.0;
+        test_ray.position.z = (float32)0.0;
+        test_ray.direction.x = (float32)0.0;
+        test_ray.direction.y = (float32)1.0;
+        test_ray.direction.z = (float32)0.0;
+        Vector3 sphere_center = new Vector3((float32)0.0, (float32)10.0, (float32)0.0);
+        float32 sphere_radius = (float32)2.0;
+
+        RayCollision ray_collision = Raylib::GetRayCollisionSphere(test_ray, sphere_center, sphere_radius);
+        if (!ray_collision.hit) {
+            return 14;
+        }
+        if (ray_collision.distance != (float32)8.0) {
+            return 15;
+        }
+        if (ray_collision.point.y != (float32)8.0) {
+            return 16;
+        }
+
+        return 0;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        return TestRunner::test();
+    }
+}

@@ -1,0 +1,44 @@
+package solix.tests;
+
+import solix.tests.TestCore;
+import solix.tests.TestCollections;
+import solix.tests.TestIo;
+import solix.tests.TestMath;
+import solix.tests.TestTime;
+import solix.tests.TestSystem;
+import solix.tests.TestCrypto;
+import solix.io.Console;
+
+class TestRunner {
+    public static int32 test() {
+        int32 result = TestCore::run_all_tests();
+        if (result != 0) {
+            return 100 + result;
+        }
+        result = TestCollections::run_all_tests();
+        if (result != 0) {
+            return 200 + result;
+        }
+        result = TestIo::run_all_tests();
+        if (result != 0) {
+            return 300 + result;
+        }
+        result = TestMath::run_all_tests();
+        if (result != 0) {
+            return 400 + result;
+        }
+        result = TestTime::run_all_tests();
+        if (result != 0) {
+            return 500 + result;
+        }
+        result = TestSystem::run_all_tests();
+        if (result != 0) {
+            return 600 + result;
+        }
+        result = TestCrypto::run_all_tests();
+        if (result != 0) {
+            return 700 + result;
+        }
+        return 0;
+    }
+}

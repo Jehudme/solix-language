@@ -1,0 +1,153 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.core.Optional;
+import solix.core.Result;
+import solix.core.Primitives;
+import solix.core.Exception;
+import solix.core.IllegalArgumentException;
+import solix.core.FileNotFoundException;
+import solix.io.Console;
+
+public class TestCore {
+    public static int32 run_all_tests() {
+        if (!TestCore::test_string()) {
+            return 1;
+        }
+        if (!TestCore::test_string_builder()) {
+            return 2;
+        }
+        if (!TestCore::test_optional()) {
+            return 3;
+        }
+        if (!TestCore::test_result()) {
+            return 4;
+        }
+        if (!TestCore::test_primitives()) {
+            return 5;
+        }
+        if (!TestCore::test_exceptions()) {
+            return 6;
+        }
+        return 0;
+    }
+
+    public static bool test_string() {
+        String greeting_str = new String("Hello");
+        String space_str = new String(" ");
+        String world_str = new String("World");
+        String p1 = greeting_str + space_str;
+        String combined_str = p1 + world_str;
+        String hw = new String("Hello World");
+        bool eq = combined_str.equals(hw);
+        if (!eq) {
+            return false;
+        }
+        if (combined_str.length() != 11) {
+            return false;
+        }
+        return true;
+    }
+
+    public static bool test_string_builder() {
+        StringBuilder builder = new StringBuilder(32);
+        builder.append(new String("Solix"));
+        builder.append_char(' ');
+        builder.append(new String("Language"));
+        builder.append_int(2026);
+        String constructed = builder.to_string();
+        if (!constructed.equals(new String("Solix Language2026"))) {
+            return false;
+        }
+        if (builder.length() != 18) {
+            return false;
+        }
+        builder.clear();
+        if (builder.length() != 0) {
+            return false;
+        }
+
+        builder.clear();
+        if (builder.length() != 0) {
+            return false;
+        }
+        return true;
+    }
+
+    public static bool test_optional() {
+        Optional<String> empty_opt = Optional::empty<String>();
+        if (empty_opt.is_present()) {
+            return false;
+        }
+        if (!empty_opt.is_empty()) {
+            return false;
+        }
+        String fallback = new String("DefaultValue");
+        String fallback_val = empty_opt.or_else(fallback);
+        if (!fallback_val.equals(new String("DefaultValue"))) {
+            return false;
+        }
+
+        String present = new String("PresentValue");
+        Optional<String> filled_opt = Optional::of<String>(present);
+        if (!filled_opt.is_present()) {
+            return false;
+        }
+        if (!filled_opt.get().equals(new String("PresentValue"))) {
+            return false;
+        }
+        return true;
+    }
+
+    public static bool test_result() {
+        Result<String, String> success_result = Result::ok<String, String>(new String("SuccessData"));
+        if (!success_result.is_ok()) {
+            return false;
+        }
+        if (success_result.is_err()) {
+            return false;
+        }
+        if (!success_result.unwrap().equals(new String("SuccessData"))) {
+            return false;
+        }
+
+        Result<String, String> failure_result = Result::err<String, String>(new String("ErrorNotice"));
+        if (!failure_result.is_err()) {
+            return false;
+        }
+        if (!failure_result.unwrap_err().equals(new String("ErrorNotice"))) {
+            return false;
+        }
+        return true;
+    }
+
+    public static bool test_primitives() {
+        int32 popcount_val = Primitives::bit_count32(0x0000000F);
+        if (popcount_val != 4) {
+            return false;
+        }
+        int32 clz_val = Primitives::count_leading_zeros32(0x00000001);
+        if (clz_val != 31) {
+            return false;
+        }
+        int32 ctz_val = Primitives::count_trailing_zeros32(0x00000008);
+        if (ctz_val != 3) {
+            return false;
+        }
+        return true;
+    }
+
+    public static bool test_exceptions() {
+        bool exception_caught = false;
+        try {
+            throw new IllegalArgumentException("test_param", "Invalid argument passed");
+        } catch (IllegalArgumentException caught_exception) {
+            exception_caught = true;
+            if (caught_exception.parameter_name != "test_param") {
+                return false;
+            }
+        }
+        return exception_caught;
+    }
+}

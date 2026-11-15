@@ -4,7 +4,7 @@ use solix_common::bytecode::{
     BinaryProgram, CompiledClass, CompiledFunction, ConstantPool, ConstantPoolValue,
     DeclarationModifier, ExceptionHandlerEntry, ExportManifest, ExportedClass, ExportedField,
     ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic, Instruction,
-    MAGIC, OpCode, VERSION_MAJOR, extract_api_manifest,
+    LocalVariableDebugInfo, MAGIC, OpCode, SourceMapEntry, VERSION_MAJOR, extract_api_manifest,
 };
 use solix_common::diagnostics::EmissionError;
 use solix_common::span::Span;
@@ -344,6 +344,7 @@ fn test_export_manifest_json_extraction() {
         return_type: Type::Primitive(PrimitiveKind::Int32),
         is_constructor: false,
         is_destructor: false,
+        is_operator: false,
     };
 
     let exported_static = ExportedStatic {
@@ -388,6 +389,7 @@ fn test_export_manifest_json_extraction() {
             return_type: Type::Primitive(PrimitiveKind::Float64),
             is_constructor: false,
             is_destructor: false,
+            is_operator: false,
         }],
     };
 
@@ -398,13 +400,21 @@ fn test_export_manifest_json_extraction() {
     };
 
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: program.package_name.clone(),
         package_version: program.package_version.clone(),
         package_description: program.package_description.clone(),
+        build_profile: "debug".to_string(),
+        native_library_checksums: std::collections::HashMap::new(),
+        dependencies: Vec::new(),
         exported_classes: vec![exported_class],
+        exported_enums: Vec::new(),
         exported_functions: vec![exported_func],
         exported_statics: vec![exported_static],
         generic_templates: vec![generic_template],
+        source_files: Vec::new(),
+        api_header: String::new(),
+        exported_ast_bytes: Vec::new(),
     };
 
     let manifest_json = extract_api_manifest(&program).expect("json extraction succeeds");
@@ -426,10 +436,15 @@ fn test_binary_program_manifest_round_trip() {
     program.package_description = "Networking library".to_string();
 
     program.export_manifest = ExportManifest {
+        entry_point: None,
         package_name: "network".to_string(),
         package_version: "2.0.1".to_string(),
         package_description: "Networking library".to_string(),
+        build_profile: "release".to_string(),
+        native_library_checksums: std::collections::HashMap::new(),
+        dependencies: Vec::new(),
         exported_classes: Vec::new(),
+        exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {
             symbol: "network::connect/1".to_string(),
             simple_name: "connect".to_string(),
@@ -441,9 +456,13 @@ fn test_binary_program_manifest_round_trip() {
             return_type: Type::Primitive(PrimitiveKind::Bool),
             is_constructor: false,
             is_destructor: false,
+            is_operator: false,
         }],
         exported_statics: Vec::new(),
         generic_templates: Vec::new(),
+        source_files: Vec::new(),
+        api_header: String::new(),
+        exported_ast_bytes: Vec::new(),
     };
 
     let bytes = program.to_bytes();
@@ -451,7 +470,104 @@ fn test_binary_program_manifest_round_trip() {
         BinaryProgram::from_bytes(&bytes).expect("round-trip deserialization succeeds");
 
     assert_eq!(deserialized.package_name, "network");
+    assert_eq!(deserialized.build_profile, "release");
+    assert_eq!(program.compute_sha256(), deserialized.compute_sha256());
+    assert_eq!(program.compute_sha256().len(), 64);
+
+    program.exported_ast_bytes = vec![1, 2, 3, 4, 5, 42];
+    let bytes_with_ast = program.to_bytes();
+    let deserialized_with_ast =
+        BinaryProgram::from_bytes(&bytes_with_ast).expect("round-trip with ast");
+    assert_eq!(
+        deserialized_with_ast.exported_ast_bytes,
+        vec![1, 2, 3, 4, 5, 42]
+    );
+    assert_eq!(
+        deserialized_with_ast.export_manifest.exported_ast_bytes,
+        vec![1, 2, 3, 4, 5, 42]
+    );
     assert_eq!(deserialized.package_version, "2.0.1");
     assert_eq!(deserialized.package_description, "Networking library");
     assert_eq!(deserialized.export_manifest, program.export_manifest);
+}
+
+#[test]
+fn test_debug_metadata_lossless_roundtrip() {
+    let mut program = BinaryProgram::new();
+    program.package_name = "sample".to_string();
+    program.build_profile = "debug".to_string();
+    program.source_files = vec!["src/main.slx".to_string()];
+    program.export_manifest.source_files = vec!["src/main.slx".to_string()];
+    program.export_manifest.build_profile = "debug".to_string();
+
+    let mut sample_class = CompiledClass::new("sample::Point", 1, None, 24);
+    sample_class.field_names = vec![
+        (8, "coordinate_x".to_string(), "int32".to_string()),
+        (12, "coordinate_y".to_string(), "int32".to_string()),
+    ];
+    program.classes.push(sample_class);
+
+    let mut sample_function = CompiledFunction::new("sample::Point::distance", 0, 1, 4);
+    sample_function.source_map = vec![
+        SourceMapEntry {
+            instruction_pc: 0,
+            span: Span { id: 0, start: 10, end: 20 },
+            line: 46,
+            column: 5,
+        },
+        SourceMapEntry {
+            instruction_pc: 1,
+            span: Span { id: 0, start: 25, end: 35 },
+            line: 47,
+            column: 9,
+        },
+    ];
+    sample_function.local_variables = vec![
+        LocalVariableDebugInfo {
+            register: 0,
+            name: "this".to_string(),
+            type_name: "Point".to_string(),
+            var_type: Type::Primitive(PrimitiveKind::Void),
+            start_pc: 0,
+            end_pc: 2,
+            is_parameter: true,
+        },
+        LocalVariableDebugInfo {
+            register: 1,
+            name: "distance_result".to_string(),
+            type_name: "int32".to_string(),
+            var_type: Type::Primitive(PrimitiveKind::Void),
+            start_pc: 0,
+            end_pc: 2,
+            is_parameter: false,
+        },
+    ];
+    program.functions.push(sample_function);
+
+    let serialized_bytes = program.to_bytes();
+    let deserialized_program = BinaryProgram::from_bytes(&serialized_bytes)
+        .expect("round-trip deserialization succeeds");
+
+    assert_eq!(deserialized_program.classes.len(), 1);
+    assert_eq!(
+        deserialized_program.classes[0].field_names,
+        vec![
+            (8, "coordinate_x".to_string(), "int32".to_string()),
+            (12, "coordinate_y".to_string(), "int32".to_string()),
+        ]
+    );
+
+    assert_eq!(deserialized_program.functions.len(), 1);
+    let deserialized_function = &deserialized_program.functions[0];
+    assert_eq!(deserialized_function.source_map.len(), 2);
+    assert_eq!(deserialized_function.source_map[0].line, 46);
+    assert_eq!(deserialized_function.source_map[0].column, 5);
+    assert_eq!(deserialized_function.source_map[1].line, 47);
+    assert_eq!(deserialized_function.source_map[1].column, 9);
+
+    assert_eq!(deserialized_function.local_variables.len(), 2);
+    assert_eq!(deserialized_function.local_variables[0].name, "this");
+    assert!(deserialized_function.local_variables[0].is_parameter);
+    assert_eq!(deserialized_function.local_variables[1].name, "distance_result");
+    assert_eq!(deserialized_function.local_variables[1].type_name, "int32");
 }

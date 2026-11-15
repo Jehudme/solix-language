@@ -2,8 +2,9 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
-pub mod dispatch;
+pub mod debug;
 pub mod engine;
 pub mod fast;
 
-pub use engine::VirtualMachine;
+pub use debug::{DebugSignal, VmDebugHook};
+pub use engine::{VirtualMachine, VmTelemetry};

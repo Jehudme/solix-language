@@ -56,6 +56,10 @@ pub enum RuntimeError {
     #[error("invalid field offset {offset} for object of instance size {object_size}")]
     InvalidFieldOffset { offset: usize, object_size: usize },
 
+    /// Invalid VTable access or missing vtable entry.
+    #[error("invalid vtable access for vtable ID {vtable_id}")]
+    InvalidVTableAccess { vtable_id: u32 },
+
     /// Static variable slot offset out of bounds.
     #[error("invalid static slot offset {offset} (total static partition size {total_static})")]
     InvalidStaticOffset { offset: u32, total_static: u32 },
@@ -96,10 +100,37 @@ pub enum RuntimeError {
     },
 
     /// Invalid entry point method signature.
-    #[error(
-        "invalid entry point signature: {symbol} has {param_count} parameters (expected 0 or 1)"
-    )]
-    InvalidEntryPointSignature { symbol: String, param_count: u16 },
+    #[error("invalid entry point signature in '{symbol}': {reason}")]
+    InvalidEntryPointSignature {
+        symbol: String,
+        param_count: u16,
+        reason: String,
+    },
+
+    /// Duplicate symbol definition across loaded modules.
+    #[error("DuplicateSymbolDefinition: cannot define {kind} '{symbol}' in module '{second_module}': already defined in module '{first_module}'")]
+    DuplicateSymbolDefinition {
+        kind: String,
+        symbol: String,
+        first_module: String,
+        second_module: String,
+    },
+
+    /// Native shared library loading or symbol resolution failure.
+    #[error("SharedLibraryException: Failed to load library '{path}': {reason}")]
+    SharedLibraryError { path: String, reason: String },
+
+    /// Runtime package dependency resolution or version incompatibility failure.
+    #[error("DependencyException: {reason}")]
+    DependencyError { reason: String },
+
+    /// Native shared library checksum verification failure.
+    #[error("NativeLibraryChecksumMismatch: native library checksum verification failed for '{path}': expected {expected}, found {actual}")]
+    NativeLibraryChecksumMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Canonical numerical error codes emitted on abnormal VM termination.
@@ -150,6 +181,14 @@ pub enum RuntimeErrorCode {
     InvalidEntryPointSignature = 20,
     /// Explicit exit with non-zero code.
     ExplicitExit = 21,
+    /// Native shared library load or invocation failure.
+    SharedLibraryError = 22,
+    /// Dependency resolution or SemVer compatibility failure.
+    DependencyError = 23,
+    /// Duplicate symbol definition across loaded modules.
+    DuplicateSymbolDefinition = 24,
+    /// Native shared library checksum verification failure.
+    NativeLibraryChecksumMismatch = 25,
 }
 
 impl RuntimeErrorCode {
@@ -182,6 +221,7 @@ impl RuntimeError {
             Self::InvalidInstruction { .. } => RuntimeErrorCode::InvalidInstruction,
             Self::InvalidOpCode { .. } => RuntimeErrorCode::InvalidOpCode,
             Self::InvalidFieldOffset { .. } => RuntimeErrorCode::InvalidFieldOffset,
+            Self::InvalidVTableAccess { .. } => RuntimeErrorCode::InvalidCast,
             Self::InvalidStaticOffset { .. } => RuntimeErrorCode::InvalidStaticOffset,
             Self::BinaryLoadError { .. } => RuntimeErrorCode::BinaryLoadError,
             Self::Exit { code } => {
@@ -198,6 +238,14 @@ impl RuntimeError {
             Self::AssertionFailed { .. } => RuntimeErrorCode::AssertionFailed,
             Self::MemoryLeak { .. } => RuntimeErrorCode::MemoryLeak,
             Self::InvalidEntryPointSignature { .. } => RuntimeErrorCode::InvalidEntryPointSignature,
+            Self::SharedLibraryError { .. } => RuntimeErrorCode::SharedLibraryError,
+            Self::DependencyError { .. } => RuntimeErrorCode::DependencyError,
+            Self::DuplicateSymbolDefinition { .. } => {
+                RuntimeErrorCode::DuplicateSymbolDefinition
+            }
+            Self::NativeLibraryChecksumMismatch { .. } => {
+                RuntimeErrorCode::NativeLibraryChecksumMismatch
+            }
         }
     }
 }

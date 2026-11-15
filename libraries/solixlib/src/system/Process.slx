@@ -1,0 +1,166 @@
+package solix.system;
+
+import solix.core.String;
+import solix.core.StringBuilder;
+import solix.collections.List;
+
+public class Process {
+    private String command_name;
+    private List<String> argument_list;
+    private int64 process_handle;
+    private int32 exit_status_code;
+    private bool started_flag;
+    private bool exited_flag;
+
+    public Process(string command_text) {
+        this.command_name = (command_text != null) ? new String(command_text) : new String("");
+        this.argument_list = new List<String>();
+        this.process_handle = -1L;
+        this.exit_status_code = -1;
+        this.started_flag = false;
+        this.exited_flag = false;
+    }
+
+    public Process(String command_object) {
+        this.command_name = (command_object != null) ? command_object : new String("");
+        this.argument_list = new List<String>();
+        this.process_handle = -1L;
+        this.exit_status_code = -1;
+        this.started_flag = false;
+        this.exited_flag = false;
+    }
+
+    public Process(String command_object, List<String> arguments) {
+        this.command_name = (command_object != null) ? command_object : new String("");
+        this.argument_list = (arguments != null) ? arguments : new List<String>();
+        this.process_handle = -1L;
+        this.exit_status_code = -1;
+        this.started_flag = false;
+        this.exited_flag = false;
+    }
+
+    public Process(string command_text, List<String> arguments) {
+        this.command_name = (command_text != null) ? new String(command_text) : new String("");
+        this.argument_list = (arguments != null) ? arguments : new List<String>();
+        this.process_handle = -1L;
+        this.exit_status_code = -1;
+        this.started_flag = false;
+        this.exited_flag = false;
+    }
+
+    ~Process() {
+        if (this.started_flag && !this.exited_flag) {
+            this.kill();
+        }
+    }
+
+    public void add_argument(string argument_text) {
+        if (argument_text != null) {
+            this.argument_list.add(new String(argument_text));
+        }
+    }
+
+    public void add_argument(String argument_object) {
+        if (argument_object != null) {
+            this.argument_list.add(argument_object);
+        }
+    }
+
+    public void start() {
+        if (this.started_flag) {
+            return;
+        }
+        char[] command_chars = (this.command_name != null && this.command_name.data != null)
+            ? this.command_name.to_chars()
+            : new char[0];
+
+        StringBuilder arguments_builder = new StringBuilder(64);
+        int32 argument_index = 0;
+        while (argument_index < this.argument_list.size()) {
+            if (argument_index > 0) {
+                arguments_builder.append_char('\t');
+            }
+            String single_argument = this.argument_list.get(argument_index);
+            if (single_argument != null && single_argument.data != null) {
+                arguments_builder.append(single_argument.to_chars());
+            }
+            argument_index = argument_index + 1;
+        }
+
+        String serialized_args = arguments_builder.to_string();
+        char[] args_chars = serialized_args.to_chars();
+        this.process_handle = Process::native_start(command_chars, args_chars);
+        this.started_flag = true;
+    }
+
+    public int32 wait_for_exit() {
+        if (!this.started_flag) {
+            this.start();
+        }
+        if (this.exited_flag) {
+            return this.exit_status_code;
+        }
+        if (this.process_handle < 0L) {
+            this.exit_status_code = -1;
+            this.exited_flag = true;
+            return -1;
+        }
+        this.exit_status_code = Process::native_wait_for_exit(this.process_handle);
+        this.exited_flag = true;
+        return this.exit_status_code;
+    }
+
+    public String get_stdout() {
+        if (this.process_handle < 0L) {
+            return new String("");
+        }
+        char[] output_chars = Process::native_get_stdout(this.process_handle);
+        return new String(output_chars);
+    }
+
+    public String get_stderr() {
+        if (this.process_handle < 0L) {
+            return new String("");
+        }
+        char[] error_chars = Process::native_get_stderr(this.process_handle);
+        return new String(error_chars);
+    }
+
+    public bool kill() {
+        if (this.process_handle < 0L) {
+            return false;
+        }
+        bool kill_result = Process::native_kill(this.process_handle);
+        this.exited_flag = true;
+        return kill_result;
+    }
+
+    public ProcessResult execute() {
+        int32 exit_code = this.wait_for_exit();
+        String stdout_output = this.get_stdout();
+        String stderr_output = this.get_stderr();
+        return new ProcessResult(exit_code, stdout_output, stderr_output);
+    }
+
+    // Static convenience runners
+    public static ProcessResult run(string command_text) {
+        Process runner = new Process(command_text);
+        return runner.execute();
+    }
+
+    public static ProcessResult run(String command_object) {
+        Process runner = new Process(command_object);
+        return runner.execute();
+    }
+
+    public static ProcessResult run(String command_object, List<String> arguments) {
+        Process runner = new Process(command_object, arguments);
+        return runner.execute();
+    }
+
+    private static native int64 native_start(char[] command_name, char[] arguments_joined);
+    private static native int32 native_wait_for_exit(int64 process_handle);
+    private static native char[] native_get_stdout(int64 process_handle);
+    private static native char[] native_get_stderr(int64 process_handle);
+    private static native bool native_kill(int64 process_handle);
+}

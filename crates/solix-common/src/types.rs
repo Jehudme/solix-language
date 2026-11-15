@@ -174,6 +174,12 @@ pub enum Type {
     Error,
 }
 
+impl Default for Type {
+    fn default() -> Self {
+        Self::Primitive(PrimitiveKind::Void)
+    }
+}
+
 impl Type {
     /// Returns whether this type represents an automatic reference counting (ARC) managed reference.
     #[must_use]
@@ -192,6 +198,27 @@ impl Type {
             | Self::GenericParameter { .. }
             | Self::Unresolved(_)
             | Self::Error => false,
+        }
+    }
+
+    /// Returns whether this type is tracked by the GC reference-counting cascade.
+    ///
+    /// This differs from [`is_reference_type`] in that the primitive `string` type
+    /// (`std.string` / `BlockTag::String`) is a raw byte buffer managed by its own
+    /// internal allocator — it is **not** an ARC object and must **not** appear in
+    /// `reference_field_offsets` or be passed to `release_reference`.
+    #[must_use]
+    pub fn is_gc_managed_reference_type(&self) -> bool {
+        match self {
+            Self::Class { symbol_name, .. }
+                if symbol_name == "std.string"
+                    || symbol_name == "std::string"
+                    || symbol_name == "string" =>
+            {
+                false
+            }
+            Self::Alias { target_type, .. } => target_type.is_gc_managed_reference_type(),
+            other => other.is_reference_type(),
         }
     }
 
@@ -382,6 +409,9 @@ impl Type {
                     type_arguments: target_args,
                 },
             ) if source_name.replace('.', "::") == target_name.replace('.', "::") => {
+                if source_args.is_empty() || target_args.is_empty() {
+                    return true;
+                }
                 return source_args == target_args;
             }
             (
@@ -447,7 +477,7 @@ impl Type {
                 },
             ) => {
                 if is_subtype(source_name, target_name) {
-                    if target_args.is_empty() {
+                    if source_args.is_empty() || target_args.is_empty() {
                         true
                     } else {
                         // Invariant generic parameters: arguments must match exactly
@@ -524,7 +554,15 @@ impl Display for Type {
                 symbol_name,
                 type_arguments,
             } => {
-                let normalized_name = symbol_name.replace('.', "::");
+                // Normalize the string primitive aliases to the canonical `string` keyword.
+                let normalized_name = if symbol_name == "std.string"
+                    || symbol_name == "std::string"
+                    || symbol_name == "string"
+                {
+                    "string".to_string()
+                } else {
+                    symbol_name.replace('.', "::")
+                };
                 write!(formatter, "{normalized_name}")?;
                 if !type_arguments.is_empty() {
                     write!(formatter, "<")?;
@@ -532,7 +570,20 @@ impl Display for Type {
                         if index > 0 {
                             write!(formatter, ", ")?;
                         }
-                        write!(formatter, "{argument}")?;
+                        // Format each argument and add a trailing space before `>` when the
+                        // argument itself ends with `>` to avoid the parser seeing `>>` as
+                        // the OperatorShiftRight token.
+                        let argument_text = format!("{argument}");
+                        write!(formatter, "{argument_text}")?;
+                    }
+                    // If the last argument's formatted text ends with `>`, emit a separating
+                    // space so the closing `>` does not form a `>>` shift-right token.
+                    let last_argument_text = format!(
+                        "{}",
+                        type_arguments.last().expect("checked non-empty above")
+                    );
+                    if last_argument_text.ends_with('>') {
+                        write!(formatter, " ")?;
                     }
                     write!(formatter, ">")?;
                 }
@@ -578,7 +629,7 @@ impl Display for Type {
             Self::GenericParameter { name, .. } => write!(formatter, "{name}"),
             Self::Alias { alias_name, .. } => write!(formatter, "{alias_name}"),
             Self::Null => write!(formatter, "null"),
-            Self::Unresolved(name) => write!(formatter, "unresolved({name})"),
+            Self::Unresolved(name) => write!(formatter, "{name}"),
             Self::Error => write!(formatter, "<error-type>"),
         }
     }

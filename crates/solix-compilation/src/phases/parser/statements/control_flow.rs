@@ -6,9 +6,10 @@ use crate::phases::lexing::Span;
 use crate::phases::parser::statements::Statement;
 use crate::phases::parser::statements::expressions::Expression;
 use crate::phases::parser::statements::types::TypeAnnotation;
+use serde::{Deserialize, Serialize};
 
 /// A compound block statement enclosed by curly braces (`{ stmt1; stmt2; }`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlockStatement {
     /// Overall source coordinate span from `{` to `}`.
     pub span: Span,
@@ -17,7 +18,7 @@ pub struct BlockStatement {
 }
 
 /// Conditional branch statement (`if (cond) stmt [else stmt]`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IfStatement {
     /// Overall source coordinate span of the if-statement.
     pub span: Span,
@@ -30,7 +31,7 @@ pub struct IfStatement {
 }
 
 /// Loop statement repeating while a condition evaluates to true (`while (cond) stmt`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhileStatement {
     /// Overall source coordinate span.
     pub span: Span,
@@ -41,7 +42,7 @@ pub struct WhileStatement {
 }
 
 /// Loop statement evaluating its condition after each iteration (`do stmt while (cond);`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DoWhileStatement {
     /// Overall source coordinate span from `do` to `;`.
     pub span: Span,
@@ -52,7 +53,7 @@ pub struct DoWhileStatement {
 }
 
 /// Standard 3-clause for-loop (`for (init; cond; step) body`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ForStatement {
     /// Overall source coordinate span.
     pub span: Span,
@@ -67,7 +68,7 @@ pub struct ForStatement {
 }
 
 /// Single case clause within a switch statement (`case <expr>: <statements>`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CaseClause {
     /// Overall source coordinate span.
     pub span: Span,
@@ -78,7 +79,7 @@ pub struct CaseClause {
 }
 
 /// Multi-branch pattern switch statement (`switch (expr) { case ...: default: ... }`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SwitchStatement {
     /// Overall source coordinate span.
     pub span: Span,
@@ -91,7 +92,7 @@ pub struct SwitchStatement {
 }
 
 /// Individual catch clause catching a typed exception in a try block.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatchClause {
     /// Overall source coordinate span.
     pub span: Span,
@@ -104,7 +105,7 @@ pub struct CatchClause {
 }
 
 /// Exception-handling block statement (`try { ... } catch (...) { ... } finally { ... }`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TryStatement {
     /// Overall source coordinate span.
     pub span: Span,
@@ -117,7 +118,7 @@ pub struct TryStatement {
 }
 
 /// Throw statement raising an exception (`throw expr;`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThrowStatement {
     /// Overall source coordinate span from `throw` to `;`.
     pub span: Span,
@@ -126,7 +127,7 @@ pub struct ThrowStatement {
 }
 
 /// Function or method return statement (`return [expr];`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReturnStatement {
     /// Overall source coordinate span from `return` to `;`.
     pub span: Span,
@@ -135,21 +136,21 @@ pub struct ReturnStatement {
 }
 
 /// Break statement transferring control outside the innermost loop or switch (`break;`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BreakStatement {
     /// Overall source coordinate span from `break` to `;`.
     pub span: Span,
 }
 
 /// Continue statement jumping to the next iteration of the innermost loop (`continue;`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContinueStatement {
     /// Overall source coordinate span from `continue` to `;`.
     pub span: Span,
 }
 
 /// Variable declaration statement (`[const] Type name [= initializer];`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VariableDeclarationStatement {
     /// Overall source coordinate span.
     pub span: Span,
@@ -164,7 +165,7 @@ pub struct VariableDeclarationStatement {
 }
 
 /// Statement wrapping a single evaluated expression (`expr;`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExpressionStatement {
     /// Overall source coordinate span including the terminating semicolon.
     pub span: Span,
@@ -173,7 +174,7 @@ pub struct ExpressionStatement {
 }
 
 /// Assert intrinsic statement verifying a condition (`assert(cond [, message]);`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssertStatement {
     /// Overall source coordinate span from `assert` to `;`.
     pub span: Span,
@@ -184,7 +185,7 @@ pub struct AssertStatement {
 }
 
 /// Exit statement terminating the execution runtime (`exit(code);`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExitStatement {
     /// Overall source coordinate span from `exit` to `;`.
     pub span: Span,

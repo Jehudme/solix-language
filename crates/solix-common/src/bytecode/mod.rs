@@ -13,10 +13,13 @@ pub use binary::{
     BinaryProgram, ConstantPool, ConstantPoolValue, MAGIC, VERSION_MAJOR, VERSION_MINOR,
 };
 pub use class::CompiledClass;
-pub use function::{CompiledFunction, ExceptionHandlerEntry, SourceMapEntry};
+pub use function::{
+    CompiledFunction, ExceptionHandlerEntry, LocalVariableDebugInfo, SourceMapEntry,
+};
 pub use instruction::Instruction;
 pub use manifest::{
-    DeclarationModifier, ExportManifest, ExportedClass, ExportedField, ExportedFunction,
-    ExportedGenericTemplate, ExportedParameter, ExportedStatic, extract_api_manifest,
+    DeclarationModifier, ExportManifest, ExportedClass, ExportedEnum, ExportedField,
+    ExportedFunction, ExportedGenericTemplate, ExportedParameter, ExportedStatic,
+    extract_api_manifest,
 };
 pub use opcodes::OpCode;

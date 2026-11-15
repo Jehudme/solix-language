@@ -39,6 +39,16 @@ impl FreeListManager {
         }
     }
 
+    /// Creates a new free list manager with no free blocks initially (used when paired with a bump allocator).
+    #[must_use]
+    pub fn new_empty(capacity: usize) -> Self {
+        Self {
+            free_by_offset: BTreeMap::new(),
+            free_by_size: BTreeMap::new(),
+            total_capacity: capacity,
+        }
+    }
+
     /// Allocates a contiguous chunk of at least `required_size` bytes.
     ///
     /// Uses a best-fit search. Splits the chunk if leftover capacity exceeds `MIN_SPLIT_FRAGMENT`.

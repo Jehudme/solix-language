@@ -6,7 +6,7 @@ use crate::phases::lexing::Span;
 use crate::phases::parser::statements::Modifier;
 use serde::{Deserialize, Serialize};
 use solix_common::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Unique sequential identifier indexing a symbol in the compiler's symbol table.
 #[derive(
@@ -132,6 +132,25 @@ pub struct ImportEntry {
     pub span: Span,
 }
 
+/// Detailed metadata record of a scoped local variable, parameter, or block-level binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalSymbolEntry {
+    /// Local identifier name.
+    pub name: String,
+    /// Evaluated semantic type of the local symbol.
+    pub symbol_type: Type,
+    /// Source coordinate span of the declared identifier name.
+    pub decl_span: Span,
+    /// Source coordinate span enclosing the scope wherein this symbol is valid.
+    pub scope_span: Span,
+    /// Originating source file identifier.
+    pub source_id: u16,
+    /// Whether this local symbol was declared with the `const` modifier.
+    pub is_const: bool,
+    /// Assigned symbol identifier in the symbol table.
+    pub symbol_id: SymbolId,
+}
+
 /// Hierarchical compiler symbol table managing global, per-file, and local lexical scopes.
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
@@ -147,6 +166,12 @@ pub struct SymbolTable {
     pub file_imports: Vec<Vec<ImportEntry>>,
     /// Active lexical scope stack for local variables and parameters.
     pub scope_stack: Vec<HashMap<String, SymbolId>>,
+    /// Scoped local variable and parameter records preserved across scope pops for IDE intelligence.
+    pub local_symbols: Vec<LocalSymbolEntry>,
+    /// Known package namespaces populated during symbol discovery.
+    pub known_packages: HashSet<String>,
+    /// Optional active enclosing package context overriding `file_packages` (e.g. while checking a qualified class).
+    pub active_package: Option<String>,
 }
 
 impl SymbolTable {
@@ -170,6 +195,9 @@ impl SymbolTable {
             file_packages,
             file_imports,
             scope_stack: Vec::new(),
+            local_symbols: Vec::new(),
+            known_packages: HashSet::new(),
+            active_package: None,
         }
     }
 
@@ -230,6 +258,11 @@ impl SymbolTable {
         }
     }
 
+    /// Records a local symbol metadata entry preserved for IDE and language server intelligence.
+    pub fn record_local_symbol(&mut self, local_entry: LocalSymbolEntry) {
+        self.local_symbols.push(local_entry);
+    }
+
     /// Resolves an unqualified or qualified symbol identifier from the perspective of `source_id`.
     ///
     /// Resolution precedence (SPEC-0001 §11):
@@ -267,8 +300,12 @@ impl SymbolTable {
             }
         }
 
-        // 3. Check current package
-        if let Some(package_prefix) = self.file_packages.get(source_index)
+        // 3. Check current package (or active enclosing package context)
+        let active_pkg = self
+            .active_package
+            .as_deref()
+            .or_else(|| self.file_packages.get(source_index).map(|pkg| pkg.as_str()));
+        if let Some(package_prefix) = active_pkg
             && !package_prefix.is_empty()
         {
             let package_qualified = format!("{package_prefix}::{identifier}");
@@ -290,7 +327,46 @@ impl SymbolTable {
         }
 
         // 5. Global FQN direct match
-        self.lookup_global(identifier)
+        if let Some(symbol_id) = self.lookup_global(identifier) {
+            return Some(symbol_id);
+        }
+
+        // 6. Unqualified unique package fallback (root facade for root/default package or imported packages)
+        if !identifier.contains("::") && !identifier.contains('.') {
+            let caller_has_package = self
+                .file_packages
+                .get(source_index)
+                .is_some_and(|package_prefix| !package_prefix.is_empty());
+            let suffix = format!("::{identifier}");
+            let mut matched_symbol_id = None;
+            for (candidate_fqn, &candidate_symbol_id) in &self.global_names {
+                if candidate_fqn.ends_with(&suffix) {
+                    if caller_has_package {
+                        let package_part = candidate_fqn.strip_suffix(&suffix).unwrap_or("");
+                        let is_imported =
+                            self.file_imports.get(source_index).is_some_and(|imports| {
+                                imports.iter().any(|import_entry| {
+                                    import_entry.path == package_part
+                                        || import_entry.path.starts_with(package_part)
+                                })
+                            });
+                        if !is_imported {
+                            continue;
+                        }
+                    }
+                    if matched_symbol_id.is_some() {
+                        // Ambiguous across multiple packages
+                        return None;
+                    }
+                    matched_symbol_id = Some(candidate_symbol_id);
+                }
+            }
+            if let Some(symbol_id) = matched_symbol_id {
+                return Some(symbol_id);
+            }
+        }
+
+        None
     }
 
     /// Finds all candidate fully qualified symbol paths matching an identifier across active wildcard imports in `source_id`.

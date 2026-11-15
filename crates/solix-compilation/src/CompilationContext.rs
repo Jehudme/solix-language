@@ -2,15 +2,81 @@
 
 #![forbid(unsafe_code)]
 
+use crate::diagnostics::{CompilationDiagnostic, LexingError, ParsingError};
 use crate::phases::lexing::tokens::{Span, Token};
 use crate::phases::parser::statements::ProgramAst;
-use solix_common::{LexingError, ParsingError};
+use solix_common::bytecode::BinaryProgram;
+use solix_common::solver::{DependencyRequirement, ModuleSolver};
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+/// Target build profile controlling compiler optimizations and pipeline stages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BuildProfile {
+    /// Fast compilation without AST inlining or bytecode peephole optimizations.
+    Debug,
+    /// Full compiler optimizations enabled (AST inlining and bytecode optimizer).
+    #[default]
+    Release,
+    /// Fast compilation with test harness entry point and exact assertion traces.
+    Test,
+}
+
+/// Binary linking mode for compiled executables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkMode {
+    /// Deserializes external signatures and links dynamically via `OpCode::CallExtern`.
+    #[default]
+    Dynamic,
+    /// Merges reachable dependency functions into a single standalone binary.
+    Static,
+}
+
+impl std::str::FromStr for LinkMode {
+    type Err = String;
+
+    fn from_str(input_str: &str) -> Result<Self, Self::Err> {
+        match input_str.to_ascii_lowercase().as_str() {
+            "dynamic" => Ok(Self::Dynamic),
+            "static" => Ok(Self::Static),
+            other => Err(format!(
+                "Invalid link mode '{other}', expected 'dynamic' or 'static'"
+            )),
+        }
+    }
+}
+
+impl std::str::FromStr for BuildProfile {
+    type Err = String;
+
+    fn from_str(input_str: &str) -> Result<Self, Self::Err> {
+        match input_str.to_ascii_lowercase().as_str() {
+            "debug" => Ok(Self::Debug),
+            "release" => Ok(Self::Release),
+            "test" => Ok(Self::Test),
+            other => Err(format!(
+                "Invalid build profile '{other}', expected 'debug', 'release', or 'test'"
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for BuildProfile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Debug => write!(formatter, "debug"),
+            Self::Release => write!(formatter, "release"),
+            Self::Test => write!(formatter, "test"),
+        }
+    }
+}
 
 /// Configuration options provided to the compilation driver.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CompilationOptions {
+    /// Target build profile controlling optimization passes.
+    pub profile: BuildProfile,
     /// Mapping of source identifiers/paths to their source code contents.
     pub codes: HashMap<String, String>,
     /// Package or library name.
@@ -23,6 +89,28 @@ pub struct CompilationOptions {
     pub pipeline: Option<crate::pipeline::CompilationPipeline>,
     /// Whether to automatically include built-in standard library definitions (`blt.io`).
     pub include_builtins: bool,
+    /// Maximum statement threshold for automatic AST inlining (default 8). Set to 0 to disable automatic inlining.
+    pub inline_threshold: usize,
+    /// Whether to execute post-emission bytecode optimizations (default true).
+    pub bytecode_optimization: bool,
+    /// Pre-loaded binary programs to link as external dependencies.
+    pub dependency_binaries: Vec<BinaryProgram>,
+    /// Explicit dependency requirements (e.g. from `--deps raylib@1.0.0`).
+    pub dependency_specs: Vec<DependencyRequirement>,
+    /// Pluggable module solver for fetching missing/transitive dependencies.
+    pub solver: Option<Arc<dyn ModuleSolver>>,
+    /// Optional explicit entry point symbol (e.g. from `--entry <symbol>`).
+    pub entry_point: Option<String>,
+    /// Linking mode for dependencies and executable emission (`dynamic` or `static`).
+    pub link_mode: LinkMode,
+    /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --yolo).
+    pub verify_checksums: bool,
+}
+
+impl Default for CompilationOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CompilationOptions {
@@ -30,13 +118,74 @@ impl CompilationOptions {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            profile: BuildProfile::Release,
             codes: HashMap::new(),
             package_name: String::new(),
             package_version: "0.1.0".to_string(),
             package_description: String::new(),
             pipeline: None,
             include_builtins: false,
+            inline_threshold: 8,
+            bytecode_optimization: true,
+            dependency_binaries: Vec::new(),
+            dependency_specs: Vec::new(),
+            solver: None,
+            entry_point: None,
+            link_mode: LinkMode::Dynamic,
+            verify_checksums: true,
         }
+    }
+
+    /// Sets the explicit entry point symbol for the output binary.
+    #[must_use]
+    pub fn with_entry_point(mut self, entry_point: Option<String>) -> Self {
+        self.entry_point = entry_point;
+        self
+    }
+
+    /// Sets whether to enforce cryptographic checksum verification on dependencies.
+    #[must_use]
+    pub fn with_verify_checksums(mut self, verify: bool) -> Self {
+        self.verify_checksums = verify;
+        self
+    }
+
+    /// Sets the binary linking mode (`dynamic` or `static`).
+    #[must_use]
+    pub fn with_link_mode(mut self, link_mode: LinkMode) -> Self {
+        self.link_mode = link_mode;
+        self
+    }
+
+    /// Sets the build profile, automatically configuring optimization passes.
+    #[must_use]
+    pub fn with_profile(mut self, profile: BuildProfile) -> Self {
+        self.profile = profile;
+        match profile {
+            BuildProfile::Debug | BuildProfile::Test => {
+                self.inline_threshold = 0;
+                self.bytecode_optimization = false;
+            }
+            BuildProfile::Release => {
+                self.inline_threshold = 8;
+                self.bytecode_optimization = true;
+            }
+        }
+        self
+    }
+
+    /// Sets whether to run post-emission bytecode peephole optimizations.
+    #[must_use]
+    pub fn with_bytecode_optimization(mut self, enabled: bool) -> Self {
+        self.bytecode_optimization = enabled;
+        self
+    }
+
+    /// Sets the maximum statement count threshold for automatic AST inlining.
+    #[must_use]
+    pub fn with_inline_threshold(mut self, threshold: usize) -> Self {
+        self.inline_threshold = threshold;
+        self
     }
 
     /// Sets whether to include the standard built-in libraries (`blt.io`).
@@ -64,6 +213,27 @@ impl CompilationOptions {
         self.package_name = name.into();
         self.package_version = version.into();
         self.package_description = description.into();
+        self
+    }
+
+    /// Appends a pre-loaded dependency binary program.
+    #[must_use]
+    pub fn with_dependency_binary(mut self, program: BinaryProgram) -> Self {
+        self.dependency_binaries.push(program);
+        self
+    }
+
+    /// Appends an explicit dependency requirement specification.
+    #[must_use]
+    pub fn with_dependency_spec(mut self, spec: DependencyRequirement) -> Self {
+        self.dependency_specs.push(spec);
+        self
+    }
+
+    /// Configures the pluggable module solver for dependency resolution.
+    #[must_use]
+    pub fn with_solver(mut self, solver: Arc<dyn ModuleSolver>) -> Self {
+        self.solver = Some(solver);
         self
     }
 
@@ -108,8 +278,20 @@ pub struct CompilationContext {
     pub binding_artifacts: Option<crate::phases::binder::BindingArtifacts>,
     /// Bytecode emission artifacts (per-source compiled functions and SLXB binary program).
     pub emission_artifacts: Option<crate::phases::emitter::pipeline::EmissionArtifacts>,
+    /// Telemetry and stage throughput measurements recorded across pipeline execution.
+    pub telemetry: Option<crate::telemetry::CompilerTelemetry>,
     /// Generic type-map blackboard for arbitrary phase and plugin state.
     pub extensions: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
+    /// Resolved package dependencies for this compilation unit, mapped by package name.
+    pub dependencies_map: HashMap<String, DependencyRequirement>,
+    /// Set of package names whose API sources have already been synthesized and loaded into context.
+    pub loaded_api_packages: HashSet<String>,
+    /// Set of source IDs originating from external dependency packages.
+    pub external_source_ids: HashSet<u16>,
+    /// Accumulated binding diagnostics annotated with their originating `source_id`.
+    pub binding_errors: Vec<(u16, crate::diagnostics::BindingError)>,
+    /// Pluggable module solver reference for resolving external modules.
+    pub solver: Option<Arc<dyn ModuleSolver>>,
 }
 
 impl CompilationContext {
@@ -150,6 +332,8 @@ impl CompilationContext {
             }
         }
 
+        let solver = options.solver.clone();
+
         Self {
             options,
             source_names,
@@ -160,8 +344,25 @@ impl CompilationContext {
             dependents,
             binding_artifacts: None,
             emission_artifacts: None,
+            telemetry: None,
             extensions: HashMap::new(),
+            dependencies_map: HashMap::new(),
+            loaded_api_packages: HashSet::new(),
+            external_source_ids: HashSet::new(),
+            binding_errors: Vec::new(),
+            solver,
         }
+    }
+
+    /// Returns whether a given `source_id` originated from an external dependency.
+    #[must_use]
+    pub fn is_external_source(&self, source_id: u16) -> bool {
+        self.external_source_ids.contains(&source_id)
+    }
+
+    /// Marks a given `source_id` as originating from an external dependency.
+    pub fn mark_external_source(&mut self, source_id: u16) {
+        self.external_source_ids.insert(source_id);
     }
 
     /// Registers an additional source file dynamically, returning its assigned `source_id`.
@@ -188,7 +389,7 @@ impl CompilationContext {
     pub fn get_source_name(&self, source_id: u16) -> Option<&str> {
         self.source_names
             .get(source_id as usize)
-            .map(|s| s.as_str())
+            .map(|name| name.as_str())
     }
 
     /// Resolves the numeric `source_id` associated with a registered source name or path.
@@ -196,14 +397,16 @@ impl CompilationContext {
     pub fn get_source_id(&self, name: &str) -> Option<u16> {
         self.source_names
             .iter()
-            .position(|s| s == name)
-            .map(|idx| idx as u16)
+            .position(|name_str| name_str == name)
+            .map(|index| index as u16)
     }
 
     /// Returns the raw source code text associated with a given `source_id`.
     #[must_use]
     pub fn get_source_code(&self, source_id: u16) -> Option<&str> {
-        self.sources.get(source_id as usize).map(|s| s.as_str())
+        self.sources
+            .get(source_id as usize)
+            .map(|code| code.as_str())
     }
 
     /// Updates the source text of an existing source file and invalidates its cached artifacts.
@@ -248,8 +451,8 @@ impl CompilationContext {
     /// Executes the compilation pipeline (either configured in options or the default standard pipeline).
     ///
     /// # Errors
-    /// Returns accumulated [`solix_common::CompilationDiagnostic`]s if any phase fails and halts.
-    pub fn execute(&mut self) -> Result<(), Vec<solix_common::CompilationDiagnostic>> {
+    /// Returns accumulated [`CompilationDiagnostic`]s if any phase fails and halts.
+    pub fn execute(&mut self) -> Result<(), Vec<CompilationDiagnostic>> {
         let mut pipeline = self.options.pipeline.take().unwrap_or_default();
         let result = pipeline.execute(self);
         self.options.pipeline = Some(pipeline);
@@ -259,11 +462,11 @@ impl CompilationContext {
     /// Executes a specific compilation pipeline against this context.
     ///
     /// # Errors
-    /// Returns accumulated [`solix_common::CompilationDiagnostic`]s if any phase fails and halts.
+    /// Returns accumulated [`CompilationDiagnostic`]s if any phase fails and halts.
     pub fn execute_pipeline(
         &mut self,
         pipeline: &mut crate::pipeline::CompilationPipeline,
-    ) -> Result<(), Vec<solix_common::CompilationDiagnostic>> {
+    ) -> Result<(), Vec<CompilationDiagnostic>> {
         pipeline.execute(self)
     }
 

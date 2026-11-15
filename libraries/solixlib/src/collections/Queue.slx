@@ -1,0 +1,65 @@
+package solix.collections;
+
+import solix.core.IStringable;
+import solix.core.String;
+import solix.core.NoSuchElementException;
+
+public class Queue<T> implements ICollection<T>, IIterable<T>, IStringable {
+    private Deque<T> inner_deque;
+
+    public Queue() {
+        this.inner_deque = new Deque<T>();
+    }
+
+    public Queue(int32 initial_capacity) {
+        this.inner_deque = new Deque<T>(initial_capacity);
+    }
+
+    public int32 size() {
+        return this.inner_deque.size();
+    }
+
+    public bool is_empty() {
+        return this.inner_deque.is_empty();
+    }
+
+    public void clear() {
+        this.inner_deque.clear();
+    }
+
+    public void enqueue(T item) {
+        this.inner_deque.add_last(item);
+    }
+
+    public void add(T item) {
+        this.inner_deque.add_last(item);
+    }
+
+    public T dequeue() {
+        return this.inner_deque.remove_first();
+    }
+
+    public T peek() {
+        return this.inner_deque.peek_first();
+    }
+
+    public bool contains(T item) {
+        return this.inner_deque.contains(item);
+    }
+
+    public bool remove(T item) {
+        return this.inner_deque.remove(item);
+    }
+
+    public T[] to_array() {
+        return this.inner_deque.to_array();
+    }
+
+    public IIterator<T> iterator() {
+        return this.inner_deque.iterator();
+    }
+
+    public String to_string() {
+        return Collections::to_string<T>(this);
+    }
+}

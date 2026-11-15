@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use crate::BindingError;
 use crate::CompilationContext::CompilationContext;
 use crate::phases::binder::layout::ClassLayout;
 use crate::phases::binder::monomorphizer::GenericBlueprintRegistry;
@@ -12,7 +13,7 @@ use crate::phases::binder::symbols::{SymbolId, SymbolTable};
 use crate::phases::lexing::Span;
 use crate::phases::parser::statements::declarations::ClassDeclaration;
 use crate::phases::parser::visitor::AstVisitor;
-use solix_common::{BindingError, PrimitiveKind, Type};
+use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -56,11 +57,17 @@ pub fn bind_context(
     let sources_count = context.sources.len();
 
     let mut symbol_table = SymbolTable::with_sources_count(sources_count);
+    for dependency_name in context.dependencies_map.keys() {
+        crate::phases::binder::passes::pass1_symbol_discovery::register_known_package(
+            &mut symbol_table,
+            &dependency_name.replace('.', "::"),
+        );
+    }
     let mut blueprint_registry = GenericBlueprintRegistry::default();
     let mut layouts = HashMap::new();
     let mut node_types = HashMap::new();
     let mut resolved_symbols = HashMap::new();
-    let mut accumulated_errors = Vec::new();
+    let mut accumulated_errors: Vec<(u16, BindingError)> = Vec::new();
     let mut next_vtable_id = 1u32;
 
     // Pass 1: Global Symbol Outline & Package Registration
@@ -84,9 +91,18 @@ pub fn bind_context(
         accumulated_errors.extend(errors);
     }
 
+    crate::phases::binder::call_normalizer::normalize_call_sites(
+        &mut context.ast,
+        &context.sources,
+    );
+
     // Pass 3: Detailed Type Checking & Expression Traversal
     for (source_index, ast_option) in context.ast.iter().enumerate() {
         let source_id = source_index as u16;
+        if context.is_external_source(source_id) {
+            continue;
+        }
+
         let source_text = context
             .sources
             .get(source_index)
@@ -94,6 +110,7 @@ pub fn bind_context(
             .unwrap_or("");
 
         if let Some(program_ast) = ast_option {
+            let mut pass3_errors = Vec::new();
             let mut visitor = TypeCheckingVisitor {
                 source_id,
                 source_text,
@@ -102,7 +119,7 @@ pub fn bind_context(
                 layouts: &mut layouts,
                 node_types: &mut node_types,
                 resolved_symbols: &mut resolved_symbols,
-                errors: &mut accumulated_errors,
+                errors: &mut pass3_errors,
                 current_class: None,
                 current_class_generic_names: std::collections::HashSet::new(),
                 current_method_generic_names: std::collections::HashSet::new(),
@@ -116,6 +133,9 @@ pub fn bind_context(
             };
 
             visitor.visit_program(program_ast);
+            for error in pass3_errors {
+                accumulated_errors.push((source_id, error));
+            }
         }
     }
 
@@ -126,6 +146,9 @@ pub fn bind_context(
     // Validate entry point(s)
     let mut main_methods = Vec::new();
     for (source_index, ast_option) in context.ast.iter().enumerate() {
+        if context.is_external_source(source_index as u16) {
+            continue;
+        }
         if let Some(program_ast) = ast_option {
             let source_id = source_index as u16;
             let source_text = context
@@ -166,7 +189,7 @@ pub fn bind_context(
                                     )
                                 })
                                 .collect();
-                            main_methods.push((method_decl.span, ret_type, param_types));
+                            main_methods.push((source_id, method_decl.span, ret_type, param_types));
                         }
                     }
                     crate::phases::parser::statements::declarations::Declaration::Class(
@@ -207,7 +230,7 @@ pub fn bind_context(
                                                 )
                                             })
                                             .collect();
-                                        main_methods.push((method_decl.span, ret_type, param_types));
+                                        main_methods.push((source_id, method_decl.span, ret_type, param_types));
                                     }
                                 }
                         }
@@ -219,23 +242,31 @@ pub fn bind_context(
     }
 
     if main_methods.len() > 1 {
-        let first_conflict_span = main_methods[1].0;
-        accumulated_errors.push(BindingError::MultipleMainMethodsFound {
-            count: main_methods.len(),
-            span: first_conflict_span.to_source_span(),
-        });
+        let (first_conflict_source_id, first_conflict_span, _, _) = &main_methods[1];
+        accumulated_errors.push((
+            *first_conflict_source_id,
+            BindingError::MultipleMainMethodsFound {
+                count: main_methods.len(),
+                span: first_conflict_span.to_source_span(),
+            },
+        ));
     }
 
-    for (main_span, return_type, parameter_types) in &main_methods {
+    for (main_source_id, main_span, return_type, parameter_types) in &main_methods {
         let valid_return = matches!(
             return_type,
             Type::Primitive(PrimitiveKind::Void) | Type::Primitive(PrimitiveKind::Int32)
         );
         if !valid_return {
-            accumulated_errors.push(BindingError::MainMethodSignatureInvalid {
-                reason: format!("Main method must return 'void' or 'int32', found '{return_type}'"),
-                span: main_span.to_source_span(),
-            });
+            accumulated_errors.push((
+                *main_source_id,
+                BindingError::MainMethodSignatureInvalid {
+                    reason: format!(
+                        "Main method must return 'void' or 'int32', found '{return_type}'"
+                    ),
+                    span: main_span.to_source_span(),
+                },
+            ));
         }
 
         let valid_params = match parameter_types.len() {
@@ -279,10 +310,13 @@ pub fn bind_context(
         };
 
         if !valid_params {
-            accumulated_errors.push(BindingError::MainMethodSignatureInvalid {
-                reason: "Main method parameters must be empty () or take a single string[]/char[][] parameter".to_string(),
-                span: main_span.to_source_span(),
-            });
+            accumulated_errors.push((
+                *main_source_id,
+                BindingError::MainMethodSignatureInvalid {
+                    reason: "Main method parameters must be empty () or take a single string[]/char[][] parameter".to_string(),
+                    span: main_span.to_source_span(),
+                },
+            ));
         }
     }
 
@@ -295,9 +329,14 @@ pub fn bind_context(
     };
 
     context.binding_artifacts = Some(artifacts);
+    context.binding_errors = accumulated_errors.clone();
 
     if !accumulated_errors.is_empty() {
-        return Err(accumulated_errors);
+        let unlocated_errors: Vec<BindingError> = accumulated_errors
+            .into_iter()
+            .map(|(_, error)| error)
+            .collect();
+        return Err(unlocated_errors);
     }
 
     Ok(BindingMetaData {

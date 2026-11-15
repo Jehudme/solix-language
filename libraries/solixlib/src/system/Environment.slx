@@ -1,0 +1,155 @@
+package solix.system;
+
+import solix.core.String;
+import solix.collections.List;
+import solix.collections.HashMap;
+import solix.io.Path;
+import solix.io.Directory;
+
+public class Environment {
+    public static String get_env(String key_name) {
+        if (key_name == null || key_name.data == null) {
+            return null;
+        }
+        char[] value_chars = Environment::native_get_env(key_name.to_chars());
+        if (value_chars == null) {
+            return null;
+        }
+        return new String(value_chars);
+    }
+
+    public static String get_env(string key_name) {
+        if (key_name == null) {
+            return null;
+        }
+        return Environment::get_env(new String(key_name));
+    }
+
+    public static String get_environment_variable(String key_name) {
+        return Environment::get_env(key_name);
+    }
+
+    public static String get_environment_variable(string key_name) {
+        return Environment::get_env(key_name);
+    }
+
+    public static bool has_environment_variable(String key_name) {
+        String fetched_value = Environment::get_env(key_name);
+        return fetched_value != null;
+    }
+
+    public static bool has_environment_variable(string key_name) {
+        String fetched_value = Environment::get_env(key_name);
+        return fetched_value != null;
+    }
+
+    public static void set_env(String key_name, String variable_value) {
+        if (key_name == null || key_name.data == null) {
+            return;
+        }
+        char[] key_chars = key_name.to_chars();
+        char[] value_chars = (variable_value != null && variable_value.data != null)
+            ? variable_value.to_chars()
+            : new char[0];
+        Environment::native_set_env(key_chars, value_chars);
+    }
+
+    public static void set_env(string key_name, string variable_value) {
+        if (key_name == null) {
+            return;
+        }
+        String wrapped_key = new String(key_name);
+        String wrapped_value = (variable_value != null) ? new String(variable_value) : new String("");
+        Environment::set_env(wrapped_key, wrapped_value);
+    }
+
+    public static void set_environment_variable(String key_name, String variable_value) {
+        Environment::set_env(key_name, variable_value);
+    }
+
+    public static void set_environment_variable(string key_name, string variable_value) {
+        Environment::set_env(key_name, variable_value);
+    }
+
+    public static HashMap<String, String> get_all_env() {
+        HashMap<String, String> environment_map = new HashMap<String, String>();
+        char[] raw_entries = Environment::native_get_all_env();
+        if (raw_entries == null || raw_entries.length == 0) {
+            return environment_map;
+        }
+        String combined_text = new String(raw_entries);
+        String[] line_entries = combined_text.lines();
+        int32 entry_index = 0;
+        while (entry_index < line_entries.length) {
+            String single_line = line_entries[entry_index];
+            int32 equals_position = single_line.index_of('=');
+            if (equals_position > 0) {
+                String env_key = single_line.substring(0, equals_position);
+                String env_val = single_line.substring(equals_position + 1, single_line.length() - equals_position - 1);
+                environment_map.put(env_key, env_val);
+            }
+            entry_index = entry_index + 1;
+        }
+        return environment_map;
+    }
+
+    public static List<String> get_command_line_args() {
+        List<String> argument_list = new List<String>();
+        return argument_list;
+    }
+
+    public static List<String> get_args() {
+        return Environment::get_command_line_args();
+    }
+
+    public static String os_name() {
+        return new String(Environment::native_os_name());
+    }
+
+    public static String os_version() {
+        return new String(Environment::native_os_version());
+    }
+
+    public static bool is_windows() {
+        return Environment::native_is_windows();
+    }
+
+    public static bool is_linux() {
+        return Environment::native_is_linux();
+    }
+
+    public static bool is_macos() {
+        return Environment::native_is_macos();
+    }
+
+    public static int32 processor_count() {
+        return Environment::native_processor_count();
+    }
+
+    public static int64 process_id() {
+        return Environment::native_pid();
+    }
+
+    public static void exit_process(int32 exit_code) {
+        exit(exit_code);
+    }
+
+    public static String get_current_directory() {
+        return Directory::get_current_directory();
+    }
+
+    public static String get_temp_directory() {
+        return Path::get_temp_path();
+    }
+
+    private static native char[] native_get_env(char[] key_name);
+    private static native void native_set_env(char[] key_name, char[] variable_value);
+    private static native char[] native_get_all_env();
+    private static native char[] native_os_name();
+    private static native char[] native_os_version();
+    private static native bool native_is_windows();
+    private static native bool native_is_linux();
+    private static native bool native_is_macos();
+    private static native int32 native_processor_count();
+    private static native int64 native_pid();
+}

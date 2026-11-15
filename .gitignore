@@ -7,3 +7,16 @@
 *.swo
 *~
 .aider*
+
+# Bytecode containers & temporary build artifacts
+*.slxb
+*.slxarc
+__pycache__/
+*.pyc
+cache/
+build/
+benchmarks/workloads/*/*
+!benchmarks/workloads/*/*.slx
+!benchmarks/workloads/*/*.py
+!benchmarks/workloads/*/*.lua
+!benchmarks/workloads/*/*.c

@@ -10,6 +10,9 @@ use std::fmt;
 /// Instruction flag marking a non-owning weak reference assignment.
 pub const FLAG_WEAK: u8 = 0x01;
 
+/// Instruction flag marking an allocation of a Plain-Old-Data (POD) class instance.
+pub const FLAG_POD: u8 = 0x02;
+
 /// Strongly-typed 64-bit instruction word for the virtual register VM.
 ///
 /// Encodes instructions into uniform 8-byte aligned words using four main formats:
@@ -100,6 +103,19 @@ impl Instruction {
     #[must_use]
     pub const fn is_weak(&self) -> bool {
         (self.flags() & FLAG_WEAK) != 0
+    }
+
+    /// Returns `true` if this instruction has the `FLAG_POD` bit set.
+    #[must_use]
+    pub const fn is_pod(&self) -> bool {
+        (self.flags() & FLAG_POD) != 0
+    }
+
+    /// Returns a copy of the instruction with updated flags.
+    #[must_use]
+    pub const fn with_flags(self, flags: u8) -> Self {
+        let cleared = self.0 & !(0xFF << 8);
+        Self(cleared | ((flags as u64) << 8))
     }
 
     /// Extracts the destination register `dst` for Format A and B.
@@ -206,7 +222,8 @@ impl fmt::Display for Instruction {
                 | OpCode::CallInterface
                 | OpCode::CallSymbol
                 | OpCode::CallCallable
-                | OpCode::CallExtern => {
+                | OpCode::CallExtern
+                | OpCode::CallNativeDirect => {
                     write!(
                         f,
                         "{:<14} r{}, target:{}, args:r{}..r{}",

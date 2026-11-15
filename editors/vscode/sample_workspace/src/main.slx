@@ -1,0 +1,49 @@
+package sample_workspace;
+
+import blt.io.println;
+
+
+/// Represents a 2D coordinate point with reference-counted heap allocation.
+class Point {
+    public int32 coordinate_x;
+    public int32 coordinate_y;
+
+    public Point(int32 initial_x, int32 initial_y) {
+        this.coordinate_x = initial_x;
+        this.coordinate_y = initial_y;
+    }
+
+    /// Returns the Manhattan distance from origin.
+    public int32 distance_from_origin() {
+        return this.coordinate_x + this.coordinate_y;
+    }
+
+    /// Deterministic destructor invoked upon scope exit.
+    ~Point() {
+        // Resource cleanup upon destruction
+    }
+}
+
+/// Static mathematical utilities class.
+class MathHelper {
+    /// Computes the sum of two integers.
+    public static int32 add(int32 operand_first, int32 operand_second) {
+        return operand_first + operand_second;
+    }
+}
+
+/// Unit test recognized by the ▶ Run Test CodeLens button.
+void test_addition() {
+    int32 computed_sum = MathHelper::add(15, 25);
+    assert(computed_sum == 40, "Sum calculation mismatch");
+}
+
+/// Application entry point recognized by the ▶ Run Main CodeLens button.
+void main() {
+    Point origin_point = new Point(10, 20);
+    int32 calculated_distance = origin_point.distance_from_origin();
+    println("Calculated distance from origin: 30");
+
+    int32 static_result = MathHelper::add(50, 50);
+    println("Static addition result: 100");
+}

@@ -1,0 +1,11 @@
+[info]
+name = "raylib"
+version = "5.5.0"
+description = "Solix Raylib 1-to-1 Complete Bindings"
+license = "zlib/libpng"
+authors = []
+
+[entrypoints]
+test = "TestRunner::test"
+
+[dependencies]

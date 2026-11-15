@@ -1,0 +1,206 @@
+package solix.io;
+
+import solix.core.IStringable;
+import solix.core.IEquatable;
+import solix.core.String;
+
+public class Path implements IStringable, IEquatable<Path> {
+    public static char DIRECTORY_SEPARATOR = Path::native_get_separator();
+
+    private String raw_value;
+
+    public Path() {
+        this.raw_value = new String("");
+    }
+
+    public Path(string path_string) {
+        this.raw_value = (path_string != null) ? new String(path_string) : new String("");
+    }
+
+    public Path(String path_object) {
+        this.raw_value = (path_object != null) ? path_object : new String("");
+    }
+
+    public Path(char[] characters) {
+        this.raw_value = (characters != null) ? new String(characters) : new String("");
+    }
+
+    public String value() {
+        return this.raw_value;
+    }
+
+    public String to_string() {
+        return this.raw_value;
+    }
+
+    public bool is_empty() {
+        return this.raw_value.is_empty();
+    }
+
+    public Path parent() {
+        return new Path(Path::get_directory_name(this.raw_value));
+    }
+
+    public Path filename() {
+        return new Path(Path::get_file_name(this.raw_value));
+    }
+
+    public String extension() {
+        return Path::get_extension(this.raw_value);
+    }
+
+    public String filename_without_extension() {
+        return Path::get_file_name_without_extension(this.raw_value);
+    }
+
+    public bool is_absolute_path() {
+        return Path::is_absolute(this.raw_value);
+    }
+
+    public bool is_resource() {
+        return Path::is_resource_path(this.raw_value);
+    }
+
+    public Path normalized() {
+        return new Path(Path::normalize(this.raw_value));
+    }
+
+    public Path operator/(Path other_path) {
+        if (other_path == null) {
+            return this;
+        }
+        String combined = Path::combine(this.raw_value, other_path.raw_value);
+        return new Path(combined);
+    }
+
+    public Path operator/(String other_string) {
+        if (other_string == null) {
+            return this;
+        }
+        return new Path(Path::combine(this.raw_value, other_string));
+    }
+
+    public Path operator/(string other_str) {
+        if (other_str == null) {
+            return this;
+        }
+        return new Path(Path::combine(this.raw_value, new String(other_str)));
+    }
+
+    public bool operator==(Path other_path) {
+        if (other_path == null) {
+            return false;
+        }
+        return this.raw_value.equals(other_path.raw_value);
+    }
+
+    public bool operator!=(Path other_path) {
+        if (other_path == null) {
+            return true;
+        }
+        return !this.raw_value.equals(other_path.raw_value);
+    }
+
+    public bool equals(Path other_path) {
+        return this == other_path;
+    }
+
+    // Variadic join
+    public static Path join<args...>(args...) {
+        if (args.length == 0) {
+            return new Path("");
+        }
+        Path accumulator = new Path(String::from_any(args[0]));
+        int32 segment_index = 1;
+        while (segment_index < args.length) {
+            accumulator = accumulator / String::from_any(args[segment_index]);
+            segment_index = segment_index + 1;
+        }
+        return accumulator;
+    }
+
+    public static String combine(String first_path, String second_path) {
+        char[] first_chars = (first_path != null && first_path.data != null) ? first_path.to_chars() : new char[0];
+        char[] second_chars = (second_path != null && second_path.data != null) ? second_path.to_chars() : new char[0];
+        return new String(Path::native_combine(first_chars, second_chars));
+    }
+
+    public static String combine(string first_path, string second_path) {
+        String wrapped_first = (first_path != null) ? new String(first_path) : new String("");
+        String wrapped_second = (second_path != null) ? new String(second_path) : new String("");
+        return Path::combine(wrapped_first, wrapped_second);
+    }
+
+    public static String get_directory_name(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return new String("");
+        }
+        return new String(Path::native_get_directory_name(target_path.to_chars()));
+    }
+
+    public static String get_file_name(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return new String("");
+        }
+        return new String(Path::native_get_file_name(target_path.to_chars()));
+    }
+
+    public static String get_extension(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return new String("");
+        }
+        return new String(Path::native_get_extension(target_path.to_chars()));
+    }
+
+    public static String get_file_name_without_extension(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return new String("");
+        }
+        return new String(Path::native_get_file_name_without_extension(target_path.to_chars()));
+    }
+
+    public static bool is_absolute(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return false;
+        }
+        return Path::native_is_absolute(target_path.to_chars());
+    }
+
+    public static String get_temp_path() {
+        return new String(Path::native_get_temp_path());
+    }
+
+    public static String normalize(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return new String("");
+        }
+        return new String(Path::native_normalize(target_path.to_chars()));
+    }
+
+    public static bool is_resource_path(String target_path) {
+        if (target_path == null || target_path.data == null) {
+            return false;
+        }
+        return target_path.starts_with(new String("res://"));
+    }
+
+    public static String to_resource_path(String relative_path) {
+        if (relative_path == null || relative_path.data == null) {
+            return new String("res://");
+        }
+        if (relative_path.starts_with(new String("res://"))) {
+            return relative_path;
+        }
+        return new String("res://") + relative_path;
+    }
+
+    private static native char[] native_combine(char[] first_path, char[] second_path);
+    private static native char[] native_get_directory_name(char[] target_path);
+    private static native char[] native_get_file_name(char[] target_path);
+    private static native char[] native_get_extension(char[] target_path);
+    private static native char[] native_get_file_name_without_extension(char[] target_path);
+    private static native bool native_is_absolute(char[] target_path);
+    private static native char[] native_get_temp_path();
+    private static native char[] native_normalize(char[] target_path);
+    private static native char native_get_separator();
+}

@@ -5,7 +5,6 @@
 use crate::exceptions::RuntimeError;
 use crate::memory::deallocator::FreeListManager;
 use crate::memory::layout::{BlockHeader, BlockTag, HEADER_SIZE, align_up};
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 /// Allocation metadata record maintained for heap integrity and leak auditing.
@@ -21,19 +20,48 @@ pub struct LiveAllocationInfo {
     pub tag: BlockTag,
 }
 
+/// Telemetry metrics recorded across virtual heap memory operations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HeapTelemetry {
+    /// Currently allocated dynamic block bytes.
+    pub current_allocated_bytes: usize,
+    /// Peak allocated dynamic block bytes recorded.
+    pub peak_allocated_bytes: usize,
+    /// Total number of dynamic allocation operations processed.
+    pub total_allocations_count: u64,
+    /// Total number of dynamic deallocation operations processed.
+    pub total_deallocations_count: u64,
+    /// Number of active live objects.
+    pub active_live_objects: usize,
+}
+
 /// Byte-addressed virtual memory buffer partitioned into static and dynamic regions.
 #[derive(Debug, Clone)]
 pub struct VirtualHeap {
     /// Raw byte buffer holding static variables and dynamic heap blocks.
-    buffer: Vec<u8>,
+    pub buffer: Vec<u8>,
     /// Byte capacity reserved for static variables at the base of virtual memory.
     static_size: usize,
     /// Dynamic heap byte capacity following the static partition.
     dynamic_capacity: usize,
     /// Segregated free list tracking unallocated dynamic blocks.
-    free_list: FreeListManager,
-    /// Active allocations indexed by their 32-bit payload addresses.
-    live_allocations: BTreeMap<u32, LiveAllocationInfo>,
+    pub free_list: FreeListManager,
+    /// Currently allocated dynamic bytes.
+    current_allocated_bytes: usize,
+    /// Peak dynamic bytes allocated over the lifetime of the heap.
+    peak_allocated_bytes: usize,
+    /// Total count of allocations executed.
+    total_allocations_count: u64,
+    /// Total count of deallocations executed.
+    total_deallocations_count: u64,
+    /// Legacy safe mode flag (kept for compatibility).
+    pub safe_mode: bool,
+    /// Live allocation counter for O(1) allocation tracking.
+    pub active_live_objects: usize,
+    /// Monotonically advancing bump allocation cursor.
+    pub bump_cursor: usize,
+    /// O(1) intrusive quick-lists for size classes 8B..256B in 8-byte increments.
+    pub quick_lists: [u32; 32],
 }
 
 impl VirtualHeap {
@@ -48,9 +76,28 @@ impl VirtualHeap {
             buffer: vec![0u8; total_size],
             static_size,
             dynamic_capacity,
-            free_list: FreeListManager::new(dynamic_capacity),
-            live_allocations: BTreeMap::new(),
+            free_list: FreeListManager::new_empty(dynamic_capacity),
+            current_allocated_bytes: 0,
+            peak_allocated_bytes: 0,
+            total_allocations_count: 0,
+            total_deallocations_count: 0,
+            safe_mode: false,
+            active_live_objects: 0,
+            bump_cursor: 0,
+            quick_lists: [0u32; 32],
         }
+    }
+
+    /// Sets whether safe mode tracking is enabled.
+    pub fn set_safe_mode(&mut self, safe_mode: bool) {
+        self.safe_mode = safe_mode;
+    }
+
+    /// Builder method to set safe mode.
+    #[must_use]
+    pub fn with_safe_mode(mut self, safe_mode: bool) -> Self {
+        self.safe_mode = safe_mode;
+        self
     }
 
     /// Resizes or reserves the static partition at the base of virtual memory.
@@ -60,8 +107,10 @@ impl VirtualHeap {
             let total_size = new_static_size + self.dynamic_capacity;
             self.buffer = vec![0u8; total_size];
             self.static_size = new_static_size;
-            self.free_list = FreeListManager::new(self.dynamic_capacity);
-            self.live_allocations.clear();
+            self.free_list = FreeListManager::new_empty(self.dynamic_capacity);
+            self.bump_cursor = 0;
+            self.quick_lists = [0u32; 32];
+            self.active_live_objects = 0;
         }
     }
 
@@ -80,7 +129,7 @@ impl VirtualHeap {
     /// Number of currently active, unfreed heap allocations.
     #[must_use]
     pub fn live_objects_count(&self) -> usize {
-        self.live_allocations.len()
+        self.active_live_objects
     }
 
     // =========================================================================
@@ -95,39 +144,96 @@ impl VirtualHeap {
         let aligned_payload = align_up(payload_size);
         let required_block_size = HEADER_SIZE + aligned_payload;
 
+        if required_block_size > self.dynamic_capacity {
+            return Err(RuntimeError::OutOfMemory {
+                requested: required_block_size,
+                available: self.dynamic_capacity,
+            });
+        }
+
+        let (payload_abs_addr, allocated_bytes): (u32, usize) =
+            if required_block_size <= 256 && self.quick_lists[(required_block_size / 8) - 1] != 0 {
+                let class_index = (required_block_size / 8) - 1;
+                let cached_payload = self.quick_lists[class_index];
+                // O(1) Quick-list pop
+                let next_cached = self.read_u32(cached_payload)?;
+                self.quick_lists[class_index] = next_cached;
+
+                let block_abs_addr = cached_payload as usize - HEADER_SIZE;
+                let header = BlockHeader::new(payload_size as u32, tag, 1);
+                let header_bytes = header.to_bytes();
+                self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE]
+                    .copy_from_slice(&header_bytes);
+
+                let payload_end = block_abs_addr + required_block_size;
+                self.buffer[cached_payload as usize..payload_end].fill(0);
+
+                (cached_payload, required_block_size)
+            } else if self.bump_cursor + required_block_size <= self.dynamic_capacity {
+                // O(1) Bump allocation for any block size fitting the remaining bump capacity
+                let block_offset = self.bump_cursor;
+                self.bump_cursor += required_block_size;
+
+                let block_abs_addr = self.static_size + block_offset;
+                let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
+
+                let header = BlockHeader::new(payload_size as u32, tag, 1);
+                let header_bytes = header.to_bytes();
+                self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE]
+                    .copy_from_slice(&header_bytes);
+
+                let payload_end = block_abs_addr + required_block_size;
+                self.buffer[payload_addr as usize..payload_end].fill(0);
+
+                (payload_addr, required_block_size)
+            } else {
+                // Bump pointer exhausted. Flush un-bumped remainder to free_list and flush quick lists.
+                if self.bump_cursor < self.dynamic_capacity {
+                    let remaining_size = self.dynamic_capacity - self.bump_cursor;
+                    self.free_list.deallocate(self.bump_cursor, remaining_size);
+                    self.bump_cursor = self.dynamic_capacity;
+                }
+                self.flush_quick_lists_to_free_list();
+                self.allocate_from_free_list(required_block_size, tag)?
+            };
+
+        self.total_allocations_count += 1;
+        self.active_live_objects += 1;
+        self.current_allocated_bytes += allocated_bytes;
+        if self.current_allocated_bytes > self.peak_allocated_bytes {
+            self.peak_allocated_bytes = self.current_allocated_bytes;
+        }
+
+        Ok(payload_abs_addr)
+    }
+
+    /// Allocates from `FreeListManager` when quick lists and bump allocation are exhausted.
+    fn allocate_from_free_list(
+        &mut self,
+        required_block_size: usize,
+        tag: BlockTag,
+    ) -> Result<(u32, usize), RuntimeError> {
         let (block_offset, allocated_block_size) = self
             .free_list
             .allocate(required_block_size)
             .ok_or(RuntimeError::OutOfMemory {
                 requested: required_block_size,
-                available: self.dynamic_capacity,
+                available: self
+                    .dynamic_capacity
+                    .saturating_sub(self.current_allocated_bytes),
             })?;
 
         let block_abs_addr = self.static_size + block_offset;
-        let payload_abs_addr = block_abs_addr + HEADER_SIZE;
+        let payload_abs_addr = (block_abs_addr + HEADER_SIZE) as u32;
 
-        // Initialize header
-        let header = BlockHeader::new(payload_size as u32, tag, 1);
+        let header = BlockHeader::new((allocated_block_size - HEADER_SIZE) as u32, tag, 1);
         let header_bytes = header.to_bytes();
         self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE].copy_from_slice(&header_bytes);
 
-        // Zero out payload bytes
         let payload_end = block_abs_addr + allocated_block_size;
-        self.buffer[payload_abs_addr..payload_end].fill(0);
+        self.buffer[payload_abs_addr as usize..payload_end].fill(0);
 
-        // Record live allocation
-        let payload_addr_u32 = payload_abs_addr as u32;
-        self.live_allocations.insert(
-            payload_addr_u32,
-            LiveAllocationInfo {
-                block_offset,
-                total_block_size: allocated_block_size,
-                payload_size,
-                tag,
-            },
-        );
-
-        Ok(payload_addr_u32)
+        Ok((payload_abs_addr, allocated_block_size))
     }
 
     /// Deallocates a heap block given its payload address.
@@ -138,23 +244,121 @@ impl VirtualHeap {
         if payload_addr == 0 {
             return Err(RuntimeError::NullReferenceAccess);
         }
+        let addr = payload_addr as usize;
+        if addr < self.static_size + HEADER_SIZE || addr > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
 
-        let info = self
-            .live_allocations
-            .remove(&payload_addr)
-            .ok_or(RuntimeError::NullReferenceAccess)?;
+        let header = self.read_header(payload_addr)?;
+        let total_block_size = HEADER_SIZE + align_up(header.size as usize);
+        let block_abs_addr = addr - HEADER_SIZE;
+        let block_offset = block_abs_addr - self.static_size;
 
-        let block_abs_addr = self.static_size + info.block_offset;
-        let block_end = block_abs_addr + info.total_block_size;
+        if header.ref_count == 0 {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
 
-        // Clear payload and header memory to scrub remnants
-        self.buffer[block_abs_addr..block_end].fill(0);
+        // Clear payload and mark header dead
+        let dead_header = BlockHeader::new(header.size, BlockTag::Raw, 0);
+        let dead_bytes = dead_header.to_bytes();
+        self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE].copy_from_slice(&dead_bytes);
 
-        // Return chunk to the free list and coalesce
-        self.free_list
-            .deallocate(info.block_offset, info.total_block_size);
+        if total_block_size <= 256 {
+            // O(1) Quick-list push
+            let class_index = (total_block_size / 8) - 1;
+            let current_head = self.quick_lists[class_index];
+            self.write_u32(payload_addr, current_head)?;
+            self.quick_lists[class_index] = payload_addr;
+        } else {
+            self.free_list.deallocate(block_offset, total_block_size);
+        }
+
+        self.total_deallocations_count += 1;
+        self.active_live_objects = self.active_live_objects.saturating_sub(1);
+        self.current_allocated_bytes = self
+            .current_allocated_bytes
+            .saturating_sub(total_block_size);
 
         Ok(())
+    }
+
+    /// Fast inline deallocation for POD blocks where ref count has reached 0.
+    ///
+    /// Skips cascading destructor checks and pushes directly to quick lists or free list.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::NullReferenceAccess` if the address is invalid.
+    #[inline(always)]
+    pub fn deallocate_pod_fast(
+        &mut self,
+        payload_addr: u32,
+        size: u32,
+    ) -> Result<(), RuntimeError> {
+        if payload_addr == 0 {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        let addr_usize = payload_addr as usize;
+        if addr_usize < self.static_size + HEADER_SIZE || addr_usize > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+
+        let total_block_size = HEADER_SIZE + align_up(size as usize);
+        let block_abs_addr = addr_usize - HEADER_SIZE;
+        let block_offset = block_abs_addr - self.static_size;
+
+        // Clear payload and mark header dead
+        let dead_header = BlockHeader::new(size, BlockTag::Raw, 0);
+        let dead_bytes = dead_header.to_bytes();
+        self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE].copy_from_slice(&dead_bytes);
+
+        if total_block_size <= 256 {
+            // O(1) Quick-list push
+            let class_index = (total_block_size / 8) - 1;
+            let current_head = self.quick_lists[class_index];
+            self.write_u32(payload_addr, current_head)?;
+            self.quick_lists[class_index] = payload_addr;
+        } else {
+            self.free_list.deallocate(block_offset, total_block_size);
+        }
+
+        self.total_deallocations_count += 1;
+        self.active_live_objects = self.active_live_objects.saturating_sub(1);
+        self.current_allocated_bytes = self
+            .current_allocated_bytes
+            .saturating_sub(total_block_size);
+
+        Ok(())
+    }
+
+    /// Flushes all entries cached in `quick_lists` into `FreeListManager`.
+    pub fn flush_quick_lists_to_free_list(&mut self) {
+        for class_index in 0..32 {
+            let mut current_payload = self.quick_lists[class_index];
+            self.quick_lists[class_index] = 0;
+            let block_size = (class_index + 1) * 8;
+
+            while current_payload != 0 {
+                let next_payload = self.read_u32(current_payload).unwrap_or(0);
+                let block_abs_addr = current_payload as usize - HEADER_SIZE;
+                if block_abs_addr >= self.static_size {
+                    let block_offset = block_abs_addr - self.static_size;
+                    self.free_list.deallocate(block_offset, block_size);
+                }
+                current_payload = next_payload;
+            }
+        }
+    }
+
+    /// Returns the live telemetry metrics of the virtual heap.
+    #[must_use]
+    pub fn telemetry(&self) -> HeapTelemetry {
+        HeapTelemetry {
+            current_allocated_bytes: self.current_allocated_bytes,
+            peak_allocated_bytes: self.peak_allocated_bytes,
+            total_allocations_count: self.total_allocations_count,
+            total_deallocations_count: self.total_deallocations_count,
+            active_live_objects: self.live_objects_count(),
+        }
     }
 
     // =========================================================================
@@ -265,6 +469,26 @@ impl VirtualHeap {
         Ok(())
     }
 
+    /// Reads a little-endian 16-bit unsigned integer at virtual byte address `addr`.
+    pub fn read_u16(&self, addr: u32) -> Result<u16, RuntimeError> {
+        let pos = addr as usize;
+        if pos + 2 > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        let bytes = [self.buffer[pos], self.buffer[pos + 1]];
+        Ok(u16::from_le_bytes(bytes))
+    }
+
+    /// Writes a little-endian 16-bit unsigned integer at virtual byte address `addr`.
+    pub fn write_u16(&mut self, addr: u32, word_val: u16) -> Result<(), RuntimeError> {
+        let pos = addr as usize;
+        if pos + 2 > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        self.buffer[pos..pos + 2].copy_from_slice(&word_val.to_le_bytes());
+        Ok(())
+    }
+
     /// Reads a little-endian 32-bit unsigned integer at virtual byte address `addr`.
     pub fn read_u32(&self, addr: u32) -> Result<u32, RuntimeError> {
         let pos = addr as usize;
@@ -357,37 +581,67 @@ impl VirtualHeap {
     /// # Errors
     /// Returns `RuntimeError::MemoryLeak` detailing leaked addresses and block tags
     /// if any allocations remain active or if the heap is fragmented.
-    pub fn verify_clean_memory(&self) -> Result<(), RuntimeError> {
-        if self.live_allocations.is_empty() && self.free_list.is_fully_coalesced() {
-            return Ok(());
-        }
+    pub fn verify_clean_memory(&mut self) -> Result<(), RuntimeError> {
+        let unallocated_count = self.active_live_objects;
 
-        let mut report = String::new();
-        let unallocated_count = self.live_allocations.len();
-
-        let _ = writeln!(
-            report,
-            "Found {unallocated_count} live uncollected heap allocations:"
-        );
-        for (&addr, info) in &self.live_allocations {
+        if unallocated_count > 0 {
+            let mut report = String::new();
             let _ = writeln!(
                 report,
-                "  - Address 0x{addr:08X}: Tag={:?}, PayloadSize={}B, TotalBlockSize={}B",
-                info.tag, info.payload_size, info.total_block_size
+                "Found {unallocated_count} live uncollected heap allocations:"
             );
+
+            let mut current_offset = 0;
+            while current_offset < self.bump_cursor {
+                let block_abs_addr = self.static_size + current_offset;
+                let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
+                if let Ok(header) = self.read_header(payload_addr) {
+                    let total_block_size = HEADER_SIZE + align_up(header.size as usize);
+                    if total_block_size == 0 {
+                        break;
+                    }
+                    if header.ref_count > 0 {
+                        let _ = writeln!(
+                            report,
+                            "  - Address 0x{payload_addr:08X}: Tag={:?}, PayloadSize={}B, TotalBlockSize={}B",
+                            header.tag, header.size, total_block_size
+                        );
+                    }
+                    current_offset += total_block_size;
+                } else {
+                    break;
+                }
+            }
+
+            return Err(RuntimeError::MemoryLeak {
+                unallocated_count,
+                report,
+            });
+        }
+
+        // Flush all quick-lists into FreeListManager
+        self.flush_quick_lists_to_free_list();
+
+        // Flush remaining un-bumped space into FreeListManager
+        if self.bump_cursor < self.dynamic_capacity {
+            let remaining_size = self.dynamic_capacity - self.bump_cursor;
+            self.free_list.deallocate(self.bump_cursor, remaining_size);
+            self.bump_cursor = self.dynamic_capacity;
         }
 
         if !self.free_list.is_fully_coalesced() {
+            let mut report = String::new();
             let _ = writeln!(
                 report,
                 "Free-list is fragmented: {} free blocks remaining instead of 1 coalesced block.",
                 self.free_list.free_by_offset.len()
             );
+            return Err(RuntimeError::MemoryLeak {
+                unallocated_count: 0,
+                report,
+            });
         }
 
-        Err(RuntimeError::MemoryLeak {
-            unallocated_count,
-            report,
-        })
+        Ok(())
     }
 }

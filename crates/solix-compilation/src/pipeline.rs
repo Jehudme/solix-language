@@ -3,9 +3,13 @@
 #![forbid(unsafe_code)]
 
 use crate::CompilationContext::CompilationContext;
+use crate::CompilationDiagnostic;
 use crate::phases::phase::{CompilationPhase, PhaseDecision};
-use crate::phases::standard::{BinderPhase, EmitterPhase, LexerPhase, ParserPhase};
-use solix_common::CompilationDiagnostic;
+use crate::phases::standard::{
+    AstInlinerPhase, BinderPhase, BytecodeOptimizerPhase, DependencyResolutionPhase, EmitterPhase,
+    LexerPhase, ParserPhase,
+};
+use crate::telemetry::{CompilerTelemetry, PhaseMetric};
 
 /// Sequential pipeline holding an ordered sequence of compilation phases.
 #[derive(Debug)]
@@ -51,14 +55,43 @@ impl CompilationPipeline {
     }
 
     /// Pre-configured full compilation pipeline:
-    /// Lexical Analysis -> Syntax Parsing -> Semantic Binding -> Bytecode Emission.
+    /// Dependency Resolution -> Lexical Analysis -> Syntax Parsing -> Semantic Binding -> Bytecode Emission.
     #[must_use]
     pub fn standard() -> Self {
         Self::empty()
+            .add_phase(DependencyResolutionPhase::new())
             .add_phase(LexerPhase::new())
             .add_phase(ParserPhase::new())
             .add_phase(BinderPhase::new())
+            .add_phase(AstInlinerPhase::new())
             .add_phase(EmitterPhase::new())
+            .add_phase(BytecodeOptimizerPhase::new())
+    }
+
+    /// Pre-configured compilation pipeline tailored for a specific build profile.
+    #[must_use]
+    pub fn for_profile(profile: crate::CompilationContext::BuildProfile) -> Self {
+        match profile {
+            crate::CompilationContext::BuildProfile::Release => Self::standard(),
+            crate::CompilationContext::BuildProfile::Debug
+            | crate::CompilationContext::BuildProfile::Test => Self::empty()
+                .add_phase(DependencyResolutionPhase::new())
+                .add_phase(LexerPhase::new())
+                .add_phase(ParserPhase::new())
+                .add_phase(BinderPhase::new())
+                .add_phase(EmitterPhase::new()),
+        }
+    }
+
+    /// Pre-configured syntax and semantic verification pipeline (omits bytecode emission):
+    /// Dependency Resolution -> Lexical Analysis -> Syntax Parsing -> Semantic Binding.
+    #[must_use]
+    pub fn check() -> Self {
+        Self::empty()
+            .add_phase(DependencyResolutionPhase::new())
+            .add_phase(LexerPhase::new())
+            .add_phase(ParserPhase::new())
+            .add_phase(BinderPhase::new())
     }
 
     /// Pre-configured language server (LSP) pipeline:
@@ -81,10 +114,12 @@ impl CompilationPipeline {
     }
 
     /// Pre-configured lexer-only pipeline:
-    /// Lexical Analysis.
+    /// Dependency Resolution -> Lexical Analysis.
     #[must_use]
     pub fn lex_only() -> Self {
-        Self::empty().add_phase(LexerPhase::new())
+        Self::empty()
+            .add_phase(DependencyResolutionPhase::new())
+            .add_phase(LexerPhase::new())
     }
 
     /// Executes all registered phases in sequence against the compilation context.
@@ -104,10 +139,21 @@ impl CompilationPipeline {
         &mut self,
         context: &mut CompilationContext,
     ) -> Result<(), Vec<CompilationDiagnostic>> {
+        let total_timer = std::time::Instant::now();
         let mut accumulated_diagnostics = Vec::new();
+        let mut phase_metrics = Vec::with_capacity(self.phases.len());
 
         for phase in &mut self.phases {
-            match phase.run(context) {
+            let phase_name = phase.name().to_string();
+            let phase_timer = std::time::Instant::now();
+            let phase_result = phase.run(context);
+            let phase_duration_us = phase_timer.elapsed().as_micros() as u64;
+            phase_metrics.push(PhaseMetric {
+                name: phase_name,
+                duration_us: phase_duration_us,
+            });
+
+            match phase_result {
                 Ok(()) => {
                     let decision = phase.on_success(context);
                     if decision == PhaseDecision::Halt {
@@ -119,11 +165,50 @@ impl CompilationPipeline {
                     accumulated_diagnostics.extend(diagnostics);
 
                     if decision == PhaseDecision::Halt {
-                        return Err(accumulated_diagnostics);
+                        break;
                     }
                 }
             }
         }
+
+        let total_time_us = total_timer.elapsed().as_micros() as u64;
+        let source_bytes = context
+            .sources
+            .iter()
+            .zip(&context.source_names)
+            .filter(|(_, source_name)| source_name.as_str() != "<inliner_synthetic>")
+            .map(|(code, _)| code.len())
+            .sum();
+        let total_tokens = context.tokens.iter().map(|stream| stream.len()).sum();
+        let total_instructions = context.emission_artifacts.as_ref().map_or(0, |artifacts| {
+            artifacts
+                .program
+                .functions
+                .iter()
+                .map(|func| func.instructions.len())
+                .sum()
+        });
+        let binary_size_bytes = context
+            .emission_artifacts
+            .as_ref()
+            .map_or(0, |artifacts| artifacts.program.to_bytes().len());
+
+        let throughput_mb_s = if total_time_us > 0 {
+            (source_bytes as f64 / 1_000_000.0) / (total_time_us as f64 / 1_000_000.0)
+        } else {
+            0.0
+        };
+
+        context.telemetry = Some(CompilerTelemetry {
+            package_name: context.options.package_name.clone(),
+            total_time_us,
+            source_bytes,
+            total_tokens,
+            total_instructions,
+            binary_size_bytes,
+            throughput_mb_s,
+            phases: phase_metrics,
+        });
 
         if accumulated_diagnostics.is_empty() {
             Ok(())

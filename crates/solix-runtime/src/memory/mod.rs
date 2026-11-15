@@ -9,5 +9,5 @@ pub mod layout;
 
 pub use arc::{dec_ref, inc_ref};
 pub use deallocator::FreeListManager;
-pub use heap::{LiveAllocationInfo, VirtualHeap};
+pub use heap::{HeapTelemetry, LiveAllocationInfo, VirtualHeap};
 pub use layout::{ALIGNMENT, BlockHeader, BlockTag, HEADER_SIZE, MAX_REF_COUNT, align_up};

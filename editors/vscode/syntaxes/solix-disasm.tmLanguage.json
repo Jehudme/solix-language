@@ -1,0 +1,40 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Solix Disassembly",
+    "scopeName": "source.solix-disasm",
+    "patterns": [
+        {
+            "name": "comment.line.semicolon.disasm",
+            "match": ";.*$"
+        },
+        {
+            "name": "entity.name.section.disasm",
+            "match": "^(===|Function:).*$"
+        },
+        {
+            "name": "constant.numeric.offset.disasm",
+            "match": "\\[[0-9a-fA-F]{4,8}\\]"
+        },
+        {
+            "name": "variable.language.register.disasm",
+            "match": "\\b(r[0-9]+|sp|fp|pc|lr)\\b"
+        },
+        {
+            "name": "keyword.mnemonic.disasm",
+            "match": "\\b(Nop|LoadI8|LoadI16|LoadI32|LoadI64|LoadF32|LoadF64|LoadConst|Move|AddI32|AddI32Imm|SubI32|SubI32Imm|MulI32|DivI32|ModI32|And|Or|Xor|Not|Shl|Shr|CmpEq|CmpNe|CmpLt|CmpLe|CmpGt|CmpGe|Jump|JumpIfTrue|JumpIfFalse|CallDirect|CallVTable|CallNative|Return|AllocObject|AllocArray|GetField|SetField|GetElem|SetElem|Cast|Instanceof|Throw|EnterCatch)\\b"
+        },
+        {
+            "name": "constant.numeric.hex.disasm",
+            "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+            "name": "constant.numeric.integer.disasm",
+            "match": "\\b-?[0-9]+\\b"
+        },
+        {
+            "name": "string.quoted.double.disasm",
+            "begin": "\"",
+            "end": "\""
+        }
+    ]
+}

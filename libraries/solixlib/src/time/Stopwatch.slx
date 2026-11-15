@@ -1,0 +1,75 @@
+package solix.time;
+
+public class Stopwatch {
+    private int64 start_nanos;
+    private int64 accumulated_nanos;
+    private bool running_flag;
+
+    public Stopwatch() {
+        this.start_nanos = 0L;
+        this.accumulated_nanos = 0L;
+        this.running_flag = false;
+    }
+
+    public static Stopwatch start_new() {
+        Stopwatch watch = new Stopwatch();
+        watch.start();
+        return watch;
+    }
+
+    public void start() {
+        if (!this.running_flag) {
+            this.start_nanos = Stopwatch::native_steady_nanos();
+            this.running_flag = true;
+        }
+    }
+
+    public void stop() {
+        if (this.running_flag) {
+            int64 now_nanos = Stopwatch::native_steady_nanos();
+            this.accumulated_nanos = this.accumulated_nanos + (now_nanos - this.start_nanos);
+            this.running_flag = false;
+        }
+    }
+
+    public void reset() {
+        this.accumulated_nanos = 0L;
+        this.start_nanos = 0L;
+        this.running_flag = false;
+    }
+
+    public void restart() {
+        this.reset();
+        this.start();
+    }
+
+    public bool is_running() {
+        return this.running_flag;
+    }
+
+    public Duration elapsed() {
+        int64 total_nanos = this.accumulated_nanos;
+        if (this.running_flag) {
+            int64 now_nanos = Stopwatch::native_steady_nanos();
+            total_nanos = total_nanos + (now_nanos - this.start_nanos);
+        }
+        return new Duration(total_nanos);
+    }
+
+    public int64 elapsed_nanos() {
+        return this.elapsed().to_nanoseconds();
+    }
+
+    public int64 elapsed_millis() {
+        return this.elapsed().to_milliseconds();
+    }
+
+    public static void sleep(int64 milliseconds) {
+        if (milliseconds > 0L) {
+            Stopwatch::native_sleep_millis(milliseconds);
+        }
+    }
+
+    private static native int64 native_steady_nanos();
+    private static native void native_sleep_millis(int64 millis);
+}

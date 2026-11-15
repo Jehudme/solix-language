@@ -1,0 +1,59 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.system.Environment;
+import solix.system.ProcessResult;
+import solix.system.Process;
+
+public class TestSystem {
+    public static int32 run_all_tests() {
+        if (!TestSystem::test_environment()) {
+            return 1;
+        }
+        if (!TestSystem::test_process()) {
+            return 2;
+        }
+        return 0;
+    }
+
+    public static bool test_environment() {
+        String test_key = new String("SOLIX_SYSTEM_TEST_ENV");
+        String test_value = new String("VerifiedValue2026");
+
+        Environment::set_env(test_key, test_value);
+        if (!Environment::has_environment_variable(test_key)) {
+            return false;
+        }
+
+        String fetched_value = Environment::get_env(test_key);
+        if (fetched_value == null || !fetched_value.equals(test_value)) {
+            return false;
+        }
+
+        String os_name_str = Environment::os_name();
+        if (os_name_str.length() == 0) {
+            return false;
+        }
+
+        int32 cores_count = Environment::processor_count();
+        if (cores_count <= 0) {
+            return false;
+        }
+
+        int64 pid_val = Environment::process_id();
+        if (pid_val <= 0L) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_process() {
+        ProcessResult echo_result = Process::run(new String("echo"), new solix.collections.List<String>());
+        // Process creation and execution verify RAII and process runner
+        if (echo_result == null) {
+            return false;
+        }
+        return true;
+    }
+}

@@ -37,6 +37,8 @@ pub enum BlockTag {
     Closure = 0x08,
     /// Heap-allocated immutable UTF-8 string.
     String = 0x09,
+    /// Object instance containing only Plain-Old-Data (POD) fields without destructors or reference fields.
+    ObjectPod = 0x0A,
 }
 
 impl BlockTag {
@@ -54,6 +56,7 @@ impl BlockTag {
             0x07 => Self::Tuple,
             0x08 => Self::Closure,
             0x09 => Self::String,
+            0x0A => Self::ObjectPod,
             _ => Self::Raw,
         }
     }
@@ -122,10 +125,15 @@ impl BlockHeader {
 
     /// Increments the reference count.
     ///
+    /// If the block is marked immortal (`ref_count == MAX_REF_COUNT`), the reference count is unchanged.
+    ///
     /// # Errors
     /// Returns `RuntimeError::TypeMismatch` if the reference counter overflows `MAX_REF_COUNT`.
     pub fn inc_ref(&mut self) -> Result<u32, RuntimeError> {
-        if self.ref_count >= MAX_REF_COUNT {
+        if self.ref_count == MAX_REF_COUNT {
+            return Ok(MAX_REF_COUNT);
+        }
+        if self.ref_count >= MAX_REF_COUNT - 1 {
             return Err(RuntimeError::TypeMismatch {
                 expected: "ref count < MAX_REF_COUNT".to_string(),
                 found: format!("ref count overflowed {}", self.ref_count),
@@ -136,8 +144,13 @@ impl BlockHeader {
     }
 
     /// Decrements the reference count by 1.
+    ///
+    /// If the block is marked immortal (`ref_count == MAX_REF_COUNT`), the reference count is unchanged.
     #[must_use]
     pub fn dec_ref(&mut self) -> u32 {
+        if self.ref_count == MAX_REF_COUNT {
+            return MAX_REF_COUNT;
+        }
         if self.ref_count > 0 {
             self.ref_count -= 1;
         }
