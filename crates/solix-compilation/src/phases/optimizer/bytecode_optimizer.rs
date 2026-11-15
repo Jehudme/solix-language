@@ -1,8 +1,7 @@
 //! Post-emission bytecode peephole and superinstruction optimizer phase.
 //!
 //! Applies redundant move elimination, superinstruction fusion (`AddI32Imm`, `SubI32Imm`,
-//! `JumpIf*I32`), loop-invariant constant hoisting, and exact relative branch and exception
-//! table PC recalculation.
+//! `JumpIf*I32`), and exact relative branch and exception table PC recalculation.
 
 #![forbid(unsafe_code)]
 
@@ -289,10 +288,7 @@ fn optimize_function(function: &mut CompiledFunction) {
         cursor += 1;
     }
 
-    // Step 2: Hoist all loop-invariant constants out of backward loops
-    hoist_invariants_in_stream(&mut fused_stream, &critical_targets, &function.instructions);
-
-    // Step 3: Compute relocated instruction PCs and branch offsets
+    // Step 2: Compute relocated instruction PCs and branch offsets
     let mut old_pc_to_new_pc = vec![0u32; original_count + 1];
     for (new_pc, entry) in fused_stream.iter().enumerate() {
         old_pc_to_new_pc[entry.original_pc] = new_pc as u32;
@@ -302,7 +298,7 @@ fn optimize_function(function: &mut CompiledFunction) {
     }
     old_pc_to_new_pc[original_count] = fused_stream.len() as u32;
 
-    // Relocate jump targets
+    // Step 3: Relocate jump targets
     let mut final_instructions = Vec::with_capacity(fused_stream.len());
     for (new_pc, intermediate) in fused_stream.iter().enumerate() {
         let mut final_inst = intermediate.instruction;
@@ -347,50 +343,6 @@ fn optimize_function(function: &mut CompiledFunction) {
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
 }
 
-/// Hoists loop-invariant constant loads out of backward-jump loops directly in the intermediate stream.
-fn hoist_invariants_in_stream(
-    stream: &mut Vec<IntermediateInstruction>,
-    critical_targets: &HashSet<usize>,
-    original_instructions: &[Instruction],
-) {
-    let mut loop_pairs: Vec<(usize, usize)> = Vec::new();
-    for (idx, entry) in stream.iter().enumerate() {
-        if let Some(target_old_pc) = entry.jump_target_old_pc
-            && let Some(target_idx) = stream.iter().position(|e| e.original_pc == target_old_pc)
-            && target_idx < idx
-        {
-            loop_pairs.push((target_idx, idx));
-        }
-    }
-
-    for (loop_header, loop_back) in loop_pairs {
-        let mut candidates = Vec::new();
-        for (scan_idx, entry) in stream
-            .iter()
-            .enumerate()
-            .take(loop_back)
-            .skip(loop_header + 1)
-        {
-            let raw_opcode = entry.instruction.raw_opcode();
-            if raw_opcode == OpCode::LoadI32 as u8
-                || raw_opcode == OpCode::LoadF64 as u8
-                || raw_opcode == OpCode::LoadConst as u8
-            {
-                let target_reg = entry.instruction.dst();
-                if count_register_writes(original_instructions, target_reg) == 1
-                    && !critical_targets.contains(&entry.original_pc)
-                {
-                    candidates.push(scan_idx);
-                }
-            }
-        }
-
-        for cand_idx in candidates.into_iter().rev() {
-            let candidate_entry = stream.remove(cand_idx);
-            stream.insert(loop_header, candidate_entry);
-        }
-    }
-}
 
 /// Applies rebuilt instructions and translates exception handlers and source maps.
 fn apply_pc_relocation(
@@ -696,48 +648,6 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     false
 }
 
-/// Counts total writes to `target_reg` across the function.
-fn count_register_writes(instructions: &[Instruction], target_reg: u16) -> usize {
-    let mut write_count = 0;
-    for instruction in instructions {
-        let raw = instruction.raw_opcode();
-        let is_write = if raw == OpCode::CallDirect as u8
-            || raw == OpCode::CallVirtual as u8
-            || raw == OpCode::CallInterface as u8
-            || raw == OpCode::CallCallable as u8
-            || raw == OpCode::CallNativeDirect as u8
-            || raw == OpCode::CallSymbol as u8
-            || raw == OpCode::CallExtern as u8
-            || raw == OpCode::PackClosure as u8
-        {
-            instruction.call_dst() == target_reg
-        } else if raw == OpCode::SetStatic as u8
-            || raw == OpCode::SetStaticDirect as u8
-            || raw == OpCode::SetStaticGlobal as u8
-            || raw == OpCode::SetField as u8
-            || raw == OpCode::SetArray as u8
-            || raw == OpCode::DecRef as u8
-            || raw == OpCode::IncRef as u8
-            || raw == OpCode::Exit as u8
-            || raw == OpCode::Throw as u8
-            || raw == OpCode::Return as u8
-            || raw == OpCode::ReturnValue as u8
-            || raw == OpCode::Jump as u8
-            || raw == OpCode::JumpIfTrue as u8
-            || raw == OpCode::JumpIfFalse as u8
-            || (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
-        {
-            false
-        } else {
-            instruction.dst() == target_reg
-        };
-
-        if is_write {
-            write_count += 1;
-        }
-    }
-    write_count
-}
 
 /// Counts total reads of `target_reg` across the entire function.
 fn count_total_reads(instructions: &[Instruction], target_reg: u16) -> usize {
