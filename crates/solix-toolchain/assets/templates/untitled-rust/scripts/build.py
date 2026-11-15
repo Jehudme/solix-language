@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import solix_toolbox as tb
+import solix_build as tb
 
 
 def main() -> int:
@@ -24,4 +24,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    tb.run_cli(main)

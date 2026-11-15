@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::assets::{EMBEDDED_INIT_PROJECT_SCRIPT, resolve_init_project_script_path};
+use crate::assets::{EMBEDDED_SOLIX_SCAFFOLD_SCRIPT, resolve_scaffold_script_path};
 use crate::cli::NewArgs;
 use anyhow::{Context, Result, bail};
 use std::process::Command;
@@ -14,11 +14,11 @@ use std::process::Command;
 pub fn execute_new(args: NewArgs) -> Result<()> {
     let mut command = Command::new("python3");
 
-    if let Ok(discovered_path) = resolve_init_project_script_path() {
+    if let Ok(discovered_path) = resolve_scaffold_script_path() {
         command.arg(discovered_path);
     } else {
         // Fall back to running embedded script directly via python3 -c
-        command.arg("-c").arg(EMBEDDED_INIT_PROJECT_SCRIPT);
+        command.arg("-c").arg(EMBEDDED_SOLIX_SCAFFOLD_SCRIPT);
     }
 
     command.arg(&args.path);

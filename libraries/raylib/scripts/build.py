@@ -10,15 +10,14 @@ Step 3: Platform compilation (debug/test for host, release multi-target cross-co
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from pathlib import Path
+import sys
 
 scripts_directory = Path(__file__).resolve().parent
 project_root = scripts_directory.parent
 
 sys.path.insert(0, str(scripts_directory))
-import solix_toolbox
+import solix_build
 
 
 def step_1_extract_api(root_path: Path) -> Path:
@@ -36,20 +35,28 @@ def step_1_extract_api(root_path: Path) -> Path:
         "-DBUILD_HOST_PARSER_ONLY=ON",
         f"-DAPI_OUTPUT_FILE={api_schema_path}",
     ]
-    configure_result = subprocess.run(cmake_configure_cmd, check=False)
-    if configure_result.returncode != 0:
-        raise RuntimeError(f"CMake configure failed with code {configure_result.returncode}")
+    solix_build.run_command(
+        cmake_configure_cmd,
+        cwd=root_path,
+        phase="CMake Host Parser Configuration",
+        hint="Ensure cmake and a C host compiler (gcc/clang) are installed.",
+    )
 
     print("  [cmake] Extracting API JSON via rlparser...")
-    extract_result = subprocess.run(
+    solix_build.run_command(
         ["cmake", "--build", str(cmake_host_directory), "--target", "extract_api_json"],
-        check=False,
+        cwd=root_path,
+        phase="CMake rlparser API JSON Extraction",
+        hint="Check build/.cache/cmake/host/CMakeFiles/CMakeError.log for compiler error details.",
     )
-    if extract_result.returncode != 0:
-        raise RuntimeError(f"CMake extract_api_json failed with code {extract_result.returncode}")
 
     if not api_schema_path.exists():
-        raise FileNotFoundError(f"Expected generated API JSON schema not found at '{api_schema_path}'")
+        raise solix_build.BuildError(
+            phase="API Schema Validation",
+            message=f"Expected generated API JSON schema not found at '{api_schema_path}'",
+            cwd=root_path,
+            hint="Ensure extract_api_json target successfully wrote the output file.",
+        )
 
     print(f"  [step 1] Schema extracted successfully: {api_schema_path}")
     return api_schema_path
@@ -71,10 +78,13 @@ def step_2_codegen(root_path: Path, api_schema_path: Path) -> None:
         "--package", "raylib",
         "--class-name", "Raylib",
     ]
-    print(f"  [codegen] Generating Solix API and Rust companion bridge...")
-    codegen_result = subprocess.run(codegen_cmd, check=False)
-    if codegen_result.returncode != 0:
-        raise RuntimeError(f"Binding codegen failed with code {codegen_result.returncode}")
+    print("  [codegen] Generating Solix API and Rust companion bridge...")
+    solix_build.run_command(
+        codegen_cmd,
+        cwd=root_path,
+        phase="Unified Two-Pass IR Codegen",
+        hint="Inspect generate_bindings.py error output for schema parsing or formatting issues.",
+    )
 
     print("  [step 2] Codegen completed successfully.")
 
@@ -91,7 +101,7 @@ def run_pipeline(build_profile: str = "debug", root_path: Path | None = None) ->
 
     # Step 3: Platform compilation and packaging
     print("=== [Step 3] Platform Compilation & Distribution Packaging ===")
-    return solix_toolbox.auto_build(profile=build_profile, project_root=target_root)
+    return solix_build.auto_build(profile=build_profile, project_root=target_root)
 
 
 def main() -> None:
@@ -114,4 +124,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    solix_build.run_cli(main)
