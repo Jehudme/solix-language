@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
+"""Build script for sample workspace."""
+
 import sys
 from pathlib import Path
-import solix_toolbox as tb
+import solix_build as tb
 
-def main():
+
+def main() -> None:
     profile = "debug"
-    for arg in sys.argv[1:]:
-        if arg in ("debug", "release", "test"):
-            profile = arg
-        elif arg.startswith("--profile="):
-            profile = arg.split("=", 1)[1]
-        elif arg == "--release":
+    for argument_item in sys.argv[1:]:
+        if argument_item in ("debug", "release", "test"):
+            profile = argument_item
+        elif argument_item.startswith("--profile="):
+            profile = argument_item.split("=", 1)[1]
+        elif argument_item == "--release":
             profile = "release"
-        elif arg == "--test":
+        elif argument_item == "--test":
             profile = "test"
-        elif arg == "--debug":
+        elif argument_item == "--debug":
             profile = "debug"
     tb.auto_build(profile)
 
+
 if __name__ == "__main__":
-    main()
+    tb.run_cli(main)

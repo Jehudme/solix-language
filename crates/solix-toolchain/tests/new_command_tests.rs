@@ -55,7 +55,15 @@ fn test_solix_new_default_application() {
     assert!(
         target_project_directory
             .join("scripts")
-            .join("solix_toolbox.py")
+            .join("solix_build.py")
+            .exists()
+    );
+    assert!(
+        target_project_directory
+            .join("natives")
+            .join("sample_application_bridge")
+            .join(".cargo")
+            .join("config.toml")
             .exists()
     );
     assert!(
