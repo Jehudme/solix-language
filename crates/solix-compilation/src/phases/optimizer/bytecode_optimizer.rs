@@ -343,7 +343,6 @@ fn optimize_function(function: &mut CompiledFunction) {
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
 }
 
-
 /// Applies rebuilt instructions and translates exception handlers and source maps.
 fn apply_pc_relocation(
     function: &mut CompiledFunction,
@@ -647,7 +646,6 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
 
     false
 }
-
 
 /// Counts total reads of `target_reg` across the entire function.
 fn count_total_reads(instructions: &[Instruction], target_reg: u16) -> usize {

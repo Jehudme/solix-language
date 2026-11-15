@@ -182,3 +182,14 @@ All text offset conversions from LSP coordinates (UTF-16/character columns) to b
 ### 7.2 External Package Index Caching
 To maintain sub-millisecond response latency during interactive typing, the LSP maintains an in-memory cache of resolved external package symbol indices (`PackageExportIndex`) keyed by `(package_name, profile, version, archive_mtime_secs)`. Modifications to installed `.slxarc` packages immediately invalidate cache entries via filesystem mtime detection.
 
+### 7.3 Semantic Tokens Drift Resilience & Coordinate Sanitization
+Semantic tokens (`textDocument/semanticTokens/full`) utilize LSP 3.17 relative delta encoding (`delta_line`, `delta_start_character`, `length`, `token_type`, `token_modifiers`). To prevent semantic token desynchronization and mid-word color fragmentation during syntax errors:
+1. **UTF-16 Code Unit Precision**: Character offsets and lengths are computed using UTF-16 code unit counts conforming strictly to the LSP specification.
+2. **Multi-line Token Splitting**: Spans spanning line breaks are split at newline boundaries, ensuring no token has multi-line span length.
+3. **Strict Non-Overlapping Invariant**: Tokens are strictly sorted by line and character offset and sanitized so subsequent tokens never start before the preceding token ends.
+4. **Resilient Token Fallback**: If syntax errors prevent full AST generation, the lexer token stream provides robust lexical classification, preventing token drift across remaining source lines.
+
+### 7.4 Formal Parameter Preservation for Inlay Hints & Signatures
+Parameter names and types are preserved across all compiler passes (`SymbolEntry::parameter_names`). Inlay hints (`textDocument/inlayHint`) and signature help (`textDocument/signatureHelp`) display true declared parameter names (`brick_rect:`, `active_color:`) rather than synthesized `arg{index}:` placeholders.
+
+

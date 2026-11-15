@@ -358,6 +358,10 @@ fn test_single_colon_completion_suppression() {
     assert!(
         list_single.items.is_empty(),
         "Typing single colon ':' MUST NOT trigger completions, got: {:?}",
-        list_single.items.iter().map(|item| &item.label).collect::<Vec<_>>()
+        list_single
+            .items
+            .iter()
+            .map(|item| &item.label)
+            .collect::<Vec<_>>()
     );
 }

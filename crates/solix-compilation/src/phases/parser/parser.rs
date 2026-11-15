@@ -4592,8 +4592,38 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let is_decl = match self.parse_type_annotation() {
                 Ok(_) => self.cursor.check(TokenKind::Identifier),
                 Err(ParsingError::DotNotAllowedInTypePath { .. }) => {
-                    had_dot_type_error = true;
-                    true
+                    // Continue scanning past dotted/scoped path to see if followed by generic args or variable identifier
+                    while self.cursor.check(TokenKind::Identifier)
+                        || self.cursor.check(TokenKind::PunctuationDot)
+                        || self.cursor.check(TokenKind::PunctuationDoubleColon)
+                    {
+                        self.cursor.advance();
+                    }
+                    if self.cursor.check(TokenKind::OperatorLessThan) {
+                        let mut angle_depth = 0;
+                        while !self.cursor.is_at_end() {
+                            if self.cursor.check(TokenKind::OperatorLessThan) {
+                                angle_depth += 1;
+                                self.cursor.advance();
+                            } else if self.cursor.check(TokenKind::OperatorGreaterThan) {
+                                angle_depth -= 1;
+                                self.cursor.advance();
+                                if angle_depth == 0 {
+                                    break;
+                                }
+                            } else if self.cursor.check(TokenKind::PunctuationSemicolon) {
+                                break;
+                            } else {
+                                self.cursor.advance();
+                            }
+                        }
+                    }
+                    if self.cursor.check(TokenKind::Identifier) {
+                        had_dot_type_error = true;
+                        true
+                    } else {
+                        false
+                    }
                 }
                 Err(_) => false,
             };

@@ -109,36 +109,35 @@ fn compute_semantic_tokens(
                 if let Some(sem) = semantic
                     && let Some(&symbol_id) = sem.resolved_symbols.get(&token.span)
                     && let Some(symbol) = sem.symbol_table.get_symbol(symbol_id)
+                    && symbol.name == identifier_text
                 {
-                    if symbol.name == identifier_text {
-                        resolved = true;
-                        if symbol.is_static {
-                            modifier_mask |= 1 << 1; // static
-                        }
-                        if symbol.is_const {
-                            modifier_mask |= 1 << 2; // readonly
-                        }
-
-                        token_type_index = match &symbol.symbol_type {
-                            Type::Class { .. } => Some(2),     // class
-                            Type::Enum { .. } => Some(4),      // enum
-                            Type::Interface { .. } => Some(3), // interface
-                            Type::FunctionPointer { .. } => {
-                                if symbol.parent_symbol.is_some() {
-                                    Some(7) // method
-                                } else {
-                                    Some(6) // function
-                                }
-                            }
-                            _ => {
-                                if symbol.parent_symbol.is_some() {
-                                    Some(8) // property/field
-                                } else {
-                                    Some(9) // variable
-                                }
-                            }
-                        };
+                    resolved = true;
+                    if symbol.is_static {
+                        modifier_mask |= 1 << 1; // static
                     }
+                    if symbol.is_const {
+                        modifier_mask |= 1 << 2; // readonly
+                    }
+
+                    token_type_index = match &symbol.symbol_type {
+                        Type::Class { .. } => Some(2),     // class
+                        Type::Enum { .. } => Some(4),      // enum
+                        Type::Interface { .. } => Some(3), // interface
+                        Type::FunctionPointer { .. } => {
+                            if symbol.parent_symbol.is_some() {
+                                Some(7) // method
+                            } else {
+                                Some(6) // function
+                            }
+                        }
+                        _ => {
+                            if symbol.parent_symbol.is_some() {
+                                Some(8) // property/field
+                            } else {
+                                Some(9) // variable
+                            }
+                        }
+                    };
                 }
 
                 // 2. Lexical fallback for unresolved identifiers or during syntax errors
@@ -207,10 +206,10 @@ fn compute_semantic_tokens(
                     }
                     let line_len_utf16 = line_content.encode_utf16().count() as u32;
                     if line_len_utf16 > 0 {
-                        if let Some(range) = range_filter {
-                            if current_line < range.start.line || current_line > range.end.line {
-                                continue;
-                            }
+                        if let Some(range) = range_filter
+                            && (current_line < range.start.line || current_line > range.end.line)
+                        {
+                            continue;
                         }
                         raw_tokens.push(RawSemanticToken {
                             line: current_line,

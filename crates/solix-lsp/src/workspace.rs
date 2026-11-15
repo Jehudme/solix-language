@@ -1022,7 +1022,7 @@ impl WorkspaceManager {
                         String::new()
                     };
 
-                    let should_resolve = (import_statement.is_extern || first_segment == "solix")
+                    let should_resolve = import_statement.is_extern
                         && !first_segment.is_empty()
                         && !context.loaded_api_packages.contains(&first_segment)
                         && resolved_packages.insert(first_segment.clone());

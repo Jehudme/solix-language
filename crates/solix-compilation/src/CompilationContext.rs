@@ -286,6 +286,8 @@ pub struct CompilationContext {
     pub dependencies_map: HashMap<String, DependencyRequirement>,
     /// Set of package names whose API sources have already been synthesized and loaded into context.
     pub loaded_api_packages: HashSet<String>,
+    /// Set of package names provided directly via CLI dependency binaries (`-l` or positional CLI binaries).
+    pub cli_linked_packages: HashSet<String>,
     /// Set of source IDs originating from external dependency packages.
     pub external_source_ids: HashSet<u16>,
     /// Accumulated binding diagnostics annotated with their originating `source_id`.
@@ -334,6 +336,18 @@ impl CompilationContext {
 
         let solver = options.solver.clone();
 
+        let mut cli_linked_packages = HashSet::new();
+        for binary in &options.dependency_binaries {
+            let package_name = if !binary.package_name.is_empty() {
+                &binary.package_name
+            } else {
+                &binary.export_manifest.package_name
+            };
+            if !package_name.is_empty() {
+                cli_linked_packages.insert(package_name.clone());
+            }
+        }
+
         Self {
             options,
             source_names,
@@ -348,6 +362,7 @@ impl CompilationContext {
             extensions: HashMap::new(),
             dependencies_map: HashMap::new(),
             loaded_api_packages: HashSet::new(),
+            cli_linked_packages,
             external_source_ids: HashSet::new(),
             binding_errors: Vec::new(),
             solver,

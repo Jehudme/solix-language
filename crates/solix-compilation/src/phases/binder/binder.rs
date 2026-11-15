@@ -71,6 +71,7 @@ pub fn bind_context(
     let mut next_vtable_id = 1u32;
 
     // Pass 1: Global Symbol Outline & Package Registration
+    symbol_table.cli_linked_packages = context.cli_linked_packages.clone();
     if let Err(errors) = execute_pass1_symbol_discovery(
         &context.sources,
         &context.ast,

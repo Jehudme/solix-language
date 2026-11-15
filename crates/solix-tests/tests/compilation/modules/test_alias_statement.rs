@@ -57,7 +57,7 @@ fn test_case_3_3_class_and_qualified_type_alias() {
             "main.slx",
             r#"
             import my.pkg.Helper;
-            alias MyHelper = my.pkg.Helper;
+            alias MyHelper = my::pkg::Helper;
 
             class Main {
                 public static int32 main() {

@@ -41,7 +41,13 @@ pub fn signature_help(snapshot: &AnalysisSnapshot, position: Position) -> Option
             let mut param_strings = Vec::new();
 
             for (param_idx, param_type) in parameter_types.iter().enumerate() {
-                let label = format!("{param_type} arg{param_idx}");
+                let param_name = symbol
+                    .parameter_names
+                    .get(param_idx)
+                    .map(String::as_str)
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("arg");
+                let label = format!("{param_type} {param_name}");
                 param_strings.push(label.clone());
                 param_infos.push(ParameterInformation {
                     label: ParameterLabel::Simple(label),
