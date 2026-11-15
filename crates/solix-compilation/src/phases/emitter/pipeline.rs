@@ -394,6 +394,20 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         }
         if let Some(ast) = ast_opt {
             let code = &context.sources[source_index];
+            let current_package_prefix = if let Some(package_statement) = &ast.package {
+                let mut segments = Vec::new();
+                for span in &package_statement.path {
+                    let start_index = span.start as usize;
+                    let end_index = span.end as usize;
+                    if end_index <= code.len() {
+                        segments.push(&code[start_index..end_index]);
+                    }
+                }
+                segments.join("::")
+            } else {
+                String::new()
+            };
+
             for decl in &ast.declarations {
                 match decl {
                     Declaration::Class(cls) => {
@@ -401,15 +415,20 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             continue;
                         }
                         let cls_name = get_span_text(cls.name_span, code);
+                        let qualified_class_symbol = if current_package_prefix.is_empty() {
+                            cls_name.to_string()
+                        } else {
+                            format!("{current_package_prefix}::{cls_name}")
+                        };
                         if !cls.generic_params.is_empty() {
                             let template_src = get_span_text(cls.span, code).to_string();
                             let param_names = cls
                                 .generic_params
                                 .iter()
-                                .map(|p| get_span_text(p.name_span, code).to_string())
+                                .map(|param_node| get_span_text(param_node.name_span, code).to_string())
                                 .collect();
                             generic_templates.push(ExportedGenericTemplate {
-                                name: cls_name.to_string(),
+                                name: qualified_class_symbol,
                                 parameter_names: param_names,
                                 template_source: template_src,
                             });
@@ -633,7 +652,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                 .collect();
 
                             exported_classes.push(ExportedClass {
-                                symbol: cls_name.to_string(),
+                                symbol: qualified_class_symbol,
                                 name: cls_name.to_string(),
                                 modifiers: mods,
                                 is_interface: false,
@@ -645,37 +664,41 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             });
                         }
                     }
-                    Declaration::Method(m) => {
-                        if m.modifiers.contains(&Modifier::Extern) {
+                    Declaration::Method(method_declaration) => {
+                        if method_declaration.modifiers.contains(&Modifier::Extern) {
                             continue;
                         }
                         // Skip private top-level functions from the export manifest.
-                        if m.modifiers.contains(&Modifier::Private) {
+                        if method_declaration.modifiers.contains(&Modifier::Private) {
                             continue;
                         }
-                        let func_name = get_span_text(m.name_span, code).to_string();
-                        let arity = m.parameters.len();
-                        let full_sym = format!("{func_name}/{arity}");
+                        let func_name = get_span_text(method_declaration.name_span, code).to_string();
+                        let arity = method_declaration.parameters.len();
+                        let full_sym = if current_package_prefix.is_empty() {
+                            format!("{func_name}/{arity}")
+                        } else {
+                            format!("{current_package_prefix}::{func_name}/{arity}")
+                        };
                         let ret_type =
-                            resolve_type_annotation(ast.source_id, code, &m.return_type, sym_table);
-                        let params = m
+                            resolve_type_annotation(ast.source_id, code, &method_declaration.return_type, sym_table);
+                        let params = method_declaration
                             .parameters
                             .iter()
-                            .map(|p| {
-                                let p_name = get_span_text(p.name_span, code).to_string();
-                                let p_type = resolve_type_annotation(
+                            .map(|param_node| {
+                                let param_name = get_span_text(param_node.name_span, code).to_string();
+                                let param_type = resolve_type_annotation(
                                     ast.source_id,
                                     code,
-                                    &p.param_type,
+                                    &param_node.param_type,
                                     sym_table,
                                 );
                                 ExportedParameter {
-                                    name: p_name,
-                                    param_type: p_type,
+                                    name: param_name,
+                                    param_type,
                                 }
                             })
                             .collect();
-                        let mods = m
+                        let mods = method_declaration
                             .modifiers
                             .iter()
                             .filter_map(|&modifier| to_decl_modifier(modifier))
@@ -691,21 +714,26 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             is_operator: false,
                         });
                     }
-                    Declaration::Field(f) => {
-                        if f.modifiers.contains(&Modifier::Extern) {
+                    Declaration::Field(field_declaration) => {
+                        if field_declaration.modifiers.contains(&Modifier::Extern) {
                             continue;
                         }
-                        let var_name = get_span_text(f.name_span, code).to_string();
+                        let var_name = get_span_text(field_declaration.name_span, code).to_string();
                         let var_type =
-                            resolve_type_annotation(ast.source_id, code, &f.field_type, sym_table);
+                            resolve_type_annotation(ast.source_id, code, &field_declaration.field_type, sym_table);
                         let slot = static_layout.lookup_slot(&var_name).unwrap_or(0);
-                        let mods = f
+                        let mods = field_declaration
                             .modifiers
                             .iter()
                             .filter_map(|&modifier| to_decl_modifier(modifier))
                             .collect();
+                        let qualified_static_symbol = if current_package_prefix.is_empty() {
+                            var_name.clone()
+                        } else {
+                            format!("{current_package_prefix}::{var_name}")
+                        };
                         exported_statics.push(ExportedStatic {
-                            symbol: var_name.clone(),
+                            symbol: qualified_static_symbol,
                             name: var_name,
                             var_type,
                             modifiers: mods,
@@ -732,8 +760,13 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                     get_span_text(generic_param.name_span, code).to_string()
                                 })
                                 .collect();
+                            let qualified_template_name = if current_package_prefix.is_empty() {
+                                iface_name.clone()
+                            } else {
+                                format!("{current_package_prefix}::{iface_name}")
+                            };
                             generic_templates.push(ExportedGenericTemplate {
-                                name: iface_name,
+                                name: qualified_template_name,
                                 parameter_names,
                                 template_source,
                             });
@@ -791,8 +824,13 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             .iter()
                             .filter_map(|&modifier| to_decl_modifier(modifier))
                             .collect();
+                        let qualified_iface_symbol = if current_package_prefix.is_empty() {
+                            iface_name.clone()
+                        } else {
+                            format!("{current_package_prefix}::{iface_name}")
+                        };
                         exported_classes.push(ExportedClass {
-                            symbol: iface_name.clone(),
+                            symbol: qualified_iface_symbol,
                             name: iface_name,
                             modifiers: mods,
                             is_interface: true,
@@ -826,8 +864,13 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             .iter()
                             .filter_map(|&modifier| to_decl_modifier(modifier))
                             .collect();
+                        let qualified_enum_name = if current_package_prefix.is_empty() {
+                            enum_name.clone()
+                        } else {
+                            format!("{current_package_prefix}::{enum_name}")
+                        };
                         exported_enums.push(ExportedEnum {
-                            name: enum_name,
+                            name: qualified_enum_name,
                             modifiers: mods,
                             variants,
                         });
