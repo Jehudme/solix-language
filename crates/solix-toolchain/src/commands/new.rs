@@ -40,6 +40,9 @@ pub fn execute_new(args: NewArgs) -> Result<()> {
     if args.lib {
         command.arg("--lib");
     }
+    if args.native {
+        command.arg("--native");
+    }
     if args.no_native {
         command.arg("--no-native");
     }

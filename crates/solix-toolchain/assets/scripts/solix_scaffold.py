@@ -320,6 +320,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--main", default="Main::main", help="Main entrypoint symbol (default: Main::main)")
     parser.add_argument("--test", default="TestRunner::test", help="Test entrypoint symbol (default: TestRunner::test)")
     parser.add_argument("--lib", action="store_true", help="Generate a library project instead of an application")
+    parser.add_argument("--native", action="store_true", help="Explicitly scaffold a Rust native cdylib bridge")
     parser.add_argument("--no-native", action="store_true", help="Do not create a Rust native cdylib bridge")
     parser.add_argument(
         "-d",

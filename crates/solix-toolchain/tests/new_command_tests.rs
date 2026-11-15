@@ -21,6 +21,7 @@ fn test_solix_new_default_application() {
         main: "Main::main".to_string(),
         test: "TestRunner::test".to_string(),
         lib: false,
+        native: false,
         no_native: false,
         deps: vec![],
         force: false,
@@ -136,6 +137,7 @@ fn test_solix_new_library_no_native_and_deps() {
         main: "Main::main".to_string(),
         test: "TestRunner::test".to_string(),
         lib: true,
+        native: false,
         no_native: true,
         deps: vec!["solix@2.0.0".to_string(), "extra_helpers:0.5.1".to_string()],
         force: false,
@@ -196,6 +198,7 @@ fn test_solix_new_existing_directory_force_flag() {
         main: "Main::main".to_string(),
         test: "TestRunner::test".to_string(),
         lib: false,
+        native: false,
         no_native: true,
         deps: vec![],
         force: false,
@@ -226,6 +229,7 @@ fn test_solix_new_existing_directory_force_flag() {
         main: "Main::main".to_string(),
         test: "TestRunner::test".to_string(),
         lib: false,
+        native: false,
         no_native: true,
         deps: vec![],
         force: true,
@@ -244,4 +248,37 @@ fn test_solix_new_existing_directory_force_flag() {
     let manifest_content =
         fs::read_to_string(&manifest_path).expect("failed to read manifest.toml");
     assert!(manifest_content.contains("version = \"0.2.0\""));
+}
+
+#[test]
+fn test_solix_new_explicit_native_flag() {
+    let temporary_directory = tempdir().expect("failed to create temp dir");
+    let target_project_directory = temporary_directory.path().join("native_app");
+
+    let new_arguments = NewArgs {
+        path: target_project_directory.clone(),
+        name: Some("native_app".to_string()),
+        version: "0.1.0".to_string(),
+        description: "Native test project".to_string(),
+        license: "Apache-2.0".to_string(),
+        authors: vec![],
+        main: "Main::main".to_string(),
+        test: "TestRunner::test".to_string(),
+        lib: false,
+        native: true,
+        no_native: false,
+        deps: vec![],
+        force: false,
+    };
+
+    let execution_result = run(Cli {
+        command: Commands::New(new_arguments),
+    });
+    assert!(execution_result.is_ok());
+
+    let bridge_directory = target_project_directory
+        .join("natives")
+        .join("native_app_bridge");
+    assert!(bridge_directory.join("Cargo.toml").exists());
+    assert!(bridge_directory.join("src").join("lib.rs").exists());
 }

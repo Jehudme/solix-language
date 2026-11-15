@@ -3,6 +3,10 @@ name = "solix-compilation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Compiler frontend, lexer, parser, type checker, and bytecode generator for the Solix language"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
 solix-common.workspace = true

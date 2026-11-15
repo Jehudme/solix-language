@@ -68,69 +68,32 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+solix-ffi = "1.1"
 ```
 
-### 3.2. `natives/rust_bridge/src/lib.rs`
+### 3.2. `natives/rust_bridge/src/lib.rs` (Using `solix-ffi`)
 ```rust
 //! Rust native bridge extension crate for Solix.
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SolixCValue {
-    pub tag: u32,
-    pub flags: u32,
-    pub payload: u64,
-}
-
-pub type NativeCFunctionPtr = unsafe extern "C" fn(
-    *mut std::ffi::c_void,
-    *const SolixCValue,
-    u32,
-    *mut SolixCValue,
-) -> SolixCValue;
-
-pub type RegisterNativeCallback = unsafe extern "C" fn(
-    *mut std::ffi::c_void,
-    *const std::ffi::c_char,
-    NativeCFunctionPtr,
-);
+use solix_ffi::{solix_export, NativeCFunctionPtr, SolixCValue};
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn MathBridge_fast_add(
     _vm_context: *mut std::ffi::c_void,
-    args: *const SolixCValue,
-    arg_count: u32,
+    arguments: *const SolixCValue,
+    argument_count: u32,
     _out_error: *mut SolixCValue,
 ) -> SolixCValue {
-    if arg_count < 2 || args.is_null() {
-        return SolixCValue {
-            tag: 0,
-            flags: 0,
-            payload: 0,
-        };
+    if argument_count < 2 || arguments.is_null() {
+        return SolixCValue::null();
     }
-    let value_a = unsafe { (*args.add(0)).payload as i32 };
-    let value_b = unsafe { (*args.add(1)).payload as i32 };
-    SolixCValue {
-        tag: 2, // I32
-        flags: 0,
-        payload: ((value_a + value_b) as i64) as u64,
-    }
+    let value_a = unsafe { (*arguments.add(0)).as_i32() };
+    let value_b = unsafe { (*arguments.add(1)).as_i32() };
+    SolixCValue::from_i32(value_a + value_b)
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn solix_register_natives(
-    collector_context: *mut std::ffi::c_void,
-    register_callback: RegisterNativeCallback,
-) {
-    let add_symbol = c"MathBridge::fast_add";
-    unsafe {
-        register_callback(
-            collector_context,
-            add_symbol.as_ptr(),
-            MathBridge_fast_add,
-        );
-    }
+solix_export! {
+    "MathBridge::fast_add" => MathBridge_fast_add,
 }
 ```
 

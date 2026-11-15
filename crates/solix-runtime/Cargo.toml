@@ -3,6 +3,10 @@ name = "solix-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "64-bit register virtual machine, ARC memory manager, and native runtime for the Solix language"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
 solix-common.workspace = true

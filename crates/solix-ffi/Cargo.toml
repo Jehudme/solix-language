@@ -1,0 +1,12 @@
+[package]
+name = "solix-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe FFI abstractions, macros, and value marshaling SDK for Solix native extensions"
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+
+[dev-dependencies]

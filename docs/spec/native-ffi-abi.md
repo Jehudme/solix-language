@@ -72,3 +72,37 @@ pub extern "C" fn solix_crypto_sha256(
 ```
 
 The toolchain automatically compiles `natives/` subprojects via Cargo during `solix build` and packages the resulting `.so`/`.dll`/`.dylib` into `lib/<host_triple>/` inside the `.slxarc` container.
+
+---
+
+## 4. `solix-ffi` Official Native Extension SDK
+
+The official `solix-ffi` crate provides safe abstractions, tagged value representations (`SolixCValue`), VM context helpers, and the `solix_export!` macro for authoring native extensions in Rust:
+
+```toml
+[dependencies]
+solix-ffi = "1.1"
+```
+
+```rust
+use solix_ffi::{solix_export, NativeCFunctionPtr, SolixCValue};
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fast_add(
+    _context: *mut std::ffi::c_void,
+    arguments: *const SolixCValue,
+    argument_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if argument_count < 2 || arguments.is_null() {
+        return SolixCValue::null();
+    }
+    let value_a = unsafe { (*arguments.add(0)).as_i32() };
+    let value_b = unsafe { (*arguments.add(1)).as_i32() };
+    SolixCValue::from_i32(value_a + value_b)
+}
+
+solix_export! {
+    "Math::fast_add" => fast_add,
+}
+```

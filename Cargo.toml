@@ -7,6 +7,7 @@ members = [
     "crates/solix-toolchain",
     "crates/solix-lsp",
     "crates/solix-dap",
+    "crates/solix-ffi",
     "crates/solix-tests",
 ]
 exclude = [
@@ -21,6 +22,8 @@ authors = ["Jehud Metellus"]
 description = "The Solix Programming Language Toolchain"
 repository = "https://github.com/Jehudme/solix-language"
 homepage = "https://github.com/Jehudme/solix-language"
+documentation = "https://solix-lang.org/docs"
+readme = "README.md"
 
 [workspace.dependencies]
 # Internal workspace crates
@@ -29,6 +32,7 @@ solix-compilation = { path = "crates/solix-compilation" }
 solix-runtime = { path = "crates/solix-runtime" }
 solix-lsp = { path = "crates/solix-lsp" }
 solix-dap = { path = "crates/solix-dap" }
+solix-ffi = { path = "crates/solix-ffi" }
 
 # Error handling & logging
 thiserror = "2.0"

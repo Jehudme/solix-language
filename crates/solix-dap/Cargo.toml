@@ -3,6 +3,10 @@ name = "solix-dap"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Debug Adapter Protocol (DAP) implementation for the Solix language"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [lib]
 name = "solix_dap"

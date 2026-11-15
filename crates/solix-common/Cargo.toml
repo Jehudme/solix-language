@@ -3,6 +3,10 @@ name = "solix-common"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Common data structures, bytecode format, diagnostics, and solver for the Solix language"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [dependencies]
 thiserror.workspace = true

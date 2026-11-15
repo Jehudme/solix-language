@@ -508,8 +508,12 @@ pub struct NewArgs {
     #[arg(long)]
     pub lib: bool,
 
+    /// Explicitly scaffold a Rust native cdylib bridge [default: true]
+    #[arg(long, conflicts_with = "no_native")]
+    pub native: bool,
+
     /// Do not create a Rust native cdylib bridge
-    #[arg(long)]
+    #[arg(long, conflicts_with = "native")]
     pub no_native: bool,
 
     /// Add dependency in pkg@ver format (can be repeated)

@@ -3,6 +3,10 @@ name = "solix-lsp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Language Server Protocol (LSP 3.17) implementation for the Solix language"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
 
 [lib]
 name = "solix_lsp"

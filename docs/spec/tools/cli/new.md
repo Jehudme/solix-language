@@ -32,6 +32,7 @@ solix new <path> [options]
 | `--main <symbol>` | | String | `"Main::main"` | Canonical application entry point symbol. |
 | `--test <symbol>` | | String | `"TestRunner::test"` | Canonical test runner entry point symbol. |
 | `--lib` | | Flag | `false` | Scaffolds a reusable library project instead of an executable application. |
+| `--native` | | Flag | `false` | Explicitly enables and scaffolds the Rust native `cdylib` extension bridge in `natives/`. |
 | `--no-native` | | Flag | `false` | Omits the Rust native `cdylib` extension crate bridge in `natives/`. |
 | `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Declares an external package dependency (e.g. `-d raylib@1.0.0`). |
 | `--force` | | Flag | `false` | Overwrites existing `manifest.toml` if the directory already contains a project. |
