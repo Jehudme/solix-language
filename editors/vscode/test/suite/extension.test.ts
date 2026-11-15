@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 export async function runSuite(): Promise<void> {
     console.log('Verifying extension activation and command registration...');
 
-    const extension = vscode.extensions.getExtension('solix-lang.solix');
+    const extension = vscode.extensions.getExtension('solix.solix');
     assert.ok(extension, 'Expected solix extension to be discovered by VS Code');
 
     if (!extension.isActive) {
