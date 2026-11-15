@@ -163,7 +163,7 @@ main = "Main::main"
 test = "TestRunner::test"
 
 [dependencies]
-# solixlib = "2.0.0"
+# solixlib = { version = "2.0.0", profile = "release" }
 ```
 
 ### Scaffolding Libraries (`--lib`)

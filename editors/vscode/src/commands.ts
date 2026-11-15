@@ -53,6 +53,7 @@ function readPackageName(projectRoot: string): string {
 
 /**
  * Extracts declared dependencies from manifest.toml content as "name@version" pairs.
+ * Dependencies strictly follow table notation: `name = { version = "...", profile = "..." }`.
  */
 function parseManifestDependencies(manifestContent: string): string[] {
     const dependencies: string[] = [];
@@ -64,9 +65,20 @@ function parseManifestDependencies(manifestContent: string): string[] {
             if (!trimmedLine || trimmedLine.startsWith('#')) {
                 continue;
             }
-            const match = trimmedLine.match(/^([a-zA-Z0-9_\-\.]+)\s*=\s*["']([^"']+)["']/);
-            if (match && match[1] && match[2]) {
-                dependencies.push(`${match[1]}@${match[2]}`);
+            const tableMatch = trimmedLine.match(/^([a-zA-Z0-9_\-\.]+)\s*=\s*\{([^}]+)\}/);
+            if (tableMatch && tableMatch[1] && tableMatch[2]) {
+                const dependencyName = tableMatch[1];
+                const tableBody = tableMatch[2];
+                const versionMatch = tableBody.match(/version\s*=\s*["']([^"']+)["']/);
+                const profileMatch = tableBody.match(/profile\s*=\s*["']([^"']+)["']/);
+                if (versionMatch && versionMatch[1]) {
+                    const dependencyVersion = versionMatch[1];
+                    if (profileMatch && profileMatch[1]) {
+                        dependencies.push(`${dependencyName}@${dependencyVersion}#${profileMatch[1]}`);
+                    } else {
+                        dependencies.push(`${dependencyName}@${dependencyVersion}`);
+                    }
+                }
             }
         }
     }

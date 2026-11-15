@@ -606,17 +606,23 @@ def compile_solix_sources(
     dependencies = manifest.get("dependencies", {})
     if isinstance(dependencies, dict):
         for raw_dependency_key, dependency_val in sorted(dependencies.items()):
-            if isinstance(dependency_val, dict):
-                dep_version = dependency_val.get("version", "")
-                dep_name = raw_dependency_key
+            if not isinstance(dependency_val, dict):
+                raise BuildError(
+                    phase="Manifest Dependency Validation",
+                    message=(
+                        f"Invalid dependency format for '{raw_dependency_key}' in manifest.toml. "
+                        f"Only table notation is supported: {raw_dependency_key} = {{ version = \"...\", profile = \"...\" }}"
+                    ),
+                    command=[],
+                    cwd=project_root,
+                    hint=f"Update manifest.toml dependencies to use table notation, e.g. {raw_dependency_key} = {{ version = \"5.5.0\", profile = \"release\" }}",
+                )
+            dep_version = dependency_val.get("version", "*")
+            dep_profile = dependency_val.get("profile")
+            if dep_profile:
+                compile_command.extend(["--deps", f"{raw_dependency_key}@{dep_version}#{dep_profile}"])
             else:
-                dep_version = str(dependency_val)
-                dep_name = raw_dependency_key
-                for known_suffix in ("-release", "-debug", "-test"):
-                    if dep_name.endswith(known_suffix):
-                        dep_name = dep_name[:-len(known_suffix)]
-                        break
-            compile_command.extend(["--deps", f"{dep_name}@{dep_version}"])
+                compile_command.extend(["--deps", f"{raw_dependency_key}@{dep_version}"])
 
     print(f"  [solix] Compiling Solix sources for '{package_name}' ({profile})...")
     run_command(

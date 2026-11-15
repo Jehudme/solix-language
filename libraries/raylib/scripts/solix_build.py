@@ -23,6 +23,7 @@ SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
     ("x86_64-unknown-linux-gnu", ".so"),
     ("aarch64-unknown-linux-gnu", ".so"),
     ("x86_64-pc-windows-gnu", ".dll"),
+    ("x86_64-pc-windows-msvc", ".dll"),
     ("x86_64-apple-darwin", ".dylib"),
     ("aarch64-apple-darwin", ".dylib"),
 ]
@@ -273,7 +274,7 @@ def compile_rust_project(
     home_cargo_bin = str(Path.home() / ".cargo" / "bin")
     current_system_path = cargo_environment.get("PATH", "")
     if home_cargo_bin not in current_system_path:
-        cargo_environment["PATH"] = f"{home_cargo_bin}:{current_system_path}"
+        cargo_environment["PATH"] = f"{home_cargo_bin}{os.pathsep}{current_system_path}"
 
     if sys.platform.startswith("linux"):
         cargo_environment["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + cargo_environment.get("RUSTFLAGS", "")
@@ -321,11 +322,19 @@ def compile_rust_project(
     successful_targets = 0
 
     for target_triple, target_extension in SUPPORTED_RELEASE_TARGETS:
-        is_host_platform = (target_triple == host_target_triple)
+        is_host_platform = (
+            target_triple == host_target_triple
+            or (
+                target_triple.startswith("x86_64-pc-windows")
+                and host_target_triple.startswith("x86_64-pc-windows")
+            )
+        )
         target_stage_directory = stage_lib_directory / target_triple
         target_stage_directory.mkdir(parents=True, exist_ok=True)
 
         if has_cargo_zigbuild:
+            if "msvc" in target_triple:
+                continue
             cargo_command = [
                 "cargo",
                 "zigbuild",
@@ -449,6 +458,77 @@ def resolve_solix_binary() -> str:
     return "solix"
 
 
+def resolve_profile_options(manifest: dict, target_profile: str) -> dict:
+    """Resolves hierarchical profile inheritance (e.g. bench -> release -> default)."""
+    visited_profiles: list[str] = []
+    resolution_chain: list[str] = []
+    current_profile_name = target_profile
+    profiles_table = manifest.get("profile", {})
+
+    while current_profile_name:
+        if current_profile_name in visited_profiles:
+            break
+        visited_profiles.append(current_profile_name)
+        resolution_chain.append(current_profile_name)
+        current_config = profiles_table.get(current_profile_name, {})
+        parent_name = current_config.get("inherits")
+        if not parent_name:
+            if current_profile_name in ("release", "debug"):
+                parent_name = "default"
+            elif current_profile_name == "test":
+                parent_name = "debug"
+            elif current_profile_name == "default":
+                parent_name = None
+            else:
+                parent_name = "default"
+        if parent_name == "default" and current_profile_name == "default":
+            break
+        current_profile_name = parent_name
+
+    resolved_options = {
+        "opt_level": 0,
+        "inline_threshold": 8,
+        "debug_symbols": True,
+        "emit_disassembly": False,
+        "warnings_as_errors": False,
+        "verify_checksum": True,
+        "link": "dynamic",
+    }
+
+    build_table = manifest.get("build", {})
+    if "inline_threshold" in build_table:
+        resolved_options["inline_threshold"] = build_table["inline_threshold"]
+    if "verify_checksum" in build_table:
+        resolved_options["verify_checksum"] = build_table["verify_checksum"]
+    if "link" in build_table:
+        resolved_options["link"] = build_table["link"]
+
+    while resolution_chain:
+        step_profile = resolution_chain.pop()
+        if step_profile == "release":
+            resolved_options["opt_level"] = 3
+            resolved_options["inline_threshold"] = 8
+            resolved_options["debug_symbols"] = False
+        elif step_profile in ("debug", "test"):
+            resolved_options["opt_level"] = 0
+            resolved_options["debug_symbols"] = True
+
+        step_config = profiles_table.get(step_profile, {})
+        for option_key in (
+            "opt_level",
+            "inline_threshold",
+            "debug_symbols",
+            "emit_disassembly",
+            "warnings_as_errors",
+            "verify_checksum",
+            "link",
+        ):
+            if option_key in step_config:
+                resolved_options[option_key] = step_config[option_key]
+
+    return resolved_options
+
+
 def compile_solix_sources(
     project_root: Path,
     manifest: dict[str, Any],
@@ -498,22 +578,26 @@ def compile_solix_sources(
         if selected_entrypoint:
             compile_command.extend(["--entry", str(selected_entrypoint)])
 
-    build_config = manifest.get("build", {})
-    link_mode = os.environ.get("SOLIX_LINK_MODE") or build_config.get("link")
+    resolved_profile_options = resolve_profile_options(manifest, profile)
+
+    link_mode = os.environ.get("SOLIX_LINK_MODE") or resolved_profile_options.get("link")
     if link_mode:
         compile_command.extend(["--link", str(link_mode)])
 
-    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR") or build_config.get("pkg_dir")
+    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR") or manifest.get("build", {}).get("pkg_dir")
     if pkg_dir_override:
         compile_command.extend(["--pkg-dir", str(pkg_dir_override)])
 
-    verify_checksum = build_config.get("verify_checksum", True)
+    verify_checksum = resolved_profile_options.get("verify_checksum", True)
     if not verify_checksum or os.environ.get("SOLIX_VERIFY_CHECKSUM") == "0":
         compile_command.append("--no-verify")
 
-    inline_threshold = os.environ.get("SOLIX_INLINE_THRESHOLD") or build_config.get("inline_threshold")
+    inline_threshold = os.environ.get("SOLIX_INLINE_THRESHOLD") or resolved_profile_options.get("inline_threshold")
     if inline_threshold is not None:
         compile_command.extend(["--inline-threshold", str(inline_threshold)])
+
+    if resolved_profile_options.get("emit_disassembly"):
+        compile_command.append("--disasm")
 
     for lib_file in stage_lib_directory.iterdir():
         if lib_file.name.endswith(".slxb"):
@@ -521,8 +605,24 @@ def compile_solix_sources(
 
     dependencies = manifest.get("dependencies", {})
     if isinstance(dependencies, dict):
-        for dependency_name, dependency_version in sorted(dependencies.items()):
-            compile_command.extend(["--deps", f"{dependency_name}@{dependency_version}"])
+        for raw_dependency_key, dependency_val in sorted(dependencies.items()):
+            if not isinstance(dependency_val, dict):
+                raise BuildError(
+                    phase="Manifest Dependency Validation",
+                    message=(
+                        f"Invalid dependency format for '{raw_dependency_key}' in manifest.toml. "
+                        f"Only table notation is supported: {raw_dependency_key} = {{ version = \"...\", profile = \"...\" }}"
+                    ),
+                    command=[],
+                    cwd=project_root,
+                    hint=f"Update manifest.toml dependencies to use table notation, e.g. {raw_dependency_key} = {{ version = \"5.5.0\", profile = \"release\" }}",
+                )
+            dep_version = dependency_val.get("version", "*")
+            dep_profile = dependency_val.get("profile")
+            if dep_profile:
+                compile_command.extend(["--deps", f"{raw_dependency_key}@{dep_version}#{dep_profile}"])
+            else:
+                compile_command.extend(["--deps", f"{raw_dependency_key}@{dep_version}"])
 
     print(f"  [solix] Compiling Solix sources for '{package_name}' ({profile})...")
     run_command(

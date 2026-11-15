@@ -186,10 +186,19 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         && let Some(ref manifest) = parent_manifest
     {
         for resolved_dependency in manifest.resolved_dependencies() {
-            let spec_string = format!(
-                "{}@{}",
-                resolved_dependency.package_name, resolved_dependency.version
-            );
+            let spec_string = if resolved_dependency.build_profile.is_empty() {
+                format!(
+                    "{}@{}",
+                    resolved_dependency.package_name, resolved_dependency.version
+                )
+            } else {
+                format!(
+                    "{}@{}#{}",
+                    resolved_dependency.package_name,
+                    resolved_dependency.version,
+                    resolved_dependency.build_profile
+                )
+            };
             let requirement =
                 DependencyRequirement::parse(&spec_string).map_err(|parse_error| {
                     anyhow::anyhow!(

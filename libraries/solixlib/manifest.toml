@@ -10,4 +10,4 @@ main = "Main::main"
 test = "TestRunner::test"
 
 [dependencies]
-# solix = "2.0.0"
+# solix = { version = "2.0.0", profile = "release" }

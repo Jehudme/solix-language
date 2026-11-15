@@ -10,4 +10,4 @@ main = "BreakoutGame::main"
 test = "TestRunner::test"
 
 [dependencies]
-raylib = "5.5.0"
+raylib = { version = "5.5.0", profile = "release" }

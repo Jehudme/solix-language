@@ -89,8 +89,8 @@ def generate_project(
     authors_formatted = ", ".join(f'"{author_item}"' for author_item in authors)
     deps_lines = []
     for dependency_name, dependency_version in sorted(parsed_dependencies.items()):
-        deps_lines.append(f'{dependency_name} = "{dependency_version}"')
-    deps_block = "\n".join(deps_lines) if deps_lines else "# solix = \"2.0.0\""
+        deps_lines.append(f'{dependency_name} = {{ version = "{dependency_version}", profile = "release" }}')
+    deps_block = "\n".join(deps_lines) if deps_lines else '# solix = { version = "2.0.0", profile = "release" }'
 
     manifest_content = f"""[info]
 name = "{project_name}"

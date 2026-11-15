@@ -752,7 +752,7 @@ authors = ["Tester"]
 main = "Main::main"
 
 [dependencies]
-math = "1.0.0"
+math = { version = "1.0.0", profile = "release" }
 "#;
     fs::write(project_root.join("manifest.toml"), manifest_content).expect("write manifest");
 

@@ -201,4 +201,10 @@ The Language Server enforces diagnostic parity with the CLI compiler (`solix com
 1. **Builtin Packages**: Only `std::*` standard library packages and `blt` / `blt::*` compiler builtins are recognized without project dependencies.
 2. **External Packages**: Any external package (such as `solix.*` or `raylib.*`) requires an explicit dependency entry in `manifest.toml` or an `extern import` declaration. Wildcard imports targeting undeclared external packages consistently emit `CannotResolveImport` (`E0232`).
 
+### 7.6 Workspace Manifest Dependency Table Resolution
+The LSP `WorkspaceManager` locates `manifest.toml` in project parent directories and deserializes `[dependencies]` using strictly-typed table notation:
+- Dependencies are declared as `package_name = { version = "<version>", profile = "<profile>" }`.
+- When `profile` is omitted, the profile defaults to `"release"`.
+- Each resolved dependency propagates both semantic version requirements and build profiles into the language server compilation options, ensuring background diagnostics match CLI build output.
+
 

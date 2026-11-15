@@ -156,8 +156,8 @@ fn test_solix_new_library_no_native_and_deps() {
         fs::read_to_string(&manifest_path).expect("failed to read manifest.toml");
     assert!(manifest_content.contains("name = \"math_utilities\""));
     assert!(manifest_content.contains("version = \"1.2.3\""));
-    assert!(manifest_content.contains("solix = \"2.0.0\""));
-    assert!(manifest_content.contains("extra_helpers = \"0.5.1\""));
+    assert!(manifest_content.contains("solix = { version = \"2.0.0\", profile = \"release\" }"));
+    assert!(manifest_content.contains("extra_helpers = { version = \"0.5.1\", profile = \"release\" }"));
 
     assert!(
         target_project_directory

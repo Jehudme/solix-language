@@ -901,10 +901,14 @@ impl WorkspaceManager {
                 if let Ok(parsed_version) =
                     solix_common::solver::PackageVersion::parse(&resolved_dependency.version)
                 {
-                    dependency_specs.push(solix_common::solver::DependencyRequirement::new(
+                    let mut requirement = solix_common::solver::DependencyRequirement::new(
                         resolved_dependency.package_name,
                         parsed_version,
-                    ));
+                    );
+                    if !resolved_dependency.build_profile.is_empty() {
+                        requirement = requirement.with_profile(resolved_dependency.build_profile);
+                    }
+                    dependency_specs.push(requirement);
                 }
             }
         }

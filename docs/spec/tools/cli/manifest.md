@@ -86,14 +86,21 @@ test = "SuiteRunner::run_tests"
 
 Defines external package dependencies resolved against the local Solix package store (`~/.solix/packages`).
 
-Each entry specifies the required package name and a SemVer version requirement string:
+Dependencies are strictly declared using table notation:
 
 ```toml
 [dependencies]
-solixlib = "2.0.0"
-raylib = "^1.2.0"
-math_matrix = "0.3.1"
+raylib = { version = "5.5.0", profile = "debug" }
+solixlib = { version = "2.0.0", profile = "release" }
+math_matrix = { version = "0.3.1", profile = "release" }
 ```
+
+#### Table Specification Fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `version` | String | *(Required)* | SemVer version requirement string (e.g. `"5.5.0"`, `"^1.2.0"`, `"*"`). |
+| `profile` | String | `"release"` | Target build profile to resolve against the package repository or store (`"release"`, `"debug"`, or `"test"`). |
 
 #### Version Requirement Syntax
 
@@ -104,29 +111,8 @@ math_matrix = "0.3.1"
 | `">=1.0.0"` | Comparison Range | Greater than or equal to version | `">=1.0.0"` matches any version `>= 1.0.0` |
 | `"*"` | Wildcard | Any available installed version | `"*"` matches any installed version |
 
----
-
-#### Profile-Aware Dependency Declarations
-
-Dependencies can specify their target build profile explicitly:
-
-1. **Table Notation**:
-   ```toml
-   [dependencies]
-   raylib = { version = "5.5.0", profile = "debug" }
-   solixlib = { version = "2.0.0", profile = "release" }
-   ```
-2. **Suffix Notation**:
-   ```toml
-   [dependencies]
-   raylib-debug = "5.5.0"
-   raylib-release = "5.5.0"
-   ```
-3. **Simple Notation** (defaults automatically to `"release"`):
-   ```toml
-   [dependencies]
-   math = "1.0.0" # resolves to math-release@1.0.0
-   ```
+> [!NOTE]
+> Dependency declarations in `manifest.toml` strictly require table notation: `package_name = { version = "<version>", profile = "<profile>" }`. Shorthand string syntax and suffix notation are rejected by the manifest parser.
 
 ---
 

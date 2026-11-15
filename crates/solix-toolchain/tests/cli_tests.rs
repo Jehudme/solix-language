@@ -1721,7 +1721,7 @@ description = "Showcase game"
 main = "Game::main"
 
 [dependencies]
-math_lib = "1.0.0"
+math_lib = { version = "1.0.0", profile = "release" }
 "#;
     std::fs::write(project_dir.join("manifest.toml"), manifest_content).expect("write manifest");
 

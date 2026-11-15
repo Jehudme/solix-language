@@ -174,37 +174,43 @@ impl ResolvedProfile {
     }
 }
 
+fn default_dependency_profile() -> String {
+    "release".to_string()
+}
+
 /// Representation of a dependency requirement in `[dependencies]`.
+///
+/// Only strictly-typed table notation is supported:
+/// `raylib = { version = "5.5.0", profile = "debug" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum DependencySpec {
-    /// Shorthand version string or suffix (e.g. `"5.5.0"`).
-    Simple(String),
-    /// Detailed dependency table with version and profile.
-    Detailed {
-        version: String,
-        #[serde(default)]
-        profile: Option<String>,
-    },
+pub struct DependencySpec {
+    /// Semantic version requirement string (e.g. `"5.5.0"`, `"^1.2.0"`).
+    pub version: String,
+    /// Target build profile (defaults to `"release"` if omitted in table).
+    #[serde(default = "default_dependency_profile")]
+    pub profile: String,
 }
 
 impl DependencySpec {
-    /// Retrieves the semantic version requirement string.
+    /// Creates a new dependency specification with version and profile.
     #[must_use]
-    pub fn version(&self) -> &str {
-        match self {
-            Self::Simple(version_string) => version_string.as_str(),
-            Self::Detailed { version, .. } => version.as_str(),
+    pub fn new(version: impl Into<String>, profile: impl Into<String>) -> Self {
+        Self {
+            version: version.into(),
+            profile: profile.into(),
         }
     }
 
-    /// Retrieves the optional target profile name.
+    /// Retrieves the semantic version requirement string.
     #[must_use]
-    pub fn profile(&self) -> Option<&str> {
-        match self {
-            Self::Simple(_) => None,
-            Self::Detailed { profile, .. } => profile.as_deref(),
-        }
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// Retrieves the target profile name.
+    #[must_use]
+    pub fn profile(&self) -> &str {
+        &self.profile
     }
 }
 
@@ -378,24 +384,11 @@ impl ProjectManifest {
     #[must_use]
     pub fn resolved_dependencies(&self) -> Vec<ResolvedDependency> {
         let mut results = Vec::new();
-        for (raw_name, specification) in &self.dependencies {
-            let version = specification.version().to_string();
-            let (package_name, build_profile) = if let Some(explicit_profile) = specification.profile() {
-                (raw_name.clone(), explicit_profile.to_string())
-            } else if let Some(stripped_name) = raw_name.strip_suffix("-release") {
-                (stripped_name.to_string(), "release".to_string())
-            } else if let Some(stripped_name) = raw_name.strip_suffix("-debug") {
-                (stripped_name.to_string(), "debug".to_string())
-            } else if let Some(stripped_name) = raw_name.strip_suffix("-test") {
-                (stripped_name.to_string(), "test".to_string())
-            } else {
-                (raw_name.clone(), "release".to_string())
-            };
-
+        for (package_name, specification) in &self.dependencies {
             results.push(ResolvedDependency {
-                package_name,
-                version,
-                build_profile,
+                package_name: package_name.clone(),
+                version: specification.version.clone(),
+                build_profile: specification.profile.clone(),
             });
         }
         results

@@ -244,8 +244,8 @@ name = "game_project"
 version = "0.5.0"
 
 [dependencies]
-raylib = "1.2.0"
-math_utils = "2.0.0"
+raylib = { version = "1.2.0", profile = "release" }
+math_utils = { version = "2.0.0", profile = "debug" }
 "#;
 
     let project_manifest =
@@ -256,15 +256,29 @@ math_utils = "2.0.0"
         project_manifest
             .dependencies
             .get("raylib")
-            .map(|dep| dep.version()),
+            .map(|specification| specification.version()),
         Some("1.2.0")
     );
     assert_eq!(
         project_manifest
             .dependencies
+            .get("raylib")
+            .map(|specification| specification.profile()),
+        Some("release")
+    );
+    assert_eq!(
+        project_manifest
+            .dependencies
             .get("math_utils")
-            .map(|dep| dep.version()),
+            .map(|specification| specification.version()),
         Some("2.0.0")
+    );
+    assert_eq!(
+        project_manifest
+            .dependencies
+            .get("math_utils")
+            .map(|specification| specification.profile()),
+        Some("debug")
     );
 }
 
@@ -398,10 +412,10 @@ name = "full_stack_app"
 version = "2.0.0"
 
 [dependencies]
-math = "1.0.0"
-raylib-debug = "5.5.0"
-solixlib = { version = "2.0.0", profile = "release" }
-crypto-test = "0.4.0"
+math = { version = "1.0.0", profile = "release" }
+raylib = { version = "5.5.0", profile = "debug" }
+solixlib = { version = "2.0.0" }
+crypto = { version = "0.4.0", profile = "test" }
 "#;
 
     let project_manifest =
@@ -411,31 +425,65 @@ crypto-test = "0.4.0"
 
     let math_dep = resolved_dependencies
         .iter()
-        .find(|dep| dep.package_name == "math")
+        .find(|dependency| dependency.package_name == "math")
         .expect("math dependency must exist");
     assert_eq!(math_dep.version, "1.0.0");
-    assert_eq!(math_dep.build_profile, "release"); // defaults to release
+    assert_eq!(math_dep.build_profile, "release");
 
     let raylib_dep = resolved_dependencies
         .iter()
-        .find(|dep| dep.package_name == "raylib")
+        .find(|dependency| dependency.package_name == "raylib")
         .expect("raylib dependency must exist");
     assert_eq!(raylib_dep.version, "5.5.0");
-    assert_eq!(raylib_dep.build_profile, "debug"); // extracted from -debug suffix
+    assert_eq!(raylib_dep.build_profile, "debug");
 
     let solixlib_dep = resolved_dependencies
         .iter()
-        .find(|dep| dep.package_name == "solixlib")
+        .find(|dependency| dependency.package_name == "solixlib")
         .expect("solixlib dependency must exist");
     assert_eq!(solixlib_dep.version, "2.0.0");
-    assert_eq!(solixlib_dep.build_profile, "release"); // explicit table profile
+    assert_eq!(solixlib_dep.build_profile, "release"); // defaults to release when omitted from table
 
     let crypto_dep = resolved_dependencies
         .iter()
-        .find(|dep| dep.package_name == "crypto")
+        .find(|dependency| dependency.package_name == "crypto")
         .expect("crypto dependency must exist");
     assert_eq!(crypto_dep.version, "0.4.0");
-    assert_eq!(crypto_dep.build_profile, "test"); // extracted from -test suffix
+    assert_eq!(crypto_dep.build_profile, "test");
+}
+
+#[test]
+fn test_string_dependency_format_rejected() {
+    let manifest_toml = r#"
+[info]
+name = "invalid_deps"
+version = "1.0.0"
+
+[dependencies]
+raylib = "5.5.0"
+"#;
+    let parse_result = ProjectManifest::from_toml_str(manifest_toml);
+    assert!(
+        parse_result.is_err(),
+        "String dependency format must be rejected; only table notation is supported"
+    );
+}
+
+#[test]
+fn test_suffix_string_dependency_rejected() {
+    let manifest_toml = r#"
+[info]
+name = "invalid_deps"
+version = "1.0.0"
+
+[dependencies]
+raylib-debug = "5.5.0"
+"#;
+    let parse_result = ProjectManifest::from_toml_str(manifest_toml);
+    assert!(
+        parse_result.is_err(),
+        "Suffix string dependency format must be rejected; only table notation is supported"
+    );
 }
 
 #[test]

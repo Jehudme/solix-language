@@ -285,7 +285,7 @@ pre_compile = [
 ]
 
 [dependencies]
-solixlib = { path = "../solixlib" }
+solixlib = { version = "2.0.0", profile = "release" }
 ```
 
 In `natives/rust_bridge/Cargo.toml`, set crate type to dynamic library (`cdylib`):
