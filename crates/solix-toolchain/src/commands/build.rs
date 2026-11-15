@@ -69,6 +69,8 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
     let binary_name = if cfg!(windows) { "solix.exe" } else { "solix" };
     let solix_bin = if let Ok(custom_bin) = std::env::var("SOLIX_BIN") {
         std::path::PathBuf::from(custom_bin)
+    } else if let Ok(cargo_bin_env) = std::env::var("CARGO_BIN_EXE_solix") {
+        std::path::PathBuf::from(cargo_bin_env)
     } else if current_exe
         .file_name()
         .is_some_and(|name| name == "solix" || name == "solix.exe")
@@ -106,7 +108,7 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
     });
     let mut command = Command::new(python_binary);
     command
-        .arg("scripts/build.py")
+        .arg(&build_script_path)
         .arg("--profile")
         .arg(effective_profile)
         .current_dir(&project_root)
@@ -130,16 +132,27 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         command.env("SOLIX_LINK_MODE", "static");
     }
 
-    let status = command.status().with_context(|| {
+    let output = command.output().with_context(|| {
         format!(
             "failed to execute python3 build script at '{}'",
             build_script_path.display()
         )
     })?;
 
-    if !status.success() {
-        let exit_code = status.code().unwrap_or(1);
-        bail!("Build script terminated with non-zero exit code: {exit_code}");
+    let stdout_text = String::from_utf8_lossy(&output.stdout);
+    let stderr_text = String::from_utf8_lossy(&output.stderr);
+    if !stdout_text.is_empty() {
+        print!("{stdout_text}");
+    }
+    if !stderr_text.is_empty() {
+        eprint!("{stderr_text}");
+    }
+
+    if !output.status.success() {
+        let exit_code = output.status.code().unwrap_or(1);
+        bail!(
+            "Build script terminated with non-zero exit code: {exit_code}\n[stdout]:\n{stdout_text}\n[stderr]:\n{stderr_text}"
+        );
     }
 
     let should_install = args.install || manifest_data.build.install;

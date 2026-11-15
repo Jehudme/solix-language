@@ -93,6 +93,8 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --workspace --all-targets
+        env:
+          SOLIX_BIN: ${{ runner.os == 'Windows' && format('{0}/target/debug/solix.exe', github.workspace) || format('{0}/target/debug/solix', github.workspace) }}
 
       - name: Build and stage default first-party libraries
         if: runner.os == 'Linux'
