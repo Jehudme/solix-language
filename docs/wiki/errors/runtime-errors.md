@@ -1,6 +1,6 @@
 # Runtime Execution Errors (`R0001` – `R0024`)
 
-This section documents runtime trap codes and execution faults emitted by the Solix Virtual Machine ([`crates/solix-runtime/src/exceptions/errors.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/exceptions/errors.rs)).
+This section documents runtime trap codes and execution faults emitted by the Solix Virtual Machine ([`crates/solix-runtime/src/exceptions/errors.rs`](../../../crates/solix-runtime/src/exceptions/errors.rs)).
 
 ---
 

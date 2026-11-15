@@ -1,6 +1,6 @@
 # Parser Error Codes (`E0101` – `E0200`)
 
-This section documents the syntax diagnostics emitted by [`crates/solix-compilation/src/phases/parser/`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/parser/).
+This section documents the syntax diagnostics emitted by [`crates/solix-compilation/src/phases/parser/`](../../../crates/solix-compilation/src/phases/parser).
 
 ---
 

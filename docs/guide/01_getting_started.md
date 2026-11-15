@@ -93,14 +93,14 @@ solix <subcommand> [options] [arguments...]
 
 | Subcommand | Function | Reference |
 |---|---|---|
-| `new` | Scaffolds a project workspace with `manifest.toml`, build automation, and tests | [docs/spec/tools/cli/new.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/new.md) |
-| `compile` | Directly compiles source files into executable bytecode (`.slxb`) | [docs/spec/tools/cli/compile.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/compile.md) |
-| `build` | Builds multi-file projects into distribution archive packages (`.slxarc`) | [docs/spec/tools/cli/build.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/build.md) |
-| `run` | Executes bytecode containers, archive packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/run.md) |
-| `info` | Inspects container metadata, disassembles bytecode, or reconstructs APIs | [docs/spec/tools/cli/info.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/info.md) |
-| `install` | Installs `.slxb` binaries or `.slxarc` archives into the local package store | [docs/spec/tools/cli/install.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/install.md) |
-| `uninstall` | Removes installed packages or specific versions from the local store | [docs/spec/tools/cli/uninstall.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/uninstall.md) |
-| `list` | Lists all installed packages and versions | [docs/spec/tools/cli/list.md](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/list.md) |
+| `new` | Scaffolds a project workspace with `manifest.toml`, build automation, and tests | [docs/spec/tools/cli/new.md](../spec/tools/cli/new.md) |
+| `compile` | Directly compiles source files into executable bytecode (`.slxb`) | [docs/spec/tools/cli/compile.md](../spec/tools/cli/compile.md) |
+| `build` | Builds multi-file projects into distribution archive packages (`.slxarc`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
+| `run` | Executes bytecode containers, archive packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](../spec/tools/cli/run.md) |
+| `info` | Inspects container metadata, disassembles bytecode, or reconstructs APIs | [docs/spec/tools/cli/info.md](../spec/tools/cli/info.md) |
+| `install` | Installs `.slxb` binaries or `.slxarc` archives into the local package store | [docs/spec/tools/cli/install.md](../spec/tools/cli/install.md) |
+| `uninstall` | Removes installed packages or specific versions from the local store | [docs/spec/tools/cli/uninstall.md](../spec/tools/cli/uninstall.md) |
+| `list` | Lists all installed packages and versions | [docs/spec/tools/cli/list.md](../spec/tools/cli/list.md) |
 
 ---
 
@@ -445,8 +445,8 @@ solix run src/main.slx -- --host localhost --port 8080
 
 ## Next Steps & Further Reading
 
-- [Variables & Types Guide](file:///home/jehud/Projects/solix-language/docs/guide/02_variables_and_types.md): Variables, primitive types, operators, and control flow.
-- [Classes & Object-Oriented Programming](file:///home/jehud/Projects/solix-language/docs/guide/04_classes_and_oop.md): Classes, inheritance, abstract methods, and interfaces.
-- [Memory Management & ARC](file:///home/jehud/Projects/solix-language/docs/guide/05_memory_management_and_arc.md): Automatic Reference Counting, weak references, and deterministic destructors.
-- [Native C & Rust Interop](file:///home/jehud/Projects/solix-language/docs/guide/09_native_plugins.md): Binding C and Rust shared libraries using `SolixCValue` and FFI callbacks.
-- [CLI Command Wiki Reference](file:///home/jehud/Projects/solix-language/docs/wiki/commands/README.md): Quick reference cheat sheets for all CLI commands and options.
+- [Variables & Types Guide](02_variables_and_types.md): Variables, primitive types, operators, and control flow.
+- [Classes & Object-Oriented Programming](04_classes_and_oop.md): Classes, inheritance, abstract methods, and interfaces.
+- [Memory Management & ARC](05_memory_management_and_arc.md): Automatic Reference Counting, weak references, and deterministic destructors.
+- [Native C & Rust Interop](09_native_plugins.md): Binding C and Rust shared libraries using `SolixCValue` and FFI callbacks.
+- [CLI Command Wiki Reference](../wiki/commands/README.md): Quick reference cheat sheets for all CLI commands and options.

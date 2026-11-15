@@ -56,5 +56,5 @@ solix fmt --check
 
 ## 6. Related Documentation
 
-* [Language Server Command Reference](file:///home/jehud/Projects/solix-language/docs/wiki/commands/lsp.md)
-* [Solix Getting Started Guide](file:///home/jehud/Projects/solix-language/docs/guide/01_getting_started.md)
+* [Language Server Command Reference](lsp.md)
+* [Solix Getting Started Guide](../../guide/01_getting_started.md)

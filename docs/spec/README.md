@@ -2,7 +2,7 @@
 
 This directory contains the authoritative, normative technical specifications for the Solix language compiler, 64-bit register-based virtual machine, memory runtime, standard library, and package toolchain.
 
-Per [`GL-0012`](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-features-and-wiki.md), specifications serve as the normative source of truth for systems engineers and toolchain contributors.
+Per [`GL-0012`](../internals/guidelines/authoring-features-and-wiki.md), specifications serve as the normative source of truth for systems engineers and toolchain contributors.
 
 ---
 

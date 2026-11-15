@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The `Binder` stage ([`crates/solix-compilation/src/phases/binder/binder.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/binder.rs)) is the semantic engine of the Solix compiler. Because Solix supports forward references, cyclic class relationships, virtual inheritance, method overloading, and template monomorphization, binding cannot occur in a single top-to-bottom AST traversal.
+The `Binder` stage ([`crates/solix-compilation/src/phases/binder/binder.rs`](../../crates/solix-compilation/src/phases/binder/binder.rs)) is the semantic engine of the Solix compiler. Because Solix supports forward references, cyclic class relationships, virtual inheritance, method overloading, and template monomorphization, binding cannot occur in a single top-to-bottom AST traversal.
 
 Instead, the `Binder` executes **four sequential passes**:
 
@@ -18,7 +18,7 @@ flowchart TD
 ---
 
 ## 2. Pass 1a: Symbol Discovery & Package Registration
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass1_symbol_discovery.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/passes/pass1_symbol_discovery.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass1_symbol_discovery.rs`](../../crates/solix-compilation/src/phases/binder/passes/pass1_symbol_discovery.rs)
 - **Goal**: Register the names of all top-level types across all compilation units before inspecting any bodies.
 - **Operations**:
   - Traverses the `Program` AST across all parsed source files.
@@ -30,19 +30,19 @@ flowchart TD
 ---
 
 ## 3. Pass 1b: Type Hierarchy & Member Registration
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass2_type_hierarchy.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/passes/pass2_type_hierarchy.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass2_type_hierarchy.rs`](../../crates/solix-compilation/src/phases/binder/passes/pass2_type_hierarchy.rs)
 - **Goal**: Establish inheritance relationships and calculate physical class memory layouts without type-checking method bodies.
 - **Operations**:
   - Resolves `extends` base classes and `implements` interfaces against registered symbols.
   - Enforces single class inheritance while permitting multiple interface implementation.
   - Validates inheritance graphs and reports `BindingError::CyclicInheritance` on cycles (e.g. `class A extends B` and `class B extends A`).
-  - Calculates field byte offsets adhering to natural alignment boundaries ([`crates/solix-compilation/src/phases/binder/layout.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/layout.rs)).
+  - Calculates field byte offsets adhering to natural alignment boundaries ([`crates/solix-compilation/src/phases/binder/layout.rs`](../../crates/solix-compilation/src/phases/binder/layout.rs)).
   - Assigns unique sequential `vtable_id` numbers to all classes and constructs virtual method tables.
 
 ---
 
 ## 4. Pass 2: Type Checking, Scoping & ARC Insertion
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass3_type_checking.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/passes/pass3_type_checking.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/passes/pass3_type_checking.rs`](../../crates/solix-compilation/src/phases/binder/passes/pass3_type_checking.rs)
 - **Goal**: Full semantic validation of statements and expressions, call resolution, and insertion of memory management hooks.
 - **Operations**:
   - Validates expression types, binary operations, method argument matching, and explicit type casts.
@@ -54,7 +54,7 @@ flowchart TD
 ---
 
 ## 5. Pass 3: Template Monomorphization
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/monomorphizer.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/monomorphizer.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/monomorphizer.rs`](../../crates/solix-compilation/src/phases/binder/monomorphizer.rs)
 - **Goal**: Specialize generic class and interface blueprints into concrete AST declarations.
 - **Operations**:
   - Scans AST expressions for generic type instantiations (e.g. `List<int32>`, `Map<String, int64>`).

@@ -51,7 +51,7 @@ flowchart TD
 ```
 
 ### 3.1. Reverse Table Lookup
-Exception handler search ([`crates/solix-runtime/src/exceptions/unwinder.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/exceptions/unwinder.rs)) searches the handler table in reverse order:
+Exception handler search ([`crates/solix-runtime/src/exceptions/unwinder.rs`](../../crates/solix-runtime/src/exceptions/unwinder.rs)) searches the handler table in reverse order:
 ```rust
 pub fn find_matching_handler(
     handlers: &[ExceptionHandlerEntry],

@@ -6,7 +6,7 @@ verify that all feature wiki keword a# Formal Specification: Compilation Pipelin
 * **Scope:** Compiler Architecture & Pipeline Stages (`crates/solix-compilation/src/`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-compilation/src/pipeline.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/pipeline.rs)
+* **Rust Implementation:** [`crates/solix-compilation/src/pipeline.rs`](../../crates/solix-compilation/src/pipeline.rs)
 
 ---
 
@@ -77,7 +77,7 @@ The Solix Ahead-of-Time (AOT) compiler transforms UTF-8 source translation units
 
 ## 2. Compilation Context & State Architecture
 
-All phases operate upon a unified [`CompilationContext`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/CompilationContext.rs):
+All phases operate upon a unified [`CompilationContext`](../../crates/solix-compilation/src/CompilationContext.rs):
 * **`sources: Vec<String>`**: Raw UTF-8 source strings indexed by `source_id: u16`.
 * **`tokens: Vec<Vec<Token>>`**: Token streams for each translation unit.
 * **`ast: Vec<Option<ProgramAst>>`**: Parsed ASTs. External dependencies inject pre-parsed ASTs directly into this array, completely bypassing lexical analysis.

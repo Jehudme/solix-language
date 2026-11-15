@@ -6,7 +6,7 @@
 * **Scope:** Lexical Analysis & Token Streaming (`crates/solix-compilation/src/phases/lexing/`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-compilation/src/phases/lexing/lexer.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/lexing/lexer.rs)
+* **Rust Implementation:** [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../crates/solix-compilation/src/phases/lexing/lexer.rs)
 
 ---
 

@@ -104,14 +104,14 @@ class ExampleClass {
 ```solix
 // [Demonstrate incorrect code with error annotation]
 ```
-* **Diagnostic Code:** [`E0XXX`](file:///home/jehud/Projects/solix-language/docs/wiki/errors/binder-errors.md#e0xxx)
+* **Diagnostic Code:** [`E0XXX`](../../wiki/errors/binder-errors.md#e0xxx)
 * **Compiler Remediation:** [Explain how to fix the error]
 
 ---
 
 ## 6. Related Specifications & Features
-* Formal Spec: [`docs/spec/statements/<spec>.md`](file:///home/jehud/Projects/solix-language/docs/spec/statements/<spec>.md)
-* User Guide: [`docs/guide/<guide>.md`](file:///home/jehud/Projects/solix-language/docs/guide/<guide>.md)
+* Formal Spec: [`docs/spec/statements/<spec>.md`](../../spec/statements/<spec>.md)
+* User Guide: [`docs/guide/<guide>.md`](../../guide/<guide>.md)
 ````
 
 ---
@@ -152,7 +152,7 @@ class GoodSample {
 
 #### Related Diagnostics & Formal Specification
 * Related: [`E0YYY`](#e0yyy)
-* Formal Specification: [`docs/spec/<spec_path>.md`](file:///home/jehud/Projects/solix-language/docs/spec/<spec_path>.md)
+* Formal Specification: [`docs/spec/<spec_path>.md`](../../spec/<spec_path>.md)
 ````
 
 ---
@@ -209,7 +209,7 @@ class PrimitiveExample {
 ---
 
 ## 5. Related Specifications
-* Formal Spec: [`docs/spec/types.md`](file:///home/jehud/Projects/solix-language/docs/spec/types.md)
+* Formal Spec: [`docs/spec/types.md`](../../spec/types.md)
 ````
 
 ---
@@ -247,7 +247,7 @@ solix <subcommand> target --flag
 ```
 
 ### Related Specifications
-* Formal Spec: [`docs/spec/tools/cli/<subcommand>.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/<subcommand>.md)
+* Formal Spec: [`docs/spec/tools/cli/<subcommand>.md`](../../spec/tools/cli/<subcommand>.md)
 ````
 
 ---

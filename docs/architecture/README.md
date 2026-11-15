@@ -6,11 +6,11 @@ This directory provides deep technical specifications and internal implementatio
 
 ## Architecture Documents
 
-- [`pipeline.md`](file:///home/jehud/Projects/solix-language/docs/architecture/pipeline.md) — The complete compilation and execution pipeline: Lexer $\to$ Parser $\to$ Binder $\to$ Optimizer $\to$ Emitter $\to$ Runtime Register VM.
-- [`binder_passes.md`](file:///home/jehud/Projects/solix-language/docs/architecture/binder_passes.md) — Detailed mechanics of semantic passes: Symbol Discovery, Hierarchy & Member Layout, Type Checking & ARC Hook Insertion, and Generic Monomorphization.
-- [`memory_model.md`](file:///home/jehud/Projects/solix-language/docs/architecture/memory_model.md) — Byte-addressed virtual heap, 8-byte `BlockHeader` packing, natural field alignment, and `BlockTag` metadata.
-- [`arc_internals.md`](file:///home/jehud/Projects/solix-language/docs/architecture/arc_internals.md) — Deterministic Automatic Reference Counting (ARC), cycle prevention via `weak` references, and segregated free-list recycling.
-- [`exception_unwinding.md`](file:///home/jehud/Projects/solix-language/docs/architecture/exception_unwinding.md) — Table-driven zero-cost exception handling, VTable catch matching, and cleanup trampolines.
+- [`pipeline.md`](pipeline.md) — The complete compilation and execution pipeline: Lexer $\to$ Parser $\to$ Binder $\to$ Optimizer $\to$ Emitter $\to$ Runtime Register VM.
+- [`binder_passes.md`](binder_passes.md) — Detailed mechanics of semantic passes: Symbol Discovery, Hierarchy & Member Layout, Type Checking & ARC Hook Insertion, and Generic Monomorphization.
+- [`memory_model.md`](memory_model.md) — Byte-addressed virtual heap, 8-byte `BlockHeader` packing, natural field alignment, and `BlockTag` metadata.
+- [`arc_internals.md`](arc_internals.md) — Deterministic Automatic Reference Counting (ARC), cycle prevention via `weak` references, and segregated free-list recycling.
+- [`exception_unwinding.md`](exception_unwinding.md) — Table-driven zero-cost exception handling, VTable catch matching, and cleanup trampolines.
 
 ---
 

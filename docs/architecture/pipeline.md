@@ -24,7 +24,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 ## 2. Stage Breakdown
 
 ### 2.1. Lexical Analysis (`Lexer`)
-- **Source Module**: [`crates/solix-compilation/src/phases/lexing/lexer.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/lexing/lexer.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../crates/solix-compilation/src/phases/lexing/lexer.rs)
 - **Input**: UTF-8 source string buffer (`CompilationContext::sources`).
 - **Output**: Linear stream of strongly typed tokens (`Vec<Token>`).
 - **Responsibilities**:
@@ -36,7 +36,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 
 ### 2.2. Syntactic Analysis (`Parser`)
 - **Input**: Token stream (`Vec<Token>`).
-- **Source Module**: [`crates/solix-compilation/src/phases/parser/parser.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/parser/parser.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/parser/parser.rs`](../../crates/solix-compilation/src/phases/parser/parser.rs)
 - **Output**: Typed Abstract Syntax Tree (`Program` structure containing top-level declarations).
 - **Responsibilities**:
   - Employs recursive descent parsing with operator-precedence climbing for nested binary expressions.
@@ -47,7 +47,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 
 ### 2.3. Semantic Analysis & Type Binding (`Binder`)
 - **Input**: Raw parsed AST.
-- **Source Module**: [`crates/solix-compilation/src/phases/binder/binder.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/binder.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/binder/binder.rs`](../../crates/solix-compilation/src/phases/binder/binder.rs)
 - **Output**: Fully bound and validated AST with symbol tables, resolved types, and ARC hooks.
 - **Responsibilities**:
   - Executes sequential semantic passes:
@@ -58,7 +58,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 
 ### 2.4. Optimization Phase (`Optimizer`)
 - **Input**: Semantically validated AST.
-- **Source Module**: [`crates/solix-compilation/src/phases/optimizer/mod.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/optimizer/mod.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/optimizer/mod.rs`](../../crates/solix-compilation/src/phases/optimizer/mod.rs)
 - **Output**: Optimized AST and pruned call graphs.
 - **Responsibilities**:
   - Performs AST-level small function inlining (`ast_inliner.rs`) for leaf methods below configurable node count thresholds.
@@ -67,7 +67,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 
 ### 2.5. Bytecode Emission (`Emitter`)
 - **Input**: Bound and optimized AST.
-- **Source Module**: [`crates/solix-compilation/src/phases/emitter/emitter.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/emitter/emitter.rs)
+- **Source Module**: [`crates/solix-compilation/src/phases/emitter/emitter.rs`](../../crates/solix-compilation/src/phases/emitter/emitter.rs)
 - **Output**: `CompiledProgram` containing function bytecode streams, constant pool, and VTable definitions.
 - **Responsibilities**:
   - Allocates virtual registers via graph coloring / linear scan allocator (`register_allocator.rs`).
@@ -84,7 +84,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 
 ### 2.7. Runtime Engine Execution (`solix-vm`)
 - **Input**: Serialized bytecode buffer.
-- **Source Module**: [`crates/solix-runtime/src/vm/engine.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/vm/engine.rs)
+- **Source Module**: [`crates/solix-runtime/src/vm/engine.rs`](../../crates/solix-runtime/src/vm/engine.rs)
 - **Output**: Execution output, exit status, and memory telemetry.
 - **Responsibilities**:
   - Dispatches register instructions via direct loop matching.
@@ -110,5 +110,5 @@ The Solix compilation pipeline enforces zero tolerance for cascading compiler fa
 ## 4. Verification & Testing
 
 The compilation pipeline is verified via exhaustive automated test suites:
-- End-to-end integration tests: [`crates/solix-tests/tests/`](file:///home/jehud/Projects/solix-language/crates/solix-tests/tests/)
+- End-to-end integration tests: [`crates/solix-tests/tests/`](../../crates/solix-tests/tests)
 - Conformance test suites covering all compilation phases and runtime execution modes.

@@ -6,7 +6,7 @@
 * **Scope:** Virtual Machine Instruction Set Architecture (`crates/solix-runtime/src/`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-common/src/bytecode/instruction.rs`](file:///home/jehud/Projects/solix-language/crates/solix-common/src/bytecode/instruction.rs)
+* **Rust Implementation:** [`crates/solix-common/src/bytecode/instruction.rs`](../../crates/solix-common/src/bytecode/instruction.rs)
 
 ---
 

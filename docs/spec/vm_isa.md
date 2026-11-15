@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0006
 * **Scope:** 64-Bit Register Virtual Machine Architecture (`crates/solix-runtime/src/`, `crates/solix-common/src/bytecode/`)
 * **Status:** Final Normative Standard
-* **Implementation Reference:** [`crates/solix-common/src/bytecode/instruction.rs`](file:///home/jehud/Projects/solix-language/crates/solix-common/src/bytecode/instruction.rs), [`crates/solix-runtime/src/vm/engine.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/vm/engine.rs)
+* **Implementation Reference:** [`crates/solix-common/src/bytecode/instruction.rs`](../../crates/solix-common/src/bytecode/instruction.rs), [`crates/solix-runtime/src/vm/engine.rs`](../../crates/solix-runtime/src/vm/engine.rs)
 
 ---
 

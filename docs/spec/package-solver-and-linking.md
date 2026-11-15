@@ -6,7 +6,7 @@
 * **Scope:** Package Manager, Dependency Resolution & SemVer Laws (`crates/solix-common/src/solver.rs`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-common/src/solver.rs`](file:///home/jehud/Projects/solix-language/crates/solix-common/src/solver.rs)
+* **Rust Implementation:** [`crates/solix-common/src/solver.rs`](../../crates/solix-common/src/solver.rs)
 
 ---
 
@@ -27,7 +27,7 @@ A candidate version $V_{c}$ is compatible with a required minimum version $V_{r}
 
 ## 2. Pluggable `ModuleSolver` Architecture
 
-The [`ModuleSolver`](file:///home/jehud/Projects/solix-language/crates/solix-common/src/solver.rs) trait abstracts package discovery, version solving, and available package cataloging:
+The [`ModuleSolver`](../../crates/solix-common/src/solver.rs) trait abstracts package discovery, version solving, and available package cataloging:
 
 ```rust
 pub trait ModuleSolver: Send + Sync + std::fmt::Debug {

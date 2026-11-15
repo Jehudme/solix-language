@@ -135,9 +135,14 @@ def check_markdown_links(
     if target_url.startswith("file:///"):
         parsed_url = urllib.parse.urlparse(target_url)
         target_path = Path(parsed_url.path)
-        if not target_path.exists():
-            return f"Absolute file URI '{target_url}' does not exist on disk"
-        return None
+        if target_path.exists():
+            return None
+        if "/solix-language/" in parsed_url.path:
+            relative_subpath = parsed_url.path.rsplit("/solix-language/", 1)[1]
+            resolved_in_repo = repo_root / relative_subpath
+            if resolved_in_repo.exists():
+                return None
+        return f"Absolute file URI '{target_url}' does not exist on disk"
 
     if target_url.startswith("#"):
         return None

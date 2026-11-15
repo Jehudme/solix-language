@@ -6,13 +6,13 @@
 * **Scope:** Memory Allocator, Automatic Reference Counting & Object Lifecycle (`crates/solix-runtime/src/memory/`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-runtime/src/memory/heap.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/heap.rs)
+* **Rust Implementation:** [`crates/solix-runtime/src/memory/heap.rs`](../../crates/solix-runtime/src/memory/heap.rs)
 
 ---
 
 ## 1. VirtualHeap Allocator Architecture
 
-The Solix runtime manages object allocations via the [`VirtualHeap`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/heap.rs), a segregated free-list memory allocator:
+The Solix runtime manages object allocations via the [`VirtualHeap`](../../crates/solix-runtime/src/memory/heap.rs), a segregated free-list memory allocator:
 
 ```text
 ┌────────────────────────────────────────────────────────┐

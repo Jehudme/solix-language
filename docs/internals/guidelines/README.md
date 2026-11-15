@@ -21,16 +21,16 @@ All contributors **MUST** adhere to these guidelines across all crates (`crates/
 
 | Guideline ID | Title & Specification | Primary Scope | Status |
 | :--- | :--- | :--- | :--- |
-| **GL-0001** | [Conventional Commits & Release Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-commits.md) | Universal Commit Grammar & SemVer | `FINAL` |
-| **GL-0002** | [Trunk-Based & Milestone Branching Topology Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/branching-conventions.md) | Git Topology & Milestone Branches | `FINAL` |
-| **GL-0004** | [Meta-Guideline: Authoring Engineering Guidelines](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-guidelines.md) | Standard for Creating Guidelines | `FINAL` |
-| **GL-0005** | [Language & Subsystem Specification Invariants & Schema](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-specs.md) | Grammar, Statements, Opcodes, Runtime, CLI | `FINAL` |
-| **GL-0008** | [Milestone Planning & Delivery Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-milestones.md) | Phased Milestones & Rust Definition of Done | `FINAL` |
-| **GL-0009** | [Test Engineering & Verification Matrices Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-test.md) | Unit Tests at Bottom of File & Dual Matrices | `FINAL` |
-| **GL-0010** | [Living Documentation & Drift Prevention Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-docs.md) | Zero-Drift, Rustdoc & CLI Sync | `FINAL` |
-| **GL-0011** | [Rust Language & Security Conventions Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/language-conventions.md) | No Single-Letter Names, Military Safety, Errors | `FINAL` |
-| **GL-0012** | [Tripartite Documentation Architecture Specification](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/authoring-features-and-wiki.md) | Guides vs Specs vs Atomic Wiki Architecture | `FINAL` |
-| **GL-0013** | [Mandatory Pre-Merge Git-Diff Documentation Audit Protocol](file:///home/jehud/Projects/solix-language/docs/internals/guidelines/documentation-update-protocol.md) | Pre-Merge Cross-Update Trigger Matrix & Anti-Drift | `FINAL` |
+| **GL-0001** | [Conventional Commits & Release Specification](authoring-commits.md) | Universal Commit Grammar & SemVer | `FINAL` |
+| **GL-0002** | [Trunk-Based & Milestone Branching Topology Specification](branching-conventions.md) | Git Topology & Milestone Branches | `FINAL` |
+| **GL-0004** | [Meta-Guideline: Authoring Engineering Guidelines](authoring-guidelines.md) | Standard for Creating Guidelines | `FINAL` |
+| **GL-0005** | [Language & Subsystem Specification Invariants & Schema](authoring-specs.md) | Grammar, Statements, Opcodes, Runtime, CLI | `FINAL` |
+| **GL-0008** | [Milestone Planning & Delivery Specification](authoring-milestones.md) | Phased Milestones & Rust Definition of Done | `FINAL` |
+| **GL-0009** | [Test Engineering & Verification Matrices Specification](authoring-test.md) | Unit Tests at Bottom of File & Dual Matrices | `FINAL` |
+| **GL-0010** | [Living Documentation & Drift Prevention Specification](authoring-docs.md) | Zero-Drift, Rustdoc & CLI Sync | `FINAL` |
+| **GL-0011** | [Rust Language & Security Conventions Specification](language-conventions.md) | No Single-Letter Names, Military Safety, Errors | `FINAL` |
+| **GL-0012** | [Tripartite Documentation Architecture Specification](authoring-features-and-wiki.md) | Guides vs Specs vs Atomic Wiki Architecture | `FINAL` |
+| **GL-0013** | [Mandatory Pre-Merge Git-Diff Documentation Audit Protocol](documentation-update-protocol.md) | Pre-Merge Cross-Update Trigger Matrix & Anti-Drift | `FINAL` |
 
 ---
 

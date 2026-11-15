@@ -6,7 +6,7 @@
 * **Scope:** Semantic Analysis, Symbol Resolution & Type Checking (`crates/solix-compilation/src/phases/binder/`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-compilation/src/phases/binder/binder.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/binder.rs)
+* **Rust Implementation:** [`crates/solix-compilation/src/phases/binder/binder.rs`](../../crates/solix-compilation/src/phases/binder/binder.rs)
 
 ---
 

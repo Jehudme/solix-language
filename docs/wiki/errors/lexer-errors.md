@@ -1,6 +1,6 @@
 # Lexical Error Codes (`E0000` – `E0015`)
 
-This section documents the lexical analysis diagnostics emitted during tokenization by [`crates/solix-compilation/src/phases/lexing/lexer.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/lexing/lexer.rs).
+This section documents the lexical analysis diagnostics emitted during tokenization by [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../../crates/solix-compilation/src/phases/lexing/lexer.rs).
 
 ---
 

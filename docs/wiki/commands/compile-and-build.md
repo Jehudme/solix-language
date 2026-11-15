@@ -85,5 +85,5 @@ solix build ../my_game --release --static
 ---
 
 ## Related Specifications
-* Formal Spec: [`docs/spec/tools/cli/compile.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/compile.md)
-* Formal Spec: [`docs/spec/tools/cli/build.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/build.md)
+* Formal Spec: [`docs/spec/tools/cli/compile.md`](../../spec/tools/cli/compile.md)
+* Formal Spec: [`docs/spec/tools/cli/build.md`](../../spec/tools/cli/build.md)

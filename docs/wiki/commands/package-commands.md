@@ -110,8 +110,8 @@ solix list --json
 ---
 
 ## Related Specifications
-* Formal Spec: [`docs/spec/tools/cli/new.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/new.md)
-* Formal Spec: [`docs/spec/tools/cli/install.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/install.md)
-* Formal Spec: [`docs/spec/tools/cli/uninstall.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/uninstall.md)
-* Formal Spec: [`docs/spec/tools/cli/list.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/list.md)
-* Formal Spec: [`docs/spec/tools/cli/manifest.md`](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/manifest.md)
+* Formal Spec: [`docs/spec/tools/cli/new.md`](../../spec/tools/cli/new.md)
+* Formal Spec: [`docs/spec/tools/cli/install.md`](../../spec/tools/cli/install.md)
+* Formal Spec: [`docs/spec/tools/cli/uninstall.md`](../../spec/tools/cli/uninstall.md)
+* Formal Spec: [`docs/spec/tools/cli/list.md`](../../spec/tools/cli/list.md)
+* Formal Spec: [`docs/spec/tools/cli/manifest.md`](../../spec/tools/cli/manifest.md)

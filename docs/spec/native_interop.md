@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0011
 * **Scope:** Native Interoperability, FFI Bridge & Dynamic Shared Libraries (`crates/solix-runtime/src/native/`)
 * **Status:** Final Normative Standard
-* **Implementation Source:** [`crates/solix-runtime/src/native/ffi.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/native/ffi.rs)
+* **Implementation Source:** [`crates/solix-runtime/src/native/ffi.rs`](../../crates/solix-runtime/src/native/ffi.rs)
 
 ---
 

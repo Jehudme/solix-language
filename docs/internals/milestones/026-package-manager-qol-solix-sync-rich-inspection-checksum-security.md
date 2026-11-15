@@ -35,7 +35,7 @@ While Milestone 020 introduced basic package installation (`solix install <file.
    * By recording the exact **`(name, version, sha256)`** of every resolved dependency inside the compiled `.slxb` binary and enforcing **exact version + exact SHA-256 checksum verification** by default (with an explicit **`--yolo` / `--ignore-checksum`** flag to bypass verification when intentionally testing hot-swapped libraries), Solix guarantees 100% reproducible, tamper-proof execution.
 5. **Cold-Start Compilation Overhead on Package Imports (~112 ms Bottleneck):**
    * Detailed profiling of `solix compile` importing `solix.io.Console` revealed three critical performance bottlenecks accounting for > 95% of total compilation latency:
-     * **Archive Re-Decompression (~22 ms):** On every cold compile, [`SlxarcArchive::extract_and_load`](file:///home/jehud/Projects/solix-language/crates/solix-common/src/project.rs#L315) opens `solix.slxarc` (6.16 MB `.slxb`) and inflates all entries from scratch.
+     * **Archive Re-Decompression (~22 ms):** On every cold compile, [`SlxarcArchive::extract_and_load`](../../../crates/solix-common/src/project.rs#L315) opens `solix.slxarc` (6.16 MB `.slxb`) and inflates all entries from scratch.
      * **Manifest & AST JSON Bloat (~52 ms):** Serializing `exported_ast_bytes: Vec<u8>` inside the JSON `ExportManifest` turns raw bytes into a 4.5 MB ASCII JSON array `[123, 34, ...]`, expanding `ExportManifest` to 5.38 MB and forcing two multi-megabyte JSON deserialization passes.
      * **Monolithic Symbol Registration (~18 ms):** Ingesting the entire `solix` standard library binds all 97 declarations (crypto, collections, math, time) even when only `Console` is imported.
    * Milestone 026 eliminates this entire latency cliff via:
@@ -180,9 +180,9 @@ To eliminate the **~15 ms semantic binding overhead**:
 
 1. **Current Bottleneck:**
    * Importing `solix.io.Console` currently ingests the entire `solix@2.0.0` AST containing all 97 declarations (AES/SHA crypto, Red-Black Trees, Queues, HashMaps, Math, Time, System).
-   * [`BinderPhase`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/standard.rs#L170) binds all 97 classes, computes field layouts, vtables, and itables for 95 unused classes.
+   * [`BinderPhase`](../../../crates/solix-compilation/src/phases/standard.rs#L170) binds all 97 classes, computes field layouts, vtables, and itables for 95 unused classes.
 2. **Selective AST Ingestion Strategy:**
-   * In [`DependencyResolutionPhase`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/dependency.rs), when resolving an `extern import`:
+   * In [`DependencyResolutionPhase`](../../../crates/solix-compilation/src/phases/dependency.rs), when resolving an `extern import`:
      * Inspect the imported symbol paths (e.g. `solix.io.Console`).
      * Extract only the target class declaration AST node (`Console`) and its transitive reachability closure (`solix.core.String`, `IStringable`, primitive wrappers).
      * Omit unreferenced collection templates and cryptographic modules from `context.ast`.

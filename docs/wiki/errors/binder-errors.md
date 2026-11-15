@@ -1,6 +1,6 @@
 # Binder & Semantic Error Codes (`E0201` – `E0290`)
 
-This section documents semantic binding diagnostics emitted by [`crates/solix-compilation/src/phases/binder/`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/).
+This section documents semantic binding diagnostics emitted by [`crates/solix-compilation/src/phases/binder/`](../../../crates/solix-compilation/src/phases/binder).
 
 ---
 

@@ -96,7 +96,7 @@ The Solix Language Server supports 32 language intelligence features:
 
 ## 5. Related Documentation
 
-* [Formal LSP Specification](file:///home/jehud/Projects/solix-language/docs/spec/tools/lsp/protocol.md)
-* [LSP Navigation Specification](file:///home/jehud/Projects/solix-language/docs/spec/tools/lsp/navigation.md)
-* [LSP Intelligence Specification](file:///home/jehud/Projects/solix-language/docs/spec/tools/lsp/intelligence.md)
-* [Code Formatter Command Reference](file:///home/jehud/Projects/solix-language/docs/wiki/commands/fmt.md)
+* [Formal LSP Specification](../../spec/tools/lsp/protocol.md)
+* [LSP Navigation Specification](../../spec/tools/lsp/navigation.md)
+* [LSP Intelligence Specification](../../spec/tools/lsp/intelligence.md)
+* [Code Formatter Command Reference](fmt.md)

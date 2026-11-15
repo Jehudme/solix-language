@@ -1,6 +1,6 @@
 # Emission Error Codes (`E0300` – `E0350`)
 
-This section documents bytecode emission diagnostics emitted by [`crates/solix-compilation/src/phases/emitter/`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/emitter/).
+This section documents bytecode emission diagnostics emitted by [`crates/solix-compilation/src/phases/emitter/`](../../../crates/solix-compilation/src/phases/emitter).
 
 ---
 

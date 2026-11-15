@@ -26,7 +26,7 @@ Whenever an object reference is duplicated:
 - Storing a reference into an instance field of another heap object.
 - Appending a reference to a dynamic collection or array.
 
-The VM increments the 28-bit counter via [`crates/solix-runtime/src/memory/layout.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/layout.rs#L122):
+The VM increments the 28-bit counter via [`crates/solix-runtime/src/memory/layout.rs`](../../crates/solix-runtime/src/memory/layout.rs#L122):
 ```rust
 pub fn inc_ref(&mut self) -> Result<u32, RuntimeError> {
     if self.ref_count == MAX_REF_COUNT {

@@ -13,7 +13,7 @@
 
 Solix implements a zero-cost exception handling model. When no exceptions are thrown, `try`/`catch` blocks incur zero runtime overhead—there is no runtime registration or stack push during normal control flow.
 
-Each compiled function contains an immutable table of [`ExceptionHandlerEntry`](file:///home/jehud/Projects/solix-language/crates/solix-common/src/bytecode/function.rs) records:
+Each compiled function contains an immutable table of [`ExceptionHandlerEntry`](../../crates/solix-common/src/bytecode/function.rs) records:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

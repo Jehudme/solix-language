@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The Solix Virtual Machine operates on a high-performance, byte-addressed virtual memory space (`VirtualHeap` implemented in [`crates/solix-runtime/src/memory/heap.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/heap.rs)). Virtual memory is partitioned into:
+The Solix Virtual Machine operates on a high-performance, byte-addressed virtual memory space (`VirtualHeap` implemented in [`crates/solix-runtime/src/memory/heap.rs`](../../crates/solix-runtime/src/memory/heap.rs)). Virtual memory is partitioned into:
 1. **Static Address Space**: Contiguous byte segment at the base of virtual memory storing global and static class variables.
 2. **Dynamic Heap Space**: Byte-addressed region governed by Automatic Reference Counting (ARC) and a segregated free-list manager (`FreeListManager`).
 
@@ -24,7 +24,7 @@ Every dynamically allocated heap block (objects, primitive arrays, reference arr
 ```
 
 ### 2.1. Header Packing Specification
-The 8-byte header ([`crates/solix-runtime/src/memory/layout.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/layout.rs#L80-L150)) packs:
+The 8-byte header ([`crates/solix-runtime/src/memory/layout.rs`](../../crates/solix-runtime/src/memory/layout.rs#L80-L150)) packs:
 - **`size` (Bytes 0..4)**: 32-bit unsigned integer holding the allocated byte size or array element count.
 - **`tag_and_ref` (Bytes 4..8)**:
   - **Upper 4 bits (`bits [31:28]`)**: Strongly typed `BlockTag` indicating the runtime representation.
@@ -50,7 +50,7 @@ The 8-byte header ([`crates/solix-runtime/src/memory/layout.rs`](file:///home/je
 
 ## 3. Natural Field Alignment in Class Instances
 
-During class layout computation ([`crates/solix-compilation/src/phases/binder/layout.rs`](file:///home/jehud/Projects/solix-language/crates/solix-compilation/src/phases/binder/layout.rs)), fields are packed contiguously while adhering to standard natural alignment rules:
+During class layout computation ([`crates/solix-compilation/src/phases/binder/layout.rs`](../../crates/solix-compilation/src/phases/binder/layout.rs)), fields are packed contiguously while adhering to standard natural alignment rules:
 
 | Type Category | Primitive Types | Width in Bytes | Alignment Boundary |
 |---|---|---|---|
@@ -91,7 +91,7 @@ Opcodes accessing arrays compute offset via `effective_address = base_address + 
 When an object's reference counter drops to zero, the runtime does not leak memory or require compaction sweeps. Instead:
 1. Destructors and child reference decrements are triggered immediately.
 2. The deallocated memory block is coalesced with adjacent free blocks in physical memory.
-3. The coalesced block is returned to segregated size buckets within `FreeListManager` ([`crates/solix-runtime/src/memory/deallocator.rs`](file:///home/jehud/Projects/solix-language/crates/solix-runtime/src/memory/deallocator.rs)).
+3. The coalesced block is returned to segregated size buckets within `FreeListManager` ([`crates/solix-runtime/src/memory/deallocator.rs`](../../crates/solix-runtime/src/memory/deallocator.rs)).
 4. Subsequent allocations match against these buckets for $O(1)$ memory reuse.
 
 ---

@@ -5,9 +5,9 @@
 * **Scope:** Toolchain Build Orchestration, Python Build Engine (`solix_build.py`), Artifact Isolation, Diagnostics
 * **Target Audience:** Systems Engineers, Tooling Developers, Package Maintainers
 * **Related Specifications:**
-  * [CLI Build Subcommand](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/build.md)
-  * [Package Manifest Specification](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/manifest.md)
-  * [Package Installation & Store](file:///home/jehud/Projects/solix-language/docs/spec/tools/cli/install.md)
+  * [CLI Build Subcommand](../spec/tools/cli/build.md)
+  * [Package Manifest Specification](../spec/tools/cli/manifest.md)
+  * [Package Installation & Store](../spec/tools/cli/install.md)
 
 ---
 
