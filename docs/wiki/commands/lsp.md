@@ -83,9 +83,9 @@ The Solix Language Server supports 32 language intelligence features:
 8. **Call & Type Hierarchies**: Incoming/outgoing call trees and subtype/supertype navigation.
 9. **Intelligent Completion**: Receiver-type-aware instance member completion on local variables and parameters, hierarchical solver-backed `import` and `extern import` completion discovering installed packages via `ModuleSolver::list_packages()` alongside subpackage trees and public symbols, strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites, postfix snippets (`.if`, `.notnull`, `.println`, `.ret`).
 10. **Rich Hover Cards**: Complete signature, `sizeof: XXB` instance byte size, struct field `+XB` offsets, and doc comments for functions, classes, fields, parameters, and local variables.
-11. **Signature Help**: Active parameter tracking with overload switching.
-12. **Inlay Hints**: Parameter names and RAII scope-exit destructor hints (`~dtor()`).
-13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting.
+11. **Signature Help**: Active parameter tracking with declared formal parameter names and overload switching.
+12. **Inlay Hints**: True parameter names (e.g., `brick_rect:`, `active_color:` instead of generic `arg0:`) and RAII scope-exit destructor hints (`~dtor()`).
+13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting with UTF-16 coordinate precision, multi-line span splitting, overlap deduplication, and syntax-error drift resilience.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
 15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `Debug Main` for application entrypoints configured in `manifest.toml` (or `"main"` fallback) and `▶ Run Test` / `Debug Test` for test suites, plus reference count lenses linked to `solix.showReferences`.
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).

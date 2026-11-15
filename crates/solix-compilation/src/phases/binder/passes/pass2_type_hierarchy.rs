@@ -300,6 +300,19 @@ pub fn execute_pass2_type_hierarchy(
                             .method_slots
                             .insert(method_name.to_string(), slot_index);
 
+                        let parameter_names: Vec<String> = method
+                            .parameters
+                            .iter()
+                            .map(|parameter| {
+                                let span = parameter.name_span;
+                                if (span.end as usize) <= source_text.len() {
+                                    source_text[span.start as usize..span.end as usize].to_string()
+                                } else {
+                                    String::new()
+                                }
+                            })
+                            .collect();
+
                         let method_symbol = SymbolEntry {
                             id: SymbolId(0),
                             name: method_name.to_string(),
@@ -316,6 +329,7 @@ pub fn execute_pass2_type_hierarchy(
                             is_static: false,
                             is_const: false,
                             slot_index: Some(slot_index as u32),
+                            parameter_names,
                         };
                         let method_id = symbol_table.insert_symbol(method_symbol);
                         iface_child_ids.push(method_id);
@@ -673,21 +687,21 @@ pub fn execute_pass2_type_hierarchy(
                                 iface_vtable_id,
                             );
                             let mut iface_child_ids = Vec::new();
-                            for (slot, m) in nested_iface.methods.iter().enumerate() {
-                                let m_name = if m.name_span.end as usize <= source_text.len() {
+                            for (slot, method_node) in nested_iface.methods.iter().enumerate() {
+                                let m_name = if method_node.name_span.end as usize <= source_text.len() {
                                     &source_text
-                                        [m.name_span.start as usize..m.name_span.end as usize]
+                                        [method_node.name_span.start as usize..method_node.name_span.end as usize]
                                 } else {
                                     "method"
                                 };
                                 let m_ret = resolve_type_annotation(
                                     source_id,
                                     source_text,
-                                    &m.return_type,
+                                    &method_node.return_type,
                                     symbol_table,
                                 );
                                 let mut m_param_types = Vec::new();
-                                for param in &m.parameters {
+                                for param in &method_node.parameters {
                                     let p_type = if param.is_variadic {
                                         Type::Primitive(PrimitiveKind::TuplePrimitive)
                                     } else {
@@ -701,13 +715,26 @@ pub fn execute_pass2_type_hierarchy(
                                     m_param_types.push(p_type);
                                 }
                                 iface_layout.method_slots.insert(m_name.to_string(), slot);
+                                let parameter_names: Vec<String> = method_node
+                                    .parameters
+                                    .iter()
+                                    .map(|parameter| {
+                                        let span = parameter.name_span;
+                                        if (span.end as usize) <= source_text.len() {
+                                            source_text[span.start as usize..span.end as usize]
+                                                .to_string()
+                                        } else {
+                                            String::new()
+                                        }
+                                    })
+                                    .collect();
                                 let method_symbol = SymbolEntry {
                                     id: SymbolId(0),
                                     name: m_name.to_string(),
                                     fully_qualified_name: format!("{nested_fqn}::{m_name}"),
                                     source_id,
-                                    span: m.span,
-                                    modifiers: m.modifiers.clone(),
+                                    span: method_node.span,
+                                    modifiers: method_node.modifiers.clone(),
                                     symbol_type: Type::FunctionPointer {
                                         return_type: Box::new(m_ret),
                                         parameter_types: m_param_types,
@@ -717,6 +744,7 @@ pub fn execute_pass2_type_hierarchy(
                                     is_static: false,
                                     is_const: false,
                                     slot_index: Some(slot as u32),
+                                    parameter_names,
                                 };
                                 let m_id = symbol_table.insert_symbol(method_symbol);
                                 iface_child_ids.push(m_id);
@@ -1124,6 +1152,7 @@ pub fn execute_pass2_type_hierarchy(
                         is_static: field_declaration.modifiers.contains(&Modifier::Static),
                         is_const: field_declaration.modifiers.contains(&Modifier::Const),
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let field_id = symbol_table.insert_symbol(field_symbol);
                     child_symbol_ids.push(field_id);
@@ -1444,6 +1473,18 @@ pub fn execute_pass2_type_hierarchy(
                         .map(|param_type| param_type.to_string())
                         .collect::<Vec<_>>()
                         .join(",");
+                    let parameter_names: Vec<String> = method_declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
                     let method_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: method_name.to_string(),
@@ -1460,6 +1501,7 @@ pub fn execute_pass2_type_hierarchy(
                         is_static,
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     let method_id = symbol_table.insert_symbol(method_symbol.clone());
                     child_symbol_ids.push(method_id);
@@ -1572,6 +1614,18 @@ pub fn execute_pass2_type_hierarchy(
                             p_type
                         })
                         .collect();
+                    let parameter_names: Vec<String> = constructor_declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
                     let constructor_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: "constructor".to_string(),
@@ -1588,6 +1642,7 @@ pub fn execute_pass2_type_hierarchy(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     let constructor_id = symbol_table.insert_symbol(constructor_symbol);
                     child_symbol_ids.push(constructor_id);
@@ -1606,6 +1661,7 @@ pub fn execute_pass2_type_hierarchy(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let destructor_id = symbol_table.insert_symbol(destructor_symbol);
                     child_symbol_ids.push(destructor_id);
@@ -1684,6 +1740,18 @@ pub fn execute_pass2_type_hierarchy(
                         });
                     }
 
+                    let parameter_names: Vec<String> = operator_declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
                     let operator_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: operator_name.clone(),
@@ -1700,6 +1768,7 @@ pub fn execute_pass2_type_hierarchy(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     let operator_id = symbol_table.insert_symbol(operator_symbol);
                     child_symbol_ids.push(operator_id);
@@ -1744,6 +1813,7 @@ pub fn execute_pass2_type_hierarchy(
                         is_static: true,
                         is_const: false,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let enum_id = symbol_table.insert_symbol(enum_symbol);
                     child_symbol_ids.push(enum_id);
@@ -1794,6 +1864,7 @@ pub fn execute_pass2_type_hierarchy(
                             is_static: true,
                             is_const: true,
                             slot_index: Some(current_val as u32),
+                            parameter_names: Vec::new(),
                         };
                         let variant_id = symbol_table.insert_symbol(variant_symbol);
                         if let Some(parent_entry) = symbol_table.get_symbol_mut(enum_id) {

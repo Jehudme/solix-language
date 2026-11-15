@@ -245,3 +245,49 @@ fn test_negative_master_syntax_fixture_detects_all_errors() {
         );
     }
 }
+
+#[test]
+fn test_strict_namespace_type_path_syntax() {
+    // 1. Dot syntax in type paths MUST fail with E0201
+    let invalid_dot_type_source = "solix.collections.List<int32> items;";
+    let tokens_invalid = lex_source(0, invalid_dot_type_source).expect("Lexing succeeds");
+    let parse_result_invalid = parse_source(0, &tokens_invalid, invalid_dot_type_source);
+    assert!(
+        parse_result_invalid.is_err(),
+        "Dot in type annotation MUST be rejected"
+    );
+    let detected_errors = parse_result_invalid.unwrap_err();
+    assert!(
+        detected_errors
+            .iter()
+            .any(|error| error.error_code() == "E0201"),
+        "Expected E0201 (DotNotAllowedInTypePath) when using '.' in type annotation"
+    );
+
+    // 2. Scope resolution syntax '::' in type paths MUST succeed
+    let valid_colon_type_source = "solix::collections::List<int32> items;";
+    let tokens_valid = lex_source(0, valid_colon_type_source).expect("Lexing succeeds");
+    let parse_result_valid = parse_source(0, &tokens_valid, valid_colon_type_source);
+    assert!(
+        parse_result_valid.is_ok(),
+        "Scope resolution '::' in type annotation MUST succeed"
+    );
+
+    // 3. Both '::' and '.' in package statements MUST succeed
+    let package_dot_source = "package game.logic; class Player {}";
+    let tokens_pkg_dot = lex_source(0, package_dot_source).expect("Lexing succeeds");
+    assert!(parse_source(0, &tokens_pkg_dot, package_dot_source).is_ok());
+
+    let package_colon_source = "package game::logic; class Player {}";
+    let tokens_pkg_colon = lex_source(0, package_colon_source).expect("Lexing succeeds");
+    assert!(parse_source(0, &tokens_pkg_colon, package_colon_source).is_ok());
+
+    // 4. Both '::' and '.' in import statements MUST succeed
+    let import_dot_source = "import solix.collections.List;";
+    let tokens_import_dot = lex_source(0, import_dot_source).expect("Lexing succeeds");
+    assert!(parse_source(0, &tokens_import_dot, import_dot_source).is_ok());
+
+    let import_colon_source = "import solix::collections::List;";
+    let tokens_import_colon = lex_source(0, import_colon_source).expect("Lexing succeeds");
+    assert!(parse_source(0, &tokens_import_colon, import_colon_source).is_ok());
+}

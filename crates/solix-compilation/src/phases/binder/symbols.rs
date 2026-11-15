@@ -70,6 +70,8 @@ pub struct SymbolEntry {
     pub is_const: bool,
     /// Local frame stack slot index (for parameters and local variables).
     pub slot_index: Option<u32>,
+    /// Preserved formal parameter names (for functions, methods, constructors, and operators).
+    pub parameter_names: Vec<String>,
 }
 
 impl SymbolEntry {
@@ -92,10 +94,7 @@ impl SymbolEntry {
     }
 
     /// Formats the signature of a function/method symbol in canonical Solix signature notation:
-    /// `<return_type> <name>(<param_type_1>, <param_type_2>, ...)`
-    ///
-    /// Omits access modifiers and variable names. Uses `::` for namespace qualification.
-    /// Example: `solix::models::User find_user_by_email(int64, std::string, bool)`
+    /// `<return_type> <name>(<param_type_1> <name_1>, <param_type_2> <name_2>, ...)`
     #[must_use]
     pub fn to_signature_string(&self) -> String {
         if let Type::FunctionPointer {
@@ -105,7 +104,16 @@ impl SymbolEntry {
         {
             let params = parameter_types
                 .iter()
-                .map(|param| param.to_string())
+                .enumerate()
+                .map(|(index, param_type)| {
+                    if let Some(param_name) = self.parameter_names.get(index)
+                        && !param_name.is_empty()
+                    {
+                        format!("{param_type} {param_name}")
+                    } else {
+                        param_type.to_string()
+                    }
+                })
                 .collect::<Vec<String>>()
                 .join(", ");
             format!("{return_type} {}({params})", self.name)
@@ -170,6 +178,8 @@ pub struct SymbolTable {
     pub local_symbols: Vec<LocalSymbolEntry>,
     /// Known package namespaces populated during symbol discovery.
     pub known_packages: HashSet<String>,
+    /// Set of package names explicitly linked via CLI dependency binaries (`-l` or positional CLI binaries).
+    pub cli_linked_packages: HashSet<String>,
     /// Optional active enclosing package context overriding `file_packages` (e.g. while checking a qualified class).
     pub active_package: Option<String>,
 }
@@ -197,6 +207,7 @@ impl SymbolTable {
             scope_stack: Vec::new(),
             local_symbols: Vec::new(),
             known_packages: HashSet::new(),
+            cli_linked_packages: HashSet::new(),
             active_package: None,
         }
     }
@@ -328,21 +339,58 @@ impl SymbolTable {
 
         // 5. Global FQN direct match
         if let Some(symbol_id) = self.lookup_global(identifier) {
-            return Some(symbol_id);
+            if identifier.contains("::") {
+                let leading_segment = identifier.split("::").next().unwrap_or("");
+                let caller_package = self
+                    .file_packages
+                    .get(source_index)
+                    .map(|package_prefix| package_prefix.as_str())
+                    .unwrap_or("");
+
+                let is_same_file = self
+                    .get_symbol(symbol_id)
+                    .is_some_and(|symbol_entry| symbol_entry.source_id == source_id);
+
+                if !is_same_file
+                    && self.known_packages.contains(leading_segment)
+                    && caller_package != leading_segment
+                {
+                    let is_cli_linked = self.cli_linked_packages.contains(leading_segment);
+                    let is_imported = self.file_imports.get(source_index).is_some_and(|imports| {
+                        imports.iter().any(|import_entry| {
+                            import_entry.path == leading_segment
+                                || import_entry.path.starts_with(leading_segment)
+                        })
+                    });
+                    if is_cli_linked || is_imported {
+                        return Some(symbol_id);
+                    }
+                } else {
+                    return Some(symbol_id);
+                }
+            } else {
+                return Some(symbol_id);
+            }
         }
 
         // 6. Unqualified unique package fallback (root facade for root/default package or imported packages)
         if !identifier.contains("::") && !identifier.contains('.') {
-            let caller_has_package = self
+            let caller_package = self
                 .file_packages
                 .get(source_index)
-                .is_some_and(|package_prefix| !package_prefix.is_empty());
+                .map(|package_prefix| package_prefix.as_str())
+                .unwrap_or("");
             let suffix = format!("::{identifier}");
             let mut matched_symbol_id = None;
             for (candidate_fqn, &candidate_symbol_id) in &self.global_names {
                 if candidate_fqn.ends_with(&suffix) {
-                    if caller_has_package {
-                        let package_part = candidate_fqn.strip_suffix(&suffix).unwrap_or("");
+                    let package_part = candidate_fqn.strip_suffix(&suffix).unwrap_or("");
+                    let is_same_file = self
+                        .get_symbol(candidate_symbol_id)
+                        .is_some_and(|symbol_entry| symbol_entry.source_id == source_id);
+
+                    if !is_same_file && !package_part.is_empty() && caller_package != package_part {
+                        let is_cli_linked = self.cli_linked_packages.contains(package_part);
                         let is_imported =
                             self.file_imports.get(source_index).is_some_and(|imports| {
                                 imports.iter().any(|import_entry| {
@@ -350,7 +398,7 @@ impl SymbolTable {
                                         || import_entry.path.starts_with(package_part)
                                 })
                             });
-                        if !is_imported {
+                        if !is_cli_linked && !is_imported {
                             continue;
                         }
                     }

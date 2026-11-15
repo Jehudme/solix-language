@@ -1813,6 +1813,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                     is_static: false,
                     is_const: false,
                     slot_index: Some(param_index as u32),
+                    parameter_names: Vec::new(),
                 };
                 let param_id = self.symbol_table.insert_symbol(param_symbol);
                 self.symbol_table.declare_local(param_name, param_id);
@@ -2515,6 +2516,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 is_static: false,
                 is_const: false,
                 slot_index: Some(slot_index as u32),
+                parameter_names: Vec::new(),
             };
             if let Some(innermost_scope) = self.symbol_table.scope_stack.last()
                 && innermost_scope.contains_key(param_name)
@@ -2616,6 +2618,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 is_static: false,
                 is_const: false,
                 slot_index: Some(slot_index as u32),
+                parameter_names: Vec::new(),
             };
             if let Some(innermost_scope) = self.symbol_table.scope_stack.last()
                 && innermost_scope.contains_key(param_name)
@@ -2792,6 +2795,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 is_static: false,
                 is_const: false,
                 slot_index: Some(slot_index as u32),
+                parameter_names: Vec::new(),
             };
             if let Some(innermost_scope) = self.symbol_table.scope_stack.last()
                 && innermost_scope.contains_key(param_name)
@@ -2978,6 +2982,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             is_static: false,
             is_const,
             slot_index: None,
+            parameter_names: Vec::new(),
         };
         let var_id = self.symbol_table.insert_symbol(var_symbol);
         self.symbol_table.declare_local(var_name, var_id);
@@ -3226,6 +3231,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
             is_static: false,
             is_const: false,
             slot_index: None,
+            parameter_names: Vec::new(),
         };
         let exception_id = self.symbol_table.insert_symbol(exception_symbol);
         self.symbol_table

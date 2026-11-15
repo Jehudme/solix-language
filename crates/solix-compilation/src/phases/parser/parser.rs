@@ -448,7 +448,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let first_ident = self.consume_identifier()?;
         path.push(first_ident);
 
-        while self.cursor.match_token(TokenKind::PunctuationDot).is_some() {
+        while matches!(
+            self.cursor.peek_kind(),
+            TokenKind::PunctuationDot | TokenKind::PunctuationDoubleColon
+        ) {
+            self.cursor.advance();
             let segment = self.consume_identifier()?;
             path.push(segment);
         }
@@ -473,7 +477,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let first_ident = self.consume_identifier()?;
         path.push(first_ident);
 
-        while self.cursor.match_token(TokenKind::PunctuationDot).is_some() {
+        while matches!(
+            self.cursor.peek_kind(),
+            TokenKind::PunctuationDot | TokenKind::PunctuationDoubleColon
+        ) {
+            self.cursor.advance();
             if self
                 .cursor
                 .match_token(TokenKind::OperatorMultiply)
@@ -3941,13 +3949,26 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 let mut path = vec![token.span];
                 self.cursor.advance();
 
-                while matches!(
-                    self.cursor.peek_kind(),
-                    TokenKind::PunctuationDot | TokenKind::PunctuationDoubleColon
-                ) {
-                    self.cursor.advance();
+                if self.cursor.check(TokenKind::PunctuationDot) {
+                    let dot_token = self.cursor.advance().copied().unwrap_or_default();
+                    return Err(ParsingError::DotNotAllowedInTypePath {
+                        span: dot_token.span.to_source_span(),
+                    });
+                }
+
+                while self
+                    .cursor
+                    .match_token(TokenKind::PunctuationDoubleColon)
+                    .is_some()
+                {
                     let segment = self.consume_identifier()?;
                     path.push(segment);
+                    if self.cursor.check(TokenKind::PunctuationDot) {
+                        let dot_token = self.cursor.advance().copied().unwrap_or_default();
+                        return Err(ParsingError::DotNotAllowedInTypePath {
+                            span: dot_token.span.to_source_span(),
+                        });
+                    }
                 }
 
                 let named_span = token
@@ -4567,13 +4588,51 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let saved_pos = self.cursor.position;
             let saved_errors = self.errors.len();
 
+            let mut had_dot_type_error = false;
             let is_decl = match self.parse_type_annotation() {
                 Ok(_) => self.cursor.check(TokenKind::Identifier),
+                Err(ParsingError::DotNotAllowedInTypePath { .. }) => {
+                    // Continue scanning past dotted/scoped path to see if followed by generic args or variable identifier
+                    while self.cursor.check(TokenKind::Identifier)
+                        || self.cursor.check(TokenKind::PunctuationDot)
+                        || self.cursor.check(TokenKind::PunctuationDoubleColon)
+                    {
+                        self.cursor.advance();
+                    }
+                    if self.cursor.check(TokenKind::OperatorLessThan) {
+                        let mut angle_depth = 0;
+                        while !self.cursor.is_at_end() {
+                            if self.cursor.check(TokenKind::OperatorLessThan) {
+                                angle_depth += 1;
+                                self.cursor.advance();
+                            } else if self.cursor.check(TokenKind::OperatorGreaterThan) {
+                                angle_depth -= 1;
+                                self.cursor.advance();
+                                if angle_depth == 0 {
+                                    break;
+                                }
+                            } else if self.cursor.check(TokenKind::PunctuationSemicolon) {
+                                break;
+                            } else {
+                                self.cursor.advance();
+                            }
+                        }
+                    }
+                    if self.cursor.check(TokenKind::Identifier) {
+                        had_dot_type_error = true;
+                        true
+                    } else {
+                        false
+                    }
+                }
                 Err(_) => false,
             };
 
             self.cursor.position = saved_pos;
             self.errors.truncate(saved_errors);
+            if had_dot_type_error {
+                return true;
+            }
             return is_decl;
         }
         false

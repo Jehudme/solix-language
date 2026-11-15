@@ -121,7 +121,7 @@ fn test_case_3_4_qualified_access_with_active_import() {
 
             class Main {
                 public static int32 main() {
-                    my.core.Item s1 = new my.core.Item(10);
+                    my::core::Item s1 = new my::core::Item(10);
                     Item s2 = new Item(20);
                     return (s1.getVal() == 10 && s2.getVal() == 20) ? 0 : 1;
                 }

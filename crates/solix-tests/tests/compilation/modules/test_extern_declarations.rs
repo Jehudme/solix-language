@@ -120,6 +120,8 @@ fn test_case_56_4_api_manifest_extraction_and_source_synthesis() {
 
     // 3. Downstream consumer compiles against synthesized source
     let app_code = r#"
+        import math.*;
+
         class Main {
             public static int32 main() {
                 int32 sum = add(5, 10);

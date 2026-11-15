@@ -1007,6 +1007,18 @@ pub enum ParsingError {
         #[label("invalid operator modifier")]
         span: SourceSpan,
     },
+
+    #[error("Dot '.' is not allowed in type paths; use '::' instead")]
+    #[diagnostic(
+        code(solix::parser::dot_not_allowed_in_type_path),
+        help(
+            "Replace '.' with '::' for type and namespace paths (e.g. 'solix::collections::List'). Dot '.' is reserved for instance member access."
+        )
+    )]
+    DotNotAllowedInTypePath {
+        #[label("'.' not allowed in type path; use '::'")]
+        span: SourceSpan,
+    },
 }
 
 impl ParsingError {
@@ -1110,6 +1122,7 @@ impl ParsingError {
             Self::InvalidEnumModifier { .. } => "E0198",
             Self::InvalidFreeFunctionModifier { .. } => "E0199",
             Self::InvalidOperatorModifier { .. } => "E0200",
+            Self::DotNotAllowedInTypePath { .. } => "E0201",
         }
     }
 
@@ -1211,7 +1224,8 @@ impl ParsingError {
             | Self::InvalidInterfaceModifier { span, .. }
             | Self::InvalidEnumModifier { span, .. }
             | Self::InvalidFreeFunctionModifier { span, .. }
-            | Self::InvalidOperatorModifier { span, .. } => *span,
+            | Self::InvalidOperatorModifier { span, .. }
+            | Self::DotNotAllowedInTypePath { span } => *span,
         }
     }
 
@@ -1249,6 +1263,9 @@ mod tests {
             span: dummy_span,
         };
         assert_eq!(error_invalid_op_mod.error_code(), "E0200");
+
+        let error_dot_in_type = ParsingError::DotNotAllowedInTypePath { span: dummy_span };
+        assert_eq!(error_dot_in_type.error_code(), "E0201");
     }
 
     #[test]

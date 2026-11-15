@@ -470,8 +470,8 @@ impl LanguageServer for SolixLanguageServer {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = &params.text_document.uri;
-        let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+        let snapshot = match self.workspace.get_live_snapshot(uri) {
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -484,8 +484,8 @@ impl LanguageServer for SolixLanguageServer {
     ) -> Result<Option<SemanticTokensRangeResult>> {
         let uri = &params.text_document.uri;
         let range = params.range;
-        let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+        let snapshot = match self.workspace.get_live_snapshot(uri) {
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 

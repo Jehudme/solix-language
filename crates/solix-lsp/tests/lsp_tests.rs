@@ -599,6 +599,38 @@ fn test_feature_24_semantic_tokens() {
     }
 }
 
+#[test]
+fn test_semantic_tokens_syntax_error_resilience_and_no_overlap() {
+    let (workspace, uri) = create_test_workspace();
+    let source = "/* Multi-line\n   comment */\nclass Worker {\n    int32 id;\n    public void work( {\n    Raylib::ClearBackground(bg_slate);\n}\n";
+
+    let snapshot = workspace.did_open(uri, 1, source.to_string());
+    let result = semantic_tokens_full(&snapshot).unwrap();
+    if let SemanticTokensResult::Tokens(tokens) = result {
+        assert!(!tokens.data.is_empty());
+        let mut _previous_line = 0u32;
+        let mut previous_start = 0u32;
+        let mut previous_len = 0u32;
+        for token in &tokens.data {
+            if token.delta_line == 0 {
+                let absolute_start = previous_start + token.delta_start;
+                assert!(
+                    absolute_start >= previous_start + previous_len,
+                    "Tokens must NEVER overlap on same line! Prev start: {previous_start}, len: {previous_len}, cur start: {absolute_start}"
+                );
+                previous_start = absolute_start;
+            } else {
+                _previous_line += token.delta_line;
+                previous_start = token.delta_start;
+            }
+            previous_len = token.length;
+            assert!(token.length > 0, "Token length must be > 0");
+        }
+    } else {
+        panic!("Expected full tokens");
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Feature 25: Code Lens
 // -----------------------------------------------------------------------------
@@ -887,6 +919,114 @@ fn test_ms029_multifile_diagnostic_isolation() {
         snapshot.diagnostics.len(),
         0,
         "Expected 0 diagnostics on clean single-file main: {:?}",
+        snapshot.diagnostics
+    );
+}
+
+#[test]
+fn test_inlay_hints_and_signature_help_real_parameter_names() {
+    let (workspace, test_uri) = create_test_workspace();
+    let test_source = r#"
+class Renderer {
+    public static void draw_rect(int32 width_px, int32 height_px, bool is_filled) {}
+}
+
+void main() {
+    Renderer::draw_rect(100, 200, true);
+}
+"#;
+
+    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
+    let hint_range = Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 8,
+            character: 1,
+        },
+    };
+
+    let calculated_hints = inlay_hints(&snapshot, hint_range);
+    let hint_labels: Vec<String> = calculated_hints
+        .iter()
+        .filter_map(|hint| match &hint.label {
+            InlayHintLabel::String(label_str) => Some(label_str.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        hint_labels.contains(&"width_px: ".to_string()),
+        "Expected 'width_px: ' inlay hint, found: {:?}",
+        hint_labels
+    );
+    assert!(
+        hint_labels.contains(&"height_px: ".to_string()),
+        "Expected 'height_px: ' inlay hint, found: {:?}",
+        hint_labels
+    );
+    assert!(
+        hint_labels.contains(&"is_filled: ".to_string()),
+        "Expected 'is_filled: ' inlay hint, found: {:?}",
+        hint_labels
+    );
+
+    // Test Signature Help at line 6, character 25 (inside draw_rect argument list)
+    let help_pos = Position {
+        line: 6,
+        character: 25,
+    };
+    let help_result = signature_help(&snapshot, help_pos);
+    assert!(help_result.is_some(), "Expected signature help result");
+    let signature_info = &help_result.unwrap().signatures[0];
+    assert!(
+        signature_info.label.contains("int32 width_px"),
+        "Expected parameter name 'width_px' in signature label: {}",
+        signature_info.label
+    );
+    assert!(
+        signature_info.label.contains("int32 height_px"),
+        "Expected parameter name 'height_px' in signature label: {}",
+        signature_info.label
+    );
+    assert!(
+        signature_info.label.contains("bool is_filled"),
+        "Expected parameter name 'is_filled' in signature label: {}",
+        signature_info.label
+    );
+}
+
+#[test]
+fn test_lsp_unresolved_import_diagnostic_parity() {
+    let (workspace, test_uri) = create_test_workspace();
+    let test_source = r#"
+import solix.collections.List;
+
+public class TestClass {
+    public int32 run() {
+        return 0;
+    }
+}
+"#;
+
+    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
+    assert!(
+        !snapshot.diagnostics.is_empty(),
+        "Expected LSP diagnostics for unimported external package 'solix.collections.List'"
+    );
+
+    let found_import_error = snapshot.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code.as_ref().is_some_and(|code| match code {
+            NumberOrString::String(code_str) => code_str == "E0232",
+            _ => false,
+        }) || diagnostic.message.contains("Cannot resolve import")
+    });
+
+    assert!(
+        found_import_error,
+        "Expected E0232 CannotResolveImport diagnostic in LSP snapshot, got: {:?}",
         snapshot.diagnostics
     );
 }

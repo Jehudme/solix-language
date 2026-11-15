@@ -223,6 +223,7 @@ pub fn execute_pass1_symbol_discovery(
                 is_static: false,
                 is_const: false,
                 slot_index: None,
+                parameter_names: Vec::new(),
             };
 
             if symbol_table
@@ -349,6 +350,7 @@ pub fn execute_pass1_symbol_discovery(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let class_id = symbol_table.insert_symbol(class_symbol);
 
@@ -377,6 +379,7 @@ pub fn execute_pass1_symbol_discovery(
                                 is_static: true,
                                 is_const: false,
                                 slot_index: None,
+                                parameter_names: Vec::new(),
                             };
                             let enum_id = symbol_table.insert_symbol(nested_sym);
                             symbol_table
@@ -413,6 +416,7 @@ pub fn execute_pass1_symbol_discovery(
                                 is_static: false,
                                 is_const: false,
                                 slot_index: None,
+                                parameter_names: Vec::new(),
                             };
                             let nested_id = symbol_table.insert_symbol(nested_sym);
                             symbol_table
@@ -457,6 +461,7 @@ pub fn execute_pass1_symbol_discovery(
                                 is_static: false,
                                 is_const: false,
                                 slot_index: None,
+                                parameter_names: Vec::new(),
                             };
                             let nested_id = symbol_table.insert_symbol(nested_sym);
                             symbol_table
@@ -528,6 +533,7 @@ pub fn execute_pass1_symbol_discovery(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     symbol_table.insert_symbol(interface_symbol);
                 }
@@ -581,6 +587,7 @@ pub fn execute_pass1_symbol_discovery(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let enum_id = symbol_table.insert_symbol(enum_symbol);
 
@@ -620,6 +627,7 @@ pub fn execute_pass1_symbol_discovery(
                             is_static: true,
                             is_const: true,
                             slot_index: Some(variant_index as u32),
+                            parameter_names: Vec::new(),
                         };
                         let variant_id = symbol_table.insert_symbol(variant_symbol);
                         if let Some(parent_entry) = symbol_table.get_symbol_mut(enum_id) {
@@ -671,6 +679,19 @@ pub fn execute_pass1_symbol_discovery(
                         })
                         .collect();
 
+                    let parameter_names: Vec<String> = method_declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
+
                     let method_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: method_name.to_string(),
@@ -687,6 +708,7 @@ pub fn execute_pass1_symbol_discovery(
                         is_static: true,
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     symbol_table.insert_symbol(method_symbol);
                 }
@@ -730,6 +752,7 @@ pub fn execute_pass1_symbol_discovery(
                         is_static: true,
                         is_const,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let fid = symbol_table.insert_symbol(field_symbol);
                     symbol_table

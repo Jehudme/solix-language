@@ -270,11 +270,55 @@ fn test_symbol_signature_string_canonical_format() {
         is_static: false,
         is_const: false,
         slot_index: None,
+        parameter_names: Vec::new(),
     };
 
     assert_eq!(
         symbol.to_signature_string(),
         "solix::models::User find_user_by_email(int64, string, bool)"
+    );
+}
+
+#[test]
+fn test_symbol_signature_string_with_parameter_names() {
+    let symbol = SymbolEntry {
+        id: SymbolId(2),
+        name: "DrawRectangleRounded".to_string(),
+        fully_qualified_name: "raylib::Raylib::DrawRectangleRounded".to_string(),
+        source_id: 0,
+        span: Span::new(0, 0, 10),
+        modifiers: vec![Modifier::Public, Modifier::Static],
+        symbol_type: Type::FunctionPointer {
+            return_type: Box::new(Type::Primitive(PrimitiveKind::Void)),
+            parameter_types: vec![
+                Type::Class {
+                    symbol_name: "Rectangle".to_string(),
+                    type_arguments: Vec::new(),
+                },
+                Type::Primitive(PrimitiveKind::Float32),
+                Type::Primitive(PrimitiveKind::Int32),
+                Type::Class {
+                    symbol_name: "Color".to_string(),
+                    type_arguments: Vec::new(),
+                },
+            ],
+        },
+        parent_symbol: None,
+        members: Vec::new(),
+        is_static: true,
+        is_const: false,
+        slot_index: None,
+        parameter_names: vec![
+            "rec".to_string(),
+            "roundness".to_string(),
+            "segments".to_string(),
+            "color".to_string(),
+        ],
+    };
+
+    assert_eq!(
+        symbol.to_signature_string(),
+        "void DrawRectangleRounded(Rectangle rec, float32 roundness, int32 segments, Color color)"
     );
 }
 
@@ -358,5 +402,61 @@ public int32 main() {
             .lookup_global("solix::types::Count")
             .is_some(),
         "solix::types::Count must be registered globally"
+    );
+}
+
+#[test]
+fn test_strict_foreign_package_symbol_isolation() {
+    let foreign_source = r#"
+package raylib;
+
+public class Raylib {
+    public static void init() {}
+}
+"#;
+
+    let unimported_consumer = r#"
+public int32 main() {
+    Raylib::init();
+    return 0;
+}
+"#;
+
+    let options_unimported = CompilationOptions::new()
+        .with_source("raylib.slx", foreign_source)
+        .with_source("consumer.slx", unimported_consumer);
+
+    let mut context_unimported = CompilationContext::new(options_unimported);
+    lex(&mut context_unimported).expect("Lexing must succeed");
+    parse(&mut context_unimported).expect("Parsing must succeed");
+    let bind_unimported_result = bind(&mut context_unimported);
+
+    assert!(
+        bind_unimported_result.is_err() || !context_unimported.binding_errors.is_empty(),
+        "Using foreign package symbol 'Raylib' without import must fail binding"
+    );
+
+    let imported_consumer = r#"
+import raylib.*;
+
+public int32 main() {
+    Raylib::init();
+    return 0;
+}
+"#;
+
+    let options_imported = CompilationOptions::new()
+        .with_source("raylib.slx", foreign_source)
+        .with_source("consumer.slx", imported_consumer);
+
+    let mut context_imported = CompilationContext::new(options_imported);
+    lex(&mut context_imported).expect("Lexing must succeed");
+    parse(&mut context_imported).expect("Parsing must succeed");
+    let bind_imported_result = bind(&mut context_imported);
+
+    assert!(
+        bind_imported_result.is_ok(),
+        "Using foreign package symbol 'Raylib' with wildcard import must succeed: {:?}",
+        context_imported.binding_errors
     );
 }

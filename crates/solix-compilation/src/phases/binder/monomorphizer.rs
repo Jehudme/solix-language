@@ -219,6 +219,7 @@ impl GenericBlueprintRegistry {
             is_static: false,
             is_const: false,
             slot_index: None,
+            parameter_names: Vec::new(),
         };
 
         let class_symbol_id = symbol_table.insert_symbol(class_symbol_entry);
@@ -316,6 +317,7 @@ impl GenericBlueprintRegistry {
                         is_static: field_decl.modifiers.contains(&Modifier::Static),
                         is_const: field_decl.modifiers.contains(&Modifier::Const),
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let field_id = symbol_table.insert_symbol(field_symbol);
                     child_symbol_ids.push(field_id);
@@ -356,6 +358,18 @@ impl GenericBlueprintRegistry {
                         .map(|t| t.to_string())
                         .collect::<Vec<_>>()
                         .join(",");
+                    let parameter_names: Vec<String> = method_decl
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
                     let method_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: method_name.to_string(),
@@ -372,6 +386,7 @@ impl GenericBlueprintRegistry {
                         is_static: method_decl.modifiers.contains(&Modifier::Static),
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     let method_id = symbol_table.insert_symbol(method_symbol);
                     child_symbol_ids.push(method_id);
@@ -400,6 +415,18 @@ impl GenericBlueprintRegistry {
                     }
                 }
                 ClassMember::Constructor(constructor_decl) => {
+                    let parameter_names: Vec<String> = constructor_decl
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
                     let constructor_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: "constructor".to_string(),
@@ -413,6 +440,7 @@ impl GenericBlueprintRegistry {
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     let constructor_id = symbol_table.insert_symbol(constructor_symbol);
                     child_symbol_ids.push(constructor_id);
@@ -431,11 +459,24 @@ impl GenericBlueprintRegistry {
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names: Vec::new(),
                     };
                     let destructor_id = symbol_table.insert_symbol(destructor_symbol);
                     child_symbol_ids.push(destructor_id);
                 }
                 ClassMember::Operator(operator_decl) => {
+                    let parameter_names: Vec<String> = operator_decl
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let span = parameter.name_span;
+                            if (span.end as usize) <= source_text.len() {
+                                source_text[span.start as usize..span.end as usize].to_string()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .collect();
                     let op_str = operator_decl.operator_token.as_static_str();
                     let operator_symbol = SymbolEntry {
                         id: SymbolId(0),
@@ -450,6 +491,7 @@ impl GenericBlueprintRegistry {
                         is_static: false,
                         is_const: false,
                         slot_index: None,
+                        parameter_names,
                     };
                     let operator_id = symbol_table.insert_symbol(operator_symbol);
                     child_symbol_ids.push(operator_id);

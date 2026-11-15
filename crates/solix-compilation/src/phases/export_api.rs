@@ -135,8 +135,8 @@ pub fn generate_api_header(context: &CompilationContext) -> String {
             None => continue,
         };
 
-        let file_package = if let Some(pkg_stmt) = &program_ast.package {
-            extract_package_path(&pkg_stmt.path, source_code)
+        let file_package = if let Some(package_statement) = &program_ast.package {
+            extract_package_path(&package_statement.path, source_code)
         } else if !context.options.package_name.is_empty() {
             context.options.package_name.replace('.', "::")
         } else {

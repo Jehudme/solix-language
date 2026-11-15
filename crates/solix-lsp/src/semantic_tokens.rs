@@ -90,7 +90,6 @@ fn compute_semantic_tokens(
 
     for token in &snapshot.tokens {
         let start_pos = byte_offset_to_position(&snapshot.source_text, token.span.start as usize);
-        let token_len = token.span.end.saturating_sub(token.span.start);
 
         if let Some(range) = range_filter
             && (start_pos.line < range.start.line || start_pos.line > range.end.line)
@@ -103,11 +102,16 @@ fn compute_semantic_tokens(
 
         match token.kind {
             TokenKind::Identifier => {
-                // Check if resolved by binder
+                let identifier_text = get_span_text(&snapshot.source_text, token.span);
+                let mut resolved = false;
+
+                // 1. Try binder resolved symbols if the lexeme matches symbol.name
                 if let Some(sem) = semantic
                     && let Some(&symbol_id) = sem.resolved_symbols.get(&token.span)
                     && let Some(symbol) = sem.symbol_table.get_symbol(symbol_id)
+                    && symbol.name == identifier_text
                 {
+                    resolved = true;
                     if symbol.is_static {
                         modifier_mask |= 1 << 1; // static
                     }
@@ -116,7 +120,9 @@ fn compute_semantic_tokens(
                     }
 
                     token_type_index = match &symbol.symbol_type {
-                        Type::Class { .. } => Some(2), // class
+                        Type::Class { .. } => Some(2),     // class
+                        Type::Enum { .. } => Some(4),      // enum
+                        Type::Interface { .. } => Some(3), // interface
                         Type::FunctionPointer { .. } => {
                             if symbol.parent_symbol.is_some() {
                                 Some(7) // method
@@ -133,6 +139,25 @@ fn compute_semantic_tokens(
                         }
                     };
                 }
+
+                // 2. Lexical fallback for unresolved identifiers or during syntax errors
+                if !resolved && !identifier_text.is_empty() {
+                    let first_char = identifier_text.chars().next().unwrap_or('_');
+                    if first_char.is_ascii_uppercase() {
+                        token_type_index = Some(2); // class / type
+                    } else {
+                        // Check if followed by open paren '('
+                        let after_span = (token.span.end as usize).min(snapshot.source_text.len());
+                        let is_call = snapshot.source_text[after_span..]
+                            .trim_start()
+                            .starts_with('(');
+                        if is_call {
+                            token_type_index = Some(6); // function / method
+                        } else {
+                            token_type_index = Some(9); // variable
+                        }
+                    }
+                }
             }
             TokenKind::String => {
                 token_type_index = Some(14); // string
@@ -147,7 +172,9 @@ fn compute_semantic_tokens(
                 token_type_index = Some(13); // comment
             }
             _ => {
-                if token.kind.is_keyword() {
+                if token.kind.is_primitive() {
+                    token_type_index = Some(1); // type
+                } else if token.kind.is_keyword() {
                     let text = get_span_text(&snapshot.source_text, token.span);
                     if text == "class" || text == "interface" || text == "enum" {
                         token_type_index = Some(11); // keyword
@@ -167,14 +194,44 @@ fn compute_semantic_tokens(
             }
         }
 
+        let token_text = get_span_text(&snapshot.source_text, token.span);
         if let Some(type_idx) = token_type_index {
-            raw_tokens.push(RawSemanticToken {
-                line: start_pos.line,
-                start_char: start_pos.character,
-                length: token_len,
-                token_type: type_idx,
-                modifiers: modifier_mask,
-            });
+            if token_text.contains('\n') {
+                let mut current_line = start_pos.line;
+                let mut current_char = start_pos.character;
+                for (line_index, line_content) in token_text.split('\n').enumerate() {
+                    if line_index > 0 {
+                        current_line += 1;
+                        current_char = 0;
+                    }
+                    let line_len_utf16 = line_content.encode_utf16().count() as u32;
+                    if line_len_utf16 > 0 {
+                        if let Some(range) = range_filter
+                            && (current_line < range.start.line || current_line > range.end.line)
+                        {
+                            continue;
+                        }
+                        raw_tokens.push(RawSemanticToken {
+                            line: current_line,
+                            start_char: current_char,
+                            length: line_len_utf16,
+                            token_type: type_idx,
+                            modifiers: modifier_mask,
+                        });
+                    }
+                }
+            } else {
+                let token_len_utf16 = token_text.encode_utf16().count() as u32;
+                if token_len_utf16 > 0 {
+                    raw_tokens.push(RawSemanticToken {
+                        line: start_pos.line,
+                        start_char: start_pos.character,
+                        length: token_len_utf16,
+                        token_type: type_idx,
+                        modifiers: modifier_mask,
+                    });
+                }
+            }
         }
     }
 
@@ -185,14 +242,23 @@ fn compute_semantic_tokens(
             .then_with(|| a.start_char.cmp(&b.start_char))
     });
 
-    // Delta-encode
+    // Delta-encode with non-overlapping sanitization
     let mut encoded = Vec::new();
     let mut previous_line = 0u32;
     let mut previous_start = 0u32;
+    let mut previous_end = 0u32;
 
     for raw in raw_tokens {
-        let delta_line = raw.line - previous_line;
+        if raw.length == 0 {
+            continue;
+        }
+
+        let delta_line = raw.line.saturating_sub(previous_line);
         let delta_start = if delta_line == 0 {
+            // Disallow overlapping tokens on the same line
+            if raw.start_char < previous_end {
+                continue;
+            }
             raw.start_char.saturating_sub(previous_start)
         } else {
             raw.start_char
@@ -208,6 +274,7 @@ fn compute_semantic_tokens(
 
         previous_line = raw.line;
         previous_start = raw.start_char;
+        previous_end = raw.start_char.saturating_add(raw.length);
     }
 
     encoded
