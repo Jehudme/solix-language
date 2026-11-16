@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.3.0] - 2026-11-16
+
+### Dynamic Release Benchmarking, Cycle Collection, Expanded Switch & Standard Library
+* **Universal Target Syntax & Documentation Generator (MS-053):**
+  * Modernized package and target reference format to `<name>[:<profile>][@<version>]` across all CLI commands (`run`, `install`, `uninstall`, `info`).
+  * Removed runtime `--test` and execution flags in favor of compile-time profile target artifacts (e.g. `build/test/project.slxarc`).
+  * Added compile-time and runtime entrypoint validation rejecting non-existent entrypoints with actionable diagnostics (`[E0310]`).
+  * Implemented built-in `solix doc` documentation generator producing responsive HTML/CSS API documentation trees with full markdown parsing.
+  * Enhanced Language Server Protocol (`solix lsp`) and VS Code extension to present full markdown documentation across hover hints and IntelliSense proposals.
+* **Expanded Pattern Matching & Equality Operators (MS-054):**
+  * Expanded `switch` statements to support all primitive types (`int32`, `int64`, `float64`, `string`, `bool`).
+  * Added direct support for enum discriminants and qualified variant cases (`case Enum::Variant:` and `case Variant:`).
+  * Added class instance dispatch via `==` and `!=` operator overloading (`[E0320]`).
+  * Introduced tuple pattern matching and type-testing expressions via `instanceof`.
+* **Flow-Sensitive Escape Analysis, SRA & ARC Elision (MS-055):**
+  * Implemented static inter-procedural flow-sensitive escape analysis discovering variable lifecycle boundaries.
+  * Added Call Frame Stack Inlining (Scalar Replacement of Aggregates) with threshold sizing for non-escaping structures.
+  * Implemented automatic reference count (ARC) increment and decrement elision for variables guaranteed not to escape local function scopes.
+* **Standard Library Expansion, C++ `std::format` & VM Telemetry (MS-056):**
+  * Introduced C++ `std::format`-style formatting engine in `solixlib` supporting positional indices, hex, octal, binary, floating-point precision, fill, and text alignment (`[E0331]`).
+  * Added standard library modules: `solix.json` (`JsonValue`, `[E0332]`), `solix.net` (`TcpListener`, `TcpStream`, `UdpSocket`, `HttpClient`, `[E0333]`), and `solix.compress` (`Gzip`, `Zlib`, `Deflate`, `[E0334]`).
+  * Implemented 56 VM telemetry metric queries in `solix.system.Vm` and `VmMetrics`.
+  * Added `mount://` virtual filesystem redirection routing read-only IO directly into packaged `.slxpac` container zip resources (`[E0330]`).
+* **Bacon-Rajan (2001) ARC Cycle Collector & Zero-Cost Opt-Out (MS-057):**
+  * Implemented the Bacon & Rajan (2001) four-color cycle collection state machine (`Black`, `Gray`, `White`, `Purple`) in VM heap memory.
+  * Added 3-phase trial deletion (`mark_gray`, `scan`, `collect_white`) collecting circular self-referential and multi-node reference graphs.
+  * Added zero-cost runtime opt-out flag `--cycle-collector <on|off>`.
+  * Configured configurable collection thresholds (`--cycle-threshold <N>`, `[E0341]`) and bounded microsecond budgets (`--cycle-budget-us <N>`, `[W0340]`).
+* **Dynamic Release Benchmarking & CI/CD Performance Gates (MS-058):**
+  * Replaced static baseline files with a dynamic release-to-release benchmarking pipeline.
+  * Added `benchmarks/compare_releases.py` calculating geometric mean speedups, execution deltas, and RSS memory differences against preceding release assets.
+  * Automated generation and injection of GitHub Flavored Markdown comparison tables into release notes.
+  * Added mandatory `python3 benchmarks/runner.py --verify` correctness gate in `.github/workflows/ci.yml`.
+
+---
+
 ## [1.2.0] - 2026-11-16
 
 ### Unified Configuration Manifest Schema, Profile-Scoped Sources & Automated CI/CD

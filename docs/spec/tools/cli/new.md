@@ -125,7 +125,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-solix-ffi = ">=1.1.3, <=1.2.0"
+solix-ffi = ">=1.1.3, <=1.3.0"
 ```
 
 ### 2. Library Project (`--lib`)

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jehudme/solix-language/actions/workflows/ci.yml/badge.svg)](https://github.com/jehudme/solix-language/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v1.2.0-green.svg)](https://github.com/jehudme/solix-language/releases)
+[![Version](https://img.shields.io/badge/version-v1.3.0-green.svg)](https://github.com/jehudme/solix-language/releases)
 
 Solix is a modern, statically typed programming language designed to be fast, memory-safe, and easy to learn. It combines the clean, expressive syntax of languages like C# and Java with the predictable performance and resource control of systems languages like C++ and Rust.
 
@@ -24,7 +24,7 @@ Solix enforces clear visual separation between namespaces, types, and instance m
 * **Member Access (`.`)**: Used strictly for instance fields, object properties, and instance method invocations (e.g. `player.health`, `particle.update(delta_time)`).
 
 ### All-in-One Unified Toolchain
-Developing with Solix requires no external build tools, Makefiles, or complicated configuration. The single, consolidated `solix` executable manages the entire development lifecycle: project creation (`solix new`), compilation (`solix compile`), project builds (`solix build`), execution (`solix run`), testing (`solix run --test`), code formatting (`solix fmt`), package management (`solix install`, `solix list`), and editor language intelligence (`solix lsp`, `solix dap`).
+Developing with Solix requires no external build tools, Makefiles, or complicated configuration. The single, consolidated `solix` executable manages the entire development lifecycle: project creation (`solix new`), compilation (`solix compile`), project builds (`solix build`), execution (`solix run`), code formatting (`solix fmt`), documentation generation (`solix doc`), package management (`solix install`, `solix list`), and editor language intelligence (`solix lsp`, `solix dap`).
 
 ---
 
