@@ -205,6 +205,30 @@ pub unsafe extern "C" fn vm_native_get_metric(
     SolixCValue::i64_val(metric_value as i64)
 }
 
+pub unsafe extern "C" fn vm_native_collect_cycles(
+    vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let collected_count = unsafe { crate::invoke_collect_cycles(vm_context) };
+    SolixCValue::i64_val(collected_count as i64)
+}
+
+pub unsafe extern "C" fn vm_native_set_cycle_threshold(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::null();
+    }
+    let threshold = unsafe { (*args.add(0)).as_i32() as u32 };
+    unsafe { crate::invoke_set_cycle_threshold(vm_context, threshold) };
+    SolixCValue::null()
+}
+
 pub unsafe extern "C" fn env_native_is_slxpac(
     vm_context: *mut c_void,
     _args: *const SolixCValue,
@@ -544,6 +568,22 @@ pub unsafe fn register_sys_process_natives(
                 "Vm::native_get_metric",
             ],
             vm_native_get_metric,
+        ),
+        (
+            &[
+                "Vm_native_collect_cycles",
+                "solix_system_Vm_native_collect_cycles",
+                "Vm::native_collect_cycles",
+            ],
+            vm_native_collect_cycles,
+        ),
+        (
+            &[
+                "Vm_native_set_cycle_threshold",
+                "solix_system_Vm_native_set_cycle_threshold",
+                "Vm::native_set_cycle_threshold",
+            ],
+            vm_native_set_cycle_threshold,
         ),
     ];
 

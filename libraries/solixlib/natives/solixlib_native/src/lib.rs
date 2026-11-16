@@ -135,6 +135,10 @@ pub struct SolixVmContext {
         unsafe extern "C" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,
     pub get_vm_metric:
         unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
+    pub collect_cycles:
+        unsafe extern "C" fn(vm_ptr: *mut c_void) -> u64,
+    pub set_cycle_threshold:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
 }
 
 pub type NativeCFunctionPtr = unsafe extern "C" fn(
@@ -278,6 +282,30 @@ pub unsafe fn read_vm_metric(vm_context: *mut c_void, metric_id: u32) -> u64 {
         return 0;
     }
     unsafe { (context_ref.get_vm_metric)(context_ref.vm_ptr, metric_id) }
+}
+
+/// Triggers synchronous cycle collection across the ARC heap.
+pub unsafe fn invoke_collect_cycles(vm_context: *mut c_void) -> u64 {
+    if vm_context.is_null() {
+        return 0;
+    }
+    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
+    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+        return 0;
+    }
+    unsafe { (context_ref.collect_cycles)(context_ref.vm_ptr) }
+}
+
+/// Updates the cycle collector candidate threshold.
+pub unsafe fn invoke_set_cycle_threshold(vm_context: *mut c_void, threshold: u32) {
+    if vm_context.is_null() {
+        return;
+    }
+    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
+    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+        return;
+    }
+    unsafe { (context_ref.set_cycle_threshold)(context_ref.vm_ptr, threshold) }
 }
 
 /// Registers a symbol with all canonical and mangled aliases.

@@ -74,6 +74,24 @@ pub struct VirtualMachine {
     pub quickened_instructions_count: u64,
     /// Optional thread-safe output sink for capturing guest standard output.
     pub output_sink: Option<crate::options::OutputSink>,
+    /// Whether the Bacon & Rajan (2001) ARC cycle collector is enabled.
+    pub cycle_collector_enabled: bool,
+    /// Candidate buffer size threshold triggering cycle collection.
+    pub cycle_threshold: usize,
+    /// Bounded execution budget in microseconds before deferring cycle roots.
+    pub cycle_budget_us: Option<u64>,
+    /// Preallocated candidate purple root buffer.
+    pub purple_buffer: Vec<u32>,
+    /// Total cycle collections executed.
+    pub arc_cycle_collector_runs: u64,
+    /// Total candidate roots suspected.
+    pub arc_cycle_collector_candidates: u64,
+    /// Total cyclic garbage blocks collected and freed.
+    pub arc_cycles_collected: u64,
+    /// Cumulative microseconds spent in cycle collection.
+    pub arc_cycle_collector_time_micros: u64,
+    /// Count of elided ARC operations from optimizer.
+    pub arc_elided_ops_count: u64,
 }
 
 impl VirtualMachine {
@@ -82,6 +100,9 @@ impl VirtualMachine {
     pub fn new(context: RuntimeContext) -> Self {
         let total_static = context.total_static_space;
         let heap_size = context.options.heap_size;
+        let cycle_collector_enabled = context.options.cycle_collector;
+        let cycle_threshold = context.options.cycle_threshold;
+        let cycle_budget_us = context.options.cycle_budget_us;
         let mut heap = VirtualHeap::new(total_static, heap_size);
         heap.set_safe_mode(context.options.safe_mode);
         let static_slots = vec![Value::Null; total_static as usize];
@@ -147,6 +168,15 @@ impl VirtualMachine {
             native_calls_count: 0,
             quickened_instructions_count: 0,
             output_sink,
+            cycle_collector_enabled,
+            cycle_threshold,
+            cycle_budget_us,
+            purple_buffer: Vec::with_capacity(cycle_threshold.max(16)),
+            arc_cycle_collector_runs: 0,
+            arc_cycle_collector_candidates: 0,
+            arc_cycles_collected: 0,
+            arc_cycle_collector_time_micros: 0,
+            arc_elided_ops_count: 0,
         }
     }
 
@@ -403,7 +433,18 @@ impl VirtualMachine {
         if header.ref_count > 1 {
             let mut updated_header = header;
             updated_header.ref_count -= 1;
+            if self.cycle_collector_enabled
+                && crate::memory::layout::can_contain_references(header.tag)
+                && updated_header.color != crate::memory::layout::GcColor::Purple
+            {
+                updated_header.color = crate::memory::layout::GcColor::Purple;
+                self.purple_buffer.push(addr);
+                self.arc_cycle_collector_candidates += 1;
+            }
             self.heap.write_header(addr, updated_header)?;
+            if self.cycle_collector_enabled && self.purple_buffer.len() >= self.cycle_threshold {
+                self.collect_cycles()?;
+            }
             return Ok(());
         }
 
@@ -506,6 +547,35 @@ impl VirtualMachine {
         self.active_destructors.remove(&addr);
 
         Ok(())
+    }
+
+    /// Triggers Bacon & Rajan (2001) cycle collection across all buffered purple candidate roots.
+    ///
+    /// Returns the total number of reclaimed cyclic garbage blocks.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` on invalid heap operations.
+    pub fn collect_cycles(&mut self) -> Result<u64, RuntimeError> {
+        if self.purple_buffer.is_empty() {
+            return Ok(0);
+        }
+        let run_start_time = std::time::Instant::now();
+        self.arc_cycle_collector_runs += 1;
+
+        let candidate_roots = std::mem::take(&mut self.purple_buffer);
+        let (reclaimed_count, deferred_roots) =
+            crate::memory::cycle_collector::run_cycle_collection(
+                &mut self.heap,
+                &self.context,
+                &candidate_roots,
+                self.cycle_budget_us,
+            )?;
+
+        self.purple_buffer = deferred_roots;
+        self.arc_cycles_collected += reclaimed_count;
+        self.arc_cycle_collector_time_micros += run_start_time.elapsed().as_micros() as u64;
+
+        Ok(reclaimed_count)
     }
 
     /// Pushes a new activation record for a lambda closure with an associated captured environment.
@@ -973,11 +1043,11 @@ impl VirtualMachine {
             12 => self.instructions_dispatched / 4,
             13 => self.instructions_dispatched / 4,
             14 => self.heap.telemetry().total_deallocations_count,
-            15 => 0,
-            16 => 0,
-            17 => 0,
-            18 => 0,
-            19 => 0,
+            15 => self.arc_cycle_collector_runs,
+            16 => self.arc_cycle_collector_candidates,
+            17 => self.arc_cycles_collected,
+            18 => self.arc_cycle_collector_time_micros,
+            19 => self.arc_elided_ops_count,
 
             // Call Stack (20..=27)
             20 => self.call_frames.len() as u64,

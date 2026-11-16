@@ -5,9 +5,10 @@ use solix_runtime::context::RuntimeContext;
 use solix_runtime::native::ffi::{
     SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, solix_vm_alloc_array, solix_vm_alloc_byte_array,
     solix_vm_alloc_chars, solix_vm_alloc_object, solix_vm_alloc_string, solix_vm_array_get_u64,
-    solix_vm_array_len, solix_vm_array_set_u64, solix_vm_get_class_vtable_id,
-    solix_vm_get_field_i32, solix_vm_get_metric, solix_vm_read_bytes, solix_vm_read_field_u64,
-    solix_vm_set_field_i32, solix_vm_write_field_u64,
+    solix_vm_array_len, solix_vm_array_set_u64, solix_vm_collect_cycles,
+    solix_vm_get_class_vtable_id, solix_vm_get_field_i32, solix_vm_get_metric, solix_vm_read_bytes,
+    solix_vm_read_field_u64, solix_vm_set_cycle_threshold, solix_vm_set_field_i32,
+    solix_vm_write_field_u64,
 };
 use solix_runtime::options::RuntimeOptions;
 use solix_runtime::vm::VirtualMachine;
@@ -38,6 +39,8 @@ fn test_ffi_string_allocation_and_read() {
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -88,6 +91,8 @@ fn test_ffi_char_and_byte_arrays() {
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -165,6 +170,8 @@ fn test_ffi_generic_array_manipulation() {
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -234,6 +241,8 @@ fn test_ffi_object_allocation_and_u64_fields() {
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -310,6 +319,8 @@ fn test_ffi_get_class_vtable_id_lookup() {
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -368,6 +379,8 @@ fn test_ffi_get_vm_metric_telemetry() {
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 

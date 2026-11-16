@@ -42,6 +42,10 @@ pub struct SolixVmContext {
     pub get_class_vtable_id: unsafe extern "C" fn(vm_ptr: *mut c_void, name_pointer: *const c_char) -> u32,
     /// Evaluates a runtime execution or environment metric by identifier (0..=55).
     pub get_vm_metric: unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
+    /// Triggers synchronous cycle collection across the ARC heap and returns count of collected objects.
+    pub collect_cycles: unsafe extern "C" fn(vm_ptr: *mut c_void) -> u64,
+    /// Updates the cycle collector candidate threshold.
+    pub set_cycle_threshold: unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
 }
 
 impl SolixVmContext {
@@ -98,7 +102,23 @@ impl SolixVmContext {
     ///
     /// # Safety
     /// `self.vm_ptr` must point to a valid, live VM instance.
-    pub unsafe fn get_metric(&self, metric_id: u32) -> u64 {
+    pub unsafe fn get_vm_metric(&self, metric_id: u32) -> u64 {
         unsafe { (self.get_vm_metric)(self.vm_ptr, metric_id) }
+    }
+
+    /// Safely triggers cycle collection and returns the number of reclaimed objects.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn collect_cycles(&self) -> u64 {
+        unsafe { (self.collect_cycles)(self.vm_ptr) }
+    }
+
+    /// Safely sets the cycle collector candidate threshold.
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn set_cycle_threshold(&self, threshold: u32) {
+        unsafe { (self.set_cycle_threshold)(self.vm_ptr, threshold) }
     }
 }

@@ -183,6 +183,12 @@ pub struct SolixVmContext {
 
     /// Evaluates a runtime execution or environment metric by identifier (0..=55).
     pub get_vm_metric: unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
+
+    /// Triggers synchronous Bacon & Rajan cycle collection across the ARC heap.
+    pub collect_cycles: unsafe extern "C" fn(vm_ptr: *mut c_void) -> u64,
+
+    /// Sets the cycle collector candidate threshold.
+    pub set_cycle_threshold: unsafe extern "C" fn(vm_ptr: *mut c_void, threshold: u32),
 }
 
 /// Stable C-ABI native function pointer signature.
@@ -266,6 +272,8 @@ pub fn invoke_c_native(
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
         get_vm_metric: solix_vm_get_metric,
+        collect_cycles: solix_vm_collect_cycles,
+        set_cycle_threshold: solix_vm_set_cycle_threshold,
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -1099,4 +1107,33 @@ pub unsafe extern "C" fn solix_vm_get_metric(vm_context: *mut c_void, metric_id:
         None => return 0,
     };
     vm_instance.get_metric_by_id(metric_id)
+}
+
+/// Triggers synchronous Bacon & Rajan cycle collection.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_collect_cycles(vm_context: *mut c_void) -> u64 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    vm_instance.collect_cycles().unwrap_or(0)
+}
+
+/// Sets the cycle collector candidate threshold.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_set_cycle_threshold(
+    vm_context: *mut c_void,
+    threshold: u32,
+) {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return,
+    };
+    vm_instance.cycle_threshold = threshold.max(1) as usize;
 }

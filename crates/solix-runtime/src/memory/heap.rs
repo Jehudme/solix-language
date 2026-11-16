@@ -281,6 +281,51 @@ impl VirtualHeap {
         Ok(())
     }
 
+    /// Deallocates a dynamic heap block directly without requiring `ref_count > 0`.
+    ///
+    /// Used by the cycle collector to sweep confirmed cyclic garbage.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::NullReferenceAccess` if the address is 0 or out of bounds.
+    pub fn force_deallocate(&mut self, payload_addr: u32) -> Result<(), RuntimeError> {
+        if payload_addr == 0 {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+        let addr = payload_addr as usize;
+        if addr < self.static_size + HEADER_SIZE || addr > self.buffer.len() {
+            return Err(RuntimeError::NullReferenceAccess);
+        }
+
+        let header = self.read_header(payload_addr)?;
+        if header.tag == BlockTag::Raw {
+            return Ok(());
+        }
+        let total_block_size = HEADER_SIZE + align_up(header.size as usize).max(ALIGNMENT);
+        let block_abs_addr = addr - HEADER_SIZE;
+        let block_offset = block_abs_addr - self.static_size;
+
+        let dead_header = BlockHeader::new(header.size, BlockTag::Raw, 0);
+        let dead_bytes = dead_header.to_bytes();
+        self.buffer[block_abs_addr..block_abs_addr + HEADER_SIZE].copy_from_slice(&dead_bytes);
+
+        if total_block_size <= 256 {
+            let class_index = (total_block_size / 8) - 1;
+            let current_head = self.quick_lists[class_index];
+            self.write_u32(payload_addr, current_head)?;
+            self.quick_lists[class_index] = payload_addr;
+        } else {
+            self.free_list.deallocate(block_offset, total_block_size);
+        }
+
+        self.total_deallocations_count += 1;
+        self.active_live_objects = self.active_live_objects.saturating_sub(1);
+        self.current_allocated_bytes = self
+            .current_allocated_bytes
+            .saturating_sub(total_block_size);
+
+        Ok(())
+    }
+
     /// Fast inline deallocation for POD blocks where ref count has reached 0.
     ///
     /// Skips cascading destructor checks and pushes directly to quick lists or free list.

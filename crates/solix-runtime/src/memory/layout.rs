@@ -10,8 +10,52 @@ pub const HEADER_SIZE: usize = 8;
 /// Minimum allocation alignment in bytes (64-bit word alignment).
 pub const ALIGNMENT: usize = 8;
 
-/// Maximum allowable reference count (28-bit unsigned integer).
-pub const MAX_REF_COUNT: u32 = 0x0FFF_FFFF;
+/// Maximum allowable reference count (26-bit unsigned integer).
+pub const MAX_REF_COUNT: u32 = 0x03FF_FFFF;
+
+/// Four-color state tags for the Bacon & Rajan (2001) cycle collection algorithm.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+#[repr(u8)]
+pub enum GcColor {
+    /// In use or free block (Black).
+    #[default]
+    Black = 0,
+    /// Possible member of cycle / trial deletion in progress (Gray).
+    Gray = 1,
+    /// Confirmed member of unreachable cycle (White).
+    White = 2,
+    /// Possible root of cycle (Purple).
+    Purple = 3,
+}
+
+impl GcColor {
+    /// Decodes 2 bits into a `GcColor`.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Self {
+        match bits & 0x03 {
+            0 => Self::Black,
+            1 => Self::Gray,
+            2 => Self::White,
+            3 => Self::Purple,
+            _ => Self::Black,
+        }
+    }
+
+    /// Converts this color tag into an 8-bit unsigned byte.
+    #[must_use]
+    pub const fn to_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Returns whether a block tag can contain outgoing reference pointers to other heap blocks.
+#[must_use]
+pub const fn can_contain_references(tag: BlockTag) -> bool {
+    matches!(
+        tag,
+        BlockTag::Object | BlockTag::ArrayRef | BlockTag::Tuple | BlockTag::Closure
+    )
+}
 
 /// Strongly-typed 4-bit heap allocation category tag.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -72,24 +116,38 @@ impl BlockTag {
 ///
 /// Bit layout:
 /// - Bytes 0..4: `size` (32-bit unsigned payload size or element count)
-/// - Bytes 4..8: `tag_and_ref` (Upper 4 bits: `BlockTag`, Lower 28 bits: `ref_count`)
+/// - Bytes 4..8: `tag_and_ref` (Bits 28..32: `BlockTag`, Bits 26..28: `GcColor`, Bits 0..26: `ref_count`)
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BlockHeader {
     /// Payload capacity in bytes (or element count for arrays).
     pub size: u32,
     /// Memory block classification tag.
     pub tag: BlockTag,
-    /// Automatic reference count (max 268,435,455).
+    /// Bacon & Rajan 4-color state tag for cycle collection.
+    pub color: GcColor,
+    /// Automatic reference count (max 67,108,863).
     pub ref_count: u32,
 }
 
 impl BlockHeader {
-    /// Creates a new `BlockHeader`.
+    /// Creates a new `BlockHeader` initialized with color `GcColor::Black`.
     #[must_use]
     pub fn new(size: u32, tag: BlockTag, ref_count: u32) -> Self {
         Self {
             size,
             tag,
+            color: GcColor::Black,
+            ref_count: ref_count.min(MAX_REF_COUNT),
+        }
+    }
+
+    /// Creates a new `BlockHeader` with an explicit `GcColor`.
+    #[must_use]
+    pub fn with_color(size: u32, tag: BlockTag, color: GcColor, ref_count: u32) -> Self {
+        Self {
+            size,
+            tag,
+            color,
             ref_count: ref_count.min(MAX_REF_COUNT),
         }
     }
@@ -99,7 +157,9 @@ impl BlockHeader {
     pub fn to_bytes(&self) -> [u8; HEADER_SIZE] {
         let mut bytes = [0u8; HEADER_SIZE];
         let tag_nibble = (self.tag.to_u8() & 0x0F) as u32;
-        let tag_and_ref = (tag_nibble << 28) | (self.ref_count & MAX_REF_COUNT);
+        let color_bits = (self.color.to_u8() & 0x03) as u32;
+        let tag_and_ref =
+            (tag_nibble << 28) | (color_bits << 26) | (self.ref_count & MAX_REF_COUNT);
 
         bytes[0..4].copy_from_slice(&self.size.to_le_bytes());
         bytes[4..8].copy_from_slice(&tag_and_ref.to_le_bytes());
@@ -113,12 +173,15 @@ impl BlockHeader {
         let tag_and_ref = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
 
         let tag_nibble = ((tag_and_ref >> 28) & 0x0F) as u8;
+        let color_bits = ((tag_and_ref >> 26) & 0x03) as u8;
         let ref_count = tag_and_ref & MAX_REF_COUNT;
         let tag = BlockTag::from_nibble(tag_nibble);
+        let color = GcColor::from_bits(color_bits);
 
         Self {
             size,
             tag,
+            color,
             ref_count,
         }
     }

@@ -3,11 +3,16 @@
 #![forbid(unsafe_code)]
 
 pub mod arc;
+pub mod cycle_collector;
 pub mod deallocator;
 pub mod heap;
 pub mod layout;
 
 pub use arc::{dec_ref, inc_ref};
+pub use cycle_collector::CycleCollector;
 pub use deallocator::FreeListManager;
 pub use heap::{HeapTelemetry, LiveAllocationInfo, VirtualHeap};
-pub use layout::{ALIGNMENT, BlockHeader, BlockTag, HEADER_SIZE, MAX_REF_COUNT, align_up};
+pub use layout::{
+    ALIGNMENT, BlockHeader, BlockTag, GcColor, HEADER_SIZE, MAX_REF_COUNT, align_up,
+    can_contain_references,
+};

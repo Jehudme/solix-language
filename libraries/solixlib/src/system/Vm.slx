@@ -93,5 +93,15 @@ public class Vm {
         return Vm::native_get_metric(38) == 1;
     }
 
+    public static int64 collect_cycles() {
+        return Vm::native_collect_cycles();
+    }
+
+    public static void set_cycle_threshold(int32 threshold) {
+        Vm::native_set_cycle_threshold(threshold);
+    }
+
     private static native int64 native_get_metric(int32 metric_id);
+    private static native int64 native_collect_cycles();
+    private static native void native_set_cycle_threshold(int32 threshold);
 }

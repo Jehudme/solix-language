@@ -84,9 +84,19 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory.clone()));
 
+    let cycle_collector_enabled =
+        !matches!(args.cycle_collector.to_lowercase().as_str(), "off" | "false" | "0");
+    if args.cycle_threshold == 0 {
+        bail!(
+            "[E0341] Invalid cycle collector configuration parameter: cycle threshold must be greater than zero."
+        );
+    }
+
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(heap_size)
         .with_max_call_stack_depth(args.max_stack)
+        .with_cycle_collector(cycle_collector_enabled)
+        .with_cycle_threshold(args.cycle_threshold)
         .with_args(args.args)
         .with_safe_mode(args.safe)
         .with_solver(solver.clone())
@@ -95,6 +105,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_native_function("Console::println", builtin_println)
         .with_native_function("Console::print", builtin_print)
         .with_verify_checksums(!args.no_verify);
+
+    if let Some(budget_us) = args.cycle_budget_us {
+        runtime_options = runtime_options.with_cycle_budget_us(budget_us);
+    }
 
     if args.no_verify {
         eprintln!(

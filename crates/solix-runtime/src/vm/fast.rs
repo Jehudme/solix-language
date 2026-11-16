@@ -2311,7 +2311,14 @@ impl VirtualMachine {
                     if let Value::Ref(addr) = val
                         && addr > 0
                     {
-                        crate::memory::arc::inc_ref(&mut self.heap, addr)?;
+                        if self.cycle_collector_enabled {
+                            let mut header = self.heap.read_header(addr)?;
+                            header.color = crate::memory::layout::GcColor::Black;
+                            let _ = header.inc_ref()?;
+                            self.heap.write_header(addr, header)?;
+                        } else {
+                            crate::memory::arc::inc_ref(&mut self.heap, addr)?;
+                        }
                     }
                 }
 
@@ -2326,7 +2333,20 @@ impl VirtualMachine {
                         } else if header.ref_count > 1 {
                             let mut updated_header = header;
                             updated_header.ref_count -= 1;
+                            if self.cycle_collector_enabled
+                                && crate::memory::layout::can_contain_references(header.tag)
+                                && updated_header.color != crate::memory::layout::GcColor::Purple
+                            {
+                                updated_header.color = crate::memory::layout::GcColor::Purple;
+                                self.purple_buffer.push(addr);
+                                self.arc_cycle_collector_candidates += 1;
+                            }
                             self.heap.write_header(addr, updated_header)?;
+                            if self.cycle_collector_enabled
+                                && self.purple_buffer.len() >= self.cycle_threshold
+                            {
+                                self.collect_cycles()?;
+                            }
                         } else if header.tag == BlockTag::ObjectPod {
                             self.heap.deallocate_pod_fast(addr, header.size)?;
                         } else {

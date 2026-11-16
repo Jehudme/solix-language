@@ -38,6 +38,12 @@ pub struct RuntimeOptions {
     pub safe_mode: bool,
     /// Sandboxing flag disabling non-sandboxed host native operations and filesystem access.
     pub sandboxed: bool,
+    /// Flag enabling the Bacon & Rajan (2001) ARC cycle collector (default: true).
+    pub cycle_collector: bool,
+    /// Candidate buffer size threshold triggering cycle collection (default: 1024).
+    pub cycle_threshold: usize,
+    /// Optional execution time budget in microseconds before deferring cycle roots.
+    pub cycle_budget_us: Option<u64>,
     /// Container packaging kind (e.g. "slxpac", "slxarc", "slxb", "source").
     pub container_kind: Option<String>,
     /// Root directory path holding extracted container resources.
@@ -108,6 +114,9 @@ impl Default for RuntimeOptions {
             args: Vec::new(),
             safe_mode: false,
             sandboxed: false,
+            cycle_collector: true,
+            cycle_threshold: 1024,
+            cycle_budget_us: None,
             container_kind: None,
             container_resource_root: None,
             container_resource_count: 0,
@@ -275,6 +284,27 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_output_sink(mut self, sink: OutputSink) -> Self {
         self.output_sink = Some(sink);
+        self
+    }
+
+    /// Configures whether the Bacon & Rajan (2001) ARC cycle collector is enabled.
+    #[must_use]
+    pub fn with_cycle_collector(mut self, enabled: bool) -> Self {
+        self.cycle_collector = enabled;
+        self
+    }
+
+    /// Configures the candidate buffer size threshold triggering cycle collection.
+    #[must_use]
+    pub fn with_cycle_threshold(mut self, threshold: usize) -> Self {
+        self.cycle_threshold = threshold;
+        self
+    }
+
+    /// Configures the execution budget in microseconds before deferring remaining cycle roots.
+    #[must_use]
+    pub fn with_cycle_budget_us(mut self, budget_us: u64) -> Self {
+        self.cycle_budget_us = Some(budget_us);
         self
     }
 }

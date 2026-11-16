@@ -319,6 +319,18 @@ pub struct RunArgs {
     #[arg(long, default_value_t = 1024)]
     pub max_stack: usize,
 
+    /// Enable or disable Bacon & Rajan (2001) ARC cycle collector (e.g. "on", "off") [default: "on"]
+    #[arg(long, default_value = "on", value_parser = ["on", "off", "true", "false", "1", "0"])]
+    pub cycle_collector: String,
+
+    /// Candidate buffer size threshold triggering cycle collection [default: 1024]
+    #[arg(long, default_value_t = 1024)]
+    pub cycle_threshold: usize,
+
+    /// Execution budget in microseconds before deferring remaining cycle roots
+    #[arg(long)]
+    pub cycle_budget_us: Option<u64>,
+
     /// Print execution statistics and memory report upon completion
     #[arg(short, long, alias = "gc-stats")]
     pub verbose: bool,

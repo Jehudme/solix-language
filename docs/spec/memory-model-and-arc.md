@@ -86,3 +86,33 @@ Every allocated heap object begins with an immutable 24-byte header:
    * When an object dies, its reference field offsets are read from its `CompiledClass` descriptor. All child object references are released recursively, freeing entire object graphs deterministically without garbage collection pauses.
 3. **Leak-Free Invariant:**
    * Clean execution guarantees zero remaining heap allocations: `vm.verify_clean_memory() == Ok(())`.
+
+---
+
+## 4. Bacon & Rajan (2001) Synchronous Cycle Collector
+
+To collect circular reference graphs while retaining deterministic ARC deallocation for acyclic objects, Solix integrates the Bacon & Rajan (2001) four-color synchronous cycle collection algorithm:
+
+### Four-Color State Machine
+
+* **`Black` (0):** Normal in-use or free heap block.
+* **`Gray` (1):** Candidate member of a suspected cyclic subgraph undergoing simulated trial deletion.
+* **`White` (2):** Confirmed unreachable garbage cycle candidate scheduled for sweeping.
+* **`Purple` (3):** Suspected root of a potential cycle, buffered when an object with outgoing references is decremented to a non-zero count.
+
+### Algorithm Phases
+
+1. **Trial Deletion (`MarkGray`):** Traverses candidate subgraphs from purple roots, decrementing internal reference counts on outgoing child pointers to isolate internal versus external references.
+2. **Cycle Confirmation (`Scan`):** Evaluates reference counts. If an object's reference count is $> 0$, external references exist: it and all reachable children are repainted `Black` and counts restored via `ScanBlack`. If reference count is $0$, the node is painted `White`.
+3. **Reclamation (`CollectWhite`):** Traverses confirmed `White` nodes, repainting them `Black` and returning heap memory to the segregated free list or quick lists via `force_deallocate`.
+
+### Zero-Cost Opt-Out & Tuning
+
+* **CLI Flags:**
+  * `--cycle-collector <on|off>`: Enables or completely bypasses purple root buffering. When disabled, execution runs pure ARC with zero candidate tracking overhead.
+  * `--cycle-threshold <N>`: Candidate buffer size triggering automatic collection (default: 1024). Specifying `0` rejects with diagnostic `[E0341]`.
+  * `--cycle-budget-us <N>`: Bounded execution budget in microseconds. If exceeded, deferred roots trigger warning `[W0340]`.
+* **Guest API (`solix.system.Vm`):**
+  * `Vm::collect_cycles() -> int64`: Explicitly triggers synchronous cycle collection.
+  * `Vm::set_cycle_threshold(int32 threshold)`: Dynamically configures the collection threshold.
+

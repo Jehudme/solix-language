@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-057
 * **Target Version:** `v2.0.0`
 * **Milestone Branch:** `milestone/057-bacon-rajan-arc-cycle-collector`
-* **Status:** DRAFT
+* **Status:** COMPLETED
 * **Lead Architect:** Runtime Virtual Machine & Memory Management Team
 * **Target Delivery Date:** 2026-11-16
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)
