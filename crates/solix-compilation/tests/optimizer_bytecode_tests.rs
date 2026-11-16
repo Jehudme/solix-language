@@ -858,3 +858,216 @@ fn test_negative_reassigned_closure_and_null_safe_check_not_miscompiled() {
     let res = vm.run().expect("Execution should succeed");
     assert_eq!(res, Value::I32(1550));
 }
+
+#[test]
+fn test_positive_owned_local_return_transfers_without_arc_leak() {
+    let source_code = r#"
+        class TreeCell {
+            public int32 payload;
+            public TreeCell left;
+            public TreeCell right;
+            public TreeCell(int32 val) {
+                this.payload = val;
+                this.left = null;
+                this.right = null;
+            }
+        }
+        TreeCell build_tree(int32 depth, int32 item) {
+            TreeCell node = new TreeCell(item);
+            if (depth > 0) {
+                node.left = build_tree(depth - 1, item * 2);
+                node.right = build_tree(depth - 1, item * 2 + 1);
+            }
+            return node;
+        }
+        int32 sum_tree(TreeCell node) {
+            if (node == null) {
+                return 0;
+            }
+            return node.payload + sum_tree(node.left) + sum_tree(node.right);
+        }
+        int32 main() {
+            TreeCell root = build_tree(4, 1);
+            int32 total = sum_tree(root);
+            return total;
+        }
+    "#;
+    let options = CompilationOptions::new().with_source("owned_return_arc.slx", source_code);
+    let mut context = CompilationContext::new(options);
+    let compile_res = context.execute();
+    assert!(compile_res.is_ok(), "Compilation failed: {compile_res:?}");
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Emission artifacts must be present");
+    let build_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("build_tree"))
+        .expect("build_tree function must exist");
+    let inc_count = build_fn
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::IncRef as u8)
+        .count();
+    assert_eq!(
+        inc_count, 0,
+        "Returning an owned local must transfer ownership without emitting IncRef: {:?}",
+        build_fn.instructions
+    );
+
+    let runtime_context =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program.clone()))
+            .expect("RuntimeContext should build");
+    let mut vm = VirtualMachine::new(runtime_context);
+    let res = vm.run().expect("Execution should succeed");
+    // Depth 4 complete binary tree labeled heap-style from 1..=31 has sum 31*32/2 = 496.
+    assert_eq!(res, Value::I32(496));
+    let heap_telemetry = vm.heap.telemetry();
+    assert_eq!(heap_telemetry.total_allocations_count, 31);
+    assert_eq!(
+        heap_telemetry.total_deallocations_count, heap_telemetry.total_allocations_count,
+        "Returned tree must deallocate all 31 nodes with zero ARC leaks"
+    );
+}
+
+#[test]
+fn test_negative_borrowed_parameter_return_retains_inc_ref() {
+    let source_code = r#"
+        class BoxedInt {
+            public int32 value;
+            public BoxedInt(int32 initial_val) {
+                this.value = initial_val;
+            }
+        }
+        BoxedInt forward_ref(BoxedInt input) {
+            return input;
+        }
+        int32 main() {
+            BoxedInt first = new BoxedInt(41);
+            BoxedInt second = forward_ref(first);
+            return first.value + second.value;
+        }
+    "#;
+    let options = CompilationOptions::new().with_source("borrowed_param_return.slx", source_code);
+    let mut context = CompilationContext::new(options);
+    let compile_res = context.execute();
+    assert!(compile_res.is_ok(), "Compilation failed: {compile_res:?}");
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Emission artifacts must be present");
+    let forward_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("forward_ref"))
+        .expect("forward_ref function must exist");
+    assert!(
+        forward_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::IncRef as u8),
+        "Returning a borrowed parameter must retain IncRef: {:?}",
+        forward_fn.instructions
+    );
+
+    let runtime_context =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program.clone()))
+            .expect("RuntimeContext should build");
+    let mut vm = VirtualMachine::new(runtime_context);
+    let res = vm.run().expect("Execution should succeed");
+    assert_eq!(res, Value::I32(82));
+    let heap_telemetry = vm.heap.telemetry();
+    assert_eq!(
+        heap_telemetry.total_deallocations_count, heap_telemetry.total_allocations_count,
+        "Both aliases must release cleanly with zero leaks or double-free"
+    );
+}
+
+#[test]
+fn test_positive_borrowed_array_element_and_immortal_closure_arc_elision() {
+    let source_code = r#"
+        class ItemBase {
+            public virtual int32 compute(int32 val) { return val; }
+        }
+        class ItemDouble extends ItemBase {
+            public override int32 compute(int32 val) { return val * 2; }
+        }
+        int32 helper_add(int32 num) { return num + 3; }
+        int32 helper_mul(int32 num) { return num * 3; }
+        int32 main() {
+            ItemBase[] items = new ItemBase[2];
+            items[0] = new ItemBase();
+            items[1] = new ItemDouble();
+            int32 acc = 0;
+            for (int32 idx = 0; idx < 10; idx = idx + 1) {
+                ItemBase elem = items[idx % 2];
+                int32(*)(int32) callback;
+                if (idx % 2 == 0) {
+                    callback = helper_add;
+                } else {
+                    callback = helper_mul;
+                }
+                acc = acc + elem.compute(callback(idx));
+            }
+            return acc;
+        }
+    "#;
+    let options = CompilationOptions::new().with_source("arc_elision_diamond.slx", source_code);
+    let mut context = CompilationContext::new(options);
+    let compile_res = context.execute();
+    assert!(compile_res.is_ok(), "Compilation failed: {compile_res:?}");
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Emission artifacts must be present");
+    let main_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+    let backedge = main_fn
+        .instructions
+        .iter()
+        .enumerate()
+        .find_map(|(pc_idx, inst)| {
+            if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
+                Some(((pc_idx as i32 + inst.jump_offset()) as usize, pc_idx))
+            } else {
+                None
+            }
+        })
+        .expect("Expected loop backedge");
+    let loop_arc_ops = main_fn.instructions[backedge.0..=backedge.1]
+        .iter()
+        .filter(|inst| {
+            let raw = inst.raw_opcode();
+            raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8
+        })
+        .count();
+    assert_eq!(
+        loop_arc_ops,
+        0,
+        "Expected zero IncRef/DecRef ops inside loop body for immutable local array & zero-cap closures (full: {:?}): {:?}",
+        &main_fn.instructions,
+        &main_fn.instructions[backedge.0..=backedge.1]
+    );
+
+    let runtime_context =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program.clone()))
+            .expect("RuntimeContext should build");
+    let mut vm = VirtualMachine::new(runtime_context);
+    let res = vm.run().expect("Execution should succeed");
+    assert!(matches!(res, Value::I32(_)));
+    let heap_telemetry = vm.heap.telemetry();
+    assert_eq!(
+        heap_telemetry.total_deallocations_count,
+        heap_telemetry.total_allocations_count
+    );
+}

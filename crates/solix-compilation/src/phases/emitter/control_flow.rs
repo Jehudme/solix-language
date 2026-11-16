@@ -794,12 +794,19 @@ impl<'ctx> Emitter<'ctx> {
                 self.allocator.free_temp(r_val);
                 r_val = converted_reg;
             }
-            if (self.query_type(val.span()).is_reference_type()
-                || matches!(
-                    self.query_type(val.span()),
-                    solix_common::types::Type::GenericParameter { .. }
-                        | solix_common::types::Type::Unresolved(_)
-                ))
+            let returning_owned_local = matches!(
+                val,
+                Expression::Identifier { span }
+                    if self.allocator.lookup_local(self.get_lexeme(*span)) == Some(r_val)
+                        && self.function.reference_registers.contains(&r_val)
+            );
+            if !returning_owned_local
+                && (self.query_type(val.span()).is_reference_type()
+                    || matches!(
+                        self.query_type(val.span()),
+                        solix_common::types::Type::GenericParameter { .. }
+                            | solix_common::types::Type::Unresolved(_)
+                    ))
                 && self.is_borrowed_reference(val)
             {
                 self.emit_instruction(

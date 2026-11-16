@@ -45,23 +45,32 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             optimize_function(compiled_function, &class_descriptors, &function_descriptors);
         }
 
-        // Inline small leaf constructors across callers, then re-converge caller passes.
-        let optimized_snapshot = emission_artifacts.program.functions.clone();
-        for (func_idx, compiled_function) in
-            emission_artifacts.program.functions.iter_mut().enumerate()
-        {
-            if inline_leaf_constructors(compiled_function, func_idx, &optimized_snapshot) {
-                super::escape_analysis::apply_scalar_replacement(
-                    compiled_function,
-                    &class_descriptors,
-                    &optimized_snapshot,
-                );
-                super::escape_analysis::apply_arc_elision(compiled_function);
-                elide_redundant_arc_ops(compiled_function);
-                elide_borrowed_local_arc_ops(compiled_function);
-                elide_fresh_null_set_fields(compiled_function);
-                optimize_peephole_passes(compiled_function);
-                hoist_loop_invariant_constants(compiled_function);
+        // Inline small leaf constructors across callers (multiple rounds handle inheritance chains),
+        // then re-converge caller passes.
+        for _inline_round in 0..3 {
+            let optimized_snapshot = emission_artifacts.program.functions.clone();
+            let mut round_changed = false;
+            for (func_idx, compiled_function) in
+                emission_artifacts.program.functions.iter_mut().enumerate()
+            {
+                if inline_leaf_constructors(compiled_function, func_idx, &optimized_snapshot) {
+                    round_changed = true;
+                    super::escape_analysis::apply_scalar_replacement(
+                        compiled_function,
+                        &class_descriptors,
+                        &optimized_snapshot,
+                    );
+                    super::escape_analysis::apply_arc_elision(compiled_function);
+                    elide_redundant_arc_ops(compiled_function);
+                    optimize_peephole_passes(compiled_function);
+                    elide_borrowed_local_arc_ops(compiled_function);
+                    elide_fresh_null_set_fields(compiled_function);
+                    optimize_peephole_passes(compiled_function);
+                    hoist_loop_invariant_constants(compiled_function);
+                }
+            }
+            if !round_changed {
+                break;
             }
         }
 
@@ -103,6 +112,7 @@ fn optimize_function(
     super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
     super::escape_analysis::apply_arc_elision(function);
     elide_redundant_arc_ops(function);
+    optimize_peephole_passes(function);
     elide_borrowed_local_arc_ops(function);
     elide_fresh_null_set_fields(function);
 
@@ -208,8 +218,83 @@ fn find_immortal_constant_arrays(
     candidates
 }
 
+/// Returns `true` if `inst` is guaranteed never to write a dynamically allocated mutable `Value::Ref`
+/// (`Load*`, `PackClosure` with 0 captures, `GetArray` from an immortal constant array, or scalar ALU/compare opcodes).
+fn is_guaranteed_non_heap_write(inst: Instruction, immortal_arrays: &HashSet<u16>) -> bool {
+    let Some(opc) = OpCode::from_raw_u8(inst.raw_opcode()) else {
+        return false;
+    };
+    matches!(
+        opc,
+        OpCode::LoadI32
+            | OpCode::LoadI64
+            | OpCode::LoadF64
+            | OpCode::LoadBool
+            | OpCode::LoadNull
+            | OpCode::LoadConst
+            | OpCode::AddI32
+            | OpCode::AddI64
+            | OpCode::AddF64
+            | OpCode::SubI32
+            | OpCode::SubI64
+            | OpCode::SubF64
+            | OpCode::MulI32
+            | OpCode::MulI64
+            | OpCode::MulF64
+            | OpCode::DivI32
+            | OpCode::DivI64
+            | OpCode::DivF64
+            | OpCode::ModI32
+            | OpCode::ModI64
+            | OpCode::NegI32
+            | OpCode::NegI64
+            | OpCode::NegF64
+            | OpCode::Band
+            | OpCode::Bor
+            | OpCode::Bxor
+            | OpCode::Bnot
+            | OpCode::Shl
+            | OpCode::Shr
+            | OpCode::EqI32
+            | OpCode::EqI64
+            | OpCode::EqF64
+            | OpCode::EqBool
+            | OpCode::EqString
+            | OpCode::EqRef
+            | OpCode::NeqI32
+            | OpCode::NeqI64
+            | OpCode::NeqF64
+            | OpCode::NeqBool
+            | OpCode::NeqString
+            | OpCode::NeqRef
+            | OpCode::LtI32
+            | OpCode::LtI64
+            | OpCode::LtF64
+            | OpCode::LteI32
+            | OpCode::LteI64
+            | OpCode::LteF64
+            | OpCode::GtI32
+            | OpCode::GtI64
+            | OpCode::GtF64
+            | OpCode::GteI32
+            | OpCode::GteI64
+            | OpCode::GteF64
+            | OpCode::Not
+            | OpCode::ArrayLength
+            | OpCode::Instanceof
+            | OpCode::ConvIToF
+            | OpCode::ConvFToI
+            | OpCode::TupleInstanceof
+            | OpCode::AddI32Imm
+            | OpCode::SubI32Imm
+            | OpCode::MulI32Imm
+            | OpCode::ModI32Imm
+    ) || (opc == OpCode::PackClosure && inst.arg_count() == 0)
+        || (opc == OpCode::GetArray && immortal_arrays.contains(&inst.src1()))
+}
+
 /// Eliminates redundant `IncRef` and `DecRef` on `LoadConst`, `LoadNull`, zero-capture `PackClosure`,
-/// and elements loaded from immutable local constant arrays within basic blocks.
+/// and elements loaded from immutable local constant arrays within basic blocks or across the function.
 fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
     let inst_count = function.instructions.len();
     if inst_count < 2 {
@@ -218,6 +303,83 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
 
     let critical_targets = collect_critical_targets(function);
     let immortal_arrays = find_immortal_constant_arrays(function, &critical_targets);
+
+    // Find registers whose every definition across the entire function yields a non-heap-ref/immortal value.
+    let mut always_immortal_regs: HashSet<u16> = HashSet::new();
+    let mut has_any_write = vec![false; function.num_registers as usize];
+    let mut has_non_immortal_direct_write = vec![false; function.num_registers as usize];
+    let mut mov_sources: HashMap<u16, Vec<u16>> = HashMap::new();
+    let mut scan_block_non_heap: HashSet<u16> = HashSet::new();
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        if critical_targets.contains(&pc_idx) {
+            scan_block_non_heap.clear();
+        }
+        let raw = inst.raw_opcode();
+        if let Some(dst_reg) = instruction_write_dst(inst) {
+            let idx = dst_reg as usize;
+            if idx < has_any_write.len() {
+                has_any_write[idx] = true;
+                if is_guaranteed_non_heap_write(*inst, &immortal_arrays) {
+                    scan_block_non_heap.insert(dst_reg);
+                } else if raw == OpCode::Mov as u8 {
+                    let src_reg = inst.src1();
+                    if scan_block_non_heap.contains(&src_reg) {
+                        scan_block_non_heap.insert(dst_reg);
+                    } else {
+                        scan_block_non_heap.remove(&dst_reg);
+                        mov_sources.entry(dst_reg).or_default().push(src_reg);
+                    }
+                } else {
+                    scan_block_non_heap.remove(&dst_reg);
+                    has_non_immortal_direct_write[idx] = true;
+                }
+            }
+        }
+        if is_control_flow_terminator(raw)
+            || is_conditional_branch(raw)
+            || raw == OpCode::Jump as u8
+            || raw == OpCode::Switch as u8
+        {
+            scan_block_non_heap.clear();
+        }
+    }
+    for reg in function.param_count..function.num_registers {
+        let idx = reg as usize;
+        if has_any_write[idx]
+            && !has_non_immortal_direct_write[idx]
+            && !mov_sources.contains_key(&reg)
+        {
+            always_immortal_regs.insert(reg);
+        }
+    }
+    loop {
+        let mut added = false;
+        for reg in function.param_count..function.num_registers {
+            let idx = reg as usize;
+            if always_immortal_regs.contains(&reg)
+                || !has_any_write[idx]
+                || has_non_immortal_direct_write[idx]
+            {
+                continue;
+            }
+            if let Some(srcs) = mov_sources.get(&reg)
+                && srcs
+                    .iter()
+                    .all(|src_reg| always_immortal_regs.contains(src_reg))
+            {
+                always_immortal_regs.insert(reg);
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    if !always_immortal_regs.is_empty() {
+        function
+            .reference_registers
+            .retain(|reg| !always_immortal_regs.contains(reg));
+    }
 
     let mut block_immortals: HashSet<u16> = HashSet::new();
     for pc_idx in 0..inst_count {
@@ -229,7 +391,7 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
         let raw = inst.raw_opcode();
 
         if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
-            && block_immortals.contains(&inst.dst())
+            && (block_immortals.contains(&inst.dst()) || always_immortal_regs.contains(&inst.dst()))
         {
             function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             continue;
@@ -263,12 +425,13 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
 }
 
 /// Elides ARC operations on non-escaping borrowed local alias registers whose owning source allocations
-/// remain live until the function epilogue cleanup block after all uses of the alias.
+/// or immutable non-escaping local arrays remain live until the function epilogue cleanup block after all uses of the alias.
 fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
     if !function.exception_handlers.is_empty() || function.instructions.len() < 4 {
         return;
     }
     let inst_count = function.instructions.len();
+    let critical_targets = collect_critical_targets(function);
     let mut def_counts: HashMap<u16, usize> = HashMap::new();
     let mut def_opc: HashMap<u16, u8> = HashMap::new();
     let mut decref_pcs: HashMap<u16, Vec<usize>> = HashMap::new();
@@ -304,23 +467,25 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
         let Some(owner_decs) = decref_pcs.get(&owner_reg) else {
             continue;
         };
-        if owner_decs.len() != 1 {
+        if owner_decs.is_empty() {
             continue;
         }
-        let dec_pc = owner_decs[0];
-        let mut epilogue_ok = false;
-        for scan_pc in (dec_pc + 1)..inst_count {
-            let scan_raw = function.instructions[scan_pc].raw_opcode();
-            if scan_raw == OpCode::Return as u8 || scan_raw == OpCode::ReturnValue as u8 {
-                epilogue_ok = true;
-                break;
+        let all_in_epilogues = owner_decs.iter().all(|&dec_pc| {
+            let mut epilogue_ok = false;
+            for scan_pc in (dec_pc + 1)..inst_count {
+                let scan_raw = function.instructions[scan_pc].raw_opcode();
+                if scan_raw == OpCode::Return as u8 || scan_raw == OpCode::ReturnValue as u8 {
+                    epilogue_ok = true;
+                    break;
+                }
+                if scan_raw != OpCode::DecRef as u8 && scan_raw != OpCode::Nop as u8 {
+                    break;
+                }
             }
-            if scan_raw != OpCode::DecRef as u8 && scan_raw != OpCode::Nop as u8 {
-                break;
-            }
-        }
-        if epilogue_ok {
-            stable_owners.insert(owner_reg, dec_pc);
+            epilogue_ok
+        });
+        if all_in_epilogues && let Some(&earliest_dec_pc) = owner_decs.iter().min() {
+            stable_owners.insert(owner_reg, earliest_dec_pc);
         }
     }
 
@@ -328,7 +493,61 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
         return;
     }
 
-    // Find candidate alias registers written solely via Mov(alias, owner) where owner is in stable_owners.
+    // Identify immutable post-initialization local AllocArray owners whose elements cannot be
+    // overwritten or freed before epilogue DecRef (all SetArrays precede all GetArrays, non-escaping).
+    let mut immutable_local_arrays: HashSet<u16> = HashSet::new();
+    for &owner_reg in stable_owners.keys() {
+        if def_opc.get(&owner_reg).copied() != Some(OpCode::AllocArray as u8) {
+            continue;
+        }
+        let mut max_set_pc: Option<usize> = None;
+        let mut min_get_pc: Option<usize> = None;
+        let mut only_safe_array_uses = true;
+        for (pc_idx, inst) in function.instructions.iter().enumerate() {
+            let raw = inst.raw_opcode();
+            if raw == OpCode::SetArray as u8 && inst.dst() == owner_reg {
+                max_set_pc = Some(max_set_pc.map_or(pc_idx, |cur| cur.max(pc_idx)));
+                continue;
+            }
+            if raw == OpCode::GetArray as u8 && inst.src1() == owner_reg {
+                min_get_pc = Some(min_get_pc.map_or(pc_idx, |cur| cur.min(pc_idx)));
+                continue;
+            }
+            if (raw == OpCode::ArrayLength as u8 && inst.src1() == owner_reg)
+                || (raw == OpCode::DecRef as u8 && inst.dst() == owner_reg)
+            {
+                continue;
+            }
+            if instruction_reads_register(inst, owner_reg) {
+                only_safe_array_uses = false;
+                break;
+            }
+        }
+        if !only_safe_array_uses {
+            continue;
+        }
+        let phase_separated = match (max_set_pc, min_get_pc) {
+            (Some(last_set), Some(first_get)) => {
+                last_set < first_get
+                    && !(function
+                        .instructions
+                        .iter()
+                        .enumerate()
+                        .any(|(pc_idx, inst)| {
+                            decode_jump_target(*inst, pc_idx, inst_count)
+                                .is_some_and(|target| target <= last_set && pc_idx >= first_get)
+                        }))
+            }
+            (None, Some(_)) => true,
+            _ => false,
+        };
+        if phase_separated {
+            immutable_local_arrays.insert(owner_reg);
+        }
+    }
+
+    // Find candidate alias registers written solely via Mov(alias, stable_owner) or
+    // GetArray(alias, immutable_local_array, _) where owning allocations stay alive until epilogue.
     let mut borrowed_aliases: HashSet<u16> = HashSet::new();
     for candidate_reg in 0..function.num_registers {
         if (candidate_reg as usize) < (function.param_count as usize)
@@ -346,7 +565,10 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
             let raw = inst.raw_opcode();
             if instruction_write_dst(inst) == Some(candidate_reg) {
                 writes_count += 1;
-                if raw == OpCode::Mov as u8 && stable_owners.contains_key(&inst.src1()) {
+                if (raw == OpCode::Mov as u8 && stable_owners.contains_key(&inst.src1()))
+                    || (raw == OpCode::GetArray as u8
+                        && immutable_local_arrays.contains(&inst.src1()))
+                {
                     used_owners.push(inst.src1());
                 } else {
                     writes_ok = false;
@@ -404,33 +626,146 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
         }
     }
 
-    if borrowed_aliases.is_empty() {
-        return;
+    if !borrowed_aliases.is_empty() {
+        // Elide IncRef/DecRef on borrowed aliases and matched IncRef(owner) preceding Mov(alias, owner).
+        for pc_idx in 0..inst_count {
+            let inst = function.instructions[pc_idx];
+            let raw = inst.raw_opcode();
+            if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
+                && borrowed_aliases.contains(&inst.dst())
+            {
+                function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                continue;
+            }
+            if raw == OpCode::Mov as u8
+                && borrowed_aliases.contains(&inst.dst())
+                && stable_owners.contains_key(&inst.src1())
+            {
+                let owner_reg = inst.src1();
+                // Look back up to 2 instructions in same basic block for `IncRef owner_reg`.
+                let lookback_start = pc_idx.saturating_sub(2);
+                for back_pc in (lookback_start..pc_idx).rev() {
+                    if critical_targets.contains(&(back_pc + 1)) {
+                        break;
+                    }
+                    let back_inst = function.instructions[back_pc];
+                    if back_inst.raw_opcode() == OpCode::IncRef as u8
+                        && back_inst.dst() == owner_reg
+                    {
+                        function.instructions[back_pc] =
+                            Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
-    // Elide IncRef/DecRef on borrowed aliases and matched IncRef(owner) preceding Mov(alias, owner).
-    for pc_idx in 0..inst_count {
-        let inst = function.instructions[pc_idx];
-        let raw = inst.raw_opcode();
-        if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
-            && borrowed_aliases.contains(&inst.dst())
-        {
-            function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
-            continue;
+    // Also elide local `(GetArray reg, immut_arr -> IncRef reg ... DecRef reg)` windows
+    // (including across closed forward branch diamonds and non-escaping calls)
+    // when `reg` is reused elsewhere in the function or calls occur inside the window.
+    if !immutable_local_arrays.is_empty() {
+        let mut jump_bounds_to_target: HashMap<usize, (usize, usize)> = HashMap::new();
+        for (src_pc, inst) in function.instructions.iter().enumerate() {
+            if let Some(target_pc) = decode_jump_target(*inst, src_pc, inst_count) {
+                jump_bounds_to_target
+                    .entry(target_pc)
+                    .and_modify(|bounds| {
+                        bounds.0 = bounds.0.min(src_pc);
+                        bounds.1 = bounds.1.max(src_pc);
+                    })
+                    .or_insert((src_pc, src_pc));
+            }
         }
-        if raw == OpCode::Mov as u8
-            && borrowed_aliases.contains(&inst.dst())
-            && stable_owners.contains_key(&inst.src1())
-        {
-            let owner_reg = inst.src1();
-            // Look back up to 2 instructions in same basic block for `IncRef owner_reg`.
-            let lookback_start = pc_idx.saturating_sub(2);
-            for back_pc in (lookback_start..pc_idx).rev() {
-                let back_inst = function.instructions[back_pc];
-                if back_inst.raw_opcode() == OpCode::IncRef as u8 && back_inst.dst() == owner_reg {
-                    function.instructions[back_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+        for inc_pc in 1..inst_count {
+            let inc_inst = function.instructions[inc_pc];
+            if inc_inst.raw_opcode() != OpCode::IncRef as u8 {
+                continue;
+            }
+            let target_reg = inc_inst.dst();
+            let mut loaded_from_arr: Option<u16> = None;
+            let mut scan_back = inc_pc;
+            while scan_back > 0 && inc_pc - scan_back <= 4 {
+                if critical_targets.contains(&scan_back) {
                     break;
                 }
+                scan_back -= 1;
+                let back_inst = function.instructions[scan_back];
+                let back_raw = back_inst.raw_opcode();
+                if back_raw == OpCode::GetArray as u8
+                    && back_inst.dst() == target_reg
+                    && immutable_local_arrays.contains(&back_inst.src1())
+                {
+                    loaded_from_arr = Some(back_inst.src1());
+                    break;
+                }
+                if instruction_write_dst(&back_inst) == Some(target_reg)
+                    || is_control_flow_terminator(back_raw)
+                    || is_conditional_branch(back_raw)
+                    || back_raw == OpCode::Jump as u8
+                    || back_raw == OpCode::Switch as u8
+                {
+                    break;
+                }
+            }
+            let Some(arr_reg) = loaded_from_arr else {
+                continue;
+            };
+            let epilogue_dec_pc = stable_owners[&arr_reg];
+            let search_end = epilogue_dec_pc.min(inst_count).min(inc_pc + 48);
+            let mut matched_dec_pc: Option<usize> = None;
+            let mut max_forward_target: Option<usize> = None;
+            for fwd_pc in (inc_pc + 1)..search_end {
+                let fwd_inst = function.instructions[fwd_pc];
+                let fwd_raw = fwd_inst.raw_opcode();
+                if let Some(&(min_src, max_src)) = jump_bounds_to_target.get(&fwd_pc)
+                    && (min_src <= inc_pc || max_src >= fwd_pc)
+                {
+                    break;
+                }
+                if fwd_raw == OpCode::DecRef as u8 && fwd_inst.dst() == target_reg {
+                    if max_forward_target.is_none_or(|max_t| max_t <= fwd_pc) {
+                        matched_dec_pc = Some(fwd_pc);
+                    }
+                    break;
+                }
+                if fwd_raw == OpCode::Jump as u8 || is_conditional_branch(fwd_raw) {
+                    let Some(target_pc) = decode_jump_target(fwd_inst, fwd_pc, inst_count) else {
+                        break;
+                    };
+                    if target_pc <= fwd_pc || target_pc >= search_end {
+                        break;
+                    }
+                    max_forward_target =
+                        Some(max_forward_target.map_or(target_pc, |cur| cur.max(target_pc)));
+                    continue;
+                }
+                let escapes_reg = (fwd_raw == OpCode::SetField as u8
+                    && fwd_inst.dst() == target_reg)
+                    || (fwd_raw == OpCode::SetArray as u8 && fwd_inst.src2() == target_reg)
+                    || ((fwd_raw == OpCode::SetStatic as u8
+                        || fwd_raw == OpCode::SetStaticDirect as u8
+                        || fwd_raw == OpCode::SetStaticGlobal as u8)
+                        && fwd_inst.dst() == target_reg)
+                    || (fwd_raw == OpCode::PackClosure as u8
+                        && target_reg >= fwd_inst.arg_base()
+                        && target_reg < fwd_inst.arg_base() + fwd_inst.arg_count() as u16)
+                    || (fwd_raw == OpCode::AllocTuple as u8
+                        && target_reg >= fwd_inst.src1()
+                        && target_reg < fwd_inst.src1() + fwd_inst.src2());
+                if escapes_reg
+                    || instruction_write_dst(&fwd_inst) == Some(target_reg)
+                    || is_control_flow_terminator(fwd_raw)
+                    || fwd_raw == OpCode::Switch as u8
+                    || ((fwd_raw == OpCode::IncRef as u8 || fwd_raw == OpCode::DecRef as u8)
+                        && fwd_inst.dst() == arr_reg)
+                {
+                    break;
+                }
+            }
+            if let Some(dec_pc) = matched_dec_pc {
+                function.instructions[inc_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                function.instructions[dec_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             }
         }
     }
@@ -554,8 +889,21 @@ fn inline_leaf_constructors(
     }
 
     let mut jump_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
+    let mut incoming_targets = vec![false; inst_count + 1];
     for (pc_idx, inst) in caller.instructions.iter().enumerate() {
-        jump_targets.push(decode_jump_target(*inst, pc_idx, inst_count));
+        let target = decode_jump_target(*inst, pc_idx, inst_count);
+        if let Some(target_pc) = target
+            && target_pc < incoming_targets.len()
+        {
+            incoming_targets[target_pc] = true;
+        }
+        jump_targets.push(target);
+    }
+    for handler in &caller.exception_handlers {
+        let handler_pc = handler.handler_pc as usize;
+        if handler_pc < incoming_targets.len() {
+            incoming_targets[handler_pc] = true;
+        }
     }
 
     let mut rebuilt: Vec<(Instruction, Option<usize>)> = Vec::with_capacity(inst_count + 16);
@@ -615,6 +963,42 @@ fn inline_leaf_constructors(
                         pushed_any = true;
                     }
                     if !pushed_any {
+                        if let Some((prev_inst, None)) = rebuilt.last()
+                            && !incoming_targets[old_pc]
+                            && arg_count == 1
+                            && prev_inst.raw_opcode() == OpCode::Mov as u8
+                            && prev_inst.dst() == arg_base
+                        {
+                            let mut overwrites_before_read = false;
+                            for (&scan_inst, &is_target) in caller.instructions[old_pc + 1..]
+                                .iter()
+                                .zip(&incoming_targets[old_pc + 1..inst_count])
+                            {
+                                if is_target {
+                                    break;
+                                }
+                                let scan_raw = scan_inst.raw_opcode();
+                                if instruction_reads_register(&scan_inst, arg_base) {
+                                    break;
+                                }
+                                if instruction_write_dst(&scan_inst) == Some(arg_base) {
+                                    overwrites_before_read = true;
+                                    break;
+                                }
+                                if is_control_flow_terminator(scan_raw)
+                                    || is_conditional_branch(scan_raw)
+                                    || scan_raw == OpCode::Jump as u8
+                                    || scan_raw == OpCode::Switch as u8
+                                {
+                                    break;
+                                }
+                            }
+                            if overwrites_before_read
+                                && let Some((slot_inst, _)) = rebuilt.last_mut()
+                            {
+                                *slot_inst = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                            }
+                        }
                         rebuilt.push((Instruction::format_a(OpCode::Nop, 0, 0, 0, 0), None));
                     }
                     any_inlined = true;
@@ -669,8 +1053,6 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
 
     let max_passes = 6;
     for _pass_index in 0..max_passes {
-        let mut changed = propagate_block_copies(&mut stream, &critical_targets);
-
         let mut old_pc_to_stream_idx: Vec<Option<usize>> = vec![None; original_count + 1];
         for (stream_idx, entry) in stream.iter().enumerate() {
             for &covered_pc in &entry.covered_original_pcs {
@@ -680,8 +1062,26 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
             }
         }
         old_pc_to_stream_idx[original_count] = Some(stream.len());
+        for reverse_pc in (0..original_count).rev() {
+            if old_pc_to_stream_idx[reverse_pc].is_none() {
+                old_pc_to_stream_idx[reverse_pc] = old_pc_to_stream_idx[reverse_pc + 1];
+            }
+        }
+        let mut stream_critical = vec![false; stream.len() + 1];
+        for &crit_pc in &critical_targets {
+            if let Some(Some(target_idx)) = old_pc_to_stream_idx.get(crit_pc).copied()
+                && target_idx < stream_critical.len()
+            {
+                stream_critical[target_idx] = true;
+            }
+        }
+
+        let mut changed = propagate_block_copies(&mut stream, &stream_critical);
+        changed |=
+            propagate_single_def_copies(&mut stream, &old_pc_to_stream_idx, &stream_critical);
 
         let mut next_stream: Vec<IntermediateInstruction> = Vec::with_capacity(stream.len());
+        let mut pending_orphaned_pcs: Vec<usize> = Vec::new();
         let mut cursor = 0;
 
         while cursor < stream.len() {
@@ -689,6 +1089,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
             let current_raw = current_entry.instruction.raw_opcode();
 
             if current_raw == OpCode::Nop as u8 {
+                pending_orphaned_pcs.extend_from_slice(&current_entry.covered_original_pcs);
                 changed = true;
                 cursor += 1;
                 continue;
@@ -698,12 +1099,13 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                 let mov_dst = current_entry.instruction.dst();
                 let mov_src = current_entry.instruction.src1();
                 if mov_dst == mov_src {
+                    pending_orphaned_pcs.extend_from_slice(&current_entry.covered_original_pcs);
                     changed = true;
                     cursor += 1;
                     continue;
                 }
                 let src_is_non_ref =
-                    is_reg_non_reference_at(&stream, cursor, mov_src, &critical_targets);
+                    is_reg_non_reference_at(&stream, cursor, mov_src, &stream_critical);
                 if (!function.reference_registers.contains(&mov_dst) || src_is_non_ref)
                     && is_dead_after_use(
                         &stream,
@@ -711,9 +1113,10 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                         mov_dst,
                         function,
                         &old_pc_to_stream_idx,
-                        &critical_targets,
+                        &stream_critical,
                     )
                 {
+                    pending_orphaned_pcs.extend_from_slice(&current_entry.covered_original_pcs);
                     changed = true;
                     cursor += 1;
                     continue;
@@ -727,9 +1130,10 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                     current_entry.instruction.dst(),
                     function,
                     &old_pc_to_stream_idx,
-                    &critical_targets,
+                    &stream_critical,
                 )
             {
+                pending_orphaned_pcs.extend_from_slice(&current_entry.covered_original_pcs);
                 changed = true;
                 cursor += 1;
                 continue;
@@ -737,10 +1141,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
 
             if cursor + 1 < stream.len() {
                 let next_entry = &stream[cursor + 1];
-                let next_is_critical = next_entry
-                    .covered_original_pcs
-                    .first()
-                    .is_some_and(|first_pc| critical_targets.contains(first_pc));
+                let next_is_critical = stream_critical[cursor + 1];
                 let next_raw = next_entry.instruction.raw_opcode();
 
                 // ---------------------------------------------------------
@@ -765,7 +1166,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                             cmp_dst,
                             function,
                             &old_pc_to_stream_idx,
-                            &critical_targets,
+                            &stream_critical,
                         )
                     {
                         let fused_opcode =
@@ -808,7 +1209,11 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
 
                         let reg_a = current_entry.instruction.src1();
                         let reg_b = current_entry.instruction.src2();
-                        let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                        let mut merged_pcs = {
+                            let mut combined_pcs = std::mem::take(&mut pending_orphaned_pcs);
+                            combined_pcs.extend_from_slice(&current_entry.covered_original_pcs);
+                            combined_pcs
+                        };
                         merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                         next_stream.push(IntermediateInstruction {
@@ -851,10 +1256,16 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                     r_imm,
                                     function,
                                     &old_pc_to_stream_idx,
-                                    &critical_targets,
+                                    &stream_critical,
                                 )
                             {
-                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
                                 merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                                 next_stream.push(IntermediateInstruction {
@@ -887,10 +1298,16 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                     r_imm,
                                     function,
                                     &old_pc_to_stream_idx,
-                                    &critical_targets,
+                                    &stream_critical,
                                 )
                             {
-                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
                                 merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                                 next_stream.push(IntermediateInstruction {
@@ -930,10 +1347,16 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                     r_imm,
                                     function,
                                     &old_pc_to_stream_idx,
-                                    &critical_targets,
+                                    &stream_critical,
                                 )
                             {
-                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
                                 merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                                 next_stream.push(IntermediateInstruction {
@@ -966,10 +1389,16 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                     r_imm,
                                     function,
                                     &old_pc_to_stream_idx,
-                                    &critical_targets,
+                                    &stream_critical,
                                 )
                             {
-                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
                                 merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                                 next_stream.push(IntermediateInstruction {
@@ -1012,12 +1441,16 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                             r_tmp,
                             function,
                             &old_pc_to_stream_idx,
-                            &critical_targets,
+                            &stream_critical,
                         )
                     {
                         let updated_instruction =
                             rewrite_instruction_destination(&current_entry.instruction, r_dest);
-                        let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                        let mut merged_pcs = {
+                            let mut combined_pcs = std::mem::take(&mut pending_orphaned_pcs);
+                            combined_pcs.extend_from_slice(&current_entry.covered_original_pcs);
+                            combined_pcs
+                        };
                         merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                         next_stream.push(IntermediateInstruction {
@@ -1034,8 +1467,21 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                 }
             }
 
-            next_stream.push(current_entry.clone());
+            let mut cloned_entry = current_entry.clone();
+            if !pending_orphaned_pcs.is_empty() {
+                let mut combined = std::mem::take(&mut pending_orphaned_pcs);
+                combined.extend_from_slice(&cloned_entry.covered_original_pcs);
+                cloned_entry.covered_original_pcs = combined;
+            }
+            next_stream.push(cloned_entry);
             cursor += 1;
+        }
+        if !pending_orphaned_pcs.is_empty()
+            && let Some(last_entry) = next_stream.last_mut()
+        {
+            last_entry
+                .covered_original_pcs
+                .extend_from_slice(&pending_orphaned_pcs);
         }
 
         stream = next_stream;
@@ -1393,7 +1839,7 @@ fn is_reg_non_reference_at(
     stream: &[IntermediateInstruction],
     at_idx: usize,
     target_reg: u16,
-    critical_targets: &HashSet<usize>,
+    stream_critical: &[bool],
 ) -> bool {
     let mut scan_idx = at_idx;
     loop {
@@ -1410,17 +1856,12 @@ fn is_reg_non_reference_at(
                 let source_reg = inst.src1();
                 if source_reg != target_reg {
                     // Check if source_reg was defined right in this block as non-reference
-                    return is_reg_non_reference_at(stream, scan_idx, source_reg, critical_targets);
+                    return is_reg_non_reference_at(stream, scan_idx, source_reg, stream_critical);
                 }
             }
             return false;
         }
-        if stream[scan_idx]
-            .covered_original_pcs
-            .first()
-            .is_some_and(|first_pc| critical_targets.contains(first_pc))
-            || scan_idx == 0
-        {
+        if stream_critical[scan_idx] || scan_idx == 0 {
             return false;
         }
         scan_idx -= 1;
@@ -1466,17 +1907,13 @@ fn is_reg_non_reference_raw(
 /// Performs local basic-block copy propagation (`Mov dst, src` -> replace reads of `dst` with `src`).
 fn propagate_block_copies(
     stream: &mut [IntermediateInstruction],
-    critical_targets: &HashSet<usize>,
+    stream_critical: &[bool],
 ) -> bool {
     let mut any_changed = false;
     let mut copy_map: HashMap<u16, u16> = HashMap::new();
 
-    for entry in stream.iter_mut() {
-        if entry
-            .covered_original_pcs
-            .first()
-            .is_some_and(|first_pc| critical_targets.contains(first_pc))
-        {
+    for (stream_idx, entry) in stream.iter_mut().enumerate() {
+        if stream_critical[stream_idx] {
             copy_map.clear();
         }
 
@@ -1524,6 +1961,132 @@ fn propagate_block_copies(
     any_changed
 }
 
+/// Propagates single-definition `Mov alias, orig` copies across forward conditional diamonds
+/// when `alias` has a single definition, `orig` is written in the same basic block before `alias`
+/// and never modified across the interval `[orig_idx + 1..=max_read_idx]`, and all uses of `alias`
+/// lie inside a closed forward CFG diamond.
+fn propagate_single_def_copies(
+    stream: &mut [IntermediateInstruction],
+    old_pc_to_stream_idx: &[Option<usize>],
+    stream_critical: &[bool],
+) -> bool {
+    let stream_len = stream.len();
+    if stream_len < 3 {
+        return false;
+    }
+
+    let mut def_counts: HashMap<u16, usize> = HashMap::new();
+    let mut mov_candidates: Vec<(usize, u16, u16)> = Vec::new();
+    let mut jump_edges: Vec<(usize, usize)> = Vec::new();
+
+    for (idx, entry) in stream.iter().enumerate() {
+        let inst = entry.instruction;
+        if let Some(written) = instruction_write_dst(&inst) {
+            *def_counts.entry(written).or_insert(0) += 1;
+        }
+        if inst.raw_opcode() == OpCode::Mov as u8 && inst.dst() != inst.src1() {
+            mov_candidates.push((idx, inst.dst(), inst.src1()));
+        }
+        if let Some(target_old) = entry.jump_target_old_pc
+            && target_old < old_pc_to_stream_idx.len()
+            && let Some(target_idx) = old_pc_to_stream_idx[target_old]
+        {
+            jump_edges.push((idx, target_idx));
+        }
+    }
+
+    let mut any_changed = false;
+    for (mov_idx, alias_reg, orig_reg) in mov_candidates {
+        if def_counts.get(&alias_reg).copied() != Some(1) {
+            continue;
+        }
+        // Scan backward in the same basic block to locate the defining instruction for `orig_reg`.
+        let mut orig_def_idx: Option<usize> = None;
+        let mut scan_idx = mov_idx;
+        while scan_idx > 0 {
+            if stream_critical[scan_idx] {
+                break;
+            }
+            scan_idx -= 1;
+            let prev_raw = stream[scan_idx].instruction.raw_opcode();
+            if is_control_flow_terminator(prev_raw)
+                || is_conditional_branch(prev_raw)
+                || prev_raw == OpCode::Jump as u8
+                || prev_raw == OpCode::Switch as u8
+            {
+                break;
+            }
+            if instruction_write_dst(&stream[scan_idx].instruction) == Some(orig_reg) {
+                orig_def_idx = Some(scan_idx);
+                break;
+            }
+        }
+        let Some(orig_idx) = orig_def_idx else {
+            continue;
+        };
+
+        let mut max_read_idx = mov_idx;
+        let mut reads_outside = false;
+        let mut read_indices: Vec<usize> = Vec::new();
+        for (scan_idx, entry) in stream.iter().enumerate() {
+            let raw = entry.instruction.raw_opcode();
+            if instruction_reads_register(&entry.instruction, alias_reg) {
+                if raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8 {
+                    reads_outside = true;
+                    break;
+                }
+                if scan_idx <= mov_idx {
+                    reads_outside = true;
+                    break;
+                }
+                if can_rewrite_read_register(&entry.instruction, alias_reg) {
+                    max_read_idx = max_read_idx.max(scan_idx);
+                    read_indices.push(scan_idx);
+                } else {
+                    reads_outside = true;
+                    break;
+                }
+            }
+        }
+        if reads_outside || read_indices.is_empty() {
+            continue;
+        }
+
+        let orig_modified_in_span = ((orig_idx + 1)..=max_read_idx)
+            .any(|idx| instruction_write_dst(&stream[idx].instruction) == Some(orig_reg));
+        if orig_modified_in_span {
+            continue;
+        }
+
+        let interval_closed = jump_edges.iter().all(|&(src_idx, dst_idx)| {
+            let enters_from_outside = dst_idx > mov_idx
+                && dst_idx <= max_read_idx
+                && !(mov_idx..=max_read_idx).contains(&src_idx);
+            let backward_edge_inside = dst_idx <= src_idx
+                && (mov_idx..=max_read_idx).contains(&src_idx)
+                && (mov_idx..=max_read_idx).contains(&dst_idx);
+            let jumps_between_orig_and_mov = dst_idx > orig_idx && dst_idx <= mov_idx;
+            !enters_from_outside && !backward_edge_inside && !jumps_between_orig_and_mov
+        });
+        if !interval_closed {
+            continue;
+        }
+
+        for read_idx in read_indices {
+            if let Some(rewritten) = rewrite_instruction_read_register(
+                &stream[read_idx].instruction,
+                alias_reg,
+                orig_reg,
+            ) {
+                stream[read_idx].instruction = rewritten;
+                any_changed = true;
+            }
+        }
+    }
+
+    any_changed
+}
+
 /// Forward CFG liveness check over `IntermediateInstruction` stream: returns `true` iff
 /// `reg` is never read again before being overwritten (or exiting) along all paths after `use_idx`.
 fn is_dead_after_use(
@@ -1532,7 +2095,7 @@ fn is_dead_after_use(
     reg: u16,
     function: &CompiledFunction,
     old_pc_to_stream_idx: &[Option<usize>],
-    critical_targets: &HashSet<usize>,
+    stream_critical: &[bool],
 ) -> bool {
     let len = stream.len();
     if use_idx >= len {
@@ -1540,7 +2103,7 @@ fn is_dead_after_use(
     }
 
     let reg_pinned_as_ref = function.reference_registers.contains(&reg)
-        && !is_reg_non_reference_at(stream, use_idx, reg, critical_targets);
+        && !is_reg_non_reference_at(stream, use_idx, reg, stream_critical);
 
     let mut visited = vec![false; len];
     let mut worklist: Vec<usize> = Vec::with_capacity(8);
