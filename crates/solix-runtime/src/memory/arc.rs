@@ -11,6 +11,7 @@ use crate::memory::heap::VirtualHeap;
 ///
 /// # Errors
 /// Returns `RuntimeError` if the reference count overflows `MAX_REF_COUNT` or address is invalid.
+#[inline(always)]
 pub fn inc_ref(heap: &mut VirtualHeap, payload_addr: u32) -> Result<u32, RuntimeError> {
     if payload_addr == 0 {
         return Ok(0);
@@ -27,6 +28,7 @@ pub fn inc_ref(heap: &mut VirtualHeap, payload_addr: u32) -> Result<u32, Runtime
 ///
 /// # Errors
 /// Returns `RuntimeError` if the address is invalid.
+#[inline(always)]
 pub fn dec_ref(heap: &mut VirtualHeap, payload_addr: u32) -> Result<u32, RuntimeError> {
     if payload_addr == 0 {
         return Ok(0);

@@ -630,24 +630,32 @@ impl VirtualMachine {
         self.call_frames.last().map_or(0, |f| f.pc)
     }
 
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn null_reference_error() -> RuntimeError {
+        RuntimeError::NullReferenceAccess
+    }
+
     /// Returns a reference to the topmost active call frame.
     ///
     /// # Errors
     /// Returns `RuntimeError::NullReferenceAccess` if the call stack is empty.
+    #[inline(always)]
     pub fn current_frame(&self) -> Result<&CallFrame, RuntimeError> {
         self.call_frames
             .last()
-            .ok_or(RuntimeError::NullReferenceAccess)
+            .ok_or_else(Self::null_reference_error)
     }
 
     /// Returns a mutable reference to the topmost active call frame.
     ///
     /// # Errors
     /// Returns `RuntimeError::NullReferenceAccess` if the call stack is empty.
+    #[inline(always)]
     pub fn current_frame_mut(&mut self) -> Result<&mut CallFrame, RuntimeError> {
         self.call_frames
             .last_mut()
-            .ok_or(RuntimeError::NullReferenceAccess)
+            .ok_or_else(Self::null_reference_error)
     }
 
     /// Reads a value from local register `reg` within the current call frame.
@@ -814,7 +822,7 @@ impl VirtualMachine {
         let frame = self
             .call_frames
             .pop()
-            .ok_or(RuntimeError::NullReferenceAccess)?;
+            .ok_or_else(Self::null_reference_error)?;
 
         if self.call_frames.is_empty() {
             self.last_return_value = return_val;

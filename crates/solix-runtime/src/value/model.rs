@@ -4,6 +4,15 @@
 
 use crate::exceptions::RuntimeError;
 
+#[cold]
+#[inline(never)]
+fn type_mismatch_error(expected: &'static str, found_value: &Value) -> RuntimeError {
+    RuntimeError::TypeMismatch {
+        expected: expected.to_string(),
+        found: found_value.type_name().to_string(),
+    }
+}
+
 /// Strongly-typed 64-bit tagged value representation for register and heap variables.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Value {
@@ -91,10 +100,7 @@ impl Value {
     pub fn as_bool(&self) -> Result<bool, RuntimeError> {
         match self {
             Self::Bool(boolean_value) => Ok(*boolean_value),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "bool".to_string(),
-                found: self.type_name().to_string(),
-            }),
+            _ => Err(type_mismatch_error("bool", self)),
         }
     }
 
@@ -104,10 +110,7 @@ impl Value {
         match self {
             Self::I32(primitive_number) => Ok(*primitive_number),
             Self::I64(primitive_number) => Ok(*primitive_number as i32),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "int32".to_string(),
-                found: self.type_name().to_string(),
-            }),
+            _ => Err(type_mismatch_error("int32", self)),
         }
     }
 
@@ -117,10 +120,7 @@ impl Value {
         match self {
             Self::I64(number_val) => Ok(*number_val),
             Self::I32(number_val) => Ok(*number_val as i64),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "int64".to_string(),
-                found: self.type_name().to_string(),
-            }),
+            _ => Err(type_mismatch_error("int64", self)),
         }
     }
 
@@ -131,10 +131,7 @@ impl Value {
             Self::F64(float_val) => Ok(*float_val),
             Self::I32(number_val) => Ok(*number_val as f64),
             Self::I64(number_val) => Ok(*number_val as f64),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "float64".to_string(),
-                found: self.type_name().to_string(),
-            }),
+            _ => Err(type_mismatch_error("float64", self)),
         }
     }
 
@@ -144,10 +141,7 @@ impl Value {
         match self {
             Self::Ref(heap_address) => Ok(*heap_address),
             Self::Null => Ok(0),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "ref".to_string(),
-                found: self.type_name().to_string(),
-            }),
+            _ => Err(type_mismatch_error("ref", self)),
         }
     }
 
@@ -156,10 +150,7 @@ impl Value {
     pub fn as_fn_ptr(&self) -> Result<u32, RuntimeError> {
         match self {
             Self::FnPtr(func_id) => Ok(*func_id),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "fn_ptr".to_string(),
-                found: self.type_name().to_string(),
-            }),
+            _ => Err(type_mismatch_error("fn_ptr", self)),
         }
     }
 

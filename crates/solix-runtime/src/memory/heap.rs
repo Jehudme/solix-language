@@ -409,14 +409,21 @@ impl VirtualHeap {
     // Header Inspection & Mutation
     // =========================================================================
 
+    #[cold]
+    #[inline(never)]
+    fn null_reference_error() -> RuntimeError {
+        RuntimeError::NullReferenceAccess
+    }
+
     /// Reads the `BlockHeader` preceding the payload at `payload_addr`.
     ///
     /// # Errors
     /// Returns `RuntimeError::NullReferenceAccess` if the address is invalid.
+    #[inline(always)]
     pub fn read_header(&self, payload_addr: u32) -> Result<BlockHeader, RuntimeError> {
         let addr = payload_addr as usize;
         if addr < self.static_size + HEADER_SIZE || addr > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         let header_start = addr - HEADER_SIZE;
         let mut bytes = [0u8; HEADER_SIZE];
@@ -428,6 +435,7 @@ impl VirtualHeap {
     ///
     /// # Errors
     /// Returns `RuntimeError::NullReferenceAccess` if the address is invalid.
+    #[inline(always)]
     pub fn write_header(
         &mut self,
         payload_addr: u32,
@@ -435,7 +443,7 @@ impl VirtualHeap {
     ) -> Result<(), RuntimeError> {
         let addr = payload_addr as usize;
         if addr < self.static_size + HEADER_SIZE || addr > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         let header_start = addr - HEADER_SIZE;
         let bytes = header.to_bytes();
@@ -494,50 +502,55 @@ impl VirtualHeap {
     // =========================================================================
 
     /// Reads a single byte at virtual byte address `addr`.
+    #[inline(always)]
     pub fn read_u8(&self, addr: u32) -> Result<u8, RuntimeError> {
         let pos = addr as usize;
         self.buffer
             .get(pos)
             .copied()
-            .ok_or(RuntimeError::NullReferenceAccess)
+            .ok_or_else(Self::null_reference_error)
     }
 
     /// Writes a single byte at virtual byte address `addr`.
+    #[inline(always)]
     pub fn write_u8(&mut self, addr: u32, val: u8) -> Result<(), RuntimeError> {
         let pos = addr as usize;
         let cell = self
             .buffer
             .get_mut(pos)
-            .ok_or(RuntimeError::NullReferenceAccess)?;
+            .ok_or_else(Self::null_reference_error)?;
         *cell = val;
         Ok(())
     }
 
     /// Reads a little-endian 16-bit unsigned integer at virtual byte address `addr`.
+    #[inline(always)]
     pub fn read_u16(&self, addr: u32) -> Result<u16, RuntimeError> {
         let pos = addr as usize;
         if pos + 2 > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         let bytes = [self.buffer[pos], self.buffer[pos + 1]];
         Ok(u16::from_le_bytes(bytes))
     }
 
     /// Writes a little-endian 16-bit unsigned integer at virtual byte address `addr`.
+    #[inline(always)]
     pub fn write_u16(&mut self, addr: u32, word_val: u16) -> Result<(), RuntimeError> {
         let pos = addr as usize;
         if pos + 2 > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         self.buffer[pos..pos + 2].copy_from_slice(&word_val.to_le_bytes());
         Ok(())
     }
 
     /// Reads a little-endian 32-bit unsigned integer at virtual byte address `addr`.
+    #[inline(always)]
     pub fn read_u32(&self, addr: u32) -> Result<u32, RuntimeError> {
         let pos = addr as usize;
         if pos + 4 > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         let bytes = [
             self.buffer[pos],
@@ -549,20 +562,22 @@ impl VirtualHeap {
     }
 
     /// Writes a little-endian 32-bit unsigned integer at virtual byte address `addr`.
+    #[inline(always)]
     pub fn write_u32(&mut self, addr: u32, val: u32) -> Result<(), RuntimeError> {
         let pos = addr as usize;
         if pos + 4 > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         self.buffer[pos..pos + 4].copy_from_slice(&val.to_le_bytes());
         Ok(())
     }
 
     /// Reads a little-endian 64-bit unsigned integer at virtual byte address `addr`.
+    #[inline(always)]
     pub fn read_u64(&self, addr: u32) -> Result<u64, RuntimeError> {
         let pos = addr as usize;
         if pos + 8 > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         let bytes = [
             self.buffer[pos],
@@ -578,10 +593,11 @@ impl VirtualHeap {
     }
 
     /// Writes a little-endian 64-bit unsigned integer at virtual byte address `addr`.
+    #[inline(always)]
     pub fn write_u64(&mut self, addr: u32, val: u64) -> Result<(), RuntimeError> {
         let pos = addr as usize;
         if pos + 8 > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         self.buffer[pos..pos + 8].copy_from_slice(&val.to_le_bytes());
         Ok(())

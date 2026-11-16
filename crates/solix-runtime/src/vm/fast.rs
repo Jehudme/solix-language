@@ -9,12 +9,55 @@ use crate::value::Value;
 use crate::vm::engine::VirtualMachine;
 use solix_common::bytecode::{ConstantPoolValue, Instruction, OpCode};
 
+#[cold]
+#[inline(never)]
+fn invalid_opcode_error(pc: u32, raw_opcode: u8) -> RuntimeError {
+    RuntimeError::InvalidOpCode {
+        pc,
+        opcode: raw_opcode,
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn stack_overflow_error(current_depth: usize, max_depth: usize) -> RuntimeError {
+    RuntimeError::StackOverflow {
+        current_depth,
+        max_depth,
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn function_not_found_error(function_id: u32) -> RuntimeError {
+    RuntimeError::FunctionNotFound {
+        symbol_or_id: format!("#{function_id}"),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_static_offset_error(offset: u32, total_static: u32) -> RuntimeError {
+    RuntimeError::InvalidStaticOffset {
+        offset,
+        total_static,
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn grow_register_stack(register_stack: &mut Vec<Value>, required: usize) {
+    register_stack.resize(required + 4096, Value::Null);
+}
+
 impl VirtualMachine {
+
     /// Fast-path frame activation: copies argument registers within `register_stack` without allocating a heap vector.
     ///
     /// # Errors
     /// Returns `RuntimeError::StackOverflow` if recursion depth exceeds configured limit,
     /// or `RuntimeError::FunctionNotFound` if `function_id` is unrecognized.
+    #[inline(always)]
     pub(crate) fn push_frame_fast(
         &mut self,
         function_id: u32,
@@ -23,17 +66,17 @@ impl VirtualMachine {
         arg_count: usize,
     ) -> Result<(), RuntimeError> {
         if self.call_frames.len() >= self.context.options.max_call_stack_depth {
-            return Err(RuntimeError::StackOverflow {
-                current_depth: self.call_frames.len(),
-                max_depth: self.context.options.max_call_stack_depth,
-            });
+            return Err(stack_overflow_error(
+                self.call_frames.len(),
+                self.context.options.max_call_stack_depth,
+            ));
         }
 
-        let func = self.context.get_function(function_id).ok_or_else(|| {
-            RuntimeError::FunctionNotFound {
-                symbol_or_id: format!("#{function_id}"),
-            }
-        })?;
+        let func = self
+            .context
+            .all_functions
+            .get(function_id as usize)
+            .ok_or_else(|| function_not_found_error(function_id))?;
 
         let meta = &self.context.function_meta[function_id as usize];
         let binary_id = meta.binary_id;
@@ -47,17 +90,20 @@ impl VirtualMachine {
             })
         };
         let num_regs = (func.num_registers as usize).max(arg_count);
+        let required_regs = reg_base + num_regs;
 
-        if reg_base + num_regs > self.register_stack.len() {
-            self.register_stack
-                .resize(reg_base + num_regs + 4096, Value::Null);
+        if required_regs > self.register_stack.len() {
+            grow_register_stack(&mut self.register_stack, required_regs);
         }
 
         if meta.has_references {
             for &ref_reg in &func.reference_registers {
                 let reg_index = ref_reg as usize;
                 if reg_index >= arg_count && reg_index < num_regs {
-                    self.register_stack[reg_base + reg_index] = Value::Null;
+                    // SAFETY: reg_base + reg_index < required_regs <= self.register_stack.len() was ensured above.
+                    unsafe {
+                        *self.register_stack.as_mut_ptr().add(reg_base + reg_index) = Value::Null;
+                    }
                 }
             }
         }
@@ -123,8 +169,12 @@ impl VirtualMachine {
                 let curr = self
                     .call_frames
                     .last()
-                    .ok_or(RuntimeError::NullReferenceAccess)?;
-                let func = &self.context.all_functions[curr.function_id as usize];
+                    .ok_or_else(Self::null_reference_error)?;
+                let func = self
+                    .context
+                    .all_functions
+                    .get(curr.function_id as usize)
+                    .ok_or_else(Self::null_reference_error)?;
                 inst_ptr = func.instructions.as_ptr();
                 inst_len = func.instructions.len();
                 pc = curr.pc as usize;
@@ -166,7 +216,7 @@ impl VirtualMachine {
                 let frame = self
                     .call_frames
                     .pop()
-                    .ok_or(RuntimeError::NullReferenceAccess)?;
+                    .ok_or_else(Self::null_reference_error)?;
                 if self.call_frames.len() <= target_depth {
                     self.last_return_value = ret_val;
                     break;
@@ -174,7 +224,17 @@ impl VirtualMachine {
                 let caller_frame = self
                     .call_frames
                     .last()
-                    .ok_or(RuntimeError::NullReferenceAccess)?;
+                    .ok_or_else(Self::null_reference_error)?;
+                let caller_func = self
+                    .context
+                    .all_functions
+                    .get(caller_frame.function_id as usize)
+                    .ok_or_else(Self::null_reference_error)?;
+                inst_ptr = caller_func.instructions.as_ptr();
+                inst_len = caller_func.instructions.len();
+                pc = caller_frame.pc as usize;
+                static_base = caller_frame.static_base_offset;
+                binary_id = caller_frame.binary_id;
                 // SAFETY: caller_dst is within caller frame register window
                 unsafe {
                     let caller_reg_base = self
@@ -182,9 +242,8 @@ impl VirtualMachine {
                         .as_mut_ptr()
                         .add(caller_frame.register_base);
                     *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
+                    reg_base = caller_reg_base;
                 }
-                flush_telemetry!();
-                reload_frame!();
                 finish_instruction!();
                 continue;
             }
@@ -194,10 +253,10 @@ impl VirtualMachine {
             pc += 1;
             local_inst_count += 1;
 
-            let opcode = inst.opcode(pc).map_err(|_| RuntimeError::InvalidOpCode {
-                pc: pc as u32,
-                opcode: inst.raw_opcode(),
-            })?;
+            let raw_opcode = inst.raw_opcode();
+            let Some(opcode) = OpCode::from_raw_u8(raw_opcode) else {
+                return Err(invalid_opcode_error(pc as u32, raw_opcode));
+            };
             match opcode {
                 // =============================================================
                 // 0x00 .. 0x07: Constants & Register Movement
@@ -450,51 +509,85 @@ impl VirtualMachine {
                 // 0x21 .. 0x26: Bitwise Operations
                 // =============================================================
                 OpCode::Band => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let raw_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let raw_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let result = match (raw_a, raw_b) {
+                        (Value::I32(lhs), Value::I32(rhs)) => Value::I32(lhs & rhs),
+                        _ => Value::I64(raw_a.as_i64()? & raw_b.as_i64()?),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a & val_b);
+                        *reg_base.add(inst.dst() as usize) = result;
                     }
                 }
 
                 OpCode::Bor => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let raw_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let raw_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let result = match (raw_a, raw_b) {
+                        (Value::I32(lhs), Value::I32(rhs)) => Value::I32(lhs | rhs),
+                        _ => Value::I64(raw_a.as_i64()? | raw_b.as_i64()?),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a | val_b);
+                        *reg_base.add(inst.dst() as usize) = result;
                     }
                 }
 
                 OpCode::Bxor => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
+                    let raw_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let raw_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let result = match (raw_a, raw_b) {
+                        (Value::I32(lhs), Value::I32(rhs)) => Value::I32(lhs ^ rhs),
+                        _ => Value::I64(raw_a.as_i64()? ^ raw_b.as_i64()?),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a ^ val_b);
+                        *reg_base.add(inst.dst() as usize) = result;
                     }
                 }
 
                 OpCode::Bnot => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
+                    let raw_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let result = match raw_a {
+                        Value::I32(lhs) => Value::I32(!lhs),
+                        _ => Value::I64(!raw_a.as_i64()?),
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(!val_a);
+                        *reg_base.add(inst.dst() as usize) = result;
                     }
                 }
 
                 OpCode::Shl => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    let shift = (val_b & 63) as u32;
+                    let raw_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let raw_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let result = match (raw_a, raw_b) {
+                        (Value::I32(lhs), Value::I32(rhs)) => {
+                            let shift = (rhs & 31) as u32;
+                            Value::I32(lhs.wrapping_shl(shift))
+                        }
+                        _ => {
+                            let shift = (raw_b.as_i64()? & 63) as u32;
+                            Value::I64(raw_a.as_i64()?.wrapping_shl(shift))
+                        }
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_shl(shift));
+                        *reg_base.add(inst.dst() as usize) = result;
                     }
                 }
 
                 OpCode::Shr => {
-                    let val_a = unsafe { *reg_base.add(inst.src1() as usize) }.as_i64()?;
-                    let val_b = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
-                    let shift = (val_b & 63) as u32;
+                    let raw_a = unsafe { *reg_base.add(inst.src1() as usize) };
+                    let raw_b = unsafe { *reg_base.add(inst.src2() as usize) };
+                    let result = match (raw_a, raw_b) {
+                        (Value::I32(lhs), Value::I32(rhs)) => {
+                            let shift = (rhs & 31) as u32;
+                            Value::I32(lhs.wrapping_shr(shift))
+                        }
+                        _ => {
+                            let shift = (raw_b.as_i64()? & 63) as u32;
+                            Value::I64(raw_a.as_i64()?.wrapping_shr(shift))
+                        }
+                    };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_shr(shift));
+                        *reg_base.add(inst.dst() as usize) = result;
                     }
                 }
 
@@ -826,7 +919,6 @@ impl VirtualMachine {
                         continue;
                     }
 
-                    flush_telemetry!();
                     self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
                     reload_frame!();
                     finish_instruction!();
@@ -908,7 +1000,6 @@ impl VirtualMachine {
                         continue;
                     }
 
-                    flush_telemetry!();
                     self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
                     reload_frame!();
                     finish_instruction!();
@@ -978,7 +1069,6 @@ impl VirtualMachine {
                         continue;
                     }
 
-                    flush_telemetry!();
                     self.push_frame_fast(
                         resolved_func_id,
                         caller_dst,
@@ -1100,7 +1190,6 @@ impl VirtualMachine {
                     );
                     self.patch_instruction(caller_func_id, caller_pc, quickened);
 
-                    flush_telemetry!();
                     self.push_frame_fast(global_id, caller_dst, caller_arg_start, arg_count)?;
                     reload_frame!();
                     finish_instruction!();
@@ -1203,7 +1292,6 @@ impl VirtualMachine {
                         }
                     }
 
-                    flush_telemetry!();
                     self.push_frame_fast(global_id, caller_dst, caller_arg_start, arg_count)?;
                     reload_frame!();
                     finish_instruction!();
@@ -1239,7 +1327,6 @@ impl VirtualMachine {
                                 finish_instruction!();
                                 continue;
                             }
-                            flush_telemetry!();
                             self.push_frame_fast(
                                 global_func_id,
                                 caller_dst,
@@ -1270,7 +1357,6 @@ impl VirtualMachine {
                                 finish_instruction!();
                                 continue;
                             }
-                            flush_telemetry!();
                             self.push_frame_fast(
                                 global_func_id,
                                 caller_dst,
@@ -1298,7 +1384,7 @@ impl VirtualMachine {
                     let frame = self
                         .call_frames
                         .pop()
-                        .ok_or(RuntimeError::NullReferenceAccess)?;
+                        .ok_or_else(Self::null_reference_error)?;
                     if self.call_frames.len() <= target_depth {
                         self.last_return_value = ret_val;
                         break;
@@ -1306,7 +1392,17 @@ impl VirtualMachine {
                     let caller_frame = self
                         .call_frames
                         .last()
-                        .ok_or(RuntimeError::NullReferenceAccess)?;
+                        .ok_or_else(Self::null_reference_error)?;
+                    let caller_func = self
+                        .context
+                        .all_functions
+                        .get(caller_frame.function_id as usize)
+                        .ok_or_else(Self::null_reference_error)?;
+                    inst_ptr = caller_func.instructions.as_ptr();
+                    inst_len = caller_func.instructions.len();
+                    pc = caller_frame.pc as usize;
+                    static_base = caller_frame.static_base_offset;
+                    binary_id = caller_frame.binary_id;
                     // SAFETY: caller_dst is within caller frame register window
                     unsafe {
                         let caller_reg_base = self
@@ -1314,9 +1410,8 @@ impl VirtualMachine {
                             .as_mut_ptr()
                             .add(caller_frame.register_base);
                         *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
+                        reg_base = caller_reg_base;
                     }
-                    flush_telemetry!();
-                    reload_frame!();
                     finish_instruction!();
                     continue;
                 }
@@ -1327,7 +1422,7 @@ impl VirtualMachine {
                     let frame = self
                         .call_frames
                         .pop()
-                        .ok_or(RuntimeError::NullReferenceAccess)?;
+                        .ok_or_else(Self::null_reference_error)?;
                     if self.call_frames.len() <= target_depth {
                         self.last_return_value = ret_val;
                         break;
@@ -1335,7 +1430,17 @@ impl VirtualMachine {
                     let caller_frame = self
                         .call_frames
                         .last()
-                        .ok_or(RuntimeError::NullReferenceAccess)?;
+                        .ok_or_else(Self::null_reference_error)?;
+                    let caller_func = self
+                        .context
+                        .all_functions
+                        .get(caller_frame.function_id as usize)
+                        .ok_or_else(Self::null_reference_error)?;
+                    inst_ptr = caller_func.instructions.as_ptr();
+                    inst_len = caller_func.instructions.len();
+                    pc = caller_frame.pc as usize;
+                    static_base = caller_frame.static_base_offset;
+                    binary_id = caller_frame.binary_id;
                     // SAFETY: caller_dst is within caller frame register window
                     unsafe {
                         let caller_reg_base = self
@@ -1343,9 +1448,8 @@ impl VirtualMachine {
                             .as_mut_ptr()
                             .add(caller_frame.register_base);
                         *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
+                        reg_base = caller_reg_base;
                     }
-                    flush_telemetry!();
-                    reload_frame!();
                     finish_instruction!();
                     continue;
                 }
@@ -1443,14 +1547,7 @@ impl VirtualMachine {
                     let receiver = unsafe { *reg_base.add(inst.src1() as usize) };
                     let obj_addr = receiver.as_ref()?;
                     if obj_addr == 0 {
-                        eprintln!(
-                            "DEBUG GetField obj_addr==0: func={:?}, pc={}",
-                            self.call_frames
-                                .last()
-                                .map(|target_frame| target_frame.function_id),
-                            pc
-                        );
-                        return Err(RuntimeError::NullReferenceAccess);
+                        return Err(Self::null_reference_error());
                     }
                     let offset = inst.src2() as usize;
                     let field_addr = obj_addr + offset as u32;
@@ -1663,12 +1760,9 @@ impl VirtualMachine {
                             });
                         }
                     };
-                    let resolved_slot = self.context.resolve_static_slot(sym_str).ok_or(
-                        RuntimeError::InvalidStaticOffset {
-                            offset: pool_idx as u32,
-                            total_static: self.static_slots.len() as u32,
-                        },
-                    )?;
+                    let resolved_slot = self.context.resolve_static_slot(sym_str).ok_or_else(|| {
+                        invalid_static_offset_error(pool_idx as u32, self.static_slots.len() as u32)
+                    })?;
 
                     // In-place quickening to GetStaticDirect
                     let quickened = Instruction::format_b(
@@ -1709,12 +1803,9 @@ impl VirtualMachine {
                             });
                         }
                     };
-                    let resolved_slot = self.context.resolve_static_slot(sym_str).ok_or(
-                        RuntimeError::InvalidStaticOffset {
-                            offset: pool_idx as u32,
-                            total_static: self.static_slots.len() as u32,
-                        },
-                    )?;
+                    let resolved_slot = self.context.resolve_static_slot(sym_str).ok_or_else(|| {
+                        invalid_static_offset_error(pool_idx as u32, self.static_slots.len() as u32)
+                    })?;
 
                     // In-place quickening to SetStaticDirect
                     let quickened = Instruction::format_b(
@@ -1779,14 +1870,7 @@ impl VirtualMachine {
                     let arr_val = unsafe { *reg_base.add(inst.src1() as usize) };
                     let arr_addr = arr_val.as_ref()?;
                     if arr_addr == 0 {
-                        eprintln!(
-                            "DEBUG GetArray arr_addr==0: func={:?}, pc={}",
-                            self.call_frames
-                                .last()
-                                .map(|target_frame| target_frame.function_id),
-                            pc
-                        );
-                        return Err(RuntimeError::NullReferenceAccess);
+                        return Err(Self::null_reference_error());
                     }
                     let index_i64 = unsafe { *reg_base.add(inst.src2() as usize) }.as_i64()?;
                     let arr_offset = arr_addr as usize;
@@ -2136,26 +2220,33 @@ impl VirtualMachine {
                     let cap_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst() as usize;
 
-                    let payload_size = 8 + cap_count * 16;
-                    let payload_addr = self.heap.allocate(payload_size, BlockTag::Closure)?;
-                    self.heap.write_u32(payload_addr, target_lambda_id)?;
-                    self.heap.write_u32(payload_addr + 4, cap_count as u32)?;
-
-                    for index in 0..cap_count {
-                        let cell_addr = payload_addr + 8 + (index * 16) as u32;
-                        let cap_val = unsafe { *reg_base.add(cap_base + index) };
-                        let (tag_raw, payload_raw) = cap_val.to_tagged_parts();
-                        let _ = self.heap.write_u64(cell_addr, tag_raw);
-                        let _ = self.heap.write_u64(cell_addr + 8, payload_raw);
-                        if let Value::Ref(child_addr) = cap_val
-                            && child_addr > 0
-                        {
-                            crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                    if cap_count == 0 {
+                        // Stateless closure: encode directly as a tagged FnPtr with zero heap allocation.
+                        unsafe {
+                            *reg_base.add(caller_dst) = Value::FnPtr(target_lambda_id);
                         }
-                    }
+                    } else {
+                        let payload_size = 8 + cap_count * 16;
+                        let payload_addr = self.heap.allocate(payload_size, BlockTag::Closure)?;
+                        self.heap.write_u32(payload_addr, target_lambda_id)?;
+                        self.heap.write_u32(payload_addr + 4, cap_count as u32)?;
 
-                    unsafe {
-                        *reg_base.add(caller_dst) = Value::Ref(payload_addr);
+                        for index in 0..cap_count {
+                            let cell_addr = payload_addr + 8 + (index * 16) as u32;
+                            let cap_val = unsafe { *reg_base.add(cap_base + index) };
+                            let (tag_raw, payload_raw) = cap_val.to_tagged_parts();
+                            let _ = self.heap.write_u64(cell_addr, tag_raw);
+                            let _ = self.heap.write_u64(cell_addr + 8, payload_raw);
+                            if let Value::Ref(child_addr) = cap_val
+                                && child_addr > 0
+                            {
+                                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                            }
+                        }
+
+                        unsafe {
+                            *reg_base.add(caller_dst) = Value::Ref(payload_addr);
+                        }
                     }
                 }
 
@@ -2163,18 +2254,20 @@ impl VirtualMachine {
                     let capture_base = inst.arg_base() as usize;
                     let capture_count = inst.arg_count() as usize;
 
-                    let closure_addr = self
-                        .current_frame()?
-                        .active_closure
-                        .ok_or(RuntimeError::NullReferenceAccess)?;
+                    if capture_count > 0 {
+                        let closure_addr = self
+                            .current_frame()?
+                            .active_closure
+                            .ok_or_else(Self::null_reference_error)?;
 
-                    for index in 0..capture_count {
-                        let cell_addr = closure_addr + 8 + (index * 16) as u32;
-                        let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
-                        let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
-                        unsafe {
-                            *reg_base.add(capture_base + index) =
-                                Value::from_tagged_parts(tag_raw, payload_raw);
+                        for index in 0..capture_count {
+                            let cell_addr = closure_addr + 8 + (index * 16) as u32;
+                            let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                            let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
+                            unsafe {
+                                *reg_base.add(capture_base + index) =
+                                    Value::from_tagged_parts(tag_raw, payload_raw);
+                            }
                         }
                     }
                 }
@@ -2568,7 +2661,7 @@ impl VirtualMachine {
                         let _frame = self
                             .call_frames
                             .pop()
-                            .ok_or(RuntimeError::NullReferenceAccess)?;
+                            .ok_or_else(Self::null_reference_error)?;
 
                         if self.call_frames.len() <= target_depth {
                             if local_inst_count > 0 {
@@ -2594,10 +2687,136 @@ impl VirtualMachine {
             let frame = self
                 .call_frames
                 .last_mut()
-                .ok_or(RuntimeError::NullReferenceAccess)?;
+                .ok_or_else(Self::null_reference_error)?;
             frame.pc = pc as u32;
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::RuntimeContext;
+    use crate::options::RuntimeOptions;
+    use solix_common::bytecode::{BinaryProgram, CompiledFunction};
+
+    #[test]
+    fn test_positive_bitwise_ops_preserve_i32_variant() {
+        let mut program = BinaryProgram::new();
+        let mut main_fn = CompiledFunction::new("main", 0, 0, 8);
+        main_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 0, 0x0F0F));
+        main_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 0x00FF));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Band, 0, 2, 0, 1));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Bor, 0, 3, 2, 0));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Bxor, 0, 4, 3, 1));
+        main_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 5, 2));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Shl, 0, 6, 4, 5));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Shr, 0, 7, 6, 5));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Bnot, 0, 2, 7, 0));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Bnot, 0, 2, 2, 0));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 2, 0, 0));
+        program.functions.push(main_fn);
+        program.entry_point_id = Some(0);
+
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(program))
+            .expect("context should build");
+        let mut vm = VirtualMachine::new(context);
+        let result = vm.run().expect("vm execution should succeed");
+        assert_eq!(result, Value::I32(0x0FF0));
+    }
+
+    #[test]
+    fn test_positive_stateless_pack_closure_uses_fnptr_without_heap_alloc() {
+        let mut program = BinaryProgram::new();
+
+        let mut lambda_fn = CompiledFunction::new("lambda_zero_cap", 0, 1, 2);
+        lambda_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 10));
+        lambda_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::AddI32, 0, 0, 0, 1));
+        lambda_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 0, 0, 0));
+        program.functions.push(lambda_fn);
+
+        let mut main_fn = CompiledFunction::new("main", 0, 0, 4);
+        main_fn
+            .instructions
+            .push(Instruction::format_call(OpCode::PackClosure, 0, 0, 0, 0));
+        main_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 2, 32));
+        main_fn
+            .instructions
+            .push(Instruction::format_call(OpCode::CallCallable, 3, 0, 2, 1));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 3, 0, 0));
+        program.functions.push(main_fn);
+        program.entry_point_id = Some(1);
+
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(program))
+            .expect("context should build");
+        let mut vm = VirtualMachine::new(context);
+        let result = vm.run().expect("vm execution should succeed");
+        assert_eq!(result, Value::I32(42));
+        assert_eq!(
+            vm.heap.telemetry().total_allocations_count,
+            0,
+            "zero-capture PackClosure should not allocate on the heap"
+        );
+    }
+
+    #[test]
+    fn test_negative_invalid_opcode_in_fast_loop_returns_error() {
+        let mut program = BinaryProgram::new();
+        let mut main_fn = CompiledFunction::new("main", 0, 0, 1);
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Nop, 0, 0, 0, 0));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+        program.functions.push(main_fn);
+        program.entry_point_id = Some(0);
+
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(program))
+            .expect("context should build");
+        let mut vm = VirtualMachine::new(context);
+        vm.patch_instruction(0, 0, Instruction(0x0000_0000_0000_00FE));
+        let err = vm.run().expect_err("invalid raw opcode should trap cleanly");
+        assert!(matches!(
+            err,
+            RuntimeError::InvalidOpCode {
+                pc: 1,
+                opcode: 0xFE
+            }
+        ));
     }
 }
