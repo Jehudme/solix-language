@@ -147,6 +147,8 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
 
     let max_passes = 6;
     for _pass_index in 0..max_passes {
+        let mut changed = propagate_block_copies(&mut stream, &critical_targets);
+
         let mut old_pc_to_stream_idx: Vec<Option<usize>> = vec![None; original_count + 1];
         for (stream_idx, entry) in stream.iter().enumerate() {
             for &covered_pc in &entry.covered_original_pcs {
@@ -158,7 +160,6 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
         old_pc_to_stream_idx[original_count] = Some(stream.len());
 
         let mut next_stream: Vec<IntermediateInstruction> = Vec::with_capacity(stream.len());
-        let mut changed = false;
         let mut cursor = 0;
 
         while cursor < stream.len() {
@@ -171,12 +172,30 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                 continue;
             }
 
-            if current_raw == OpCode::Mov as u8
-                && current_entry.instruction.dst() == current_entry.instruction.src1()
-            {
-                changed = true;
-                cursor += 1;
-                continue;
+            if current_raw == OpCode::Mov as u8 {
+                let mov_dst = current_entry.instruction.dst();
+                let mov_src = current_entry.instruction.src1();
+                if mov_dst == mov_src {
+                    changed = true;
+                    cursor += 1;
+                    continue;
+                }
+                let src_is_non_ref =
+                    is_reg_non_reference_at(&stream, cursor, mov_src, &critical_targets);
+                if (!function.reference_registers.contains(&mov_dst) || src_is_non_ref)
+                    && is_dead_after_use(
+                        &stream,
+                        cursor,
+                        mov_dst,
+                        function,
+                        &old_pc_to_stream_idx,
+                        &critical_targets,
+                    )
+                {
+                    changed = true;
+                    cursor += 1;
+                    continue;
+                }
             }
 
             if cursor + 1 < stream.len() {
@@ -209,6 +228,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                             cmp_dst,
                             function,
                             &old_pc_to_stream_idx,
+                            &critical_targets,
                         )
                     {
                         let fused_opcode =
@@ -294,6 +314,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                     r_imm,
                                     function,
                                     &old_pc_to_stream_idx,
+                                    &critical_targets,
                                 )
                             {
                                 let mut merged_pcs = current_entry.covered_original_pcs.clone();
@@ -329,6 +350,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                     r_imm,
                                     function,
                                     &old_pc_to_stream_idx,
+                                    &critical_targets,
                                 )
                             {
                                 let mut merged_pcs = current_entry.covered_original_pcs.clone();
@@ -337,6 +359,85 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                                 next_stream.push(IntermediateInstruction {
                                     instruction: Instruction::format_a(
                                         OpCode::SubI32Imm,
+                                        0,
+                                        dst_reg,
+                                        src1_reg,
+                                        imm_val as i16 as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        } else if next_raw == OpCode::MulI32 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+
+                            let other_reg = if src2_reg == r_imm && src1_reg != r_imm {
+                                Some(src1_reg)
+                            } else if src1_reg == r_imm && src2_reg != r_imm {
+                                Some(src2_reg)
+                            } else {
+                                None
+                            };
+
+                            if let Some(r_other) = other_reg
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_imm,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                    &critical_targets,
+                                )
+                            {
+                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::MulI32Imm,
+                                        0,
+                                        dst_reg,
+                                        r_other,
+                                        imm_val as i16 as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        } else if next_raw == OpCode::ModI32 as u8 && imm_val > 0 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+
+                            if src2_reg == r_imm
+                                && src1_reg != r_imm
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_imm,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                    &critical_targets,
+                                )
+                            {
+                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::ModI32Imm,
                                         0,
                                         dst_reg,
                                         src1_reg,
@@ -365,7 +466,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                     let r_tmp = next_entry.instruction.src1();
                     let r_dest = next_entry.instruction.dst();
 
-                    if current_entry.instruction.dst() == r_tmp
+                    if instruction_write_dst(&current_entry.instruction) == Some(r_tmp)
                         && r_tmp != r_dest
                         && can_change_instruction_destination(&current_entry.instruction, r_dest)
                         && is_dead_after_use(
@@ -374,6 +475,7 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                             r_tmp,
                             function,
                             &old_pc_to_stream_idx,
+                            &critical_targets,
                         )
                     {
                         let updated_instruction =
@@ -490,19 +592,11 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     let mut hoisted_any = false;
 
     for (header_pc, loop_end_pc) in ordered_headers {
-        let loop_has_frame_call =
-            function.instructions[header_pc..=loop_end_pc]
-                .iter()
-                .any(|loop_inst| {
-                    let loop_raw = loop_inst.raw_opcode();
-                    loop_raw == OpCode::CallDirect as u8
-                        || loop_raw == OpCode::CallVirtual as u8
-                        || loop_raw == OpCode::CallInterface as u8
-                        || loop_raw == OpCode::CallCallable as u8
-                        || loop_raw == OpCode::CallSymbol as u8
-                        || loop_raw == OpCode::CallExtern as u8
-                });
-        if loop_has_frame_call {
+        let has_interior_external_entry = old_pc_targets[..header_pc]
+            .iter()
+            .flatten()
+            .any(|&target_pc| target_pc > header_pc && target_pc <= loop_end_pc);
+        if has_interior_external_entry {
             continue;
         }
 
@@ -573,7 +667,13 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
             {
                 true
             } else {
-                is_dead_after_use_raw(function, &old_pc_targets, last_pc, r_orig)
+                is_dead_after_use_raw(
+                    function,
+                    &old_pc_targets,
+                    &critical_targets,
+                    last_pc,
+                    r_orig,
+                )
             };
 
             if !dead_after {
@@ -733,6 +833,159 @@ fn relocate_jump_instruction(
     instruction
 }
 
+/// Returns `true` if `opcode` strictly writes a primitive or null value (never a heap reference).
+fn opcode_writes_only_non_reference(raw: u8) -> bool {
+    raw == OpCode::LoadI32 as u8
+        || raw == OpCode::LoadI64 as u8
+        || raw == OpCode::LoadF64 as u8
+        || raw == OpCode::LoadBool as u8
+        || raw == OpCode::LoadNull as u8
+        || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
+        || raw == OpCode::Instanceof as u8
+        || raw == OpCode::ArrayLength as u8
+}
+
+/// Scans backward within the current basic block up to `at_idx` to prove `target_reg` holds a non-reference value.
+fn is_reg_non_reference_at(
+    stream: &[IntermediateInstruction],
+    at_idx: usize,
+    target_reg: u16,
+    critical_targets: &HashSet<usize>,
+) -> bool {
+    let mut scan_idx = at_idx;
+    loop {
+        let inst = &stream[scan_idx].instruction;
+        if scan_idx != at_idx && instruction_write_dst(inst) == Some(target_reg) {
+            return opcode_writes_only_non_reference(inst.raw_opcode());
+        }
+        if scan_idx == at_idx && instruction_write_dst(inst) == Some(target_reg) {
+            let cur_raw = inst.raw_opcode();
+            if opcode_writes_only_non_reference(cur_raw) {
+                return true;
+            }
+            if cur_raw == OpCode::Mov as u8 {
+                let source_reg = inst.src1();
+                if source_reg != target_reg {
+                    // Check if source_reg was defined right in this block as non-reference
+                    return is_reg_non_reference_at(stream, scan_idx, source_reg, critical_targets);
+                }
+            }
+            return false;
+        }
+        if stream[scan_idx]
+            .covered_original_pcs
+            .first()
+            .is_some_and(|first_pc| critical_targets.contains(first_pc))
+            || scan_idx == 0
+        {
+            return false;
+        }
+        scan_idx -= 1;
+        let prev_raw = stream[scan_idx].instruction.raw_opcode();
+        if is_control_flow_terminator(prev_raw)
+            || is_conditional_branch(prev_raw)
+            || prev_raw == OpCode::Jump as u8
+            || prev_raw == OpCode::Switch as u8
+        {
+            return false;
+        }
+    }
+}
+
+/// Scans backward in raw instructions up to `at_pc` to prove `target_reg` holds a non-reference value.
+fn is_reg_non_reference_raw(
+    function: &CompiledFunction,
+    at_pc: usize,
+    target_reg: u16,
+    critical_targets: &HashSet<usize>,
+) -> bool {
+    let mut scan_pc = at_pc;
+    loop {
+        let inst = &function.instructions[scan_pc];
+        if instruction_write_dst(inst) == Some(target_reg) {
+            return opcode_writes_only_non_reference(inst.raw_opcode());
+        }
+        if scan_pc == 0 || critical_targets.contains(&scan_pc) {
+            return false;
+        }
+        scan_pc -= 1;
+        let prev_raw = function.instructions[scan_pc].raw_opcode();
+        if is_control_flow_terminator(prev_raw)
+            || is_conditional_branch(prev_raw)
+            || prev_raw == OpCode::Jump as u8
+            || prev_raw == OpCode::Switch as u8
+        {
+            return false;
+        }
+    }
+}
+
+/// Performs local basic-block copy propagation (`Mov dst, src` -> replace reads of `dst` with `src`).
+fn propagate_block_copies(
+    stream: &mut [IntermediateInstruction],
+    critical_targets: &HashSet<usize>,
+) -> bool {
+    let mut any_changed = false;
+    let mut copy_map: HashMap<u16, u16> = HashMap::new();
+
+    for entry in stream.iter_mut() {
+        if entry
+            .covered_original_pcs
+            .first()
+            .is_some_and(|first_pc| critical_targets.contains(first_pc))
+        {
+            copy_map.clear();
+        }
+
+        let raw = entry.instruction.raw_opcode();
+        if !copy_map.is_empty() && raw != OpCode::IncRef as u8 && raw != OpCode::DecRef as u8 {
+            let candidates: Vec<(u16, u16)> = copy_map.iter().map(|(&key, &val)| (key, val)).collect();
+            for (alias_reg, orig_reg) in candidates {
+                if instruction_reads_register(&entry.instruction, alias_reg)
+                    && can_rewrite_read_register(&entry.instruction, alias_reg)
+                    && let Some(rewritten) =
+                        rewrite_instruction_read_register(&entry.instruction, alias_reg, orig_reg)
+                {
+                    entry.instruction = rewritten;
+                    any_changed = true;
+                }
+            }
+        }
+
+        let updated_raw = entry.instruction.raw_opcode();
+        if updated_raw == OpCode::Mov as u8 {
+            let mov_dst = entry.instruction.dst();
+            let mov_src = entry.instruction.src1();
+            let canonical_src = copy_map.get(&mov_src).copied().unwrap_or(mov_src);
+            copy_map.retain(|&key_reg, &mut val_reg| key_reg != mov_dst && val_reg != mov_dst);
+            if mov_dst != canonical_src {
+                copy_map.insert(mov_dst, canonical_src);
+            }
+        } else {
+            if let Some(written_reg) = instruction_write_dst(&entry.instruction) {
+                copy_map.retain(|&key_reg, &mut val_reg| {
+                    key_reg != written_reg && val_reg != written_reg
+                });
+            }
+            if is_control_flow_terminator(updated_raw)
+                || is_conditional_branch(updated_raw)
+                || updated_raw == OpCode::Jump as u8
+                || updated_raw == OpCode::Switch as u8
+            {
+                copy_map.clear();
+            }
+        }
+    }
+
+    any_changed
+}
+
 /// Forward CFG liveness check over `IntermediateInstruction` stream: returns `true` iff
 /// `reg` is never read again before being overwritten (or exiting) along all paths after `use_idx`.
 fn is_dead_after_use(
@@ -741,11 +994,15 @@ fn is_dead_after_use(
     reg: u16,
     function: &CompiledFunction,
     old_pc_to_stream_idx: &[Option<usize>],
+    critical_targets: &HashSet<usize>,
 ) -> bool {
     let len = stream.len();
     if use_idx >= len {
         return true;
     }
+
+    let reg_pinned_as_ref = function.reference_registers.contains(&reg)
+        && !is_reg_non_reference_at(stream, use_idx, reg, critical_targets);
 
     let mut visited = vec![false; len];
     let mut worklist: Vec<usize> = Vec::with_capacity(8);
@@ -785,7 +1042,7 @@ fn is_dead_after_use(
                 return false;
             }
 
-            if can_instruction_throw(raw) && function.reference_registers.contains(&reg) {
+            if can_instruction_throw(raw) && reg_pinned_as_ref {
                 return false;
             }
 
@@ -867,6 +1124,7 @@ fn old_pc_targets_len(slice: &[Option<usize>]) -> usize {
 fn is_dead_after_use_raw(
     function: &CompiledFunction,
     jump_targets: &[Option<usize>],
+    critical_targets: &HashSet<usize>,
     use_pc: usize,
     reg: u16,
 ) -> bool {
@@ -874,6 +1132,9 @@ fn is_dead_after_use_raw(
     if use_pc >= len {
         return true;
     }
+
+    let reg_pinned_as_ref = function.reference_registers.contains(&reg)
+        && !is_reg_non_reference_raw(function, use_pc, reg, critical_targets);
 
     let mut visited = vec![false; len];
     let mut worklist: Vec<usize> = Vec::with_capacity(8);
@@ -907,7 +1168,7 @@ fn is_dead_after_use_raw(
                 return false;
             }
 
-            if can_instruction_throw(raw) && function.reference_registers.contains(&reg) {
+            if can_instruction_throw(raw) && reg_pinned_as_ref {
                 return false;
             }
 
@@ -995,6 +1256,8 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::AllocObject as u8
         || raw == OpCode::AllocObjectExtern as u8
         || raw == OpCode::GetField as u8
@@ -1086,7 +1349,11 @@ fn rewrite_instruction_read_register(
         ));
     }
 
-    if raw == OpCode::AddI32Imm as u8 || raw == OpCode::SubI32Imm as u8 {
+    if raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
+    {
         let new_src1 = if instruction.src1() == from_reg {
             to_reg
         } else {
@@ -1370,6 +1637,8 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::Not as u8
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || (OpCode::LoadI32 as u8..=OpCode::LoadConst as u8).contains(&raw);
@@ -1382,6 +1651,8 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
     if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || raw == OpCode::GetField as u8
@@ -1494,8 +1765,12 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
 
-    // Format A: superinstructions AddI32Imm and SubI32Imm read src1
-    if raw == OpCode::AddI32Imm as u8 || raw == OpCode::SubI32Imm as u8 {
+    // Format A: superinstructions AddI32Imm, SubI32Imm, MulI32Imm, and ModI32Imm read src1
+    if raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
+    {
         return instruction.src1() == target_reg;
     }
 

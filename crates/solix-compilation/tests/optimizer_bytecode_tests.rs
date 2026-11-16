@@ -587,3 +587,131 @@ fn test_negative_loop_sra_rejects_loop_carried_object_alias() {
         "Loop-carried object assigned to outer variable must preserve heap AllocObject"
     );
 }
+
+#[test]
+fn test_positive_mul_i32_imm_and_mod_i32_imm_superinstructions() {
+    let source_code = r#"
+        int32 combine_math(int32 input_val) {
+            int32 scaled = input_val * 3;
+            int32 mod_seven = scaled % 7;
+            int32 mod_eight = scaled % 8;
+            return mod_seven + mod_eight;
+        }
+        int32 main() {
+            return combine_math(11) * 100 + combine_math(16);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    // combine_math(11): 33 % 7 = 5, 33 % 8 = 1 -> 6
+    // combine_math(16): 48 % 7 = 6, 48 % 8 = 0 -> 6
+    assert_eq!(execution_result, Value::I32(606));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let helper_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("combine_math"))
+        .expect("combine_math function must exist");
+
+    let has_mul_imm = helper_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::MulI32Imm as u8);
+    let mod_imm_count = helper_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::ModI32Imm as u8)
+        .count();
+
+    assert!(
+        has_mul_imm,
+        "Expected MulI32Imm fusion in combine_math: {:?}",
+        helper_func.instructions
+    );
+    assert_eq!(
+        mod_imm_count, 2,
+        "Expected two ModI32Imm fusions in combine_math: {:?}",
+        helper_func.instructions
+    );
+}
+
+#[test]
+fn test_negative_mod_by_zero_traps_without_unsafe_folding() {
+    let source_code = r#"
+        int32 main() {
+            int32 numerator = 42;
+            return numerator % 0;
+        }
+    "#;
+    let options = CompilationOptions::new()
+        .with_source("mod_zero.slx", source_code)
+        .with_inline_threshold(0);
+    let mut ctx = CompilationContext::new(options);
+    let compile_res = ctx.execute();
+    assert!(
+        compile_res.is_ok(),
+        "Compilation should succeed: {compile_res:?}"
+    );
+    let artifacts = ctx.emission_artifacts.expect("artifacts expected");
+    let rt_ctx = RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program))
+        .expect("runtime context should build");
+    let mut vm = VirtualMachine::new(rt_ctx);
+    assert!(matches!(
+        vm.run(),
+        Err(solix_runtime::exceptions::RuntimeError::DivideByZero)
+    ));
+}
+
+#[test]
+fn test_positive_loop_hoist_with_frame_call_preserves_constants() {
+    let source_code = r#"
+        float64 bump_value(float64 value_in, float64 extra_in) {
+            return value_in + extra_in;
+        }
+        float64 run_calls(int32 count, float64 step_val) {
+            float64 acc = 0.0;
+            for (int32 index = 0; index < count; index = index + 1) {
+                float64 cur = bump_value(acc, step_val);
+                acc = cur + 1.5;
+            }
+            return acc;
+        }
+        int32 main() {
+            float64 total = run_calls(20, 0.5);
+            return total == 40.0 ? 0 : 1;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let loop_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("run_calls"))
+        .expect("run_calls function must exist");
+    let backedge = loop_func
+        .instructions
+        .iter()
+        .enumerate()
+        .find_map(|(pc_idx, inst)| {
+            if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
+                let target_pc = (pc_idx as i32 + inst.jump_offset()) as usize;
+                Some((target_pc, pc_idx))
+            } else {
+                None
+            }
+        })
+        .expect("Expected backward Jump forming a loop");
+    let loop_body_f64_loads = loop_func.instructions[backedge.0..=backedge.1]
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::LoadF64 as u8)
+        .count();
+    assert_eq!(
+        loop_body_f64_loads, 0,
+        "Expected LoadF64 inside loop with frame call to hoist cleanly outside [{}..={}]",
+        backedge.0, backedge.1
+    );
+}

@@ -213,6 +213,8 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::AllocObject as u8
         || raw == OpCode::AllocObjectExtern as u8
         || raw == OpCode::GetField as u8
@@ -254,7 +256,11 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
     if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
-    if raw == OpCode::AddI32Imm as u8 || raw == OpCode::SubI32Imm as u8 {
+    if raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
+    {
         return instruction.src1() == target_reg;
     }
     if raw == OpCode::Mov as u8
@@ -406,6 +412,8 @@ fn rewrite_any_write_dst(instruction: &Instruction, new_dst: u16) -> Option<Inst
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::GetField as u8
         || raw == OpCode::GetArray as u8
         || raw == OpCode::GetTuple as u8
@@ -1168,13 +1176,13 @@ fn try_scalar_replace_one(
         }
     }
 
-    // 4. Clean up reference_registers only if no remaining instruction writes to that register
+    // 4. Clean up reference_registers when no remaining instruction writes a potential reference to that register
     for &alias_register in &ever_aliases {
-        let still_defined = function
-            .instructions
-            .iter()
-            .any(|inst| instruction_write_dst(inst) == Some(alias_register));
-        if !still_defined {
+        let can_still_hold_reference = function.instructions.iter().any(|inst| {
+            instruction_write_dst(inst) == Some(alias_register)
+                && instruction_can_write_reference(inst.raw_opcode())
+        });
+        if !can_still_hold_reference {
             function
                 .reference_registers
                 .retain(|candidate_register| *candidate_register != alias_register);
@@ -1182,6 +1190,24 @@ fn try_scalar_replace_one(
     }
 
     true
+}
+
+/// Returns `false` if an opcode strictly produces primitive/null values (never a heap reference).
+fn instruction_can_write_reference(raw: u8) -> bool {
+    !(raw == OpCode::LoadI32 as u8
+        || raw == OpCode::LoadI64 as u8
+        || raw == OpCode::LoadF64 as u8
+        || raw == OpCode::LoadBool as u8
+        || raw == OpCode::LoadNull as u8
+        || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
+        || raw == OpCode::Instanceof as u8
+        || raw == OpCode::ArrayLength as u8)
 }
 
 /// Applies inter-procedural and local reference counting (ARC) elision.

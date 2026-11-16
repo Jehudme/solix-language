@@ -83,7 +83,7 @@ pub fn disassemble_instruction(
             )
         }
 
-        OpCode::AddI32Imm | OpCode::SubI32Imm => {
+        OpCode::AddI32Imm | OpCode::SubI32Imm | OpCode::MulI32Imm | OpCode::ModI32Imm => {
             let imm = instruction.src2() as i16;
             format!(
                 "{pc:04}  {:<16} r{}, r{}, {imm:+}",

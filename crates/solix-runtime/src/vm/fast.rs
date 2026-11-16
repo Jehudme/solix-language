@@ -2854,7 +2854,7 @@ impl VirtualMachine {
                 }
 
                 // =============================================================
-                // 0xD0 .. 0xD7: Superinstructions
+                // 0xD0 .. 0xD9: Superinstructions
                 // =============================================================
                 OpCode::AddI32Imm => {
                     let imm_val = inst.src2() as i16 as i32;
@@ -2871,6 +2871,31 @@ impl VirtualMachine {
                     unsafe {
                         *reg_base.add(inst.dst() as usize) =
                             Value::I32(val_a.wrapping_sub(imm_val));
+                    }
+                }
+
+                OpCode::MulI32Imm => {
+                    let imm_val = inst.src2() as i16 as i32;
+                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) =
+                            Value::I32(val_a.wrapping_mul(imm_val));
+                    }
+                }
+
+                OpCode::ModI32Imm => {
+                    let imm_val = inst.src2() as i16 as i32;
+                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                    if imm_val == 0 {
+                        return Err(VmTrap::divide_by_zero());
+                    }
+                    let rem_val = if val_a >= 0 && imm_val > 0 && (imm_val & (imm_val - 1)) == 0 {
+                        val_a & (imm_val - 1)
+                    } else {
+                        val_a.wrapping_rem(imm_val)
+                    };
+                    unsafe {
+                        *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
                     }
                 }
 

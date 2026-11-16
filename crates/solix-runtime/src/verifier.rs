@@ -346,7 +346,7 @@ fn verify_instruction(
         }
 
         // Superinstructions
-        OpCode::AddI32Imm | OpCode::SubI32Imm => {
+        OpCode::AddI32Imm | OpCode::SubI32Imm | OpCode::MulI32Imm | OpCode::ModI32Imm => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "src1")?;
         }
