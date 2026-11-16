@@ -136,6 +136,10 @@ class BenchmarkRunner:
         }
 
     def resolve_engine(self, engine_name: str) -> Optional[str]:
+        if engine_name == "solix":
+            candidate_binary = os.environ.get("SOLIX_BIN")
+            if candidate_binary and Path(candidate_binary).exists():
+                return str(Path(candidate_binary).resolve())
         engines = self.config.get("engines", {})
         cmd = engines.get(engine_name, engine_name)
         if cmd.startswith("./") or cmd.startswith("../"):

@@ -88,6 +88,64 @@ jobs:
           name: artifacts-vscode-extension
           path: editors/vscode/solix-language.vsix
 
+  benchmark-release:
+    name: Run Benchmark Suite & Generate Release Notes Comparison
+    runs-on: ubuntu-latest
+    needs:
+      - plan
+      - build-bundled-libraries
+    if: ${{ always() && needs.plan.outputs.publishing == 'true' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev lua5.4 luajit gcc
+
+      - name: Install Zig compiler
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.13.0"
+
+      - name: Build and stage default first-party libraries
+        run: python3 scripts/build_default_libraries.py --profiles release,debug --install
+
+      - name: Build optimized Solix release binary
+        run: cargo build --release --bin solix
+
+      - name: Execute benchmark suite and generate release baseline
+        run: |
+          mkdir -p staging-benchmarks
+          python3 benchmarks/runner.py --save-baseline staging-benchmarks/release_baseline.json
+
+      - name: Generate release notes comparison table against previous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 benchmarks/compare_releases.py \
+            --current staging-benchmarks/release_baseline.json \
+            --download-previous \
+            --current-tag "${{ needs.plan.outputs.tag }}" \
+            --markdown-output staging-benchmarks/benchmark_comparison.md
+
+      - name: Upload benchmark artifacts for release ingestion
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-benchmarks
+          path: staging-benchmarks/
+
   # Run 'dist plan' to determine what tasks we need to do
   plan:
     runs-on: "ubuntu-latest"
@@ -251,6 +309,7 @@ jobs:
       - build-vscode-extension
       - build-local-artifacts
       - build-global-artifacts
+      - benchmark-release
     if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -305,6 +364,11 @@ jobs:
           RELEASE_COMMIT: "${{ github.sha }}"
         run: |
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          if [ -f artifacts/benchmark_comparison.md ]; then
+            echo -e "\n\n" >> $RUNNER_TEMP/notes.txt
+            cat artifacts/benchmark_comparison.md >> $RUNNER_TEMP/notes.txt
+            rm -f artifacts/benchmark_comparison.md
+          fi
           RELEASE_FILES=$(find artifacts -maxdepth 1 -type f)
           if gh release view "${{ needs.plan.outputs.tag }}" > /dev/null 2>&1; then
             gh release upload "${{ needs.plan.outputs.tag }}" $RELEASE_FILES --clobber

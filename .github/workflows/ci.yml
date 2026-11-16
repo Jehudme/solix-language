@@ -100,6 +100,10 @@ jobs:
         env:
           SOLIX_BIN: ${{ runner.os == 'Windows' && format('{0}/target/debug/solix.exe', github.workspace) || format('{0}/target/debug/solix', github.workspace) }}
 
+      - name: Run benchmark correctness verification gate
+        if: runner.os == 'Linux'
+        run: python3 benchmarks/runner.py --verify
+
       - name: List installed packages
         if: runner.os == 'Linux'
         run: cargo run --bin solix -- list
