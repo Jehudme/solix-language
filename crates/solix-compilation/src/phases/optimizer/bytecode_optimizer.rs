@@ -37,9 +37,12 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             return Ok(());
         };
 
+        let class_descriptors = emission_artifacts.program.classes.clone();
+        let function_descriptors = emission_artifacts.program.functions.clone();
+
         // Optimize each compiled function in the binary program
         for compiled_function in &mut emission_artifacts.program.functions {
-            optimize_function(compiled_function);
+            optimize_function(compiled_function, &class_descriptors, &function_descriptors);
         }
 
         // Keep functions_by_source synchronized with optimized functions
@@ -71,7 +74,14 @@ struct IntermediateInstruction {
 
 /// Optimizes a single compiled function by running constant hoisting, peephole fusion,
 /// move elimination, and PC relocation.
-fn optimize_function(function: &mut CompiledFunction) {
+fn optimize_function(
+    function: &mut CompiledFunction,
+    classes: &[solix_common::bytecode::CompiledClass],
+    all_functions: &[CompiledFunction],
+) {
+    super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
+    super::escape_analysis::apply_arc_elision(function);
+
     let original_count = function.instructions.len();
     if original_count < 2 {
         return;
@@ -121,12 +131,17 @@ fn optimize_function(function: &mut CompiledFunction) {
     let mut cursor = 0;
     while cursor < intermediate_stream.len() {
         let current_entry = &intermediate_stream[cursor];
+        let current_raw = current_entry.instruction.raw_opcode();
+
+        if current_raw == OpCode::Nop as u8 {
+            cursor += 1;
+            continue;
+        }
 
         if cursor + 1 < intermediate_stream.len() {
             let next_entry = &intermediate_stream[cursor + 1];
             let next_is_critical = critical_targets.contains(&next_entry.original_pc);
 
-            let current_raw = current_entry.instruction.raw_opcode();
             let next_raw = next_entry.instruction.raw_opcode();
 
             // -------------------------------------------------------------
@@ -289,7 +304,8 @@ fn optimize_function(function: &mut CompiledFunction) {
     }
 
     // Step 2: Compute relocated instruction PCs and branch offsets
-    let mut old_pc_to_new_pc = vec![0u32; original_count + 1];
+    let sentinel_pc = u32::MAX;
+    let mut old_pc_to_new_pc = vec![sentinel_pc; original_count + 1];
     for (new_pc, entry) in fused_stream.iter().enumerate() {
         old_pc_to_new_pc[entry.original_pc] = new_pc as u32;
         if let Some(second_pc) = entry.second_original_pc {
@@ -297,6 +313,11 @@ fn optimize_function(function: &mut CompiledFunction) {
         }
     }
     old_pc_to_new_pc[original_count] = fused_stream.len() as u32;
+    for reverse_index in (0..original_count).rev() {
+        if old_pc_to_new_pc[reverse_index] == sentinel_pc {
+            old_pc_to_new_pc[reverse_index] = old_pc_to_new_pc[reverse_index + 1];
+        }
+    }
 
     // Step 3: Relocate jump targets
     let mut final_instructions = Vec::with_capacity(fused_stream.len());

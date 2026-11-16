@@ -4,6 +4,7 @@
 
 pub mod ast_inliner;
 pub mod bytecode_optimizer;
+pub mod escape_analysis;
 
 pub use ast_inliner::AstInlinerPhase;
 pub use bytecode_optimizer::BytecodeOptimizerPhase;

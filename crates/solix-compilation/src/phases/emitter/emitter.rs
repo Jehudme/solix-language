@@ -675,9 +675,21 @@ impl<'a> Emitter<'a> {
                     self.emit_statement(stmt, &mut inner_loop_stack)?;
                 }
                 let dst = if let Some(res) = result {
-                    let val_reg = self.emit_expression(res, target_reg)?;
+                    let val_reg = self.emit_expression(res, None)?;
                     self.emit_block_exit_arc_cleanup_except(Some(val_reg));
-                    val_reg
+                    if let Some(target) = target_reg {
+                        if target != val_reg {
+                            self.emit_instruction(
+                                Instruction::format_a(OpCode::Mov, 0, target, val_reg, 0),
+                                Some(*span),
+                            );
+                            target
+                        } else {
+                            val_reg
+                        }
+                    } else {
+                        val_reg
+                    }
                 } else {
                     self.emit_block_exit_arc_cleanup();
                     let val_reg = self.resolve_dst(target_reg)?;

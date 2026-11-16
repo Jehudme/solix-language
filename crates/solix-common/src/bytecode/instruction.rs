@@ -46,6 +46,13 @@ impl Instruction {
         Self(raw)
     }
 
+    /// Returns a copy of this Format A or Format B instruction with the destination register modified.
+    #[must_use]
+    pub const fn with_dst(self, new_dst: u16) -> Self {
+        let raw = (self.0 & !0x0000_0000_FFFF_0000) | ((new_dst as u64) << 16);
+        Self(raw)
+    }
+
     /// Constructs a Format B instruction with a 32-bit signed immediate.
     #[must_use]
     pub const fn format_b_signed(opcode: OpCode, flags: u8, dst: u16, imm: i32) -> Self {
