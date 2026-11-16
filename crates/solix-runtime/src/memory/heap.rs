@@ -64,16 +64,20 @@ pub struct VirtualHeap {
     pub quick_lists: [u32; 32],
 }
 
+/// Initial heap buffer allocation committed upfront before growing on demand up to `dynamic_capacity`.
+const INITIAL_DYNAMIC_COMMIT: usize = 256 * 1024;
+
 impl VirtualHeap {
     /// Creates a new virtual heap with the specified static slot count and dynamic capacity.
     #[must_use]
     pub fn new(static_slots: u32, dynamic_capacity: usize) -> Self {
         let static_size = align_up(static_slots as usize * 8);
         let dynamic_capacity = align_up(dynamic_capacity);
-        let total_size = static_size + dynamic_capacity;
+        let initial_dynamic = dynamic_capacity.min(INITIAL_DYNAMIC_COMMIT);
+        let total_initial = static_size + initial_dynamic;
 
         Self {
-            buffer: vec![0u8; total_size],
+            buffer: vec![0u8; total_initial],
             static_size,
             dynamic_capacity,
             free_list: FreeListManager::new_empty(dynamic_capacity),
@@ -104,8 +108,9 @@ impl VirtualHeap {
     pub fn reserve_static_partition(&mut self, static_slots: u32) {
         let new_static_size = align_up(static_slots as usize * 8);
         if new_static_size != self.static_size {
-            let total_size = new_static_size + self.dynamic_capacity;
-            self.buffer = vec![0u8; total_size];
+            let initial_dynamic = self.dynamic_capacity.min(INITIAL_DYNAMIC_COMMIT);
+            let total_initial = new_static_size + initial_dynamic;
+            self.buffer = vec![0u8; total_initial];
             self.static_size = new_static_size;
             self.free_list = FreeListManager::new_empty(self.dynamic_capacity);
             self.bump_cursor = 0;
@@ -170,6 +175,16 @@ impl VirtualHeap {
 
                 (cached_payload, required_block_size)
             } else if self.bump_cursor + required_block_size <= self.dynamic_capacity {
+                // Grow committed dynamic backing storage on demand up to configured dynamic_capacity.
+                let needed_total = self.static_size + self.bump_cursor + required_block_size;
+                if needed_total > self.buffer.len() {
+                    let current_dyn = self.buffer.len().saturating_sub(self.static_size);
+                    let target_dyn = (self.bump_cursor + required_block_size)
+                        .max(current_dyn.saturating_mul(2))
+                        .min(self.dynamic_capacity);
+                    self.buffer.resize(self.static_size + target_dyn, 0);
+                }
+
                 // O(1) Bump allocation for any block size fitting the remaining bump capacity
                 let block_offset = self.bump_cursor;
                 let block_abs_addr = self.static_size + block_offset;
@@ -186,6 +201,11 @@ impl VirtualHeap {
 
                 (payload_addr, required_block_size)
             } else {
+                // Ensure backing storage spans full dynamic_capacity before falling back to free_list.
+                let full_size = self.static_size + self.dynamic_capacity;
+                if self.buffer.len() < full_size {
+                    self.buffer.resize(full_size, 0);
+                }
                 // Bump pointer exhausted. Flush un-bumped remainder to free_list and flush quick lists.
                 if self.bump_cursor < self.dynamic_capacity {
                     let remaining_size = self.dynamic_capacity - self.bump_cursor;
@@ -737,5 +757,42 @@ impl VirtualHeap {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_positive_lazy_heap_starts_compact_and_grows_within_limit() {
+        let configured_capacity = 2 * 1024 * 1024;
+        let mut heap = VirtualHeap::new(4, configured_capacity);
+        assert!(
+            heap.buffer.len() < configured_capacity,
+            "Lazy heap should commit at most INITIAL_DYNAMIC_COMMIT initially"
+        );
+        // Allocate beyond initial 256 KB commit, within 2 MB limit.
+        let addr_first = heap
+            .allocate(300 * 1024, BlockTag::Raw)
+            .expect("300 KB allocation must grow backing buffer seamlessly");
+        assert!(heap.buffer.len() >= 300 * 1024);
+        assert!(heap.buffer.len() <= heap.static_size() + configured_capacity);
+        heap.deallocate(addr_first).expect("deallocate should succeed");
+    }
+
+    #[test]
+    fn test_negative_lazy_heap_enforces_configured_max_capacity() {
+        let configured_capacity = 512 * 1024;
+        let mut heap = VirtualHeap::new(0, configured_capacity);
+        let first_addr = heap
+            .allocate(400 * 1024, BlockTag::Raw)
+            .expect("first 400 KB block must fit");
+        let second_res = heap.allocate(200 * 1024, BlockTag::Raw);
+        assert!(
+            matches!(second_res, Err(RuntimeError::OutOfMemory { .. })),
+            "Allocation exceeding configured dynamic_capacity must fail with OutOfMemory"
+        );
+        heap.deallocate(first_addr).expect("deallocate should succeed");
     }
 }
