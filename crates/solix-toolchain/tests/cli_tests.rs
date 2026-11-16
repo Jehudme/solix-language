@@ -1369,16 +1369,19 @@ fn test_cli_info_slxarc_archive_inspection_and_json() {
     std::fs::create_dir_all(&lib_directory).expect("create lib dir");
 
     let manifest_toml = r#"
-[info]
+[configuration]
 name = "archive_info_test"
 version = "2.5.0"
 description = "Test inspecting slxarc archive container"
 license = "Apache-2.0"
 authors = ["Tester <tester@example.com>"]
 
-[entrypoints]
-main = "Main::main"
-test = "TestRunner::main"
+[profiles.release]
+entrypoint = "Main::main"
+
+[profiles.test]
+inherits = "release"
+entrypoint = "TestRunner::main"
 "#;
     std::fs::write(stage_directory.join("manifest.toml"), manifest_toml).expect("write manifest");
 
@@ -1437,9 +1440,9 @@ class Main {
 
     let json_content = std::fs::read_to_string(&json_output_path).expect("read json");
     let parsed_json: serde_json::Value = serde_json::from_str(&json_content).expect("parse json");
-    assert_eq!(parsed_json["manifest"]["info"]["name"], "archive_info_test");
-    assert_eq!(parsed_json["manifest"]["info"]["version"], "2.5.0");
-    assert_eq!(parsed_json["manifest"]["entrypoints"]["main"], "Main::main");
+    assert_eq!(parsed_json["manifest"]["configuration"]["name"], "archive_info_test");
+    assert_eq!(parsed_json["manifest"]["configuration"]["version"], "2.5.0");
+    assert_eq!(parsed_json["manifest"]["profiles"]["release"]["entrypoint"], "Main::main");
 }
 
 #[test]
@@ -1452,12 +1455,12 @@ fn test_cli_run_slxarc_archive_directly() {
     std::fs::create_dir_all(&bin_directory).expect("create bin dir");
 
     let manifest_toml = r#"
-[info]
+[configuration]
 name = "runner_app"
 version = "1.0.0"
 
-[entrypoints]
-main = "Main::main"
+[profiles.release]
+entrypoint = "Main::main"
 "#;
     std::fs::write(stage_directory.join("manifest.toml"), manifest_toml).expect("write manifest");
 
@@ -1563,13 +1566,13 @@ fn test_cli_info_enriched_fields() {
     std::fs::create_dir_all(&lib_macos_directory).expect("create macos lib dir");
 
     let manifest_toml = r#"
-[info]
+[configuration]
 name = "enriched_pkg"
 version = "3.2.1"
 description = "Enriched diagnostic test package"
 
-[entrypoints]
-main = "Main::main"
+[profiles.release]
+entrypoint = "Main::main"
 "#;
     std::fs::write(stage_directory.join("manifest.toml"), manifest_toml).expect("write manifest");
 
@@ -1712,15 +1715,15 @@ public class MathLib {
     std::fs::create_dir_all(&source_dir).expect("create src dir");
 
     let manifest_content = r#"
-[info]
+[configuration]
 name = "my_game"
 version = "1.2.0"
 description = "Showcase game"
 
-[entrypoints]
-main = "Game::main"
+[profiles.release]
+entrypoint = "Game::main"
 
-[dependencies]
+[profiles.release.dependencies]
 math_lib = { version = "1.0.0", profile = "release" }
 "#;
     std::fs::write(project_dir.join("manifest.toml"), manifest_content).expect("write manifest");

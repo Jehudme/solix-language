@@ -312,10 +312,31 @@ jobs:
             gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" $RELEASE_FILES
           fi
 
+  publish-crates:
+    name: Publish Public Crates to Crates.io
+    runs-on: ubuntu-latest
+    needs:
+      - plan
+      - host
+    if: ${{ always() && needs.plan.outputs.publishing == 'true' && needs.host.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Publish solix-ffi
+        run: cargo publish -p solix-ffi --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
+      - name: Publish solix-common
+        run: cargo publish -p solix-common --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
+      - name: Publish solix-runtime
+        run: cargo publish -p solix-runtime --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
+      - name: Publish solix-compilation
+        run: cargo publish -p solix-compilation --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
+
   announce:
     needs:
       - plan
       - host
+      - publish-crates
     if: ${{ always() && needs.host.result == 'success' }}
     runs-on: "ubuntu-latest"
     env:

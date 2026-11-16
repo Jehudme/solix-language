@@ -64,6 +64,36 @@ my_app/
     └── solix_build.py        # Turnkey build orchestration primitives
 ```
 
+#### Generated `manifest.toml`
+```toml
+[configuration]
+name = "my_app"
+version = "0.1.0"
+description = "A Solix project"
+license = "Apache-2.0"
+authors = []
+
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
+
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 8
+debug_symbols = true
+static = false
+
+[profiles.test]
+inherits = "debug"
+entrypoint = "TestRunner::test"
+sources = ["src", "tests"]
+```
+
 #### Generated `src/main.slx`
 ```solix
 class Main {

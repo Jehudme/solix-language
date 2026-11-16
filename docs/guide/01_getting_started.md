@@ -151,19 +151,32 @@ In Solix, executable programs define a `main` method (by default `Main::main`). 
 #### The Project Manifest (`manifest.toml`)
 
 ```toml
-[info]
+[configuration]
 name = "hello_solix"
 version = "0.1.0"
 description = "A Solix project"
 license = "Apache-2.0"
 authors = []
 
-[entrypoints]
-main = "Main::main"
-test = "TestRunner::test"
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
 
-[dependencies]
-# solixlib = { version = "2.0.0", profile = "release" }
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 8
+debug_symbols = true
+static = false
+
+[profiles.test]
+inherits = "debug"
+entrypoint = "TestRunner::test"
+sources = ["src", "tests"]
 ```
 
 ### Scaffolding Libraries (`--lib`)

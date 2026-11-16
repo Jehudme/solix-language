@@ -103,9 +103,9 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let link_mode = args.resolved_link_mode();
     let package_name = args.name.unwrap_or_else(|| {
         if let Some(ref manifest) = parent_manifest
-            && !manifest.info.name.is_empty()
+            && !manifest.configuration.name.is_empty()
         {
-            manifest.info.name.clone()
+            manifest.configuration.name.clone()
         } else {
             resolved_sources
                 .first()
@@ -127,9 +127,9 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
 
     let package_version = if args.version == "0.1.0"
         && let Some(ref manifest) = parent_manifest
-        && !manifest.info.version.is_empty()
+        && !manifest.configuration.version.is_empty()
     {
-        &manifest.info.version
+        &manifest.configuration.version
     } else {
         &args.version
     };
@@ -138,7 +138,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         Some(explicit_description) => explicit_description,
         None => parent_manifest
             .as_ref()
-            .and_then(|manifest| manifest.info.description.as_deref())
+            .and_then(|manifest| manifest.configuration.description.as_deref())
             .unwrap_or(""),
     };
 
@@ -153,7 +153,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     let effective_entry = args.entry.or_else(|| {
         parent_manifest
             .as_ref()
-            .and_then(|manifest| manifest.entrypoints.main.clone())
+            .and_then(|manifest| manifest.main_entrypoint())
     });
 
     if let Some(entry_sym) = effective_entry {

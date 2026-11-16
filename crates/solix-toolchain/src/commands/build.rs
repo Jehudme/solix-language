@@ -45,25 +45,21 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         "test"
     } else if args.debug {
         "debug"
-    } else if !manifest_data.build.profile.is_empty() {
-        manifest_data.build.profile.as_str()
     } else {
-        "debug"
+        "release"
     };
 
-    let effective_link_mode = if manifest_data.build.link.eq_ignore_ascii_case("static") {
+    let resolved_profile = manifest_data
+        .resolve_profile(effective_profile)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let effective_link_mode = if resolved_profile.is_static {
         "static"
     } else {
         "dynamic"
     };
 
-    let effective_pkg_dir = args.pkg_dir.clone().or_else(|| {
-        if !manifest_data.build.pkg_dir.is_empty() {
-            Some(std::path::PathBuf::from(&manifest_data.build.pkg_dir))
-        } else {
-            None
-        }
-    });
+    let effective_pkg_dir = args.pkg_dir.clone();
 
     let current_exe = std::env::current_exe().unwrap_or_else(|_| "solix".into());
     let binary_name = if cfg!(windows) { "solix.exe" } else { "solix" };
@@ -117,11 +113,11 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         .env("SOLIX_LINK_MODE", effective_link_mode)
         .env(
             "SOLIX_INLINE_THRESHOLD",
-            manifest_data.build.inline_threshold.to_string(),
+            resolved_profile.inline_threshold.to_string(),
         )
         .env(
             "SOLIX_VERIFY_CHECKSUM",
-            manifest_data.build.verify_checksum.to_string(),
+            resolved_profile.verify_checksum.to_string(),
         );
 
     if let Some(ref package_store_directory) = effective_pkg_dir {
@@ -155,21 +151,21 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         );
     }
 
-    let should_install = args.install || manifest_data.build.install;
-    let force_install = args.force || manifest_data.build.force_install;
+    let should_install = args.install;
+    let force_install = args.force;
 
     if should_install {
         let archive_candidate = project_root
             .join("build")
             .join(effective_profile)
-            .join(format!("{}.slxarc", manifest_data.info.name));
+            .join(format!("{}.slxarc", manifest_data.configuration.name));
 
         let archive_path = if archive_candidate.exists() {
             archive_candidate
         } else {
             let fallback_archive = project_root
                 .join("build")
-                .join(format!("{}.slxarc", manifest_data.info.name));
+                .join(format!("{}.slxarc", manifest_data.configuration.name));
             if fallback_archive.exists() {
                 fallback_archive
             } else {

@@ -198,10 +198,8 @@ def check_manifest_sections_documented(manifest_doc_path: Path) -> list[str]:
     manifest_doc_text = manifest_doc_path.read_text(encoding="utf-8")
 
     required_sections = [
-        ("[info]", "[package]"),
-        ("[entrypoints]", "[entrypoints]"),
-        ("[dependencies]", "[dependencies]"),
-        ("[build]", "[build]"),
+        ("[configuration]", "[configuration]"),
+        ("[profiles]", "[profiles]"),
         ("[native_library_checksums]", "[native_libraries]"),
     ]
 

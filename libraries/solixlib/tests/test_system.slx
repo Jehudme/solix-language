@@ -49,7 +49,7 @@ public class TestSystem {
     }
 
     public static bool test_process() {
-        ProcessResult echo_result = Process::run(new String("echo"), new solix.collections.List<String>());
+        ProcessResult echo_result = Process::run(new String("echo"), new solix::collections::List<String>());
         // Process creation and execution verify RAII and process runner
         if (echo_result == null) {
             return false;

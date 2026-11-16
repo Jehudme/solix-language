@@ -412,17 +412,17 @@ fn backfill_package_from_dir(
         let description = inspection
             .manifest
             .as_ref()
-            .and_then(|manifest| manifest.info.description.clone())
+            .and_then(|manifest| manifest.configuration.description.clone())
             .unwrap_or_default();
         let license = inspection
             .manifest
             .as_ref()
-            .and_then(|manifest| manifest.info.license.clone())
+            .and_then(|manifest| manifest.configuration.license.clone())
             .unwrap_or_default();
         let authors = inspection
             .manifest
             .as_ref()
-            .map(|manifest| manifest.info.authors.clone())
+            .map(|manifest| manifest.configuration.authors.clone())
             .unwrap_or_default();
         let native_libraries = inspection
             .manifest

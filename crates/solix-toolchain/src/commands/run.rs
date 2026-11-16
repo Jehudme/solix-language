@@ -184,15 +184,11 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             }
             if runtime_options.entry_point.is_none() {
                 let selected_entry = if args.test {
-                    archive_manifest
-                        .entrypoints
-                        .test
-                        .as_ref()
-                        .or(archive_manifest.entrypoints.main.as_ref())
+                    archive_manifest.test_entrypoint()
                 } else {
-                    archive_manifest.entrypoints.main.as_ref()
+                    archive_manifest.main_entrypoint()
                 };
-                if let Some(target_symbol) = selected_entry {
+                if let Some(ref target_symbol) = selected_entry {
                     runtime_options = runtime_options.with_entry_point(target_symbol);
                 }
             }

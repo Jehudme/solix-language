@@ -41,7 +41,7 @@ function readPackageName(projectRoot: string): string {
     const manifestPath = path.join(projectRoot, 'manifest.toml');
     try {
         const manifestContent = fs.readFileSync(manifestPath, 'utf8');
-        const nameMatch = manifestContent.match(/(?:\[info\]|\[package\])[^[]*?name\s*=\s*["']([^"']+)["']/s);
+        const nameMatch = manifestContent.match(/(?:\[configuration\]|\[info\]|\[package\])[^[]*?name\s*=\s*["']([^"']+)["']/s);
         if (nameMatch && nameMatch[1]) {
             return nameMatch[1].trim();
         }
@@ -57,26 +57,29 @@ function readPackageName(projectRoot: string): string {
  */
 function parseManifestDependencies(manifestContent: string): string[] {
     const dependencies: string[] = [];
-    const depsMatch = manifestContent.match(/\[dependencies\]([\s\S]*?)(?:\[|$)/);
-    if (depsMatch && depsMatch[1]) {
-        const lines = depsMatch[1].split('\n');
-        for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine || trimmedLine.startsWith('#')) {
-                continue;
-            }
-            const tableMatch = trimmedLine.match(/^([a-zA-Z0-9_\-\.]+)\s*=\s*\{([^}]+)\}/);
-            if (tableMatch && tableMatch[1] && tableMatch[2]) {
-                const dependencyName = tableMatch[1];
-                const tableBody = tableMatch[2];
-                const versionMatch = tableBody.match(/version\s*=\s*["']([^"']+)["']/);
-                const profileMatch = tableBody.match(/profile\s*=\s*["']([^"']+)["']/);
-                if (versionMatch && versionMatch[1]) {
-                    const dependencyVersion = versionMatch[1];
-                    if (profileMatch && profileMatch[1]) {
-                        dependencies.push(`${dependencyName}@${dependencyVersion}#${profileMatch[1]}`);
-                    } else {
-                        dependencies.push(`${dependencyName}@${dependencyVersion}`);
+    const depsRegex = /(?:\[dependencies\]|\[profiles\.[^\]]+\.dependencies\])([\s\S]*?)(?:\[|$)/g;
+    let depsMatch: RegExpExecArray | null;
+    while ((depsMatch = depsRegex.exec(manifestContent)) !== null) {
+        if (depsMatch[1]) {
+            const lines = depsMatch[1].split('\n');
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine || trimmedLine.startsWith('#')) {
+                    continue;
+                }
+                const tableMatch = trimmedLine.match(/^([a-zA-Z0-9_\-\.]+)\s*=\s*\{([^}]+)\}/);
+                if (tableMatch && tableMatch[1] && tableMatch[2]) {
+                    const dependencyName = tableMatch[1];
+                    const tableBody = tableMatch[2];
+                    const versionMatch = tableBody.match(/version\s*=\s*["']([^"']+)["']/);
+                    const profileMatch = tableBody.match(/profile\s*=\s*["']([^"']+)["']/);
+                    if (versionMatch && versionMatch[1]) {
+                        const dependencyVersion = versionMatch[1];
+                        if (profileMatch && profileMatch[1]) {
+                            dependencies.push(`${dependencyName}@${dependencyVersion}#${profileMatch[1]}`);
+                        } else {
+                            dependencies.push(`${dependencyName}@${dependencyVersion}`);
+                        }
                     }
                 }
             }
@@ -89,8 +92,12 @@ function parseManifestDependencies(manifestContent: string): string[] {
  * Extracts canonical entry point symbol from manifest.toml if specified.
  */
 function parseManifestEntryPoint(manifestContent: string): string | undefined {
-    const entryMatch = manifestContent.match(/\[entrypoints\][\s\S]*?main\s*=\s*["']([^"']+)["']/);
-    return entryMatch && entryMatch[1] ? entryMatch[1].trim() : undefined;
+    const profileEntryMatch = manifestContent.match(/entrypoint\s*=\s*["']([^"']+)["']/);
+    if (profileEntryMatch && profileEntryMatch[1]) {
+        return profileEntryMatch[1].trim();
+    }
+    const legacyEntryMatch = manifestContent.match(/\[entrypoints\][\s\S]*?main\s*=\s*["']([^"']+)["']/);
+    return legacyEntryMatch && legacyEntryMatch[1] ? legacyEntryMatch[1].trim() : undefined;
 }
 
 /**

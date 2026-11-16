@@ -90,33 +90,37 @@ def generate_project(
     deps_lines = []
     for dependency_name, dependency_version in sorted(parsed_dependencies.items()):
         deps_lines.append(f'{dependency_name} = {{ version = "{dependency_version}", profile = "release" }}')
-    deps_block = "\n".join(deps_lines) if deps_lines else '# solix = { version = "2.0.0", profile = "release" }'
+    
+    release_deps_block = ""
+    if deps_lines:
+        release_deps_block = "\n[profiles.release.dependencies]\n" + "\n".join(deps_lines)
 
-    manifest_content = f"""[info]
+    manifest_content = f"""[configuration]
 name = "{project_name}"
 version = "{version}"
 description = "{description}"
 license = "{license_id}"
 authors = [{authors_formatted}]
 
-[entrypoints]
-main = "{main_entry}"
-test = "{test_entry}"
+[profiles.release]
+entrypoint = "{main_entry}"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]{release_deps_block}
 
-[build]
-profile = "debug"
-
-[profile.default]
-opt_level = 0
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
 inline_threshold = 8
 debug_symbols = true
+static = false
 
-[profile.release]
-opt_level = 3
-debug_symbols = false
-
-[dependencies]
-{deps_block}
+[profiles.test]
+inherits = "debug"
+entrypoint = "{test_entry}"
+sources = ["src", "tests"]
 """
     manifest_file.write_text(manifest_content, encoding="utf-8")
 
@@ -224,7 +228,7 @@ target-dir = "../../build/.cache/cargo"
         cargo_toml_content = f"""[package]
 name = "{bridge_name}"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [workspace]
 
@@ -232,33 +236,14 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+solix-ffi = "1.1.3"
 """
         (bridge_dir / "Cargo.toml").write_text(cargo_toml_content, encoding="utf-8")
 
         bridge_lib_content = f"""//! Rust native bridge extension crate for Solix package '{project_name}'.
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct SolixCValue {{
-    pub tag: u32,
-    pub flags: u32,
-    pub payload: u64,
-}}
+use solix_ffi::{{NativeRegistry, SolixCValue, solix_export}};
 
-pub type NativeCFunctionPtr = unsafe extern "C" fn(
-    *mut std::ffi::c_void,
-    *const SolixCValue,
-    u32,
-    *mut SolixCValue,
-) -> SolixCValue;
-
-pub type RegisterNativeCallback = unsafe extern "C" fn(
-    *mut std::ffi::c_void,
-    *const std::ffi::c_char,
-    NativeCFunctionPtr,
-);
-
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn {pascal_name}Native_fast_add(
     _vm_context: *mut std::ffi::c_void,
     args: *const SolixCValue,
@@ -266,35 +251,16 @@ pub unsafe extern "C" fn {pascal_name}Native_fast_add(
     _out_error: *mut SolixCValue,
 ) -> SolixCValue {{
     if arg_count < 2 || args.is_null() {{
-        return SolixCValue {{
-            tag: 0,
-            flags: 0,
-            payload: 0,
-        }};
+        return SolixCValue::null();
     }}
     let first = unsafe {{ (*args.add(0)).payload as i32 }};
     let second = unsafe {{ (*args.add(1)).payload as i32 }};
-    SolixCValue {{
-        tag: 2,
-        flags: 0,
-        payload: ((first + second) as i64) as u64,
-    }}
+    SolixCValue::from_i32(first + second)
 }}
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn solix_register_natives(
-    collector_context: *mut std::ffi::c_void,
-    register_callback: RegisterNativeCallback,
-) {{
-    let add_symbol = c"{pascal_name}Native::fast_add";
-    unsafe {{
-        register_callback(
-            collector_context,
-            add_symbol.as_ptr(),
-            {pascal_name}Native_fast_add,
-        );
-    }}
-}}
+solix_export!(
+    "{pascal_name}Native::fast_add" => {pascal_name}Native_fast_add
+);
 """
         (bridge_src_dir / "lib.rs").write_text(bridge_lib_content, encoding="utf-8")
 

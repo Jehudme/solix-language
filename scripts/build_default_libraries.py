@@ -54,10 +54,13 @@ def discover_libraries(libraries_directory: Path) -> dict[str, dict[str, Any]]:
             continue
 
         manifest_data = parse_manifest(manifest_path)
-        info_table = manifest_data.get("info", {})
-        package_name = info_table.get("name")
-        package_version = info_table.get("version", "0.1.0")
-        dependencies_table = manifest_data.get("dependencies", {})
+        config_table = manifest_data.get("configuration", manifest_data.get("info", {}))
+        package_name = config_table.get("name")
+        package_version = config_table.get("version", "0.1.0")
+        dependencies_table = (
+            manifest_data.get("profiles", {}).get("release", {}).get("dependencies", {})
+            or manifest_data.get("dependencies", {})
+        )
 
         if not package_name:
             continue

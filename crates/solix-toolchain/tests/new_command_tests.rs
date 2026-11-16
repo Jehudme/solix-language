@@ -44,8 +44,8 @@ fn test_solix_new_default_application() {
     assert!(manifest_content.contains("name = \"sample_application\""));
     assert!(manifest_content.contains("version = \"0.1.0\""));
     assert!(manifest_content.contains("authors = [\"Alice Doe <alice@example.com>\"]"));
-    assert!(manifest_content.contains("main = \"Main::main\""));
-    assert!(manifest_content.contains("test = \"TestRunner::test\""));
+    assert!(manifest_content.contains("entrypoint = \"Main::main\""));
+    assert!(manifest_content.contains("entrypoint = \"TestRunner::test\""));
 
     assert!(
         target_project_directory
@@ -281,4 +281,6 @@ fn test_solix_new_explicit_native_flag() {
         .join("native_app_bridge");
     assert!(bridge_directory.join("Cargo.toml").exists());
     assert!(bridge_directory.join("src").join("lib.rs").exists());
+    let cargo_toml = fs::read_to_string(bridge_directory.join("Cargo.toml")).expect("read bridge Cargo.toml");
+    assert!(cargo_toml.contains("solix-ffi = \"1.1.3\""));
 }

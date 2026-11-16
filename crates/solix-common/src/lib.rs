@@ -25,7 +25,8 @@ pub use cache::{
 pub use diagnostics::EmissionError;
 pub use hash::{Sha256Hasher, format_hex_digest, sha256_bytes, sha256_file, sha256_hex};
 pub use project::{
-    LoadedSlxarc, ProjectEntryPoints, ProjectInfo, ProjectManifest, SlxarcArchive, SlxarcFileEntry,
+    DependencySpec, LoadedSlxarc, ProfileConfig, ProjectConfiguration, ProjectInfo,
+    ProjectManifest, ResolvedDependency, ResolvedProfile, SlxarcArchive, SlxarcFileEntry,
     SlxarcInspection,
 };
 pub use solver::{

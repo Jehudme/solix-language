@@ -196,12 +196,12 @@ def load_manifest(project_root: Path) -> dict[str, Any]:
             hint="Ensure manifest.toml is valid TOML syntax.",
         ) from parse_error
 
-    if "info" not in manifest_data or "name" not in manifest_data["info"]:
+    if "configuration" not in manifest_data or "name" not in manifest_data["configuration"]:
         raise BuildError(
             phase="Manifest Validation",
-            message="manifest.toml must contain a valid [info] section with 'name'",
+            message="manifest.toml must contain a valid [configuration] section with 'name'",
             cwd=project_root,
-            hint="Add [info] section with name = \"<package_name>\" to manifest.toml.",
+            hint="Add [configuration] section with name = \"<package_name>\" to manifest.toml.",
         )
 
     return manifest_data
@@ -458,73 +458,106 @@ def resolve_solix_binary() -> str:
     return "solix"
 
 
-def resolve_profile_options(manifest: dict, target_profile: str) -> dict:
-    """Resolves hierarchical profile inheritance (e.g. bench -> release -> default)."""
+def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> dict[str, Any]:
+    """Resolves hierarchical profile inheritance (e.g. test -> debug -> release)."""
+    profiles_table = manifest.get("profiles", {})
+    if "release" not in profiles_table:
+        raise BuildError(
+            phase="Profile Resolution",
+            message="manifest.toml must define mandatory [profiles.release] profile",
+            hint="Add [profiles.release] section to manifest.toml.",
+        )
+
     visited_profiles: list[str] = []
     resolution_chain: list[str] = []
     current_profile_name = target_profile
-    profiles_table = manifest.get("profile", {})
 
     while current_profile_name:
         if current_profile_name in visited_profiles:
-            break
+            raise BuildError(
+                phase="Profile Resolution",
+                message=f"Cyclic profile inheritance detected: {' -> '.join(visited_profiles)} -> {current_profile_name}",
+                hint="Ensure profile inheritance hierarchy does not contain cycles.",
+            )
         visited_profiles.append(current_profile_name)
         resolution_chain.append(current_profile_name)
+        if current_profile_name == "release":
+            break
+
         current_config = profiles_table.get(current_profile_name, {})
         parent_name = current_config.get("inherits")
         if not parent_name:
-            if current_profile_name in ("release", "debug"):
-                parent_name = "default"
-            elif current_profile_name == "test":
-                parent_name = "debug"
-            elif current_profile_name == "default":
-                parent_name = None
-            else:
-                parent_name = "default"
-        if parent_name == "default" and current_profile_name == "default":
-            break
+            parent_name = "release"
         current_profile_name = parent_name
 
-    resolved_options = {
-        "opt_level": 0,
-        "inline_threshold": 8,
-        "debug_symbols": True,
+    resolved_options: dict[str, Any] = {
+        "name": target_profile,
+        "entrypoint": "Main::main",
+        "opt_level": 3,
+        "inline_threshold": 16,
+        "debug_symbols": False,
+        "static": True,
         "emit_disassembly": False,
         "warnings_as_errors": False,
         "verify_checksum": True,
-        "link": "dynamic",
+        "link": "static",
+        "sources": ["src"],
+        "dependencies": {},
     }
-
-    build_table = manifest.get("build", {})
-    if "inline_threshold" in build_table:
-        resolved_options["inline_threshold"] = build_table["inline_threshold"]
-    if "verify_checksum" in build_table:
-        resolved_options["verify_checksum"] = build_table["verify_checksum"]
-    if "link" in build_table:
-        resolved_options["link"] = build_table["link"]
 
     while resolution_chain:
         step_profile = resolution_chain.pop()
-        if step_profile == "release":
-            resolved_options["opt_level"] = 3
-            resolved_options["inline_threshold"] = 8
-            resolved_options["debug_symbols"] = False
-        elif step_profile in ("debug", "test"):
-            resolved_options["opt_level"] = 0
-            resolved_options["debug_symbols"] = True
+        step_config = profiles_table.get(step_profile)
+        if step_config is None:
+            if step_profile == "debug":
+                resolved_options["opt_level"] = 0
+                resolved_options["inline_threshold"] = 8
+                resolved_options["debug_symbols"] = True
+                resolved_options["static"] = False
+                resolved_options["link"] = "dynamic"
+            elif step_profile == "test":
+                resolved_options["opt_level"] = 0
+                resolved_options["inline_threshold"] = 8
+                resolved_options["debug_symbols"] = True
+                resolved_options["entrypoint"] = "TestRunner::test"
+                if "tests" not in resolved_options["sources"] and "test" not in resolved_options["sources"]:
+                    resolved_options["sources"].append("tests")
+            continue
 
-        step_config = profiles_table.get(step_profile, {})
-        for option_key in (
-            "opt_level",
-            "inline_threshold",
-            "debug_symbols",
-            "emit_disassembly",
-            "warnings_as_errors",
-            "verify_checksum",
-            "link",
-        ):
-            if option_key in step_config:
-                resolved_options[option_key] = step_config[option_key]
+        if "entrypoint" in step_config:
+            resolved_options["entrypoint"] = step_config["entrypoint"]
+        if "optimization_level" in step_config:
+            resolved_options["opt_level"] = step_config["optimization_level"]
+        if "opt_level" in step_config:
+            resolved_options["opt_level"] = step_config["opt_level"]
+        if "inline_threshold" in step_config:
+            resolved_options["inline_threshold"] = step_config["inline_threshold"]
+        if "debug_symbols" in step_config:
+            resolved_options["debug_symbols"] = step_config["debug_symbols"]
+        if "static" in step_config:
+            resolved_options["static"] = step_config["static"]
+            resolved_options["link"] = "static" if step_config["static"] else "dynamic"
+        if "link" in step_config:
+            resolved_options["link"] = step_config["link"]
+            resolved_options["static"] = (step_config["link"] == "static")
+        if "emit_disassembly" in step_config:
+            resolved_options["emit_disassembly"] = step_config["emit_disassembly"]
+        if "warnings_as_errors" in step_config:
+            resolved_options["warnings_as_errors"] = step_config["warnings_as_errors"]
+        if "verify_checksum" in step_config:
+            resolved_options["verify_checksum"] = step_config["verify_checksum"]
+
+        if "sources" in step_config:
+            if step_profile == "release":
+                resolved_options["sources"] = list(step_config["sources"])
+            else:
+                for source_item in step_config["sources"]:
+                    if source_item not in resolved_options["sources"]:
+                        resolved_options["sources"].append(source_item)
+
+        if "dependencies" in step_config and isinstance(step_config["dependencies"], dict):
+            for raw_dep_key, raw_dep_spec in step_config["dependencies"].items():
+                resolved_options["dependencies"][raw_dep_key] = raw_dep_spec
 
     return resolved_options
 
@@ -538,18 +571,24 @@ def compile_solix_sources(
 ) -> Path:
     """Invokes solix compile to emit the main application bytecode binary."""
     solix_executable = resolve_solix_binary()
-    package_name = manifest["info"]["name"]
-    package_version = manifest["info"].get("version", "0.1.0")
-    package_description = manifest["info"].get("description", "")
+    package_name = manifest["configuration"]["name"]
+    package_version = manifest["configuration"].get("version", "0.1.0")
+    package_description = manifest["configuration"].get("description", "")
 
     output_slxb = stage_bin_directory / f"{package_name}.slxb"
 
-    source_directory = project_root / "src"
-    tests_directory = project_root / "tests"
+    resolved_profile_options = resolve_profile_options(manifest, profile)
 
-    sources_to_compile: list[str] = [str(source_directory)]
-    if profile == "test" and tests_directory.exists():
-        sources_to_compile.append(str(tests_directory))
+    sources_to_compile: list[str] = []
+    for source_subpath in resolved_profile_options["sources"]:
+        full_source_path = project_root / source_subpath
+        if full_source_path.exists():
+            sources_to_compile.append(str(full_source_path))
+
+    if not sources_to_compile:
+        fallback_src = project_root / "src"
+        if fallback_src.exists():
+            sources_to_compile.append(str(fallback_src))
 
     compile_command: list[str] = [
         solix_executable,
@@ -568,23 +607,15 @@ def compile_solix_sources(
     if package_description:
         compile_command.extend(["--description", package_description])
 
-    entrypoints = manifest.get("entrypoints", {})
-    if isinstance(entrypoints, dict):
-        selected_entrypoint = (
-            entrypoints.get("test") or entrypoints.get("main")
-            if profile == "test"
-            else entrypoints.get("main")
-        )
-        if selected_entrypoint:
-            compile_command.extend(["--entry", str(selected_entrypoint)])
-
-    resolved_profile_options = resolve_profile_options(manifest, profile)
+    selected_entrypoint = resolved_profile_options.get("entrypoint")
+    if selected_entrypoint:
+        compile_command.extend(["--entry", str(selected_entrypoint)])
 
     link_mode = os.environ.get("SOLIX_LINK_MODE") or resolved_profile_options.get("link")
     if link_mode:
         compile_command.extend(["--link", str(link_mode)])
 
-    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR") or manifest.get("build", {}).get("pkg_dir")
+    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR")
     if pkg_dir_override:
         compile_command.extend(["--pkg-dir", str(pkg_dir_override)])
 
@@ -603,7 +634,7 @@ def compile_solix_sources(
         if lib_file.name.endswith(".slxb"):
             compile_command.extend(["-l", str(lib_file)])
 
-    dependencies = manifest.get("dependencies", {})
+    dependencies = resolved_profile_options.get("dependencies", {})
     if isinstance(dependencies, dict):
         for raw_dependency_key, dependency_val in sorted(dependencies.items()):
             if not isinstance(dependency_val, dict):
@@ -687,22 +718,21 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
         project_root = Path.cwd()
 
     manifest = load_manifest(project_root)
-    build_config = manifest.get("build", {})
 
     # Resolve effective profile
-    effective_profile = profile or os.environ.get("SOLIX_PROFILE") or build_config.get("profile", "debug")
+    effective_profile = profile or os.environ.get("SOLIX_PROFILE") or "release"
     effective_profile = effective_profile.lower()
     if effective_profile not in ("debug", "release", "test"):
         raise BuildError(
             phase="Profile Resolution",
             message=f"Unknown build profile '{effective_profile}'; expected 'debug', 'release', or 'test'",
             cwd=project_root,
-            hint="Set profile to 'debug', 'release', or 'test' via CLI or [build].profile in manifest.toml.",
+            hint="Set profile to 'debug', 'release', or 'test' via CLI or build command.",
         )
 
     print(f"=== Building Solix Project: {project_root.name} [{effective_profile}] ===")
 
-    package_name = manifest["info"]["name"]
+    package_name = manifest["configuration"]["name"]
     staging = prepare_staging_dirs(project_root, effective_profile)
 
     # Compile native Rust subprojects
@@ -768,16 +798,17 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
     print(f"  Total Elapsed Time:           {total_duration_ms:.1f} ms")
 
     # Optional automatic installation into package store
+    profile_options = resolve_profile_options(manifest, effective_profile)
     should_install = (
         os.environ.get("SOLIX_AUTO_INSTALL") == "1"
-        or build_config.get("install", False)
+        or profile_options.get("install", False)
     )
     if should_install:
         force_install = (
             os.environ.get("SOLIX_FORCE_INSTALL") == "1"
-            or build_config.get("force_install", False)
+            or profile_options.get("force_install", False)
         )
-        custom_pkg_dir = os.environ.get("SOLIX_PKG_DIR") or build_config.get("pkg_dir")
+        custom_pkg_dir = os.environ.get("SOLIX_PKG_DIR") or profile_options.get("pkg_dir")
 
         solix_executable = resolve_solix_binary()
         install_command: list[str] = [
