@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-060
 * **Target Version:** `v2.1.0`
 * **Milestone Branch:** `milestone/060-nan-boxed-values-compact-trap-abi-and-total-lua-supremacy`
-* **Status:** DRAFT
+* **Status:** ACTIVE
 * **Lead Architect:** Core Systems, Compiler & Runtime Performance Engineering Team
 * **Target Delivery Date:** 2026-12-15
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
