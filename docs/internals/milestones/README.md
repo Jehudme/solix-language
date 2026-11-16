@@ -66,3 +66,4 @@ This directory maintains the historical and active engineering roadmap and deliv
 | **MS-056** | Standard Library Expansion, C++ std::format & VM Telemetry | `v2.0.0` | COMPLETED | [056-standard-library-expansion-and-vm-telemetry.md](056-standard-library-expansion-and-vm-telemetry.md) |
 | **MS-057** | Bacon-Rajan ARC Cycle Collector with Zero-Cost Opt-Out | `v2.0.0` | COMPLETED | [057-bacon-rajan-arc-cycle-collector.md](057-bacon-rajan-arc-cycle-collector.md) |
 | **MS-058** | Dynamic Release Benchmarking, Comparison Tables & CI/CD Gate | `v2.0.0` | COMPLETED | [058-dynamic-release-benchmarking-and-ci-cd.md](058-dynamic-release-benchmarking-and-ci-cd.md) |
+| **MS-059** | Cross-Crate Opcode Inlining, Zero-Drop Call Frames, Liveness Peephole & Lua Parity | `v2.1.0` | ACTIVE | [059-vm-dispatch-inlining-peephole-liveness-and-lua-parity.md](059-vm-dispatch-inlining-peephole-liveness-and-lua-parity.md) |
