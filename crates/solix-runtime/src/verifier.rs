@@ -351,6 +351,30 @@ fn verify_instruction(
             check_reg(instruction.src1(), "src1")?;
         }
 
+        OpCode::AddBandI32 => {
+            check_reg(instruction.dst(), "dst")?;
+            check_reg(instruction.flags() as u16, "acc_reg")?;
+            check_reg(instruction.src1(), "val_reg")?;
+            check_reg(instruction.src2(), "mask_reg")?;
+        }
+
+        OpCode::ForLoopI32 => {
+            check_reg(instruction.dst(), "idx_reg")?;
+            check_reg(instruction.src1(), "bound_reg")?;
+            if (instruction.flags() & 0x80) != 0 {
+                let step_reg = (instruction.flags() & 0x3F) as u16;
+                check_reg(step_reg, "step_reg")?;
+            }
+            let offset = instruction.src2() as i16 as i32;
+            check_branch_target(offset)?;
+        }
+
+        OpCode::JumpIfI32Imm => {
+            check_reg(instruction.dst(), "reg_a")?;
+            let offset = instruction.src2() as i16 as i32;
+            check_branch_target(offset)?;
+        }
+
         OpCode::JumpIfLtI32
         | OpCode::JumpIfLteI32
         | OpCode::JumpIfGtI32

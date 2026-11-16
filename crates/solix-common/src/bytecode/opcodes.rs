@@ -131,7 +131,7 @@ pub enum OpCode {
     IncRef = 0xC0,
     DecRef = 0xC1,
 
-    // 0xD0 .. 0xD9: Superinstructions
+    // 0xD0 .. 0xDC: Superinstructions
     AddI32Imm = 0xD0,
     SubI32Imm = 0xD1,
     JumpIfLtI32 = 0xD2,
@@ -142,6 +142,9 @@ pub enum OpCode {
     JumpIfNeqI32 = 0xD7,
     MulI32Imm = 0xD8,
     ModI32Imm = 0xD9,
+    ForLoopI32 = 0xDA,
+    AddBandI32 = 0xDB,
+    JumpIfI32Imm = 0xDC,
 }
 
 impl OpCode {
@@ -269,6 +272,9 @@ impl OpCode {
             0xD7 => Some(Self::JumpIfNeqI32),
             0xD8 => Some(Self::MulI32Imm),
             0xD9 => Some(Self::ModI32Imm),
+            0xDA => Some(Self::ForLoopI32),
+            0xDB => Some(Self::AddBandI32),
+            0xDC => Some(Self::JumpIfI32Imm),
 
             _ => None,
         }
@@ -412,6 +418,9 @@ impl OpCode {
             Self::JumpIfNeqI32 => "JUMP_IF_NEQ_I32",
             Self::MulI32Imm => "MUL_I32_IMM",
             Self::ModI32Imm => "MOD_I32_IMM",
+            Self::ForLoopI32 => "FOR_LOOP_I32",
+            Self::AddBandI32 => "ADD_BAND_I32",
+            Self::JumpIfI32Imm => "JUMP_IF_I32_IMM",
         }
     }
 }
@@ -445,9 +454,10 @@ mod tests {
             assert_eq!(OpCode::from_u8(raw_byte, 0).ok(), decoded);
         }
 
-        let extra_bytes: [u8; 27] = [
+        let extra_bytes: [u8; 30] = [
             0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x90, 0x91, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xB0,
-            0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0x00,
+            0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB,
+            0xDC, 0x00,
         ];
         for raw_byte in extra_bytes {
             let decoded = OpCode::from_raw_u8(raw_byte);

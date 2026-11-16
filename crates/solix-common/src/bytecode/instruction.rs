@@ -13,6 +13,9 @@ pub const FLAG_WEAK: u8 = 0x01;
 /// Instruction flag marking an allocation of a Plain-Old-Data (POD) class instance.
 pub const FLAG_POD: u8 = 0x02;
 
+/// Instruction flag marking an ownership-transferring reference store (eliding `IncRef` + `DecRef`).
+pub const FLAG_MOVE: u8 = 0x80;
+
 /// Strongly-typed 64-bit instruction word for the virtual register VM.
 ///
 /// Encodes instructions into uniform 8-byte aligned words using four main formats:
@@ -253,13 +256,23 @@ impl fmt::Display for Instruction {
                 | OpCode::CallSymbol
                 | OpCode::CallCallable
                 | OpCode::CallExtern
-                | OpCode::CallNativeDirect => {
+                | OpCode::CallNativeDirect
+                | OpCode::PackClosure => {
                     write!(
                         f,
                         "{:<14} r{}, target:{}, args:r{}..r{}",
                         opcode.mnemonic(),
                         self.call_dst(),
                         self.call_target(),
+                        self.arg_base(),
+                        self.arg_base() + self.arg_count() as u16
+                    )
+                }
+                OpCode::UnpackCaptures => {
+                    write!(
+                        f,
+                        "{:<14} args:r{}..r{}",
+                        opcode.mnemonic(),
                         self.arg_base(),
                         self.arg_base() + self.arg_count() as u16
                     )
@@ -274,9 +287,12 @@ impl fmt::Display for Instruction {
                     )
                 }
                 OpCode::LoadI32
+                | OpCode::LoadI64
+                | OpCode::LoadF64
+                | OpCode::LoadBool
                 | OpCode::LoadConst
-                | OpCode::GetField
-                | OpCode::SetField
+                | OpCode::GetStatic
+                | OpCode::SetStatic
                 | OpCode::GetStaticGlobal
                 | OpCode::GetStaticDirect
                 | OpCode::SetStaticGlobal
@@ -288,6 +304,17 @@ impl fmt::Display for Instruction {
                         opcode.mnemonic(),
                         self.dst(),
                         self.imm32()
+                    )
+                }
+                OpCode::AddBandI32 => {
+                    write!(
+                        f,
+                        "{:<14} r{}, r{}, r{}, r{}",
+                        opcode.mnemonic(),
+                        self.dst(),
+                        self.flags(),
+                        self.src1(),
+                        self.src2()
                     )
                 }
                 _ => {

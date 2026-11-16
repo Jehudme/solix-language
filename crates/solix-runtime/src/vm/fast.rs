@@ -938,6 +938,7 @@ impl VirtualMachine {
         arr_offset: usize,
         index_usize: usize,
         val: Value,
+        is_move: bool,
     ) -> Result<bool, VmTrap> {
         let elem_offset = arr_offset + 8 + (index_usize * 16);
         if elem_offset + 16 > self.heap.buffer.len() {
@@ -960,7 +961,8 @@ impl VirtualMachine {
         self.heap.buffer[elem_offset + 8..elem_offset + 16]
             .copy_from_slice(&new_payload.to_le_bytes());
 
-        if let Value::Ref(child_addr) = val
+        if !is_move
+            && let Value::Ref(child_addr) = val
             && child_addr > 0
         {
             crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
@@ -1036,12 +1038,13 @@ impl VirtualMachine {
         obj_addr: u32,
         offset: usize,
         raw_flags: u8,
-        val_ref: &Value,
+        val: Value,
         pc: usize,
     ) -> Result<bool, VmTrap> {
         let field_addr = obj_addr + offset as u32;
         let is_weak = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
-        let tag_shifted = raw_flags >> 1;
+        let is_move = (raw_flags & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
+        let tag_shifted = (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
         let field_type_tag = if tag_shifted > 0 {
             Some(tag_shifted)
         } else {
@@ -1053,44 +1056,37 @@ impl VirtualMachine {
 
         match field_type_tag {
             Some(1) | Some(2) => {
-                let _ = self
-                    .heap
-                    .write_u8(field_addr, read_i32_fast(val_ref)? as u8);
+                let _ = self.heap.write_u8(field_addr, read_i32_fast(&val)? as u8);
             }
             Some(3) | Some(4) => {
-                let _ = self
-                    .heap
-                    .write_u16(field_addr, read_i32_fast(val_ref)? as u16);
+                let _ = self.heap.write_u16(field_addr, read_i32_fast(&val)? as u16);
             }
             Some(5) | Some(6) => {
-                let _ = self
-                    .heap
-                    .write_u32(field_addr, read_i32_fast(val_ref)? as u32);
+                let _ = self.heap.write_u32(field_addr, read_i32_fast(&val)? as u32);
             }
             Some(7) | Some(8) => {
-                let _ = self
-                    .heap
-                    .write_u64(field_addr, read_i64_fast(val_ref)? as u64);
+                let _ = self.heap.write_u64(field_addr, read_i64_fast(&val)? as u64);
             }
             Some(9) => {
-                let bits = (read_f64_fast(val_ref)? as f32).to_bits();
+                let bits = (read_f64_fast(&val)? as f32).to_bits();
                 let _ = self.heap.write_u32(field_addr, bits);
             }
             Some(10) => {
-                let bits = read_f64_fast(val_ref)?.to_bits();
+                let bits = read_f64_fast(&val)?.to_bits();
                 let _ = self.heap.write_u64(field_addr, bits);
             }
             Some(11) => {
                 let _ = self
                     .heap
-                    .write_u8(field_addr, if read_bool_fast(val_ref)? { 1 } else { 0 });
+                    .write_u8(field_addr, if read_bool_fast(&val)? { 1 } else { 0 });
             }
             _ => {
                 let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
                 let old_val = Value::from_raw_u64(old_raw);
-                self.heap.write_u64(field_addr, val_ref.to_raw_u64())?;
-                if let Value::Ref(child_addr) = *val_ref
+                self.heap.write_u64(field_addr, val.to_raw_u64())?;
+                if let Value::Ref(child_addr) = val
                     && !is_weak
+                    && !is_move
                     && child_addr > 0
                 {
                     crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
@@ -1115,11 +1111,18 @@ impl VirtualMachine {
         arr_offset: usize,
         index_usize: usize,
         val_reg: u16,
+        raw_flags: u8,
         pc: usize,
     ) -> Result<bool, VmTrap> {
+        let is_move = (raw_flags & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
         let val = {
             let caller_frame = self.current_frame_fast()?;
-            self.register_stack[caller_frame.register_base as usize + val_reg as usize]
+            let reg_idx = caller_frame.register_base as usize + val_reg as usize;
+            let loaded = self.register_stack[reg_idx];
+            if is_move {
+                self.register_stack[reg_idx] = Value::Null;
+            }
+            loaded
         };
         let buf_ptr = self.heap.buffer.as_mut_ptr();
         let heap_len = self.heap.buffer.len();
@@ -1170,7 +1173,8 @@ impl VirtualMachine {
         }
 
         if is_reference_element {
-            if let Value::Ref(child_addr) = val
+            if !is_move
+                && let Value::Ref(child_addr) = val
                 && child_addr > 0
             {
                 crate::memory::arc::inc_ref(&mut self.heap, child_addr)
@@ -3044,13 +3048,18 @@ impl VirtualMachine {
                         let obj_addr =
                             read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                         let offset = inst.src2() as usize;
-                        let val_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let val_idx = inst.dst() as usize;
+                        let val_ref = unsafe { &*reg_base.add(val_idx) };
                         let field_addr = obj_addr + offset as u32;
                         let raw_flags = inst.flags();
+                        let is_move =
+                            (raw_flags & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
+                        let field_tag =
+                            (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
                         if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) == 0
-                            && (raw_flags >> 1) > 0
+                            && field_tag > 0
                         {
-                            match raw_flags >> 1 {
+                            match field_tag {
                                 5 | 6 => {
                                     write_heap_u32_fast(
                                         &mut self.heap.buffer,
@@ -3069,18 +3078,95 @@ impl VirtualMachine {
                                     let bits = read_f64_fast(val_ref)?.to_bits();
                                     write_heap_u64_fast(&mut self.heap.buffer, field_addr, bits);
                                 }
+                                12 => {
+                                    let old_raw =
+                                        read_heap_u64_or_zero(&self.heap.buffer, field_addr);
+                                    if old_raw == 0 || old_raw == Value::TAG_NULL {
+                                        let new_val = *val_ref;
+                                        if is_move {
+                                            unsafe {
+                                                *reg_base.add(val_idx) = Value::Null;
+                                            }
+                                            write_heap_u64_fast(
+                                                &mut self.heap.buffer,
+                                                field_addr,
+                                                new_val.to_raw_u64(),
+                                            );
+                                        } else {
+                                            write_heap_u64_fast(
+                                                &mut self.heap.buffer,
+                                                field_addr,
+                                                new_val.to_raw_u64(),
+                                            );
+                                            if let Value::Ref(child_addr) = new_val
+                                                && child_addr > 0
+                                            {
+                                                let rc_offset = (child_addr as usize) - 4;
+                                                let buf_ptr = self.heap.buffer.as_mut_ptr();
+                                                if rc_offset + 4 <= self.heap.buffer.len() {
+                                                    let rc = unsafe {
+                                                        u32::from_le(std::ptr::read_unaligned(
+                                                            buf_ptr.add(rc_offset).cast::<u32>(),
+                                                        ))
+                                                    };
+                                                    if rc > 0 && rc != u32::MAX {
+                                                        unsafe {
+                                                            std::ptr::write_unaligned(
+                                                                buf_ptr
+                                                                    .add(rc_offset)
+                                                                    .cast::<u32>(),
+                                                                (rc + 1).to_le(),
+                                                            );
+                                                        }
+                                                    } else if rc == 0 {
+                                                        inc_ref_trap_cold(
+                                                            &mut self.heap,
+                                                            child_addr,
+                                                        )?;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        let new_val = *val_ref;
+                                        if is_move {
+                                            unsafe {
+                                                *reg_base.add(val_idx) = Value::Null;
+                                            }
+                                        }
+                                        if self.execute_set_field_slow(
+                                            obj_addr, offset, raw_flags, new_val, pc,
+                                        )? {
+                                            reload_frame!();
+                                        }
+                                    }
+                                }
                                 _ => {
+                                    let new_val = *val_ref;
+                                    if is_move {
+                                        unsafe {
+                                            *reg_base.add(val_idx) = Value::Null;
+                                        }
+                                    }
                                     if self.execute_set_field_slow(
-                                        obj_addr, offset, raw_flags, val_ref, pc,
+                                        obj_addr, offset, raw_flags, new_val, pc,
                                     )? {
                                         reload_frame!();
                                     }
                                 }
                             }
-                        } else if self
-                            .execute_set_field_slow(obj_addr, offset, raw_flags, val_ref, pc)?
-                        {
-                            reload_frame!();
+                        } else {
+                            let new_val = *val_ref;
+                            if is_move {
+                                unsafe {
+                                    *reg_base.add(val_idx) = Value::Null;
+                                }
+                            }
+                            if self
+                                .execute_set_field_slow(obj_addr, offset, raw_flags, new_val, pc)?
+                            {
+                                reload_frame!();
+                            }
                         }
                     }
 
@@ -3316,8 +3402,17 @@ impl VirtualMachine {
                         let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
 
                         if tag_nibble == BlockTag::Tuple as u8 {
-                            let val = unsafe { *reg_base.add(inst.src2() as usize) };
-                            if self.execute_set_tuple(arr_offset, index_usize, val)? {
+                            let val_idx = inst.src2() as usize;
+                            let is_move = (inst.flags()
+                                & solix_common::bytecode::instruction::FLAG_MOVE)
+                                != 0;
+                            let val = unsafe { *reg_base.add(val_idx) };
+                            if is_move {
+                                unsafe {
+                                    *reg_base.add(val_idx) = Value::Null;
+                                }
+                            }
+                            if self.execute_set_tuple(arr_offset, index_usize, val, is_move)? {
                                 let caller_frame = self.current_frame_mut_fast()?;
                                 caller_frame.pc = pc as u32;
                                 reload_frame!();
@@ -3325,7 +3420,8 @@ impl VirtualMachine {
                         } else {
                             let elem_size_raw = unsafe { *buf_ptr.add(arr_offset + 4) };
                             let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                            let val_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                            let val_idx = inst.src2() as usize;
+                            let val_ref = unsafe { &*reg_base.add(val_idx) };
                             if elem_type_tag == 11 && elem_size_raw == 1 {
                                 let elem_offset = arr_offset + 8 + index_usize;
                                 if elem_offset + 1 > heap_len {
@@ -3354,10 +3450,55 @@ impl VirtualMachine {
                                         word_val.to_le(),
                                     );
                                 }
+                            } else if elem_type_tag == 10 && elem_size_raw == 8 {
+                                let elem_offset = arr_offset + 8 + (index_usize << 3);
+                                if elem_offset + 8 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let bits = read_f64_fast(val_ref)?.to_bits();
+                                unsafe {
+                                    std::ptr::write_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u64>(),
+                                        bits.to_le(),
+                                    );
+                                }
+                            } else if (elem_type_tag == 13 || elem_type_tag >= 0x80)
+                                && elem_size_raw == 8
+                                && (inst.flags() & solix_common::bytecode::instruction::FLAG_MOVE)
+                                    != 0
+                            {
+                                let elem_offset = arr_offset + 8 + (index_usize << 3);
+                                if elem_offset + 8 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let old_child = unsafe {
+                                    u32::from_le(std::ptr::read_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u32>(),
+                                    ))
+                                };
+                                if old_child == 0 {
+                                    let new_val = *val_ref;
+                                    unsafe {
+                                        *reg_base.add(val_idx) = Value::Null;
+                                        std::ptr::write_unaligned(
+                                            buf_ptr.add(elem_offset).cast::<u64>(),
+                                            new_val.to_primitive_u64().to_le(),
+                                        );
+                                    }
+                                } else if self.execute_set_array_slow(
+                                    arr_offset,
+                                    index_usize,
+                                    inst.src2(),
+                                    inst.flags(),
+                                    pc,
+                                )? {
+                                    reload_frame!();
+                                }
                             } else if self.execute_set_array_slow(
                                 arr_offset,
                                 index_usize,
                                 inst.src2(),
+                                inst.flags(),
                                 pc,
                             )? {
                                 reload_frame!();
@@ -3674,6 +3815,71 @@ impl VirtualMachine {
                         };
                         if !is_equal {
                             pc = ((pc as i32 - 1) + target_offset) as usize;
+                        }
+                    }
+
+                    OpCode::ForLoopI32 => {
+                        let idx_slot = unsafe { &mut *reg_base.add(inst.dst() as usize) };
+                        let bound_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let flags = inst.flags();
+                        let step = if (flags & 0x80) == 0 {
+                            1
+                        } else {
+                            read_i32_fast(unsafe { &*reg_base.add((flags & 0x3F) as usize) })?
+                        };
+                        let next_idx = if let Value::I32(cur) = *idx_slot {
+                            cur.wrapping_add(step)
+                        } else {
+                            read_i32_fast(idx_slot)?.wrapping_add(step)
+                        };
+                        *idx_slot = Value::I32(next_idx);
+                        let bound = if let Value::I32(b) = *bound_ref {
+                            b
+                        } else {
+                            read_i32_fast(bound_ref)?
+                        };
+                        let keep_going = if (flags & 0x40) == 0 {
+                            next_idx < bound
+                        } else {
+                            next_idx <= bound
+                        };
+                        if keep_going {
+                            let offset = inst.src2() as i16 as i32;
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::AddBandI32 => {
+                        let acc_ref = unsafe { &*reg_base.add(inst.flags() as usize) };
+                        let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let mask_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let res = if let (Value::I32(acc), Value::I32(val), Value::I32(mask)) =
+                            (*acc_ref, *val_ref, *mask_ref)
+                        {
+                            acc.wrapping_add(val) & mask
+                        } else {
+                            read_i32_fast(acc_ref)?.wrapping_add(read_i32_fast(val_ref)?)
+                                & read_i32_fast(mask_ref)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I32(res);
+                        }
+                    }
+
+                    OpCode::JumpIfI32Imm => {
+                        let offset = inst.src2() as i16 as i32;
+                        let imm_val = inst.src1() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        let take_branch = match inst.flags() {
+                            0 => val_a == imm_val,
+                            1 => val_a != imm_val,
+                            2 => val_a < imm_val,
+                            3 => val_a <= imm_val,
+                            4 => val_a > imm_val,
+                            _ => val_a >= imm_val,
+                        };
+                        if take_branch {
+                            pc = ((pc as i32 - 1) + offset) as usize;
                         }
                     }
 
