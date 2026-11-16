@@ -12,7 +12,7 @@ use solix_common::bytecode::{CompiledFunction, Instruction, OpCode};
 use solix_common::diagnostics::EmissionError;
 use solix_common::span::Span;
 use solix_common::types::{PrimitiveKind, Type};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Bytecode emitter context for transforming expressions and statements into virtual register instructions.
 pub struct Emitter<'a> {
@@ -32,6 +32,8 @@ pub struct Emitter<'a> {
     pub class_layouts: Option<&'a HashMap<String, ClassLayout>>,
     /// Function indices indexed by function signature symbol.
     pub function_ids: Option<&'a HashMap<String, u32>>,
+    /// Non-virtual concrete method targets indexed by `(vtable_id, slot_index) -> func_id`.
+    pub direct_method_targets: Option<&'a HashMap<(u32, usize), u32>>,
     /// Enum variant constant values indexed by fully qualified symbol (e.g. `Color::Red` -> 0).
     pub enum_variants: Option<&'a HashMap<String, u32>>,
     /// Synthesized functions (such as compiled lambda closure bodies) to append to the module.
@@ -40,6 +42,10 @@ pub struct Emitter<'a> {
     pub finally_stack: Vec<crate::phases::parser::statements::control_flow::BlockStatement>,
     /// Optional symbol of the enclosing class currently being emitted.
     pub enclosing_class: Option<String>,
+    /// Local variable names initialized with guaranteed non-null references and never reassigned.
+    pub non_null_locals: HashSet<String>,
+    /// Local variable names that may be reassigned or declared nullable within the current function.
+    pub unsafe_non_null_locals: HashSet<String>,
 }
 
 impl<'a> Emitter<'a> {
@@ -58,10 +64,13 @@ impl<'a> Emitter<'a> {
             static_layout: None,
             class_layouts: None,
             function_ids: None,
+            direct_method_targets: None,
             enum_variants: None,
             synthesized_functions: None,
             finally_stack: Vec::new(),
             enclosing_class: None,
+            non_null_locals: HashSet::new(),
+            unsafe_non_null_locals: HashSet::new(),
         }
     }
 
@@ -182,6 +191,216 @@ impl<'a> Emitter<'a> {
     pub fn with_enclosing_class(mut self, enclosing_class: impl Into<String>) -> Self {
         self.enclosing_class = Some(enclosing_class.into());
         self
+    }
+
+    /// Attaches precomputed devirtualized concrete method targets `(vtable_id, slot) -> func_id`.
+    #[must_use]
+    pub fn with_direct_method_targets(
+        mut self,
+        direct_method_targets: &'a HashMap<(u32, usize), u32>,
+    ) -> Self {
+        self.direct_method_targets = Some(direct_method_targets);
+        self
+    }
+
+    /// Pre-scans a function block to identify any local variable names that are reassigned or declared nullable.
+    pub fn populate_reassigned_locals_from_block(
+        &mut self,
+        block: &crate::phases::parser::statements::control_flow::BlockStatement,
+    ) {
+        self.populate_reassigned_locals_from_statements(&block.statements);
+    }
+
+    /// Pre-scans statements to record local variable names that are reassigned or potentially nullable.
+    pub fn populate_reassigned_locals_from_statements(
+        &mut self,
+        statements: &[crate::phases::parser::statements::Statement],
+    ) {
+        use crate::phases::parser::statements::Statement;
+        for statement in statements {
+            match statement {
+                Statement::Block(inner_block) => {
+                    self.populate_reassigned_locals_from_statements(&inner_block.statements);
+                }
+                Statement::If(if_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&if_stmt.condition);
+                    self.populate_reassigned_locals_from_statements(&[if_stmt
+                        .then_branch
+                        .as_ref()
+                        .clone()]);
+                    if let Some(else_branch) = &if_stmt.else_branch {
+                        self.populate_reassigned_locals_from_statements(&[else_branch
+                            .as_ref()
+                            .clone()]);
+                    }
+                }
+                Statement::While(while_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&while_stmt.condition);
+                    self.populate_reassigned_locals_from_statements(&[while_stmt
+                        .body
+                        .as_ref()
+                        .clone()]);
+                }
+                Statement::DoWhile(do_while) => {
+                    self.collect_unsafe_locals_in_expr(&do_while.condition);
+                    self.populate_reassigned_locals_from_statements(&[do_while
+                        .body
+                        .as_ref()
+                        .clone()]);
+                }
+                Statement::For(for_stmt) => {
+                    if let Some(init) = &for_stmt.initializer {
+                        self.populate_reassigned_locals_from_statements(&[init.as_ref().clone()]);
+                    }
+                    if let Some(cond) = &for_stmt.condition {
+                        self.collect_unsafe_locals_in_expr(cond);
+                    }
+                    if let Some(update) = &for_stmt.update {
+                        self.collect_unsafe_locals_in_expr(update);
+                    }
+                    self.populate_reassigned_locals_from_statements(&[for_stmt
+                        .body
+                        .as_ref()
+                        .clone()]);
+                }
+                Statement::Switch(switch_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&switch_stmt.discriminant);
+                    for case_clause in &switch_stmt.cases {
+                        self.collect_unsafe_locals_in_expr(&case_clause.case_value);
+                        self.populate_reassigned_locals_from_statements(&case_clause.statements);
+                    }
+                    if let Some(default_stmts) = &switch_stmt.default_case {
+                        self.populate_reassigned_locals_from_statements(default_stmts);
+                    }
+                }
+                Statement::Try(try_stmt) => {
+                    self.populate_reassigned_locals_from_statements(&try_stmt.try_block.statements);
+                    for clause in &try_stmt.catch_clauses {
+                        let catch_name = self.get_lexeme(clause.variable_name).to_string();
+                        self.unsafe_non_null_locals.insert(catch_name);
+                        self.populate_reassigned_locals_from_statements(&clause.block.statements);
+                    }
+                    if let Some(finally_block) = &try_stmt.finally_block {
+                        self.populate_reassigned_locals_from_statements(&finally_block.statements);
+                    }
+                }
+                Statement::VariableDeclaration(var_decl) => {
+                    let var_name = self.get_lexeme(var_decl.name_span).to_string();
+                    let non_null_init = var_decl
+                        .initializer
+                        .as_ref()
+                        .is_some_and(is_static_non_null_literal_or_alloc);
+                    if !non_null_init {
+                        self.unsafe_non_null_locals.insert(var_name);
+                    }
+                    if let Some(init_expr) = &var_decl.initializer {
+                        self.collect_unsafe_locals_in_expr(init_expr);
+                    }
+                }
+                Statement::Expression(expr_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&expr_stmt.expression);
+                }
+                Statement::Return(ret_stmt) => {
+                    if let Some(ret_val) = &ret_stmt.value {
+                        self.collect_unsafe_locals_in_expr(ret_val);
+                    }
+                }
+                Statement::Throw(throw_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&throw_stmt.expression);
+                }
+                Statement::Assert(assert_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&assert_stmt.condition);
+                }
+                Statement::Exit(exit_stmt) => {
+                    self.collect_unsafe_locals_in_expr(&exit_stmt.code);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_unsafe_locals_in_expr(&mut self, expr: &Expression) {
+        match expr {
+            Expression::Assignment { target, value, .. } => {
+                if let Expression::Identifier { span } = target.as_ref() {
+                    let target_name = self.get_lexeme(*span).to_string();
+                    self.unsafe_non_null_locals.insert(target_name);
+                }
+                self.collect_unsafe_locals_in_expr(target);
+                self.collect_unsafe_locals_in_expr(value);
+            }
+            Expression::Unary {
+                operator, operand, ..
+            } => {
+                if matches!(
+                    operator,
+                    TokenKind::OperatorIncrement | TokenKind::OperatorDecrement
+                ) && let Expression::Identifier { span } = operand.as_ref()
+                {
+                    let target_name = self.get_lexeme(*span).to_string();
+                    self.unsafe_non_null_locals.insert(target_name);
+                }
+                self.collect_unsafe_locals_in_expr(operand);
+            }
+            Expression::Binary { left, right, .. } => {
+                self.collect_unsafe_locals_in_expr(left);
+                self.collect_unsafe_locals_in_expr(right);
+            }
+            Expression::MemberAccess { object, .. } => {
+                self.collect_unsafe_locals_in_expr(object);
+            }
+            Expression::MethodCall {
+                callee, arguments, ..
+            } => {
+                self.collect_unsafe_locals_in_expr(callee);
+                for arg in arguments {
+                    self.collect_unsafe_locals_in_expr(arg);
+                }
+            }
+            Expression::ArrayAccess { array, index, .. } => {
+                self.collect_unsafe_locals_in_expr(array);
+                self.collect_unsafe_locals_in_expr(index);
+            }
+            Expression::ArrayCreation { size, .. } => {
+                self.collect_unsafe_locals_in_expr(size);
+            }
+            Expression::ArrayLiteral { elements, .. } => {
+                for element in elements {
+                    self.collect_unsafe_locals_in_expr(element);
+                }
+            }
+            Expression::NewInstance { arguments, .. } => {
+                for arg in arguments {
+                    self.collect_unsafe_locals_in_expr(arg);
+                }
+            }
+            Expression::Cast { expression, .. } | Expression::Instanceof { expression, .. } => {
+                self.collect_unsafe_locals_in_expr(expression);
+            }
+            Expression::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.collect_unsafe_locals_in_expr(condition);
+                self.collect_unsafe_locals_in_expr(then_branch);
+                self.collect_unsafe_locals_in_expr(else_branch);
+            }
+            _ => {}
+        }
+    }
+
+    /// Returns `true` if `expr` is provably non-null at runtime (`this`, `new ...`, array/string allocs, or tracked non-null local).
+    #[must_use]
+    pub fn is_guaranteed_non_null(&self, expr: &Expression) -> bool {
+        match expr {
+            Expression::Identifier { span } => {
+                let name = self.get_lexeme(*span);
+                name == "this" || self.non_null_locals.contains(name)
+            }
+            _ => is_static_non_null_literal_or_alloc(expr),
+        }
     }
 
     /// Resolves the exact string slice from source code for the given span.
@@ -1151,13 +1370,24 @@ impl<'a> Emitter<'a> {
                             return Ok(dst);
                         }
 
-                        // Virtual / interface method call object.method(args)
+                        // Virtual / interface / devirtualized method call object.method(args)
                         let arg_types: Vec<Type> = arguments
                             .iter()
                             .map(|a| self.query_type(a.span()))
                             .collect();
                         let (slot, is_interface) =
                             self.resolve_method_dispatch(object.span(), &method_name, &arg_types);
+
+                        let direct_func_id = if !is_interface
+                            && self.is_guaranteed_non_null(object)
+                            && let Some(vtable_id) = self.resolve_receiver_vtable_id(object.span())
+                        {
+                            self.direct_method_targets
+                                .and_then(|targets| targets.get(&(vtable_id, slot as usize)))
+                                .copied()
+                        } else {
+                            None
+                        };
 
                         let total_args = 1 + arguments.len();
                         let arg_base = self.allocator.alloc_window(total_args)?;
@@ -1168,15 +1398,28 @@ impl<'a> Emitter<'a> {
                         }
 
                         let dst = self.resolve_dst(target_reg)?;
-                        let op = if is_interface {
-                            OpCode::CallInterface
+                        if let Some(func_id) = direct_func_id {
+                            self.emit_instruction(
+                                Instruction::format_call(
+                                    OpCode::CallDirect,
+                                    dst,
+                                    func_id as u16,
+                                    arg_base,
+                                    total_args as u8,
+                                ),
+                                Some(*span),
+                            );
                         } else {
-                            OpCode::CallVirtual
-                        };
-                        self.emit_instruction(
-                            Instruction::format_call(op, dst, slot, arg_base, total_args as u8),
-                            Some(*span),
-                        );
+                            let op = if is_interface {
+                                OpCode::CallInterface
+                            } else {
+                                OpCode::CallVirtual
+                            };
+                            self.emit_instruction(
+                                Instruction::format_call(op, dst, slot, arg_base, total_args as u8),
+                                Some(*span),
+                            );
+                        }
                         if self.is_reference_expr(object) && !self.is_borrowed_reference(object) {
                             self.emit_instruction(
                                 Instruction::format_a(OpCode::DecRef, 0, arg_base, 0, 0),
@@ -1395,6 +1638,7 @@ impl<'a> Emitter<'a> {
                     self.sources,
                     self.class_layouts,
                     self.function_ids,
+                    self.direct_method_targets,
                     self.static_layout,
                     synth.as_deref_mut(),
                 )?;
@@ -2650,13 +2894,15 @@ impl<'a> Emitter<'a> {
                 if matches!(operator, TokenKind::OperatorAssign) {
                     let is_ref = self.function.reference_registers.contains(&local_reg)
                         || self.query_type(target.span()).is_reference_type();
-
-                    let mut r_val = self.emit_expression(value, None)?;
                     let value_type = self.query_type(value.span());
                     let target_type = self.query_type(target.span());
-                    if target_type.is_floating_point()
-                        && (value_type.is_signed_integer() || value_type.is_unsigned_integer())
-                    {
+                    let needs_conv = target_type.is_floating_point()
+                        && (value_type.is_signed_integer() || value_type.is_unsigned_integer());
+                    let direct_target = (!is_ref && !needs_conv && is_direct_eval_safe(value))
+                        .then_some(local_reg);
+
+                    let mut r_val = self.emit_expression(value, direct_target)?;
+                    if needs_conv {
                         let converted_reg = self.allocator.alloc_temp()?;
                         self.emit_instruction(
                             Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
@@ -2677,17 +2923,21 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                     }
-                    self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, local_reg, r_val, 0),
-                        Some(span),
-                    );
+                    if r_val != local_reg {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::Mov, 0, local_reg, r_val, 0),
+                            Some(span),
+                        );
+                    }
                     if dst != local_reg {
                         self.emit_instruction(
                             Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
                             Some(span),
                         );
                     }
-                    self.allocator.free_temp(r_val);
+                    if r_val != local_reg {
+                        self.allocator.free_temp(r_val);
+                    }
                     return Ok(());
                 }
 
@@ -3519,15 +3769,37 @@ impl<'a> Emitter<'a> {
         let obj_type = self.query_type(object_span);
         let is_interface = matches!(obj_type, Type::Interface { .. });
         if let Type::Class {
-            ref symbol_name, ..
+            ref symbol_name,
+            ref type_arguments,
         }
         | Type::Interface {
-            ref symbol_name, ..
+            ref symbol_name,
+            ref type_arguments,
         } = obj_type
         {
-            let simple = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+            let formatted_name = if !type_arguments.is_empty() && !symbol_name.contains('<') {
+                format!(
+                    "{symbol_name}<{}>",
+                    type_arguments
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                symbol_name.clone()
+            };
+            let simple = formatted_name
+                .rsplit(['.', ':'])
+                .next()
+                .unwrap_or(&formatted_name);
+            let raw_simple = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
             if let Some(layouts) = self.class_layouts
-                && let Some(layout) = layouts.get(symbol_name).or_else(|| layouts.get(simple))
+                && let Some(layout) = layouts
+                    .get(&formatted_name)
+                    .or_else(|| layouts.get(simple))
+                    .or_else(|| layouts.get(symbol_name))
+                    .or_else(|| layouts.get(raw_simple))
                 && let Some(&slot) = layout
                     .method_slots
                     .get(&mangled_name)
@@ -3545,4 +3817,100 @@ impl<'a> Emitter<'a> {
         }
         (0, is_interface)
     }
+
+    fn resolve_receiver_vtable_id(&self, object_span: Span) -> Option<u32> {
+        let layouts = self.class_layouts?;
+        let obj_name = self.get_lexeme(object_span);
+        if obj_name == "this"
+            && let Some(ref cls) = self.enclosing_class
+        {
+            let simple = cls.rsplit(['.', ':']).next().unwrap_or(cls);
+            if let Some(layout) = layouts.get(cls).or_else(|| layouts.get(simple)) {
+                return Some(layout.vtable_id);
+            }
+        }
+
+        let queried_type = self.query_type(object_span);
+        let obj_type = queried_type.unwrap_alias();
+        if let Type::Class {
+            symbol_name,
+            type_arguments,
+        } = obj_type
+        {
+            let formatted_name = if !type_arguments.is_empty() && !symbol_name.contains('<') {
+                format!(
+                    "{symbol_name}<{}>",
+                    type_arguments
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            } else {
+                symbol_name.clone()
+            };
+            let simple = formatted_name
+                .rsplit(['.', ':'])
+                .next()
+                .unwrap_or(&formatted_name);
+            let raw_simple = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+            return layouts
+                .get(&formatted_name)
+                .or_else(|| layouts.get(simple))
+                .or_else(|| layouts.get(symbol_name.as_str()))
+                .or_else(|| layouts.get(raw_simple))
+                .map(|layout| layout.vtable_id);
+        }
+        None
+    }
+}
+
+/// Checks whether evaluating `expr` directly into a target register is safe (no short-circuit/assignment/control-flow side effects).
+fn is_direct_eval_safe(expr: &Expression) -> bool {
+    match expr {
+        Expression::Literal { .. } | Expression::Identifier { .. } => true,
+        Expression::Unary {
+            operator, operand, ..
+        } => {
+            !matches!(
+                operator,
+                TokenKind::OperatorIncrement | TokenKind::OperatorDecrement
+            ) && is_direct_eval_safe(operand)
+        }
+        Expression::Binary {
+            operator,
+            left,
+            right,
+            ..
+        } => {
+            !matches!(
+                operator,
+                TokenKind::OperatorLogicalAnd | TokenKind::OperatorLogicalOr
+            ) && is_direct_eval_safe(left)
+                && is_direct_eval_safe(right)
+        }
+        Expression::MemberAccess { object, .. } => is_direct_eval_safe(object),
+        Expression::ArrayAccess { array, index, .. } => {
+            is_direct_eval_safe(array) && is_direct_eval_safe(index)
+        }
+        Expression::MethodCall {
+            callee, arguments, ..
+        } => is_direct_eval_safe(callee) && arguments.iter().all(is_direct_eval_safe),
+        Expression::Cast { expression, .. } => is_direct_eval_safe(expression),
+        _ => false,
+    }
+}
+
+/// Returns `true` if `expr` inherently constructs or denotes a non-null heap reference.
+fn is_static_non_null_literal_or_alloc(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::NewInstance { .. }
+            | Expression::ArrayCreation { .. }
+            | Expression::ArrayLiteral { .. }
+            | Expression::Literal {
+                value: LiteralValue::String(_),
+                ..
+            }
+    )
 }

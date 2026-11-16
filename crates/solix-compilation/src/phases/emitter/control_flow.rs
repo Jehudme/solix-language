@@ -96,7 +96,8 @@ impl<'a> Emitter<'a> {
             Statement::Try(try_stmt) => self.emit_try_statement(try_stmt, loop_stack),
             Statement::Throw(throw_stmt) => self.emit_throw_statement(throw_stmt),
             Statement::Expression(expr_stmt) => {
-                let temp = self.emit_expression(&expr_stmt.expression, None)?;
+                let target_hint = self.resolve_assignment_target_local(&expr_stmt.expression);
+                let temp = self.emit_expression(&expr_stmt.expression, target_hint)?;
                 if self
                     .query_type(expr_stmt.expression.span())
                     .is_reference_type()
@@ -116,7 +117,9 @@ impl<'a> Emitter<'a> {
                         Some(expr_stmt.span),
                     );
                 }
-                self.allocator.free_temp(temp);
+                if target_hint != Some(temp) {
+                    self.allocator.free_temp(temp);
+                }
                 Ok(())
             }
             Statement::Assert(assert_stmt) => self.emit_assert_statement(assert_stmt),
@@ -366,8 +369,11 @@ impl<'a> Emitter<'a> {
         }
 
         if let Some(update) = &for_stmt.update {
-            let temp = self.emit_expression(update, None)?;
-            self.allocator.free_temp(temp);
+            let target_hint = self.resolve_assignment_target_local(update);
+            let temp = self.emit_expression(update, target_hint)?;
+            if target_hint != Some(temp) {
+                self.allocator.free_temp(temp);
+            }
         }
 
         let loop_end_pc = self.function.instructions.len() as i32;
@@ -832,6 +838,7 @@ impl<'a> Emitter<'a> {
         var_decl: &VariableDeclarationStatement,
     ) -> Result<(), EmissionError> {
         let name = self.get_lexeme(var_decl.name_span).to_string();
+        let tracked_name = name.clone();
         let local_reg = self.allocator.alloc_local(name.clone())?;
 
         let var_type = self.query_type(var_decl.span);
@@ -898,6 +905,11 @@ impl<'a> Emitter<'a> {
                     Some(var_decl.span),
                 );
             }
+            if !self.unsafe_non_null_locals.contains(&tracked_name)
+                && self.is_guaranteed_non_null(init)
+            {
+                self.non_null_locals.insert(tracked_name);
+            }
         } else {
             self.emit_instruction(
                 Instruction::format_b(OpCode::LoadNull, 0, local_reg, 0),
@@ -905,6 +917,17 @@ impl<'a> Emitter<'a> {
             );
         }
         Ok(())
+    }
+
+    /// Returns the local variable register index when `expr` is an identifier assignment targeting a local.
+    fn resolve_assignment_target_local(&self, expr: &Expression) -> Option<u16> {
+        if let Expression::Assignment { target, .. } = expr
+            && let Expression::Identifier { span } = target.as_ref()
+        {
+            let name = self.get_lexeme(*span);
+            return self.allocator.lookup_local(name);
+        }
+        None
     }
 
     pub fn patch_jump_offset(&mut self, instruction_index: usize, offset: i32) {

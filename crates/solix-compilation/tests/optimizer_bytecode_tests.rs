@@ -351,3 +351,135 @@ fn test_negative_live_constant_used_multiple_times_preserved_correctly() {
     let (_context, execution_result) = compile_and_execute(source_code);
     assert_eq!(execution_result, Value::I32(37 * 100 + 28));
 }
+
+#[test]
+fn test_positive_non_virtual_concrete_method_devirtualizes_to_call_direct() {
+    let source_code = r#"
+        class BoxedCounter {
+            private int32 count_val;
+            public BoxedCounter(int32 start_val) {
+                this.count_val = start_val;
+            }
+            public int32 add_offset(int32 delta_val) {
+                return this.count_val + delta_val;
+            }
+        }
+        int32 main() {
+            BoxedCounter holder = new BoxedCounter(30);
+            return holder.add_offset(12);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_virtual = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::CallVirtual as u8);
+    let direct_count = main_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::CallDirect as u8)
+        .count();
+
+    assert!(
+        !has_virtual,
+        "Non-virtual concrete method on guaranteed non-null local should not emit CallVirtual"
+    );
+    assert!(
+        direct_count >= 1,
+        "Expected CallDirect emission for non-virtual concrete method call"
+    );
+}
+
+#[test]
+fn test_negative_nullable_receiver_retains_call_virtual_and_traps() {
+    let source_code = r#"
+        class SafeBox {
+            public int32 fixed_num() {
+                return 99;
+            }
+        }
+        int32 main() {
+            SafeBox maybe_null = null;
+            return maybe_null.fixed_num();
+        }
+    "#;
+    let options = CompilationOptions::new()
+        .with_source("test_null_receiver.slx", source_code)
+        .with_inline_threshold(0);
+    let mut context = CompilationContext::new(options);
+    context.execute().expect("compilation must succeed");
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+    assert!(
+        main_func
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::CallVirtual as u8),
+        "Nullable receiver must retain CallVirtual null-check semantics"
+    );
+
+    let runtime_context = RuntimeContext::new(
+        RuntimeOptions::new().with_binary(artifacts.program.clone()),
+    )
+    .expect("RuntimeContext creation failed");
+    let mut virtual_machine = VirtualMachine::new(runtime_context);
+    let runtime_err = virtual_machine
+        .run()
+        .expect_err("null receiver method call must trap cleanly");
+    assert!(matches!(
+        runtime_err,
+        solix_runtime::RuntimeError::NullReferenceAccess
+    ));
+}
+
+#[test]
+fn test_positive_direct_assignment_eliminates_trailing_mov() {
+    let source_code = r#"
+        int32 accumulate(int32 limit) {
+            int32 total = 0;
+            for (int32 index = 0; index < limit; index = index + 1) {
+                total = total + index;
+            }
+            return total;
+        }
+        int32 main() {
+            return accumulate(10);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(45));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let acc_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("accumulate"))
+        .expect("accumulate function must exist");
+
+    let mov_count = acc_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::Mov as u8)
+        .count();
+    assert_eq!(
+        mov_count, 0,
+        "Expected zero Mov instructions in assignment/loop update path, found {:?}",
+        acc_func.instructions
+    );
+}

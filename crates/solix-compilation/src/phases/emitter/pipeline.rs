@@ -33,7 +33,7 @@ use solix_common::bytecode::{
 };
 use solix_common::diagnostics::EmissionError;
 use solix_common::types::{PrimitiveKind, Type};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Emitted artifacts container capturing per-source function metadata and the final binary program.
 #[derive(Debug, Clone, PartialEq)]
@@ -173,6 +173,22 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         }
     }
 
+    // Precompute symbol->func mapping and safe devirtualized concrete method targets
+    let sym_to_func = if let Some(artifacts) = &context.binding_artifacts {
+        build_sym_to_func_map(&artifacts.symbol_table, &function_ids)
+    } else {
+        HashMap::new()
+    };
+    let direct_method_targets = if let Some(artifacts) = &context.binding_artifacts {
+        build_direct_method_targets(
+            &artifacts.layouts,
+            &artifacts.symbol_table,
+            &sym_to_func,
+        )
+    } else {
+        HashMap::new()
+    };
+
     // 3. Synthesize Module Static Initializer (@init - Function ID 0)
     let init_func = synthesize_module_init(
         &static_decls,
@@ -251,6 +267,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 &context.sources,
                 &class_layouts,
                 &function_ids,
+                &direct_method_targets,
                 &enum_variants,
                 &static_layout,
                 &node_types,
@@ -271,6 +288,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 &context.sources,
                 &class_layouts,
                 &function_ids,
+                &direct_method_targets,
                 &enum_variants,
                 &static_layout,
                 &node_types,
@@ -283,52 +301,6 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
     // 5. Compile class descriptors
     let mut compiled_classes = Vec::new();
-    let mut sym_to_func = HashMap::<SymbolId, u32>::new();
-    if let Some(artifacts) = &context.binding_artifacts {
-        for entry in &artifacts.symbol_table.symbols {
-            let signature = if let Type::FunctionPointer {
-                parameter_types, ..
-            } = &entry.symbol_type
-            {
-                Some(
-                    parameter_types
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(","),
-                )
-            } else {
-                None
-            };
-            let mangled_name = signature
-                .as_ref()
-                .map(|parameters| format!("{}({parameters})", entry.fully_qualified_name));
-            if let Some(func_id) = mangled_name
-                .as_ref()
-                .and_then(|name| function_ids.get(name))
-                .or_else(|| function_ids.get(&entry.fully_qualified_name))
-                .copied()
-            {
-                sym_to_func.insert(entry.id, func_id);
-            } else if let Some(parent_id) = entry.parent_symbol
-                && let Some(parent) = artifacts.symbol_table.get_symbol(parent_id)
-            {
-                let short_full = format!("{}::{}", parent.name, entry.name);
-                let short_mangled = signature
-                    .as_ref()
-                    .map(|parameters| format!("{short_full}({parameters})"));
-                if let Some(func_id) = short_mangled
-                    .as_ref()
-                    .and_then(|name| function_ids.get(name))
-                    .or_else(|| function_ids.get(&short_full))
-                    .copied()
-                {
-                    sym_to_func.insert(entry.id, func_id);
-                }
-            }
-        }
-    }
-
     if let Some(artifacts) = &context.binding_artifacts {
         let mut iface_to_id = HashMap::new();
         for layout in artifacts.layouts.values() {
@@ -1657,6 +1629,7 @@ fn compile_source_functions(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -1704,6 +1677,7 @@ fn compile_source_functions(
                 sources,
                 class_layouts,
                 function_ids,
+                direct_method_targets,
                 enum_variants,
                 static_layout,
                 node_types,
@@ -1730,6 +1704,7 @@ fn compile_source_functions(
                         sources,
                         class_layouts,
                         function_ids,
+                        direct_method_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1774,6 +1749,7 @@ fn compile_source_functions(
                         sources,
                         class_layouts,
                         function_ids,
+                        direct_method_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1796,6 +1772,7 @@ fn compile_source_functions(
                                 sources,
                                 class_layouts,
                                 function_ids,
+                                direct_method_targets,
                                 enum_variants,
                                 static_layout,
                                 node_types,
@@ -1828,6 +1805,7 @@ fn compile_source_functions(
                         sources,
                         class_layouts,
                         function_ids,
+                        direct_method_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1845,6 +1823,7 @@ fn compile_source_functions(
                         sources,
                         class_layouts,
                         function_ids,
+                        direct_method_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1863,6 +1842,7 @@ fn compile_source_functions(
                         sources,
                         class_layouts,
                         function_ids,
+                        direct_method_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1888,6 +1868,7 @@ fn compile_source_functions(
                 sources,
                 class_layouts,
                 function_ids,
+                direct_method_targets,
                 enum_variants,
                 static_layout,
                 node_types,
@@ -1912,10 +1893,12 @@ fn compile_source_functions(
                 .with_sources(sources)
                 .with_class_layouts(class_layouts)
                 .with_function_ids(function_ids)
+                .with_direct_method_targets(direct_method_targets)
                 .with_enum_variants(enum_variants)
                 .with_static_layout(static_layout)
                 .with_node_types(node_types)
                 .with_synthesized_functions(synthesized_lambdas);
+            emitter.populate_reassigned_locals_from_statements(&ast.root_statements);
 
             let mut loop_stack = Vec::<LoopContext>::new();
             for stmt in &ast.root_statements {
@@ -2064,6 +2047,7 @@ fn compile_single_method(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2138,10 +2122,12 @@ fn compile_single_method(
             .with_sources(sources)
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
+            .with_direct_method_targets(direct_method_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
             .with_synthesized_functions(synthesized_lambdas);
+        emitter.populate_reassigned_locals_from_block(body);
 
         if !cls_name.is_empty() {
             emitter = emitter.with_enclosing_class(cls_name);
@@ -2200,6 +2186,7 @@ fn compile_constructor(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2237,11 +2224,13 @@ fn compile_constructor(
             .with_sources(sources)
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
+            .with_direct_method_targets(direct_method_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
             .with_synthesized_functions(synthesized_lambdas)
             .with_enclosing_class(cls_name);
+        emitter.populate_reassigned_locals_from_block(&ctor.body);
 
         let mut loop_stack = Vec::<LoopContext>::new();
 
@@ -2318,6 +2307,7 @@ fn compile_default_constructor(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2341,6 +2331,7 @@ fn compile_default_constructor(
             .with_sources(sources)
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
+            .with_direct_method_targets(direct_method_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
@@ -2433,6 +2424,7 @@ fn compile_destructor(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2455,11 +2447,13 @@ fn compile_destructor(
             .with_sources(sources)
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
+            .with_direct_method_targets(direct_method_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
             .with_synthesized_functions(synthesized_lambdas)
             .with_enclosing_class(cls_name);
+        emitter.populate_reassigned_locals_from_block(&dtor.body);
 
         let mut loop_stack = Vec::<LoopContext>::new();
         emitter.emit_block_statement(&dtor.body, &mut loop_stack)?;
@@ -2527,6 +2521,7 @@ fn compile_operator(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2565,11 +2560,13 @@ fn compile_operator(
             .with_sources(sources)
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
+            .with_direct_method_targets(direct_method_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
             .with_synthesized_functions(synthesized_lambdas)
             .with_enclosing_class(cls_name);
+        emitter.populate_reassigned_locals_from_block(&op.body);
 
         let mut loop_stack = Vec::<LoopContext>::new();
         emitter.emit_block_statement(&op.body, &mut loop_stack)?;
@@ -2743,6 +2740,7 @@ fn compile_monomorphized_class_functions(
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
+    direct_method_targets: &HashMap<(u32, usize), u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2793,6 +2791,7 @@ fn compile_monomorphized_class_functions(
                     sources,
                     class_layouts,
                     function_ids,
+                    direct_method_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2810,6 +2809,7 @@ fn compile_monomorphized_class_functions(
                     sources,
                     class_layouts,
                     function_ids,
+                    direct_method_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2827,6 +2827,7 @@ fn compile_monomorphized_class_functions(
                     sources,
                     class_layouts,
                     function_ids,
+                    direct_method_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2845,6 +2846,7 @@ fn compile_monomorphized_class_functions(
                     sources,
                     class_layouts,
                     function_ids,
+                    direct_method_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2857,4 +2859,125 @@ fn compile_monomorphized_class_functions(
         }
     }
     Ok(())
+}
+
+/// Maps each method/function `SymbolId` in `symbol_table` to its assigned flat function index.
+fn build_sym_to_func_map(
+    symbol_table: &SymbolTable,
+    function_ids: &HashMap<String, u32>,
+) -> HashMap<SymbolId, u32> {
+    let mut sym_to_func = HashMap::new();
+    for entry in &symbol_table.symbols {
+        let signature = if let Type::FunctionPointer {
+            parameter_types, ..
+        } = &entry.symbol_type
+        {
+            Some(
+                parameter_types
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            )
+        } else {
+            None
+        };
+        let mangled_name = signature
+            .as_ref()
+            .map(|parameters| format!("{}({parameters})", entry.fully_qualified_name));
+        if let Some(func_id) = mangled_name
+            .as_ref()
+            .and_then(|name| function_ids.get(name))
+            .or_else(|| function_ids.get(&entry.fully_qualified_name))
+            .copied()
+        {
+            sym_to_func.insert(entry.id, func_id);
+        } else if let Some(parent_id) = entry.parent_symbol
+            && let Some(parent) = symbol_table.get_symbol(parent_id)
+        {
+            let short_full = format!("{}::{}", parent.name, entry.name);
+            let short_mangled = signature
+                .as_ref()
+                .map(|parameters| format!("{short_full}({parameters})"));
+            if let Some(func_id) = short_mangled
+                .as_ref()
+                .and_then(|name| function_ids.get(name))
+                .or_else(|| function_ids.get(&short_full))
+                .copied()
+            {
+                sym_to_func.insert(entry.id, func_id);
+            }
+        }
+    }
+    sym_to_func
+}
+
+/// Identifies `(vtable_id, slot_index)` pairs that unambiguously resolve to a single concrete
+/// non-virtual, non-overridden method target `func_id`, enabling static devirtualization to `CallDirect`.
+fn build_direct_method_targets(
+    layouts: &HashMap<SymbolId, ClassLayout>,
+    symbol_table: &SymbolTable,
+    sym_to_func: &HashMap<SymbolId, u32>,
+) -> HashMap<(u32, usize), u32> {
+    let mut children_by_base: HashMap<u32, Vec<&ClassLayout>> = HashMap::new();
+    for layout in layouts.values() {
+        if let Some(base_id) = layout.base_vtable_id {
+            children_by_base.entry(base_id).or_default().push(layout);
+        }
+    }
+
+    let mut direct_targets = HashMap::new();
+    for layout in layouts.values() {
+        if layout.is_extern {
+            continue;
+        }
+        if let Some(cls_entry) = symbol_table.get_symbol(layout.class_symbol_id)
+            && cls_entry.modifiers.contains(&Modifier::Extern)
+        {
+            continue;
+        }
+
+        // Collect all transitive subclass layouts for this class
+        let mut descendants: Vec<&ClassLayout> = Vec::new();
+        let mut stack: Vec<u32> = vec![layout.vtable_id];
+        let mut visited_vtables: HashSet<u32> = HashSet::new();
+        while let Some(current_vtable) = stack.pop() {
+            if !visited_vtables.insert(current_vtable) {
+                continue;
+            }
+            if let Some(direct_subs) = children_by_base.get(&current_vtable) {
+                for &sub_layout in direct_subs {
+                    descendants.push(sub_layout);
+                    stack.push(sub_layout.vtable_id);
+                }
+            }
+        }
+
+        for (slot_idx, &method_sym_id) in layout.vtable_methods.iter().enumerate() {
+            let Some(method_entry) = symbol_table.get_symbol(method_sym_id) else {
+                continue;
+            };
+            if method_entry.modifiers.iter().any(|modifier| {
+                matches!(
+                    modifier,
+                    Modifier::Virtual | Modifier::Override | Modifier::Abstract
+                )
+            }) {
+                continue;
+            }
+
+            let overridden_in_descendant = descendants.iter().any(|sub_layout| {
+                sub_layout.vtable_methods.get(slot_idx) != Some(&method_sym_id)
+            });
+            if overridden_in_descendant {
+                continue;
+            }
+
+            if let Some(&func_id) = sym_to_func.get(&method_sym_id) {
+                direct_targets.insert((layout.vtable_id, slot_idx), func_id);
+            }
+        }
+    }
+
+    direct_targets
 }

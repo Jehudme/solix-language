@@ -571,6 +571,7 @@ pub fn synthesize_lambda_function(
     sources: Option<&[String]>,
     class_layouts: Option<&HashMap<String, ClassLayout>>,
     function_ids: Option<&HashMap<String, u32>>,
+    direct_method_targets: Option<&HashMap<(u32, usize), u32>>,
     static_layout: Option<&StaticLayout>,
     synthesized_functions: Option<&mut Vec<CompiledFunction>>,
 ) -> Result<CompiledFunction, EmissionError> {
@@ -637,11 +638,17 @@ pub fn synthesize_lambda_function(
             if let Some(fids) = function_ids {
                 emitter = emitter.with_function_ids(fids);
             }
+            if let Some(direct_targets) = direct_method_targets {
+                emitter = emitter.with_direct_method_targets(direct_targets);
+            }
             if let Some(slayout) = static_layout {
                 emitter = emitter.with_static_layout(slayout);
             }
             if let Some(synth) = synthesized_functions {
                 emitter = emitter.with_synthesized_functions(synth);
+            }
+            if let LambdaBody::Block(block) = body {
+                emitter.populate_reassigned_locals_from_block(block);
             }
 
             match body {
