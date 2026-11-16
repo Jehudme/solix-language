@@ -20,7 +20,6 @@ solix compile <sources...> [options]
 * `--profile <debug|release|test>`: Compilation profile [default: `release`].
 * `-e, --entry <symbol>`: Overrides default entry point symbol (e.g. `Main::main`).
 * `--emit-api <file.slx>`: Synthesizes and writes public external API signatures to a `.slx` file.
-* `--no-builtins`: Disables automatic inclusion of built-in standard library definitions (`blt.io`).
 * `--check`: Performs syntax and semantic binder verification without emitting bytecode.
 * `--time`: Prints wall-clock duration for each compiler pipeline phase.
 * `--metrics [<format>]`: Prints compiler throughput metrics and phase duration breakdown (`text` or `json`).

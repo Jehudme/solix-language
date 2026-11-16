@@ -13,6 +13,9 @@ debug_symbols = false
 static = true
 sources = ["src"]
 
+[profiles.release.dependencies]
+solix = { version = "2.0.0", profile = "release" }
+
 [profiles.debug]
 inherits = "release"
 optimization_level = 0

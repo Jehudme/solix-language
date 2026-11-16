@@ -15,7 +15,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 * `-l, --lib <path>`: External library binary or native shared object (`.so`, `.dll`, `.dylib`) to link (can be repeated).
 * `-e, --entry <symbol>`: Overrides application entry point method [default: `Main::main`].
 * `--test`: Executes test entry point defined in archive `manifest.toml` (`[entrypoints].test`).
-* `--no-builtins`: Disables automatic registration of built-in standard I/O native methods.
+* `-p, --profile <profile>`: Target build profile to execute (`release`, `debug`, `test`).
 * `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
 * `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`].
 * `--max-stack <depth>`: Maximum call stack frame depth [default: `1024`].
@@ -39,6 +39,12 @@ solix run build/release/my_game.slxarc
 
 # Execute project unit tests packaged within the archive
 solix run --test build/debug/my_game.slxarc
+
+# Run an installed package directly by name, version, or profile
+solix run my-app
+solix run my-app@1.0.0
+solix run my-app:debug@1.0.0
+solix run my-app --profile debug
 
 # Pass command-line arguments to the guest Solix program
 solix run bin/app.slxb -- --port 8080 --host 0.0.0.0

@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 class Box<T> {
     public T value;

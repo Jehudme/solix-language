@@ -5,7 +5,9 @@
 use crate::cache::FilesystemPackageCache;
 use crate::cli::{BuildArgs, InstallArgs, ListArgs, ReinstallArgs, SyncArgs, UninstallArgs};
 use crate::commands::execute_build;
-use crate::registry::{PackageRecord, PackageRegistry, format_iso8601_timestamp};
+use crate::registry::{
+    PackageRecord, PackageRegistry, format_iso8601_timestamp, parse_package_spec,
+};
 use crate::solver::{resolve_native_cache_dir, resolve_package_store_dir};
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::BinaryProgram;
@@ -387,24 +389,7 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
             return Ok(());
         }
     } else if let Some(ref spec) = args.spec {
-        let target_spec = spec.trim();
-        let (spec_name_part, spec_version_part) =
-            if let Some((left, right)) = target_spec.split_once('@') {
-                (left, Some(right))
-            } else {
-                (target_spec, None)
-            };
-
-        let (package_name, profile_filter) =
-            if let Some(base) = spec_name_part.strip_suffix("-debug") {
-                (base, Some("debug"))
-            } else if let Some(base) = spec_name_part.strip_suffix("-release") {
-                (base, Some("release"))
-            } else if let Some(base) = spec_name_part.strip_suffix("-test") {
-                (base, Some("test"))
-            } else {
-                (spec_name_part, None)
-            };
+        let (package_name, profile_filter, spec_version_part) = parse_package_spec(spec);
 
         let mut matching_records: Vec<&PackageRecord> = registry
             .packages
@@ -412,7 +397,7 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
             .filter(|record| record.name == package_name)
             .collect();
 
-        if let Some(prof) = profile_filter {
+        if let Some(prof) = profile_filter.as_deref() {
             matching_records.retain(|record| record.build_profile == prof);
         }
         if let Some(version_str) = spec_version_part {
@@ -551,24 +536,16 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
     let native_cache_directory = resolve_native_cache_dir(&store_directory);
     let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
 
-    let (spec_name_part, spec_version_part) =
-        if let Some((left, right)) = specification.split_once('@') {
-            (left, Some(right))
-        } else {
-            (specification, None)
-        };
+    let (package_name, profile_filter, spec_version_part) =
+        parse_package_spec(specification);
+    let version_target_ref = spec_version_part.as_deref();
+    let profile_target_ref = profile_filter.as_deref();
 
-    let (package_name, profile_filter) = if let Some(base) = spec_name_part.strip_suffix("-debug") {
-        (base, Some("debug"))
-    } else if let Some(base) = spec_name_part.strip_suffix("-release") {
-        (base, Some("release"))
-    } else if let Some(base) = spec_name_part.strip_suffix("-test") {
-        (base, Some("test"))
-    } else {
-        (spec_name_part, None)
-    };
-
-    let removed_records = registry.unregister(package_name, spec_version_part, profile_filter)?;
+    let removed_records = registry.unregister(
+        &package_name,
+        version_target_ref,
+        profile_target_ref,
+    )?;
 
     let mut any_folder_removed = false;
     if store_directory.exists()
@@ -578,15 +555,15 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
             let entry_path = entry_result.path();
             let entry_name = entry_result.file_name().to_string_lossy().to_string();
 
-            let should_remove = if let Some(version_target) = spec_version_part {
-                if let Some(prof_target) = profile_filter {
+            let should_remove = if let Some(version_target) = version_target_ref {
+                if let Some(prof_target) = profile_target_ref {
                     entry_name == format!("{package_name}-{prof_target}@{version_target}")
                 } else {
                     entry_name == format!("{package_name}@{version_target}")
                         || (entry_name.starts_with(&format!("{package_name}-"))
                             && entry_name.ends_with(&format!("@{version_target}")))
                 }
-            } else if let Some(prof_target) = profile_filter {
+            } else if let Some(prof_target) = profile_target_ref {
                 entry_name.starts_with(&format!("{package_name}-{prof_target}@"))
             } else {
                 entry_name == package_name
@@ -602,9 +579,9 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
     }
 
     // Also check legacy nested structure: store_directory/<name>/<version>
-    let legacy_package_folder = store_directory.join(package_name);
+    let legacy_package_folder = store_directory.join(&package_name);
     if legacy_package_folder.exists() {
-        if let Some(version_target) = spec_version_part {
+        if let Some(version_target) = version_target_ref {
             let legacy_version_folder = legacy_package_folder.join(version_target);
             if legacy_version_folder.exists() {
                 let _ = fs::remove_dir_all(&legacy_version_folder);
@@ -627,8 +604,8 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
     {
         for entry_result in entries.flatten() {
             let folder_name = entry_result.file_name().to_string_lossy().to_string();
-            let should_remove = if let Some(version_target) = spec_version_part {
-                if let Some(prof_target) = profile_filter {
+            let should_remove = if let Some(version_target) = version_target_ref {
+                if let Some(prof_target) = profile_target_ref {
                     folder_name == format!("{package_name}-{prof_target}@{version_target}")
                         || folder_name == format!("{package_name}-{version_target}")
                 } else {

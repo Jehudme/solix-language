@@ -143,9 +143,6 @@ impl RuntimeContext {
 
             // Check duplicate static symbols across modules
             for (static_symbol, _) in &binary.static_symbols_map {
-                if static_symbol.starts_with("blt::") || static_symbol.starts_with("blt.") {
-                    continue;
-                }
                 if let Some(first_module) = defined_statics.get(static_symbol) {
                     if first_module != &binary_label {
                         return Err(RuntimeError::DuplicateSymbolDefinition {
@@ -162,9 +159,6 @@ impl RuntimeContext {
 
             // Check duplicate classes across modules
             for class in &binary.classes {
-                if class.symbol.starts_with("blt::") || class.symbol.starts_with("blt.") {
-                    continue;
-                }
                 let is_generic_instantiation =
                     class.symbol.contains('<') && class.symbol.contains('>');
                 let is_generic_template = generic_template_names.iter().any(|template_name| {
@@ -190,11 +184,6 @@ impl RuntimeContext {
 
             // Check duplicate functions across modules
             for func in &binary.functions {
-                let is_built_in =
-                    func.symbol.starts_with("blt::") || func.symbol.starts_with("blt.");
-                if is_built_in {
-                    continue;
-                }
                 let is_synthetic = func.symbol.starts_with('@')
                     || func.symbol.starts_with("__static_init")
                     || func.symbol.starts_with("<entry_")

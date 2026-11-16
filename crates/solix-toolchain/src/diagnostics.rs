@@ -17,19 +17,10 @@ pub fn render_diagnostics(
             && let Some(src) = sources.get(source_id as usize)
         {
             (name.as_str(), src.as_str())
+        } else if let (Some(name), Some(src)) = (source_names.first(), sources.first()) {
+            (name.as_str(), src.as_str())
         } else {
-            // Fallback: prioritize non-builtin user source files
-            let non_builtin = source_names
-                .iter()
-                .zip(sources.iter())
-                .find(|(name, _)| !name.starts_with("blt@"));
-            if let Some((name, src)) = non_builtin {
-                (name.as_str(), src.as_str())
-            } else if let (Some(name), Some(src)) = (source_names.first(), sources.first()) {
-                (name.as_str(), src.as_str())
-            } else {
-                ("", "")
-            }
+            ("", "")
         };
 
         if !file_name.is_empty() {

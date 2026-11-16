@@ -27,7 +27,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | `--lib <path>` | `-l` | Path (Repeated) | `[]` | Additional library files or native shared libraries to load (`*.slxb`, `*.slxarc`, `*.so`, `*.dll`, `*.dylib`). |
 | `--entry <symbol>` | `-e` | String | None | Overrides default entry point symbol (e.g. `Main::main`). |
 | `--test` | | Flag | `false` | Executes the test entry point defined in archive `manifest.toml` (`[entrypoints].test`). |
-| `--no-builtins` | | Flag | `false` | Omits automatic registration of standard I/O built-in native functions. |
+| `--profile <profile>` | `-p` | String | None | Target build profile to execute (e.g. `release`, `debug`, `test`). |
 | `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for AST inlining when compiling `.slx` sources. |
 | `--heap-size <size>` | | String | `"32MB"` | Virtual heap allocation capacity limit (e.g., `"16MB"`, `"64MB"`, `"1GB"`). |
 | `--max-stack <depth>` | | Integer | `1024` | Maximum call stack frame depth limit. |
@@ -75,6 +75,25 @@ solix run build/release/my_app.slxarc
 
 # Run test suite
 solix run --test build/debug/my_app.slxarc
+```
+
+### 4. Installed Package Execution
+
+When given a package name or specification instead of a file path, `solix run` resolves and executes the package from the local package store (`~/.solix/packages`):
+
+```bash
+# Run latest installed version (default profile: release)
+solix run my-app
+
+# Run specific version
+solix run my-app@1.2.0
+
+# Run specific profile using colon notation
+solix run my-app:debug@1.2.0
+solix run my-app:release
+
+# Run with explicit --profile flag
+solix run my-app --profile debug
 ```
 
 ---

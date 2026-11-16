@@ -10,8 +10,12 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 #[test]
-fn test_import_completion_root_packages_and_blt() {
+fn test_import_completion_root_packages() {
     let workspace = Arc::new(WorkspaceManager::new(None, None));
+    let core_uri = Url::parse("file:///workspace/core.slx").unwrap();
+    let core_code = "package my_core.io;\n\npublic class Logger {}\n";
+    let _ = workspace.did_open(core_uri, 1, core_code.to_string());
+
     let file_uri = Url::parse("file:///workspace/test.slx").unwrap();
     let source_code = "import ";
     let snapshot = workspace.did_open(file_uri.clone(), 1, source_code.to_string());
@@ -33,18 +37,22 @@ fn test_import_completion_root_packages_and_blt() {
     let item_labels: Vec<String> = result.items.iter().map(|item| item.label.clone()).collect();
 
     assert!(
-        item_labels.contains(&"blt".to_string()),
-        "Completion must contain built-in package 'blt': {item_labels:?}"
+        item_labels.contains(&"my_core".to_string()),
+        "Completion must contain workspace package 'my_core': {item_labels:?}"
     );
 }
 
 #[test]
-fn test_import_completion_blt_hierarchy_and_wildcard() {
+fn test_import_completion_package_hierarchy_and_wildcard() {
     let workspace = Arc::new(WorkspaceManager::new(None, None));
+    let core_uri = Url::parse("file:///workspace/core.slx").unwrap();
+    let core_code = "package my_core.io;\n\npublic class Logger {}\n";
+    let _ = workspace.did_open(core_uri, 1, core_code.to_string());
+
     let file_uri = Url::parse("file:///workspace/test.slx").unwrap();
 
-    // 1. User types 'import blt.'
-    let subpackage_code = "import blt.";
+    // 1. User types 'import my_core.'
+    let subpackage_code = "import my_core.";
     let subpackage_snapshot = workspace.did_open(file_uri.clone(), 1, subpackage_code.to_string());
     let subpackage_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
@@ -53,7 +61,7 @@ fn test_import_completion_blt_hierarchy_and_wildcard() {
             },
             position: Position {
                 line: 0,
-                character: 11,
+                character: 15,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -70,11 +78,11 @@ fn test_import_completion_blt_hierarchy_and_wildcard() {
 
     assert!(
         subpackage_labels.contains(&"io".to_string()),
-        "Child namespace 'io' must be suggested under 'blt': {subpackage_labels:?}"
+        "Child namespace 'io' must be suggested under 'my_core': {subpackage_labels:?}"
     );
 
-    // 2. User types 'import blt.io.'
-    let terminal_code = "import blt.io.";
+    // 2. User types 'import my_core.io.'
+    let terminal_code = "import my_core.io.";
     let terminal_snapshot = workspace.did_change(&file_uri, 2, terminal_code.to_string());
     let terminal_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
@@ -83,7 +91,7 @@ fn test_import_completion_blt_hierarchy_and_wildcard() {
             },
             position: Position {
                 line: 0,
-                character: 14,
+                character: 18,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -99,26 +107,22 @@ fn test_import_completion_blt_hierarchy_and_wildcard() {
         .collect();
 
     assert!(
-        terminal_labels.contains(&"println".to_string()),
-        "'println' must be suggested under 'blt.io': {terminal_labels:?}"
-    );
-    assert!(
-        terminal_labels.contains(&"print".to_string()),
-        "'print' must be suggested under 'blt.io': {terminal_labels:?}"
+        terminal_labels.contains(&"Logger".to_string()),
+        "'Logger' must be suggested under 'my_core.io': {terminal_labels:?}"
     );
     assert!(
         terminal_labels.contains(&"*".to_string()),
         "Wildcard '*' must be suggested: {terminal_labels:?}"
     );
 
-    let println_item = terminal_completions
+    let logger_item = terminal_completions
         .items
         .iter()
-        .find(|item| item.label == "println")
-        .expect("println item must exist");
+        .find(|item| item.label == "Logger")
+        .expect("Logger item must exist");
     assert_eq!(
-        println_item.insert_text.as_deref(),
-        Some("println;"),
+        logger_item.insert_text.as_deref(),
+        Some("Logger;"),
         "Terminal symbol insert text must append trailing semicolon when missing"
     );
 }
@@ -126,19 +130,23 @@ fn test_import_completion_blt_hierarchy_and_wildcard() {
 #[test]
 fn test_import_completion_semicolon_deduplication() {
     let workspace = Arc::new(WorkspaceManager::new(None, None));
+    let core_uri = Url::parse("file:///workspace/core.slx").unwrap();
+    let core_code = "package my_core.io;\n\npublic class Logger {}\n";
+    let _ = workspace.did_open(core_uri, 1, core_code.to_string());
+
     let file_uri = Url::parse("file:///workspace/test.slx").unwrap();
 
-    // Source already has trailing semicolon: 'import blt.io.;'
-    let source_code = "import blt.io.;";
+    // Source already has trailing semicolon: 'import my_core.io.;'
+    let source_code = "import my_core.io.;";
     let snapshot = workspace.did_open(file_uri.clone(), 1, source_code.to_string());
 
-    // Cursor is placed between '.' and ';' (offset 14)
+    // Cursor is placed between '.' and ';' (offset 18)
     let completion_params = CompletionParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: file_uri },
             position: Position {
                 line: 0,
-                character: 14,
+                character: 18,
             },
         },
         work_done_progress_params: WorkDoneProgressParams::default(),
@@ -147,15 +155,15 @@ fn test_import_completion_semicolon_deduplication() {
     };
 
     let result = completions(&workspace, &snapshot, &completion_params);
-    let println_item = result
+    let logger_item = result
         .items
         .iter()
-        .find(|item| item.label == "println")
-        .expect("println item must exist");
+        .find(|item| item.label == "Logger")
+        .expect("Logger item must exist");
 
     assert_eq!(
-        println_item.insert_text.as_deref(),
-        Some("println"),
+        logger_item.insert_text.as_deref(),
+        Some("Logger"),
         "Terminal symbol insert text must NOT duplicate semicolon when already present"
     );
 }

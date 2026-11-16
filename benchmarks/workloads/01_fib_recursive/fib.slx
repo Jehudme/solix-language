@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 class FibApp {
     public static int32 fib(int32 n) {

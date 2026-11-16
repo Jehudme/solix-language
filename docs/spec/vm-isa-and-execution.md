@@ -94,4 +94,4 @@ For host embeddings, game engines, and long-running interactive host processes, 
    - Replaces all static slots containing reference values with `null` and decrements their ARC counters (invoking class destructors `~Class()` on global singleton instances).
    - Frees interned string constants and verifies heap integrity.
 4. **Load-Time Duplicate Symbol Rejection (`R0024`):**
-   - When multiple `BinaryProgram` modules are loaded into `RuntimeContext::new`, any function, class, or static global with the same symbol defined in more than one module immediately triggers `RuntimeError::DuplicateSymbolDefinition` (`R0024`), excluding compiler built-ins (`blt::*`) and generic template instantiations.
+   - When multiple `BinaryProgram` modules are loaded into `RuntimeContext::new`, any function, class, or static global with the same symbol defined in more than one module immediately triggers `RuntimeError::DuplicateSymbolDefinition` (`R0024`), excluding generic template instantiations.

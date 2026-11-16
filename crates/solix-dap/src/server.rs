@@ -1176,8 +1176,6 @@ fn setup_runtime_for_target(
         .with_solver(solver.clone())
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
-        .with_native_function("blt::io::println", builtin_println)
-        .with_native_function("blt::io::print", builtin_print)
         .with_native_function("Console::println", builtin_println)
         .with_native_function("Console::print", builtin_print);
 
@@ -1210,7 +1208,6 @@ fn setup_runtime_for_target(
         let mut compilation_options = CompilationOptions::new()
             .with_profile(solix_compilation::BuildProfile::Debug)
             .with_package_metadata(file_stem, "0.1.0", "")
-            .with_builtins(true)
             .with_solver(solver)
             .with_source(target_path.display().to_string(), source_content);
 

@@ -198,7 +198,7 @@ Parameter names and types are preserved across all compiler passes (`SymbolEntry
 
 ### 7.5 Strict Import Resolution Parity
 The Language Server enforces diagnostic parity with the CLI compiler (`solix compile` / `solix build`):
-1. **Builtin Packages**: Only `std::*` standard library packages and `blt` / `blt::*` compiler builtins are recognized without project dependencies.
+1. **Builtin Packages**: Only `std::*` standard library packages are recognized without project dependencies.
 2. **External Packages**: Any external package (such as `solix.*` or `raylib.*`) requires an explicit dependency entry in `manifest.toml` or an `extern import` declaration. Wildcard imports targeting undeclared external packages consistently emit `CannotResolveImport` (`E0232`).
 
 ### 7.6 Workspace Manifest Dependency Table Resolution

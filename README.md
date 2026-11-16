@@ -77,9 +77,13 @@ Alternatively, search for **Solix** in the Visual Studio Code Extensions marketp
 ## Code at a Glance
 
 ```solix
-import blt::io::println;
+import solix.io.Console;
 
-class Particle {
+public interface IEntity {
+    void update(float32 delta_time);
+}
+
+public class Particle implements IEntity {
     public float32 coord_x;
     public float32 coord_y;
     public uint8   alpha;
@@ -90,8 +94,8 @@ class Particle {
         this.alpha = 255;          // Context-typed numeric literal coercion
     }
 
-    public ~Particle() {
-        // Runs deterministically when the particle is released from memory
+    ~Particle() {
+        // Runs deterministically via ARC when reference count reaches zero
     }
 
     public void update(float32 delta_time) {
@@ -100,11 +104,11 @@ class Particle {
     }
 }
 
-class Main {
+public class Main {
     public static int32 main() {
         Particle spark = new Particle(100.0, 200.0);
         spark.update(0.016);
-        println("Particle position: " + spark.coord_x + ", " + spark.coord_y);
+        Console::println("Particle updated: x=" + spark.coord_x + ", y=" + spark.coord_y);
         return 0;
     }
 }

@@ -315,28 +315,6 @@ impl WorkspaceManager {
     /// Resolves or returns the cached package namespace and symbol index for the given package name.
     #[must_use]
     pub fn resolve_package_index(&self, target_package_name: &str) -> PackageNamespaceIndex {
-        // Built-in package 'blt'
-        if target_package_name == "blt" {
-            let mut blt_index = PackageNamespaceIndex::default();
-            blt_index.namespaces.insert("blt.io".to_string());
-            blt_index.symbols_by_namespace.insert(
-                "blt.io".to_string(),
-                vec![
-                    (
-                        "print".to_string(),
-                        CompletionItemKind::FUNCTION,
-                        "void print(string message)".to_string(),
-                    ),
-                    (
-                        "println".to_string(),
-                        CompletionItemKind::FUNCTION,
-                        "void println(string message)".to_string(),
-                    ),
-                ],
-            );
-            return blt_index;
-        }
-
         let mut cache_key = PackageExportCacheKey {
             package_name: target_package_name.to_string(),
             profile: "release".to_string(),
@@ -924,7 +902,6 @@ impl WorkspaceManager {
         // Construct CompilationContext
         let mut options = CompilationOptions {
             profile: BuildProfile::Debug,
-            include_builtins: true,
             codes: sources_map,
             dependency_specs,
             dependency_binaries: cached_binaries,

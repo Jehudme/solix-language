@@ -52,7 +52,6 @@ public int32 main() {
     let mut compilation_options = CompilationOptions::new()
         .with_profile(BuildProfile::Debug)
         .with_link_mode(LinkMode::Static)
-        .with_builtins(false)
         .with_source("consumer.slx", consumer_source);
     compilation_options
         .dependency_binaries
@@ -144,7 +143,6 @@ public int32 main() {
     let compilation_options = CompilationOptions::new()
         .with_profile(BuildProfile::Debug)
         .with_link_mode(LinkMode::Dynamic)
-        .with_builtins(false)
         .with_source("consumer_dyn.slx", consumer_source);
 
     let mut context = CompilationContext::new(compilation_options);

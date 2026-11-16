@@ -2,8 +2,7 @@
 
 use solix_runtime::Value;
 use solix_tests::common::{
-    assert_compile_error, assert_compile_error_with_builtins, assert_compile_sources_error,
-    compile_and_run_multi, compile_and_run_with_builtins,
+    assert_compile_error, assert_compile_sources_error, compile_and_run_multi,
 };
 
 #[test]
@@ -149,34 +148,56 @@ fn test_case_3_5_cross_platform_binary_path_resolution() {
 }
 
 #[test]
-fn test_case_3_6_builtin_io_direct_symbol_import() {
-    let code = r#"
-        import blt.io.println;
+fn test_case_3_6_package_direct_symbol_import() {
+    let pkg_code = r#"
+        package test_pkg.io;
 
-        class Main {
-            public static int32 main() {
-                println("Hello from direct builtin import!");
+        public class Logger {
+            public static int32 get_status() {
                 return 0;
             }
         }
     "#;
-    let (execution_result, _) = compile_and_run_with_builtins(code);
+    let main_code = r#"
+        import test_pkg.io.Logger;
+
+        class Main {
+            public static int32 main() {
+                return Logger::get_status();
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run_multi(&[
+        ("test_pkg/io.slx", pkg_code),
+        ("main.slx", main_code),
+    ]);
     assert_eq!(execution_result, Value::I32(0));
 }
 
 #[test]
-fn test_case_3_7_builtin_io_wildcard_import() {
-    let code = r#"
-        import blt.io.*;
+fn test_case_3_7_package_wildcard_import() {
+    let pkg_code = r#"
+        package test_pkg.io;
 
-        class Main {
-            public static int32 main() {
-                println("Hello from wildcard builtin import!");
+        public class Logger {
+            public static int32 get_status() {
                 return 0;
             }
         }
     "#;
-    let (execution_result, _) = compile_and_run_with_builtins(code);
+    let main_code = r#"
+        import test_pkg.io.*;
+
+        class Main {
+            public static int32 main() {
+                return Logger::get_status();
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run_multi(&[
+        ("test_pkg/io.slx", pkg_code),
+        ("main.slx", main_code),
+    ]);
     assert_eq!(execution_result, Value::I32(0));
 }
 
@@ -289,9 +310,12 @@ fn test_case_4_6_import_statement_inside_function_body() {
 
 #[test]
 fn test_case_4_7_importing_symbol_from_subpackage_prefix_fails() {
-    // Error: E0232 (CannotResolveImport) - 'blt' is not a package, only 'blt.io' is
+    let pkg_code = r#"
+        package test_pkg.io;
+        public class Logger {}
+    "#;
     let code = r#"
-        import blt.println;
+        import test_pkg.println;
 
         class Main {
             public static int32 main() {
@@ -299,14 +323,17 @@ fn test_case_4_7_importing_symbol_from_subpackage_prefix_fails() {
             }
         }
     "#;
-    assert_compile_error_with_builtins(code, "E0232");
+    assert_compile_sources_error(&[("pkg.slx", pkg_code), ("main.slx", code)], "E0232");
 }
 
 #[test]
 fn test_case_4_8_wildcard_import_of_subpackage_prefix_fails() {
-    // Error: E0232 (CannotResolveImport) - 'blt' is not a package, only 'blt.io' is
+    let pkg_code = r#"
+        package test_pkg.io;
+        public class Logger {}
+    "#;
     let code = r#"
-        import blt.*;
+        import test_pkg.*;
 
         class Main {
             public static int32 main() {
@@ -314,14 +341,17 @@ fn test_case_4_8_wildcard_import_of_subpackage_prefix_fails() {
             }
         }
     "#;
-    assert_compile_error_with_builtins(code, "E0232");
+    assert_compile_sources_error(&[("pkg.slx", pkg_code), ("main.slx", code)], "E0232");
 }
 
 #[test]
-fn test_case_4_9_importing_unknown_member_from_builtin_package_fails() {
-    // Error: E0201 (UndefinedSymbol) - 'nonexistent_symbol' does not exist in valid package 'blt.io'
+fn test_case_4_9_importing_unknown_member_from_package_fails() {
+    let pkg_code = r#"
+        package test_pkg.io;
+        public class Logger {}
+    "#;
     let code = r#"
-        import blt.io.nonexistent_symbol;
+        import test_pkg.io.nonexistent_symbol;
 
         class Main {
             public static int32 main() {
@@ -329,7 +359,7 @@ fn test_case_4_9_importing_unknown_member_from_builtin_package_fails() {
             }
         }
     "#;
-    assert_compile_error_with_builtins(code, "E0201");
+    assert_compile_sources_error(&[("pkg.slx", pkg_code), ("main.slx", code)], "E0201");
 }
 
 #[test]

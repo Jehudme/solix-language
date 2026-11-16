@@ -213,26 +213,6 @@ fn test_pipeline_halts_immediately_on_first_error_phase() {
 }
 
 #[test]
-fn test_builtins_inclusion_and_compilation() {
-    let code = r#"
-        import blt.io.println;
-
-        class App {
-            public static void main() {
-                println("Hello from builtins!");
-            }
-        }
-    "#;
-    let options = CompilationOptions::new()
-        .with_source("main.slx", code)
-        .with_builtins(true);
-
-    let mut context = CompilationContext::new(options);
-    assert!(context.execute().is_ok());
-    assert!(context.emission_artifacts.is_some());
-}
-
-#[test]
 fn test_pipeline_telemetry_recording() {
     let source_code = r#"
         class MathUtils {

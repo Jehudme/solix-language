@@ -1,5 +1,6 @@
-import blt.io.println;
 import math.calc.Calculator;
+
+native void println(string msg);
 
 class MultiApp {
     public static void main() {

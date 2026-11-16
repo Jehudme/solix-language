@@ -4,6 +4,7 @@
 
 use crate::cli::RunArgs;
 use crate::diagnostics::render_diagnostics;
+use crate::registry::{PackageRecord, PackageRegistry, parse_package_spec};
 use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use crate::telemetry::{
     ExecutionTelemetry, MemoryTelemetry, RunMetricsReport, TimingsTelemetry,
@@ -12,6 +13,7 @@ use crate::telemetry::{
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::BinaryProgram;
 use solix_common::project::SlxarcArchive;
+use solix_common::solver::PackageVersion;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::pipeline::CompilationPipeline;
 use solix_runtime::native::builtins::{builtin_print, builtin_println};
@@ -80,7 +82,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
-    let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
+    let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory.clone()));
 
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(heap_size)
@@ -90,8 +92,6 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_solver(solver.clone())
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
-        .with_native_function("blt::io::println", builtin_println)
-        .with_native_function("blt::io::print", builtin_print)
         .with_native_function("Console::println", builtin_println)
         .with_native_function("Console::print", builtin_print)
         .with_verify_checksums(!args.no_verify);
@@ -151,11 +151,91 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         }
     }
 
+    let mut target_binaries = args.binaries.clone();
+
+    if target_binaries.len() == 1 {
+        let single_target = &target_binaries[0];
+        let spec_string = single_target.to_string_lossy().to_string();
+        let looks_like_package_spec = !single_target.exists()
+            && (spec_string.contains(':')
+                || spec_string.contains('@')
+                || single_target.extension().is_none()
+                || single_target.extension().is_some_and(|extension| {
+                    !extension.eq_ignore_ascii_case("slx")
+                        && !extension.eq_ignore_ascii_case("slxb")
+                        && !extension.eq_ignore_ascii_case("slxarc")
+                }));
+
+        if looks_like_package_spec {
+            let (package_name, spec_profile, spec_version) = parse_package_spec(&spec_string);
+            let effective_profile = spec_profile
+                .as_deref()
+                .or(args.profile.as_deref())
+                .unwrap_or("release");
+
+            let registry = PackageRegistry::load_or_sync(&store_directory)?;
+
+            let mut candidates: Vec<&PackageRecord> = registry
+                .packages
+                .iter()
+                .filter(|record| {
+                    record.name == package_name && record.build_profile == effective_profile
+                })
+                .collect();
+
+            if candidates.is_empty() && spec_profile.is_none() && args.profile.is_none() {
+                candidates = registry
+                    .packages
+                    .iter()
+                    .filter(|record| record.name == package_name)
+                    .collect();
+            }
+
+            if let Some(ref version_query) = spec_version {
+                candidates.retain(|record| &record.version == version_query);
+            }
+
+            candidates.sort_by(|record_alpha, record_beta| {
+                let parsed_alpha = PackageVersion::parse(&record_alpha.version).ok();
+                let parsed_beta = PackageVersion::parse(&record_beta.version).ok();
+                parsed_beta.cmp(&parsed_alpha)
+            });
+
+            if let Some(matched_record) = candidates.first() {
+                if !matched_record.artifact_path.exists() {
+                    bail!(
+                        "Package '{}@{}' ({}) artifact was not found at expected path '{}'",
+                        matched_record.name,
+                        matched_record.version,
+                        matched_record.build_profile,
+                        matched_record.artifact_path.display()
+                    );
+                }
+                target_binaries = vec![matched_record.artifact_path.clone()];
+            } else {
+                let installed_summary: Vec<String> = registry
+                    .packages
+                    .iter()
+                    .map(|record| {
+                        format!("{}:{}@{}", record.name, record.build_profile, record.version)
+                    })
+                    .collect();
+                bail!(
+                    "Package '{}' (profile: '{}') was not found in installed packages store at '{}'. Available packages: [{}]",
+                    package_name,
+                    effective_profile,
+                    store_directory.display(),
+                    installed_summary.join(", ")
+                );
+            }
+        }
+    }
+
     // Partition target paths into source files (*.slx), archives (*.slxarc), and precompiled binaries (*.slxb)
     let mut source_paths: Vec<&PathBuf> = Vec::new();
     let mut binary_paths: Vec<&PathBuf> = Vec::new();
 
-    for target_path in &args.binaries {
+    for target_path in &target_binaries {
         let extension = target_path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -233,9 +313,50 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
         let mut compilation_options = CompilationOptions::new()
             .with_package_metadata(first_stem, "0.1.0", "")
-            .with_builtins(!args.no_builtins)
             .with_inline_threshold(args.inline_threshold)
             .with_solver(solver.clone());
+
+        let parent_manifest = source_paths
+            .first()
+            .and_then(|source_path| crate::commands::compile::find_parent_manifest(source_path))
+            .and_then(|manifest_path| {
+                solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
+            });
+
+        if let Some(ref manifest) = parent_manifest {
+            for resolved_dependency in manifest.resolved_dependencies() {
+                let spec_string = if resolved_dependency.build_profile.is_empty() {
+                    format!(
+                        "{}@{}",
+                        resolved_dependency.package_name, resolved_dependency.version
+                    )
+                } else {
+                    format!(
+                        "{}@{}#{}",
+                        resolved_dependency.package_name,
+                        resolved_dependency.version,
+                        resolved_dependency.build_profile
+                    )
+                };
+                if let Ok(requirement) =
+                    solix_common::solver::DependencyRequirement::parse(&spec_string)
+                {
+                    compilation_options = compilation_options.with_dependency_spec(requirement);
+                }
+            }
+            if runtime_options.entry_point.is_none() && args.entry.is_none() {
+                let selected_entry = if args.test {
+                    manifest.test_entrypoint()
+                } else {
+                    manifest.main_entrypoint()
+                };
+                if let Some(ref target_symbol) = selected_entry {
+                    compilation_options =
+                        compilation_options.with_entry_point(Some(target_symbol.clone()));
+                    runtime_options = runtime_options.with_entry_point(target_symbol);
+                }
+            }
+        }
 
         if let Some(entry) = &args.entry {
             compilation_options = compilation_options.with_entry_point(Some(entry.clone()));
@@ -313,8 +434,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         1.0
     };
 
-    let workload_name = args
-        .binaries
+    let workload_name = target_binaries
         .first()
         .and_then(|path| path.file_stem())
         .and_then(|stem| stem.to_str())

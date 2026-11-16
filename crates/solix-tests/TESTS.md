@@ -244,27 +244,25 @@ class Main {
 ### Case 3.5: Cross-Platform Binary Path Resolution [IMPLEMENTED]
 *Expected Result*: Verifies `solix::get_executable_path()` and `solix::get_executable_dir()` correctly resolve the running binary path and containing directory across Linux, macOS, and Windows without platform crashes.
 
-### Case 3.6: Built-in IO Package Direct Symbol Import [IMPLEMENTED]
+### Case 3.6: Package Direct Symbol Import [IMPLEMENTED]
 ```solix
-import blt.io.println;
+import test_pkg.io.Logger;
 
 class Main {
     public static int32 main() {
-        println("Hello from direct builtin import!");
-        return 0;
+        return Logger::get_status();
     }
 }
 ```
-*Expected Result*: Direct item import from built-in standard library resolves symbol and executes cleanly.
+*Expected Result*: Direct item import from package resolves symbol and executes cleanly.
 
-### Case 3.7: Built-in IO Package Wildcard Import [IMPLEMENTED]
+### Case 3.7: Package Wildcard Import [IMPLEMENTED]
 ```solix
-import blt.io.*;
+import test_pkg.io.*;
 
 class Main {
     public static int32 main() {
-        println("Hello from wildcard builtin import!");
-        return 0;
+        return Logger::get_status();
     }
 }
 ```
@@ -345,29 +343,29 @@ void test() {
 
 ### Case 4.7: Importing Symbol from Subpackage Prefix Fails [IMPLEMENTED]
 ```solix
-import blt.println;
+import test_pkg.println;
 ```
 *Expected Compiler Diagnostic*:
 ```text
-[ERROR] binder: Cannot resolve import 'blt.println': package or symbol not found (E0232)
+[ERROR] binder: Cannot resolve import 'test_pkg.println': package or symbol not found (E0232)
 ```
 
 ### Case 4.8: Wildcard Import of Subpackage Prefix Fails [IMPLEMENTED]
 ```solix
-import blt.*;
+import test_pkg.*;
 ```
 *Expected Compiler Diagnostic*:
 ```text
-[ERROR] binder: Cannot resolve import 'blt': package or symbol not found (E0232)
+[ERROR] binder: Cannot resolve import 'test_pkg': package or symbol not found (E0232)
 ```
 
-### Case 4.9: Importing Unknown Member from Builtin Package Fails [IMPLEMENTED]
+### Case 4.9: Importing Unknown Member from Package Fails [IMPLEMENTED]
 ```solix
-import blt.io.nonexistent_symbol;
+import test_pkg.io.nonexistent_symbol;
 ```
 *Expected Compiler Diagnostic*:
 ```text
-[ERROR] binder: Symbol 'nonexistent_symbol' not found in package 'blt.io' (E0201)
+[ERROR] binder: Symbol 'nonexistent_symbol' not found in package 'test_pkg.io' (E0201)
 ```
 
 ### Case 4.10: Importing Intermediate Prefix of User Package Fails [IMPLEMENTED]
@@ -6146,18 +6144,17 @@ class Main {
 
 ---
 
-### Case 59.2: Builtin Standard Library Subsystem (`blt.io.println`) [IMPLEMENTED]
+### Case 59.2: Standard Library Import Resolution [IMPLEMENTED]
 ```solix
-import blt.io.println;
+import solix.io.Console;
 
 class Main {
     public static int32 main() {
-        println("Hello from Solix builtins!");
         return 0;
     }
 }
 ```
-*Expected Result*: With built-in libraries included by default (`--no-builtins` omitted), `blt.io.println` resolves seamlessly at compile-time and runtime prints message to stdout.
+*Expected Result*: Direct import of standard library Console resolves cleanly and executes.
 
 ---
 
@@ -6281,9 +6278,9 @@ class Main {
 
 ### Negative Test Scenarios (Invalid Variations & Expected Errors)
 
-### Case 59.13: Builtin Standard Library Disabled Flag (`--no-builtins`) [IMPLEMENTED]
+### Case 59.13: Unresolved Package Import Detection [IMPLEMENTED]
 ```solix
-import blt.io.println;
+import nonexistent_package.io.Console;
 
 class Main {
     public static int32 main() {
@@ -6291,7 +6288,7 @@ class Main {
     }
 }
 ```
-*Expected Result*: Passing `--no-builtins` disables automatic injection of `blt.io`, causing the semantic binder to fail with unresolved symbol diagnostic error.
+*Expected Result*: Attempting to import from an unregistered package causes the semantic binder to fail with unresolved symbol diagnostic error (E0232).
 
 ---
 

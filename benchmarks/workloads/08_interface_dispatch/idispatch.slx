@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 interface IWorker {
     int32 work(int32 x);

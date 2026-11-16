@@ -90,7 +90,6 @@ Language tooling (`solix-lsp`) leverages `ModuleSolver::list_packages()` and cac
 1. **Segment 0 (Root Package):**
    When the user types `import ` or `extern import `, the completion engine queries:
    * Available installed packages via `solver.list_packages()` (e.g., `solix`, `raylib`).
-   * Compiler built-in package `blt`.
    * Workspace-local project package names.
 
 2. **Segment 1..N (Subpackages & Exported Symbols):**

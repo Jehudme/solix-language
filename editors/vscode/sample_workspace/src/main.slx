@@ -1,6 +1,6 @@
 package sample_workspace;
 
-import blt.io.println;
+native void println(string msg);
 
 
 /// Represents a 2D coordinate point with reference-counted heap allocation.

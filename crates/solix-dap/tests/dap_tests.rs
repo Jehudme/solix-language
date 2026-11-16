@@ -163,7 +163,6 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
     let compilation_options = CompilationOptions::new()
         .with_profile(solix_compilation::BuildProfile::Debug)
         .with_package_metadata("sample_workspace", "0.1.0", "")
-        .with_builtins(true)
         .with_source(source_path.display().to_string(), source_content);
 
     let mut pipeline = CompilationPipeline::standard();
@@ -218,8 +217,6 @@ fn test_exact_breakpoint_resolution_and_locals_inspection() {
         .with_heap_size(16 * 1024 * 1024)
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
-        .with_native_function("blt::io::println", builtin_println)
-        .with_native_function("blt::io::print", builtin_print)
         .with_binary(deserialized_program);
 
     let runtime_context = RuntimeContext::new(runtime_options).expect("RuntimeContext creation");

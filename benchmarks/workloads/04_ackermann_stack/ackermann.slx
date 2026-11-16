@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 class AckermannApp {
     public static int32 ack(int32 m, int32 n) {

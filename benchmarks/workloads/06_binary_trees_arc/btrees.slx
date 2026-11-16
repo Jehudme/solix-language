@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 class Node {
     public int32 item;

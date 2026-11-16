@@ -509,3 +509,60 @@ pub fn format_iso8601_timestamp(unix_seconds: u64) -> String {
 
     format!("{adjusted_year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
+
+/// Parses a package specification string into `(package_name, profile_filter, version_filter)`.
+///
+/// Supported formats:
+/// - `<name>:<profile>@<version>`
+/// - `<name>@<version>:<profile>`
+/// - `<name>:<profile>`
+/// - `<name>@<version>`
+/// - `<name>`
+/// - Legacy fallback: `<name>-<profile>@<version>` where profile is `release`, `debug`, or `test`.
+#[must_use]
+pub fn parse_package_spec(specification: &str) -> (String, Option<String>, Option<String>) {
+    let trimmed_spec = specification.trim();
+
+    // Check if colon (':') separates profile
+    if let Some((before_colon, after_colon)) = trimmed_spec.split_once(':') {
+        if let Some((left_part, right_version)) = before_colon.split_once('@') {
+            // Case: name@version:profile
+            let package_name = left_part.trim().to_string();
+            let version_filter = Some(right_version.trim().to_string());
+            let profile_filter = Some(after_colon.trim().to_string());
+            return (package_name, profile_filter, version_filter);
+        }
+
+        if let Some((profile_part, right_version)) = after_colon.split_once('@') {
+            // Case: name:profile@version
+            let package_name = before_colon.trim().to_string();
+            let profile_filter = Some(profile_part.trim().to_string());
+            let version_filter = Some(right_version.trim().to_string());
+            return (package_name, profile_filter, version_filter);
+        }
+
+        // Case: name:profile
+        let package_name = before_colon.trim().to_string();
+        let profile_filter = Some(after_colon.trim().to_string());
+        return (package_name, profile_filter, None);
+    }
+
+    // No colon present: check for '@' (version delimiter)
+    let (name_part, version_filter) =
+        if let Some((left_part, right_part)) = trimmed_spec.split_once('@') {
+            (left_part.trim(), Some(right_part.trim().to_string()))
+        } else {
+            (trimmed_spec, None)
+        };
+
+    // Legacy fallback check: does name_part end with '-debug', '-release', or '-test'?
+    if let Some(base_name) = name_part.strip_suffix("-debug") {
+        (base_name.to_string(), Some("debug".to_string()), version_filter)
+    } else if let Some(base_name) = name_part.strip_suffix("-release") {
+        (base_name.to_string(), Some("release".to_string()), version_filter)
+    } else if let Some(base_name) = name_part.strip_suffix("-test") {
+        (base_name.to_string(), Some("test".to_string()), version_filter)
+    } else {
+        (name_part.to_string(), None, version_filter)
+    }
+}

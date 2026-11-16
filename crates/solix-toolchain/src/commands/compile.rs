@@ -45,7 +45,7 @@ fn collect_slx_sources_recursively(
 }
 
 /// Searches upward from the target source path looking for an enclosing `manifest.toml`.
-fn find_parent_manifest(initial_path: &std::path::Path) -> Option<PathBuf> {
+pub(crate) fn find_parent_manifest(initial_path: &std::path::Path) -> Option<PathBuf> {
     let mut current_directory = if initial_path.is_dir() {
         initial_path.to_path_buf()
     } else {
@@ -146,7 +146,6 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         .with_profile(profile)
         .with_link_mode(link_mode)
         .with_package_metadata(&package_name, package_version, package_description)
-        .with_builtins(!args.no_builtins)
         .with_solver(solver)
         .with_verify_checksums(!args.no_verify);
 

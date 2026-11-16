@@ -1081,8 +1081,6 @@ fn handle_import_completion(
             package_candidates.extend(solver.list_packages());
         }
 
-        package_candidates.push("blt".to_string());
-
         for workspace_snapshot in workspace.all_snapshots() {
             if let Some(ast) = &workspace_snapshot.ast
                 && let Some(package_statement) = &ast.package

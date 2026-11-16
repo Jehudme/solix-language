@@ -200,10 +200,6 @@ pub struct CompileArgs {
     #[arg(long)]
     pub emit_api: Option<PathBuf>,
 
-    /// Do not automatically include built-in standard library definitions (blt.io)
-    #[arg(long)]
-    pub no_builtins: bool,
-
     /// Perform syntax and semantic checks without emitting bytecode
     #[arg(long)]
     pub check: bool,
@@ -284,9 +280,9 @@ pub struct RunArgs {
     #[arg(long)]
     pub test: bool,
 
-    /// Do not automatically include built-in standard library definitions (blt.io)
-    #[arg(long)]
-    pub no_builtins: bool,
+    /// Target build profile (e.g. "release", "debug", "test")
+    #[arg(short, long)]
+    pub profile: Option<String>,
 
     /// Inlining statement threshold limit for AstInlinerPhase
     #[arg(long, default_value_t = 8)]

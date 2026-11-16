@@ -33,7 +33,6 @@ solix compile <sources...> [options]
 | `--profile <mode>` | | String | `"release"` | Target compilation profile: `debug`, `release`, or `test`. |
 | `--entry <symbol>` | `-e` | String | None | Explicit entry point function symbol (e.g. `-e Main::main`). |
 | `--emit-api <file.slx>` | | Path | None | Synthesizes and writes the public interface API declarations to a `.slx` file. |
-| `--no-builtins` | | Flag | `false` | Omits automatic ingestion of built-in standard library definitions (`blt.io`). |
 | `--check` | | Flag | `false` | Executes lexical, grammatical, and semantic binder checks without emitting bytecode. |
 | `--time` | | Flag | `false` | Prints wall-clock elapsed duration for each compiler pipeline phase. |
 | `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints compiler throughput metrics and phase duration breakdown formatted as `text` or `json`. |

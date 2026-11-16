@@ -12,10 +12,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn register_all_builtins(registry: &mut NativeRegistry) {
     registry.register("print", builtin_print);
     registry.register("println", builtin_println);
-    registry.register("blt::io::print", builtin_print);
-    registry.register("blt::io::println", builtin_println);
-    registry.register("blt::io::print_chars", builtin_print);
-    registry.register("blt::io::println_chars", builtin_println);
     registry.register("Console::print", builtin_print);
     registry.register("Console::println", builtin_println);
     registry.register("assert", builtin_assert);

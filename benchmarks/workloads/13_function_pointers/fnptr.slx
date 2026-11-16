@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 class FnPtrApp {
     public static int32 fn1(int32 x) {

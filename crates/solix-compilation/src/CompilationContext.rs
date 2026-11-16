@@ -87,8 +87,6 @@ pub struct CompilationOptions {
     pub package_description: String,
     /// Optional customized compilation pipeline. If None, defaults to [`crate::pipeline::CompilationPipeline::standard()`].
     pub pipeline: Option<crate::pipeline::CompilationPipeline>,
-    /// Whether to automatically include built-in standard library definitions (`blt.io`).
-    pub include_builtins: bool,
     /// Maximum statement threshold for automatic AST inlining (default 8). Set to 0 to disable automatic inlining.
     pub inline_threshold: usize,
     /// Whether to execute post-emission bytecode optimizations (default true).
@@ -124,7 +122,6 @@ impl CompilationOptions {
             package_version: "0.1.0".to_string(),
             package_description: String::new(),
             pipeline: None,
-            include_builtins: false,
             inline_threshold: 8,
             bytecode_optimization: true,
             dependency_binaries: Vec::new(),
@@ -185,13 +182,6 @@ impl CompilationOptions {
     #[must_use]
     pub fn with_inline_threshold(mut self, threshold: usize) -> Self {
         self.inline_threshold = threshold;
-        self
-    }
-
-    /// Sets whether to include the standard built-in libraries (`blt.io`).
-    #[must_use]
-    pub fn with_builtins(mut self, enabled: bool) -> Self {
-        self.include_builtins = enabled;
         self
     }
 
@@ -299,18 +289,7 @@ pub struct CompilationContext {
 impl CompilationContext {
     /// Initializes a new compilation context from the provided options.
     #[must_use]
-    pub fn new(mut options: CompilationOptions) -> Self {
-        if options.include_builtins
-            && !options
-                .codes
-                .contains_key(crate::builtins::BLT_IO_FILE_NAME)
-        {
-            options.codes.insert(
-                crate::builtins::BLT_IO_FILE_NAME.to_string(),
-                crate::builtins::BLT_IO_SOURCE.to_string(),
-            );
-        }
-
+    pub fn new(options: CompilationOptions) -> Self {
         let capacity = options.codes.len();
         let mut source_names = Vec::with_capacity(capacity);
         let mut sources = Vec::with_capacity(capacity);

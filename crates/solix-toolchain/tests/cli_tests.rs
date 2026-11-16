@@ -54,17 +54,14 @@ class Main {
 }
 
 #[test]
-fn test_cli_compile_with_builtins_blt_io() {
+fn test_cli_compile_simple_program() {
     let ws = HermeticCliWorkspace::create().unwrap();
     let src = ws
         .write_file(
             "hello.slx",
             r#"
-import blt.io.println;
-
 class Main {
     public static int32 main() {
-        println("Hello from Solix builtins!");
         return 0;
     }
 }
@@ -89,41 +86,6 @@ class Main {
     let run_cli = Cli::try_parse_from(["solix", "run", bin.to_str().unwrap()]).unwrap();
     let exit_code = run(run_cli).expect("Execution failed");
     assert_eq!(exit_code, 0);
-}
-
-#[test]
-fn test_cli_compile_no_builtins_flag_rejects_blt_io() {
-    let ws = HermeticCliWorkspace::create().unwrap();
-    let src = ws
-        .write_file(
-            "no_builtins.slx",
-            r#"
-import blt.io.println;
-
-class Main {
-    public static int32 main() {
-        return 0;
-    }
-}
-"#,
-        )
-        .unwrap();
-
-    let bin = ws.file_path("no_builtins.slxb");
-
-    let cli = Cli::try_parse_from([
-        "solix",
-        "compile",
-        src.to_str().unwrap(),
-        "--no-builtins",
-        "-o",
-        bin.to_str().unwrap(),
-    ])
-    .unwrap();
-
-    // With --no-builtins, blt.io cannot be resolved
-    assert!(run(cli).is_err());
-    assert!(!bin.exists());
 }
 
 #[test]
@@ -678,7 +640,6 @@ fn test_cli_parse_flags_and_defaults() {
     if let Commands::Compile(args) = compile_cli.command {
         assert_eq!(args.sources.len(), 1);
         assert_eq!(args.version, "0.1.0");
-        assert!(!args.no_builtins);
         assert!(!args.check);
         assert!(!args.time);
     } else {
@@ -703,7 +664,6 @@ fn test_cli_parse_flags_and_defaults() {
         "2.0.0",
         "--description",
         "Cool app",
-        "--no-builtins",
         "--check",
         "--time",
     ])
@@ -714,7 +674,6 @@ fn test_cli_parse_flags_and_defaults() {
         assert_eq!(args.name.as_deref(), Some("my_package"));
         assert_eq!(args.version, "2.0.0");
         assert_eq!(args.description.as_deref(), Some("Cool app"));
-        assert!(args.no_builtins);
         assert!(args.check);
         assert!(args.time);
     } else {
@@ -810,11 +769,8 @@ fn test_cli_run_direct_source_execution_single_file() {
         .write_file(
             "direct_main.slx",
             r#"
-import blt.io.println;
-
 class DirectApp {
     public static int32 main() {
-        println("Direct source execution works!");
         return 42;
     }
 }
@@ -958,36 +914,7 @@ class BrokenApp {
     assert!(error_message.contains("Compilation aborted due to previous error(s)"));
 }
 
-#[test]
-fn test_cli_run_direct_source_no_builtins_flag() {
-    let workspace = HermeticCliWorkspace::create().unwrap();
-    let source_path = workspace
-        .write_file(
-            "builtins_test.slx",
-            r#"
-import blt.io.println;
 
-class AppWithBuiltin {
-    public static int32 main() {
-        println("Should fail if builtins disabled");
-        return 0;
-    }
-}
-"#,
-        )
-        .unwrap();
-
-    let run_cli = Cli::try_parse_from([
-        "solix",
-        "run",
-        "--no-builtins",
-        source_path.to_str().unwrap(),
-    ])
-    .expect("Failed to parse run CLI arguments");
-
-    let execution_result = run(run_cli);
-    assert!(execution_result.is_err());
-}
 
 #[test]
 fn test_cli_run_direct_source_execution_multi_source_and_multi_lib_positional() {
@@ -1092,6 +1019,101 @@ class MainConsumer {
     let execution_result = run(run_cli);
     assert!(execution_result.is_ok());
     assert_eq!(execution_result.unwrap(), 0);
+}
+
+#[test]
+fn test_cli_run_installed_package_spec_resolution() {
+    let workspace = HermeticCliWorkspace::create().unwrap();
+    let package_store = workspace.file_path("test_store");
+    std::fs::create_dir_all(&package_store).unwrap();
+
+    let source_path = workspace
+        .write_file(
+            "app.slx",
+            r#"
+class App {
+    public static int32 main() {
+        return 42;
+    }
+}
+"#,
+        )
+        .unwrap();
+
+    let binary_artifact = workspace.file_path("my-tool.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_path.to_str().unwrap(),
+        "--name",
+        "my-tool",
+        "-V",
+        "1.0.0",
+        "-o",
+        binary_artifact.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(run(compile_cli).is_ok());
+
+    let install_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        binary_artifact.to_str().unwrap(),
+        "--pkg-dir",
+        package_store.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(run(install_cli).is_ok());
+
+    // 1. Run via bare name
+    let run_bare = Cli::try_parse_from([
+        "solix",
+        "run",
+        "my-tool",
+        "--pkg-dir",
+        package_store.to_str().unwrap(),
+    ])
+    .unwrap();
+    let exit_code = run(run_bare).expect("Execution of bare package name failed");
+    assert_eq!(exit_code, 42);
+
+    // 2. Run via name@version
+    let run_versioned = Cli::try_parse_from([
+        "solix",
+        "run",
+        "my-tool@1.0.0",
+        "--pkg-dir",
+        package_store.to_str().unwrap(),
+    ])
+    .unwrap();
+    let exit_code_versioned = run(run_versioned).expect("Execution of versioned package failed");
+    assert_eq!(exit_code_versioned, 42);
+
+    // 3. Run via name:profile@version
+    let run_colon = Cli::try_parse_from([
+        "solix",
+        "run",
+        "my-tool:release@1.0.0",
+        "--pkg-dir",
+        package_store.to_str().unwrap(),
+    ])
+    .unwrap();
+    let exit_code_colon = run(run_colon).expect("Execution of colon package spec failed");
+    assert_eq!(exit_code_colon, 42);
+
+    // 4. Run via name with --profile flag
+    let run_profile_flag = Cli::try_parse_from([
+        "solix",
+        "run",
+        "my-tool",
+        "--profile",
+        "release",
+        "--pkg-dir",
+        package_store.to_str().unwrap(),
+    ])
+    .unwrap();
+    let exit_code_flag = run(run_profile_flag).expect("Execution with --profile flag failed");
+    assert_eq!(exit_code_flag, 42);
 }
 
 #[test]

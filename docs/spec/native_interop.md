@@ -104,8 +104,8 @@ Native functions can read and write heap structures via VM helper callbacks:
 ## 5. Standard Built-in Native Functions & Output Redirection Sink
 
 The virtual machine registers essential built-in native functions into the standard dispatch table:
-- `println` & `blt::io::println`: Writes string arguments with a trailing newline.
-- `print` & `blt::io::print`: Writes string arguments without trailing newlines.
+- `println` & `Console::println`: Writes string arguments with a trailing newline.
+- `print` & `Console::print`: Writes string arguments without trailing newlines.
 - `assert`: Evaluates a boolean invariant and raises `RuntimeError::AssertionFailed` upon violation.
 - `clock`: Returns high-resolution timestamps in seconds.
 

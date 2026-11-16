@@ -1,4 +1,4 @@
-import blt.io.println;
+native void println(string msg);
 
 class StrProcApp {
     public static int32 process(string s, int32 factor) {

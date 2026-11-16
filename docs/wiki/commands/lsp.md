@@ -77,7 +77,7 @@ The Solix Language Server supports 32 language intelligence features:
 2. **Document Overlay**: Live in-memory buffer synchronization (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`).
 3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.toml` discovery, unified `[configuration]` and `[profiles]` profile-aware dependency resolution (supporting table notation `name = { version = "...", profile = "..." }` and suffix notation `name-profile = "..."`), and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
 4. **Resilient Compilation**: AST and semantic cache retention during partial typing or syntax errors.
-5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` with strict compiler import resolution parity (exempting only `std::*` and `blt::*`), linked to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
+5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` with strict compiler import resolution parity (exempting only `std::*`), linked to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
 6. **Code Navigation**: Go-to Definition (`gd`), Type Definition (`gy`), Implementation (`gi`), and Find All References (`gr`).
 7. **Document Highlights**: Distinction between read usages and write/mutating usages.
 8. **Call & Type Hierarchies**: Incoming/outgoing call trees and subtype/supertype navigation.
