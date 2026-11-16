@@ -226,3 +226,128 @@ fn test_exception_handler_table_accuracy_after_optimization() {
         );
     }
 }
+
+#[test]
+fn test_positive_peephole_fuses_with_reused_scratch_register() {
+    let source_code = r#"
+        int32 sum_filtered(int32 limit) {
+            int32 total = 0;
+            for (int32 index = 0; index < limit; index = index + 1) {
+                if (index < 50) {
+                    total = total + 3;
+                } else {
+                    total = total + 7;
+                }
+            }
+            return total;
+        }
+        int32 main() {
+            return sum_filtered(100);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(50 * 3 + 50 * 7));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let sum_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("sum_filtered"))
+        .expect("sum_filtered function must exist");
+
+    let add_imm_count = sum_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::AddI32Imm as u8)
+        .count();
+    let super_jump_count = sum_func
+        .instructions
+        .iter()
+        .filter(|inst| {
+            let raw = inst.raw_opcode();
+            raw >= OpCode::JumpIfLtI32 as u8 && raw <= OpCode::JumpIfNeqI32 as u8
+        })
+        .count();
+
+    assert!(
+        add_imm_count >= 3,
+        "Expected index + 1, total + 3, and total + 7 to all fuse into AddI32Imm, found {add_imm_count}"
+    );
+    assert!(
+        super_jump_count >= 2,
+        "Expected both loop header and inner branch comparisons to fuse into JumpIf*I32, found {super_jump_count}"
+    );
+}
+
+#[test]
+fn test_positive_loop_hoisting_moves_constant_loads_before_loop() {
+    let source_code = r#"
+        float64 accumulate_scaled(int32 iterations) {
+            float64 acc = 0.0;
+            for (int32 index = 0; index < iterations; index = index + 1) {
+                acc = acc + 1.25;
+            }
+            return acc;
+        }
+        int32 main() {
+            float64 result = accumulate_scaled(100);
+            return result == 125.0 ? 0 : 1;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let loop_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("accumulate_scaled"))
+        .expect("accumulate_scaled function must exist");
+
+    let backedge = loop_func
+        .instructions
+        .iter()
+        .enumerate()
+        .find_map(|(pc_idx, inst)| {
+            if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
+                let target_pc = (pc_idx as i32 + inst.jump_offset()) as usize;
+                Some((target_pc, pc_idx))
+            } else {
+                None
+            }
+        })
+        .expect("Expected backward Jump forming a loop");
+
+    let loop_body_loads = loop_func.instructions[backedge.0..=backedge.1]
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::LoadF64 as u8)
+        .count();
+    assert_eq!(
+        loop_body_loads, 0,
+        "Expected constant LoadF64 inside loop [{}..={}] to be hoisted before loop header",
+        backedge.0, backedge.1
+    );
+}
+
+#[test]
+fn test_negative_live_constant_used_multiple_times_preserved_correctly() {
+    let source_code = r#"
+        int32 compute_multi(int32 start_val, bool flag_val) {
+            int32 offset_val = 9;
+            int32 updated = start_val + offset_val;
+            if (flag_val) {
+                updated = updated + offset_val;
+            }
+            return updated + offset_val;
+        }
+        int32 main() {
+            int32 first_case = compute_multi(10, true);
+            int32 second_case = compute_multi(10, false);
+            return first_case * 100 + second_case;
+        }
+    "#;
+    let (_context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(37 * 100 + 28));
+}

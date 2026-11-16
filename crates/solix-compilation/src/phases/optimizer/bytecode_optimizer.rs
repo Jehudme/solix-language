@@ -9,7 +9,7 @@ use crate::CompilationContext::CompilationContext;
 use crate::CompilationDiagnostic;
 use crate::phases::phase::CompilationPhase;
 use solix_common::bytecode::{CompiledFunction, Instruction, OpCode, SourceMapEntry};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Post-emission bytecode optimizer implementing [`CompilationPhase`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -68,12 +68,13 @@ impl CompilationPhase for BytecodeOptimizerPhase {
 struct IntermediateInstruction {
     instruction: Instruction,
     original_pc: usize,
-    second_original_pc: Option<usize>,
+    covered_original_pcs: Vec<usize>,
     jump_target_old_pc: Option<usize>,
 }
 
-/// Optimizes a single compiled function by running constant hoisting, peephole fusion,
-/// move elimination, and PC relocation.
+/// Optimizes a single compiled function by running scalar replacement, ARC elision,
+/// immortal constant `DecRef` elision, convergent peephole fusion with liveness analysis,
+/// and loop-invariant constant hoisting.
 fn optimize_function(
     function: &mut CompiledFunction,
     classes: &[solix_common::bytecode::CompiledClass],
@@ -81,287 +82,1133 @@ fn optimize_function(
 ) {
     super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
     super::escape_analysis::apply_arc_elision(function);
+    elide_immortal_const_decref(function);
 
-    let original_count = function.instructions.len();
-    if original_count < 2 {
+    optimize_peephole_passes(function);
+    hoist_loop_invariant_constants(function);
+}
+
+/// Eliminates `DecRef` on registers holding an immortal `LoadConst` value within a basic block.
+fn elide_immortal_const_decref(function: &mut CompiledFunction) {
+    let inst_count = function.instructions.len();
+    if inst_count < 2 {
         return;
     }
 
     let critical_targets = collect_critical_targets(function);
+    for def_pc in 0..inst_count {
+        let def_inst = function.instructions[def_pc];
+        if def_inst.raw_opcode() != OpCode::LoadConst as u8 {
+            continue;
+        }
+        let target_reg = def_inst.dst();
+        for scan_pc in (def_pc + 1)..inst_count {
+            if critical_targets.contains(&scan_pc) {
+                break;
+            }
+            let scan_inst = function.instructions[scan_pc];
+            let raw = scan_inst.raw_opcode();
+            if raw == OpCode::DecRef as u8 && scan_inst.dst() == target_reg {
+                function.instructions[scan_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                continue;
+            }
+            if is_control_flow_terminator(raw)
+                || is_conditional_branch(raw)
+                || raw == OpCode::Switch as u8
+            {
+                break;
+            }
+            if instruction_write_dst(&scan_inst) == Some(target_reg) {
+                break;
+            }
+        }
+    }
+}
 
-    let mut intermediate_stream: Vec<IntermediateInstruction> = Vec::with_capacity(original_count);
+/// Executes convergent multi-pass peephole fusion and redundant `Mov` elimination
+/// backed by forward CFG liveness verification.
+fn optimize_peephole_passes(function: &mut CompiledFunction) {
+    let original_count = function.instructions.len();
+    if original_count == 0 {
+        return;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut stream: Vec<IntermediateInstruction> = Vec::with_capacity(original_count);
 
     for (pc_index, instruction) in function.instructions.iter().enumerate() {
-        let raw_opcode = instruction.raw_opcode();
-        let jump_target = if raw_opcode == OpCode::Jump as u8
-            || raw_opcode == OpCode::JumpIfTrue as u8
-            || raw_opcode == OpCode::JumpIfFalse as u8
-        {
-            let offset = instruction.jump_offset();
-            let target_pc = (pc_index as i32) + offset;
-            if target_pc >= 0 && (target_pc as usize) <= original_count {
-                Some(target_pc as usize)
-            } else {
-                None
-            }
-        } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode) {
-            let offset = instruction.src2() as i16 as i32;
-            let target_pc = (pc_index as i32) + offset;
-            if target_pc >= 0 && (target_pc as usize) <= original_count {
-                Some(target_pc as usize)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        intermediate_stream.push(IntermediateInstruction {
+        stream.push(IntermediateInstruction {
             instruction: *instruction,
             original_pc: pc_index,
-            second_original_pc: None,
-            jump_target_old_pc: jump_target,
+            covered_original_pcs: vec![pc_index],
+            jump_target_old_pc: decode_jump_target(*instruction, pc_index, original_count),
         });
     }
 
-    // Step 1: Peephole fusion and redundant move elimination
-    let mut fused_stream: Vec<IntermediateInstruction> =
-        Vec::with_capacity(intermediate_stream.len());
-
-    let mut cursor = 0;
-    while cursor < intermediate_stream.len() {
-        let current_entry = &intermediate_stream[cursor];
-        let current_raw = current_entry.instruction.raw_opcode();
-
-        if current_raw == OpCode::Nop as u8 {
-            cursor += 1;
-            continue;
+    let max_passes = 6;
+    for _pass_index in 0..max_passes {
+        let mut old_pc_to_stream_idx: Vec<Option<usize>> = vec![None; original_count + 1];
+        for (stream_idx, entry) in stream.iter().enumerate() {
+            for &covered_pc in &entry.covered_original_pcs {
+                if covered_pc < old_pc_to_stream_idx.len() {
+                    old_pc_to_stream_idx[covered_pc] = Some(stream_idx);
+                }
+            }
         }
+        old_pc_to_stream_idx[original_count] = Some(stream.len());
 
-        if cursor + 1 < intermediate_stream.len() {
-            let next_entry = &intermediate_stream[cursor + 1];
-            let next_is_critical = critical_targets.contains(&next_entry.original_pc);
+        let mut next_stream: Vec<IntermediateInstruction> = Vec::with_capacity(stream.len());
+        let mut changed = false;
+        let mut cursor = 0;
 
-            let next_raw = next_entry.instruction.raw_opcode();
+        while cursor < stream.len() {
+            let current_entry = &stream[cursor];
+            let current_raw = current_entry.instruction.raw_opcode();
 
-            // -------------------------------------------------------------
-            // Pattern 1: Compare + Conditional Jump Fusion
-            // LtI32/LteI32/GtI32/GteI32/EqI32/NeqI32 + JumpIfFalse / JumpIfTrue -> JumpIf*I32
-            // -------------------------------------------------------------
-            let is_compare = current_raw == OpCode::LtI32 as u8
-                || current_raw == OpCode::LteI32 as u8
-                || current_raw == OpCode::GtI32 as u8
-                || current_raw == OpCode::GteI32 as u8
-                || current_raw == OpCode::EqI32 as u8
-                || current_raw == OpCode::NeqI32 as u8;
-
-            let is_branch =
-                next_raw == OpCode::JumpIfFalse as u8 || next_raw == OpCode::JumpIfTrue as u8;
-
-            if !next_is_critical
-                && is_compare
-                && is_branch
-                && current_entry.instruction.dst() == next_entry.instruction.cond_reg()
-                && count_total_reads(&function.instructions, current_entry.instruction.dst()) == 1
-            {
-                let fused_opcode = match (current_raw, next_raw == OpCode::JumpIfFalse as u8) {
-                    (r, true) if r == OpCode::LtI32 as u8 => OpCode::JumpIfGteI32,
-                    (r, false) if r == OpCode::LtI32 as u8 => OpCode::JumpIfLtI32,
-                    (r, true) if r == OpCode::LteI32 as u8 => OpCode::JumpIfGtI32,
-                    (r, false) if r == OpCode::LteI32 as u8 => OpCode::JumpIfLteI32,
-                    (r, true) if r == OpCode::GtI32 as u8 => OpCode::JumpIfLteI32,
-                    (r, false) if r == OpCode::GtI32 as u8 => OpCode::JumpIfGtI32,
-                    (r, true) if r == OpCode::GteI32 as u8 => OpCode::JumpIfLtI32,
-                    (r, false) if r == OpCode::GteI32 as u8 => OpCode::JumpIfGteI32,
-                    (r, true) if r == OpCode::EqI32 as u8 => OpCode::JumpIfNeqI32,
-                    (r, false) if r == OpCode::EqI32 as u8 => OpCode::JumpIfEqI32,
-                    (r, true) if r == OpCode::NeqI32 as u8 => OpCode::JumpIfEqI32,
-                    _ => OpCode::JumpIfNeqI32,
-                };
-
-                let reg_a = current_entry.instruction.src1();
-                let reg_b = current_entry.instruction.src2();
-
-                fused_stream.push(IntermediateInstruction {
-                    instruction: Instruction::format_a(fused_opcode, 0, reg_a, reg_b, 0),
-                    original_pc: current_entry.original_pc,
-                    second_original_pc: Some(next_entry.original_pc),
-                    jump_target_old_pc: next_entry.jump_target_old_pc,
-                });
-
-                cursor += 2;
+            if current_raw == OpCode::Nop as u8 {
+                changed = true;
+                cursor += 1;
                 continue;
             }
 
-            // -------------------------------------------------------------
-            // Pattern 2: LoadI32 + AddI32 / SubI32 Fusion
-            // LoadI32 r_imm, imm + AddI32 dst, r_a, r_imm -> AddI32Imm dst, r_a, imm
-            // -------------------------------------------------------------
-            if !next_is_critical && current_raw == OpCode::LoadI32 as u8 {
-                let imm_val = current_entry.instruction.imm32_signed();
-                if (-32768..=32767).contains(&imm_val) {
-                    let r_imm = current_entry.instruction.dst();
-                    let total_reads = count_total_reads(&function.instructions, r_imm);
+            if current_raw == OpCode::Mov as u8
+                && current_entry.instruction.dst() == current_entry.instruction.src1()
+            {
+                changed = true;
+                cursor += 1;
+                continue;
+            }
 
-                    if total_reads == 1 && next_raw == OpCode::AddI32 as u8 {
-                        let dst_reg = next_entry.instruction.dst();
-                        let src1_reg = next_entry.instruction.src1();
-                        let src2_reg = next_entry.instruction.src2();
+            if cursor + 1 < stream.len() {
+                let next_entry = &stream[cursor + 1];
+                let next_is_critical = next_entry
+                    .covered_original_pcs
+                    .first()
+                    .is_some_and(|first_pc| critical_targets.contains(first_pc));
+                let next_raw = next_entry.instruction.raw_opcode();
 
-                        let other_reg = if src2_reg == r_imm {
-                            Some(src1_reg)
-                        } else if src1_reg == r_imm {
-                            Some(src2_reg)
-                        } else {
-                            None
+                // ---------------------------------------------------------
+                // Pattern 1: Compare + Conditional Jump Fusion
+                // ---------------------------------------------------------
+                let is_compare = current_raw == OpCode::LtI32 as u8
+                    || current_raw == OpCode::LteI32 as u8
+                    || current_raw == OpCode::GtI32 as u8
+                    || current_raw == OpCode::GteI32 as u8
+                    || current_raw == OpCode::EqI32 as u8
+                    || current_raw == OpCode::NeqI32 as u8;
+
+                let is_branch =
+                    next_raw == OpCode::JumpIfFalse as u8 || next_raw == OpCode::JumpIfTrue as u8;
+
+                if !next_is_critical && is_compare && is_branch {
+                    let cmp_dst = current_entry.instruction.dst();
+                    if cmp_dst == next_entry.instruction.cond_reg()
+                        && is_dead_after_use(
+                            &stream,
+                            cursor + 1,
+                            cmp_dst,
+                            function,
+                            &old_pc_to_stream_idx,
+                        )
+                    {
+                        let fused_opcode = match (current_raw, next_raw == OpCode::JumpIfFalse as u8)
+                        {
+                            (raw_val, true) if raw_val == OpCode::LtI32 as u8 => OpCode::JumpIfGteI32,
+                            (raw_val, false) if raw_val == OpCode::LtI32 as u8 => OpCode::JumpIfLtI32,
+                            (raw_val, true) if raw_val == OpCode::LteI32 as u8 => OpCode::JumpIfGtI32,
+                            (raw_val, false) if raw_val == OpCode::LteI32 as u8 => {
+                                OpCode::JumpIfLteI32
+                            }
+                            (raw_val, true) if raw_val == OpCode::GtI32 as u8 => OpCode::JumpIfLteI32,
+                            (raw_val, false) if raw_val == OpCode::GtI32 as u8 => OpCode::JumpIfGtI32,
+                            (raw_val, true) if raw_val == OpCode::GteI32 as u8 => OpCode::JumpIfLtI32,
+                            (raw_val, false) if raw_val == OpCode::GteI32 as u8 => {
+                                OpCode::JumpIfGteI32
+                            }
+                            (raw_val, true) if raw_val == OpCode::EqI32 as u8 => OpCode::JumpIfNeqI32,
+                            (raw_val, false) if raw_val == OpCode::EqI32 as u8 => OpCode::JumpIfEqI32,
+                            (raw_val, true) if raw_val == OpCode::NeqI32 as u8 => OpCode::JumpIfEqI32,
+                            _ => OpCode::JumpIfNeqI32,
                         };
 
-                        if let Some(r_other) = other_reg {
-                            fused_stream.push(IntermediateInstruction {
-                                instruction: Instruction::format_a(
-                                    OpCode::AddI32Imm,
-                                    0,
-                                    dst_reg,
-                                    r_other,
-                                    imm_val as i16 as u16,
-                                ),
-                                original_pc: current_entry.original_pc,
-                                second_original_pc: Some(next_entry.original_pc),
-                                jump_target_old_pc: None,
-                            });
+                        let reg_a = current_entry.instruction.src1();
+                        let reg_b = current_entry.instruction.src2();
+                        let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                        merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
-                            cursor += 2;
-                            continue;
+                        next_stream.push(IntermediateInstruction {
+                            instruction: Instruction::format_a(fused_opcode, 0, reg_a, reg_b, 0),
+                            original_pc: current_entry.original_pc,
+                            covered_original_pcs: merged_pcs,
+                            jump_target_old_pc: next_entry.jump_target_old_pc,
+                        });
+
+                        changed = true;
+                        cursor += 2;
+                        continue;
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // Pattern 2: LoadI32 + AddI32 / SubI32 Fusion
+                // ---------------------------------------------------------
+                if !next_is_critical && current_raw == OpCode::LoadI32 as u8 {
+                    let imm_val = current_entry.instruction.imm32_signed();
+                    if (-32768..=32767).contains(&imm_val) {
+                        let r_imm = current_entry.instruction.dst();
+                        if next_raw == OpCode::AddI32 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+
+                            let other_reg = if src2_reg == r_imm && src1_reg != r_imm {
+                                Some(src1_reg)
+                            } else if src1_reg == r_imm && src2_reg != r_imm {
+                                Some(src2_reg)
+                            } else {
+                                None
+                            };
+
+                            if let Some(r_other) = other_reg
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_imm,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                )
+                            {
+                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::AddI32Imm,
+                                        0,
+                                        dst_reg,
+                                        r_other,
+                                        imm_val as i16 as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        } else if next_raw == OpCode::SubI32 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+
+                            if src2_reg == r_imm
+                                && src1_reg != r_imm
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_imm,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                )
+                            {
+                                let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::SubI32Imm,
+                                        0,
+                                        dst_reg,
+                                        src1_reg,
+                                        imm_val as i16 as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
                         }
-                    } else if total_reads == 1 && next_raw == OpCode::SubI32 as u8 {
-                        let dst_reg = next_entry.instruction.dst();
-                        let src1_reg = next_entry.instruction.src1();
-                        let src2_reg = next_entry.instruction.src2();
+                    }
+                }
 
-                        // Only valid if subtracting immediate (r_a - imm)
-                        if src2_reg == r_imm {
-                            fused_stream.push(IntermediateInstruction {
-                                instruction: Instruction::format_a(
-                                    OpCode::SubI32Imm,
-                                    0,
-                                    dst_reg,
-                                    src1_reg,
-                                    imm_val as i16 as u16,
-                                ),
-                                original_pc: current_entry.original_pc,
-                                second_original_pc: Some(next_entry.original_pc),
-                                jump_target_old_pc: None,
-                            });
+                // ---------------------------------------------------------
+                // Pattern 3: Peephole Mov Elimination
+                // ---------------------------------------------------------
+                if !next_is_critical
+                    && current_raw != OpCode::Mov as u8
+                    && next_raw == OpCode::Mov as u8
+                {
+                    let r_tmp = next_entry.instruction.src1();
+                    let r_dest = next_entry.instruction.dst();
 
-                            cursor += 2;
-                            continue;
-                        }
+                    if current_entry.instruction.dst() == r_tmp
+                        && r_tmp != r_dest
+                        && can_change_instruction_destination(&current_entry.instruction, r_dest)
+                        && is_dead_after_use(
+                            &stream,
+                            cursor + 1,
+                            r_tmp,
+                            function,
+                            &old_pc_to_stream_idx,
+                        )
+                    {
+                        let updated_instruction =
+                            rewrite_instruction_destination(&current_entry.instruction, r_dest);
+                        let mut merged_pcs = current_entry.covered_original_pcs.clone();
+                        merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                        next_stream.push(IntermediateInstruction {
+                            instruction: updated_instruction,
+                            original_pc: current_entry.original_pc,
+                            covered_original_pcs: merged_pcs,
+                            jump_target_old_pc: current_entry.jump_target_old_pc,
+                        });
+
+                        changed = true;
+                        cursor += 2;
+                        continue;
                     }
                 }
             }
 
-            // -------------------------------------------------------------
-            // Pattern 3: Peephole Mov Elimination
-            // Op dst=r_tmp + Mov r_local, r_tmp -> Op dst=r_local
-            // -------------------------------------------------------------
-            if !next_is_critical
-                && current_raw != OpCode::Mov as u8
-                && next_raw == OpCode::Mov as u8
-            {
-                let r_tmp = next_entry.instruction.src1();
-                let r_dest = next_entry.instruction.dst();
-
-                if current_entry.instruction.dst() == r_tmp
-                    && r_tmp != r_dest
-                    && count_total_reads(&function.instructions, r_tmp) == 1
-                    && can_change_instruction_destination(&current_entry.instruction, r_dest)
-                {
-                    let updated_instruction =
-                        rewrite_instruction_destination(&current_entry.instruction, r_dest);
-
-                    fused_stream.push(IntermediateInstruction {
-                        instruction: updated_instruction,
-                        original_pc: current_entry.original_pc,
-                        second_original_pc: Some(next_entry.original_pc),
-                        jump_target_old_pc: current_entry.jump_target_old_pc,
-                    });
-
-                    cursor += 2;
-                    continue;
-                }
-            }
+            next_stream.push(current_entry.clone());
+            cursor += 1;
         }
 
-        // Default: keep current instruction
-        fused_stream.push(IntermediateInstruction {
-            instruction: current_entry.instruction,
-            original_pc: current_entry.original_pc,
-            second_original_pc: None,
-            jump_target_old_pc: current_entry.jump_target_old_pc,
-        });
-
-        cursor += 1;
+        stream = next_stream;
+        if !changed {
+            break;
+        }
     }
 
-    // Step 2: Compute relocated instruction PCs and branch offsets
+    // Relocate instruction PCs and branch offsets
     let sentinel_pc = u32::MAX;
     let mut old_pc_to_new_pc = vec![sentinel_pc; original_count + 1];
-    for (new_pc, entry) in fused_stream.iter().enumerate() {
-        old_pc_to_new_pc[entry.original_pc] = new_pc as u32;
-        if let Some(second_pc) = entry.second_original_pc {
-            old_pc_to_new_pc[second_pc] = new_pc as u32;
+    for (new_pc, entry) in stream.iter().enumerate() {
+        for &covered_pc in &entry.covered_original_pcs {
+            if covered_pc < old_pc_to_new_pc.len() {
+                old_pc_to_new_pc[covered_pc] = new_pc as u32;
+            }
         }
     }
-    old_pc_to_new_pc[original_count] = fused_stream.len() as u32;
+    old_pc_to_new_pc[original_count] = stream.len() as u32;
     for reverse_index in (0..original_count).rev() {
         if old_pc_to_new_pc[reverse_index] == sentinel_pc {
             old_pc_to_new_pc[reverse_index] = old_pc_to_new_pc[reverse_index + 1];
         }
     }
 
-    // Step 3: Relocate jump targets
-    let mut final_instructions = Vec::with_capacity(fused_stream.len());
-    for (new_pc, intermediate) in fused_stream.iter().enumerate() {
+    let mut final_instructions = Vec::with_capacity(stream.len());
+    for (new_pc, intermediate) in stream.iter().enumerate() {
         let mut final_inst = intermediate.instruction;
         if let Some(target_old_pc) = intermediate.jump_target_old_pc {
             let target_new_pc = if target_old_pc < old_pc_to_new_pc.len() {
                 old_pc_to_new_pc[target_old_pc]
             } else {
-                fused_stream.len() as u32
+                stream.len() as u32
             };
-
-            let new_offset = (target_new_pc as i32) - (new_pc as i32);
-            let raw_opcode = final_inst.raw_opcode();
-
-            if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode) {
-                if let Ok(opcode) = final_inst.opcode(new_pc) {
-                    final_inst = Instruction::format_a(
-                        opcode,
-                        0,
-                        final_inst.dst(),
-                        final_inst.src1(),
-                        new_offset as i16 as u16,
-                    );
-                }
-            } else if (raw_opcode == OpCode::Jump as u8
-                || raw_opcode == OpCode::JumpIfTrue as u8
-                || raw_opcode == OpCode::JumpIfFalse as u8)
-                && let Ok(opcode) = final_inst.opcode(new_pc)
-            {
-                final_inst = Instruction::format_c(
-                    opcode,
-                    final_inst.flags(),
-                    final_inst.cond_reg(),
-                    new_offset,
-                );
-            }
+            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
         }
-
         final_instructions.push(final_inst);
     }
 
-    // Apply relocated instructions and tables to function
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+}
+
+/// Hoists loop-invariant constant loads (`LoadI32`, `LoadI64`, `LoadF64`, `LoadBool`,
+/// `LoadConst`) above loop headers into fresh registers and rewrites in-loop consumers.
+fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
+    let inst_count = function.instructions.len();
+    if inst_count < 3 {
+        return;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut handler_pcs = HashSet::new();
+    for handler in &function.exception_handlers {
+        handler_pcs.insert(handler.try_start_pc as usize);
+        handler_pcs.insert(handler.try_end_pc as usize);
+        handler_pcs.insert(handler.handler_pc as usize);
+        if let Some(finally_pc) = handler.finally_pc {
+            handler_pcs.insert(finally_pc as usize);
+        }
+    }
+
+    // Group backward jumps by header PC -> outermost enclosing back-edge end PC
+    let mut loops_by_header: HashMap<usize, usize> = HashMap::new();
+    for (pc_index, instruction) in function.instructions.iter().enumerate() {
+        if let Some(target_pc) = decode_jump_target(*instruction, pc_index, inst_count)
+            && target_pc <= pc_index
+            && !handler_pcs.contains(&target_pc)
+        {
+            loops_by_header
+                .entry(target_pc)
+                .and_modify(|existing_end| *existing_end = (*existing_end).max(pc_index))
+                .or_insert(pc_index);
+        }
+    }
+
+    if loops_by_header.is_empty() {
+        return;
+    }
+
+    let mut ordered_headers: Vec<(usize, usize)> = loops_by_header.into_iter().collect();
+    ordered_headers.sort_by_key(|&(header_pc, _)| header_pc);
+
+    // Build initial CFG liveness helper table
+    let mut old_pc_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
+    for (pc_index, instruction) in function.instructions.iter().enumerate() {
+        old_pc_targets.push(decode_jump_target(*instruction, pc_index, inst_count));
+    }
+
+    let mut preheaders: HashMap<usize, Vec<Instruction>> = HashMap::new();
+    let mut hoisted_cache: HashMap<(usize, u8, u8, u32), u16> = HashMap::new();
+    let mut hoisted_any = false;
+
+    for (header_pc, loop_end_pc) in ordered_headers {
+        let mut cursor = header_pc;
+        while cursor <= loop_end_pc && cursor < function.instructions.len() {
+            let inst = function.instructions[cursor];
+            let raw = inst.raw_opcode();
+            let is_hoistable_load = raw == OpCode::LoadI32 as u8
+                || raw == OpCode::LoadI64 as u8
+                || raw == OpCode::LoadF64 as u8
+                || raw == OpCode::LoadBool as u8
+                || raw == OpCode::LoadConst as u8;
+
+            if !is_hoistable_load {
+                cursor += 1;
+                continue;
+            }
+
+            let r_orig = inst.dst();
+            let mut consumer_pcs: Vec<usize> = Vec::new();
+            let mut last_use_pc: Option<usize> = None;
+            let mut aborted_rewrite = false;
+            let mut terminated_block = false;
+
+            for scan_pc in (cursor + 1)..inst_count {
+                if critical_targets.contains(&scan_pc) {
+                    break;
+                }
+                let scan_inst = function.instructions[scan_pc];
+                let scan_raw = scan_inst.raw_opcode();
+
+                let reads_orig = instruction_reads_register(&scan_inst, r_orig);
+                if reads_orig {
+                    if can_rewrite_read_register(&scan_inst, r_orig) {
+                        consumer_pcs.push(scan_pc);
+                        last_use_pc = Some(scan_pc);
+                    } else {
+                        aborted_rewrite = true;
+                        break;
+                    }
+                }
+
+                if instruction_write_dst(&scan_inst) == Some(r_orig) {
+                    terminated_block = true;
+                    break;
+                }
+
+                if is_control_flow_terminator(scan_raw)
+                    || is_conditional_branch(scan_raw)
+                    || scan_raw == OpCode::Switch as u8
+                {
+                    break;
+                }
+            }
+
+            if aborted_rewrite || consumer_pcs.is_empty() {
+                cursor += 1;
+                continue;
+            }
+
+            let Some(last_pc) = last_use_pc else {
+                cursor += 1;
+                continue;
+            };
+
+            let dead_after = if terminated_block && instruction_write_dst(&function.instructions[last_pc]) == Some(r_orig) {
+                true
+            } else {
+                is_dead_after_use_raw(function, &old_pc_targets, last_pc, r_orig)
+            };
+
+            if !dead_after {
+                cursor += 1;
+                continue;
+            }
+
+            let cache_key = (header_pc, raw, inst.flags(), inst.imm32());
+            let hoisted_reg = if let Some(&existing_reg) = hoisted_cache.get(&cache_key) {
+                existing_reg
+            } else {
+                if (function.num_registers as usize) >= (u16::MAX as usize) {
+                    break;
+                }
+                let alloc_reg = function.num_registers;
+                function.num_registers += 1;
+                preheaders
+                    .entry(header_pc)
+                    .or_default()
+                    .push(inst.with_dst(alloc_reg));
+                hoisted_cache.insert(cache_key, alloc_reg);
+                alloc_reg
+            };
+
+            for consumer_pc in consumer_pcs {
+                if let Some(rewritten) =
+                    rewrite_instruction_read_register(&function.instructions[consumer_pc], r_orig, hoisted_reg)
+                {
+                    function.instructions[consumer_pc] = rewritten;
+                }
+            }
+
+            function.instructions[cursor] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            hoisted_any = true;
+            cursor += 1;
+        }
+    }
+
+    if !hoisted_any {
+        return;
+    }
+
+    // Rebuild instruction list with hoisted preheaders and exact forward vs back-edge targets
+    let mut rebuilt: Vec<(Instruction, Option<(usize, usize)>)> = Vec::with_capacity(inst_count + 16);
+    let sentinel_pc = u32::MAX;
+    let mut old_pc_to_new_pc = vec![sentinel_pc; inst_count + 1];
+    let mut preheader_start_pc: HashMap<usize, u32> = HashMap::new();
+
+    for (old_pc, instruction) in function.instructions.iter().enumerate() {
+        if let Some(header_loads) = preheaders.get(&old_pc) {
+            preheader_start_pc.insert(old_pc, rebuilt.len() as u32);
+            for &hoisted_inst in header_loads {
+                rebuilt.push((hoisted_inst, None));
+            }
+        }
+
+        if instruction.raw_opcode() == OpCode::Nop as u8 {
+            continue;
+        }
+
+        old_pc_to_new_pc[old_pc] = rebuilt.len() as u32;
+        let jump_info = old_pc_targets[old_pc].map(|target| (old_pc, target));
+        rebuilt.push((*instruction, jump_info));
+    }
+
+    old_pc_to_new_pc[inst_count] = rebuilt.len() as u32;
+    for reverse_index in (0..inst_count).rev() {
+        if old_pc_to_new_pc[reverse_index] == sentinel_pc {
+            old_pc_to_new_pc[reverse_index] = old_pc_to_new_pc[reverse_index + 1];
+        }
+    }
+
+    let mut final_instructions = Vec::with_capacity(rebuilt.len());
+    for (new_pc, (inst, jump_info)) in rebuilt.into_iter().enumerate() {
+        let mut final_inst = inst;
+        if let Some((origin_old_pc, target_old_pc)) = jump_info {
+            let target_new_pc = if origin_old_pc < target_old_pc {
+                if let Some(&preheader_pc) = preheader_start_pc.get(&target_old_pc) {
+                    preheader_pc
+                } else if target_old_pc < old_pc_to_new_pc.len() {
+                    old_pc_to_new_pc[target_old_pc]
+                } else {
+                    old_pc_to_new_pc[inst_count]
+                }
+            } else if target_old_pc < old_pc_to_new_pc.len() {
+                old_pc_to_new_pc[target_old_pc]
+            } else {
+                old_pc_to_new_pc[inst_count]
+            };
+            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+        }
+        final_instructions.push(final_inst);
+    }
+
+    apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+}
+
+/// Decodes a branch or jump instruction's absolute target PC within `[0..=inst_count]`.
+fn decode_jump_target(instruction: Instruction, pc_index: usize, inst_count: usize) -> Option<usize> {
+    let raw_opcode = instruction.raw_opcode();
+    if raw_opcode == OpCode::Jump as u8
+        || raw_opcode == OpCode::JumpIfTrue as u8
+        || raw_opcode == OpCode::JumpIfFalse as u8
+    {
+        let target_pc = (pc_index as i32) + instruction.jump_offset();
+        if target_pc >= 0 && (target_pc as usize) <= inst_count {
+            return Some(target_pc as usize);
+        }
+    } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode) {
+        let target_pc = (pc_index as i32) + (instruction.src2() as i16 as i32);
+        if target_pc >= 0 && (target_pc as usize) <= inst_count {
+            return Some(target_pc as usize);
+        }
+    }
+    None
+}
+
+/// Rewrites the signed PC jump offset of a branch/jump instruction cleanly.
+fn relocate_jump_instruction(instruction: Instruction, new_pc: usize, target_new_pc: u32) -> Instruction {
+    let new_offset = (target_new_pc as i32) - (new_pc as i32);
+    let raw_opcode = instruction.raw_opcode();
+
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode) {
+        if let Some(opcode) = OpCode::from_raw_u8(raw_opcode) {
+            return Instruction::format_a(
+                opcode,
+                0,
+                instruction.dst(),
+                instruction.src1(),
+                new_offset as i16 as u16,
+            );
+        }
+    } else if (raw_opcode == OpCode::Jump as u8
+        || raw_opcode == OpCode::JumpIfTrue as u8
+        || raw_opcode == OpCode::JumpIfFalse as u8)
+        && let Some(opcode) = OpCode::from_raw_u8(raw_opcode)
+    {
+        return Instruction::format_c(
+            opcode,
+            instruction.flags(),
+            instruction.cond_reg(),
+            new_offset,
+        );
+    }
+
+    instruction
+}
+
+/// Forward CFG liveness check over `IntermediateInstruction` stream: returns `true` iff
+/// `reg` is never read again before being overwritten (or exiting) along all paths after `use_idx`.
+fn is_dead_after_use(
+    stream: &[IntermediateInstruction],
+    use_idx: usize,
+    reg: u16,
+    function: &CompiledFunction,
+    old_pc_to_stream_idx: &[Option<usize>],
+) -> bool {
+    let len = stream.len();
+    if use_idx >= len {
+        return true;
+    }
+
+    let mut visited = vec![false; len];
+    let mut worklist: Vec<usize> = Vec::with_capacity(8);
+
+    let use_entry = &stream[use_idx];
+    let use_raw = use_entry.instruction.raw_opcode();
+
+    if !is_control_flow_terminator(use_raw) && use_raw != OpCode::Jump as u8 && use_idx + 1 < len {
+        worklist.push(use_idx + 1);
+    }
+    if use_raw == OpCode::Jump as u8 || is_conditional_branch(use_raw) {
+        let Some(target_old) = use_entry.jump_target_old_pc else {
+            return false;
+        };
+        if target_old < old_pc_targets_len(old_pc_to_stream_idx)
+            && let Some(target_stream_idx) = old_pc_to_stream_idx[target_old]
+            && target_stream_idx < len
+        {
+            worklist.push(target_stream_idx);
+        }
+    } else if use_raw == OpCode::Switch as u8 {
+        return false;
+    }
+
+    while let Some(start_idx) = worklist.pop() {
+        for cur in start_idx..len {
+            if visited[cur] {
+                break;
+            }
+            visited[cur] = true;
+
+            let entry = &stream[cur];
+            let inst = &entry.instruction;
+            let raw = inst.raw_opcode();
+
+            if instruction_reads_register(inst, reg) {
+                return false;
+            }
+
+            if !function.exception_handlers.is_empty() && can_instruction_throw(raw) {
+                for handler in &function.exception_handlers {
+                    let orig = entry.original_pc as u32;
+                    if orig >= handler.try_start_pc && orig < handler.try_end_pc {
+                        let handler_pc = handler.handler_pc as usize;
+                        if handler_pc < old_pc_to_stream_idx.len() {
+                            if let Some(h_idx) = old_pc_to_stream_idx[handler_pc]
+                                && h_idx < len
+                            {
+                                worklist.push(h_idx);
+                            } else {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            if instruction_write_dst(inst) == Some(reg) {
+                break;
+            }
+
+            if is_control_flow_terminator(raw) {
+                break;
+            }
+
+            if raw == OpCode::Jump as u8 {
+                let Some(target_old) = entry.jump_target_old_pc else {
+                    return false;
+                };
+                if target_old < old_pc_to_stream_idx.len() {
+                    if let Some(target_idx) = old_pc_to_stream_idx[target_old] {
+                        if target_idx < len {
+                            worklist.push(target_idx);
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                break;
+            }
+
+            if is_conditional_branch(raw) {
+                let Some(target_old) = entry.jump_target_old_pc else {
+                    return false;
+                };
+                if target_old < old_pc_to_stream_idx.len() {
+                    if let Some(target_idx) = old_pc_to_stream_idx[target_old] {
+                        if target_idx < len {
+                            worklist.push(target_idx);
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            } else if raw == OpCode::Switch as u8 {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+#[inline(always)]
+fn old_pc_targets_len(slice: &[Option<usize>]) -> usize {
+    slice.len()
+}
+
+/// Forward CFG liveness check directly over `function.instructions`.
+fn is_dead_after_use_raw(
+    function: &CompiledFunction,
+    jump_targets: &[Option<usize>],
+    use_pc: usize,
+    reg: u16,
+) -> bool {
+    let len = function.instructions.len();
+    if use_pc >= len {
+        return true;
+    }
+
+    let mut visited = vec![false; len];
+    let mut worklist: Vec<usize> = Vec::with_capacity(8);
+
+    let use_raw = function.instructions[use_pc].raw_opcode();
+    if !is_control_flow_terminator(use_raw) && use_raw != OpCode::Jump as u8 && use_pc + 1 < len {
+        worklist.push(use_pc + 1);
+    }
+    if use_raw == OpCode::Jump as u8 || is_conditional_branch(use_raw) {
+        let Some(target_pc) = jump_targets[use_pc] else {
+            return false;
+        };
+        if target_pc < len {
+            worklist.push(target_pc);
+        }
+    } else if use_raw == OpCode::Switch as u8 {
+        return false;
+    }
+
+    while let Some(start_pc) = worklist.pop() {
+        for cur in start_pc..len {
+            if visited[cur] {
+                break;
+            }
+            visited[cur] = true;
+
+            let inst = &function.instructions[cur];
+            let raw = inst.raw_opcode();
+
+            if instruction_reads_register(inst, reg) {
+                return false;
+            }
+
+            if !function.exception_handlers.is_empty() && can_instruction_throw(raw) {
+                let cur_u32 = cur as u32;
+                for handler in &function.exception_handlers {
+                    if cur_u32 >= handler.try_start_pc && cur_u32 < handler.try_end_pc {
+                        let handler_pc = handler.handler_pc as usize;
+                        if handler_pc < len {
+                            worklist.push(handler_pc);
+                        }
+                    }
+                }
+            }
+
+            if instruction_write_dst(inst) == Some(reg) {
+                break;
+            }
+
+            if is_control_flow_terminator(raw) {
+                break;
+            }
+
+            if raw == OpCode::Jump as u8 {
+                let Some(target_pc) = jump_targets[cur] else {
+                    return false;
+                };
+                if target_pc < len {
+                    worklist.push(target_pc);
+                }
+                break;
+            }
+
+            if is_conditional_branch(raw) {
+                let Some(target_pc) = jump_targets[cur] else {
+                    return false;
+                };
+                if target_pc < len {
+                    worklist.push(target_pc);
+                }
+            } else if raw == OpCode::Switch as u8 {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn is_control_flow_terminator(raw: u8) -> bool {
+    raw == OpCode::Return as u8
+        || raw == OpCode::ReturnValue as u8
+        || raw == OpCode::Exit as u8
+        || raw == OpCode::Throw as u8
+}
+
+fn is_conditional_branch(raw: u8) -> bool {
+    raw == OpCode::JumpIfTrue as u8
+        || raw == OpCode::JumpIfFalse as u8
+        || (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+}
+
+fn can_instruction_throw(raw: u8) -> bool {
+    !(raw == OpCode::Nop as u8
+        || raw == OpCode::Mov as u8
+        || raw == OpCode::LoadI32 as u8
+        || raw == OpCode::LoadI64 as u8
+        || raw == OpCode::LoadF64 as u8
+        || raw == OpCode::LoadBool as u8
+        || raw == OpCode::LoadNull as u8
+        || raw == OpCode::LoadConst as u8
+        || raw == OpCode::IncRef as u8
+        || raw == OpCode::Jump as u8
+        || raw == OpCode::JumpIfTrue as u8
+        || raw == OpCode::JumpIfFalse as u8)
+}
+
+/// Returns `Some(reg)` if `instruction` writes to a single register `reg`.
+fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
+    let raw = instruction.raw_opcode();
+    if (OpCode::Mov as u8..=OpCode::LoadConst as u8).contains(&raw)
+        || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::AllocObject as u8
+        || raw == OpCode::AllocObjectExtern as u8
+        || raw == OpCode::GetField as u8
+        || raw == OpCode::GetStatic as u8
+        || raw == OpCode::GetStaticDirect as u8
+        || raw == OpCode::GetStaticGlobal as u8
+        || raw == OpCode::AllocArray as u8
+        || raw == OpCode::GetArray as u8
+        || raw == OpCode::ArrayLength as u8
+        || raw == OpCode::AllocTuple as u8
+        || raw == OpCode::GetTuple as u8
+        || raw == OpCode::Instanceof as u8
+        || raw == OpCode::CastCheck as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
+        || raw == OpCode::TupleInstanceof as u8
+    {
+        return Some(instruction.dst());
+    }
+
+    if raw == OpCode::CallDirect as u8
+        || raw == OpCode::CallVirtual as u8
+        || raw == OpCode::CallInterface as u8
+        || raw == OpCode::CallCallable as u8
+        || raw == OpCode::CallNativeDirect as u8
+        || raw == OpCode::CallSymbol as u8
+        || raw == OpCode::CallExtern as u8
+        || raw == OpCode::PackClosure as u8
+    {
+        return Some(instruction.call_dst());
+    }
+
+    None
+}
+
+/// Checks whether a register read inside `instruction` can be cleanly rewritten from `from_reg` to `to_reg`.
+fn can_rewrite_read_register(instruction: &Instruction, target_reg: u16) -> bool {
+    let raw = instruction.raw_opcode();
+    if raw == OpCode::CallDirect as u8
+        || raw == OpCode::CallVirtual as u8
+        || raw == OpCode::CallInterface as u8
+        || raw == OpCode::CallNativeDirect as u8
+        || raw == OpCode::CallSymbol as u8
+        || raw == OpCode::CallExtern as u8
+        || raw == OpCode::PackClosure as u8
+    {
+        return false;
+    }
+    if raw == OpCode::CallCallable as u8 {
+        let base = instruction.arg_base();
+        let count = instruction.arg_count() as u16;
+        if target_reg >= base && target_reg < base + count {
+            return false;
+        }
+        return instruction.call_target() == target_reg;
+    }
+    if raw == OpCode::AllocTuple as u8 || raw == OpCode::UnpackCaptures as u8 {
+        return false;
+    }
+    true
+}
+
+/// Rewrites input register operands matching `from_reg` to `to_reg`, returning the updated instruction.
+fn rewrite_instruction_read_register(
+    instruction: &Instruction,
+    from_reg: u16,
+    to_reg: u16,
+) -> Option<Instruction> {
+    let raw = instruction.raw_opcode();
+    let opcode = OpCode::from_raw_u8(raw)?;
+
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+        let new_dst = if instruction.dst() == from_reg {
+            to_reg
+        } else {
+            instruction.dst()
+        };
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            new_dst,
+            new_src1,
+            instruction.src2(),
+        ));
+    }
+
+    if raw == OpCode::AddI32Imm as u8 || raw == OpCode::SubI32Imm as u8 {
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            instruction.dst(),
+            new_src1,
+            instruction.src2(),
+        ));
+    }
+
+    if raw == OpCode::Mov as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
+        || raw == OpCode::Not as u8
+        || raw == OpCode::Bnot as u8
+        || raw == OpCode::NegI32 as u8
+        || raw == OpCode::NegI64 as u8
+        || raw == OpCode::NegF64 as u8
+        || raw == OpCode::GetField as u8
+        || raw == OpCode::ArrayLength as u8
+        || raw == OpCode::AllocArray as u8
+        || raw == OpCode::GetTuple as u8
+        || raw == OpCode::TupleInstanceof as u8
+        || raw == OpCode::CastCheck as u8
+        || raw == OpCode::Instanceof as u8
+    {
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            instruction.dst(),
+            new_src1,
+            instruction.src2(),
+        ));
+    }
+
+    if raw == OpCode::IncRef as u8
+        || raw == OpCode::DecRef as u8
+        || raw == OpCode::Exit as u8
+        || raw == OpCode::Throw as u8
+        || raw == OpCode::ReturnValue as u8
+    {
+        let new_dst = if instruction.dst() == from_reg {
+            to_reg
+        } else {
+            instruction.dst()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            new_dst,
+            instruction.src1(),
+            instruction.src2(),
+        ));
+    }
+
+    if raw == OpCode::SetStatic as u8
+        || raw == OpCode::SetStaticDirect as u8
+        || raw == OpCode::SetStaticGlobal as u8
+    {
+        let new_dst = if instruction.dst() == from_reg {
+            to_reg
+        } else {
+            instruction.dst()
+        };
+        return Some(Instruction::format_b(
+            opcode,
+            instruction.flags(),
+            new_dst,
+            instruction.imm32(),
+        ));
+    }
+
+    if raw == OpCode::SetField as u8 {
+        let new_dst = if instruction.dst() == from_reg {
+            to_reg
+        } else {
+            instruction.dst()
+        };
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            new_dst,
+            new_src1,
+            instruction.src2(),
+        ));
+    }
+
+    if raw == OpCode::GetArray as u8
+        || (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+    {
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        let new_src2 = if instruction.src2() == from_reg {
+            to_reg
+        } else {
+            instruction.src2()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            instruction.dst(),
+            new_src1,
+            new_src2,
+        ));
+    }
+
+    if raw == OpCode::SetArray as u8 {
+        let new_dst = if instruction.dst() == from_reg {
+            to_reg
+        } else {
+            instruction.dst()
+        };
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        let new_src2 = if instruction.src2() == from_reg {
+            to_reg
+        } else {
+            instruction.src2()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            new_dst,
+            new_src1,
+            new_src2,
+        ));
+    }
+
+    if raw == OpCode::JumpIfTrue as u8 || raw == OpCode::JumpIfFalse as u8 {
+        let new_cond = if instruction.cond_reg() == from_reg {
+            to_reg
+        } else {
+            instruction.cond_reg()
+        };
+        return Some(Instruction::format_c(
+            opcode,
+            instruction.flags(),
+            new_cond,
+            instruction.jump_offset(),
+        ));
+    }
+
+    if raw == OpCode::CallCallable as u8 {
+        let base = instruction.arg_base();
+        let count = instruction.arg_count() as u16;
+        if from_reg >= base && from_reg < base + count {
+            return None;
+        }
+        let new_target = if instruction.call_target() == from_reg {
+            to_reg
+        } else {
+            instruction.call_target()
+        };
+        return Some(Instruction::format_call(
+            opcode,
+            instruction.call_dst(),
+            new_target,
+            instruction.arg_base(),
+            instruction.arg_count(),
+        ));
+    }
+
+    None
 }
 
 /// Applies rebuilt instructions and translates exception handlers and source maps.
@@ -457,12 +1304,22 @@ fn collect_critical_targets(function: &CompiledFunction) -> HashSet<usize> {
 /// Checks whether an instruction format allows rewriting its destination register.
 fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -> bool {
     let raw = instruction.raw_opcode();
-    if instruction_reads_register(instruction, new_dst) {
+    let reads_new_dst = instruction_reads_register(instruction, new_dst);
+    let pure_alu_or_load = (OpCode::AddI32 as u8..=OpCode::MulF64 as u8).contains(&raw)
+        || (OpCode::NegI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || raw == OpCode::Not as u8
+        || raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
+        || (OpCode::LoadI32 as u8..=OpCode::LoadConst as u8).contains(&raw);
+
+    if reads_new_dst && !pure_alu_or_load {
         return false;
     }
 
     // Format A instructions that write to dst
-    if (OpCode::AddI32 as u8..=OpCode::NeqString as u8).contains(&raw)
+    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::ConvIToF as u8
@@ -474,7 +1331,6 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::AllocTuple as u8
         || raw == OpCode::GetTuple as u8
         || raw == OpCode::TupleInstanceof as u8
-        || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::Not as u8
         || raw == OpCode::Bnot as u8
         || raw == OpCode::NegI32 as u8
@@ -604,12 +1460,11 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         return instruction.src1() == target_reg;
     }
 
-    // Format A: DecRef, IncRef, Exit, Throw, Return, ReturnValue read dst
+    // Format A: DecRef, IncRef, Exit, Throw, ReturnValue read dst
     if raw == OpCode::DecRef as u8
         || raw == OpCode::IncRef as u8
         || raw == OpCode::Exit as u8
         || raw == OpCode::Throw as u8
-        || raw == OpCode::Return as u8
         || raw == OpCode::ReturnValue as u8
     {
         return instruction.dst() == target_reg;
@@ -633,7 +1488,7 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     }
 
     // Format A: Binary operations read src1 and src2
-    if (OpCode::AddI32 as u8..=OpCode::NeqString as u8).contains(&raw) {
+    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw) {
         return instruction.src1() == target_reg || instruction.src2() == target_reg;
     }
 
@@ -646,11 +1501,14 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     }
 
     // Format C: JumpIfTrue and JumpIfFalse read cond_reg
-    if raw == OpCode::JumpIfTrue as u8 || raw == OpCode::JumpIfFalse as u8 {
+    if raw == OpCode::JumpIfTrue as u8
+        || raw == OpCode::JumpIfFalse as u8
+        || raw == OpCode::Switch as u8
+    {
         return instruction.cond_reg() == target_reg;
     }
 
-    // Format Call: windowed argument registers
+    // Format Call: windowed argument registers (plus call_target for CallCallable)
     if raw == OpCode::CallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
@@ -660,21 +1518,13 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
     {
+        if raw == OpCode::CallCallable as u8 && instruction.call_target() == target_reg {
+            return true;
+        }
         let base = instruction.arg_base();
         let count = instruction.arg_count() as u16;
         return target_reg >= base && target_reg < base + count;
     }
 
     false
-}
-
-/// Counts total reads of `target_reg` across the entire function.
-fn count_total_reads(instructions: &[Instruction], target_reg: u16) -> usize {
-    let mut count = 0;
-    for instruction in instructions {
-        if instruction_reads_register(instruction, target_reg) {
-            count += 1;
-        }
-    }
-    count
 }
