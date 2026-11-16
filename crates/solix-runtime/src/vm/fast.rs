@@ -516,29 +516,22 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn inc_ref_cycle_cold(&mut self, addr: u32) -> Result<(), RuntimeError> {
-        let mut header = self.heap.read_header(addr)?;
-        header.color = crate::memory::layout::GcColor::Black;
-        let _ = header.inc_ref()?;
-        self.heap.write_header(addr, header)
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn dec_ref_cycle_cold(
+    fn push_purple_candidate_cold(
         &mut self,
         addr: u32,
-        mut updated_header: crate::memory::layout::BlockHeader,
-    ) -> Result<(), RuntimeError> {
-        updated_header.ref_count -= 1;
-        if crate::memory::layout::can_contain_references(updated_header.tag)
-            && updated_header.color != crate::memory::layout::GcColor::Purple
-        {
-            updated_header.color = crate::memory::layout::GcColor::Purple;
-            self.purple_buffer.push(addr);
-            self.arc_cycle_collector_candidates += 1;
+        tag_and_ref_word: u32,
+    ) -> Result<(), VmTrap> {
+        let updated_word = (tag_and_ref_word & !(3 << 26)) | (3 << 26);
+        let addr_usize = addr as usize;
+        // SAFETY: Caller verified addr_usize >= 8 && addr_usize <= heap.buffer.len().
+        unsafe {
+            std::ptr::write_unaligned(
+                self.heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>(),
+                updated_word.to_le(),
+            );
         }
-        self.heap.write_header(addr, updated_header)?;
+        self.purple_buffer.push(addr);
+        self.arc_cycle_collector_candidates += 1;
         if self.purple_buffer.len() >= self.cycle_threshold {
             self.collect_cycles()?;
         }
@@ -2866,7 +2859,37 @@ impl VirtualMachine {
                 OpCode::UnpackCaptures => {
                     let capture_count = inst.arg_count() as usize;
                     if capture_count > 0 {
-                        self.execute_unpack_captures(inst.arg_base() as usize, capture_count)?;
+                        let capture_base = inst.arg_base() as usize;
+                        if capture_count <= 2 {
+                            let closure_addr = self
+                                .current_frame_fast()?
+                                .active_closure
+                                .ok_or_else(VmTrap::null_reference)?;
+                            let closure_offset = closure_addr as usize;
+                            if closure_offset + 8 + (capture_count * 16) <= self.heap.buffer.len()
+                            {
+                                let buf_ptr = self.heap.buffer.as_ptr();
+                                for cap_idx in 0..capture_count {
+                                    let cell_offset = closure_offset + 8 + (cap_idx * 16);
+                                    // SAFETY: cell_offset + 16 <= heap.buffer.len() verified above.
+                                    let (tag_raw, payload_raw) = unsafe {
+                                        let cell_ptr = buf_ptr.add(cell_offset).cast::<u64>();
+                                        (
+                                            u64::from_le(std::ptr::read_unaligned(cell_ptr)),
+                                            u64::from_le(std::ptr::read_unaligned(cell_ptr.add(1))),
+                                        )
+                                    };
+                                    unsafe {
+                                        *reg_base.add(capture_base + cap_idx) =
+                                            Value::from_tagged_parts(tag_raw, payload_raw);
+                                    }
+                                }
+                            } else {
+                                self.execute_unpack_captures(capture_base, capture_count)?;
+                            }
+                        } else {
+                            self.execute_unpack_captures(capture_base, capture_count)?;
+                        }
                     }
                 }
 
@@ -2897,10 +2920,31 @@ impl VirtualMachine {
                     if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
                         && addr > 0
                     {
-                        if self.cycle_collector_enabled {
-                            self.inc_ref_cycle_cold(addr)?;
-                        } else {
+                        let addr_usize = addr as usize;
+                        if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
+                            return Err(VmTrap::null_reference());
+                        }
+                        // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
+                        let word_ptr = unsafe {
+                            self.heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>()
+                        };
+                        let tag_and_ref = unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+                        let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
+                        if ref_count == crate::memory::layout::MAX_REF_COUNT {
+                            // Immortal constant string or immortal object
+                        } else if ref_count + 1 >= crate::memory::layout::MAX_REF_COUNT {
                             crate::memory::arc::inc_ref(&mut self.heap, addr)?;
+                        } else {
+                            let updated = if self.cycle_collector_enabled {
+                                // Clear bits 26..28 (GcColor::Black) and increment ref_count in place.
+                                (tag_and_ref & 0xF000_0000) | (ref_count + 1)
+                            } else {
+                                (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
+                                    | (ref_count + 1)
+                            };
+                            unsafe {
+                                std::ptr::write_unaligned(word_ptr, updated.to_le());
+                            }
                         }
                     }
                 }
@@ -2909,19 +2953,66 @@ impl VirtualMachine {
                     if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
                         && addr > 0
                     {
-                        let header = self.heap.read_header(addr)?;
-                        if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
+                        let addr_usize = addr as usize;
+                        if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
+                            return Err(VmTrap::null_reference());
+                        }
+                        // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
+                        let word_ptr = unsafe {
+                            self.heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>()
+                        };
+                        let tag_and_ref = unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+                        let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
+                        let tag_nibble = ((tag_and_ref >> 28) & 0x0F) as u8;
+                        if ref_count == crate::memory::layout::MAX_REF_COUNT {
                             // Immortal constant string or immortal object
-                        } else if header.ref_count > 1 {
-                            if self.cycle_collector_enabled {
-                                self.dec_ref_cycle_cold(addr, header)?;
-                            } else {
-                                let mut updated_header = header;
-                                updated_header.ref_count -= 1;
-                                self.heap.write_header(addr, updated_header)?;
+                        } else if ref_count > 1 {
+                            let decremented =
+                                (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
+                                    | (ref_count - 1);
+                            unsafe {
+                                std::ptr::write_unaligned(word_ptr, decremented.to_le());
                             }
-                        } else if header.tag == BlockTag::ObjectPod {
-                            self.heap.deallocate_pod_fast(addr, header.size)?;
+                            if self.cycle_collector_enabled
+                                && (tag_nibble == BlockTag::Object as u8
+                                    || tag_nibble == BlockTag::ArrayRef as u8
+                                    || tag_nibble == BlockTag::Tuple as u8
+                                    || tag_nibble == BlockTag::Closure as u8)
+                                && ((tag_and_ref >> 26) & 0x03) != 3
+                            {
+                                let needs_cycle_check = if tag_nibble == BlockTag::Object as u8 {
+                                    if addr_usize + 4 <= self.heap.buffer.len() {
+                                        let vtable_id = unsafe {
+                                            u32::from_le(std::ptr::read_unaligned(
+                                                self.heap
+                                                    .buffer
+                                                    .as_ptr()
+                                                    .add(addr_usize)
+                                                    .cast::<u32>(),
+                                            ))
+                                        };
+                                        !self.context.is_class_acyclic(vtable_id)
+                                    } else {
+                                        true
+                                    }
+                                } else {
+                                    true
+                                };
+                                if needs_cycle_check {
+                                    self.push_purple_candidate_cold(addr, decremented)?;
+                                }
+                            }
+                        } else if tag_nibble == BlockTag::ObjectPod as u8 {
+                            let payload_size = unsafe {
+                                u32::from_le(std::ptr::read_unaligned(
+                                    self.heap
+                                        .buffer
+                                        .as_ptr()
+                                        .add(addr_usize - 8)
+                                        .cast::<u32>(),
+                                ))
+                            };
+                            self.heap.deallocate_pod_fast(addr, payload_size)?;
                         } else {
                             let caller_frame = self.current_frame_mut_fast()?;
                             caller_frame.pc = pc as u32;
@@ -3050,6 +3141,8 @@ impl VirtualMachine {
                 // =============================================================
                 OpCode::Throw => {
                     flush_inst_count!();
+                    let caller_frame = self.current_frame_mut_fast()?;
+                    caller_frame.pc = pc as u32;
                     let exc_val = unsafe { *reg_base.add(inst.dst() as usize) };
                     self.execute_throw(exc_val, target_depth)?;
                     reload_frame!();

@@ -40,9 +40,29 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         let class_descriptors = emission_artifacts.program.classes.clone();
         let function_descriptors = emission_artifacts.program.functions.clone();
 
-        // Optimize each compiled function in the binary program
+        // Optimize each compiled function individually first so leaf constructors shrink to minimal bodies.
         for compiled_function in &mut emission_artifacts.program.functions {
             optimize_function(compiled_function, &class_descriptors, &function_descriptors);
+        }
+
+        // Inline small leaf constructors across callers, then re-converge caller passes.
+        let optimized_snapshot = emission_artifacts.program.functions.clone();
+        for (func_idx, compiled_function) in
+            emission_artifacts.program.functions.iter_mut().enumerate()
+        {
+            if inline_leaf_constructors(compiled_function, func_idx, &optimized_snapshot) {
+                super::escape_analysis::apply_scalar_replacement(
+                    compiled_function,
+                    &class_descriptors,
+                    &optimized_snapshot,
+                );
+                super::escape_analysis::apply_arc_elision(compiled_function);
+                elide_redundant_arc_ops(compiled_function);
+                elide_borrowed_local_arc_ops(compiled_function);
+                elide_fresh_null_set_fields(compiled_function);
+                optimize_peephole_passes(compiled_function);
+                hoist_loop_invariant_constants(compiled_function);
+            }
         }
 
         // Keep functions_by_source synchronized with optimized functions
@@ -73,7 +93,7 @@ struct IntermediateInstruction {
 }
 
 /// Optimizes a single compiled function by running scalar replacement, ARC elision,
-/// immortal constant `DecRef` elision, convergent peephole fusion with liveness analysis,
+/// redundant ARC/null field elimination, convergent peephole fusion with liveness analysis,
 /// and loop-invariant constant hoisting.
 fn optimize_function(
     function: &mut CompiledFunction,
@@ -82,47 +102,546 @@ fn optimize_function(
 ) {
     super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
     super::escape_analysis::apply_arc_elision(function);
-    elide_immortal_const_decref(function);
+    elide_redundant_arc_ops(function);
+    elide_borrowed_local_arc_ops(function);
+    elide_fresh_null_set_fields(function);
 
     optimize_peephole_passes(function);
     hoist_loop_invariant_constants(function);
 }
 
-/// Eliminates `DecRef` on registers holding an immortal `LoadConst` value within a basic block.
-fn elide_immortal_const_decref(function: &mut CompiledFunction) {
+/// Returns `true` if `reg` holds a guaranteed immortal/null/FnPtr value throughout an immutable local array
+/// or within a straight-line basic block (`LoadConst`, `LoadNull`, zero-capture `PackClosure`).
+fn is_immortal_or_null_producer(inst: Instruction) -> bool {
+    let raw = inst.raw_opcode();
+    raw == OpCode::LoadConst as u8
+        || raw == OpCode::LoadNull as u8
+        || (raw == OpCode::PackClosure as u8 && inst.arg_count() == 0)
+}
+
+/// Finds local `AllocArray` registers populated exclusively by immortal/null values that never escape.
+fn find_immortal_constant_arrays(
+    function: &CompiledFunction,
+    critical_targets: &HashSet<usize>,
+) -> HashSet<u16> {
+    let mut alloc_counts: HashMap<u16, usize> = HashMap::new();
+    for inst in &function.instructions {
+        if let Some(written) = instruction_write_dst(inst) {
+            *alloc_counts.entry(written).or_insert(0) += 1;
+        }
+    }
+
+    let mut candidates: HashSet<u16> = HashSet::new();
+    for inst in &function.instructions {
+        if inst.raw_opcode() == OpCode::AllocArray as u8 {
+            let arr_reg = inst.dst();
+            if alloc_counts.get(&arr_reg).copied() == Some(1) {
+                candidates.insert(arr_reg);
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return candidates;
+    }
+
+    let mut disqualified: HashSet<u16> = HashSet::new();
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        let raw = inst.raw_opcode();
+        if raw == OpCode::SetArray as u8 {
+            let arr_reg = inst.dst();
+            if candidates.contains(&arr_reg) {
+                let val_reg = inst.src2();
+                let mut val_is_immortal = false;
+                let mut back_pc = pc_idx;
+                while back_pc > 0 {
+                    if critical_targets.contains(&back_pc) {
+                        break;
+                    }
+                    back_pc -= 1;
+                    let prev = function.instructions[back_pc];
+                    let prev_raw = prev.raw_opcode();
+                    if is_control_flow_terminator(prev_raw)
+                        || is_conditional_branch(prev_raw)
+                        || prev_raw == OpCode::Jump as u8
+                        || prev_raw == OpCode::Switch as u8
+                    {
+                        break;
+                    }
+                    if instruction_write_dst(&prev) == Some(val_reg) {
+                        val_is_immortal = is_immortal_or_null_producer(prev);
+                        break;
+                    }
+                }
+                if !val_is_immortal {
+                    disqualified.insert(arr_reg);
+                }
+            }
+            let stored_val = inst.src2();
+            if candidates.contains(&stored_val) {
+                disqualified.insert(stored_val);
+            }
+            continue;
+        }
+
+        if raw == OpCode::GetArray as u8 || raw == OpCode::ArrayLength as u8 {
+            if raw == OpCode::GetArray as u8 && candidates.contains(&inst.src2()) {
+                disqualified.insert(inst.src2());
+            }
+            continue;
+        }
+
+        if raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8 {
+            continue;
+        }
+
+        for candidate_reg in &candidates {
+            if instruction_reads_register(inst, *candidate_reg) {
+                disqualified.insert(*candidate_reg);
+            }
+        }
+    }
+
+    for bad_reg in disqualified {
+        candidates.remove(&bad_reg);
+    }
+    candidates
+}
+
+/// Eliminates redundant `IncRef` and `DecRef` on `LoadConst`, `LoadNull`, zero-capture `PackClosure`,
+/// and elements loaded from immutable local constant arrays within basic blocks.
+fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
     let inst_count = function.instructions.len();
     if inst_count < 2 {
         return;
     }
 
     let critical_targets = collect_critical_targets(function);
-    for def_pc in 0..inst_count {
-        let def_inst = function.instructions[def_pc];
-        if def_inst.raw_opcode() != OpCode::LoadConst as u8 {
+    let immortal_arrays = find_immortal_constant_arrays(function, &critical_targets);
+
+    let mut block_immortals: HashSet<u16> = HashSet::new();
+    for pc_idx in 0..inst_count {
+        if critical_targets.contains(&pc_idx) {
+            block_immortals.clear();
+        }
+
+        let inst = function.instructions[pc_idx];
+        let raw = inst.raw_opcode();
+
+        if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
+            && block_immortals.contains(&inst.dst())
+        {
+            function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             continue;
         }
-        let target_reg = def_inst.dst();
-        for scan_pc in (def_pc + 1)..inst_count {
-            if critical_targets.contains(&scan_pc) {
-                break;
+
+        if is_immortal_or_null_producer(inst) {
+            if let Some(dst_reg) = instruction_write_dst(&inst) {
+                block_immortals.insert(dst_reg);
             }
-            let scan_inst = function.instructions[scan_pc];
-            let raw = scan_inst.raw_opcode();
-            if raw == OpCode::DecRef as u8 && scan_inst.dst() == target_reg {
-                function.instructions[scan_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
-                continue;
+        } else if raw == OpCode::GetArray as u8 && immortal_arrays.contains(&inst.src1()) {
+            block_immortals.insert(inst.dst());
+        } else if raw == OpCode::Mov as u8 {
+            let mov_dst = inst.dst();
+            if block_immortals.contains(&inst.src1()) {
+                block_immortals.insert(mov_dst);
+            } else {
+                block_immortals.remove(&mov_dst);
             }
-            if is_control_flow_terminator(raw)
-                || is_conditional_branch(raw)
-                || raw == OpCode::Switch as u8
-            {
-                break;
-            }
-            if instruction_write_dst(&scan_inst) == Some(target_reg) {
-                break;
+        } else if let Some(written) = instruction_write_dst(&inst) {
+            block_immortals.remove(&written);
+        }
+
+        if is_control_flow_terminator(raw)
+            || is_conditional_branch(raw)
+            || raw == OpCode::Jump as u8
+            || raw == OpCode::Switch as u8
+        {
+            block_immortals.clear();
+        }
+    }
+}
+
+/// Elides ARC operations on non-escaping borrowed local alias registers whose owning source allocations
+/// remain live until the function epilogue cleanup block after all uses of the alias.
+fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
+    if !function.exception_handlers.is_empty() || function.instructions.len() < 4 {
+        return;
+    }
+    let inst_count = function.instructions.len();
+    let mut def_counts: HashMap<u16, usize> = HashMap::new();
+    let mut def_opc: HashMap<u16, u8> = HashMap::new();
+    let mut decref_pcs: HashMap<u16, Vec<usize>> = HashMap::new();
+    let mut last_read_or_arc_pc: HashMap<u16, usize> = HashMap::new();
+
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        let raw = inst.raw_opcode();
+        if let Some(written) = instruction_write_dst(inst) {
+            *def_counts.entry(written).or_insert(0) += 1;
+            def_opc.insert(written, raw);
+        }
+        if raw == OpCode::DecRef as u8 {
+            decref_pcs.entry(inst.dst()).or_default().push(pc_idx);
+        }
+        for reg in 0..function.num_registers {
+            if instruction_reads_register(inst, reg) {
+                last_read_or_arc_pc.insert(reg, pc_idx);
             }
         }
     }
+
+    // Identify single-definition local owners (AllocObject / AllocArray) whose only DecRefs sit
+    // in the straight-line epilogue cleanup right before Return/ReturnValue.
+    let mut stable_owners: HashMap<u16, usize> = HashMap::new();
+    for (&owner_reg, &count) in &def_counts {
+        if count != 1 {
+            continue;
+        }
+        let opc = def_opc.get(&owner_reg).copied().unwrap_or(0);
+        if opc != OpCode::AllocObject as u8 && opc != OpCode::AllocArray as u8 {
+            continue;
+        }
+        let Some(owner_decs) = decref_pcs.get(&owner_reg) else {
+            continue;
+        };
+        if owner_decs.len() != 1 {
+            continue;
+        }
+        let dec_pc = owner_decs[0];
+        let mut epilogue_ok = false;
+        for scan_pc in (dec_pc + 1)..inst_count {
+            let scan_raw = function.instructions[scan_pc].raw_opcode();
+            if scan_raw == OpCode::Return as u8 || scan_raw == OpCode::ReturnValue as u8 {
+                epilogue_ok = true;
+                break;
+            }
+            if scan_raw != OpCode::DecRef as u8 && scan_raw != OpCode::Nop as u8 {
+                break;
+            }
+        }
+        if epilogue_ok {
+            stable_owners.insert(owner_reg, dec_pc);
+        }
+    }
+
+    if stable_owners.is_empty() {
+        return;
+    }
+
+    // Find candidate alias registers written solely via Mov(alias, owner) where owner is in stable_owners.
+    let mut borrowed_aliases: HashSet<u16> = HashSet::new();
+    for candidate_reg in 0..function.num_registers {
+        if (candidate_reg as usize) < (function.param_count as usize)
+            || stable_owners.contains_key(&candidate_reg)
+        {
+            continue;
+        }
+        let mut writes_count = 0usize;
+        let mut writes_ok = true;
+        let mut escapes = false;
+        let mut used_owners: Vec<u16> = Vec::new();
+        let mut max_non_epilogue_use: usize = 0;
+
+        for (pc_idx, inst) in function.instructions.iter().enumerate() {
+            let raw = inst.raw_opcode();
+            if instruction_write_dst(inst) == Some(candidate_reg) {
+                writes_count += 1;
+                if raw == OpCode::Mov as u8 && stable_owners.contains_key(&inst.src1()) {
+                    used_owners.push(inst.src1());
+                } else {
+                    writes_ok = false;
+                    break;
+                }
+            }
+            if raw == OpCode::SetField as u8 && inst.dst() == candidate_reg
+                || raw == OpCode::SetArray as u8 && inst.src2() == candidate_reg
+                || (raw == OpCode::SetStatic as u8
+                    || raw == OpCode::SetStaticDirect as u8
+                    || raw == OpCode::SetStaticGlobal as u8)
+                    && inst.dst() == candidate_reg
+                || raw == OpCode::ReturnValue as u8 && inst.dst() == candidate_reg
+                || raw == OpCode::Throw as u8 && inst.dst() == candidate_reg
+                || raw == OpCode::PackClosure as u8
+                    && candidate_reg >= inst.arg_base()
+                    && candidate_reg < inst.arg_base() + inst.arg_count() as u16
+                || raw == OpCode::AllocTuple as u8
+                    && candidate_reg >= inst.src1()
+                    && candidate_reg < inst.src1() + inst.src2()
+            {
+                escapes = true;
+                break;
+            }
+            if instruction_reads_register(inst, candidate_reg) {
+                let is_epilogue_decref = raw == OpCode::DecRef as u8
+                    && function.instructions[pc_idx + 1..].iter().any(|trailing| {
+                        trailing.raw_opcode() == OpCode::Return as u8
+                            || trailing.raw_opcode() == OpCode::ReturnValue as u8
+                    })
+                    && function.instructions[pc_idx + 1..]
+                        .iter()
+                        .take_while(|trailing| {
+                            trailing.raw_opcode() != OpCode::Return as u8
+                                && trailing.raw_opcode() != OpCode::ReturnValue as u8
+                        })
+                        .all(|trailing| {
+                            trailing.raw_opcode() == OpCode::DecRef as u8
+                                || trailing.raw_opcode() == OpCode::Nop as u8
+                        });
+                if !is_epilogue_decref {
+                    max_non_epilogue_use = max_non_epilogue_use.max(pc_idx);
+                }
+            }
+        }
+
+        if writes_ok
+            && writes_count > 0
+            && !escapes
+            && used_owners
+                .iter()
+                .all(|owner| stable_owners[owner] > max_non_epilogue_use)
+        {
+            borrowed_aliases.insert(candidate_reg);
+        }
+    }
+
+    if borrowed_aliases.is_empty() {
+        return;
+    }
+
+    // Elide IncRef/DecRef on borrowed aliases and matched IncRef(owner) preceding Mov(alias, owner).
+    for pc_idx in 0..inst_count {
+        let inst = function.instructions[pc_idx];
+        let raw = inst.raw_opcode();
+        if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
+            && borrowed_aliases.contains(&inst.dst())
+        {
+            function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            continue;
+        }
+        if raw == OpCode::Mov as u8
+            && borrowed_aliases.contains(&inst.dst())
+            && stable_owners.contains_key(&inst.src1())
+        {
+            let owner_reg = inst.src1();
+            // Look back up to 2 instructions in same basic block for `IncRef owner_reg`.
+            let lookback_start = pc_idx.saturating_sub(2);
+            for back_pc in (lookback_start..pc_idx).rev() {
+                let back_inst = function.instructions[back_pc];
+                if back_inst.raw_opcode() == OpCode::IncRef as u8 && back_inst.dst() == owner_reg {
+                    function.instructions[back_pc] =
+                        Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Eliminates redundant `SetField null` on freshly `AllocObject`ed instances or at the start of leaf constructors.
+fn elide_fresh_null_set_fields(function: &mut CompiledFunction) {
+    let inst_count = function.instructions.len();
+    if inst_count < 2 {
+        return;
+    }
+    let critical_targets = collect_critical_targets(function);
+    let is_ctor = function.symbol.contains("::constructor");
+    let mut fresh_zero_regs: HashSet<u16> = HashSet::new();
+    let mut block_null_regs: HashSet<u16> = HashSet::new();
+    if is_ctor {
+        fresh_zero_regs.insert(0);
+    }
+
+    for pc_idx in 0..inst_count {
+        if critical_targets.contains(&pc_idx) {
+            fresh_zero_regs.clear();
+            block_null_regs.clear();
+        }
+        let inst = function.instructions[pc_idx];
+        let raw = inst.raw_opcode();
+
+        if raw == OpCode::SetField as u8
+            && fresh_zero_regs.contains(&inst.src1())
+            && block_null_regs.contains(&inst.dst())
+        {
+            function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            continue;
+        }
+
+        if raw == OpCode::AllocObject as u8 {
+            fresh_zero_regs.insert(inst.dst());
+            block_null_regs.remove(&inst.dst());
+            continue;
+        }
+
+        if raw == OpCode::LoadNull as u8 {
+            block_null_regs.insert(inst.dst());
+            fresh_zero_regs.remove(&inst.dst());
+            continue;
+        }
+
+        if let Some(written) = instruction_write_dst(&inst) {
+            block_null_regs.remove(&written);
+            fresh_zero_regs.remove(&written);
+        }
+
+        if is_control_flow_terminator(raw)
+            || is_conditional_branch(raw)
+            || raw == OpCode::Jump as u8
+            || raw == OpCode::Switch as u8
+            || raw == OpCode::CallDirect as u8
+            || raw == OpCode::CallVirtual as u8
+            || raw == OpCode::CallInterface as u8
+            || raw == OpCode::CallCallable as u8
+            || raw == OpCode::CallSymbol as u8
+            || raw == OpCode::CallExtern as u8
+        {
+            fresh_zero_regs.clear();
+            block_null_regs.clear();
+        }
+    }
+}
+
+/// Inlines empty or pure field-initializing leaf constructors at `CallDirect` call sites.
+fn inline_leaf_constructors(
+    caller: &mut CompiledFunction,
+    caller_index: usize,
+    all_functions: &[CompiledFunction],
+) -> bool {
+    let mut is_leaf_ctor = vec![false; all_functions.len()];
+    for (func_idx, candidate) in all_functions.iter().enumerate() {
+        if func_idx == caller_index
+            || !candidate.symbol.contains("::constructor")
+            || !candidate.exception_handlers.is_empty()
+            || candidate.param_count == 0
+            || candidate.instructions.is_empty()
+            || candidate.instructions.len() > 8
+        {
+            continue;
+        }
+        let body_ok = candidate.instructions.iter().enumerate().all(|(idx, inst)| {
+            let raw = inst.raw_opcode();
+            if idx + 1 == candidate.instructions.len() {
+                return raw == OpCode::Return as u8;
+            }
+            if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
+                return true;
+            }
+            if raw == OpCode::LoadI32 as u8
+                || raw == OpCode::LoadI64 as u8
+                || raw == OpCode::LoadF64 as u8
+                || raw == OpCode::LoadBool as u8
+                || raw == OpCode::LoadNull as u8
+                || raw == OpCode::LoadConst as u8
+            {
+                return true;
+            }
+            raw == OpCode::SetField as u8 && inst.src1() == 0
+        });
+        is_leaf_ctor[func_idx] = body_ok;
+    }
+
+    let inst_count = caller.instructions.len();
+    let has_candidate = caller.instructions.iter().any(|inst| {
+        inst.raw_opcode() == OpCode::CallDirect as u8
+            && (inst.call_target() as usize) < is_leaf_ctor.len()
+            && is_leaf_ctor[inst.call_target() as usize]
+    });
+    if !has_candidate {
+        return false;
+    }
+
+    let mut jump_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
+    for (pc_idx, inst) in caller.instructions.iter().enumerate() {
+        jump_targets.push(decode_jump_target(*inst, pc_idx, inst_count));
+    }
+
+    let mut rebuilt: Vec<(Instruction, Option<usize>)> = Vec::with_capacity(inst_count + 16);
+    let mut old_pc_to_new_pc = vec![u32::MAX; inst_count + 1];
+    let mut any_inlined = false;
+
+    for (old_pc, &inst) in caller.instructions.iter().enumerate() {
+        old_pc_to_new_pc[old_pc] = rebuilt.len() as u32;
+        if inst.raw_opcode() == OpCode::CallDirect as u8 {
+            let target_idx = inst.call_target() as usize;
+            let arg_base = inst.arg_base();
+            let arg_count = inst.arg_count() as u16;
+            if target_idx < is_leaf_ctor.len()
+                && is_leaf_ctor[target_idx]
+                && arg_count == all_functions[target_idx].param_count
+            {
+                let callee = &all_functions[target_idx];
+                let scratch_needed = callee.num_registers.saturating_sub(arg_count);
+                if (caller.num_registers as usize) + (scratch_needed as usize) < u16::MAX as usize {
+                    let scratch_base = caller.num_registers;
+                    caller.num_registers += scratch_needed;
+                    let remap_reg = |reg: u16| -> u16 {
+                        if reg < arg_count {
+                            arg_base + reg
+                        } else {
+                            scratch_base + (reg - arg_count)
+                        }
+                    };
+                    let body_len = callee.instructions.len() - 1;
+                    let mut pushed_any = false;
+                    for &ctor_inst in &callee.instructions[..body_len] {
+                        let c_raw = ctor_inst.raw_opcode();
+                        if c_raw == OpCode::Nop as u8 {
+                            continue;
+                        }
+                        let remapped = match c_raw {
+                            raw if raw == OpCode::Mov as u8 => Instruction::format_a(
+                                OpCode::Mov,
+                                0,
+                                remap_reg(ctor_inst.dst()),
+                                remap_reg(ctor_inst.src1()),
+                                0,
+                            ),
+                            raw if raw == OpCode::SetField as u8 => Instruction::format_a(
+                                OpCode::SetField,
+                                ctor_inst.flags(),
+                                remap_reg(ctor_inst.dst()),
+                                remap_reg(ctor_inst.src1()),
+                                ctor_inst.src2(),
+                            ),
+                            _ => rewrite_instruction_destination(
+                                &ctor_inst,
+                                remap_reg(ctor_inst.dst()),
+                            ),
+                        };
+                        rebuilt.push((remapped, None));
+                        pushed_any = true;
+                    }
+                    if !pushed_any {
+                        rebuilt.push((Instruction::format_a(OpCode::Nop, 0, 0, 0, 0), None));
+                    }
+                    any_inlined = true;
+                    continue;
+                }
+            }
+        }
+        rebuilt.push((inst, jump_targets[old_pc]));
+    }
+
+    if !any_inlined {
+        return false;
+    }
+
+    old_pc_to_new_pc[inst_count] = rebuilt.len() as u32;
+    let mut final_instructions = Vec::with_capacity(rebuilt.len());
+    for (new_pc, (inst, target_opt)) in rebuilt.into_iter().enumerate() {
+        let mut final_inst = inst;
+        if let Some(target_old_pc) = target_opt {
+            let target_new_pc = if target_old_pc < old_pc_to_new_pc.len() {
+                old_pc_to_new_pc[target_old_pc]
+            } else {
+                old_pc_to_new_pc[inst_count]
+            };
+            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+        }
+        final_instructions.push(final_inst);
+    }
+    apply_pc_relocation(caller, final_instructions, &old_pc_to_new_pc);
+    true
 }
 
 /// Executes convergent multi-pass peephole fusion and redundant `Mov` elimination
@@ -196,6 +715,21 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                     cursor += 1;
                     continue;
                 }
+            }
+
+            if (OpCode::LoadI32 as u8..=OpCode::LoadConst as u8).contains(&current_raw)
+                && is_dead_after_use(
+                    &stream,
+                    cursor,
+                    current_entry.instruction.dst(),
+                    function,
+                    &old_pc_to_stream_idx,
+                    &critical_targets,
+                )
+            {
+                changed = true;
+                cursor += 1;
+                continue;
             }
 
             if cursor + 1 < stream.len() {
@@ -1380,7 +1914,6 @@ fn rewrite_instruction_read_register(
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
-        || raw == OpCode::TupleInstanceof as u8
         || raw == OpCode::CastCheck as u8
         || raw == OpCode::Instanceof as u8
     {
@@ -1395,6 +1928,26 @@ fn rewrite_instruction_read_register(
             instruction.dst(),
             new_src1,
             instruction.src2(),
+        ));
+    }
+
+    if raw == OpCode::TupleInstanceof as u8 {
+        let new_src1 = if instruction.src1() == from_reg {
+            to_reg
+        } else {
+            instruction.src1()
+        };
+        let new_src2 = if instruction.src2() == from_reg {
+            to_reg
+        } else {
+            instruction.src2()
+        };
+        return Some(Instruction::format_a(
+            opcode,
+            instruction.flags(),
+            instruction.dst(),
+            new_src1,
+            new_src2,
         ));
     }
 
@@ -1787,7 +2340,6 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
-        || raw == OpCode::TupleInstanceof as u8
         || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::CastCheck as u8
         || raw == OpCode::Instanceof as u8
@@ -1810,8 +2362,8 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
 
-    // Format A: GetArray reads src1 (array) and src2 (index)
-    if raw == OpCode::GetArray as u8 {
+    // Format A: GetArray and TupleInstanceof read src1 and src2
+    if raw == OpCode::GetArray as u8 || raw == OpCode::TupleInstanceof as u8 {
         return instruction.src1() == target_reg || instruction.src2() == target_reg;
     }
 

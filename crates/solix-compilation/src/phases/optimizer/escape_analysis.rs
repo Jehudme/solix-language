@@ -275,12 +275,14 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
-        || raw == OpCode::TupleInstanceof as u8
         || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::CastCheck as u8
         || raw == OpCode::Instanceof as u8
     {
         return instruction.src1() == target_reg;
+    }
+    if raw == OpCode::TupleInstanceof as u8 {
+        return instruction.src1() == target_reg || instruction.src2() == target_reg;
     }
     if raw == OpCode::DecRef as u8
         || raw == OpCode::IncRef as u8
@@ -1212,41 +1214,90 @@ fn instruction_can_write_reference(raw: u8) -> bool {
 
 /// Applies inter-procedural and local reference counting (ARC) elision.
 ///
-/// Removes paired `IncRef` and `DecRef` instructions on local temporaries
-/// and non-escaping parameters.
+/// Removes paired `IncRef` and `DecRef` instructions on non-escaping local aliases,
+/// including across post-dominated forward conditional branch diamonds.
 pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
     let mut elided_count = 0;
     let instruction_count = function.instructions.len();
+    let critical_targets = collect_arc_branch_targets(function);
 
     for start_index in 0..instruction_count {
         if function.instructions[start_index].raw_opcode() == OpCode::IncRef as u8 {
             let target_register = function.instructions[start_index].dst();
 
             let mut matching_dec_index = None;
-            for forward_index in start_index + 1..std::cmp::min(start_index + 32, instruction_count)
-            {
+            let mut max_forward_target: Option<usize> = None;
+            let limit = std::cmp::min(start_index + 48, instruction_count);
+            for forward_index in (start_index + 1)..limit {
+                // Reject external control-flow jumps entering the middle of a diamond before a branch saw it.
                 let forward_inst = function.instructions[forward_index];
                 let forward_raw = forward_inst.raw_opcode();
+
+                if forward_raw == OpCode::DecRef as u8 && forward_inst.dst() == target_register {
+                    let branch_span_ok = max_forward_target
+                        .is_none_or(|max_target| max_target == forward_index);
+                    if branch_span_ok {
+                        matching_dec_index = Some(forward_index);
+                    }
+                    break;
+                }
+
+                // Any jump landing inside (start..=forward_index) except at the DecRef site
+                // is fine only if it came from a branch after start_index; external jumps fail below.
+                if critical_targets.contains(&forward_index)
+                    && max_forward_target.is_none_or(|max_target| forward_index > max_target)
+                {
+                    break;
+                }
+
+                if forward_raw == OpCode::Return as u8
+                    || forward_raw == OpCode::ReturnValue as u8
+                    || forward_raw == OpCode::Exit as u8
+                    || forward_raw == OpCode::Throw as u8
+                    || forward_raw == OpCode::Switch as u8
+                {
+                    break;
+                }
 
                 if forward_raw == OpCode::Jump as u8
                     || forward_raw == OpCode::JumpIfTrue as u8
                     || forward_raw == OpCode::JumpIfFalse as u8
-                    || forward_raw == OpCode::Return as u8
-                    || forward_raw == OpCode::ReturnValue as u8
-                    || forward_raw == OpCode::Throw as u8
+                    || (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8)
+                        .contains(&forward_raw)
+                {
+                    let Some(target_pc) = decode_branch_target(&forward_inst, forward_index, instruction_count) else {
+                        break;
+                    };
+                    if target_pc <= forward_index || target_pc >= limit {
+                        break;
+                    }
+                    max_forward_target =
+                        Some(max_forward_target.map_or(target_pc, |cur| cur.max(target_pc)));
+                    continue;
+                }
+
+                // Prohibit calls, heap mutations, or escapes that could alias or release the source.
+                if forward_raw == OpCode::CallDirect as u8
+                    || forward_raw == OpCode::CallVirtual as u8
+                    || forward_raw == OpCode::CallInterface as u8
+                    || forward_raw == OpCode::CallCallable as u8
+                    || forward_raw == OpCode::CallNativeDirect as u8
+                    || forward_raw == OpCode::CallSymbol as u8
+                    || forward_raw == OpCode::CallExtern as u8
+                    || forward_raw == OpCode::PackClosure as u8
+                    || forward_raw == OpCode::SetField as u8
+                    || forward_raw == OpCode::SetArray as u8
+                    || forward_raw == OpCode::SetStatic as u8
+                    || forward_raw == OpCode::SetStaticDirect as u8
+                    || forward_raw == OpCode::SetStaticGlobal as u8
+                    || forward_raw == OpCode::AllocTuple as u8
+                    || forward_raw == OpCode::IncRef as u8
+                    || forward_raw == OpCode::DecRef as u8
                 {
                     break;
                 }
 
-                if forward_inst.dst() == target_register
-                    && forward_raw != OpCode::IncRef as u8
-                    && forward_raw != OpCode::DecRef as u8
-                {
-                    break;
-                }
-
-                if forward_raw == OpCode::DecRef as u8 && forward_inst.dst() == target_register {
-                    matching_dec_index = Some(forward_index);
+                if instruction_write_dst(&forward_inst) == Some(target_register) {
                     break;
                 }
             }
@@ -1260,4 +1311,18 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
     }
 
     elided_count
+}
+
+fn collect_arc_branch_targets(function: &CompiledFunction) -> HashSet<usize> {
+    let mut targets = HashSet::new();
+    let inst_count = function.instructions.len();
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        if let Some(target_pc) = decode_branch_target(inst, pc_idx, inst_count) {
+            targets.insert(target_pc);
+        }
+    }
+    for handler in &function.exception_handlers {
+        targets.insert(handler.handler_pc as usize);
+    }
+    targets
 }

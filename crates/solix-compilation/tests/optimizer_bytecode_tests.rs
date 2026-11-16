@@ -757,3 +757,104 @@ fn test_positive_discarded_field_and_array_assignments_omit_trailing_mov() {
         target_fn.instructions
     );
 }
+
+#[test]
+fn test_positive_local_closure_inlining_and_leaf_ctor_arc_elision() {
+    let options = CompilationOptions::new().with_source(
+        "t08_inlining_and_arc.slx",
+        r#"
+            class PairNode {
+                public int32 value;
+                public PairNode next;
+                public PairNode(int32 initial_val) {
+                    this.value = initial_val;
+                    this.next = null;
+                }
+            }
+            int32 main() {
+                int32 factor = 7;
+                int32(*)(int32) scaler = (x) => x + factor;
+                int32 sum = 0;
+                for (int32 idx = 0; idx < 10; idx = idx + 1) {
+                    PairNode node = new PairNode(idx);
+                    sum = sum + scaler(node.value);
+                }
+                return sum;
+            }
+        "#,
+    );
+    let mut context = CompilationContext::new(options);
+    let compile_res = context.execute();
+    assert!(compile_res.is_ok(), "Compilation failed: {compile_res:?}");
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Emission artifacts must be present");
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_call_callable = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::CallCallable as u8);
+    assert!(
+        !has_call_callable,
+        "Local non-reassigned closure `scaler` should inline away CallCallable: {:?}",
+        main_func.instructions
+    );
+
+    let ctor_call_count = main_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::CallDirect as u8)
+        .count();
+    assert_eq!(
+        ctor_call_count, 0,
+        "Leaf constructor PairNode should be inlined inside main(): {:?}",
+        main_func.instructions
+    );
+
+    let runtime_context =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program.clone()))
+            .expect("RuntimeContext should build");
+    let mut vm = VirtualMachine::new(runtime_context);
+    let res = vm.run().expect("Execution should succeed");
+    // sum_{idx=0..9} (idx + 7) = 45 + 70 = 115
+    assert_eq!(res, Value::I32(115));
+}
+
+#[test]
+fn test_negative_reassigned_closure_and_null_safe_check_not_miscompiled() {
+    let options = CompilationOptions::new().with_source(
+        "t08_negative_reassigned_lambda.slx",
+        r#"
+            int32 main() {
+                int32 base = 10;
+                int32(*)(int32) op = (v) => v + base;
+                int32 first = op(5);
+                op = (v) => v * base;
+                int32 second = op(5);
+                return first * 100 + second;
+            }
+        "#,
+    );
+    let mut context = CompilationContext::new(options);
+    let compile_res = context.execute();
+    assert!(compile_res.is_ok(), "Compilation failed: {compile_res:?}");
+
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Emission artifacts must be present");
+    let runtime_context =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program.clone()))
+            .expect("RuntimeContext should build");
+    let mut vm = VirtualMachine::new(runtime_context);
+    let res = vm.run().expect("Execution should succeed");
+    assert_eq!(res, Value::I32(1550));
+}

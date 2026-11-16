@@ -10,11 +10,11 @@ use crate::phases::parser::statements::control_flow::VariableDeclarationStatemen
 use crate::phases::parser::statements::declarations::{
     ClassMember, Declaration, MethodDeclaration, Modifier,
 };
-use crate::phases::parser::statements::expressions::Expression;
+use crate::phases::parser::statements::expressions::{Expression, LambdaBody};
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::phase::CompilationPhase;
 use solix_common::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Maximum recursion depth allowed during AST inlining expansion to prevent code blowup.
 const MAX_INLINE_DEPTH: usize = 4;
@@ -156,7 +156,7 @@ impl CompilationPhase for AstInlinerPhase {
             }
         }
 
-        if inlinable_functions.is_empty() {
+        if inlinable_functions.is_empty() && inline_threshold == 0 {
             return Ok(());
         }
 
@@ -171,30 +171,28 @@ impl CompilationPhase for AstInlinerPhase {
             }
             if let Some(mut current_ast) = context.ast[ast_index].take() {
                 // Inline calls in root statements
-                for statement in &mut current_ast.root_statements {
-                    transform_statement(
-                        statement,
-                        &inlinable_functions,
-                        context,
-                        &mut call_counter,
-                        0,
-                    );
-                }
+                transform_statement_list(
+                    &mut current_ast.root_statements,
+                    &inlinable_functions,
+                    context,
+                    &mut call_counter,
+                    0,
+                    inline_threshold,
+                );
 
                 // Inline calls in declaration bodies
                 for declaration in &mut current_ast.declarations {
                     match declaration {
                         Declaration::Method(method) => {
                             if let Some(body) = &mut method.body {
-                                for statement in &mut body.statements {
-                                    transform_statement(
-                                        statement,
-                                        &inlinable_functions,
-                                        context,
-                                        &mut call_counter,
-                                        0,
-                                    );
-                                }
+                                transform_statement_list(
+                                    &mut body.statements,
+                                    &inlinable_functions,
+                                    context,
+                                    &mut call_counter,
+                                    0,
+                                    inline_threshold,
+                                );
                             }
                         }
                         Declaration::Class(class_decl) => {
@@ -202,27 +200,25 @@ impl CompilationPhase for AstInlinerPhase {
                                 match member {
                                     ClassMember::Method(method) => {
                                         if let Some(body) = &mut method.body {
-                                            for statement in &mut body.statements {
-                                                transform_statement(
-                                                    statement,
-                                                    &inlinable_functions,
-                                                    context,
-                                                    &mut call_counter,
-                                                    0,
-                                                );
-                                            }
-                                        }
-                                    }
-                                    ClassMember::Constructor(constructor) => {
-                                        for statement in &mut constructor.body.statements {
-                                            transform_statement(
-                                                statement,
+                                            transform_statement_list(
+                                                &mut body.statements,
                                                 &inlinable_functions,
                                                 context,
                                                 &mut call_counter,
                                                 0,
+                                                inline_threshold,
                                             );
                                         }
+                                    }
+                                    ClassMember::Constructor(constructor) => {
+                                        transform_statement_list(
+                                            &mut constructor.body.statements,
+                                            &inlinable_functions,
+                                            context,
+                                            &mut call_counter,
+                                            0,
+                                            inline_threshold,
+                                        );
                                     }
                                     _ => {}
                                 }
@@ -909,6 +905,530 @@ fn expression_calls_symbol(expression: &Expression, sources: &[String], target_n
     }
 }
 
+/// Checks if a local closure variable is safe to inline across `statements`.
+fn try_collect_local_lambda(
+    var_decl: &VariableDeclarationStatement,
+    statements: &[Statement],
+    inline_threshold: usize,
+    sources: &[String],
+) -> Option<(String, InlinableFunctionInfo)> {
+    if inline_threshold == 0 {
+        return None;
+    }
+    let name_src_idx = var_decl.name_span.id as usize;
+    if name_src_idx >= sources.len() {
+        return None;
+    }
+    let var_name =
+        &sources[name_src_idx][var_decl.name_span.start as usize..var_decl.name_span.end as usize];
+    if var_name.is_empty() {
+        return None;
+    }
+
+    let Some(Expression::Lambda {
+        parameters, body, ..
+    }) = &var_decl.initializer
+    else {
+        return None;
+    };
+
+    let (raw_statements, body_expr_only) = match body {
+        LambdaBody::Expression(expr) => (
+            vec![Statement::Return(
+                crate::phases::parser::statements::control_flow::ReturnStatement {
+                    span: var_decl.span,
+                    value: Some((**expr).clone()),
+                },
+            )],
+            true,
+        ),
+        LambdaBody::Block(block) => (block.statements.clone(), false),
+    };
+
+    if raw_statements.is_empty() || raw_statements.len() > inline_threshold {
+        return None;
+    }
+    if raw_statements.iter().any(statement_has_lambda) {
+        return None;
+    }
+
+    let return_type_annotation = match &var_decl.var_type {
+        TypeAnnotation::FunctionPointer { return_type, .. } => (**return_type).clone(),
+        other => other.clone(),
+    };
+    let is_void = matches!(
+        &return_type_annotation,
+        TypeAnnotation::Primitive { span: type_span, .. }
+            if (type_span.id as usize) < sources.len()
+                && &sources[type_span.id as usize]
+                    [type_span.start as usize..type_span.end as usize]
+                    == "void"
+    );
+
+    let effective_statements = if body_expr_only {
+        raw_statements
+    } else if is_void {
+        if raw_statements.iter().any(statement_has_return) {
+            return None;
+        }
+        raw_statements
+    } else {
+        let Some(Statement::Return(_)) = raw_statements.last() else {
+            return None;
+        };
+        let count = raw_statements.len();
+        if count > 1 && raw_statements[..count - 1].iter().any(statement_has_return) {
+            let flattened = try_flatten_guard_returns(&raw_statements)?;
+            vec![Statement::Return(
+                crate::phases::parser::statements::control_flow::ReturnStatement {
+                    span: var_decl.span,
+                    value: Some(flattened),
+                },
+            )]
+        } else {
+            raw_statements
+        }
+    };
+
+    if effective_statements
+        .iter()
+        .any(|stmt| statement_calls_symbol(stmt, sources, var_name))
+    {
+        return None;
+    }
+
+    let fp_param_types: Option<&[TypeAnnotation]> = match &var_decl.var_type {
+        TypeAnnotation::FunctionPointer { parameters, .. } => Some(parameters.as_slice()),
+        _ => None,
+    };
+
+    let mut parameter_names = Vec::with_capacity(parameters.len());
+    let mut parameter_types = Vec::with_capacity(parameters.len());
+    let mut param_name_set = HashSet::new();
+    for (param_idx, param) in parameters.iter().enumerate() {
+        let param_src = param.name_span.id as usize;
+        if param_src >= sources.len() {
+            return None;
+        }
+        let param_name =
+            &sources[param_src][param.name_span.start as usize..param.name_span.end as usize];
+        let param_type = fp_param_types
+            .and_then(|fp_list| fp_list.get(param_idx))
+            .unwrap_or(&param.param_type)
+            .clone();
+        param_name_set.insert(param_name.to_string());
+        parameter_names.push(param_name.to_string());
+        parameter_types.push(param_type);
+    }
+
+    let mut local_decl_names = Vec::new();
+    collect_local_variable_names(&effective_statements, sources, &mut local_decl_names);
+    let mut bound_names = param_name_set;
+    for local_name in local_decl_names {
+        bound_names.insert(local_name);
+    }
+
+    let mut mutated_idents = HashSet::new();
+    let mut escaped_idents = HashSet::new();
+    collect_mutated_and_non_callee_idents(statements, sources, &mut mutated_idents, &mut escaped_idents);
+    if mutated_idents.contains(var_name) || escaped_idents.contains(var_name) {
+        return None;
+    }
+
+    let mut body_idents = HashSet::new();
+    for stmt in &effective_statements {
+        collect_all_idents_in_statement(stmt, sources, &mut body_idents);
+    }
+    for body_ident in &body_idents {
+        if !bound_names.contains(body_ident) && mutated_idents.contains(body_ident) {
+            return None;
+        }
+    }
+
+    Some((
+        var_name.to_string(),
+        InlinableFunctionInfo {
+            parameter_names,
+            parameter_types,
+            return_type_annotation,
+            body_statements: effective_statements,
+            has_this_receiver: false,
+        },
+    ))
+}
+
+fn collect_mutated_and_non_callee_idents(
+    statements: &[Statement],
+    sources: &[String],
+    mutated: &mut HashSet<String>,
+    non_callee_uses: &mut HashSet<String>,
+) {
+    for stmt in statements {
+        collect_stmt_mutated_and_non_callee(stmt, sources, mutated, non_callee_uses);
+    }
+}
+
+fn collect_stmt_mutated_and_non_callee(
+    stmt: &Statement,
+    sources: &[String],
+    mutated: &mut HashSet<String>,
+    non_callee_uses: &mut HashSet<String>,
+) {
+    match stmt {
+        Statement::Block(block) => {
+            collect_mutated_and_non_callee_idents(&block.statements, sources, mutated, non_callee_uses);
+        }
+        Statement::If(if_stmt) => {
+            collect_expr_mutated_and_non_callee(&if_stmt.condition, sources, mutated, non_callee_uses);
+            collect_stmt_mutated_and_non_callee(&if_stmt.then_branch, sources, mutated, non_callee_uses);
+            if let Some(else_branch) = &if_stmt.else_branch {
+                collect_stmt_mutated_and_non_callee(else_branch, sources, mutated, non_callee_uses);
+            }
+        }
+        Statement::While(while_stmt) => {
+            collect_expr_mutated_and_non_callee(&while_stmt.condition, sources, mutated, non_callee_uses);
+            collect_stmt_mutated_and_non_callee(&while_stmt.body, sources, mutated, non_callee_uses);
+        }
+        Statement::DoWhile(do_while) => {
+            collect_stmt_mutated_and_non_callee(&do_while.body, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(&do_while.condition, sources, mutated, non_callee_uses);
+        }
+        Statement::For(for_stmt) => {
+            if let Some(initializer) = &for_stmt.initializer {
+                collect_stmt_mutated_and_non_callee(initializer, sources, mutated, non_callee_uses);
+            }
+            if let Some(condition) = &for_stmt.condition {
+                collect_expr_mutated_and_non_callee(condition, sources, mutated, non_callee_uses);
+            }
+            if let Some(update) = &for_stmt.update {
+                collect_expr_mutated_and_non_callee(update, sources, mutated, non_callee_uses);
+            }
+            collect_stmt_mutated_and_non_callee(&for_stmt.body, sources, mutated, non_callee_uses);
+        }
+        Statement::Switch(switch_stmt) => {
+            collect_expr_mutated_and_non_callee(&switch_stmt.discriminant, sources, mutated, non_callee_uses);
+            for case in &switch_stmt.cases {
+                collect_expr_mutated_and_non_callee(&case.case_value, sources, mutated, non_callee_uses);
+                collect_mutated_and_non_callee_idents(&case.statements, sources, mutated, non_callee_uses);
+            }
+            if let Some(default_case) = &switch_stmt.default_case {
+                collect_mutated_and_non_callee_idents(default_case, sources, mutated, non_callee_uses);
+            }
+        }
+        Statement::Return(ret) => {
+            if let Some(value) = &ret.value {
+                collect_expr_mutated_and_non_callee(value, sources, mutated, non_callee_uses);
+            }
+        }
+        Statement::Throw(throw_stmt) => {
+            collect_expr_mutated_and_non_callee(&throw_stmt.expression, sources, mutated, non_callee_uses);
+        }
+        Statement::VariableDeclaration(var_decl) => {
+            if let Some(initializer) = &var_decl.initializer
+                && !matches!(initializer, Expression::Lambda { .. })
+            {
+                collect_expr_mutated_and_non_callee(initializer, sources, mutated, non_callee_uses);
+            }
+        }
+        Statement::Expression(expr_stmt) => {
+            collect_expr_mutated_and_non_callee(&expr_stmt.expression, sources, mutated, non_callee_uses);
+        }
+        Statement::Assert(assert_stmt) => {
+            collect_expr_mutated_and_non_callee(&assert_stmt.condition, sources, mutated, non_callee_uses);
+            if let Some(message) = &assert_stmt.message {
+                collect_expr_mutated_and_non_callee(message, sources, mutated, non_callee_uses);
+            }
+        }
+        Statement::Exit(exit_stmt) => {
+            collect_expr_mutated_and_non_callee(&exit_stmt.code, sources, mutated, non_callee_uses);
+        }
+        Statement::Try(try_stmt) => {
+            collect_mutated_and_non_callee_idents(&try_stmt.try_block.statements, sources, mutated, non_callee_uses);
+            for catch_clause in &try_stmt.catch_clauses {
+                collect_mutated_and_non_callee_idents(&catch_clause.block.statements, sources, mutated, non_callee_uses);
+            }
+            if let Some(finally_block) = &try_stmt.finally_block {
+                collect_mutated_and_non_callee_idents(&finally_block.statements, sources, mutated, non_callee_uses);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expr_mutated_and_non_callee(
+    expr: &Expression,
+    sources: &[String],
+    mutated: &mut HashSet<String>,
+    non_callee_uses: &mut HashSet<String>,
+) {
+    match expr {
+        Expression::Identifier { span } => {
+            let source_index = span.id as usize;
+            if source_index < sources.len() {
+                let ident_text =
+                    &sources[source_index][span.start as usize..span.end as usize];
+                non_callee_uses.insert(ident_text.to_string());
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            if let Expression::Identifier { span } = target.as_ref() {
+                let source_index = span.id as usize;
+                if source_index < sources.len() {
+                    let ident_text =
+                        &sources[source_index][span.start as usize..span.end as usize];
+                    mutated.insert(ident_text.to_string());
+                }
+            } else {
+                collect_expr_mutated_and_non_callee(target, sources, mutated, non_callee_uses);
+            }
+            collect_expr_mutated_and_non_callee(value, sources, mutated, non_callee_uses);
+        }
+        Expression::Unary {
+            operator, operand, ..
+        } => {
+            if matches!(
+                operator,
+                crate::phases::lexing::TokenKind::OperatorIncrement
+                    | crate::phases::lexing::TokenKind::OperatorDecrement
+            ) && let Expression::Identifier { span } = operand.as_ref()
+            {
+                let source_index = span.id as usize;
+                if source_index < sources.len() {
+                    let ident_text =
+                        &sources[source_index][span.start as usize..span.end as usize];
+                    mutated.insert(ident_text.to_string());
+                }
+            }
+            collect_expr_mutated_and_non_callee(operand, sources, mutated, non_callee_uses);
+        }
+        Expression::Binary { left, right, .. } => {
+            collect_expr_mutated_and_non_callee(left, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(right, sources, mutated, non_callee_uses);
+        }
+        Expression::MemberAccess { object, .. } => {
+            collect_expr_mutated_and_non_callee(object, sources, mutated, non_callee_uses);
+        }
+        Expression::MethodCall {
+            callee, arguments, ..
+        } => {
+            if !matches!(callee.as_ref(), Expression::Identifier { .. }) {
+                collect_expr_mutated_and_non_callee(callee, sources, mutated, non_callee_uses);
+            }
+            for arg in arguments {
+                collect_expr_mutated_and_non_callee(arg, sources, mutated, non_callee_uses);
+            }
+        }
+        Expression::ArrayAccess { array, index, .. } => {
+            collect_expr_mutated_and_non_callee(array, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(index, sources, mutated, non_callee_uses);
+        }
+        Expression::ArrayCreation { size, .. } => {
+            collect_expr_mutated_and_non_callee(size, sources, mutated, non_callee_uses);
+        }
+        Expression::ArrayLiteral { elements, .. }
+        | Expression::TupleCreation { elements, .. }
+        | Expression::NewInstance {
+            arguments: elements,
+            ..
+        } => {
+            for elem in elements {
+                collect_expr_mutated_and_non_callee(elem, sources, mutated, non_callee_uses);
+            }
+        }
+        Expression::Cast { expression: inner, .. }
+        | Expression::Instanceof { expression: inner, .. } => {
+            collect_expr_mutated_and_non_callee(inner, sources, mutated, non_callee_uses);
+        }
+        Expression::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_expr_mutated_and_non_callee(condition, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(then_branch, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(else_branch, sources, mutated, non_callee_uses);
+        }
+        Expression::Lambda { body, .. } => match body {
+            LambdaBody::Expression(body_expr) => {
+                collect_expr_mutated_and_non_callee(body_expr, sources, mutated, non_callee_uses);
+            }
+            LambdaBody::Block(block) => {
+                collect_mutated_and_non_callee_idents(&block.statements, sources, mutated, non_callee_uses);
+            }
+        },
+        Expression::Block {
+            statements, result, ..
+        } => {
+            collect_mutated_and_non_callee_idents(statements, sources, mutated, non_callee_uses);
+            if let Some(res) = result {
+                collect_expr_mutated_and_non_callee(res, sources, mutated, non_callee_uses);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_all_idents_in_statement(stmt: &Statement, sources: &[String], idents: &mut HashSet<String>) {
+    match stmt {
+        Statement::Block(block) => {
+            for inner in &block.statements {
+                collect_all_idents_in_statement(inner, sources, idents);
+            }
+        }
+        Statement::If(if_stmt) => {
+            collect_all_idents_in_expr(&if_stmt.condition, sources, idents);
+            collect_all_idents_in_statement(&if_stmt.then_branch, sources, idents);
+            if let Some(else_branch) = &if_stmt.else_branch {
+                collect_all_idents_in_statement(else_branch, sources, idents);
+            }
+        }
+        Statement::While(while_stmt) => {
+            collect_all_idents_in_expr(&while_stmt.condition, sources, idents);
+            collect_all_idents_in_statement(&while_stmt.body, sources, idents);
+        }
+        Statement::DoWhile(do_while) => {
+            collect_all_idents_in_statement(&do_while.body, sources, idents);
+            collect_all_idents_in_expr(&do_while.condition, sources, idents);
+        }
+        Statement::For(for_stmt) => {
+            if let Some(init) = &for_stmt.initializer {
+                collect_all_idents_in_statement(init, sources, idents);
+            }
+            if let Some(cond) = &for_stmt.condition {
+                collect_all_idents_in_expr(cond, sources, idents);
+            }
+            if let Some(upd) = &for_stmt.update {
+                collect_all_idents_in_expr(upd, sources, idents);
+            }
+            collect_all_idents_in_statement(&for_stmt.body, sources, idents);
+        }
+        Statement::Return(ret) => {
+            if let Some(val) = &ret.value {
+                collect_all_idents_in_expr(val, sources, idents);
+            }
+        }
+        Statement::VariableDeclaration(var_decl) => {
+            if let Some(init) = &var_decl.initializer {
+                collect_all_idents_in_expr(init, sources, idents);
+            }
+        }
+        Statement::Expression(expr_stmt) => {
+            collect_all_idents_in_expr(&expr_stmt.expression, sources, idents);
+        }
+        _ => {}
+    }
+}
+
+fn collect_all_idents_in_expr(expr: &Expression, sources: &[String], idents: &mut HashSet<String>) {
+    match expr {
+        Expression::Identifier { span } => {
+            let source_index = span.id as usize;
+            if source_index < sources.len() {
+                idents.insert(sources[source_index][span.start as usize..span.end as usize].to_string());
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            collect_all_idents_in_expr(left, sources, idents);
+            collect_all_idents_in_expr(right, sources, idents);
+        }
+        Expression::Unary { operand, .. } => collect_all_idents_in_expr(operand, sources, idents),
+        Expression::Assignment { target, value, .. } => {
+            collect_all_idents_in_expr(target, sources, idents);
+            collect_all_idents_in_expr(value, sources, idents);
+        }
+        Expression::MemberAccess { object, .. } => collect_all_idents_in_expr(object, sources, idents),
+        Expression::MethodCall {
+            callee, arguments, ..
+        } => {
+            collect_all_idents_in_expr(callee, sources, idents);
+            for arg in arguments {
+                collect_all_idents_in_expr(arg, sources, idents);
+            }
+        }
+        Expression::ArrayAccess { array, index, .. } => {
+            collect_all_idents_in_expr(array, sources, idents);
+            collect_all_idents_in_expr(index, sources, idents);
+        }
+        Expression::ArrayCreation { size, .. } => collect_all_idents_in_expr(size, sources, idents),
+        Expression::ArrayLiteral { elements, .. }
+        | Expression::TupleCreation { elements, .. }
+        | Expression::NewInstance {
+            arguments: elements,
+            ..
+        } => {
+            for elem in elements {
+                collect_all_idents_in_expr(elem, sources, idents);
+            }
+        }
+        Expression::Cast { expression: inner, .. }
+        | Expression::Instanceof { expression: inner, .. } => {
+            collect_all_idents_in_expr(inner, sources, idents);
+        }
+        Expression::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_all_idents_in_expr(condition, sources, idents);
+            collect_all_idents_in_expr(then_branch, sources, idents);
+            collect_all_idents_in_expr(else_branch, sources, idents);
+        }
+        Expression::Block {
+            statements, result, ..
+        } => {
+            for inner in statements {
+                collect_all_idents_in_statement(inner, sources, idents);
+            }
+            if let Some(res) = result {
+                collect_all_idents_in_expr(res, sources, idents);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Recursively transforms a statement slice, registering eligible local closures into a scoped inline map.
+fn transform_statement_list(
+    statements: &mut [Statement],
+    inlinable_functions: &HashMap<String, InlinableFunctionInfo>,
+    context: &mut CompilationContext,
+    call_counter: &mut usize,
+    depth: usize,
+    inline_threshold: usize,
+) {
+    let mut local_lambdas: Vec<(String, InlinableFunctionInfo)> = Vec::new();
+    for statement in statements.iter() {
+        if let Statement::VariableDeclaration(var_decl) = statement
+            && let Some(entry) =
+                try_collect_local_lambda(var_decl, statements, inline_threshold, &context.sources)
+        {
+            local_lambdas.push(entry);
+        }
+    }
+
+    if local_lambdas.is_empty() {
+        for statement in statements.iter_mut() {
+            transform_statement(
+                statement,
+                inlinable_functions,
+                context,
+                call_counter,
+                depth,
+            );
+        }
+    } else {
+        let mut scoped_map = inlinable_functions.clone();
+        for (lambda_name, lambda_info) in local_lambdas {
+            scoped_map.insert(lambda_name, lambda_info);
+        }
+        for statement in statements.iter_mut() {
+            transform_statement(statement, &scoped_map, context, call_counter, depth);
+        }
+    }
+}
+
 /// Recursively transforms statements, inlining candidate calls.
 fn transform_statement(
     statement: &mut Statement,
@@ -923,15 +1443,14 @@ fn transform_statement(
 
     match statement {
         Statement::Block(block) => {
-            for nested_statement in &mut block.statements {
-                transform_statement(
-                    nested_statement,
-                    inlinable_functions,
-                    context,
-                    call_counter,
-                    depth,
-                );
-            }
+            transform_statement_list(
+                &mut block.statements,
+                inlinable_functions,
+                context,
+                call_counter,
+                depth,
+                context.options.inline_threshold,
+            );
         }
         Statement::If(if_stmt) => {
             transform_expression(

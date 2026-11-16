@@ -87,6 +87,8 @@ pub struct RuntimeContext {
     pub flat_vtables: Vec<Box<[u32]>>,
     /// Compact `O(1)` interface method tables indexed by `[vtable_id][iface_id][slot]`.
     pub flat_itables: Vec<Box<[Box<[u32]>]>>,
+    /// Pre-computed static acyclicity flag per `vtable_id` (skips cycle collector purple push when `true`).
+    pub class_acyclic: Vec<bool>,
     /// Total static variable slots reserved across all loaded binaries.
     pub total_static_space: u32,
     /// Global function ID of the resolved program entry point, if available.
@@ -468,6 +470,7 @@ impl RuntimeContext {
                 flat_itables[class_idx] = iface_rows.into_boxed_slice();
             }
         }
+        let class_acyclic = compute_class_acyclicity(&vtable_lookup);
 
         let mut native_registry = NativeRegistry::with_builtins();
         for (native_name, native_callback) in &options.native_functions {
@@ -617,6 +620,7 @@ impl RuntimeContext {
             vtable_lookup,
             flat_vtables,
             flat_itables,
+            class_acyclic,
             total_static_space: current_static_offset,
             entry_point_function_id,
             init_function_ids,
@@ -629,6 +633,16 @@ impl RuntimeContext {
         self.vtable_lookup
             .get(vtable_id as usize)
             .and_then(Option::as_ref)
+    }
+
+    /// Returns `true` if instances of `vtable_id` cannot form ownership cycles on the reference graph.
+    #[inline(always)]
+    #[must_use]
+    pub fn is_class_acyclic(&self, vtable_id: u32) -> bool {
+        self.class_acyclic
+            .get(vtable_id as usize)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Resolves a function's global ID for entry point invocation using exact, package-qualified,
@@ -1015,4 +1029,101 @@ fn verify_and_resolve_runtime_dependencies(
     }
 
     Ok(())
+}
+
+/// Computes static acyclicity per `vtable_id`.
+///
+/// A class is guaranteed acyclic if it has no strong reference fields or every strong reference
+/// field strictly targets `String` (tag `13`) or statically acyclic concrete classes without
+/// untyped/unknown edges.
+fn compute_class_acyclicity(vtable_lookup: &[Option<CompiledClass>]) -> Vec<bool> {
+    let class_count = vtable_lookup.len();
+    let mut subtypes: Vec<Vec<usize>> = vec![Vec::new(); class_count];
+    for (class_idx, class_opt) in vtable_lookup.iter().enumerate() {
+        if let Some(class_entry) = class_opt
+            && let Some(base_id) = class_entry.base_vtable_id
+            && (base_id as usize) < class_count
+        {
+            subtypes[base_id as usize].push(class_idx);
+        }
+    }
+
+    let mut edges: Vec<Option<Vec<usize>>> = vec![None; class_count];
+    for (class_idx, class_opt) in vtable_lookup.iter().enumerate() {
+        let Some(class_entry) = class_opt else {
+            continue;
+        };
+        if class_entry.reference_field_offsets.is_empty() {
+            edges[class_idx] = Some(Vec::new());
+            continue;
+        }
+        let mut targets: Vec<usize> = Vec::new();
+        let mut all_known = true;
+        for &offset in &class_entry.reference_field_offsets {
+            match class_entry.get_field_type(offset) {
+                Some(13) => {}
+                Some(tag_val) if (tag_val & 0x80) != 0 => {
+                    let target_vid = (tag_val & 0x7F) as usize;
+                    if target_vid < class_count && vtable_lookup[target_vid].is_some() {
+                        let mut queue = vec![target_vid];
+                        while let Some(subclass_id) = queue.pop() {
+                            if !targets.contains(&subclass_id) {
+                                targets.push(subclass_id);
+                                queue.extend_from_slice(&subtypes[subclass_id]);
+                            }
+                        }
+                    } else {
+                        all_known = false;
+                        break;
+                    }
+                }
+                _ => {
+                    all_known = false;
+                    break;
+                }
+            }
+        }
+        if all_known {
+            edges[class_idx] = Some(targets);
+        }
+    }
+
+    fn check_acyclic(
+        node_idx: usize,
+        edges: &[Option<Vec<usize>>],
+        memo: &mut [Option<bool>],
+        visiting: &mut [bool],
+    ) -> bool {
+        if let Some(cached) = memo[node_idx] {
+            return cached;
+        }
+        if visiting[node_idx] {
+            return false;
+        }
+        let Some(ref target_list) = edges[node_idx] else {
+            memo[node_idx] = Some(false);
+            return false;
+        };
+        visiting[node_idx] = true;
+        let mut is_clean = true;
+        for &next_idx in target_list {
+            if !check_acyclic(next_idx, edges, memo, visiting) {
+                is_clean = false;
+                break;
+            }
+        }
+        visiting[node_idx] = false;
+        memo[node_idx] = Some(is_clean);
+        is_clean
+    }
+
+    let mut memo: Vec<Option<bool>> = vec![None; class_count];
+    let mut visiting = vec![false; class_count];
+    let mut acyclic = vec![false; class_count];
+    for class_idx in 0..class_count {
+        if vtable_lookup[class_idx].is_some() {
+            acyclic[class_idx] = check_acyclic(class_idx, &edges, &mut memo, &mut visiting);
+        }
+    }
+    acyclic
 }
