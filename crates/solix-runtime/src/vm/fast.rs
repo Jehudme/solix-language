@@ -403,20 +403,9 @@ fn shl_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
     Ok(Value::I64(read_i64_fast(left_ref)?.wrapping_shl(shift)))
 }
 
-#[inline(always)]
-fn decode_array_element(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> Value {
+#[inline(never)]
+fn decode_array_element_slow(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> Value {
     match elem_type_tag {
-        11 => Value::Bool(raw_word != 0),
-        10 => Value::F64(f64::from_bits(raw_word)),
-        3 => Value::I32(raw_word as i32),
-        0 => Value::from_raw_u64(raw_word),
-        13 | 0x80..=0xFF => {
-            if raw_word == 0 {
-                Value::Null
-            } else {
-                Value::Ref(raw_word as u32)
-            }
-        }
         1 => Value::I32(raw_word as i8 as i32),
         2 => Value::I32(raw_word as i16 as i32),
         4 | 8 => Value::I64(raw_word as i64),
@@ -432,6 +421,80 @@ fn decode_array_element(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> V
         }
         _ => Value::from_raw_u64(raw_word),
     }
+}
+
+#[inline(always)]
+fn decode_array_element(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> Value {
+    match elem_type_tag {
+        11 => Value::Bool(raw_word != 0),
+        10 => Value::F64(f64::from_bits(raw_word)),
+        3 => Value::I32(raw_word as i32),
+        0 => Value::from_raw_u64(raw_word),
+        13 | 0x80..=0xFF => {
+            if raw_word == 0 {
+                Value::Null
+            } else {
+                Value::Ref(raw_word as u32)
+            }
+        }
+        _ => decode_array_element_slow(elem_type_tag, elem_size, raw_word),
+    }
+}
+
+const fn build_mod_magic_table() -> [(u64, u32); 64] {
+    let mut table = [(0u64, 0u32); 64];
+    let mut divisor = 1usize;
+    while divisor < 64 {
+        let shift = 33 + divisor.ilog2();
+        let numerator = 1u64 << shift;
+        let div_u64 = divisor as u64;
+        let magic = if numerator.is_multiple_of(div_u64) {
+            numerator / div_u64
+        } else {
+            (numerator / div_u64) + 1
+        };
+        table[divisor] = (magic, shift);
+        divisor += 1;
+    }
+    table
+}
+
+const MOD_MAGIC_TABLE: [(u64, u32); 64] = build_mod_magic_table();
+
+#[cold]
+#[inline(never)]
+fn div_i32_cold(val_a: i32, val_b: i32) -> Result<i32, VmTrap> {
+    if val_b == 0 {
+        return Err(VmTrap::divide_by_zero());
+    }
+    Ok(val_a.wrapping_div(val_b))
+}
+
+#[cold]
+#[inline(never)]
+fn rem_i32_cold(val_a: i32, val_b: i32) -> Result<i32, VmTrap> {
+    if val_b == 0 {
+        return Err(VmTrap::divide_by_zero());
+    }
+    Ok(val_a.wrapping_rem(val_b))
+}
+
+#[cold]
+#[inline(never)]
+fn div_i64_cold(val_a: i64, val_b: i64) -> Result<i64, VmTrap> {
+    if val_b == 0 {
+        return Err(VmTrap::divide_by_zero());
+    }
+    Ok(val_a.wrapping_div(val_b))
+}
+
+#[cold]
+#[inline(never)]
+fn rem_i64_cold(val_a: i64, val_b: i64) -> Result<i64, VmTrap> {
+    if val_b == 0 {
+        return Err(VmTrap::divide_by_zero());
+    }
+    Ok(val_a.wrapping_rem(val_b))
 }
 
 #[cold]
@@ -498,6 +561,35 @@ impl VirtualMachine {
         if addr_left == 0 || addr_right == 0 {
             return Ok(false);
         }
+        let left_idx = addr_left as usize;
+        let right_idx = addr_right as usize;
+        let heap_len = self.heap.buffer.len();
+        if left_idx >= 8 && left_idx <= heap_len && right_idx >= 8 && right_idx <= heap_len {
+            // SAFETY: Both header words are verified in-bounds above.
+            let (len_left, len_right) = unsafe {
+                let ptr = self.heap.buffer.as_ptr();
+                (
+                    u32::from_le(std::ptr::read_unaligned(
+                        ptr.add(left_idx - 8).cast::<u32>(),
+                    )) as usize,
+                    u32::from_le(std::ptr::read_unaligned(
+                        ptr.add(right_idx - 8).cast::<u32>(),
+                    )) as usize,
+                )
+            };
+            if len_left != len_right {
+                return Ok(false);
+            }
+            if left_idx + len_left <= heap_len && right_idx + len_right <= heap_len {
+                // SAFETY: Both payload byte slices are verified in-bounds above.
+                unsafe {
+                    let ptr = self.heap.buffer.as_ptr();
+                    let left_slice = std::slice::from_raw_parts(ptr.add(left_idx), len_left);
+                    let right_slice = std::slice::from_raw_parts(ptr.add(right_idx), len_right);
+                    return Ok(left_slice == right_slice);
+                }
+            }
+        }
         let hdr_left = self.heap.read_header(addr_left)?;
         let hdr_right = self.heap.read_header(addr_right)?;
         if hdr_left.size != hdr_right.size {
@@ -538,6 +630,44 @@ impl VirtualMachine {
         self.arc_cycle_collector_candidates += 1;
         if self.purple_buffer.len() >= self.cycle_threshold {
             self.collect_cycles()?;
+        }
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn maybe_push_cycle_candidate(
+        &mut self,
+        addr: u32,
+        tag_and_ref: u32,
+        tag_nibble: u8,
+        decremented: u32,
+    ) -> Result<(), VmTrap> {
+        if (tag_nibble == BlockTag::Object as u8
+            || tag_nibble == BlockTag::ArrayRef as u8
+            || tag_nibble == BlockTag::Tuple as u8
+            || tag_nibble == BlockTag::Closure as u8)
+            && ((tag_and_ref >> 26) & 0x03) != 3
+        {
+            let needs_cycle_check = if tag_nibble == BlockTag::Object as u8 {
+                let addr_usize = addr as usize;
+                if addr_usize + 4 <= self.heap.buffer.len() {
+                    // SAFETY: addr_usize + 4 <= self.heap.buffer.len() verified above.
+                    let vtable_id = unsafe {
+                        u32::from_le(std::ptr::read_unaligned(
+                            self.heap.buffer.as_ptr().add(addr_usize).cast::<u32>(),
+                        ))
+                    };
+                    !self.context.is_class_acyclic(vtable_id)
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+            if needs_cycle_check {
+                self.push_purple_candidate_cold(addr, decremented)?;
+            }
         }
         Ok(())
     }
@@ -677,17 +807,275 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn execute_call_symbol(
+    fn execute_get_field_slow(
+        &self,
+        obj_addr: u32,
+        offset: usize,
+        raw_flags: u8,
+    ) -> Result<Value, VmTrap> {
+        let field_addr = obj_addr + offset as u32;
+        let field_type_tag = if raw_flags > 1 {
+            Some(raw_flags >> 1)
+        } else {
+            let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+            self.context
+                .get_class_by_vtable_id(vtable_id)
+                .and_then(|cls| cls.get_field_type(offset))
+        };
+
+        let val = match field_type_tag {
+            Some(1) => Value::I32(self.heap.read_u8(field_addr).unwrap_or(0) as i8 as i32),
+            Some(2) => Value::I32(self.heap.read_u8(field_addr).unwrap_or(0) as i32),
+            Some(3) => Value::I32(self.heap.read_u16(field_addr).unwrap_or(0) as i16 as i32),
+            Some(4) => Value::I32(self.heap.read_u16(field_addr).unwrap_or(0) as i32),
+            Some(5) | Some(6) => Value::I32(self.heap.read_u32(field_addr).unwrap_or(0) as i32),
+            Some(7) | Some(8) => Value::I64(self.heap.read_u64(field_addr).unwrap_or(0) as i64),
+            Some(9) => {
+                Value::F64(f32::from_bits(self.heap.read_u32(field_addr).unwrap_or(0)) as f64)
+            }
+            Some(10) => Value::F64(f64::from_bits(self.heap.read_u64(field_addr).unwrap_or(0))),
+            Some(11) => Value::Bool(self.heap.read_u8(field_addr).unwrap_or(0) != 0),
+            Some(12) => {
+                let raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                if raw == 0 || raw == Value::TAG_NULL {
+                    Value::Null
+                } else {
+                    Value::from_raw_u64(raw)
+                }
+            }
+            _ => {
+                let raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                if raw == 0 {
+                    let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                    let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
+                    let is_ref = maybe_class.is_some_and(|cls| {
+                        cls.reference_field_offsets.contains(&offset)
+                            || cls.weak_field_offsets.contains(&offset)
+                    });
+                    if is_ref { Value::Null } else { Value::I32(0) }
+                } else {
+                    Value::from_raw_u64(raw)
+                }
+            }
+        };
+        Ok(val)
+    }
+
+    #[inline(never)]
+    fn execute_set_field_slow(
         &mut self,
-        inst: Instruction,
+        obj_addr: u32,
+        offset: usize,
+        raw_flags: u8,
+        val_ref: &Value,
         pc: usize,
-        binary_id: usize,
-    ) -> Result<(), VmTrap> {
+    ) -> Result<bool, VmTrap> {
+        let field_addr = obj_addr + offset as u32;
+        let is_weak = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
+        let tag_shifted = raw_flags >> 1;
+        let field_type_tag = if tag_shifted > 0 {
+            Some(tag_shifted)
+        } else {
+            let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+            self.context
+                .get_class_by_vtable_id(vtable_id)
+                .and_then(|cls| cls.get_field_type(offset))
+        };
+
+        match field_type_tag {
+            Some(1) | Some(2) => {
+                let _ = self
+                    .heap
+                    .write_u8(field_addr, read_i32_fast(val_ref)? as u8);
+            }
+            Some(3) | Some(4) => {
+                let _ = self
+                    .heap
+                    .write_u16(field_addr, read_i32_fast(val_ref)? as u16);
+            }
+            Some(5) | Some(6) => {
+                let _ = self
+                    .heap
+                    .write_u32(field_addr, read_i32_fast(val_ref)? as u32);
+            }
+            Some(7) | Some(8) => {
+                let _ = self
+                    .heap
+                    .write_u64(field_addr, read_i64_fast(val_ref)? as u64);
+            }
+            Some(9) => {
+                let bits = (read_f64_fast(val_ref)? as f32).to_bits();
+                let _ = self.heap.write_u32(field_addr, bits);
+            }
+            Some(10) => {
+                let bits = read_f64_fast(val_ref)?.to_bits();
+                let _ = self.heap.write_u64(field_addr, bits);
+            }
+            Some(11) => {
+                let _ = self
+                    .heap
+                    .write_u8(field_addr, if read_bool_fast(val_ref)? { 1 } else { 0 });
+            }
+            _ => {
+                let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                let old_val = Value::from_raw_u64(old_raw);
+                self.heap.write_u64(field_addr, val_ref.to_raw_u64())?;
+                if let Value::Ref(child_addr) = *val_ref
+                    && !is_weak
+                    && child_addr > 0
+                {
+                    crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                }
+                if let Value::Ref(old_child) = old_val
+                    && !is_weak
+                    && old_child > 0
+                {
+                    let caller_frame = self.current_frame_mut_fast()?;
+                    caller_frame.pc = pc as u32;
+                    self.release_reference_cold(old_child)?;
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn execute_set_array_slow(
+        &mut self,
+        elem_offset: usize,
+        elem_size: usize,
+        elem_type_tag: u8,
+        val: Value,
+        pc: usize,
+    ) -> Result<bool, VmTrap> {
+        let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+        let buf_ptr = self.heap.buffer.as_mut_ptr();
+        // SAFETY: Caller verified elem_offset + elem_size <= self.heap.buffer.len().
+        let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
+        let old_child = if is_reference_element {
+            unsafe { u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>())) }
+        } else {
+            0
+        };
+
+        if elem_type_tag == 0 {
+            let encoded_word = val.to_raw_u64().to_le();
+            unsafe {
+                std::ptr::write_unaligned(elem_ptr.cast::<u64>(), encoded_word);
+            }
+        } else {
+            let primitive_val = val.to_primitive_u64();
+            match elem_size {
+                1 => unsafe {
+                    *elem_ptr = primitive_val as u8;
+                },
+                2 => unsafe {
+                    std::ptr::write_unaligned(
+                        elem_ptr.cast::<u16>(),
+                        (primitive_val as u16).to_le(),
+                    );
+                },
+                4 => unsafe {
+                    std::ptr::write_unaligned(
+                        elem_ptr.cast::<u32>(),
+                        (primitive_val as u32).to_le(),
+                    );
+                },
+                _ => unsafe {
+                    std::ptr::write_unaligned(elem_ptr.cast::<u64>(), primitive_val.to_le());
+                },
+            }
+        }
+
+        if is_reference_element {
+            if let Value::Ref(child_addr) = val
+                && child_addr > 0
+            {
+                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+            }
+            if old_child > 0 {
+                let caller_frame = self.current_frame_mut_fast()?;
+                caller_frame.pc = pc as u32;
+                self.release_reference_cold(old_child)?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn invoke_native_call_id(
+        &mut self,
+        global_func_id: u32,
+        caller_dst: u16,
+        caller_arg_start: usize,
+        arg_count: usize,
+    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
+        let Some(meta) = self.context.function_meta.get(global_func_id as usize) else {
+            return Err(function_not_found_error(global_func_id));
+        };
+        let Some(native_callback) = meta.native_fn else {
+            return self.push_frame_window(global_func_id, caller_dst, caller_arg_start, arg_count);
+        };
+        let call_result =
+            self.invoke_native_callback_fast(native_callback, caller_arg_start, arg_count)?;
+        let (caller_func_id, resume_pc, caller_reg_base_offset) = {
+            let caller = self.current_frame_fast()?;
+            (
+                caller.function_id as usize,
+                caller.pc as usize,
+                caller.register_base as usize,
+            )
+        };
+        let code_span = self.func_code[caller_func_id];
+        // SAFETY: caller_reg_base_offset is within register_stack and caller_dst within frame window.
+        let caller_reg_base = unsafe {
+            let ptr = self.register_stack.as_mut_ptr().add(caller_reg_base_offset);
+            *ptr.add(caller_dst as usize) = call_result;
+            ptr
+        };
+        Ok((
+            code_span.inst_ptr,
+            code_span.inst_len,
+            resume_pc,
+            caller_reg_base,
+        ))
+    }
+
+    #[inline(never)]
+    fn dispatch_call_id(
+        &mut self,
+        global_func_id: u32,
+        caller_dst: u16,
+        caller_arg_start: usize,
+        arg_count: usize,
+    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
+        let Some(span) = self.func_code.get(global_func_id as usize).copied() else {
+            return Err(function_not_found_error(global_func_id));
+        };
+        if span.is_native {
+            return self.invoke_native_call_id(
+                global_func_id,
+                caller_dst,
+                caller_arg_start,
+                arg_count,
+            );
+        }
+        self.push_frame_window(global_func_id, caller_dst, caller_arg_start, arg_count)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn execute_call_symbol(&mut self, inst: Instruction, pc: usize) -> Result<(), VmTrap> {
         let const_idx = inst.call_target() as usize;
         let arg_base = inst.arg_base();
         let arg_count = inst.arg_count() as usize;
         let caller_dst = inst.call_dst();
         let caller_pc = pc.saturating_sub(1);
+        let binary_id = self.current_frame_fast()?.binary_id as usize;
 
         let sym_str = self
             .resolve_constant_pool_symbol(binary_id, const_idx)?
@@ -696,7 +1084,7 @@ impl VirtualMachine {
         let caller_frame = self.current_frame_mut()?;
         caller_frame.pc = pc as u32;
         let caller_func_id = caller_frame.function_id;
-        let caller_arg_start = caller_frame.register_base + arg_base as usize;
+        let caller_arg_start = caller_frame.register_base as usize + arg_base as usize;
 
         let clean_sym = sym_str.split('(').next().unwrap_or(&sym_str);
         let mangled_sym = clean_sym.replace("::", "_");
@@ -712,7 +1100,7 @@ impl VirtualMachine {
         if let Some(native_fn) = native_candidate {
             let call_result =
                 self.invoke_native_callback_fast(native_fn, caller_arg_start, arg_count)?;
-            let target_base = self.current_frame()?.register_base;
+            let target_base = self.current_frame()?.register_base as usize;
             self.register_stack[target_base + caller_dst as usize] = call_result;
             if let Some(&global_id) = self.context.symbol_to_function_id.get(&sym_str) {
                 let quickened = Instruction::format_call(
@@ -770,17 +1158,13 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn execute_call_extern(
-        &mut self,
-        inst: Instruction,
-        pc: usize,
-        binary_id: usize,
-    ) -> Result<(), VmTrap> {
+    fn execute_call_extern(&mut self, inst: Instruction, pc: usize) -> Result<(), VmTrap> {
         let const_idx = inst.call_target() as usize;
         let arg_base = inst.arg_base();
         let arg_count = inst.arg_count() as usize;
         let caller_dst = inst.call_dst();
         let caller_pc = pc.saturating_sub(1);
+        let binary_id = self.current_frame_fast()?.binary_id as usize;
 
         let sym_str = self
             .resolve_constant_pool_symbol(binary_id, const_idx)?
@@ -789,12 +1173,12 @@ impl VirtualMachine {
         let caller_frame = self.current_frame_mut()?;
         caller_frame.pc = pc as u32;
         let caller_func_id = caller_frame.function_id;
-        let caller_arg_start = caller_frame.register_base + arg_base as usize;
+        let caller_arg_start = caller_frame.register_base as usize + arg_base as usize;
 
         if let Some(&native_fn) = self.native_registry.get(&sym_str) {
             let call_result =
                 self.invoke_native_callback_fast(native_fn, caller_arg_start, arg_count)?;
-            let target_base = self.current_frame()?.register_base;
+            let target_base = self.current_frame()?.register_base as usize;
             self.register_stack[target_base + caller_dst as usize] = call_result;
             return Ok(());
         }
@@ -833,7 +1217,7 @@ impl VirtualMachine {
             {
                 let call_result =
                     self.invoke_native_callback_fast(native_fn, caller_arg_start, arg_count)?;
-                let target_base = self.current_frame()?.register_base;
+                let target_base = self.current_frame()?.register_base as usize;
                 self.register_stack[target_base + caller_dst as usize] = call_result;
                 return Ok(());
             }
@@ -849,9 +1233,11 @@ impl VirtualMachine {
         &mut self,
         inst: Instruction,
         pc: usize,
-        binary_id: usize,
     ) -> Result<Value, RuntimeError> {
-        let caller_func_id = self.current_frame()?.function_id;
+        let (caller_func_id, binary_id) = {
+            let frame = self.current_frame()?;
+            (frame.function_id, frame.binary_id as usize)
+        };
         let caller_pc = pc.saturating_sub(1);
         let pool_idx = inst.imm32() as usize;
         let (vtable_id, size) = {
@@ -897,9 +1283,11 @@ impl VirtualMachine {
         &mut self,
         inst: Instruction,
         pc: usize,
-        binary_id: usize,
     ) -> Result<Value, RuntimeError> {
-        let caller_func_id = self.current_frame()?.function_id;
+        let (caller_func_id, binary_id) = {
+            let frame = self.current_frame()?;
+            (frame.function_id, frame.binary_id as usize)
+        };
         let caller_pc = pc.saturating_sub(1);
         let pool_idx = inst.imm32() as usize;
         let resolved_slot = {
@@ -920,10 +1308,12 @@ impl VirtualMachine {
         &mut self,
         inst: Instruction,
         pc: usize,
-        binary_id: usize,
         val_to_set: Value,
     ) -> Result<(), RuntimeError> {
-        let caller_func_id = self.current_frame()?.function_id;
+        let (caller_func_id, binary_id) = {
+            let frame = self.current_frame()?;
+            (frame.function_id, frame.binary_id as usize)
+        };
         let caller_pc = pc.saturating_sub(1);
         let pool_idx = inst.imm32() as usize;
         let resolved_slot = {
@@ -1023,7 +1413,7 @@ impl VirtualMachine {
         cap_base: usize,
         cap_count: usize,
     ) -> Result<Value, RuntimeError> {
-        let frame_base = self.current_frame()?.register_base;
+        let frame_base = self.current_frame()?.register_base as usize;
         let payload_size = 8 + cap_count * 16;
         let payload_addr = self.heap.allocate(payload_size, BlockTag::Closure)?;
         self.heap.write_u32(payload_addr, target_lambda_id)?;
@@ -1051,9 +1441,10 @@ impl VirtualMachine {
         capture_count: usize,
     ) -> Result<(), RuntimeError> {
         let frame = self.current_frame()?;
-        let frame_base = frame.register_base;
+        let frame_base = frame.register_base as usize;
         let closure_addr = frame
             .active_closure
+            .map(std::num::NonZeroU32::get)
             .ok_or_else(Self::null_reference_error)?;
 
         for index in 0..capture_count {
@@ -1216,7 +1607,7 @@ impl VirtualMachine {
                     0
                 };
                 let curr_frame = self.current_frame_fast()?;
-                let curr_reg_base = curr_frame.register_base;
+                let curr_reg_base = curr_frame.register_base as usize;
                 for &register_index in &handler.try_ref_regs {
                     if register_index != handler.catch_reg {
                         let reg_val = self.register_stack[curr_reg_base + register_index as usize];
@@ -1238,7 +1629,7 @@ impl VirtualMachine {
             }
 
             let curr_frame = self.current_frame_fast()?;
-            let curr_reg_base = curr_frame.register_base;
+            let curr_reg_base = curr_frame.register_base as usize;
             let ref_regs = func.reference_registers.clone();
             for ref_reg in ref_regs {
                 let reg_val = self.register_stack[curr_reg_base + ref_reg as usize];
@@ -1278,15 +1669,15 @@ impl VirtualMachine {
         }
     }
 
-    /// Fast-path frame activation: pushes the call frame and returns cached window pointers.
-    #[inline(always)]
+    /// Out-of-line frame activation handling stack growth, reference register clearing, and frame push.
+    #[inline(never)]
     fn push_frame_window(
         &mut self,
         function_id: u32,
         caller_dst: u16,
         caller_arg_start: usize,
         arg_count: usize,
-    ) -> Result<(*const Instruction, usize, u32, usize, *mut Value), VmTrap> {
+    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
         if self.call_frames.len() >= self.context.options.max_call_stack_depth {
             return Err(stack_overflow_error(
                 self.call_frames.len(),
@@ -1295,22 +1686,21 @@ impl VirtualMachine {
         }
 
         let func_index = function_id as usize;
-        let meta = self
-            .context
-            .function_meta
+        let code_span = self
+            .func_code
             .get(func_index)
+            .copied()
             .ok_or_else(|| function_not_found_error(function_id))?;
-        let code_span = self.func_code[func_index];
-        let binary_id = meta.binary_id;
-        let func_id_offset = meta.func_id_offset;
-        let has_references = meta.has_references;
-        let static_base = meta.static_base_offset;
+        let binary_id = code_span.binary_id as usize;
+        let func_id_offset = code_span.func_id_offset;
+        let has_references = code_span.has_references;
+        let static_base = code_span.static_base_offset;
         let inst_ptr = code_span.inst_ptr;
         let inst_len = code_span.inst_len;
-        let num_regs = (meta.num_registers as usize).max(arg_count);
+        let num_regs = (code_span.num_registers as usize).max(arg_count);
 
         let caller_frame_end = self.call_frames.last().map_or(0, |last_frame| {
-            last_frame.register_base + last_frame.register_count
+            last_frame.register_base as usize + last_frame.register_count as usize
         });
         // Slide the register window in-place only when the argument slice sits at the top of
         // the caller's live register frame; otherwise allocate above caller_frame_end and copy.
@@ -1332,11 +1722,18 @@ impl VirtualMachine {
             // and reg_base + arg_count <= required_regs <= self.register_stack.len().
             unsafe {
                 let stack_ptr = self.register_stack.as_mut_ptr();
-                std::ptr::copy_nonoverlapping(
-                    stack_ptr.add(caller_arg_start),
-                    stack_ptr.add(reg_base),
-                    arg_count,
-                );
+                if arg_count == 1 {
+                    *stack_ptr.add(reg_base) = *stack_ptr.add(caller_arg_start);
+                } else if arg_count == 2 {
+                    *stack_ptr.add(reg_base) = *stack_ptr.add(caller_arg_start);
+                    *stack_ptr.add(reg_base + 1) = *stack_ptr.add(caller_arg_start + 1);
+                } else {
+                    std::ptr::copy_nonoverlapping(
+                        stack_ptr.add(caller_arg_start),
+                        stack_ptr.add(reg_base),
+                        arg_count,
+                    );
+                }
             }
         }
 
@@ -1367,7 +1764,19 @@ impl VirtualMachine {
         }
         // SAFETY: reg_base + num_regs <= self.register_stack.len() was ensured above.
         let reg_base_ptr = unsafe { self.register_stack.as_mut_ptr().add(reg_base) };
-        Ok((inst_ptr, inst_len, static_base, binary_id, reg_base_ptr))
+        Ok((inst_ptr, inst_len, 0, reg_base_ptr))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn dispatch_call_slow(
+        &mut self,
+        global_func_id: u32,
+        caller_dst: u16,
+        caller_arg_start: usize,
+        arg_count: usize,
+    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
+        self.dispatch_call_id(global_func_id, caller_dst, caller_arg_start, arg_count)
     }
 
     /// High-performance instruction dispatch loop using raw-pointer caching and local register windows.
@@ -1412,8 +1821,6 @@ impl VirtualMachine {
         let mut inst_ptr: *const Instruction;
         let mut inst_len: usize;
         let mut pc: usize;
-        let mut static_base: u32;
-        let mut binary_id: usize;
         let mut reg_base: *mut Value;
         let mut local_inst_count: u64 = 0;
 
@@ -1424,9 +1831,7 @@ impl VirtualMachine {
                 inst_ptr = code_span.inst_ptr;
                 inst_len = code_span.inst_len;
                 pc = curr.pc as usize;
-                static_base = curr.static_base_offset;
-                binary_id = curr.binary_id;
-                let curr_reg_base = curr.register_base;
+                let curr_reg_base = curr.register_base as usize;
                 // SAFETY: curr.register_base is guaranteed within register_stack bounds
                 reg_base = unsafe { self.register_stack.as_mut_ptr().add(curr_reg_base) };
             };
@@ -1468,9 +1873,7 @@ impl VirtualMachine {
                 inst_ptr = code_span.inst_ptr;
                 inst_len = code_span.inst_len;
                 pc = caller_frame.pc as usize;
-                static_base = caller_frame.static_base_offset;
-                binary_id = caller_frame.binary_id;
-                let caller_reg_offset = caller_frame.register_base;
+                let caller_reg_offset = caller_frame.register_base as usize;
                 // SAFETY: caller_dst is within caller frame register window
                 unsafe {
                     let caller_reg_base = self.register_stack.as_mut_ptr().add(caller_reg_offset);
@@ -1541,6 +1944,7 @@ impl VirtualMachine {
                 }
 
                 OpCode::LoadF64 => {
+                    let binary_id = self.current_frame_fast()?.binary_id as usize;
                     let idx = inst.imm32() as usize;
                     let val = self.const_pool_cache[binary_id][idx];
                     // SAFETY: Destination register is within frame window
@@ -1550,6 +1954,7 @@ impl VirtualMachine {
                 }
 
                 OpCode::LoadConst => {
+                    let binary_id = self.current_frame_fast()?.binary_id as usize;
                     let pool_idx = inst.imm32() as usize;
                     let const_val = self.const_pool_cache[binary_id][pool_idx];
                     // SAFETY: Destination register is within frame window
@@ -1648,22 +2053,18 @@ impl VirtualMachine {
                 OpCode::DivI32 => {
                     let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    if val_b == 0 {
-                        return Err(VmTrap::divide_by_zero());
-                    }
+                    let quotient = div_i32_cold(val_a, val_b)?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_div(val_b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(quotient);
                     }
                 }
 
                 OpCode::DivI64 => {
                     let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    if val_b == 0 {
-                        return Err(VmTrap::divide_by_zero());
-                    }
+                    let quotient = div_i64_cold(val_a, val_b)?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_div(val_b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(quotient);
                     }
                 }
 
@@ -1682,22 +2083,18 @@ impl VirtualMachine {
                 OpCode::ModI32 => {
                     let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    if val_b == 0 {
-                        return Err(VmTrap::divide_by_zero());
-                    }
+                    let rem_val = rem_i32_cold(val_a, val_b)?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_rem(val_b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
                     }
                 }
 
                 OpCode::ModI64 => {
                     let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    if val_b == 0 {
-                        return Err(VmTrap::divide_by_zero());
-                    }
+                    let rem_val = rem_i64_cold(val_a, val_b)?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_rem(val_b));
+                        *reg_base.add(inst.dst() as usize) = Value::I64(rem_val);
                     }
                 }
 
@@ -1859,7 +2256,13 @@ impl VirtualMachine {
                     let addr_left = read_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let addr_right =
                         read_ref_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let is_equal = self.compare_heap_strings(addr_left, addr_right)?;
+                    let is_equal = if addr_left == addr_right {
+                        true
+                    } else if addr_left == 0 || addr_right == 0 {
+                        false
+                    } else {
+                        self.compare_heap_strings(addr_left, addr_right)?
+                    };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
                     }
@@ -1923,7 +2326,13 @@ impl VirtualMachine {
                     let addr_left = read_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let addr_right =
                         read_ref_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let is_equal = self.compare_heap_strings(addr_left, addr_right)?;
+                    let is_equal = if addr_left == addr_right {
+                        true
+                    } else if addr_left == 0 || addr_right == 0 {
+                        false
+                    } else {
+                        self.compare_heap_strings(addr_left, addr_right)?
+                    };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
                     }
@@ -2097,81 +2506,110 @@ impl VirtualMachine {
                 // =============================================================
                 OpCode::CallDirect => {
                     let global_func_id = inst.call_target() as u32;
-                    let arg_base = inst.arg_base();
+                    let arg_base = inst.arg_base() as usize;
                     let arg_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst();
 
                     let caller_frame = self.current_frame_mut_fast()?;
                     caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+                    let caller_reg_base = caller_frame.register_base as usize;
+                    let caller_frame_end = caller_reg_base + caller_frame.register_count as usize;
+                    let caller_arg_start = caller_reg_base + arg_base;
 
-                    let meta = &self.context.function_meta[global_func_id as usize];
-                    if let Some(native_callback) = meta.native_fn {
-                        flush_inst_count!();
-                        let call_result = self.invoke_native_callback_fast(
-                            native_callback,
-                            caller_arg_start,
-                            arg_count,
-                        )?;
-                        reload_frame!();
-                        unsafe {
-                            *reg_base.add(caller_dst as usize) = call_result;
+                    let span = *self
+                        .func_code
+                        .get(global_func_id as usize)
+                        .ok_or_else(|| function_not_found_error(global_func_id))?;
+                    let num_regs = (span.num_registers as usize).max(arg_count);
+                    let (new_reg_base, needs_arg_copy) =
+                        if arg_count > 0 && caller_arg_start + arg_count >= caller_frame_end {
+                            (caller_arg_start, false)
+                        } else {
+                            (caller_frame_end, arg_count > 0)
+                        };
+                    let required_regs = new_reg_base + num_regs;
+
+                    if !span.is_native
+                        && !span.has_references
+                        && required_regs <= self.register_stack.len()
+                        && arg_count <= 2
+                        && self.call_frames.len() < self.context.options.max_call_stack_depth
+                    {
+                        if needs_arg_copy {
+                            // SAFETY: caller_arg_start..caller_arg_start + arg_count is in caller frame
+                            // and new_reg_base + arg_count <= required_regs <= register_stack.len().
+                            unsafe {
+                                let stack_ptr = self.register_stack.as_mut_ptr();
+                                *stack_ptr.add(new_reg_base) = *stack_ptr.add(caller_arg_start);
+                                if arg_count == 2 {
+                                    *stack_ptr.add(new_reg_base + 1) =
+                                        *stack_ptr.add(caller_arg_start + 1);
+                                }
+                            }
                         }
-                        finish_instruction!();
-                        continue;
-                    }
-
-                    (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
-                        .push_frame_window(
+                        // SAFETY: new_reg_base + num_regs <= register_stack.len() checked above.
+                        reg_base = unsafe { self.register_stack.as_mut_ptr().add(new_reg_base) };
+                        self.call_frames.push(CallFrame::new(
+                            global_func_id,
+                            span.binary_id as usize,
+                            new_reg_base,
+                            num_regs,
+                            span.static_base_offset,
+                            span.func_id_offset,
+                            caller_dst,
+                        ));
+                        self.peak_call_stack_depth =
+                            self.peak_call_stack_depth.max(self.call_frames.len());
+                        inst_ptr = span.inst_ptr;
+                        inst_len = span.inst_len;
+                        pc = 0;
+                    } else {
+                        if span.is_native {
+                            flush_inst_count!();
+                        }
+                        (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_slow(
                             global_func_id,
                             caller_dst,
                             caller_arg_start,
                             arg_count,
                         )?;
-                    pc = 0;
+                    }
                     finish_instruction!();
                     continue;
                 }
 
                 OpCode::CallNativeDirect => {
-                    let global_func_id = inst.call_target() as usize;
-                    let arg_base = inst.arg_base();
+                    let global_func_id = inst.call_target() as u32;
+                    let arg_base = inst.arg_base() as usize;
                     let arg_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst();
 
                     let caller_frame = self.current_frame_mut_fast()?;
                     caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
 
-                    let meta = &self.context.function_meta[global_func_id];
-                    if let Some(native_callback) = meta.native_fn {
-                        flush_inst_count!();
-                        let call_result = self.invoke_native_callback_fast(
-                            native_callback,
-                            caller_arg_start,
-                            arg_count,
-                        )?;
-                        reload_frame!();
-                        unsafe {
-                            *reg_base.add(caller_dst as usize) = call_result;
-                        }
-                    }
+                    flush_inst_count!();
+                    (inst_ptr, inst_len, pc, reg_base) = self.invoke_native_call_id(
+                        global_func_id,
+                        caller_dst,
+                        caller_arg_start,
+                        arg_count,
+                    )?;
                     finish_instruction!();
                     continue;
                 }
 
                 OpCode::CallVirtual => {
                     let slot = inst.call_target() as usize;
-                    let arg_base = inst.arg_base();
+                    let arg_base = inst.arg_base() as usize;
                     let arg_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst();
 
                     let caller_frame = self.current_frame_mut_fast()?;
                     caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
 
-                    let obj_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base as usize) })?;
+                    let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
                     let vtable_id = self.heap.read_u32(obj_addr)?;
                     let global_func_id = self
                         .context
@@ -2181,30 +2619,19 @@ impl VirtualMachine {
                         .copied()
                         .ok_or_else(|| self.resolve_virtual_slot_error(vtable_id, slot))?;
 
-                    let meta = &self.context.function_meta[global_func_id as usize];
-                    if let Some(native_callback) = meta.native_fn {
+                    if self
+                        .func_code
+                        .get(global_func_id as usize)
+                        .is_some_and(|span| span.is_native)
+                    {
                         flush_inst_count!();
-                        let call_result = self.invoke_native_callback_fast(
-                            native_callback,
-                            caller_arg_start,
-                            arg_count,
-                        )?;
-                        reload_frame!();
-                        unsafe {
-                            *reg_base.add(caller_dst as usize) = call_result;
-                        }
-                        finish_instruction!();
-                        continue;
                     }
-
-                    (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
-                        .push_frame_window(
-                            global_func_id,
-                            caller_dst,
-                            caller_arg_start,
-                            arg_count,
-                        )?;
-                    pc = 0;
+                    (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_id(
+                        global_func_id,
+                        caller_dst,
+                        caller_arg_start,
+                        arg_count,
+                    )?;
                     finish_instruction!();
                     continue;
                 }
@@ -2213,16 +2640,15 @@ impl VirtualMachine {
                     let target = inst.call_target();
                     let iface_id = (target >> 8) as usize;
                     let slot = (target & 0xFF) as usize;
-                    let arg_base = inst.arg_base();
+                    let arg_base = inst.arg_base() as usize;
                     let arg_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst();
 
                     let caller_frame = self.current_frame_mut_fast()?;
                     caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
 
-                    let obj_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base as usize) })?;
+                    let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
                     let vtable_id = self.heap.read_u32(obj_addr)?;
                     let direct_func_id = if iface_id != 0 {
                         self.context
@@ -2241,37 +2667,26 @@ impl VirtualMachine {
                         }
                     };
 
-                    let meta = &self.context.function_meta[global_func_id as usize];
-                    if let Some(native_callback) = meta.native_fn {
+                    if self
+                        .func_code
+                        .get(global_func_id as usize)
+                        .is_some_and(|span| span.is_native)
+                    {
                         flush_inst_count!();
-                        let call_result = self.invoke_native_callback_fast(
-                            native_callback,
-                            caller_arg_start,
-                            arg_count,
-                        )?;
-                        reload_frame!();
-                        unsafe {
-                            *reg_base.add(caller_dst as usize) = call_result;
-                        }
-                        finish_instruction!();
-                        continue;
                     }
-
-                    (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
-                        .push_frame_window(
-                            global_func_id,
-                            caller_dst,
-                            caller_arg_start,
-                            arg_count,
-                        )?;
-                    pc = 0;
+                    (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_id(
+                        global_func_id,
+                        caller_dst,
+                        caller_arg_start,
+                        arg_count,
+                    )?;
                     finish_instruction!();
                     continue;
                 }
 
                 OpCode::CallSymbol => {
                     flush_inst_count!();
-                    self.execute_call_symbol(inst, pc, binary_id)?;
+                    self.execute_call_symbol(inst, pc)?;
                     reload_frame!();
                     finish_instruction!();
                     continue;
@@ -2279,7 +2694,7 @@ impl VirtualMachine {
 
                 OpCode::CallExtern => {
                     flush_inst_count!();
-                    self.execute_call_extern(inst, pc, binary_id)?;
+                    self.execute_call_extern(inst, pc)?;
                     reload_frame!();
                     finish_instruction!();
                     continue;
@@ -2287,41 +2702,31 @@ impl VirtualMachine {
 
                 OpCode::CallCallable => {
                     let r_callee = inst.call_target();
-                    let arg_base = inst.arg_base();
+                    let arg_base = inst.arg_base() as usize;
                     let arg_count = inst.arg_count() as usize;
                     let caller_dst = inst.call_dst();
 
                     let caller_frame = self.current_frame_mut_fast()?;
                     caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
 
                     let callable_ref = unsafe { &*reg_base.add(r_callee as usize) };
                     match *callable_ref {
                         Value::Null => return Err(VmTrap::null_reference()),
                         Value::FnPtr(global_func_id) => {
-                            let meta = &self.context.function_meta[global_func_id as usize];
-                            if let Some(native_callback) = meta.native_fn {
+                            if self
+                                .func_code
+                                .get(global_func_id as usize)
+                                .is_some_and(|span| span.is_native)
+                            {
                                 flush_inst_count!();
-                                let call_result = self.invoke_native_callback_fast(
-                                    native_callback,
-                                    caller_arg_start,
-                                    arg_count,
-                                )?;
-                                reload_frame!();
-                                unsafe {
-                                    *reg_base.add(caller_dst as usize) = call_result;
-                                }
-                                finish_instruction!();
-                                continue;
                             }
-                            (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
-                                .push_frame_window(
-                                    global_func_id,
-                                    caller_dst,
-                                    caller_arg_start,
-                                    arg_count,
-                                )?;
-                            pc = 0;
+                            (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_id(
+                                global_func_id,
+                                caller_dst,
+                                caller_arg_start,
+                                arg_count,
+                            )?;
                             finish_instruction!();
                             continue;
                         }
@@ -2330,32 +2735,30 @@ impl VirtualMachine {
                                 return Err(VmTrap::null_reference());
                             }
                             let global_func_id = self.heap.read_u32(closure_addr)?;
-                            let meta = &self.context.function_meta[global_func_id as usize];
-                            if let Some(native_callback) = meta.native_fn {
+                            let span_is_native = self
+                                .func_code
+                                .get(global_func_id as usize)
+                                .is_some_and(|span| span.is_native);
+                            if span_is_native {
                                 flush_inst_count!();
-                                let call_result = self.invoke_native_callback_fast(
-                                    native_callback,
-                                    caller_arg_start,
-                                    arg_count,
-                                )?;
-                                reload_frame!();
-                                unsafe {
-                                    *reg_base.add(caller_dst as usize) = call_result;
-                                }
-                                finish_instruction!();
-                                continue;
-                            }
-                            (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
-                                .push_frame_window(
+                                (inst_ptr, inst_len, pc, reg_base) = self.invoke_native_call_id(
                                     global_func_id,
                                     caller_dst,
                                     caller_arg_start,
                                     arg_count,
                                 )?;
-                            if let Some(new_frame) = self.call_frames.last_mut() {
-                                new_frame.active_closure = Some(closure_addr);
+                            } else {
+                                (inst_ptr, inst_len, pc, reg_base) = self.push_frame_window(
+                                    global_func_id,
+                                    caller_dst,
+                                    caller_arg_start,
+                                    arg_count,
+                                )?;
+                                if let Some(new_frame) = self.call_frames.last_mut() {
+                                    new_frame.active_closure =
+                                        std::num::NonZeroU32::new(closure_addr);
+                                }
                             }
-                            pc = 0;
                             finish_instruction!();
                             continue;
                         }
@@ -2401,7 +2804,7 @@ impl VirtualMachine {
                 }
 
                 OpCode::AllocObjectExtern => {
-                    let obj_ref = self.execute_alloc_object_extern(inst, pc, binary_id)?;
+                    let obj_ref = self.execute_alloc_object_extern(inst, pc)?;
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = obj_ref;
                     }
@@ -2412,76 +2815,26 @@ impl VirtualMachine {
                         read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let offset = inst.src2() as usize;
                     let field_addr = obj_addr + offset as u32;
-
                     let raw_flags = inst.flags();
-                    let field_type_tag = if raw_flags > 1 {
-                        Some(raw_flags >> 1)
+                    let val = if raw_flags > 1 {
+                        match raw_flags >> 1 {
+                            5 | 6 => Value::I32(self.heap.read_u32(field_addr).unwrap_or(0) as i32),
+                            7 | 8 => Value::I64(self.heap.read_u64(field_addr).unwrap_or(0) as i64),
+                            10 => Value::F64(f64::from_bits(
+                                self.heap.read_u64(field_addr).unwrap_or(0),
+                            )),
+                            12 => {
+                                let raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                                if raw == 0 || raw == Value::TAG_NULL {
+                                    Value::Null
+                                } else {
+                                    Value::from_raw_u64(raw)
+                                }
+                            }
+                            _ => self.execute_get_field_slow(obj_addr, offset, raw_flags)?,
+                        }
                     } else {
-                        let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                        self.context
-                            .get_class_by_vtable_id(vtable_id)
-                            .and_then(|cls| cls.get_field_type(offset))
-                    };
-
-                    let val = match field_type_tag {
-                        Some(1) => {
-                            let byte_val = self.heap.read_u8(field_addr).unwrap_or(0);
-                            Value::I32(byte_val as i8 as i32)
-                        }
-                        Some(2) => {
-                            let byte_val = self.heap.read_u8(field_addr).unwrap_or(0);
-                            Value::I32(byte_val as i32)
-                        }
-                        Some(3) => {
-                            let word_val = self.heap.read_u16(field_addr).unwrap_or(0);
-                            Value::I32(word_val as i16 as i32)
-                        }
-                        Some(4) => {
-                            let word_val = self.heap.read_u16(field_addr).unwrap_or(0);
-                            Value::I32(word_val as i32)
-                        }
-                        Some(5) | Some(6) => {
-                            let raw = self.heap.read_u32(field_addr).unwrap_or(0);
-                            Value::I32(raw as i32)
-                        }
-                        Some(7) | Some(8) => {
-                            let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                            Value::I64(raw as i64)
-                        }
-                        Some(9) => {
-                            let raw = self.heap.read_u32(field_addr).unwrap_or(0);
-                            Value::F64(f32::from_bits(raw) as f64)
-                        }
-                        Some(10) => {
-                            let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                            Value::F64(f64::from_bits(raw))
-                        }
-                        Some(11) => {
-                            let raw = self.heap.read_u8(field_addr).unwrap_or(0);
-                            Value::Bool(raw != 0)
-                        }
-                        Some(12) => {
-                            let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                            if raw == 0 || raw == Value::TAG_NULL {
-                                Value::Null
-                            } else {
-                                Value::from_raw_u64(raw)
-                            }
-                        }
-                        _ => {
-                            let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                            if raw == 0 {
-                                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                                let is_ref = maybe_class.is_some_and(|cls| {
-                                    cls.reference_field_offsets.contains(&offset)
-                                        || cls.weak_field_offsets.contains(&offset)
-                                });
-                                if is_ref { Value::Null } else { Value::I32(0) }
-                            } else {
-                                Value::from_raw_u64(raw)
-                            }
-                        }
+                        self.execute_get_field_slow(obj_addr, offset, raw_flags)?
                     };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = val;
@@ -2494,73 +2847,37 @@ impl VirtualMachine {
                     let offset = inst.src2() as usize;
                     let val_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
                     let field_addr = obj_addr + offset as u32;
-
                     let raw_flags = inst.flags();
-                    let is_weak = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
-                    let tag_shifted = raw_flags >> 1;
-                    let field_type_tag = if tag_shifted > 0 {
-                        Some(tag_shifted)
-                    } else {
-                        let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                        self.context
-                            .get_class_by_vtable_id(vtable_id)
-                            .and_then(|cls| cls.get_field_type(offset))
-                    };
-
-                    match field_type_tag {
-                        Some(1) | Some(2) => {
-                            let _ = self
-                                .heap
-                                .write_u8(field_addr, read_i32_fast(val_ref)? as u8);
-                        }
-                        Some(3) | Some(4) => {
-                            let _ = self
-                                .heap
-                                .write_u16(field_addr, read_i32_fast(val_ref)? as u16);
-                        }
-                        Some(5) | Some(6) => {
-                            let _ = self
-                                .heap
-                                .write_u32(field_addr, read_i32_fast(val_ref)? as u32);
-                        }
-                        Some(7) | Some(8) => {
-                            let _ = self
-                                .heap
-                                .write_u64(field_addr, read_i64_fast(val_ref)? as u64);
-                        }
-                        Some(9) => {
-                            let bits = (read_f64_fast(val_ref)? as f32).to_bits();
-                            let _ = self.heap.write_u32(field_addr, bits);
-                        }
-                        Some(10) => {
-                            let bits = read_f64_fast(val_ref)?.to_bits();
-                            let _ = self.heap.write_u64(field_addr, bits);
-                        }
-                        Some(11) => {
-                            let _ = self
-                                .heap
-                                .write_u8(field_addr, if read_bool_fast(val_ref)? { 1 } else { 0 });
-                        }
-                        _ => {
-                            let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                            let old_val = Value::from_raw_u64(old_raw);
-                            self.heap.write_u64(field_addr, val_ref.to_raw_u64())?;
-                            if let Value::Ref(child_addr) = *val_ref
-                                && !is_weak
-                                && child_addr > 0
-                            {
-                                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                    if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) == 0
+                        && (raw_flags >> 1) > 0
+                    {
+                        match raw_flags >> 1 {
+                            5 | 6 => {
+                                let _ = self
+                                    .heap
+                                    .write_u32(field_addr, read_i32_fast(val_ref)? as u32);
                             }
-                            if let Value::Ref(old_child) = old_val
-                                && !is_weak
-                                && old_child > 0
-                            {
-                                let caller_frame = self.current_frame_mut_fast()?;
-                                caller_frame.pc = pc as u32;
-                                self.release_reference_cold(old_child)?;
-                                reload_frame!();
+                            7 | 8 => {
+                                let _ = self
+                                    .heap
+                                    .write_u64(field_addr, read_i64_fast(val_ref)? as u64);
+                            }
+                            10 => {
+                                let bits = read_f64_fast(val_ref)?.to_bits();
+                                let _ = self.heap.write_u64(field_addr, bits);
+                            }
+                            _ => {
+                                if self.execute_set_field_slow(
+                                    obj_addr, offset, raw_flags, val_ref, pc,
+                                )? {
+                                    reload_frame!();
+                                }
                             }
                         }
+                    } else if self
+                        .execute_set_field_slow(obj_addr, offset, raw_flags, val_ref, pc)?
+                    {
+                        reload_frame!();
                     }
                 }
 
@@ -2581,6 +2898,7 @@ impl VirtualMachine {
                 }
 
                 OpCode::GetStatic => {
+                    let static_base = self.current_frame_fast()?.static_base_offset;
                     let slot = (static_base + inst.imm32()) as usize;
                     if slot >= self.static_slots.len() {
                         return Err(VmTrap::invalid_static_offset(
@@ -2597,13 +2915,14 @@ impl VirtualMachine {
                 }
 
                 OpCode::SetStatic => {
+                    let static_base = self.current_frame_fast()?.static_base_offset;
                     let slot_idx = static_base + inst.imm32();
                     let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
                     self.set_static(slot_idx, val_to_set)?;
                 }
 
                 OpCode::GetStaticGlobal => {
-                    let static_val = self.execute_get_static_global(inst, pc, binary_id)?;
+                    let static_val = self.execute_get_static_global(inst, pc)?;
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = static_val;
                     }
@@ -2611,7 +2930,7 @@ impl VirtualMachine {
 
                 OpCode::SetStaticGlobal => {
                     let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
-                    self.execute_set_static_global(inst, pc, binary_id, val_to_set)?;
+                    self.execute_set_static_global(inst, pc, val_to_set)?;
                 }
 
                 OpCode::SetStaticDirect => {
@@ -2754,36 +3073,25 @@ impl VirtualMachine {
                         if elem_offset + elem_size > heap_len {
                             return Err(VmTrap::null_reference());
                         }
-
                         let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
                         let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
-                        // SAFETY: elem_offset + elem_size <= heap_len verified above.
-                        let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
-
-                        let old_child = if is_reference_element {
-                            unsafe {
-                                u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>()))
+                        if elem_type_tag == 0 || is_reference_element || elem_size == 2 {
+                            if self.execute_set_array_slow(
+                                elem_offset,
+                                elem_size,
+                                elem_type_tag,
+                                val,
+                                pc,
+                            )? {
+                                reload_frame!();
                             }
                         } else {
-                            0
-                        };
-
-                        if elem_type_tag == 0 {
-                            let encoded_word = val.to_raw_u64().to_le();
-                            unsafe {
-                                std::ptr::write_unaligned(elem_ptr.cast::<u64>(), encoded_word);
-                            }
-                        } else {
+                            // SAFETY: elem_offset + elem_size <= heap_len verified above.
+                            let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
                             let primitive_val = val.to_primitive_u64();
                             match elem_size {
                                 1 => unsafe {
                                     *elem_ptr = primitive_val as u8;
-                                },
-                                2 => unsafe {
-                                    std::ptr::write_unaligned(
-                                        elem_ptr.cast::<u16>(),
-                                        (primitive_val as u16).to_le(),
-                                    );
                                 },
                                 4 => unsafe {
                                     std::ptr::write_unaligned(
@@ -2797,20 +3105,6 @@ impl VirtualMachine {
                                         primitive_val.to_le(),
                                     );
                                 },
-                            }
-                        }
-
-                        if is_reference_element {
-                            if let Value::Ref(child_addr) = val
-                                && child_addr > 0
-                            {
-                                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
-                            }
-                            if old_child > 0 {
-                                let caller_frame = self.current_frame_mut_fast()?;
-                                caller_frame.pc = pc as u32;
-                                self.release_reference_cold(old_child)?;
-                                reload_frame!();
                             }
                         }
                     }
@@ -2865,35 +3159,7 @@ impl VirtualMachine {
                     let capture_count = inst.arg_count() as usize;
                     if capture_count > 0 {
                         let capture_base = inst.arg_base() as usize;
-                        if capture_count <= 2 {
-                            let closure_addr = self
-                                .current_frame_fast()?
-                                .active_closure
-                                .ok_or_else(VmTrap::null_reference)?;
-                            let closure_offset = closure_addr as usize;
-                            if closure_offset + 8 + (capture_count * 16) <= self.heap.buffer.len() {
-                                let buf_ptr = self.heap.buffer.as_ptr();
-                                for cap_idx in 0..capture_count {
-                                    let cell_offset = closure_offset + 8 + (cap_idx * 16);
-                                    // SAFETY: cell_offset + 16 <= heap.buffer.len() verified above.
-                                    let (tag_raw, payload_raw) = unsafe {
-                                        let cell_ptr = buf_ptr.add(cell_offset).cast::<u64>();
-                                        (
-                                            u64::from_le(std::ptr::read_unaligned(cell_ptr)),
-                                            u64::from_le(std::ptr::read_unaligned(cell_ptr.add(1))),
-                                        )
-                                    };
-                                    unsafe {
-                                        *reg_base.add(capture_base + cap_idx) =
-                                            Value::from_tagged_parts(tag_raw, payload_raw);
-                                    }
-                                }
-                            } else {
-                                self.execute_unpack_captures(capture_base, capture_count)?;
-                            }
-                        } else {
-                            self.execute_unpack_captures(capture_base, capture_count)?;
-                        }
+                        self.execute_unpack_captures(capture_base, capture_count)?;
                     }
                 }
 
@@ -2986,34 +3252,13 @@ impl VirtualMachine {
                             unsafe {
                                 std::ptr::write_unaligned(word_ptr, decremented.to_le());
                             }
-                            if self.cycle_collector_enabled
-                                && (tag_nibble == BlockTag::Object as u8
-                                    || tag_nibble == BlockTag::ArrayRef as u8
-                                    || tag_nibble == BlockTag::Tuple as u8
-                                    || tag_nibble == BlockTag::Closure as u8)
-                                && ((tag_and_ref >> 26) & 0x03) != 3
-                            {
-                                let needs_cycle_check = if tag_nibble == BlockTag::Object as u8 {
-                                    if addr_usize + 4 <= self.heap.buffer.len() {
-                                        let vtable_id = unsafe {
-                                            u32::from_le(std::ptr::read_unaligned(
-                                                self.heap
-                                                    .buffer
-                                                    .as_ptr()
-                                                    .add(addr_usize)
-                                                    .cast::<u32>(),
-                                            ))
-                                        };
-                                        !self.context.is_class_acyclic(vtable_id)
-                                    } else {
-                                        true
-                                    }
-                                } else {
-                                    true
-                                };
-                                if needs_cycle_check {
-                                    self.push_purple_candidate_cold(addr, decremented)?;
-                                }
+                            if self.cycle_collector_enabled {
+                                self.maybe_push_cycle_candidate(
+                                    addr,
+                                    tag_and_ref,
+                                    tag_nibble,
+                                    decremented,
+                                )?;
                             }
                         } else if tag_nibble == BlockTag::ObjectPod as u8 {
                             let payload_size = unsafe {
@@ -3064,13 +3309,16 @@ impl VirtualMachine {
                 OpCode::ModI32Imm => {
                     let imm_val = inst.src2() as i16 as i32;
                     let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    if imm_val == 0 {
-                        return Err(VmTrap::divide_by_zero());
-                    }
-                    let rem_val = if val_a >= 0 && imm_val > 0 && (imm_val & (imm_val - 1)) == 0 {
-                        val_a & (imm_val - 1)
+                    let rem_val = if val_a >= 0 && imm_val > 0 && imm_val < 64 {
+                        if (imm_val & (imm_val - 1)) == 0 {
+                            val_a & (imm_val - 1)
+                        } else {
+                            let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
+                            let quotient = (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
+                            val_a - quotient.wrapping_mul(imm_val)
+                        }
                     } else {
-                        val_a.wrapping_rem(imm_val)
+                        rem_i32_cold(val_a, imm_val)?
                     };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);

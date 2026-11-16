@@ -578,7 +578,8 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                             VariableScopeType::VmRegisters(frame_idx) => {
                                 if let Some(frame) = vm_ref.call_frames.get(frame_idx) {
                                     for register_idx in 0..16 {
-                                        let absolute_idx = frame.register_base + register_idx;
+                                        let absolute_idx =
+                                            frame.register_base as usize + register_idx;
                                         if let Some(register_val) =
                                             vm_ref.register_stack.get(absolute_idx)
                                         {

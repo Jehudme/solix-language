@@ -110,7 +110,8 @@ pub fn evaluate_expression_in_frame(
     if let Some(stripped_register) = trimmed_expression.strip_prefix('r') {
         if let Ok(register_number) = stripped_register.parse::<u16>() {
             if let Some(target_frame) = virtual_machine.call_frames.get(frame_index) {
-                let absolute_register_index = target_frame.register_base + register_number as usize;
+                let absolute_register_index =
+                    target_frame.register_base as usize + register_number as usize;
                 if let Some(register_value) =
                     virtual_machine.register_stack.get(absolute_register_index)
                 {

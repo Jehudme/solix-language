@@ -27,12 +27,21 @@ pub struct VmTelemetry {
     pub quickened_instructions_count: u64,
 }
 
-/// Compact 16-byte cached instruction slice header (`shl $4` indexing) for zero-overhead dispatch.
+/// Compact 32-byte cached instruction slice and frame metadata header (`shl $5` indexing).
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FunctionCodeSpan {
     pub inst_ptr: *const Instruction,
     pub inst_len: usize,
+    pub static_base_offset: u32,
+    pub func_id_offset: u32,
+    pub binary_id: u16,
+    pub num_registers: u16,
+    pub has_references: bool,
+    pub is_native: bool,
 }
+
+const _: () = assert!(std::mem::size_of::<FunctionCodeSpan>() == 32);
 
 // SAFETY: `FunctionCodeSpan` points solely into `VirtualMachine.context.all_functions` instruction
 // buffers; `RuntimeContext` functions are never reallocated once a `VirtualMachine` is built, and
@@ -163,9 +172,16 @@ impl VirtualMachine {
         let func_code: Vec<FunctionCodeSpan> = context
             .all_functions
             .iter()
-            .map(|compiled_fn| FunctionCodeSpan {
+            .zip(context.function_meta.iter())
+            .map(|(compiled_fn, meta)| FunctionCodeSpan {
                 inst_ptr: compiled_fn.instructions.as_ptr(),
                 inst_len: compiled_fn.instructions.len(),
+                static_base_offset: meta.static_base_offset,
+                func_id_offset: meta.func_id_offset,
+                binary_id: meta.binary_id as u16,
+                num_registers: meta.num_registers,
+                has_references: meta.has_references,
+                is_native: meta.native_fn.is_some(),
             })
             .collect();
 
@@ -651,7 +667,7 @@ impl VirtualMachine {
     ) -> Result<(), RuntimeError> {
         self.push_frame(function_id, caller_dst, args)?;
         if let Some(frame) = self.call_frames.last_mut() {
-            frame.active_closure = Some(closure_addr);
+            frame.active_closure = std::num::NonZeroU32::new(closure_addr);
         }
         Ok(())
     }
@@ -725,13 +741,14 @@ impl VirtualMachine {
     pub fn get_reg(&self, reg: u16) -> Result<Value, RuntimeError> {
         let frame = self.current_frame()?;
         let reg_idx = reg as usize;
-        if reg_idx >= frame.register_count {
+        let frame_regs = frame.register_count as usize;
+        if reg_idx >= frame_regs {
             return Err(RuntimeError::IndexOutOfBounds {
                 index: reg_idx as i64,
-                length: frame.register_count,
+                length: frame_regs,
             });
         }
-        let abs_idx = frame.register_base + reg_idx;
+        let abs_idx = frame.register_base as usize + reg_idx;
         self.register_stack
             .get(abs_idx)
             .copied()
@@ -748,13 +765,14 @@ impl VirtualMachine {
     pub fn set_reg(&mut self, reg: u16, val: Value) -> Result<(), RuntimeError> {
         let frame = self.current_frame()?;
         let reg_idx = reg as usize;
-        if reg_idx >= frame.register_count {
+        let frame_regs = frame.register_count as usize;
+        if reg_idx >= frame_regs {
             return Err(RuntimeError::IndexOutOfBounds {
                 index: reg_idx as i64,
-                length: frame.register_count,
+                length: frame_regs,
             });
         }
-        let abs_idx = frame.register_base + reg_idx;
+        let abs_idx = frame.register_base as usize + reg_idx;
         let reg_len = self.register_stack.len();
         let cell = self
             .register_stack
@@ -838,7 +856,7 @@ impl VirtualMachine {
         let func_id_offset = meta.func_id_offset;
 
         let reg_base = self.call_frames.last().map_or(0, |last_frame| {
-            last_frame.register_base + last_frame.register_count
+            last_frame.register_base as usize + last_frame.register_count as usize
         });
         let num_regs = (func.num_registers as usize).max(args.len());
 
@@ -1126,7 +1144,7 @@ impl VirtualMachine {
             25 => self
                 .call_frames
                 .last()
-                .map(|frame| (frame.register_base + frame.register_count) as u64)
+                .map(|frame| frame.register_base as u64 + frame.register_count as u64)
                 .unwrap_or(0),
             26 => self
                 .call_frames
