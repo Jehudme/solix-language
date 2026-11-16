@@ -10,16 +10,24 @@ public class Resource {
         return new String(Resource::native_get_resource_root());
     }
 
+    private static String strip_mount_prefix(String path) {
+        if (path != null && path.starts_with("mount://")) {
+            return path.substring(8, path.length() - 8);
+        }
+        return path;
+    }
+
     public static String get_path(string relative_path) {
         String wrapped_path = (relative_path != null) ? new String(relative_path) : new String("");
         return Resource::get_path(wrapped_path);
     }
 
     public static String get_path(String relative_path) {
-        if (relative_path == null || relative_path.data == null) {
+        String clean_path = Resource::strip_mount_prefix(relative_path);
+        if (clean_path == null || clean_path.data == null) {
             return Resource::get_resource_directory();
         }
-        return new String(Resource::native_get_path(relative_path.to_chars()));
+        return new String(Resource::native_get_path(clean_path.to_chars()));
     }
 
     public static bool exists(string relative_path) {
@@ -28,10 +36,11 @@ public class Resource {
     }
 
     public static bool exists(String relative_path) {
-        if (relative_path == null || relative_path.data == null) {
+        String clean_path = Resource::strip_mount_prefix(relative_path);
+        if (clean_path == null || clean_path.data == null) {
             return false;
         }
-        return Resource::native_exists(relative_path.to_chars());
+        return Resource::native_exists(clean_path.to_chars());
     }
 
     public static String read_all_text(string relative_path) {
@@ -40,13 +49,14 @@ public class Resource {
     }
 
     public static String read_all_text(String relative_path) {
-        if (relative_path == null || relative_path.data == null) {
+        String clean_path = Resource::strip_mount_prefix(relative_path);
+        if (clean_path == null || clean_path.data == null) {
             throw new FileNotFoundException("", "Resource path is null");
         }
-        if (!Resource::exists(relative_path)) {
-            throw new FileNotFoundException(relative_path.data, "Resource not found");
+        if (!Resource::exists(clean_path)) {
+            throw new FileNotFoundException(clean_path.data, "Resource not found");
         }
-        char[] content_chars = Resource::native_read_all_text(relative_path.to_chars());
+        char[] content_chars = Resource::native_read_all_text(clean_path.to_chars());
         return new String(content_chars);
     }
 

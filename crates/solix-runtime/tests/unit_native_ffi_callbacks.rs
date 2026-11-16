@@ -6,8 +6,8 @@ use solix_runtime::native::ffi::{
     SOLIX_VM_CONTEXT_MAGIC, SolixVmContext, solix_vm_alloc_array, solix_vm_alloc_byte_array,
     solix_vm_alloc_chars, solix_vm_alloc_object, solix_vm_alloc_string, solix_vm_array_get_u64,
     solix_vm_array_len, solix_vm_array_set_u64, solix_vm_get_class_vtable_id,
-    solix_vm_get_field_i32, solix_vm_read_bytes, solix_vm_read_field_u64, solix_vm_set_field_i32,
-    solix_vm_write_field_u64,
+    solix_vm_get_field_i32, solix_vm_get_metric, solix_vm_read_bytes, solix_vm_read_field_u64,
+    solix_vm_set_field_i32, solix_vm_write_field_u64,
 };
 use solix_runtime::options::RuntimeOptions;
 use solix_runtime::vm::VirtualMachine;
@@ -37,6 +37,7 @@ fn test_ffi_string_allocation_and_read() {
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -86,6 +87,7 @@ fn test_ffi_char_and_byte_arrays() {
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -162,6 +164,7 @@ fn test_ffi_generic_array_manipulation() {
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -230,6 +233,7 @@ fn test_ffi_object_allocation_and_u64_fields() {
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -305,6 +309,7 @@ fn test_ffi_get_class_vtable_id_lookup() {
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
     };
     let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -323,4 +328,74 @@ fn test_ffi_get_class_vtable_id_lookup() {
     let unknown_vtable =
         unsafe { (context_wrapper.get_class_vtable_id)(context_ptr, c"NonExistentClass".as_ptr()) };
     assert_eq!(unknown_vtable, 0);
+}
+
+#[test]
+fn test_ffi_get_vm_metric_telemetry() {
+    let mut binary_program = BinaryProgram::new();
+    binary_program
+        .functions
+        .push(solix_common::bytecode::CompiledFunction::new(
+            "test::sample_function",
+            0,
+            0,
+            4,
+        ));
+
+    let options = RuntimeOptions::new()
+        .with_binary(binary_program)
+        .with_container_kind("slxpac")
+        .with_container_resources(5, 4096);
+    let context = RuntimeContext::new(options).expect("failed to construct context");
+    let mut virtual_machine = VirtualMachine::new(context);
+
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+    let mut context_wrapper = SolixVmContext {
+        magic: SOLIX_VM_CONTEXT_MAGIC,
+        vm_ptr: vm_pointer,
+        get_field_i32: solix_vm_get_field_i32,
+        set_field_i32: solix_vm_set_field_i32,
+        read_bytes: solix_vm_read_bytes,
+        alloc_string: solix_vm_alloc_string,
+        alloc_chars: solix_vm_alloc_chars,
+        alloc_byte_array: solix_vm_alloc_byte_array,
+        alloc_array: solix_vm_alloc_array,
+        array_len: solix_vm_array_len,
+        array_get_u64: solix_vm_array_get_u64,
+        array_set_u64: solix_vm_array_set_u64,
+        alloc_object: solix_vm_alloc_object,
+        read_field_u64: solix_vm_read_field_u64,
+        write_field_u64: solix_vm_write_field_u64,
+        get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
+    };
+    let context_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
+
+    // Metric 28: func_total_registered
+    let func_count = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 28) };
+    assert_eq!(func_count, 1);
+
+    // Metric 36: container_is_slxpac
+    let is_slxpac = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 36) };
+    assert_eq!(is_slxpac, 1);
+
+    // Metric 37: container_is_slxarc
+    let is_slxarc = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 37) };
+    assert_eq!(is_slxarc, 0);
+
+    // Metric 40: container_resource_count
+    let resource_count = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 40) };
+    assert_eq!(resource_count, 5);
+
+    // Metric 41: container_resource_total_bytes
+    let resource_bytes = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 41) };
+    assert_eq!(resource_bytes, 4096);
+
+    // Metric 44: process_pid
+    let process_pid = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 44) };
+    assert_eq!(process_pid, std::process::id() as u64);
+
+    // Metric 52: sys_available_parallelism
+    let parallelism = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 52) };
+    assert!(parallelism >= 1);
 }

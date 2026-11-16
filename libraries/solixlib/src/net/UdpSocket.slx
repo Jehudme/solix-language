@@ -1,0 +1,58 @@
+package solix.net;
+
+import solix.core.String;
+
+public class UdpSocket {
+    public int64 socket_id;
+
+    public UdpSocket(int64 handle) {
+        this.socket_id = handle;
+    }
+
+    public static UdpSocket bind(string host_port) {
+        String wrapped = (host_port != null) ? new String(host_port) : new String("");
+        return UdpSocket::bind(wrapped);
+    }
+
+    public static UdpSocket bind(String host_port) {
+        if (host_port == null || host_port.data == null) {
+            throw new NetworkException("[E0333] Network operation failed on socket: null host_port");
+        }
+        int64 handle = UdpSocket::native_bind(host_port.to_chars());
+        if (handle <= 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: could not bind to " + host_port.to_string());
+        }
+        return new UdpSocket(handle);
+    }
+
+    public int32 send_to(int8[] buffer, string target_address) {
+        String wrapped = (target_address != null) ? new String(target_address) : new String("");
+        return this.send_to(buffer, wrapped);
+    }
+
+    public int32 send_to(int8[] buffer, String target_address) {
+        if (buffer == null || target_address == null || this.socket_id <= 0) {
+            return 0;
+        }
+        return UdpSocket::native_send_to(this.socket_id, buffer, target_address.to_chars());
+    }
+
+    public int8[] recv_from(int32 max_bytes) {
+        if (this.socket_id <= 0 || max_bytes <= 0) {
+            return new int8[0];
+        }
+        return UdpSocket::native_recv_from(this.socket_id, max_bytes);
+    }
+
+    public void close() {
+        if (this.socket_id > 0) {
+            UdpSocket::native_close(this.socket_id);
+            this.socket_id = 0;
+        }
+    }
+
+    private static native int64 native_bind(char[] host_port);
+    private static native int32 native_send_to(int64 socket_id, int8[] buffer, char[] target);
+    private static native int8[] native_recv_from(int64 socket_id, int32 max_bytes);
+    private static native bool native_close(int64 socket_id);
+}

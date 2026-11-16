@@ -124,7 +124,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             || extension.eq_ignore_ascii_case("dylib")
         {
             runtime_options = runtime_options.with_native_library(lib_path);
-        } else if extension.eq_ignore_ascii_case("slxarc") {
+        } else if extension.eq_ignore_ascii_case("slxarc")
+            || extension.eq_ignore_ascii_case("slxpac")
+        {
             let loaded_archive = SlxarcArchive::extract_and_load(lib_path, temp_cache_dir.path())
                 .with_context(|| {
                 format!(
@@ -164,6 +166,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     !extension.eq_ignore_ascii_case("slx")
                         && !extension.eq_ignore_ascii_case("slxb")
                         && !extension.eq_ignore_ascii_case("slxarc")
+                        && !extension.eq_ignore_ascii_case("slxpac")
                 }));
 
         if looks_like_package_spec {
@@ -243,7 +246,12 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
         if extension.eq_ignore_ascii_case("slx") {
             source_paths.push(target_path);
-        } else if extension.eq_ignore_ascii_case("slxarc") {
+        } else if extension.eq_ignore_ascii_case("slxarc")
+            || extension.eq_ignore_ascii_case("slxpac")
+        {
+            let is_slxpac = extension.eq_ignore_ascii_case("slxpac");
+            let kind_string = if is_slxpac { "slxpac" } else { "slxarc" };
+            runtime_options = runtime_options.with_container_kind(kind_string);
             let loaded_archive =
                 SlxarcArchive::extract_and_load(target_path, temp_cache_dir.path()).with_context(
                     || {
@@ -259,6 +267,12 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     target_path.display()
                 )
             })?;
+            runtime_options = runtime_options
+                .with_container_resource_root(temp_cache_dir.path().join("resources"))
+                .with_container_resources(
+                    loaded_archive.resource_files.len() as u32,
+                    loaded_archive.resource_total_bytes,
+                );
             for native_lib in loaded_archive.native_libraries {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
@@ -276,6 +290,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             loaded_binary_programs.extend(loaded_archive.binaries);
             loaded_binary_programs.extend(loaded_archive.secondary_binaries);
         } else {
+            if extension.eq_ignore_ascii_case("slxb") {
+                runtime_options = runtime_options.with_container_kind("slxb");
+            }
             binary_paths.push(target_path);
         }
     }

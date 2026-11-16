@@ -1,0 +1,10 @@
+package solix.net;
+
+import solix.core.String;
+import solix.core.Exception;
+
+public class NetworkException extends Exception {
+    public NetworkException() : super("Network error") {}
+    public NetworkException(string message) : super(message) {}
+    public NetworkException(String message) : super((message != null) ? message.data : "") {}
+}

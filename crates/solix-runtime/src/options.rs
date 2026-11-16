@@ -38,6 +38,14 @@ pub struct RuntimeOptions {
     pub safe_mode: bool,
     /// Sandboxing flag disabling non-sandboxed host native operations and filesystem access.
     pub sandboxed: bool,
+    /// Container packaging kind (e.g. "slxpac", "slxarc", "slxb", "source").
+    pub container_kind: Option<String>,
+    /// Root directory path holding extracted container resources.
+    pub container_resource_root: Option<PathBuf>,
+    /// Total count of bundled resources in the active container.
+    pub container_resource_count: u32,
+    /// Total byte length of bundled resources in the active container.
+    pub container_resource_bytes: u64,
     /// Custom host native Rust functions registered for execution.
     pub native_functions: HashMap<String, NativeFunction>,
     /// Optional pluggable module solver for auto-fetching dependencies on PC B.
@@ -100,6 +108,10 @@ impl Default for RuntimeOptions {
             args: Vec::new(),
             safe_mode: false,
             sandboxed: false,
+            container_kind: None,
+            container_resource_root: None,
+            container_resource_count: 0,
+            container_resource_bytes: 0,
             native_functions: HashMap::new(),
             solver: None,
             verify_checksums: true,
@@ -234,6 +246,28 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_solver(mut self, solver: Arc<dyn ModuleSolver>) -> Self {
         self.solver = Some(solver);
+        self
+    }
+
+    /// Sets the container packaging kind (e.g. "slxpac", "slxarc", "slxb").
+    #[must_use]
+    pub fn with_container_kind(mut self, kind: impl Into<String>) -> Self {
+        self.container_kind = Some(kind.into());
+        self
+    }
+
+    /// Sets the root directory path holding extracted container resources.
+    #[must_use]
+    pub fn with_container_resource_root(mut self, path: impl Into<PathBuf>) -> Self {
+        self.container_resource_root = Some(path.into());
+        self
+    }
+
+    /// Sets the container resource count and total bytes.
+    #[must_use]
+    pub fn with_container_resources(mut self, count: u32, total_bytes: u64) -> Self {
+        self.container_resource_count = count;
+        self.container_resource_bytes = total_bytes;
         self
     }
 

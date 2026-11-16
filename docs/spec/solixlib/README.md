@@ -19,3 +19,7 @@ The standard library specifications have been expanded into granular, component-
 - [`primitives.md`](../libraries/solixlib/primitives.md) — Primitive boxing wrappers, parsing, and bit-level inspection
 - [`resource.md`](../libraries/solixlib/resource.md) — Embedded asset extraction from `.slxarc` containers
 - [`scaffolding.md`](../libraries/solixlib/scaffolding.md) — Project templates, boilerplate scaffolding, and test harnesses
+- [`json.md`](../libraries/solixlib/json.md) — 1-to-1 serde_json bridge, JSON pointer queries, and parsing
+- [`net.md`](../libraries/solixlib/net.md) — Cross-platform TCP/UDP sockets and lightweight HTTP client
+- [`compress.md`](../libraries/solixlib/compress.md) — Gzip, Zlib, and Deflate buffer compression engines
+- [`vm.md`](../libraries/solixlib/vm.md) — 56-metric VM telemetry, memory inspection, and cycle collector controls

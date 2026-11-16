@@ -582,11 +582,488 @@ pub unsafe extern "C" fn primitives_native_hash_any(
     SolixCValue::i32_val(if final_i32 == 0 { 1 } else { final_i32 })
 }
 
+// --- C++ std::format-Style Engine ---
+
+fn parse_as_integer(raw_text: &str) -> i64 {
+    if let Ok(parsed_val) = raw_text.trim().parse::<i64>() {
+        parsed_val
+    } else if let Ok(parsed_float) = raw_text.trim().parse::<f64>() {
+        parsed_float as i64
+    } else {
+        0
+    }
+}
+
+fn parse_as_float(raw_text: &str) -> f64 {
+    raw_text.trim().parse::<f64>().unwrap_or(0.0)
+}
+
+fn pad_numeric_zero(numeric_text: &str, target_width: usize) -> String {
+    if numeric_text.len() >= target_width {
+        return numeric_text.to_string();
+    }
+    let has_sign = numeric_text.starts_with('+') || numeric_text.starts_with('-');
+    let prefix = if has_sign { &numeric_text[..1] } else { "" };
+    let body = if has_sign { &numeric_text[1..] } else { numeric_text };
+    let zeros_needed = target_width.saturating_sub(prefix.len() + body.len());
+    let mut padded_result = String::with_capacity(target_width);
+    padded_result.push_str(prefix);
+    padded_result.extend(std::iter::repeat_n('0', zeros_needed));
+    padded_result.push_str(body);
+    padded_result
+}
+
+fn format_radix_with_alternate_and_width(
+    digits_text: &str,
+    alternate_form: bool,
+    prefix: &str,
+    zero_pad: bool,
+    width_value: Option<usize>,
+) -> String {
+    let prefix_length = if alternate_form { prefix.len() } else { 0 };
+    if zero_pad && width_value.is_some() {
+        let target_width = width_value.unwrap_or(0);
+        let digits_target = target_width.saturating_sub(prefix_length);
+        let mut result = String::new();
+        if alternate_form {
+            result.push_str(prefix);
+        }
+        if digits_text.len() < digits_target {
+            let zeros_needed = digits_target - digits_text.len();
+            result.extend(std::iter::repeat_n('0', zeros_needed));
+        }
+        result.push_str(digits_text);
+        result
+    } else {
+        let mut result = String::new();
+        if alternate_form {
+            result.push_str(prefix);
+        }
+        result.push_str(digits_text);
+        result
+    }
+}
+
+pub fn format_with_specifier(value_text: &str, specifier: &str) -> Result<String, String> {
+    if specifier.is_empty() {
+        return Ok(value_text.to_string());
+    }
+
+    let characters: Vec<char> = specifier.chars().collect();
+    let mut cursor = 0;
+    let length = characters.len();
+
+    // 1. [fill]align
+    let mut fill_character = ' ';
+    let mut alignment = None;
+
+    if cursor + 1 < length && matches!(characters[cursor + 1], '<' | '>' | '^') {
+        fill_character = characters[cursor];
+        alignment = Some(characters[cursor + 1]);
+        cursor += 2;
+    } else if cursor < length && matches!(characters[cursor], '<' | '>' | '^') {
+        alignment = Some(characters[cursor]);
+        cursor += 1;
+    }
+
+    // 2. sign (+, -, ' ')
+    let mut sign_option = None;
+    if cursor < length && matches!(characters[cursor], '+' | '-' | ' ') {
+        sign_option = Some(characters[cursor]);
+        cursor += 1;
+    }
+
+    // 3. alternate '#'
+    let mut alternate_form = false;
+    if cursor < length && characters[cursor] == '#' {
+        alternate_form = true;
+        cursor += 1;
+    }
+
+    // 4. zero padding '0'
+    let mut zero_pad = false;
+    if cursor < length && characters[cursor] == '0' {
+        zero_pad = true;
+        cursor += 1;
+        if alignment.is_none() {
+            alignment = Some('>');
+            fill_character = '0';
+        }
+    }
+
+    // 5. width
+    let mut width_value: Option<usize> = None;
+    let width_start = cursor;
+    while cursor < length && characters[cursor].is_ascii_digit() {
+        cursor += 1;
+    }
+    if cursor > width_start {
+        let width_text: String = characters[width_start..cursor].iter().collect();
+        width_value = width_text.parse::<usize>().ok();
+    }
+
+    // 6. precision
+    let mut precision_value: Option<usize> = None;
+    if cursor < length && characters[cursor] == '.' {
+        cursor += 1;
+        let precision_start = cursor;
+        while cursor < length && characters[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor > precision_start {
+            let precision_text: String = characters[precision_start..cursor].iter().collect();
+            precision_value = precision_text.parse::<usize>().ok();
+        } else {
+            precision_value = Some(0);
+        }
+    }
+
+    // 7. type
+    let mut type_character: Option<char> = None;
+    if cursor < length {
+        let candidate = characters[cursor];
+        if matches!(candidate, 'd' | 'i' | 'x' | 'X' | 'b' | 'o' | 'f' | 'F' | 'e' | 'E' | 's') {
+            type_character = Some(candidate);
+            cursor += 1;
+        } else {
+            return Err(format!(
+                "[E0331] Invalid format specifier in template string: unexpected type character '{candidate}'"
+            ));
+        }
+    }
+
+    if cursor < length {
+        let remaining: String = characters[cursor..].iter().collect();
+        return Err(format!(
+            "[E0331] Invalid format specifier in template string: trailing garbage '{remaining}'"
+        ));
+    }
+
+    // Format based on type
+    let formatted_content = match type_character {
+        Some('x') => {
+            let integer_value = parse_as_integer(value_text);
+            let hex_text = format!("{integer_value:x}");
+            format_radix_with_alternate_and_width(
+                &hex_text,
+                alternate_form,
+                "0x",
+                zero_pad,
+                width_value,
+            )
+        }
+        Some('X') => {
+            let integer_value = parse_as_integer(value_text);
+            let hex_text = format!("{integer_value:X}");
+            format_radix_with_alternate_and_width(
+                &hex_text,
+                alternate_form,
+                "0X",
+                zero_pad,
+                width_value,
+            )
+        }
+        Some('b') => {
+            let integer_value = parse_as_integer(value_text);
+            let bin_text = format!("{integer_value:b}");
+            format_radix_with_alternate_and_width(
+                &bin_text,
+                alternate_form,
+                "0b",
+                zero_pad,
+                width_value,
+            )
+        }
+        Some('o') => {
+            let integer_value = parse_as_integer(value_text);
+            let oct_text = format!("{integer_value:o}");
+            format_radix_with_alternate_and_width(
+                &oct_text,
+                alternate_form,
+                "0o",
+                zero_pad,
+                width_value,
+            )
+        }
+        Some('d') | Some('i') => {
+            let integer_value = parse_as_integer(value_text);
+            let mut integer_text = integer_value.to_string();
+            if integer_value >= 0 {
+                if sign_option == Some('+') {
+                    integer_text.insert(0, '+');
+                } else if sign_option == Some(' ') {
+                    integer_text.insert(0, ' ');
+                }
+            }
+            if zero_pad && width_value.is_some() {
+                pad_numeric_zero(&integer_text, width_value.unwrap_or(0))
+            } else {
+                integer_text
+            }
+        }
+        Some('f') | Some('F') => {
+            let float_value = parse_as_float(value_text);
+            let precision = precision_value.unwrap_or(6);
+            let mut float_text = format!("{float_value:.precision$}");
+            if float_value >= 0.0 {
+                if sign_option == Some('+') {
+                    float_text.insert(0, '+');
+                } else if sign_option == Some(' ') {
+                    float_text.insert(0, ' ');
+                }
+            }
+            if zero_pad && width_value.is_some() {
+                pad_numeric_zero(&float_text, width_value.unwrap_or(0))
+            } else {
+                float_text
+            }
+        }
+        Some('e') => {
+            let float_value = parse_as_float(value_text);
+            let precision = precision_value.unwrap_or(6);
+            format!("{float_value:.precision$e}")
+        }
+        Some('E') => {
+            let float_value = parse_as_float(value_text);
+            let precision = precision_value.unwrap_or(6);
+            format!("{float_value:.precision$E}")
+        }
+        Some('s') | None => {
+            if let Some(precision) = precision_value {
+                if value_text.len() > precision {
+                    value_text[..precision].to_string()
+                } else {
+                    value_text.to_string()
+                }
+            } else if zero_pad && width_value.is_some() {
+                pad_numeric_zero(value_text, width_value.unwrap_or(0))
+            } else {
+                value_text.to_string()
+            }
+        }
+        _ => value_text.to_string(),
+    };
+
+    // Apply alignment & width padding if not already padded by radix/zero-pad
+    if let Some(target_width) = width_value {
+        if formatted_content.len() < target_width && !zero_pad {
+            let padding_needed = target_width - formatted_content.len();
+            let aligned_result = match alignment.unwrap_or('<') {
+                '<' => {
+                    let mut result_string = formatted_content;
+                    result_string.extend(std::iter::repeat_n(fill_character, padding_needed));
+                    result_string
+                }
+                '>' => {
+                    let mut result_string: String =
+                        std::iter::repeat_n(fill_character, padding_needed).collect();
+                    result_string.push_str(&formatted_content);
+                    result_string
+                }
+                '^' => {
+                    let left_pad = padding_needed / 2;
+                    let right_pad = padding_needed - left_pad;
+                    let mut result_string: String =
+                        std::iter::repeat_n(fill_character, left_pad).collect();
+                    result_string.push_str(&formatted_content);
+                    result_string.extend(std::iter::repeat_n(fill_character, right_pad));
+                    result_string
+                }
+                _ => formatted_content,
+            };
+            return Ok(aligned_result);
+        }
+    }
+
+    Ok(formatted_content)
+}
+
+pub fn format_template_with_arguments(
+    template: &str,
+    arguments: &[String],
+) -> Result<String, String> {
+    let mut result = String::with_capacity(template.len() + 32);
+    let characters: Vec<char> = template.chars().collect();
+    let mut cursor = 0;
+    let length = characters.len();
+    let mut sequential_index = 0;
+
+    while cursor < length {
+        let current_character = characters[cursor];
+        if current_character == '{' {
+            if cursor + 1 < length && characters[cursor + 1] == '{' {
+                result.push('{');
+                cursor += 2;
+                continue;
+            }
+            let mut close_index = cursor + 1;
+            while close_index < length && characters[close_index] != '}' {
+                close_index += 1;
+            }
+            if close_index >= length {
+                return Err(format!(
+                    "[E0331] Invalid format specifier in template string: unclosed '{{' at index {cursor}"
+                ));
+            }
+            let inside: String = characters[cursor + 1..close_index].iter().collect();
+            cursor = close_index + 1;
+
+            let (target_index, specifier) = if let Some(colon_pos) = inside.find(':') {
+                let index_part = &inside[..colon_pos];
+                let spec_part = &inside[colon_pos + 1..];
+                let resolved_index = if index_part.is_empty() {
+                    let current_seq = sequential_index;
+                    sequential_index += 1;
+                    current_seq
+                } else if let Ok(parsed) = index_part.parse::<usize>() {
+                    parsed
+                } else {
+                    return Err(format!(
+                        "[E0331] Invalid format specifier in template string: invalid index '{index_part}'"
+                    ));
+                };
+                (resolved_index, spec_part)
+            } else {
+                let resolved_index = if inside.is_empty() {
+                    let current_seq = sequential_index;
+                    sequential_index += 1;
+                    current_seq
+                } else if let Ok(parsed) = inside.parse::<usize>() {
+                    parsed
+                } else {
+                    return Err(format!(
+                        "[E0331] Invalid format specifier in template string: invalid index '{inside}'"
+                    ));
+                };
+                (resolved_index, "")
+            };
+
+            let argument_value = arguments.get(target_index).map(|arg_item| arg_item.as_str()).unwrap_or("");
+            let formatted_piece = format_with_specifier(argument_value, specifier)?;
+            result.push_str(&formatted_piece);
+        } else if current_character == '}' {
+            if cursor + 1 < length && characters[cursor + 1] == '}' {
+                result.push('}');
+                cursor += 2;
+            } else {
+                return Err(format!(
+                    "[E0331] Invalid format specifier in template string: single '}}' at index {cursor}"
+                ));
+            }
+        } else {
+            result.push(current_character);
+            cursor += 1;
+        }
+    }
+
+    Ok(result)
+}
+
+pub unsafe extern "C" fn string_native_format(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 1 || args.is_null() {
+        return SolixCValue::null();
+    }
+    let template_address = unsafe { (*args.add(0)).as_ref() };
+    let template_string = unsafe { read_solix_chars(vm_context, template_address) };
+
+    let mut arguments_list = Vec::new();
+    if arg_count >= 2 {
+        let array_address = unsafe { (*args.add(1)).as_ref() };
+        if array_address != 0 && !vm_context.is_null() {
+            let context_ref = unsafe { &*(vm_context as *const crate::SolixVmContext) };
+            if context_ref.magic == crate::SOLIX_VM_CONTEXT_MAGIC {
+                let array_length =
+                    unsafe { (context_ref.array_len)(context_ref.vm_ptr, array_address) };
+                for argument_index in 0..array_length {
+                    let element_raw = unsafe {
+                        (context_ref.array_get_u64)(
+                            context_ref.vm_ptr,
+                            array_address,
+                            argument_index,
+                        )
+                    };
+                    let element_address = element_raw as u32;
+                    let element_string = unsafe { read_solix_chars(vm_context, element_address) };
+                    arguments_list.push(element_string);
+                }
+            }
+        }
+    }
+
+    match format_template_with_arguments(&template_string, &arguments_list) {
+        Ok(formatted_text) => {
+            let allocated_address = unsafe { alloc_solix_chars(vm_context, &formatted_text) };
+            SolixCValue::ref_val(allocated_address)
+        }
+        Err(error_message) => {
+            if !out_error.is_null() {
+                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
+                unsafe {
+                    *out_error = SolixCValue::ref_val(allocated_error);
+                }
+            }
+            SolixCValue::null()
+        }
+    }
+}
+
+pub unsafe extern "C" fn string_native_format_spec(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count < 2 || args.is_null() {
+        return SolixCValue::null();
+    }
+    let value_address = unsafe { (*args.add(0)).as_ref() };
+    let spec_address = unsafe { (*args.add(1)).as_ref() };
+    let value_string = unsafe { read_solix_chars(vm_context, value_address) };
+    let spec_string = unsafe { read_solix_chars(vm_context, spec_address) };
+
+    match format_with_specifier(&value_string, &spec_string) {
+        Ok(formatted_text) => {
+            let allocated_address = unsafe { alloc_solix_chars(vm_context, &formatted_text) };
+            SolixCValue::ref_val(allocated_address)
+        }
+        Err(error_message) => {
+            if !out_error.is_null() {
+                let allocated_error = unsafe { alloc_solix_chars(vm_context, &error_message) };
+                unsafe {
+                    *out_error = SolixCValue::ref_val(allocated_error);
+                }
+            }
+            SolixCValue::null()
+        }
+    }
+}
+
 pub unsafe fn register_string_prim_natives(
     collector: *mut c_void,
     callback: RegisterNativeCallback,
 ) {
     let string_mappings: &[(&[&str], NativeCFunctionPtr)] = &[
+        (
+            &[
+                "String_native_format",
+                "solix_core_String_native_format",
+                "String::native_format",
+            ],
+            string_native_format,
+        ),
+        (
+            &[
+                "String_native_format_spec",
+                "solix_core_String_native_format_spec",
+                "String::native_format_spec",
+            ],
+            string_native_format_spec,
+        ),
         (
             &[
                 "String_native_from_int",

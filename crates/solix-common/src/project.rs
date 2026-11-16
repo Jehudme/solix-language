@@ -509,6 +509,10 @@ pub struct LoadedSlxarc {
     pub secondary_binaries: Vec<BinaryProgram>,
     /// All files extracted to the cache directory.
     pub extracted_files: Vec<PathBuf>,
+    /// Static resource files extracted from `resources/`.
+    pub resource_files: Vec<PathBuf>,
+    /// Total byte length of all extracted static resource files.
+    pub resource_total_bytes: u64,
 }
 
 /// Archive container packager, extractor, and inspector for `.slxarc` distributions.
@@ -733,6 +737,8 @@ impl SlxarcArchive {
         let mut secondary_binaries = Vec::new();
         let mut native_libraries = Vec::new();
         let mut extracted_files = Vec::new();
+        let mut resource_files = Vec::new();
+        let mut resource_total_bytes = 0u64;
 
         for index in 0..zip_reader.len() {
             let mut file_entry = zip_reader.by_index(index).map_err(|zip_error| {
@@ -850,6 +856,36 @@ impl SlxarcArchive {
 
                 native_libraries.push(target_path.clone());
                 extracted_files.push(target_path);
+            } else if entry_name.starts_with("resources/") {
+                let target_path = extract_cache_directory.join(&entry_name);
+                if let Some(parent_dir) = target_path.parent() {
+                    let _ = fs::create_dir_all(parent_dir);
+                }
+                let mut out_file = File::create(&target_path).map_err(|io_error| {
+                    EmissionError::ContainerSerializationFailed {
+                        reason: format!(
+                            "failed to extract resource '{}': {io_error}",
+                            target_path.display()
+                        ),
+                    }
+                })?;
+                let mut resource_bytes = Vec::new();
+                file_entry
+                    .read_to_end(&mut resource_bytes)
+                    .map_err(|io_error| EmissionError::ContainerSerializationFailed {
+                        reason: format!("failed to read resource '{entry_name}': {io_error}"),
+                    })?;
+                out_file
+                    .write_all(&resource_bytes)
+                    .map_err(|io_error| EmissionError::ContainerSerializationFailed {
+                        reason: format!(
+                            "failed to write resource '{}': {io_error}",
+                            target_path.display()
+                        ),
+                    })?;
+                resource_total_bytes += resource_bytes.len() as u64;
+                resource_files.push(target_path.clone());
+                extracted_files.push(target_path);
             }
         }
 
@@ -945,6 +981,8 @@ impl SlxarcArchive {
             native_libraries,
             secondary_binaries,
             extracted_files,
+            resource_files,
+            resource_total_bytes,
         })
     }
 }

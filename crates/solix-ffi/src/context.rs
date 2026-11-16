@@ -40,6 +40,8 @@ pub struct SolixVmContext {
     pub write_field_u64: unsafe extern "C" fn(vm_ptr: *mut c_void, object_address: u32, offset: u32, raw_value: u64),
     /// Resolves the vtable ID for a class by name.
     pub get_class_vtable_id: unsafe extern "C" fn(vm_ptr: *mut c_void, name_pointer: *const c_char) -> u32,
+    /// Evaluates a runtime execution or environment metric by identifier (0..=55).
+    pub get_vm_metric: unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
 }
 
 impl SolixVmContext {
@@ -90,5 +92,13 @@ impl SolixVmContext {
             )
         };
         count as usize
+    }
+
+    /// Safely evaluates a VM runtime metric by its 0-indexed identifier (0..=55).
+    ///
+    /// # Safety
+    /// `self.vm_ptr` must point to a valid, live VM instance.
+    pub unsafe fn get_metric(&self, metric_id: u32) -> u64 {
+        unsafe { (self.get_vm_metric)(self.vm_ptr, metric_id) }
     }
 }

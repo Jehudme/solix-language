@@ -142,6 +142,23 @@ public class Environment {
         return Path::get_temp_path();
     }
 
+    public static bool is_slxpac() {
+        return Environment::native_is_slxpac();
+    }
+
+    public static bool is_container_slxpac() {
+        return Environment::native_is_slxpac();
+    }
+
+    public static bool is_container_slxarc() {
+        return Environment::native_is_slxarc();
+    }
+
+    public static String get_container_kind() {
+        char[] kind_chars = Environment::native_get_container_kind();
+        return new String(kind_chars);
+    }
+
     private static native char[] native_get_env(char[] key_name);
     private static native void native_set_env(char[] key_name, char[] variable_value);
     private static native char[] native_get_all_env();
@@ -152,4 +169,7 @@ public class Environment {
     private static native bool native_is_macos();
     private static native int32 native_processor_count();
     private static native int64 native_pid();
+    private static native bool native_is_slxpac();
+    private static native bool native_is_slxarc();
+    private static native char[] native_get_container_kind();
 }

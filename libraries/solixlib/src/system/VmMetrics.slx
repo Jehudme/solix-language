@@ -1,0 +1,71 @@
+package solix.system;
+
+public class VmMetrics {
+    // Memory & Heap (0..=11)
+    public int64 heap_allocated_bytes;
+    public int64 heap_freed_bytes;
+    public int64 heap_live_bytes;
+    public int64 heap_peak_bytes;
+    public int64 heap_total_blocks;
+    public int64 heap_live_blocks;
+    public int64 heap_string_blocks;
+    public int64 heap_array_blocks;
+    public int64 heap_object_blocks;
+    public int64 heap_closure_blocks;
+    public int64 heap_gc_compact_count;
+    public int64 heap_large_allocation_count;
+
+    // ARC & Cycle Collector (12..=19)
+    public int64 arc_incref_count;
+    public int64 arc_decref_count;
+    public int64 arc_free_count;
+    public int64 arc_cycle_collector_runs;
+    public int64 arc_cycle_collector_candidates;
+    public int64 arc_cycles_collected;
+    public int64 arc_cycle_collector_time_micros;
+    public int64 arc_elided_ops_count;
+
+    // Call Stack (20..=27)
+    public int64 stack_current_depth;
+    public int64 stack_max_depth;
+    public int64 stack_frame_count;
+    public int64 stack_spill_count;
+    public int64 stack_allocated_slots;
+    public int64 stack_active_registers;
+    public int64 stack_exception_handlers_active;
+    public int64 stack_unwind_count;
+
+    // Functions & Bytecode Execution (28..=35)
+    public int64 func_total_registered;
+    public int64 func_total_invocations;
+    public int64 func_native_invocations;
+    public int64 func_inlined_invocations;
+    public int64 vm_instructions_executed;
+    public int64 vm_bytecode_version;
+    public int64 vm_opt_level;
+    public int64 vm_trap_count;
+
+    // Container & Environment Context (36..=43)
+    public int64 container_is_slxpac;
+    public int64 container_is_slxarc;
+    public int64 container_is_slxb;
+    public int64 container_profile;
+    public int64 container_resource_count;
+    public int64 container_resource_total_bytes;
+    public int64 container_native_lib_count;
+    public int64 container_manifest_present;
+
+    // Host Process & System (44..=55)
+    public int64 process_pid;
+    public int64 process_parent_pid;
+    public int64 process_uptime_millis;
+    public int64 process_cpu_time_millis;
+    public int64 process_memory_rss_bytes;
+    public int64 process_memory_vms_bytes;
+    public int64 process_thread_count;
+    public int64 process_open_fd_count;
+    public int64 sys_available_parallelism;
+    public int64 sys_page_size_bytes;
+    public int64 sys_total_memory_bytes;
+    public int64 sys_free_memory_bytes;
+}

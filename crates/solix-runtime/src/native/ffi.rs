@@ -180,6 +180,9 @@ pub struct SolixVmContext {
     /// Looks up a registered class VTable ID by qualified or simple name. Returns 0 if not found.
     pub get_class_vtable_id:
         unsafe extern "C" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,
+
+    /// Evaluates a runtime execution or environment metric by identifier (0..=55).
+    pub get_vm_metric: unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
 }
 
 /// Stable C-ABI native function pointer signature.
@@ -262,6 +265,7 @@ pub fn invoke_c_native(
         read_field_u64: solix_vm_read_field_u64,
         write_field_u64: solix_vm_write_field_u64,
         get_class_vtable_id: solix_vm_get_class_vtable_id,
+        get_vm_metric: solix_vm_get_metric,
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
@@ -275,9 +279,17 @@ pub fn invoke_c_native(
     };
 
     if out_error.tag != 0 {
+        let reason_text = if out_error.tag == 5 && out_error.payload != 0 {
+            let error_address = out_error.payload as u32;
+            vm.heap
+                .read_string(error_address)
+                .unwrap_or_else(|_| "error signaled by native C callback".to_string())
+        } else {
+            "error signaled by native C callback".to_string()
+        };
         return Err(RuntimeError::NativeFunctionError {
             name: "native_c_call".to_string(),
-            reason: "error signaled by native C callback".to_string(),
+            reason: reason_text,
         });
     }
 
@@ -1074,4 +1086,17 @@ pub unsafe extern "C" fn solix_vm_get_class_vtable_id(
         }
     }
     0
+}
+
+/// Queries a runtime metric by identifier.
+///
+/// # Safety
+/// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn solix_vm_get_metric(vm_context: *mut c_void, metric_id: u32) -> u64 {
+    let vm_instance = match unsafe { resolve_vm(vm_context) } {
+        Some(resolved_instance) => resolved_instance,
+        None => return 0,
+    };
+    vm_instance.get_metric_by_id(metric_id)
 }

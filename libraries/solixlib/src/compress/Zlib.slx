@@ -1,0 +1,48 @@
+package solix.compress;
+
+import solix.core.String;
+
+public class Zlib {
+    public static int8[] compress(int8[] uncompressed_data) {
+        if (uncompressed_data == null) {
+            return new int8[0];
+        }
+        return Zlib::native_compress(uncompressed_data);
+    }
+
+    public static int8[] decompress(int8[] compressed_data) {
+        if (compressed_data == null) {
+            return new int8[0];
+        }
+        return Zlib::native_decompress(compressed_data);
+    }
+
+    public static int8[] compress_string(string text) {
+        String wrapped = (text != null) ? new String(text) : new String("");
+        return Zlib::compress_string(wrapped);
+    }
+
+    public static int8[] compress_string(String text) {
+        if (text == null || text.data == null) {
+            return new int8[0];
+        }
+        char[] chars = text.to_chars();
+        int8[] bytes = new int8[chars.length];
+        for (int32 index = 0; index < chars.length; index = index + 1) {
+            bytes[index] = (int8)chars[index];
+        }
+        return Zlib::compress(bytes);
+    }
+
+    public static String decompress_to_string(int8[] compressed_data) {
+        int8[] decompressed_bytes = Zlib::decompress(compressed_data);
+        char[] chars = new char[decompressed_bytes.length];
+        for (int32 index = 0; index < decompressed_bytes.length; index = index + 1) {
+            chars[index] = (char)decompressed_bytes[index];
+        }
+        return new String(chars);
+    }
+
+    private static native int8[] native_compress(int8[] data);
+    private static native int8[] native_decompress(int8[] data);
+}

@@ -8,6 +8,9 @@ pub mod fs_path;
 pub mod math_time;
 pub mod string_prim;
 pub mod sys_process;
+pub mod compress_bridge;
+pub mod json_bridge;
+pub mod net_bridge;
 
 use std::ffi::{c_char, c_void};
 
@@ -122,6 +125,16 @@ pub struct SolixVmContext {
     pub array_get_u64: unsafe extern "C" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32) -> u64,
     pub array_set_u64:
         unsafe extern "C" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32, raw_val: u64),
+    pub alloc_object:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, class_vtable_id: u32, field_count: u32) -> u32,
+    pub read_field_u64:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32) -> u64,
+    pub write_field_u64:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),
+    pub get_class_vtable_id:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,
+    pub get_vm_metric:
+        unsafe extern "C" fn(vm_ptr: *mut c_void, metric_id: u32) -> u64,
 }
 
 pub type NativeCFunctionPtr = unsafe extern "C" fn(
@@ -138,7 +151,7 @@ pub type RegisterNativeCallback = unsafe extern "C" fn(
 );
 
 /// Reads a Solix `string` or `char[]` at `address` into a Rust `String`.
-pub unsafe fn read_solix_chars(vm_context: *mut c_void, address: u32) -> String {
+pub unsafe fn read_solix_chars(vm_context: *mut c_void, mut address: u32) -> String {
     if address == 0 || vm_context.is_null() {
         return String::new();
     }
@@ -146,7 +159,17 @@ pub unsafe fn read_solix_chars(vm_context: *mut c_void, address: u32) -> String 
     if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
         return String::new();
     }
-    let length = unsafe { (context_ref.array_len)(context_ref.vm_ptr, address) };
+    let mut length = unsafe { (context_ref.array_len)(context_ref.vm_ptr, address) };
+    if length == 0 {
+        let inner_data_addr =
+            unsafe { (context_ref.read_field_u64)(context_ref.vm_ptr, address, 0) as u32 };
+        if inner_data_addr != 0 {
+            length = unsafe { (context_ref.array_len)(context_ref.vm_ptr, inner_data_addr) };
+            if length > 0 {
+                address = inner_data_addr;
+            }
+        }
+    }
     if length == 0 {
         return String::new();
     }
@@ -245,6 +268,18 @@ pub unsafe fn write_out_box_f64(vm_context: *mut c_void, out_box_address: u32, v
     }
 }
 
+/// Queries a VM runtime metric by identifier.
+pub unsafe fn read_vm_metric(vm_context: *mut c_void, metric_id: u32) -> u64 {
+    if vm_context.is_null() {
+        return 0;
+    }
+    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
+    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+        return 0;
+    }
+    unsafe { (context_ref.get_vm_metric)(context_ref.vm_ptr, metric_id) }
+}
+
 /// Registers a symbol with all canonical and mangled aliases.
 pub unsafe fn register_symbol_variants(
     collector: *mut c_void,
@@ -276,4 +311,7 @@ pub unsafe extern "C" fn solix_register_natives(
     math_time::register_math_time_natives(collector_context, register_callback);
     sys_process::register_sys_process_natives(collector_context, register_callback);
     crypto::register_crypto_natives(collector_context, register_callback);
+    json_bridge::register_json_natives(collector_context, register_callback);
+    compress_bridge::register_compress_natives(collector_context, register_callback);
+    net_bridge::register_net_natives(collector_context, register_callback);
 }

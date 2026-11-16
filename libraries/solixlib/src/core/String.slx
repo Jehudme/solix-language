@@ -16,6 +16,8 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     private static native int64 native_last_index_of(string haystack, string needle);
     private static native string native_chars_to_string(char[] characters);
     private static native char[] native_string_to_chars(string text);
+    private static native string native_format(string format_template, string[] arguments);
+    private static native string native_format_spec(string value, string specifier);
 
     // Constructors
     public String() {
@@ -505,57 +507,20 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (format_string == null) {
             return new String("");
         }
-        if (arguments == null || arguments.length == 0) {
+        if (arguments == null) {
             return format_string;
         }
-        StringBuilder builder = new StringBuilder(format_string.data.length + 32);
-        int32 cursor_index = 0;
-        int32 sequential_arg_index = 0;
-        int32 format_len = format_string.data.length;
-
-        while (cursor_index < format_len) {
-            char current_char = format_string.data[cursor_index];
-            if (current_char == '{') {
-                if (cursor_index + 1 < format_len && format_string.data[cursor_index + 1] == '{') {
-                    builder.append_char('{');
-                    cursor_index = cursor_index + 2;
-                } else if (cursor_index + 1 < format_len && format_string.data[cursor_index + 1] == '}') {
-                    if (sequential_arg_index < arguments.length && arguments[sequential_arg_index] != null) {
-                        builder.append(arguments[sequential_arg_index].data);
-                    }
-                    sequential_arg_index = sequential_arg_index + 1;
-                    cursor_index = cursor_index + 2;
-                } else {
-                    int32 closing_brace = cursor_index + 1;
-                    while (closing_brace < format_len && format_string.data[closing_brace] != '}') {
-                        closing_brace = closing_brace + 1;
-                    }
-                    if (closing_brace < format_len) {
-                        String index_str = format_string.substring(cursor_index + 1, closing_brace - (cursor_index + 1));
-                        int32 parsed_index = String::parse_int(index_str);
-                        if (parsed_index >= 0 && parsed_index < arguments.length && arguments[parsed_index] != null) {
-                            builder.append(arguments[parsed_index].data);
-                        }
-                        cursor_index = closing_brace + 1;
-                    } else {
-                        builder.append_char('{');
-                        cursor_index = cursor_index + 1;
-                    }
-                }
-            } else if (current_char == '}') {
-                if (cursor_index + 1 < format_len && format_string.data[cursor_index + 1] == '}') {
-                    builder.append_char('}');
-                    cursor_index = cursor_index + 2;
-                } else {
-                    builder.append_char('}');
-                    cursor_index = cursor_index + 1;
-                }
-            } else {
-                builder.append_char(current_char);
-                cursor_index = cursor_index + 1;
-            }
+        string[] raw_args = new string[arguments.length];
+        for (int32 argument_index = 0; argument_index < arguments.length; argument_index = argument_index + 1) {
+            raw_args[argument_index] = (arguments[argument_index] != null) ? arguments[argument_index].data : "";
         }
-        return builder.to_string();
+        string formatted_raw = String::native_format(format_string.data, raw_args);
+        return new String(formatted_raw);
+    }
+
+    public static String format<args...>(string format_string, args... arguments) {
+        String wrapped_string = (format_string != null) ? new String(format_string) : new String("");
+        return String::format(wrapped_string, arguments);
     }
 
     public static String format<args...>(String format_string, args... arguments) {

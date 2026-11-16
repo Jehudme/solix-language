@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-056
 * **Target Version:** `v2.0.0`
 * **Milestone Branch:** `milestone/056-standard-library-expansion-and-vm-telemetry`
-* **Status:** DRAFT
+* **Status:** COMPLETED
 * **Lead Architect:** Standard Library & Runtime Architecture Team
 * **Target Delivery Date:** 2026-11-16
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)

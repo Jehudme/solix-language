@@ -1,0 +1,49 @@
+package solix.net;
+
+import solix.core.String;
+
+public class TcpListener {
+    public int64 socket_id;
+
+    public TcpListener(int64 handle) {
+        this.socket_id = handle;
+    }
+
+    public static TcpListener bind(string host_port) {
+        String wrapped = (host_port != null) ? new String(host_port) : new String("");
+        return TcpListener::bind(wrapped);
+    }
+
+    public static TcpListener bind(String host_port) {
+        if (host_port == null || host_port.data == null) {
+            throw new NetworkException("[E0333] Network operation failed on socket: null host_port");
+        }
+        int64 handle = TcpListener::native_bind(host_port.to_chars());
+        if (handle <= 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: could not bind to " + host_port.to_string());
+        }
+        return new TcpListener(handle);
+    }
+
+    public TcpStream accept() {
+        if (this.socket_id <= 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: listener closed");
+        }
+        int64 client_handle = TcpListener::native_accept(this.socket_id);
+        if (client_handle <= 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: accept failed");
+        }
+        return new TcpStream(client_handle);
+    }
+
+    public void close() {
+        if (this.socket_id > 0) {
+            TcpListener::native_close(this.socket_id);
+            this.socket_id = 0;
+        }
+    }
+
+    private static native int64 native_bind(char[] host_port);
+    private static native int64 native_accept(int64 socket_id);
+    private static native bool native_close(int64 socket_id);
+}

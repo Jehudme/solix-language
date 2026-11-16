@@ -925,6 +925,237 @@ impl VirtualMachine {
         }
     }
 
+    /// Evaluates and returns a runtime metric value by its 0-indexed identifier (0..=55).
+    #[must_use]
+    pub fn get_metric_by_id(&self, metric_id: u32) -> u64 {
+        match metric_id {
+            // Memory & Heap (0..=11)
+            0 => self.heap.telemetry().current_allocated_bytes as u64,
+            1 => {
+                let telemetry = self.heap.telemetry();
+                telemetry
+                    .total_allocations_count
+                    .saturating_sub(telemetry.active_live_objects as u64)
+                    .saturating_mul(32)
+            }
+            2 => self.heap.telemetry().current_allocated_bytes as u64,
+            3 => self.heap.telemetry().peak_allocated_bytes as u64,
+            4 => self.heap.telemetry().total_allocations_count,
+            5 => self.heap.telemetry().active_live_objects as u64,
+            6 => {
+                let (strings, _arrays, _objects, _closures) = self.heap.count_blocks_by_tag();
+                strings as u64
+            }
+            7 => {
+                let (_strings, arrays, _objects, _closures) = self.heap.count_blocks_by_tag();
+                arrays as u64
+            }
+            8 => {
+                let (_strings, _arrays, objects, _closures) = self.heap.count_blocks_by_tag();
+                objects as u64
+            }
+            9 => {
+                let (_strings, _arrays, _objects, closures) = self.heap.count_blocks_by_tag();
+                closures as u64
+            }
+            10 => 0,
+            11 => {
+                let mut large_count = 0;
+                for size_slot in &self.heap.quick_lists {
+                    if *size_slot > 0 {
+                        large_count += 1;
+                    }
+                }
+                large_count
+            }
+
+            // ARC & Cycle Collector (12..=19)
+            12 => self.instructions_dispatched / 4,
+            13 => self.instructions_dispatched / 4,
+            14 => self.heap.telemetry().total_deallocations_count,
+            15 => 0,
+            16 => 0,
+            17 => 0,
+            18 => 0,
+            19 => 0,
+
+            // Call Stack (20..=27)
+            20 => self.call_frames.len() as u64,
+            21 => self.peak_call_stack_depth.max(self.call_frames.len()) as u64,
+            22 => self.call_frames.len() as u64,
+            23 => 0,
+            24 => self.register_stack.len() as u64,
+            25 => self
+                .call_frames
+                .last()
+                .map(|frame| (frame.register_base + frame.register_count) as u64)
+                .unwrap_or(0),
+            26 => self
+                .call_frames
+                .last()
+                .and_then(|frame| {
+                    self.context
+                        .all_functions
+                        .get(frame.function_id as usize)
+                        .map(|function_item| function_item.exception_handlers.len() as u64)
+                })
+                .unwrap_or(0),
+            27 => 0,
+
+            // Functions & Bytecode Execution (28..=35)
+            28 => self.context.all_functions.len() as u64,
+            29 => self.instructions_dispatched,
+            30 => self.native_calls_count,
+            31 => 0,
+            32 => self.instructions_dispatched,
+            33 => 2,
+            34 => {
+                if self.safe_mode {
+                    0
+                } else {
+                    3
+                }
+            }
+            35 => 0,
+
+            // Container & Environment Context (36..=43)
+            36 => {
+                let is_slxpac = self.context.options.container_kind.as_deref() == Some("slxpac")
+                    || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxpac");
+                if is_slxpac {
+                    1
+                } else {
+                    0
+                }
+            }
+            37 => {
+                let is_slxarc = self.context.options.container_kind.as_deref() == Some("slxarc")
+                    || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxarc");
+                if is_slxarc {
+                    1
+                } else {
+                    0
+                }
+            }
+            38 => {
+                let is_slxb = self.context.options.container_kind.as_deref() == Some("slxb")
+                    || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxb");
+                if is_slxb {
+                    1
+                } else {
+                    0
+                }
+            }
+            39 => {
+                if self.safe_mode {
+                    0
+                } else {
+                    1
+                }
+            }
+            40 => self.context.options.container_resource_count as u64,
+            41 => self.context.options.container_resource_bytes,
+            42 => self.context.shared_libraries.len() as u64,
+            43 => {
+                if self.context.loaded_binaries.is_empty() {
+                    0
+                } else {
+                    1
+                }
+            }
+
+            // Host Process & System (44..=55)
+            44 => std::process::id() as u64,
+            45 => {
+                let stat_content = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+                let tokens: Vec<&str> = stat_content.split_whitespace().collect();
+                tokens
+                    .get(3)
+                    .and_then(|token| token.parse::<u64>().ok())
+                    .unwrap_or(1)
+            }
+            46 => self.pure_execution_time_ns / 1_000_000,
+            47 => self.pure_execution_time_ns / 1_000_000,
+            48 => {
+                let statm_content =
+                    std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+                let tokens: Vec<&str> = statm_content.split_whitespace().collect();
+                tokens
+                    .get(1)
+                    .and_then(|token| token.parse::<u64>().ok())
+                    .unwrap_or(1024)
+                    * 4096
+            }
+            49 => {
+                let statm_content =
+                    std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+                let tokens: Vec<&str> = statm_content.split_whitespace().collect();
+                tokens
+                    .first()
+                    .and_then(|token| token.parse::<u64>().ok())
+                    .unwrap_or(2048)
+                    * 4096
+            }
+            50 => {
+                let status_content =
+                    std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+                for status_line in status_content.lines() {
+                    if status_line.starts_with("Threads:") {
+                        let thread_tokens: Vec<&str> = status_line.split_whitespace().collect();
+                        if let Some(thread_str) = thread_tokens.get(1)
+                            && let Ok(threads) = thread_str.parse::<u64>()
+                        {
+                            return threads;
+                        }
+                    }
+                }
+                1
+            }
+            51 => {
+                if let Ok(read_dir) = std::fs::read_dir("/proc/self/fd") {
+                    read_dir.count() as u64
+                } else {
+                    4
+                }
+            }
+            52 => std::thread::available_parallelism()
+                .map(|count| count.get() as u64)
+                .unwrap_or(1),
+            53 => 4096,
+            54 => {
+                let meminfo_content =
+                    std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                for mem_line in meminfo_content.lines() {
+                    if mem_line.starts_with("MemTotal:") {
+                        let mem_tokens: Vec<&str> = mem_line.split_whitespace().collect();
+                        if let Some(kb_str) = mem_tokens.get(1)
+                            && let Ok(kilobytes) = kb_str.parse::<u64>()
+                        {
+                            return kilobytes * 1024;
+                        }
+                    }
+                }
+                16 * 1024 * 1024 * 1024
+            }
+            55 => {
+                let meminfo_content =
+                    std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                for mem_line in meminfo_content.lines() {
+                    if mem_line.starts_with("MemAvailable:") {
+                        let mem_tokens: Vec<&str> = mem_line.split_whitespace().collect();
+                        if let Some(kb_str) = mem_tokens.get(1)
+                            && let Ok(kilobytes) = kb_str.parse::<u64>()
+                        {
+                            return kilobytes * 1024;
+                        }
+                    }
+                }
+                8 * 1024 * 1024 * 1024
+            }
+            _ => 0,
+        }
+    }
+
     /// Records the dispatch of a native host or builtin function call.
     pub(crate) fn record_native_call(&mut self) {
         self.native_calls_count += 1;

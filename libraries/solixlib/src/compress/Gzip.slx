@@ -1,0 +1,55 @@
+package solix.compress;
+
+import solix.core.String;
+import solix.core.Exception;
+
+public class CompressionException extends Exception {
+    public CompressionException() : super("Compression error") {}
+    public CompressionException(string message) : super(message) {}
+    public CompressionException(String message) : super((message != null) ? message.data : "") {}
+}
+
+public class Gzip {
+    public static int8[] compress(int8[] uncompressed_data) {
+        if (uncompressed_data == null) {
+            return new int8[0];
+        }
+        return Gzip::native_compress(uncompressed_data);
+    }
+
+    public static int8[] decompress(int8[] compressed_data) {
+        if (compressed_data == null) {
+            return new int8[0];
+        }
+        return Gzip::native_decompress(compressed_data);
+    }
+
+    public static int8[] compress_string(string text) {
+        String wrapped = (text != null) ? new String(text) : new String("");
+        return Gzip::compress_string(wrapped);
+    }
+
+    public static int8[] compress_string(String text) {
+        if (text == null || text.data == null) {
+            return new int8[0];
+        }
+        char[] chars = text.to_chars();
+        int8[] bytes = new int8[chars.length];
+        for (int32 index = 0; index < chars.length; index = index + 1) {
+            bytes[index] = (int8)chars[index];
+        }
+        return Gzip::compress(bytes);
+    }
+
+    public static String decompress_to_string(int8[] compressed_data) {
+        int8[] decompressed_bytes = Gzip::decompress(compressed_data);
+        char[] chars = new char[decompressed_bytes.length];
+        for (int32 index = 0; index < decompressed_bytes.length; index = index + 1) {
+            chars[index] = (char)decompressed_bytes[index];
+        }
+        return new String(chars);
+    }
+
+    private static native int8[] native_compress(int8[] data);
+    private static native int8[] native_decompress(int8[] data);
+}

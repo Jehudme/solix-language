@@ -1,0 +1,97 @@
+package solix.system;
+
+import solix.core.String;
+
+public class Vm {
+    public static int64 get_metric(int32 metric_id) {
+        return Vm::native_get_metric(metric_id);
+    }
+
+    public static VmMetrics metrics() {
+        VmMetrics metrics_data = new VmMetrics();
+
+        // Memory & Heap (0..=11)
+        metrics_data.heap_allocated_bytes = Vm::native_get_metric(0);
+        metrics_data.heap_freed_bytes = Vm::native_get_metric(1);
+        metrics_data.heap_live_bytes = Vm::native_get_metric(2);
+        metrics_data.heap_peak_bytes = Vm::native_get_metric(3);
+        metrics_data.heap_total_blocks = Vm::native_get_metric(4);
+        metrics_data.heap_live_blocks = Vm::native_get_metric(5);
+        metrics_data.heap_string_blocks = Vm::native_get_metric(6);
+        metrics_data.heap_array_blocks = Vm::native_get_metric(7);
+        metrics_data.heap_object_blocks = Vm::native_get_metric(8);
+        metrics_data.heap_closure_blocks = Vm::native_get_metric(9);
+        metrics_data.heap_gc_compact_count = Vm::native_get_metric(10);
+        metrics_data.heap_large_allocation_count = Vm::native_get_metric(11);
+
+        // ARC & Cycle Collector (12..=19)
+        metrics_data.arc_incref_count = Vm::native_get_metric(12);
+        metrics_data.arc_decref_count = Vm::native_get_metric(13);
+        metrics_data.arc_free_count = Vm::native_get_metric(14);
+        metrics_data.arc_cycle_collector_runs = Vm::native_get_metric(15);
+        metrics_data.arc_cycle_collector_candidates = Vm::native_get_metric(16);
+        metrics_data.arc_cycles_collected = Vm::native_get_metric(17);
+        metrics_data.arc_cycle_collector_time_micros = Vm::native_get_metric(18);
+        metrics_data.arc_elided_ops_count = Vm::native_get_metric(19);
+
+        // Call Stack (20..=27)
+        metrics_data.stack_current_depth = Vm::native_get_metric(20);
+        metrics_data.stack_max_depth = Vm::native_get_metric(21);
+        metrics_data.stack_frame_count = Vm::native_get_metric(22);
+        metrics_data.stack_spill_count = Vm::native_get_metric(23);
+        metrics_data.stack_allocated_slots = Vm::native_get_metric(24);
+        metrics_data.stack_active_registers = Vm::native_get_metric(25);
+        metrics_data.stack_exception_handlers_active = Vm::native_get_metric(26);
+        metrics_data.stack_unwind_count = Vm::native_get_metric(27);
+
+        // Functions & Bytecode Execution (28..=35)
+        metrics_data.func_total_registered = Vm::native_get_metric(28);
+        metrics_data.func_total_invocations = Vm::native_get_metric(29);
+        metrics_data.func_native_invocations = Vm::native_get_metric(30);
+        metrics_data.func_inlined_invocations = Vm::native_get_metric(31);
+        metrics_data.vm_instructions_executed = Vm::native_get_metric(32);
+        metrics_data.vm_bytecode_version = Vm::native_get_metric(33);
+        metrics_data.vm_opt_level = Vm::native_get_metric(34);
+        metrics_data.vm_trap_count = Vm::native_get_metric(35);
+
+        // Container & Environment Context (36..=43)
+        metrics_data.container_is_slxpac = Vm::native_get_metric(36);
+        metrics_data.container_is_slxarc = Vm::native_get_metric(37);
+        metrics_data.container_is_slxb = Vm::native_get_metric(38);
+        metrics_data.container_profile = Vm::native_get_metric(39);
+        metrics_data.container_resource_count = Vm::native_get_metric(40);
+        metrics_data.container_resource_total_bytes = Vm::native_get_metric(41);
+        metrics_data.container_native_lib_count = Vm::native_get_metric(42);
+        metrics_data.container_manifest_present = Vm::native_get_metric(43);
+
+        // Host Process & System (44..=55)
+        metrics_data.process_pid = Vm::native_get_metric(44);
+        metrics_data.process_parent_pid = Vm::native_get_metric(45);
+        metrics_data.process_uptime_millis = Vm::native_get_metric(46);
+        metrics_data.process_cpu_time_millis = Vm::native_get_metric(47);
+        metrics_data.process_memory_rss_bytes = Vm::native_get_metric(48);
+        metrics_data.process_memory_vms_bytes = Vm::native_get_metric(49);
+        metrics_data.process_thread_count = Vm::native_get_metric(50);
+        metrics_data.process_open_fd_count = Vm::native_get_metric(51);
+        metrics_data.sys_available_parallelism = Vm::native_get_metric(52);
+        metrics_data.sys_page_size_bytes = Vm::native_get_metric(53);
+        metrics_data.sys_total_memory_bytes = Vm::native_get_metric(54);
+        metrics_data.sys_free_memory_bytes = Vm::native_get_metric(55);
+
+        return metrics_data;
+    }
+
+    public static bool is_container_slxpac() {
+        return Vm::native_get_metric(36) == 1;
+    }
+
+    public static bool is_container_slxarc() {
+        return Vm::native_get_metric(37) == 1;
+    }
+
+    public static bool is_container_slxb() {
+        return Vm::native_get_metric(38) == 1;
+    }
+
+    private static native int64 native_get_metric(int32 metric_id);
+}

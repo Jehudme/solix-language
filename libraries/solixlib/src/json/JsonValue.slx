@@ -1,0 +1,107 @@
+package solix.json;
+
+import solix.core.String;
+import solix.core.Exception;
+
+public class JsonException extends Exception {
+    public JsonException() : super("JSON error") {}
+    public JsonException(string message) : super(message) {}
+    public JsonException(String message) : super((message != null) ? message.data : "") {}
+}
+
+public class JsonValue {
+    public String raw_json;
+
+    public JsonValue(string raw) {
+        this.raw_json = (raw != null) ? new String(raw) : new String("null");
+    }
+
+    public JsonValue(String raw) {
+        this.raw_json = (raw != null) ? raw : new String("null");
+    }
+
+    public static JsonValue parse(string json_text) {
+        String wrapped = (json_text != null) ? new String(json_text) : new String("");
+        return JsonValue::parse(wrapped);
+    }
+
+    public static JsonValue parse(String json_text) {
+        if (json_text == null || json_text.data == null) {
+            throw new JsonException("[E0332] Failed to parse JSON string: null input");
+        }
+        bool is_valid = JsonValue::native_parse_and_validate(json_text.data);
+        if (!is_valid) {
+            throw new JsonException("[E0332] Failed to parse JSON string: invalid syntax");
+        }
+        return new JsonValue(json_text);
+    }
+
+    public String stringify() {
+        return this.stringify(false);
+    }
+
+    public String stringify(bool pretty) {
+        if (this.raw_json == null || this.raw_json.data == null) {
+            return new String("null");
+        }
+        char[] result_chars = JsonValue::native_stringify(this.raw_json.data, pretty);
+        return new String(result_chars);
+    }
+
+    public JsonValue query(string pointer_path) {
+        String wrapped_pointer = (pointer_path != null) ? new String(pointer_path) : new String("");
+        return this.query(wrapped_pointer);
+    }
+
+    public JsonValue query(String pointer_path) {
+        if (pointer_path == null || pointer_path.data == null || this.raw_json == null) {
+            return null;
+        }
+        char[] result_chars = JsonValue::native_pointer_query(this.raw_json.data, pointer_path.data);
+        if (result_chars == null || result_chars.length == 0) {
+            return null;
+        }
+        return new JsonValue(new String(result_chars));
+    }
+
+    public JsonValue get(string key) {
+        return this.query("/" + key);
+    }
+
+    public JsonValue get(int32 index) {
+        return this.query("/" + index);
+    }
+
+    public String as_string() {
+        if (this.raw_json == null) {
+            return new String("");
+        }
+        if (this.raw_json.starts_with("\"") && this.raw_json.ends_with("\"") && this.raw_json.length() >= 2) {
+            return this.raw_json.substring(1, this.raw_json.length() - 2);
+        }
+        return this.raw_json;
+    }
+
+    public int64 as_int64() {
+        String str_val = this.as_string();
+        return str_val.to_int64();
+    }
+
+    public float64 as_float64() {
+        String str_val = this.as_string();
+        return str_val.to_float64();
+    }
+
+    public bool as_bool() {
+        String str_val = this.as_string();
+        return str_val.to_bool();
+    }
+
+    public bool is_null() {
+        return this.raw_json == null || this.raw_json.equals(new String("null"));
+    }
+
+    private static native bool native_parse_and_validate(string json_text);
+    private static native char[] native_pointer_query(string json_text, string pointer_path);
+    private static native char[] native_stringify(string json_text, bool pretty);
+}

@@ -1,0 +1,82 @@
+package solix.net;
+
+import solix.core.String;
+
+public class TcpStream {
+    public int64 socket_id;
+
+    public TcpStream(int64 handle) {
+        this.socket_id = handle;
+    }
+
+    public static TcpStream connect(string host_port) {
+        String wrapped = (host_port != null) ? new String(host_port) : new String("");
+        return TcpStream::connect(wrapped);
+    }
+
+    public static TcpStream connect(String host_port) {
+        if (host_port == null || host_port.data == null) {
+            throw new NetworkException("[E0333] Network operation failed on socket: null host_port");
+        }
+        int64 handle = TcpStream::native_connect(host_port.to_chars());
+        if (handle <= 0) {
+            throw new NetworkException("[E0333] Network operation failed on socket: could not connect to " + host_port.to_string());
+        }
+        return new TcpStream(handle);
+    }
+
+    public int32 write(int8[] buffer) {
+        if (buffer == null || this.socket_id <= 0) {
+            return 0;
+        }
+        return TcpStream::native_write(this.socket_id, buffer);
+    }
+
+    public int32 write_string(string text) {
+        String wrapped = (text != null) ? new String(text) : new String("");
+        return this.write_string(wrapped);
+    }
+
+    public int32 write_string(String text) {
+        if (text == null || text.data == null) {
+            return 0;
+        }
+        char[] chars = text.to_chars();
+        int8[] bytes = new int8[chars.length];
+        for (int32 index = 0; index < chars.length; index = index + 1) {
+            bytes[index] = (int8)chars[index];
+        }
+        return this.write(bytes);
+    }
+
+    public int8[] read(int32 max_bytes) {
+        if (this.socket_id <= 0 || max_bytes <= 0) {
+            return new int8[0];
+        }
+        return TcpStream::native_read(this.socket_id, max_bytes);
+    }
+
+    public String read_string(int32 max_bytes) {
+        int8[] bytes = this.read(max_bytes);
+        if (bytes == null || bytes.length == 0) {
+            return new String("");
+        }
+        char[] chars = new char[bytes.length];
+        for (int32 index = 0; index < bytes.length; index = index + 1) {
+            chars[index] = (char)bytes[index];
+        }
+        return new String(chars);
+    }
+
+    public void close() {
+        if (this.socket_id > 0) {
+            TcpStream::native_close(this.socket_id);
+            this.socket_id = 0;
+        }
+    }
+
+    private static native int64 native_connect(char[] host_port);
+    private static native int32 native_write(int64 socket_id, int8[] buffer);
+    private static native int8[] native_read(int64 socket_id, int32 max_bytes);
+    private static native bool native_close(int64 socket_id);
+}

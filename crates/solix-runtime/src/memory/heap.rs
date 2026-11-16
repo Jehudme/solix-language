@@ -575,6 +575,39 @@ impl VirtualHeap {
     // Memory Integrity & Clean Verification
     // =========================================================================
 
+    /// Returns the live block counts partitioned by tag: (strings, arrays, objects, closures).
+    #[must_use]
+    pub fn count_blocks_by_tag(&self) -> (usize, usize, usize, usize) {
+        let mut string_count = 0;
+        let mut array_count = 0;
+        let mut object_count = 0;
+        let mut closure_count = 0;
+        let mut current_offset = 0;
+        while current_offset < self.bump_cursor {
+            let block_abs_addr = self.static_size + current_offset;
+            let payload_addr = (block_abs_addr + HEADER_SIZE) as u32;
+            if let Ok(header) = self.read_header(payload_addr) {
+                let total_block_size = HEADER_SIZE + align_up(header.size as usize).max(ALIGNMENT);
+                if total_block_size == 0 {
+                    break;
+                }
+                if header.ref_count > 0 {
+                    match header.tag {
+                        BlockTag::String => string_count += 1,
+                        BlockTag::ArrayRef => array_count += 1,
+                        BlockTag::Object => object_count += 1,
+                        BlockTag::Closure => closure_count += 1,
+                        _ => {}
+                    }
+                }
+                current_offset += total_block_size;
+            } else {
+                break;
+            }
+        }
+        (string_count, array_count, object_count, closure_count)
+    }
+
     /// Verifies that all allocated heap blocks have been cleanly freed and coalesced.
     ///
     /// # Errors

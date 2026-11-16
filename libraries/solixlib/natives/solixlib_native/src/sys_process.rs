@@ -191,6 +191,71 @@ pub unsafe extern "C" fn env_native_pid(
     SolixCValue::i64_val(std::process::id() as i64)
 }
 
+pub unsafe extern "C" fn vm_native_get_metric(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::i64_val(0);
+    }
+    let metric_id = unsafe { (*args.add(0)).as_i32() as u32 };
+    let metric_value = unsafe { crate::read_vm_metric(vm_context, metric_id) };
+    SolixCValue::i64_val(metric_value as i64)
+}
+
+pub unsafe extern "C" fn env_native_is_slxpac(
+    vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let metric_value = unsafe { crate::read_vm_metric(vm_context, 36) };
+    if metric_value == 1 {
+        return SolixCValue::bool_val(true);
+    }
+    let is_slxpac = std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxpac");
+    SolixCValue::bool_val(is_slxpac)
+}
+
+pub unsafe extern "C" fn env_native_is_slxarc(
+    vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let metric_value = unsafe { crate::read_vm_metric(vm_context, 37) };
+    if metric_value == 1 {
+        return SolixCValue::bool_val(true);
+    }
+    let is_slxarc = std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxarc");
+    SolixCValue::bool_val(is_slxarc)
+}
+
+pub unsafe extern "C" fn env_native_get_container_kind(
+    vm_context: *mut c_void,
+    _args: *const SolixCValue,
+    _arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    let is_slxpac = unsafe { crate::read_vm_metric(vm_context, 36) } == 1;
+    let is_slxarc = unsafe { crate::read_vm_metric(vm_context, 37) } == 1;
+    let is_slxb = unsafe { crate::read_vm_metric(vm_context, 38) } == 1;
+    let kind = if is_slxpac {
+        "slxpac"
+    } else if is_slxarc {
+        "slxarc"
+    } else if is_slxb {
+        "slxb"
+    } else if let Ok(kind_str) = std::env::var("SOLIX_CONTAINER_KIND") {
+        return SolixCValue::ref_val(unsafe { alloc_solix_chars(vm_context, &kind_str) });
+    } else {
+        "source"
+    };
+    SolixCValue::ref_val(unsafe { alloc_solix_chars(vm_context, kind) })
+}
+
 // --- Process Natives ---
 
 pub unsafe extern "C" fn process_native_start(
@@ -441,9 +506,48 @@ pub unsafe fn register_sys_process_natives(
             ],
             env_native_pid,
         ),
+        (
+            &[
+                "Environment_native_is_slxpac",
+                "solix_system_Environment_native_is_slxpac",
+                "Environment::native_is_slxpac",
+            ],
+            env_native_is_slxpac,
+        ),
+        (
+            &[
+                "Environment_native_is_slxarc",
+                "solix_system_Environment_native_is_slxarc",
+                "Environment::native_is_slxarc",
+            ],
+            env_native_is_slxarc,
+        ),
+        (
+            &[
+                "Environment_native_get_container_kind",
+                "solix_system_Environment_native_get_container_kind",
+                "Environment::native_get_container_kind",
+            ],
+            env_native_get_container_kind,
+        ),
     ];
 
     for (variants, func) in env_mappings {
+        unsafe { register_symbol_variants(collector, callback, variants, *func) };
+    }
+
+    let vm_mappings: &[(&[&str], NativeCFunctionPtr)] = &[
+        (
+            &[
+                "Vm_native_get_metric",
+                "solix_system_Vm_native_get_metric",
+                "Vm::native_get_metric",
+            ],
+            vm_native_get_metric,
+        ),
+    ];
+
+    for (variants, func) in vm_mappings {
         unsafe { register_symbol_variants(collector, callback, variants, *func) };
     }
 
