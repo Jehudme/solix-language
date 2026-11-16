@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-061
 * **Target Version:** `v2.2.0`
 * **Milestone Branch:** `milestone/061-superinstructions-zero-spill-dispatch-typed-arrays-cse-and-lua-domination`
-* **Status:** DRAFT
+* **Status:** ACTIVE
 * **Lead Architect:** Core Systems, Compiler & Runtime Performance Engineering Team
 * **Target Delivery Date:** 2026-12-30
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
