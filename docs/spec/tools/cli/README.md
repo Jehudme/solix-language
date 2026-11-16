@@ -53,6 +53,7 @@ solix <subcommand> --help
 | [`clean`](clean.md) | Cleans project build artifacts and intermediate caches | [clean.md](clean.md) |
 | [`uninstall`](uninstall.md) | Removes an installed package or specific version from the local package store | [uninstall.md](uninstall.md) |
 | [`list`](list.md) | Lists all installed packages and versions in the local package store | [list.md](list.md) |
+| [`doc`](doc.md) | Generates API documentation from source code comments in HTML or Markdown | [doc.md](doc.md) |
 
 ---
 
@@ -87,4 +88,5 @@ solix <subcommand> --help
 - [**`clean` Subcommand**](clean.md): Cleaning project build artifacts (`build/`) and intermediate caches (`build/.cache/`).
 - [**`uninstall` Subcommand**](uninstall.md): Removing packages and versions from the local store.
 - [**`list` Subcommand**](list.md): Listing installed packages with tabular and `--json` formatting.
+- [**`doc` Subcommand**](doc.md): Generating static HTML and Markdown API documentation with doc comment parsing.
 - [**Project Manifest (`manifest.toml`) Specification**](manifest.md): Complete schema documentation for project manifests.

@@ -210,4 +210,9 @@ The LSP `WorkspaceManager` locates `manifest.toml` in project parent directories
 ### 7.7 Internal Workspace Distribution
 The `solix-lsp` crate operates as an internal daemon embedded into the single `solix` executable (`solix lsp`). Publication to public registries is restricted (`publish = false`), and it is distributed exclusively as part of the official toolchain binaries.
 
+### 7.8 Doc Comment & Parameter Documentation Intelligence
+The Language Server extracts doc comments (`///` and `/** ... */`) directly into LSP metadata:
+1. **Completion Item Documentation**: Declarations in `textDocument/completion` results attach their doc comment string directly in `CompletionItem.documentation` upfront, allowing code completions in VS Code to immediately display formatted markdown descriptions without requiring a secondary `completionItem/resolve` round-trip.
+2. **Signature Help Parameter Documentation**: When signature help triggers on active parameter typing (`textDocument/signatureHelp`), structured `@param <name> <description>` tags are extracted from the callee's doc comments and attached to the corresponding `ParameterInformation.documentation`. Editors render the active parameter's description alongside its type in the signature tooltip.
+
 

@@ -25,8 +25,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
 | `--lib <path>` | `-l` | Path (Repeated) | `[]` | Additional library files or native shared libraries to load (`*.slxb`, `*.slxarc`, `*.so`, `*.dll`, `*.dylib`). |
-| `--entry <symbol>` | `-e` | String | None | Overrides default entry point symbol (e.g. `Main::main`). |
-| `--test` | | Flag | `false` | Executes the test entry point defined in archive `manifest.toml` (`[entrypoints].test`). |
+| `--entry <symbol>` | `-e` | String | None | Overrides default entry point symbol (e.g. `Main::main`). If the specified entrypoint symbol does not exist in the loaded program or archive container, execution halts immediately with diagnostic code `[E0301]`. |
 | `--profile <profile>` | `-p` | String | None | Target build profile to execute (e.g. `release`, `debug`, `test`). |
 | `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for AST inlining when compiling `.slx` sources. |
 | `--heap-size <size>` | | String | `"32MB"` | Virtual heap allocation capacity limit (e.g., `"16MB"`, `"64MB"`, `"1GB"`). |
@@ -65,16 +64,16 @@ When given an archive container, the runtime:
 2. Automatically stages and loads bundled native shared libraries (`natives/*.so`).
 3. Sets `SOLIX_RESOURCE_ROOT` to the archive resources directory.
 4. Selects the target entry point:
-   - Default: `[entrypoints].main` (e.g. `Main::main`)
-   - With `--test`: `[entrypoints].test` (e.g. `TestRunner::test`)
+   - Default: `[entrypoints].main` (e.g. `Main::main`) or custom profile entrypoint (e.g. `[entrypoints].test` for a test profile container).
+   - Overridden dynamically by `--entry <symbol>` (validating symbol existence, throwing `[E0301]` on missing entrypoint).
 5. Invokes the entry point in the VM.
 
 ```bash
 # Run application
 solix run build/release/my_app.slxarc
 
-# Run test suite
-solix run --test build/debug/my_app.slxarc
+# Run test profile container
+solix run build/test/my_app.slxarc
 ```
 
 ### 4. Installed Package Execution

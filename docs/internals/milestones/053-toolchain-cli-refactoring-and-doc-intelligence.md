@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-053
 * **Target Version:** `v2.0.0`
 * **Milestone Branch:** `milestone/053-toolchain-cli-refactoring-and-doc-intelligence`
-* **Status:** ACTIVE
+* **Status:** COMPLETED
 * **Lead Architect:** Core Systems & Toolchain Infrastructure Team
 * **Target Delivery Date:** 2026-11-16
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)
@@ -74,3 +74,13 @@ Key objectives:
 1. Zero compiler errors and zero clippy warnings (`cargo clippy --workspace --all-targets -- -D warnings`).
 2. 100% test pass rate across unit and integration tests (`cargo test --workspace`).
 3. CLI documentation updated with zero drift (`scripts/verify_docs.py`).
+
+---
+
+## 6. Completed Deliverables & Verification Record
+
+* **CLI `--test` Flag Removal:** Cleanly removed redundant `--test` flag from `RunArgs` and `execute_run`. Profile-scoped test entrypoint compilation now drives test execution directly.
+* **Strict Entrypoint Validation (`E0301`):** Verified `--entry <symbol>` checks that requested symbols exist in loaded bytecode containers, throwing `[E0301]` when absent.
+* **Static Documentation Generator (`solix doc`):** Implemented high-performance offline documentation tool supporting both modern static HTML with responsive CSS and Markdown exports, parsing classes, interfaces, enums, functions, methods, constructors, fields, and doc tags (`@param`, `@return`, `@throws`, `@deprecated`).
+* **LSP & IntelliSense Intelligence:** Updated `solix-lsp` to attach doc comments upfront in completion lists and populated active `@param` documentation in signature help tooltips.
+* **Hermetic Integration Tests:** Added 5 new integration tests in `milestone053_tests.rs` and 2 new LSP tests in `lsp_tests.rs`, passing with 100% success rate.

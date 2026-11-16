@@ -59,6 +59,9 @@ pub enum Commands {
     /// Formats Solix source files according to official style guidelines
     Fmt(FmtArgs),
 
+    /// Generates static HTML or Markdown API documentation from source doc comments
+    Doc(DocArgs),
+
     /// Removes project build artifacts and intermediate caches
     Clean(CleanArgs),
 }
@@ -105,6 +108,30 @@ pub struct FmtArgs {
     /// Check if files are formatted without writing changes to disk (exits with code 1 if unformatted)
     #[arg(long)]
     pub check: bool,
+}
+
+/// Arguments for `solix doc`.
+#[derive(Debug, Args, Clone)]
+pub struct DocArgs {
+    /// Workspace root or path to project manifest [default: current directory]
+    #[arg(default_value = ".")]
+    pub path: PathBuf,
+
+    /// Output directory for generated documentation [default: "docs/api"]
+    #[arg(short, long, default_value = "docs/api")]
+    pub output: PathBuf,
+
+    /// Documentation format: html (default) or markdown
+    #[arg(short, long, default_value = "html")]
+    pub format: String,
+
+    /// Open generated documentation in default web browser
+    #[arg(long)]
+    pub open: bool,
+
+    /// Target build profile (e.g. "release", "debug")
+    #[arg(short, long)]
+    pub profile: Option<String>,
 }
 
 /// Arguments for `solix build`.
@@ -275,10 +302,6 @@ pub struct RunArgs {
     /// Override default entry point symbol (e.g. "Main::main")
     #[arg(short, long)]
     pub entry: Option<String>,
-
-    /// Execute test entrypoint defined in archive manifest ([entrypoints].test)
-    #[arg(long)]
-    pub test: bool,
 
     /// Target build profile (e.g. "release", "debug", "test")
     #[arg(short, long)]

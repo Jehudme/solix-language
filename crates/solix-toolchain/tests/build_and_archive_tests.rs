@@ -383,16 +383,15 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
         test_archive.display()
     );
 
-    // Run the test archive with --test flag to execute TestRunner::main
+    // Run the test archive to execute the test profile's baked entrypoint
     let run_test_cli = Cli::try_parse_from([
         "solix",
         "run",
-        "--test",
         test_archive.to_str().expect("valid path"),
     ])
     .expect("Failed to parse run test archive CLI");
     let run_test_exit_code =
-        run(run_test_cli).expect("Executing test .slxarc archive with --test must succeed");
+        run(run_test_cli).expect("Executing test .slxarc archive must succeed");
     assert_eq!(run_test_exit_code, 0);
 }
 

@@ -263,11 +263,12 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
             if runtime_options.entry_point.is_none() {
-                let selected_entry = if args.test {
-                    archive_manifest.test_entrypoint()
-                } else {
-                    archive_manifest.main_entrypoint()
-                };
+                let target_profile = args.profile.as_deref().unwrap_or("release");
+                let selected_entry = archive_manifest
+                    .resolve_profile(target_profile)
+                    .ok()
+                    .and_then(|profile| profile.entrypoint)
+                    .or_else(|| archive_manifest.main_entrypoint());
                 if let Some(ref target_symbol) = selected_entry {
                     runtime_options = runtime_options.with_entry_point(target_symbol);
                 }
@@ -345,11 +346,12 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 }
             }
             if runtime_options.entry_point.is_none() && args.entry.is_none() {
-                let selected_entry = if args.test {
-                    manifest.test_entrypoint()
-                } else {
-                    manifest.main_entrypoint()
-                };
+                let target_profile = args.profile.as_deref().unwrap_or("release");
+                let selected_entry = manifest
+                    .resolve_profile(target_profile)
+                    .ok()
+                    .and_then(|profile| profile.entrypoint)
+                    .or_else(|| manifest.main_entrypoint());
                 if let Some(ref target_symbol) = selected_entry {
                     compilation_options =
                         compilation_options.with_entry_point(Some(target_symbol.clone()));
@@ -410,10 +412,19 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let mut vm = VirtualMachine::new(context);
     let binary_load_time_us = binary_load_timer.elapsed().as_micros() as u64;
 
-    let entry_id = vm
-        .context
-        .entry_point_function_id
-        .ok_or_else(|| anyhow::anyhow!("Entry point not found in loaded binaries"))?;
+    let entry_id = vm.context.entry_point_function_id.ok_or_else(|| {
+        if let Some(ref requested_entry) = args.entry {
+            anyhow::anyhow!(
+                "Runtime error: [E0301] Specified entrypoint symbol '{requested_entry}' was not found in the loaded program or container."
+            )
+        } else if let Some(ref configured_entry) = vm.context.options.entry_point {
+            anyhow::anyhow!(
+                "Runtime error: [E0301] Specified entrypoint symbol '{configured_entry}' was not found in the loaded program or container."
+            )
+        } else {
+            anyhow::anyhow!("Entry point not found in loaded binaries")
+        }
+    })?;
     vm.validate_cli_entry_point(entry_id)
         .map_err(|error| anyhow::anyhow!("Invalid entry point signature: {error}"))?;
 
@@ -536,6 +547,13 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     }
 
     if let Err(runtime_error) = run_result {
+        if let solix_runtime::exceptions::RuntimeError::EntryPointNotFound { symbol } =
+            &runtime_error
+        {
+            bail!(
+                "Runtime error: [E0301] Specified entrypoint symbol '{symbol}' was not found in the loaded program or container."
+            );
+        }
         bail!("Runtime error: {runtime_error}");
     }
 

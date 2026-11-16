@@ -575,7 +575,7 @@ fn handle_dot_completion(
                         && member.name != "constructor"
                         && !member.name.starts_with('~')
                     {
-                        let mut item = make_symbol_completion_item(member);
+                        let mut item = make_symbol_completion_item(snapshot, member);
                         item.additional_text_edits = Some(vec![TextEdit {
                             range: replace_range,
                             new_text: "::".to_string(),
@@ -621,7 +621,7 @@ fn handle_dot_completion(
                             && member.name != "constructor"
                             && !member.name.starts_with('~')
                         {
-                            let mut item = make_symbol_completion_item(member);
+                            let mut item = make_symbol_completion_item(snapshot, member);
                             item.sort_text = Some(format!("0_{}", member.name));
                             direct_member_names.insert(member.name.clone());
                             items.push(item);
@@ -648,7 +648,7 @@ fn handle_dot_completion(
                                     && !member.name.starts_with('~')
                                     && !direct_member_names.contains(&member.name)
                                 {
-                                    let mut item = make_symbol_completion_item(member);
+                                    let mut item = make_symbol_completion_item(snapshot, member);
                                     item.sort_text = Some(format!("1_{}", member.name));
                                     items.push(item);
                                 }
@@ -730,7 +730,7 @@ fn handle_scope_resolution_completion(
                     && member.name != "constructor"
                     && !member.name.starts_with('~')
                 {
-                    let mut item = make_symbol_completion_item(member);
+                    let mut item = make_symbol_completion_item(snapshot, member);
                     item.sort_text = Some(format!("0_{}", member.name));
                     items.push(item);
                 }
@@ -813,7 +813,7 @@ fn handle_scope_resolution_completion(
         if symbol.fully_qualified_name.starts_with(&qualified_prefix) {
             let remaining = &symbol.fully_qualified_name[qualified_prefix.len()..];
             if !remaining.contains("::") && !remaining.is_empty() {
-                let mut item = make_symbol_completion_item(symbol);
+                let mut item = make_symbol_completion_item(snapshot, symbol);
                 item.sort_text = Some(format!("1_{remaining}"));
                 items.push(item);
             }
@@ -874,7 +874,7 @@ fn handle_general_completion(
     if let Some(semantic) = &snapshot.last_good_semantic {
         for symbol in &semantic.symbol_table.symbols {
             if symbol.source_id == snapshot.source_id || symbol.is_public() {
-                items.push(make_symbol_completion_item(symbol));
+                items.push(make_symbol_completion_item(snapshot, symbol));
             }
         }
     }
@@ -913,7 +913,10 @@ fn handle_general_completion(
     }
 }
 
-fn make_symbol_completion_item(symbol: &SymbolEntry) -> CompletionItem {
+fn make_symbol_completion_item(
+    snapshot: &AnalysisSnapshot,
+    symbol: &SymbolEntry,
+) -> CompletionItem {
     let (item_kind, detail, label_details) = match &symbol.symbol_type {
         Type::FunctionPointer {
             return_type,
@@ -962,11 +965,21 @@ fn make_symbol_completion_item(symbol: &SymbolEntry) -> CompletionItem {
         ),
     };
 
+    let documentation = snapshot
+        .extract_doc_comment_for_span(symbol.span)
+        .map(|doc_text| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: doc_text,
+            })
+        });
+
     CompletionItem {
         label: symbol.name.clone(),
         kind: Some(item_kind),
         detail,
         label_details,
+        documentation,
         ..Default::default()
     }
 }

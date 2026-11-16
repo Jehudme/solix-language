@@ -12,11 +12,11 @@ pub mod solver;
 pub mod telemetry;
 
 pub use cli::{
-    BuildArgs, CleanArgs, Cli, Commands, CompileArgs, DapArgs, FmtArgs, InfoArgs, InstallArgs,
+    BuildArgs, CleanArgs, Cli, Commands, CompileArgs, DapArgs, DocArgs, FmtArgs, InfoArgs, InstallArgs,
     ListArgs, LspArgs, NewArgs, ReinstallArgs, RunArgs, SyncArgs, UninstallArgs,
 };
 pub use commands::{
-    execute_build, execute_clean, execute_compile, execute_dap, execute_fmt, execute_info,
+    execute_build, execute_clean, execute_compile, execute_dap, execute_doc, execute_fmt, execute_info,
     execute_install, execute_list, execute_lsp, execute_new, execute_reinstall, execute_run,
     execute_sync, execute_uninstall,
 };
@@ -79,6 +79,10 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
         Commands::Fmt(args) => {
             let code = execute_fmt(args)?;
             Ok(code)
+        }
+        Commands::Doc(args) => {
+            execute_doc(args)?;
+            Ok(0)
         }
         Commands::Clean(args) => {
             execute_clean(args)?;

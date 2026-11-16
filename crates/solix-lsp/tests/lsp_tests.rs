@@ -505,6 +505,33 @@ fn test_feature_20_completion_resolve_docs() {
     assert!(resolved.documentation.is_some());
 }
 
+#[test]
+fn test_feature_completion_items_include_documentation_upfront() {
+    let (workspace, uri) = create_test_workspace();
+    let source = "/// Mathematical calculator utility.\nclass Calculator {\n    /// Adds two values.\n    public int32 add(int32 x, int32 y) { return x + y; }\n}\nvoid run() {\n    Calculator c = new Calculator();\n    c.\n}\n";
+
+    let snapshot = workspace.did_open(uri.clone(), 1, source.to_string());
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 7,
+                character: 6,
+            },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: None,
+    };
+
+    let list = completions(&workspace, &snapshot, &params);
+    let add_item = list.items.iter().find(|i| i.label == "add").unwrap();
+    assert!(add_item.documentation.is_some(), "add method completion item must have documentation attached");
+    if let Some(Documentation::MarkupContent(markup)) = &add_item.documentation {
+        assert!(markup.value.contains("Adds two values"));
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Feature 21: Rich Hover Tooltips (Signature, Sizeof, Offset, ARC)
 // -----------------------------------------------------------------------------
@@ -551,6 +578,33 @@ fn test_feature_22_signature_help_active_param() {
 
     assert_eq!(sig_help.signatures.len(), 1);
     assert_eq!(sig_help.active_parameter, Some(2));
+}
+
+#[test]
+fn test_feature_signature_help_parameter_doc_comments() {
+    let (workspace, uri) = create_test_workspace();
+    let source = "/// Performs drawing operation.\n/// @param x Horizontal coordinate\n/// @param y Vertical coordinate\nvoid draw(int32 x, int32 y) {}\nvoid main() {\n    draw(10, );\n}\n";
+
+    let snapshot = workspace.did_open(uri, 1, source.to_string());
+    let pos = Position {
+        line: 5,
+        character: 13,
+    };
+    let sig_help = signature_help(&snapshot, pos).unwrap();
+    assert_eq!(sig_help.signatures.len(), 1);
+    let sig = &sig_help.signatures[0];
+    let params = sig.parameters.as_ref().unwrap();
+    assert_eq!(params.len(), 2);
+    if let Some(Documentation::String(param_doc)) = &params[0].documentation {
+        assert_eq!(param_doc, "Horizontal coordinate");
+    } else {
+        panic!("Expected parameter doc for x");
+    }
+    if let Some(Documentation::String(param_doc)) = &params[1].documentation {
+        assert_eq!(param_doc, "Vertical coordinate");
+    } else {
+        panic!("Expected parameter doc for y");
+    }
 }
 
 // -----------------------------------------------------------------------------

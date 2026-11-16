@@ -124,6 +124,23 @@ fn build_signature_info(
     let mut parameter_infos = Vec::new();
     let mut parameter_strings = Vec::new();
 
+    let extracted_doc = snapshot.extract_doc_comment_for_span(symbol.span);
+    let mut param_docs = std::collections::HashMap::new();
+
+    if let Some(ref doc_text) = extracted_doc {
+        for line in doc_text.lines() {
+            let line_trimmed = line.trim();
+            if let Some(rest) = line_trimmed.strip_prefix("@param") {
+                let mut parts = rest.trim().splitn(2, ' ');
+                let param_name = parts.next().unwrap_or("").trim();
+                let param_desc = parts.next().unwrap_or("").trim();
+                if !param_name.is_empty() && !param_desc.is_empty() {
+                    param_docs.insert(param_name.to_string(), param_desc.to_string());
+                }
+            }
+        }
+    }
+
     for (parameter_index, parameter_type) in parameter_types.iter().enumerate() {
         let parameter_name = symbol
             .parameter_names
@@ -133,9 +150,14 @@ fn build_signature_info(
             .unwrap_or("arg");
         let label = format!("{parameter_type} {parameter_name}");
         parameter_strings.push(label.clone());
+
+        let param_documentation = param_docs
+            .get(parameter_name)
+            .map(|desc| Documentation::String(desc.clone()));
+
         parameter_infos.push(ParameterInformation {
             label: ParameterLabel::Simple(label),
-            documentation: None,
+            documentation: param_documentation,
         });
     }
 
@@ -148,13 +170,12 @@ fn build_signature_info(
         )
     };
 
-    let mut documentation = None;
-    if let Some(doc_text) = snapshot.extract_doc_comment_for_span(symbol.span) {
-        documentation = Some(Documentation::MarkupContent(MarkupContent {
+    let documentation = extracted_doc.map(|doc_text| {
+        Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
             value: doc_text,
-        }));
-    }
+        })
+    });
 
     SignatureInformation {
         label: full_label,
