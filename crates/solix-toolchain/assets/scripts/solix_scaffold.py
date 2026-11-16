@@ -236,7 +236,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-solix-ffi = "1.1.3"
+solix-ffi = "1.2.0"
 """
         (bridge_dir / "Cargo.toml").write_text(cargo_toml_content, encoding="utf-8")
 

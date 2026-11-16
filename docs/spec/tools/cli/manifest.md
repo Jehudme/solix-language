@@ -80,6 +80,7 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 2. **Default Parent**: If any profile omits `inherits`, it **automatically defaults to `"release"` as its parent**.
 3. **Cumulative Sources**: The `sources` option specifies a list of directory paths (relative to project root) to recursively discover `.slx` source files. Child profiles inherit parent source directories and append additional ones preserving order. For `release`, `sources` defaults to `["src"]`.
 4. **Inherited Dependencies**: Child profiles inherit parent dependencies and can add or override dependencies.
+5. **Profile Validation**: When requesting a build profile via the CLI or build system, the target profile must either be a standard profile (`release`, `debug`, `test`) or explicitly declared in `[profiles.<name>]`. Requesting an unregistered profile produces an immediate profile resolution error.
 
 #### Profile Options:
 

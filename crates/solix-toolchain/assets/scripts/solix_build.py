@@ -722,12 +722,12 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
     # Resolve effective profile
     effective_profile = profile or os.environ.get("SOLIX_PROFILE") or "release"
     effective_profile = effective_profile.lower()
-    if effective_profile not in ("debug", "release", "test"):
+    if effective_profile not in ("debug", "release", "test") and effective_profile not in manifest.get("profiles", {}):
         raise BuildError(
             phase="Profile Resolution",
-            message=f"Unknown build profile '{effective_profile}'; expected 'debug', 'release', or 'test'",
+            message=f"Unknown build profile '{effective_profile}'; expected 'debug', 'release', 'test', or a profile defined in manifest.toml",
             cwd=project_root,
-            hint="Set profile to 'debug', 'release', or 'test' via CLI or build command.",
+            hint="Set profile to 'debug', 'release', 'test', or a custom profile defined in manifest.toml via CLI or build command.",
         )
 
     print(f"=== Building Solix Project: {project_root.name} [{effective_profile}] ===")

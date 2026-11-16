@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.2.0] - 2026-11-16
+
+### Unified Configuration Manifest Schema, Profile-Scoped Sources & Automated CI/CD
+* **Unified Project Manifest Architecture:**
+  * Replaced legacy fragmented sections (`[info]`, `[entrypoints]`, `[build]`, `[profile.<name>]`, and root `[dependencies]`) with a modern, clean `[configuration]` and `[profiles]` schema.
+  * Made `[profiles.release]` the only mandatory profile; any profile omitting `inherits` defaults to `release` as its parent automatically.
+  * Introduced profile-scoped `sources` discovery, allowing profiles (e.g. `test`) to accumulate inherited source paths and append test directories preserving discovery order.
+  * Introduced profile-scoped `dependencies` with table notation (`solix = { version = "2.0.0", profile = "release" }`), supporting hierarchical dependency inheritance and override.
+* **Scaffolding & Native Extension Modernization:**
+  * Modernized `solix new` and `solix_scaffold.py` to generate `release`, `debug`, and `test` profiles pre-configured.
+  * Updated `--native` scaffolding to automatically provision a Rust bridge library in `natives/` configured with a dependency on `solix-ffi` (v1.2.0).
+* **Toolchain & Compiler Hardening:**
+  * Enhanced module solver profile-qualified resolution and authenticated extraction cache validation.
+  * Hardened profile inheritance resolution with cycle detection, profile validation, and descriptive diagnostics.
+  * Upgraded first-party standard library (`solixlib`), graphics library (`raylib`), and game examples (`breakout`) to modern schema.
+* **Automated Crates.io CI/CD Pipeline:**
+  * Configured GitHub Actions release workflows to automatically publish public library crates (`solix-ffi`, `solix-common`, `solix-runtime`, `solix-compilation`) using `CARGO_REGISTRY_TOKEN`.
+
+---
+
 ## [1.1.3] - 2026-11-15
 
 ### Visual Studio Code Tooling, Compiler Diagnostic Parity & Language Intelligence
