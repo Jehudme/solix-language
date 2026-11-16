@@ -760,7 +760,6 @@ impl<'ctx> Emitter<'ctx> {
                 size,
             } => {
                 let r_size = self.emit_expression(size, None)?;
-                let elem_size = 8u16;
                 let dst = self.resolve_dst(target_reg)?;
                 let array_type = self.query_type(*span);
                 let type_tag = match array_type {
@@ -792,6 +791,12 @@ impl<'ctx> Emitter<'ctx> {
                         self.resolve_type_tag(resolved_name)
                     }
                 };
+                let elem_size: u16 = match type_tag {
+                    1 | 5 | 11 | 12 => 1,
+                    2 | 6 => 2,
+                    3 | 7 | 9 => 4,
+                    _ => 8,
+                };
                 self.emit_instruction(
                     Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_size, elem_size),
                     Some(*span),
@@ -821,8 +826,14 @@ impl<'ctx> Emitter<'ctx> {
                     }
                     _ => 0x80,
                 };
+                let elem_size: u16 = match type_tag {
+                    1 | 5 | 11 | 12 => 1,
+                    2 | 6 => 2,
+                    3 | 7 | 9 => 4,
+                    _ => 8,
+                };
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_len, 8),
+                    Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_len, elem_size),
                     Some(*span),
                 );
                 self.allocator.free_temp(r_len);

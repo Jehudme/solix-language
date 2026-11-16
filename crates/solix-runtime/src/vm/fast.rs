@@ -247,6 +247,18 @@ fn read_i64_fast(val_ref: &Value) -> Result<i64, VmTrap> {
 
 #[cold]
 #[inline(never)]
+fn read_i32_pair_slow(left_ref: &Value, right_ref: &Value) -> Result<(i32, i32), VmTrap> {
+    Ok((read_i32_fast(left_ref)?, read_i32_fast(right_ref)?))
+}
+
+#[cold]
+#[inline(never)]
+fn read_i64_pair_slow(left_ref: &Value, right_ref: &Value) -> Result<(i64, i64), VmTrap> {
+    Ok((read_i64_fast(left_ref)?, read_i64_fast(right_ref)?))
+}
+
+#[cold]
+#[inline(never)]
 fn read_array_index_slow(val_ref: &Value) -> Result<i64, VmTrap> {
     if let Value::I64(num_val) = *val_ref {
         Ok(num_val)
@@ -514,10 +526,10 @@ fn decode_array_element(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> V
     }
 }
 
-const fn build_mod_magic_table() -> [(u64, u32); 64] {
-    let mut table = [(0u64, 0u32); 64];
+const fn build_mod_magic_table() -> [(u64, u32); 1024] {
+    let mut table = [(0u64, 0u32); 1024];
     let mut divisor = 1usize;
-    while divisor < 64 {
+    while divisor < 1024 {
         let shift = 33 + divisor.ilog2();
         let numerator = 1u64 << shift;
         let div_u64 = divisor as u64;
@@ -532,7 +544,7 @@ const fn build_mod_magic_table() -> [(u64, u32); 64] {
     table
 }
 
-const MOD_MAGIC_TABLE: [(u64, u32); 64] = build_mod_magic_table();
+const MOD_MAGIC_TABLE: [(u64, u32); 1024] = build_mod_magic_table();
 
 #[cold]
 #[inline(never)]
@@ -2165,8 +2177,14 @@ impl VirtualMachine {
                     // 0x10 .. 0x20: Arithmetic Operations
                     // =============================================================
                     OpCode::AddI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) =
                                 Value::I32(val_a.wrapping_add(val_b));
@@ -2174,8 +2192,14 @@ impl VirtualMachine {
                     }
 
                     OpCode::AddI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) =
                                 Value::I64(val_a.wrapping_add(val_b));
@@ -2198,8 +2222,14 @@ impl VirtualMachine {
                     }
 
                     OpCode::SubI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) =
                                 Value::I32(val_a.wrapping_sub(val_b));
@@ -2207,8 +2237,14 @@ impl VirtualMachine {
                     }
 
                     OpCode::SubI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) =
                                 Value::I64(val_a.wrapping_sub(val_b));
@@ -2231,8 +2267,14 @@ impl VirtualMachine {
                     }
 
                     OpCode::MulI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) =
                                 Value::I32(val_a.wrapping_mul(val_b));
@@ -2240,8 +2282,14 @@ impl VirtualMachine {
                     }
 
                     OpCode::MulI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) =
                                 Value::I64(val_a.wrapping_mul(val_b));
@@ -2345,84 +2393,93 @@ impl VirtualMachine {
                     OpCode::Band => {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                        let result =
-                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
-                                Value::I32(lhs & rhs)
-                            } else {
-                                band_slow(left_ref, right_ref)?
-                            };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = result;
+                        if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::I32(lhs & rhs);
+                            }
+                        } else {
+                            let result = band_slow(left_ref, right_ref)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = result;
+                            }
                         }
                     }
 
                     OpCode::Bor => {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                        let result =
-                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
-                                Value::I32(lhs | rhs)
-                            } else {
-                                bor_slow(left_ref, right_ref)?
-                            };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = result;
+                        if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::I32(lhs | rhs);
+                            }
+                        } else {
+                            let result = bor_slow(left_ref, right_ref)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = result;
+                            }
                         }
                     }
 
                     OpCode::Bxor => {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                        let result =
-                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
-                                Value::I32(lhs ^ rhs)
-                            } else {
-                                bxor_slow(left_ref, right_ref)?
-                            };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = result;
+                        if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::I32(lhs ^ rhs);
+                            }
+                        } else {
+                            let result = bxor_slow(left_ref, right_ref)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = result;
+                            }
                         }
                     }
 
                     OpCode::Bnot => {
                         let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                        let result = if let Value::I32(lhs) = *val_ref {
-                            Value::I32(!lhs)
+                        if let Value::I32(lhs) = *val_ref {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::I32(!lhs);
+                            }
                         } else {
-                            bnot_slow(val_ref)?
-                        };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = result;
+                            let result = bnot_slow(val_ref)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = result;
+                            }
                         }
                     }
 
                     OpCode::Shl => {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                        let result =
-                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
-                                let shift = (rhs & 31) as u32;
-                                Value::I32(lhs.wrapping_shl(shift))
-                            } else {
-                                shl_slow(left_ref, right_ref)?
-                            };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = result;
+                        if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            let shift = (rhs & 31) as u32;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::I32(lhs.wrapping_shl(shift));
+                            }
+                        } else {
+                            let result = shl_slow(left_ref, right_ref)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = result;
+                            }
                         }
                     }
 
                     OpCode::Shr => {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                        let result =
-                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
-                                let shift = (rhs & 31) as u32;
-                                Value::I32(lhs.wrapping_shr(shift))
-                            } else {
-                                shr_slow(left_ref, right_ref)?
-                            };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = result;
+                        if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            let shift = (rhs & 31) as u32;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::I32(lhs.wrapping_shr(shift));
+                            }
+                        } else {
+                            let result = shr_slow(left_ref, right_ref)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = result;
+                            }
                         }
                     }
 
@@ -2576,16 +2633,28 @@ impl VirtualMachine {
                     }
 
                     OpCode::LtI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
                         }
                     }
 
                     OpCode::LtI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
                         }
@@ -2600,16 +2669,28 @@ impl VirtualMachine {
                     }
 
                     OpCode::LteI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
                         }
                     }
 
                     OpCode::LteI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
                         }
@@ -2624,16 +2705,28 @@ impl VirtualMachine {
                     }
 
                     OpCode::GtI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
                         }
                     }
 
                     OpCode::GtI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
                         }
@@ -2648,16 +2741,28 @@ impl VirtualMachine {
                     }
 
                     OpCode::GteI32 => {
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
                         }
                     }
 
                     OpCode::GteI64 => {
-                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i64_pair_slow(left_ref, right_ref)?
+                            };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
                         }
@@ -2887,35 +2992,51 @@ impl VirtualMachine {
                         let offset = inst.src2() as usize;
                         let field_addr = obj_addr + offset as u32;
                         let raw_flags = inst.flags();
-                        let val = if raw_flags > 1 {
+                        let dst_idx = inst.dst() as usize;
+                        if raw_flags > 1 {
                             match raw_flags >> 1 {
-                                5 | 6 => Value::I32(read_heap_u32_or_zero(
-                                    &self.heap.buffer,
-                                    field_addr,
-                                ) as i32),
-                                7 | 8 => Value::I64(read_heap_u64_or_zero(
-                                    &self.heap.buffer,
-                                    field_addr,
-                                ) as i64),
-                                10 => Value::F64(f64::from_bits(read_heap_u64_or_zero(
-                                    &self.heap.buffer,
-                                    field_addr,
-                                ))),
+                                5 | 6 => unsafe {
+                                    *reg_base.add(dst_idx) = Value::I32(read_heap_u32_or_zero(
+                                        &self.heap.buffer,
+                                        field_addr,
+                                    )
+                                        as i32);
+                                },
+                                7 | 8 => unsafe {
+                                    *reg_base.add(dst_idx) = Value::I64(read_heap_u64_or_zero(
+                                        &self.heap.buffer,
+                                        field_addr,
+                                    )
+                                        as i64);
+                                },
+                                10 => unsafe {
+                                    *reg_base.add(dst_idx) = Value::F64(f64::from_bits(
+                                        read_heap_u64_or_zero(&self.heap.buffer, field_addr),
+                                    ));
+                                },
                                 12 => {
                                     let raw = read_heap_u64_or_zero(&self.heap.buffer, field_addr);
-                                    if raw == 0 || raw == Value::TAG_NULL {
-                                        Value::Null
-                                    } else {
-                                        Value::from_raw_u64(raw)
+                                    unsafe {
+                                        if raw == 0 || raw == Value::TAG_NULL {
+                                            *reg_base.add(dst_idx) = Value::Null;
+                                        } else {
+                                            *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
+                                        }
                                     }
                                 }
-                                _ => self.execute_get_field_slow(obj_addr, offset, raw_flags)?,
+                                _ => {
+                                    let val =
+                                        self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
+                                    unsafe {
+                                        *reg_base.add(dst_idx) = val;
+                                    }
+                                }
                             }
                         } else {
-                            self.execute_get_field_slow(obj_addr, offset, raw_flags)?
-                        };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = val;
+                            let val = self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
+                            unsafe {
+                                *reg_base.add(dst_idx) = val;
+                            }
                         }
                     }
 
@@ -3095,6 +3216,7 @@ impl VirtualMachine {
                             let index_usize = index_i64 as usize;
                             let elem_size_raw = unsafe { *buf_ptr.add(arr_offset + 4) };
                             let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
+                            let dst_idx = inst.dst() as usize;
                             if elem_type_tag == 11 && elem_size_raw == 1 {
                                 let elem_offset = arr_offset + 8 + index_usize;
                                 if elem_offset + 1 > heap_len {
@@ -3102,7 +3224,7 @@ impl VirtualMachine {
                                 }
                                 let flag = unsafe { *buf_ptr.add(elem_offset) } != 0;
                                 unsafe {
-                                    *reg_base.add(inst.dst() as usize) = Value::Bool(flag);
+                                    *reg_base.add(dst_idx) = Value::Bool(flag);
                                 }
                             } else if elem_type_tag == 3 && elem_size_raw == 4 {
                                 let elem_offset = arr_offset + 8 + (index_usize << 2);
@@ -3115,7 +3237,34 @@ impl VirtualMachine {
                                     ))
                                 };
                                 unsafe {
-                                    *reg_base.add(inst.dst() as usize) = Value::I32(raw as i32);
+                                    *reg_base.add(dst_idx) = Value::I32(raw as i32);
+                                }
+                            } else if elem_size_raw == 8
+                                && (elem_type_tag >= 13
+                                    || elem_type_tag == 10
+                                    || elem_type_tag == 0)
+                            {
+                                let elem_offset = arr_offset + 8 + (index_usize << 3);
+                                if elem_offset + 8 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let raw = unsafe {
+                                    u64::from_le(std::ptr::read_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u64>(),
+                                    ))
+                                };
+                                unsafe {
+                                    if elem_type_tag >= 13 {
+                                        if raw == 0 {
+                                            *reg_base.add(dst_idx) = Value::Null;
+                                        } else {
+                                            *reg_base.add(dst_idx) = Value::Ref(raw as u32);
+                                        }
+                                    } else if elem_type_tag == 10 {
+                                        *reg_base.add(dst_idx) = Value::F64(f64::from_bits(raw));
+                                    } else {
+                                        *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
+                                    }
                                 }
                             } else {
                                 let val = get_array_variant_cold(
@@ -3126,7 +3275,7 @@ impl VirtualMachine {
                                     elem_type_tag,
                                 )?;
                                 unsafe {
-                                    *reg_base.add(inst.dst() as usize) = val;
+                                    *reg_base.add(dst_idx) = val;
                                 }
                             }
                         }
@@ -3416,27 +3565,36 @@ impl VirtualMachine {
                     OpCode::ModI32Imm => {
                         let imm_val = inst.src2() as i16 as i32;
                         let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let rem_val = if val_a >= 0 && imm_val > 0 && imm_val < 64 {
-                            if (imm_val & (imm_val - 1)) == 0 {
+                        if val_a >= 0 && imm_val > 0 && imm_val < 1024 {
+                            let rem_val = if (imm_val & (imm_val - 1)) == 0 {
                                 val_a & (imm_val - 1)
                             } else {
                                 let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
                                 let quotient =
                                     (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
                                 val_a - quotient.wrapping_mul(imm_val)
+                            };
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
                             }
                         } else {
-                            rem_i32_cold(val_a, imm_val)?
-                        };
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
+                            let rem_val = rem_i32_cold(val_a, imm_val)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
+                            }
                         }
                     }
 
                     OpCode::JumpIfLtI32 => {
                         let offset = inst.src2() as i16 as i32;
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         if val_a < val_b {
                             pc = ((pc as i32 - 1) + offset) as usize;
                         }
@@ -3444,8 +3602,14 @@ impl VirtualMachine {
 
                     OpCode::JumpIfLteI32 => {
                         let offset = inst.src2() as i16 as i32;
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         if val_a <= val_b {
                             pc = ((pc as i32 - 1) + offset) as usize;
                         }
@@ -3453,8 +3617,14 @@ impl VirtualMachine {
 
                     OpCode::JumpIfGtI32 => {
                         let offset = inst.src2() as i16 as i32;
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         if val_a > val_b {
                             pc = ((pc as i32 - 1) + offset) as usize;
                         }
@@ -3462,8 +3632,14 @@ impl VirtualMachine {
 
                     OpCode::JumpIfGteI32 => {
                         let offset = inst.src2() as i16 as i32;
-                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                read_i32_pair_slow(left_ref, right_ref)?
+                            };
                         if val_a >= val_b {
                             pc = ((pc as i32 - 1) + offset) as usize;
                         }
