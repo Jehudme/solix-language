@@ -38,7 +38,7 @@ static = false
 [profiles.test]
 inherits = "debug"
 entrypoint = "TestRunner::test"
-sources = ["src", "tests"]
+sources = ["tests"]
 
 [profiles.test.dependencies]
 testlib = { version = "1.0.0", profile = "release" }
@@ -118,7 +118,7 @@ static = false
 [profiles.test]
 inherits = "debug"
 entrypoint = "TestRunner::test"
-sources = ["src", "tests"]
+sources = ["tests"]
 ```
 
 ---

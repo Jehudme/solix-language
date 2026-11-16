@@ -6,7 +6,6 @@ license = "Apache-2.0"
 authors = []
 
 [profiles.release]
-entrypoint = "Main::main"
 optimization_level = 3
 inline_threshold = 16
 debug_symbols = false
@@ -23,4 +22,4 @@ static = false
 [profiles.test]
 inherits = "debug"
 entrypoint = "TestRunner::test"
-sources = ["src", "tests"]
+sources = ["tests"]

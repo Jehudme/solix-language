@@ -120,7 +120,7 @@ static = false
 [profiles.test]
 inherits = "debug"
 entrypoint = "{test_entry}"
-sources = ["src", "tests"]
+sources = ["tests"]
 """
     manifest_file.write_text(manifest_content, encoding="utf-8")
 

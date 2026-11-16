@@ -91,7 +91,7 @@ static = false
 [profiles.test]
 inherits = "debug"
 entrypoint = "TestRunner::test"
-sources = ["src", "tests"]
+sources = ["tests"]
 ```
 
 #### Generated `src/main.slx`
