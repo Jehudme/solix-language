@@ -56,6 +56,7 @@ impl Value {
     /// - `F64(f)` is `!f.is_nan() && f != 0.0`
     /// - `Ref(addr)` is `addr != 0`
     /// - `FnPtr(id)` is true
+    #[inline(always)]
     #[must_use]
     pub fn is_truthy(&self) -> bool {
         match self {
@@ -70,6 +71,7 @@ impl Value {
     }
 
     /// Evaluates equality between two values with support for mixed primitive/reference types.
+    #[inline(always)]
     #[must_use]
     pub fn is_equal_to(&self, other: &Self) -> bool {
         match (self, other) {
@@ -226,6 +228,7 @@ impl Value {
     }
 
     /// Encodes this value into a raw 64-bit NaN-boxed word representation for memory storage.
+    #[inline(always)]
     #[must_use]
     pub fn to_raw_u64(&self) -> u64 {
         match self {
@@ -258,6 +261,7 @@ impl Value {
     }
 
     /// Decodes a value from its raw 64-bit NaN-boxed word representation.
+    #[inline(always)]
     #[must_use]
     pub fn from_raw_u64(raw: u64) -> Self {
         if raw == 0 || raw == Self::TAG_NULL {

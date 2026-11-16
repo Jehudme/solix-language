@@ -917,19 +917,34 @@ impl VirtualMachine {
         }
     }
 
-    /// Fast-path frame activation: copies argument registers within `register_stack` without allocating a heap vector.
-    ///
-    /// # Errors
-    /// Returns `RuntimeError::StackOverflow` if recursion depth exceeds configured limit,
-    /// or `RuntimeError::FunctionNotFound` if `function_id` is unrecognized.
+    #[inline(never)]
+    fn clear_frame_reference_registers(
+        register_stack: &mut [Value],
+        ref_regs: &[u16],
+        reg_base: usize,
+        arg_count: usize,
+        num_regs: usize,
+    ) {
+        for &ref_reg in ref_regs {
+            let reg_index = ref_reg as usize;
+            if reg_index >= arg_count && reg_index < num_regs {
+                // SAFETY: caller ensures reg_base + num_regs <= register_stack.len().
+                unsafe {
+                    *register_stack.as_mut_ptr().add(reg_base + reg_index) = Value::Null;
+                }
+            }
+        }
+    }
+
+    /// Fast-path frame activation: pushes the call frame and returns cached window pointers.
     #[inline(always)]
-    pub(crate) fn push_frame_fast(
+    fn push_frame_window(
         &mut self,
         function_id: u32,
         caller_dst: u16,
         caller_arg_start: usize,
         arg_count: usize,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(*const Instruction, usize, u32, usize, *mut Value), RuntimeError> {
         if self.call_frames.len() >= self.context.options.max_call_stack_depth {
             return Err(stack_overflow_error(
                 self.call_frames.len(),
@@ -946,6 +961,10 @@ impl VirtualMachine {
         let meta = &self.context.function_meta[function_id as usize];
         let binary_id = meta.binary_id;
         let func_id_offset = meta.func_id_offset;
+        let has_references = meta.has_references;
+        let inst_ptr = func.instructions.as_ptr();
+        let inst_len = func.instructions.len();
+        let static_base = func.static_base_offset;
 
         let reg_base = if arg_count > 0 {
             caller_arg_start
@@ -961,16 +980,14 @@ impl VirtualMachine {
             grow_register_stack(&mut self.register_stack, required_regs);
         }
 
-        if meta.has_references {
-            for &ref_reg in &func.reference_registers {
-                let reg_index = ref_reg as usize;
-                if reg_index >= arg_count && reg_index < num_regs {
-                    // SAFETY: reg_base + reg_index < required_regs <= self.register_stack.len() was ensured above.
-                    unsafe {
-                        *self.register_stack.as_mut_ptr().add(reg_base + reg_index) = Value::Null;
-                    }
-                }
-            }
+        if has_references {
+            Self::clear_frame_reference_registers(
+                &mut self.register_stack,
+                &func.reference_registers,
+                reg_base,
+                arg_count,
+                num_regs,
+            );
         }
 
         let frame = CallFrame::new(
@@ -978,7 +995,7 @@ impl VirtualMachine {
             binary_id,
             reg_base,
             num_regs,
-            func.static_base_offset,
+            static_base,
             func_id_offset,
             caller_dst,
         );
@@ -987,7 +1004,26 @@ impl VirtualMachine {
         if self.call_frames.len() > self.peak_call_stack_depth {
             self.peak_call_stack_depth = self.call_frames.len();
         }
-        Ok(())
+        // SAFETY: reg_base + num_regs <= self.register_stack.len() was ensured above.
+        let reg_base_ptr = unsafe { self.register_stack.as_mut_ptr().add(reg_base) };
+        Ok((inst_ptr, inst_len, static_base, binary_id, reg_base_ptr))
+    }
+
+    /// Fast-path frame activation: copies argument registers within `register_stack` without allocating a heap vector.
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::StackOverflow` if recursion depth exceeds configured limit,
+    /// or `RuntimeError::FunctionNotFound` if `function_id` is unrecognized.
+    #[inline(always)]
+    pub(crate) fn push_frame_fast(
+        &mut self,
+        function_id: u32,
+        caller_dst: u16,
+        caller_arg_start: usize,
+        arg_count: usize,
+    ) -> Result<(), RuntimeError> {
+        self.push_frame_window(function_id, caller_dst, caller_arg_start, arg_count)
+            .map(|_| ())
     }
 
     /// High-performance instruction dispatch loop using raw-pointer caching and local register windows.
@@ -1728,8 +1764,14 @@ impl VirtualMachine {
                         continue;
                     }
 
-                    self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
-                    reload_frame!();
+                    (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
+                        .push_frame_window(
+                            global_func_id,
+                            caller_dst,
+                            caller_arg_start,
+                            arg_count,
+                        )?;
+                    pc = 0;
                     finish_instruction!();
                     continue;
                 }
@@ -1802,8 +1844,14 @@ impl VirtualMachine {
                         continue;
                     }
 
-                    self.push_frame_fast(global_func_id, caller_dst, caller_arg_start, arg_count)?;
-                    reload_frame!();
+                    (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
+                        .push_frame_window(
+                            global_func_id,
+                            caller_dst,
+                            caller_arg_start,
+                            arg_count,
+                        )?;
+                    pc = 0;
                     finish_instruction!();
                     continue;
                 }
@@ -1858,13 +1906,14 @@ impl VirtualMachine {
                                 finish_instruction!();
                                 continue;
                             }
-                            self.push_frame_fast(
-                                global_func_id,
-                                caller_dst,
-                                caller_arg_start,
-                                arg_count,
-                            )?;
-                            reload_frame!();
+                            (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
+                                .push_frame_window(
+                                    global_func_id,
+                                    caller_dst,
+                                    caller_arg_start,
+                                    arg_count,
+                                )?;
+                            pc = 0;
                             finish_instruction!();
                             continue;
                         }
@@ -1888,16 +1937,17 @@ impl VirtualMachine {
                                 finish_instruction!();
                                 continue;
                             }
-                            self.push_frame_fast(
-                                global_func_id,
-                                caller_dst,
-                                caller_arg_start,
-                                arg_count,
-                            )?;
+                            (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
+                                .push_frame_window(
+                                    global_func_id,
+                                    caller_dst,
+                                    caller_arg_start,
+                                    arg_count,
+                                )?;
                             if let Some(new_frame) = self.call_frames.last_mut() {
                                 new_frame.active_closure = Some(closure_addr);
                             }
-                            reload_frame!();
+                            pc = 0;
                             finish_instruction!();
                             continue;
                         }
