@@ -207,4 +207,7 @@ The LSP `WorkspaceManager` locates `manifest.toml` in project parent directories
 - When `profile` is omitted, the profile defaults to `"release"`.
 - Each resolved dependency propagates both semantic version requirements and build profiles into the language server compilation options, ensuring background diagnostics match CLI build output.
 
+### 7.7 Internal Workspace Distribution
+The `solix-lsp` crate operates as an internal daemon embedded into the single `solix` executable (`solix lsp`). Publication to public registries is restricted (`publish = false`), and it is distributed exclusively as part of the official toolchain binaries.
+
 

@@ -10,10 +10,10 @@ use common::HermeticCliWorkspace;
 use solix_common::bytecode::BinaryProgram;
 use solix_common::cache::PackageCache;
 use solix_common::solver::PackageVersion;
-use solix::cache::FilesystemPackageCache;
-use solix::cli::Cli;
-use solix::registry::PackageRegistry;
-use solix::run;
+use solix_toolchain::cache::FilesystemPackageCache;
+use solix_toolchain::cli::Cli;
+use solix_toolchain::registry::PackageRegistry;
+use solix_toolchain::run;
 use std::fs;
 
 #[test]

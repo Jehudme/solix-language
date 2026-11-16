@@ -1,38 +1,27 @@
 [package]
-name = "solix"
+name = "solix-toolchain"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The Solix programming language CLI toolchain, optimizing compiler, and VM runtime"
+description.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
-readme = "README.md"
+publish = false
 
 [lib]
-name = "solix"
 path = "src/lib.rs"
 
 [[bin]]
 name = "solix"
 path = "src/main.rs"
 
-[features]
-default = ["cli", "compilation", "runtime", "ffi", "lsp", "dap"]
-cli = ["compilation", "runtime", "lsp", "dap", "ffi"]
-compilation = ["dep:solix-compilation"]
-runtime = ["dep:solix-runtime"]
-ffi = ["dep:solix-ffi"]
-lsp = ["dep:solix-lsp"]
-dap = ["dep:solix-dap"]
-
 [dependencies]
 solix-common.workspace = true
-solix-compilation = { workspace = true, optional = true }
-solix-runtime = { workspace = true, optional = true }
-solix-lsp = { workspace = true, optional = true }
-solix-dap = { workspace = true, optional = true }
-solix-ffi = { workspace = true, optional = true }
+solix-compilation.workspace = true
+solix-runtime.workspace = true
+solix-lsp.workspace = true
+solix-dap.workspace = true
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true
