@@ -504,6 +504,76 @@ fn shr_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
     Ok(Value::I64(read_i64_fast(left_ref)?.wrapping_shr(shift)))
 }
 
+#[inline(always)]
+fn read_heap_u32_fast(heap_buf: &[u8], addr: u32) -> Result<u32, VmTrap> {
+    let idx = addr as usize;
+    if idx + 4 > heap_buf.len() {
+        return Err(VmTrap::null_reference());
+    }
+    // SAFETY: idx + 4 <= heap_buf.len() verified above.
+    Ok(unsafe {
+        u32::from_le(std::ptr::read_unaligned(
+            heap_buf.as_ptr().add(idx).cast::<u32>(),
+        ))
+    })
+}
+
+#[inline(always)]
+fn read_heap_u32_or_zero(heap_buf: &[u8], addr: u32) -> u32 {
+    let idx = addr as usize;
+    if idx + 4 > heap_buf.len() {
+        return 0;
+    }
+    // SAFETY: idx + 4 <= heap_buf.len() verified above.
+    unsafe {
+        u32::from_le(std::ptr::read_unaligned(
+            heap_buf.as_ptr().add(idx).cast::<u32>(),
+        ))
+    }
+}
+
+#[inline(always)]
+fn read_heap_u64_or_zero(heap_buf: &[u8], addr: u32) -> u64 {
+    let idx = addr as usize;
+    if idx + 8 > heap_buf.len() {
+        return 0;
+    }
+    // SAFETY: idx + 8 <= heap_buf.len() verified above.
+    unsafe {
+        u64::from_le(std::ptr::read_unaligned(
+            heap_buf.as_ptr().add(idx).cast::<u64>(),
+        ))
+    }
+}
+
+#[inline(always)]
+fn write_heap_u32_fast(heap_buf: &mut [u8], addr: u32, word_val: u32) {
+    let idx = addr as usize;
+    if idx + 4 <= heap_buf.len() {
+        // SAFETY: idx + 4 <= heap_buf.len() verified above.
+        unsafe {
+            std::ptr::write_unaligned(
+                heap_buf.as_mut_ptr().add(idx).cast::<u32>(),
+                word_val.to_le(),
+            );
+        }
+    }
+}
+
+#[inline(always)]
+fn write_heap_u64_fast(heap_buf: &mut [u8], addr: u32, word_val: u64) {
+    let idx = addr as usize;
+    if idx + 8 <= heap_buf.len() {
+        // SAFETY: idx + 8 <= heap_buf.len() verified above.
+        unsafe {
+            std::ptr::write_unaligned(
+                heap_buf.as_mut_ptr().add(idx).cast::<u64>(),
+                word_val.to_le(),
+            );
+        }
+    }
+}
+
 impl VirtualMachine {
     #[inline(always)]
     fn current_frame_fast(&self) -> Result<&CallFrame, VmTrap> {
@@ -1043,28 +1113,6 @@ impl VirtualMachine {
             resume_pc,
             caller_reg_base,
         ))
-    }
-
-    #[inline(never)]
-    fn dispatch_call_id(
-        &mut self,
-        global_func_id: u32,
-        caller_dst: u16,
-        caller_arg_start: usize,
-        arg_count: usize,
-    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
-        let Some(span) = self.func_code.get(global_func_id as usize).copied() else {
-            return Err(function_not_found_error(global_func_id));
-        };
-        if span.is_native {
-            return self.invoke_native_call_id(
-                global_func_id,
-                caller_dst,
-                caller_arg_start,
-                arg_count,
-            );
-        }
-        self.push_frame_window(global_func_id, caller_dst, caller_arg_start, arg_count)
     }
 
     #[cold]
@@ -1776,7 +1824,18 @@ impl VirtualMachine {
         caller_arg_start: usize,
         arg_count: usize,
     ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
-        self.dispatch_call_id(global_func_id, caller_dst, caller_arg_start, arg_count)
+        let Some(span) = self.func_code.get(global_func_id as usize).copied() else {
+            return Err(function_not_found_error(global_func_id));
+        };
+        if span.is_native {
+            return self.invoke_native_call_id(
+                global_func_id,
+                caller_dst,
+                caller_arg_start,
+                arg_count,
+            );
+        }
+        self.push_frame_window(global_func_id, caller_dst, caller_arg_start, arg_count)
     }
 
     /// High-performance instruction dispatch loop using raw-pointer caching and local register windows.
@@ -1861,12 +1920,12 @@ impl VirtualMachine {
         }
 
         macro_rules! pop_and_return_value {
-            ($ret_val:expr) => {
+            ($ret_val:expr, $loop_lbl:lifetime) => {
                 let ret_val = $ret_val;
                 let frame = self.call_frames.pop().ok_or_else(VmTrap::null_reference)?;
                 if self.call_frames.len() <= target_depth {
                     self.last_return_value = ret_val;
-                    break;
+                    break $loop_lbl;
                 }
                 let caller_frame = self.current_frame_fast()?;
                 let code_span = self.func_code[caller_frame.function_id as usize];
@@ -1881,15 +1940,15 @@ impl VirtualMachine {
                     reg_base = caller_reg_base;
                 }
                 finish_instruction!();
-                continue;
+                continue $loop_lbl;
             };
         }
 
         reload_frame!();
 
-        loop {
+        'dispatch_loop: loop {
             if pc >= inst_len {
-                pop_and_return_value!(Value::Null);
+                pop_and_return_value!(Value::Null, 'dispatch_loop);
             }
 
             // SAFETY: pc < inst_len, so inst_ptr.add(pc) is in-bounds
@@ -1901,1103 +1960,1082 @@ impl VirtualMachine {
             let Some(opcode) = OpCode::from_raw_u8(raw_opcode) else {
                 return Err(invalid_opcode_error(pc as u32, raw_opcode));
             };
-            match opcode {
-                // =============================================================
-                // 0x00 .. 0x07: Constants & Register Movement
-                // =============================================================
-                OpCode::Nop => {}
+            let (call_func_id, call_dst, call_arg_base, call_arg_count, call_closure): (
+                u32,
+                u16,
+                usize,
+                usize,
+                Option<std::num::NonZeroU32>,
+            ) = 'call_dispatch: {
+                match opcode {
+                    // =============================================================
+                    // 0x00 .. 0x07: Constants & Register Movement
+                    // =============================================================
+                    OpCode::Nop => {}
 
-                OpCode::Mov => {
-                    // SAFETY: Register operands are verified by compiler within frame window
-                    unsafe {
-                        let val = *reg_base.add(inst.src1() as usize);
-                        *reg_base.add(inst.dst() as usize) = val;
-                    }
-                }
-
-                OpCode::LoadI32 => {
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(inst.imm32_signed());
-                    }
-                }
-
-                OpCode::LoadI64 => {
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(inst.imm32_signed() as i64);
-                    }
-                }
-
-                OpCode::LoadBool => {
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(inst.imm32() != 0);
-                    }
-                }
-
-                OpCode::LoadNull => {
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Null;
-                    }
-                }
-
-                OpCode::LoadF64 => {
-                    let binary_id = self.current_frame_fast()?.binary_id as usize;
-                    let idx = inst.imm32() as usize;
-                    let val = self.const_pool_cache[binary_id][idx];
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = val;
-                    }
-                }
-
-                OpCode::LoadConst => {
-                    let binary_id = self.current_frame_fast()?.binary_id as usize;
-                    let pool_idx = inst.imm32() as usize;
-                    let const_val = self.const_pool_cache[binary_id][pool_idx];
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = const_val;
-                    }
-                }
-
-                // =============================================================
-                // 0x10 .. 0x20: Arithmetic Operations
-                // =============================================================
-                OpCode::AddI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_add(val_b));
-                    }
-                }
-
-                OpCode::AddI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_add(val_b));
-                    }
-                }
-
-                OpCode::AddF64 => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(left_val), Value::F64(right_val)) = (*left_ref, *right_ref) {
+                    OpCode::Mov => {
+                        // SAFETY: Register operands are verified by compiler within frame window
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val + right_val);
+                            let val = *reg_base.add(inst.src1() as usize);
+                            *reg_base.add(inst.dst() as usize) = val;
                         }
-                    } else {
-                        return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
                     }
-                }
 
-                OpCode::SubI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_sub(val_b));
-                    }
-                }
-
-                OpCode::SubI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_sub(val_b));
-                    }
-                }
-
-                OpCode::SubF64 => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(left_val), Value::F64(right_val)) = (*left_ref, *right_ref) {
+                    OpCode::LoadI32 => {
+                        // SAFETY: Destination register is within frame window
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val - right_val);
+                            *reg_base.add(inst.dst() as usize) = Value::I32(inst.imm32_signed());
                         }
-                    } else {
-                        return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
                     }
-                }
 
-                OpCode::MulI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(val_a.wrapping_mul(val_b));
-                    }
-                }
-
-                OpCode::MulI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_a.wrapping_mul(val_b));
-                    }
-                }
-
-                OpCode::MulF64 => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(left_val), Value::F64(right_val)) = (*left_ref, *right_ref) {
+                    OpCode::LoadI64 => {
+                        // SAFETY: Destination register is within frame window
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val * right_val);
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I64(inst.imm32_signed() as i64);
                         }
-                    } else {
-                        return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
                     }
-                }
 
-                OpCode::DivI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let quotient = div_i32_cold(val_a, val_b)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(quotient);
-                    }
-                }
-
-                OpCode::DivI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let quotient = div_i64_cold(val_a, val_b)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(quotient);
-                    }
-                }
-
-                OpCode::DivF64 => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(left_val), Value::F64(right_val)) = (*left_ref, *right_ref) {
+                    OpCode::LoadBool => {
+                        // SAFETY: Destination register is within frame window
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(left_val / right_val);
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(inst.imm32() != 0);
                         }
-                    } else {
-                        return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
                     }
-                }
 
-                OpCode::ModI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let rem_val = rem_i32_cold(val_a, val_b)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
-                    }
-                }
-
-                OpCode::ModI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let rem_val = rem_i64_cold(val_a, val_b)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(rem_val);
-                    }
-                }
-
-                OpCode::NegI32 => {
-                    let value = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(value.wrapping_neg());
-                    }
-                }
-
-                OpCode::NegI64 => {
-                    let value = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(value.wrapping_neg());
-                    }
-                }
-
-                OpCode::NegF64 => {
-                    let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    if let Value::F64(float_val) = *val_ref {
+                    OpCode::LoadNull => {
+                        // SAFETY: Destination register is within frame window
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(-float_val);
+                            *reg_base.add(inst.dst() as usize) = Value::Null;
                         }
-                    } else {
-                        return Err(f64_type_mismatch_error(val_ref));
                     }
-                }
 
-                // =============================================================
-                // 0x21 .. 0x26: Bitwise Operations
-                // =============================================================
-                OpCode::Band => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let result = if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref)
-                    {
-                        Value::I32(lhs & rhs)
-                    } else {
-                        band_slow(left_ref, right_ref)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = result;
+                    OpCode::LoadF64 => {
+                        let binary_id = self.current_frame_fast()?.binary_id as usize;
+                        let idx = inst.imm32() as usize;
+                        let val = self.const_pool_cache[binary_id][idx];
+                        // SAFETY: Destination register is within frame window
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = val;
+                        }
                     }
-                }
 
-                OpCode::Bor => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let result = if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref)
-                    {
-                        Value::I32(lhs | rhs)
-                    } else {
-                        bor_slow(left_ref, right_ref)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = result;
+                    OpCode::LoadConst => {
+                        let binary_id = self.current_frame_fast()?.binary_id as usize;
+                        let pool_idx = inst.imm32() as usize;
+                        let const_val = self.const_pool_cache[binary_id][pool_idx];
+                        // SAFETY: Destination register is within frame window
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = const_val;
+                        }
                     }
-                }
 
-                OpCode::Bxor => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let result = if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref)
-                    {
-                        Value::I32(lhs ^ rhs)
-                    } else {
-                        bxor_slow(left_ref, right_ref)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = result;
+                    // =============================================================
+                    // 0x10 .. 0x20: Arithmetic Operations
+                    // =============================================================
+                    OpCode::AddI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I32(val_a.wrapping_add(val_b));
+                        }
                     }
-                }
 
-                OpCode::Bnot => {
-                    let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let result = if let Value::I32(lhs) = *val_ref {
-                        Value::I32(!lhs)
-                    } else {
-                        bnot_slow(val_ref)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = result;
+                    OpCode::AddI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I64(val_a.wrapping_add(val_b));
+                        }
                     }
-                }
 
-                OpCode::Shl => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let result = if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref)
-                    {
-                        let shift = (rhs & 31) as u32;
-                        Value::I32(lhs.wrapping_shl(shift))
-                    } else {
-                        shl_slow(left_ref, right_ref)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = result;
-                    }
-                }
-
-                OpCode::Shr => {
-                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let result = if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref)
-                    {
-                        let shift = (rhs & 31) as u32;
-                        Value::I32(lhs.wrapping_shr(shift))
-                    } else {
-                        shr_slow(left_ref, right_ref)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = result;
-                    }
-                }
-
-                // =============================================================
-                // 0x30 .. 0x47: Comparisons
-                // =============================================================
-                OpCode::EqI32 => {
-                    let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
-                        (*first_ref, *second_ref)
-                    {
-                        first_num == second_num
-                    } else {
-                        values_equal_slow(first_ref, second_ref)
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
-                    }
-                }
-
-                OpCode::EqI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
-                    }
-                }
-
-                OpCode::EqF64 => {
-                    let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
-                    }
-                }
-
-                OpCode::EqBool => {
-                    let val_a = read_bool_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_bool_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
-                    }
-                }
-
-                OpCode::EqString => {
-                    let addr_left = read_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let addr_right =
-                        read_ref_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let is_equal = if addr_left == addr_right {
-                        true
-                    } else if addr_left == 0 || addr_right == 0 {
-                        false
-                    } else {
-                        self.compare_heap_strings(addr_left, addr_right)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
-                    }
-                }
-
-                OpCode::EqRef => {
-                    let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let is_equal = if let (Value::Ref(first_addr), Value::Ref(second_addr)) =
-                        (*first_ref, *second_ref)
-                    {
-                        first_addr == second_addr
-                    } else {
-                        values_equal_slow(first_ref, second_ref)
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
-                    }
-                }
-
-                OpCode::NeqI32 => {
-                    let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
-                        (*first_ref, *second_ref)
-                    {
-                        first_num == second_num
-                    } else {
-                        values_equal_slow(first_ref, second_ref)
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
-                    }
-                }
-
-                OpCode::NeqI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
-                    }
-                }
-
-                OpCode::NeqF64 => {
-                    let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
-                    }
-                }
-
-                OpCode::NeqBool => {
-                    let val_a = read_bool_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_bool_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
-                    }
-                }
-
-                OpCode::NeqString => {
-                    let addr_left = read_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let addr_right =
-                        read_ref_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let is_equal = if addr_left == addr_right {
-                        true
-                    } else if addr_left == 0 || addr_right == 0 {
-                        false
-                    } else {
-                        self.compare_heap_strings(addr_left, addr_right)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
-                    }
-                }
-
-                OpCode::NeqRef => {
-                    let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let is_equal = if let (Value::Ref(first_addr), Value::Ref(second_addr)) =
-                        (*first_ref, *second_ref)
-                    {
-                        first_addr == second_addr
-                    } else {
-                        values_equal_slow(first_ref, second_ref)
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
-                    }
-                }
-
-                OpCode::LtI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
-                    }
-                }
-
-                OpCode::LtI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
-                    }
-                }
-
-                OpCode::LtF64 => {
-                    let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
-                    }
-                }
-
-                OpCode::LteI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
-                    }
-                }
-
-                OpCode::LteI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
-                    }
-                }
-
-                OpCode::LteF64 => {
-                    let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
-                    }
-                }
-
-                OpCode::GtI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
-                    }
-                }
-
-                OpCode::GtI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
-                    }
-                }
-
-                OpCode::GtF64 => {
-                    let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
-                    }
-                }
-
-                OpCode::GteI32 => {
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
-                    }
-                }
-
-                OpCode::GteI64 => {
-                    let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
-                    }
-                }
-
-                OpCode::GteF64 => {
-                    let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
-                    }
-                }
-
-                OpCode::Not => {
-                    let cond = read_truthy_fast(unsafe { &*reg_base.add(inst.src1() as usize) });
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(!cond);
-                    }
-                }
-
-                OpCode::ConvIToF => {
-                    let val_n = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::F64(val_n as f64);
-                    }
-                }
-
-                OpCode::ConvFToI => {
-                    let val_f = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I64(val_f as i64);
-                    }
-                }
-
-                // =============================================================
-                // 0x50 .. 0x53: Control Flow & Branching
-                // =============================================================
-                OpCode::Jump => {
-                    let offset = inst.jump_offset();
-                    pc = ((pc as i32 - 1) + offset) as usize;
-                }
-
-                OpCode::Switch => {
-                    let offset = inst.jump_offset();
-                    pc = ((pc as i32 - 1) + offset) as usize;
-                }
-
-                OpCode::JumpIfTrue => {
-                    let cond =
-                        read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
-                    if cond {
-                        let offset = inst.jump_offset();
-                        pc = ((pc as i32 - 1) + offset) as usize;
-                    }
-                }
-
-                OpCode::JumpIfFalse => {
-                    let cond =
-                        read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
-                    if !cond {
-                        let offset = inst.jump_offset();
-                        pc = ((pc as i32 - 1) + offset) as usize;
-                    }
-                }
-
-                // =============================================================
-                // 0x60 .. 0x69: Function Invocations, Returns & Exit
-                // =============================================================
-                OpCode::CallDirect => {
-                    let global_func_id = inst.call_target() as u32;
-                    let arg_base = inst.arg_base() as usize;
-                    let arg_count = inst.arg_count() as usize;
-                    let caller_dst = inst.call_dst();
-
-                    let caller_frame = self.current_frame_mut_fast()?;
-                    caller_frame.pc = pc as u32;
-                    let caller_reg_base = caller_frame.register_base as usize;
-                    let caller_frame_end = caller_reg_base + caller_frame.register_count as usize;
-                    let caller_arg_start = caller_reg_base + arg_base;
-
-                    let span = *self
-                        .func_code
-                        .get(global_func_id as usize)
-                        .ok_or_else(|| function_not_found_error(global_func_id))?;
-                    let num_regs = (span.num_registers as usize).max(arg_count);
-                    let (new_reg_base, needs_arg_copy) =
-                        if arg_count > 0 && caller_arg_start + arg_count >= caller_frame_end {
-                            (caller_arg_start, false)
-                        } else {
-                            (caller_frame_end, arg_count > 0)
-                        };
-                    let required_regs = new_reg_base + num_regs;
-
-                    if !span.is_native
-                        && !span.has_references
-                        && required_regs <= self.register_stack.len()
-                        && arg_count <= 2
-                        && self.call_frames.len() < self.context.options.max_call_stack_depth
-                    {
-                        if needs_arg_copy {
-                            // SAFETY: caller_arg_start..caller_arg_start + arg_count is in caller frame
-                            // and new_reg_base + arg_count <= required_regs <= register_stack.len().
+                    OpCode::AddF64 => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        if let (Value::F64(left_val), Value::F64(right_val)) =
+                            (*left_ref, *right_ref)
+                        {
                             unsafe {
-                                let stack_ptr = self.register_stack.as_mut_ptr();
-                                *stack_ptr.add(new_reg_base) = *stack_ptr.add(caller_arg_start);
-                                if arg_count == 2 {
-                                    *stack_ptr.add(new_reg_base + 1) =
-                                        *stack_ptr.add(caller_arg_start + 1);
-                                }
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::F64(left_val + right_val);
                             }
+                        } else {
+                            return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
                         }
-                        // SAFETY: new_reg_base + num_regs <= register_stack.len() checked above.
-                        reg_base = unsafe { self.register_stack.as_mut_ptr().add(new_reg_base) };
-                        self.call_frames.push(CallFrame::new(
-                            global_func_id,
-                            span.binary_id as usize,
-                            new_reg_base,
-                            num_regs,
-                            span.static_base_offset,
-                            span.func_id_offset,
-                            caller_dst,
-                        ));
-                        self.peak_call_stack_depth =
-                            self.peak_call_stack_depth.max(self.call_frames.len());
-                        inst_ptr = span.inst_ptr;
-                        inst_len = span.inst_len;
-                        pc = 0;
-                    } else {
-                        if span.is_native {
-                            flush_inst_count!();
+                    }
+
+                    OpCode::SubI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I32(val_a.wrapping_sub(val_b));
                         }
-                        (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_slow(
+                    }
+
+                    OpCode::SubI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I64(val_a.wrapping_sub(val_b));
+                        }
+                    }
+
+                    OpCode::SubF64 => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        if let (Value::F64(left_val), Value::F64(right_val)) =
+                            (*left_ref, *right_ref)
+                        {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::F64(left_val - right_val);
+                            }
+                        } else {
+                            return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
+                        }
+                    }
+
+                    OpCode::MulI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I32(val_a.wrapping_mul(val_b));
+                        }
+                    }
+
+                    OpCode::MulI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I64(val_a.wrapping_mul(val_b));
+                        }
+                    }
+
+                    OpCode::MulF64 => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        if let (Value::F64(left_val), Value::F64(right_val)) =
+                            (*left_ref, *right_ref)
+                        {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::F64(left_val * right_val);
+                            }
+                        } else {
+                            return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
+                        }
+                    }
+
+                    OpCode::DivI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let quotient = div_i32_cold(val_a, val_b)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I32(quotient);
+                        }
+                    }
+
+                    OpCode::DivI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let quotient = div_i64_cold(val_a, val_b)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I64(quotient);
+                        }
+                    }
+
+                    OpCode::DivF64 => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        if let (Value::F64(left_val), Value::F64(right_val)) =
+                            (*left_ref, *right_ref)
+                        {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::F64(left_val / right_val);
+                            }
+                        } else {
+                            return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
+                        }
+                    }
+
+                    OpCode::ModI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let rem_val = rem_i32_cold(val_a, val_b)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
+                        }
+                    }
+
+                    OpCode::ModI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let rem_val = rem_i64_cold(val_a, val_b)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I64(rem_val);
+                        }
+                    }
+
+                    OpCode::NegI32 => {
+                        let value = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I32(value.wrapping_neg());
+                        }
+                    }
+
+                    OpCode::NegI64 => {
+                        let value = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I64(value.wrapping_neg());
+                        }
+                    }
+
+                    OpCode::NegF64 => {
+                        let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        if let Value::F64(float_val) = *val_ref {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = Value::F64(-float_val);
+                            }
+                        } else {
+                            return Err(f64_type_mismatch_error(val_ref));
+                        }
+                    }
+
+                    // =============================================================
+                    // 0x21 .. 0x26: Bitwise Operations
+                    // =============================================================
+                    OpCode::Band => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let result =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                Value::I32(lhs & rhs)
+                            } else {
+                                band_slow(left_ref, right_ref)?
+                            };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = result;
+                        }
+                    }
+
+                    OpCode::Bor => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let result =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                Value::I32(lhs | rhs)
+                            } else {
+                                bor_slow(left_ref, right_ref)?
+                            };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = result;
+                        }
+                    }
+
+                    OpCode::Bxor => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let result =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                Value::I32(lhs ^ rhs)
+                            } else {
+                                bxor_slow(left_ref, right_ref)?
+                            };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = result;
+                        }
+                    }
+
+                    OpCode::Bnot => {
+                        let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let result = if let Value::I32(lhs) = *val_ref {
+                            Value::I32(!lhs)
+                        } else {
+                            bnot_slow(val_ref)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = result;
+                        }
+                    }
+
+                    OpCode::Shl => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let result =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                let shift = (rhs & 31) as u32;
+                                Value::I32(lhs.wrapping_shl(shift))
+                            } else {
+                                shl_slow(left_ref, right_ref)?
+                            };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = result;
+                        }
+                    }
+
+                    OpCode::Shr => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let result =
+                            if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                                let shift = (rhs & 31) as u32;
+                                Value::I32(lhs.wrapping_shr(shift))
+                            } else {
+                                shr_slow(left_ref, right_ref)?
+                            };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = result;
+                        }
+                    }
+
+                    // =============================================================
+                    // 0x30 .. 0x47: Comparisons
+                    // =============================================================
+                    OpCode::EqI32 => {
+                        let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
+                            (*first_ref, *second_ref)
+                        {
+                            first_num == second_num
+                        } else {
+                            values_equal_slow(first_ref, second_ref)
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
+                        }
+                    }
+
+                    OpCode::EqI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
+                        }
+                    }
+
+                    OpCode::EqF64 => {
+                        let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
+                        }
+                    }
+
+                    OpCode::EqBool => {
+                        let val_a =
+                            read_bool_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b =
+                            read_bool_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a == val_b);
+                        }
+                    }
+
+                    OpCode::EqString => {
+                        let addr_left =
+                            read_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let addr_right =
+                            read_ref_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let is_equal = if addr_left == addr_right {
+                            true
+                        } else if addr_left == 0 || addr_right == 0 {
+                            false
+                        } else {
+                            self.compare_heap_strings(addr_left, addr_right)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
+                        }
+                    }
+
+                    OpCode::EqRef => {
+                        let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let is_equal = if let (Value::Ref(first_addr), Value::Ref(second_addr)) =
+                            (*first_ref, *second_ref)
+                        {
+                            first_addr == second_addr
+                        } else {
+                            values_equal_slow(first_ref, second_ref)
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(is_equal);
+                        }
+                    }
+
+                    OpCode::NeqI32 => {
+                        let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
+                            (*first_ref, *second_ref)
+                        {
+                            first_num == second_num
+                        } else {
+                            values_equal_slow(first_ref, second_ref)
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
+                        }
+                    }
+
+                    OpCode::NeqI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
+                        }
+                    }
+
+                    OpCode::NeqF64 => {
+                        let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
+                        }
+                    }
+
+                    OpCode::NeqBool => {
+                        let val_a =
+                            read_bool_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b =
+                            read_bool_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a != val_b);
+                        }
+                    }
+
+                    OpCode::NeqString => {
+                        let addr_left =
+                            read_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let addr_right =
+                            read_ref_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let is_equal = if addr_left == addr_right {
+                            true
+                        } else if addr_left == 0 || addr_right == 0 {
+                            false
+                        } else {
+                            self.compare_heap_strings(addr_left, addr_right)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
+                        }
+                    }
+
+                    OpCode::NeqRef => {
+                        let first_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let second_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let is_equal = if let (Value::Ref(first_addr), Value::Ref(second_addr)) =
+                            (*first_ref, *second_ref)
+                        {
+                            first_addr == second_addr
+                        } else {
+                            values_equal_slow(first_ref, second_ref)
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(!is_equal);
+                        }
+                    }
+
+                    OpCode::LtI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
+                        }
+                    }
+
+                    OpCode::LtI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
+                        }
+                    }
+
+                    OpCode::LtF64 => {
+                        let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a < val_b);
+                        }
+                    }
+
+                    OpCode::LteI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
+                        }
+                    }
+
+                    OpCode::LteI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
+                        }
+                    }
+
+                    OpCode::LteF64 => {
+                        let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a <= val_b);
+                        }
+                    }
+
+                    OpCode::GtI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
+                        }
+                    }
+
+                    OpCode::GtI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
+                        }
+                    }
+
+                    OpCode::GtF64 => {
+                        let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a > val_b);
+                        }
+                    }
+
+                    OpCode::GteI32 => {
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
+                        }
+                    }
+
+                    OpCode::GteI64 => {
+                        let val_a = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_i64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
+                        }
+                    }
+
+                    OpCode::GteF64 => {
+                        let val_a = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let val_b = read_f64_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(val_a >= val_b);
+                        }
+                    }
+
+                    OpCode::Not => {
+                        let cond =
+                            read_truthy_fast(unsafe { &*reg_base.add(inst.src1() as usize) });
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(!cond);
+                        }
+                    }
+
+                    OpCode::ConvIToF => {
+                        let val_n = read_i64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(val_n as f64);
+                        }
+                    }
+
+                    OpCode::ConvFToI => {
+                        let val_f = read_f64_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I64(val_f as i64);
+                        }
+                    }
+
+                    // =============================================================
+                    // 0x50 .. 0x53: Control Flow & Branching
+                    // =============================================================
+                    OpCode::Jump => {
+                        let offset = inst.jump_offset();
+                        pc = ((pc as i32 - 1) + offset) as usize;
+                    }
+
+                    OpCode::Switch => {
+                        let offset = inst.jump_offset();
+                        pc = ((pc as i32 - 1) + offset) as usize;
+                    }
+
+                    OpCode::JumpIfTrue => {
+                        let cond =
+                            read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
+                        if cond {
+                            let offset = inst.jump_offset();
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfFalse => {
+                        let cond =
+                            read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
+                        if !cond {
+                            let offset = inst.jump_offset();
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    // =============================================================
+                    // 0x60 .. 0x69: Function Invocations, Returns & Exit
+                    // =============================================================
+                    OpCode::CallDirect => {
+                        break 'call_dispatch (
+                            inst.call_target() as u32,
+                            inst.call_dst(),
+                            inst.arg_base() as usize,
+                            inst.arg_count() as usize,
+                            None,
+                        );
+                    }
+
+                    OpCode::CallNativeDirect => {
+                        let global_func_id = inst.call_target() as u32;
+                        let arg_base = inst.arg_base() as usize;
+                        let arg_count = inst.arg_count() as usize;
+                        let caller_dst = inst.call_dst();
+
+                        let caller_frame = self.current_frame_mut_fast()?;
+                        caller_frame.pc = pc as u32;
+                        let caller_arg_start = caller_frame.register_base as usize + arg_base;
+
+                        flush_inst_count!();
+                        (inst_ptr, inst_len, pc, reg_base) = self.invoke_native_call_id(
                             global_func_id,
                             caller_dst,
                             caller_arg_start,
                             arg_count,
                         )?;
+                        finish_instruction!();
+                        continue 'dispatch_loop;
                     }
-                    finish_instruction!();
-                    continue;
-                }
 
-                OpCode::CallNativeDirect => {
-                    let global_func_id = inst.call_target() as u32;
-                    let arg_base = inst.arg_base() as usize;
-                    let arg_count = inst.arg_count() as usize;
-                    let caller_dst = inst.call_dst();
-
-                    let caller_frame = self.current_frame_mut_fast()?;
-                    caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
-
-                    flush_inst_count!();
-                    (inst_ptr, inst_len, pc, reg_base) = self.invoke_native_call_id(
-                        global_func_id,
-                        caller_dst,
-                        caller_arg_start,
-                        arg_count,
-                    )?;
-                    finish_instruction!();
-                    continue;
-                }
-
-                OpCode::CallVirtual => {
-                    let slot = inst.call_target() as usize;
-                    let arg_base = inst.arg_base() as usize;
-                    let arg_count = inst.arg_count() as usize;
-                    let caller_dst = inst.call_dst();
-
-                    let caller_frame = self.current_frame_mut_fast()?;
-                    caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
-
-                    let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
-                    let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let global_func_id = self
-                        .context
-                        .flat_vtables
-                        .get(vtable_id as usize)
-                        .and_then(|slots| slots.get(slot))
-                        .copied()
-                        .ok_or_else(|| self.resolve_virtual_slot_error(vtable_id, slot))?;
-
-                    if self
-                        .func_code
-                        .get(global_func_id as usize)
-                        .is_some_and(|span| span.is_native)
-                    {
-                        flush_inst_count!();
-                    }
-                    (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_id(
-                        global_func_id,
-                        caller_dst,
-                        caller_arg_start,
-                        arg_count,
-                    )?;
-                    finish_instruction!();
-                    continue;
-                }
-
-                OpCode::CallInterface => {
-                    let target = inst.call_target();
-                    let iface_id = (target >> 8) as usize;
-                    let slot = (target & 0xFF) as usize;
-                    let arg_base = inst.arg_base() as usize;
-                    let arg_count = inst.arg_count() as usize;
-                    let caller_dst = inst.call_dst();
-
-                    let caller_frame = self.current_frame_mut_fast()?;
-                    caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
-
-                    let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
-                    let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let direct_func_id = if iface_id != 0 {
-                        self.context
-                            .flat_itables
+                    OpCode::CallVirtual => {
+                        let slot = inst.call_target() as usize;
+                        let arg_base = inst.arg_base() as usize;
+                        let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
+                        let vtable_id = read_heap_u32_fast(&self.heap.buffer, obj_addr)?;
+                        let global_func_id = match self
+                            .context
+                            .flat_vtables
                             .get(vtable_id as usize)
-                            .and_then(|iface_rows| iface_rows.get(iface_id))
                             .and_then(|slots| slots.get(slot))
                             .copied()
-                    } else {
-                        None
-                    };
-                    let global_func_id = match direct_func_id {
-                        Some(func_id) => func_id,
-                        None => {
-                            self.resolve_interface_slot_slow(vtable_id, iface_id as u32, slot)?
-                        }
-                    };
+                        {
+                            Some(func_id) => func_id,
+                            None => {
+                                if let Some(frame) = self.call_frames.last_mut() {
+                                    frame.pc = pc as u32;
+                                }
+                                return Err(self.resolve_virtual_slot_error(vtable_id, slot));
+                            }
+                        };
+                        break 'call_dispatch (
+                            global_func_id,
+                            inst.call_dst(),
+                            arg_base,
+                            inst.arg_count() as usize,
+                            None,
+                        );
+                    }
 
-                    if self
-                        .func_code
-                        .get(global_func_id as usize)
-                        .is_some_and(|span| span.is_native)
-                    {
+                    OpCode::CallInterface => {
+                        let target = inst.call_target();
+                        let iface_id = (target >> 8) as usize;
+                        let slot = (target & 0xFF) as usize;
+                        let arg_base = inst.arg_base() as usize;
+                        let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
+                        let vtable_id = read_heap_u32_fast(&self.heap.buffer, obj_addr)?;
+                        let direct_func_id = if iface_id != 0 {
+                            self.context
+                                .flat_itables
+                                .get(vtable_id as usize)
+                                .and_then(|iface_rows| iface_rows.get(iface_id))
+                                .and_then(|slots| slots.get(slot))
+                                .copied()
+                        } else {
+                            None
+                        };
+                        let global_func_id = match direct_func_id {
+                            Some(func_id) => func_id,
+                            None => {
+                                if let Some(frame) = self.call_frames.last_mut() {
+                                    frame.pc = pc as u32;
+                                }
+                                self.resolve_interface_slot_slow(vtable_id, iface_id as u32, slot)?
+                            }
+                        };
+                        break 'call_dispatch (
+                            global_func_id,
+                            inst.call_dst(),
+                            arg_base,
+                            inst.arg_count() as usize,
+                            None,
+                        );
+                    }
+
+                    OpCode::CallSymbol => {
                         flush_inst_count!();
+                        self.execute_call_symbol(inst, pc)?;
+                        reload_frame!();
+                        finish_instruction!();
+                        continue 'dispatch_loop;
                     }
-                    (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_id(
-                        global_func_id,
-                        caller_dst,
-                        caller_arg_start,
-                        arg_count,
-                    )?;
-                    finish_instruction!();
-                    continue;
-                }
 
-                OpCode::CallSymbol => {
-                    flush_inst_count!();
-                    self.execute_call_symbol(inst, pc)?;
-                    reload_frame!();
-                    finish_instruction!();
-                    continue;
-                }
+                    OpCode::CallExtern => {
+                        flush_inst_count!();
+                        self.execute_call_extern(inst, pc)?;
+                        reload_frame!();
+                        finish_instruction!();
+                        continue 'dispatch_loop;
+                    }
 
-                OpCode::CallExtern => {
-                    flush_inst_count!();
-                    self.execute_call_extern(inst, pc)?;
-                    reload_frame!();
-                    finish_instruction!();
-                    continue;
-                }
-
-                OpCode::CallCallable => {
-                    let r_callee = inst.call_target();
-                    let arg_base = inst.arg_base() as usize;
-                    let arg_count = inst.arg_count() as usize;
-                    let caller_dst = inst.call_dst();
-
-                    let caller_frame = self.current_frame_mut_fast()?;
-                    caller_frame.pc = pc as u32;
-                    let caller_arg_start = caller_frame.register_base as usize + arg_base;
-
-                    let callable_ref = unsafe { &*reg_base.add(r_callee as usize) };
-                    match *callable_ref {
-                        Value::Null => return Err(VmTrap::null_reference()),
-                        Value::FnPtr(global_func_id) => {
-                            if self
-                                .func_code
-                                .get(global_func_id as usize)
-                                .is_some_and(|span| span.is_native)
-                            {
-                                flush_inst_count!();
-                            }
-                            (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_id(
-                                global_func_id,
-                                caller_dst,
-                                caller_arg_start,
-                                arg_count,
-                            )?;
-                            finish_instruction!();
-                            continue;
-                        }
-                        Value::Ref(closure_addr) => {
-                            if closure_addr == 0 {
-                                return Err(VmTrap::null_reference());
-                            }
-                            let global_func_id = self.heap.read_u32(closure_addr)?;
-                            let span_is_native = self
-                                .func_code
-                                .get(global_func_id as usize)
-                                .is_some_and(|span| span.is_native);
-                            if span_is_native {
-                                flush_inst_count!();
-                                (inst_ptr, inst_len, pc, reg_base) = self.invoke_native_call_id(
+                    OpCode::CallCallable => {
+                        let r_callee = inst.call_target();
+                        let callable_ref = unsafe { &*reg_base.add(r_callee as usize) };
+                        match *callable_ref {
+                            Value::Null => return Err(VmTrap::null_reference()),
+                            Value::FnPtr(global_func_id) => {
+                                break 'call_dispatch (
                                     global_func_id,
-                                    caller_dst,
-                                    caller_arg_start,
-                                    arg_count,
-                                )?;
-                            } else {
-                                (inst_ptr, inst_len, pc, reg_base) = self.push_frame_window(
+                                    inst.call_dst(),
+                                    inst.arg_base() as usize,
+                                    inst.arg_count() as usize,
+                                    None,
+                                );
+                            }
+                            Value::Ref(closure_addr) => {
+                                if closure_addr == 0 {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let global_func_id =
+                                    read_heap_u32_fast(&self.heap.buffer, closure_addr)?;
+                                break 'call_dispatch (
                                     global_func_id,
-                                    caller_dst,
-                                    caller_arg_start,
-                                    arg_count,
-                                )?;
-                                if let Some(new_frame) = self.call_frames.last_mut() {
-                                    new_frame.active_closure =
-                                        std::num::NonZeroU32::new(closure_addr);
-                                }
-                            }
-                            finish_instruction!();
-                            continue;
-                        }
-                        _ => {
-                            return Err(non_callable_type_mismatch_error(callable_ref));
-                        }
-                    }
-                }
-
-                OpCode::Return => {
-                    pop_and_return_value!(Value::Null);
-                }
-
-                OpCode::ReturnValue => {
-                    // SAFETY: Return register is within frame window
-                    let ret_val = unsafe { *reg_base.add(inst.dst() as usize) };
-                    pop_and_return_value!(ret_val);
-                }
-
-                OpCode::Exit => {
-                    let code = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                    self.exit_code = Some(code);
-                    self.halted = true;
-                    break;
-                }
-
-                // =============================================================
-                // 0x70 .. 0x78: Object Model, Instance Fields & Static Memory
-                // =============================================================
-                OpCode::AllocObject => {
-                    let vtable_id = inst.src1() as u32;
-                    let size = inst.src2() as usize;
-                    let tag = if inst.is_pod() {
-                        BlockTag::ObjectPod
-                    } else {
-                        BlockTag::Object
-                    };
-                    let payload_addr = self.heap.allocate(size, tag)?;
-                    self.heap.write_u32(payload_addr, vtable_id)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
-                    }
-                }
-
-                OpCode::AllocObjectExtern => {
-                    let obj_ref = self.execute_alloc_object_extern(inst, pc)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = obj_ref;
-                    }
-                }
-
-                OpCode::GetField => {
-                    let obj_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let offset = inst.src2() as usize;
-                    let field_addr = obj_addr + offset as u32;
-                    let raw_flags = inst.flags();
-                    let val = if raw_flags > 1 {
-                        match raw_flags >> 1 {
-                            5 | 6 => Value::I32(self.heap.read_u32(field_addr).unwrap_or(0) as i32),
-                            7 | 8 => Value::I64(self.heap.read_u64(field_addr).unwrap_or(0) as i64),
-                            10 => Value::F64(f64::from_bits(
-                                self.heap.read_u64(field_addr).unwrap_or(0),
-                            )),
-                            12 => {
-                                let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                                if raw == 0 || raw == Value::TAG_NULL {
-                                    Value::Null
-                                } else {
-                                    Value::from_raw_u64(raw)
-                                }
-                            }
-                            _ => self.execute_get_field_slow(obj_addr, offset, raw_flags)?,
-                        }
-                    } else {
-                        self.execute_get_field_slow(obj_addr, offset, raw_flags)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = val;
-                    }
-                }
-
-                OpCode::SetField => {
-                    let obj_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let offset = inst.src2() as usize;
-                    let val_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
-                    let field_addr = obj_addr + offset as u32;
-                    let raw_flags = inst.flags();
-                    if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) == 0
-                        && (raw_flags >> 1) > 0
-                    {
-                        match raw_flags >> 1 {
-                            5 | 6 => {
-                                let _ = self
-                                    .heap
-                                    .write_u32(field_addr, read_i32_fast(val_ref)? as u32);
-                            }
-                            7 | 8 => {
-                                let _ = self
-                                    .heap
-                                    .write_u64(field_addr, read_i64_fast(val_ref)? as u64);
-                            }
-                            10 => {
-                                let bits = read_f64_fast(val_ref)?.to_bits();
-                                let _ = self.heap.write_u64(field_addr, bits);
+                                    inst.call_dst(),
+                                    inst.arg_base() as usize,
+                                    inst.arg_count() as usize,
+                                    std::num::NonZeroU32::new(closure_addr),
+                                );
                             }
                             _ => {
-                                if self.execute_set_field_slow(
-                                    obj_addr, offset, raw_flags, val_ref, pc,
-                                )? {
-                                    reload_frame!();
-                                }
+                                return Err(non_callable_type_mismatch_error(callable_ref));
                             }
                         }
-                    } else if self
-                        .execute_set_field_slow(obj_addr, offset, raw_flags, val_ref, pc)?
-                    {
-                        reload_frame!();
-                    }
-                }
-
-                OpCode::GetStaticDirect => {
-                    let slot = inst.imm32() as usize;
-                    if slot >= self.static_slots.len() {
-                        return Err(VmTrap::invalid_static_offset(
-                            slot as u32,
-                            self.static_slots.len() as u32,
-                        ));
-                    }
-                    // SAFETY: Slot is verified in bounds
-                    let static_val = unsafe { *self.static_slots.get_unchecked(slot) };
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = static_val;
-                    }
-                }
-
-                OpCode::GetStatic => {
-                    let static_base = self.current_frame_fast()?.static_base_offset;
-                    let slot = (static_base + inst.imm32()) as usize;
-                    if slot >= self.static_slots.len() {
-                        return Err(VmTrap::invalid_static_offset(
-                            slot as u32,
-                            self.static_slots.len() as u32,
-                        ));
-                    }
-                    // SAFETY: Slot is verified in bounds
-                    let static_val = unsafe { *self.static_slots.get_unchecked(slot) };
-                    // SAFETY: Destination register is within frame window
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = static_val;
-                    }
-                }
-
-                OpCode::SetStatic => {
-                    let static_base = self.current_frame_fast()?.static_base_offset;
-                    let slot_idx = static_base + inst.imm32();
-                    let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
-                    self.set_static(slot_idx, val_to_set)?;
-                }
-
-                OpCode::GetStaticGlobal => {
-                    let static_val = self.execute_get_static_global(inst, pc)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = static_val;
-                    }
-                }
-
-                OpCode::SetStaticGlobal => {
-                    let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
-                    self.execute_set_static_global(inst, pc, val_to_set)?;
-                }
-
-                OpCode::SetStaticDirect => {
-                    let slot = inst.imm32();
-                    let val = unsafe { *reg_base.add(inst.dst() as usize) };
-                    self.set_static(slot, val)?;
-                }
-
-                // =============================================================
-                // 0x80 .. 0x85 & 0xA4: Dynamic Arrays & Tuples
-                // =============================================================
-                OpCode::AllocArray => {
-                    let raw_len =
-                        read_array_index_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    if raw_len < 0 {
-                        return Err(VmTrap::out_of_memory(
-                            usize::MAX,
-                            self.heap.dynamic_capacity(),
-                        ));
-                    }
-                    let array_len = raw_len as usize;
-                    let elem_size = (inst.src2() as usize).max(1);
-                    let payload_size = 8 + array_len * elem_size;
-                    let payload_addr = self.heap.allocate(payload_size, BlockTag::ArrayRef)?;
-                    self.heap.write_u32(payload_addr, array_len as u32)?;
-                    self.heap.write_u8(payload_addr + 4, elem_size as u8)?;
-                    self.heap.write_u8(payload_addr + 7, inst.flags())?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
-                    }
-                }
-
-                OpCode::ArrayLength => {
-                    let arr_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let header = self.heap.read_header(arr_addr)?;
-                    let array_len = if header.tag == BlockTag::String {
-                        header.size
-                    } else {
-                        self.heap.read_u32(arr_addr)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(array_len as i32);
-                    }
-                }
-
-                OpCode::GetArray => {
-                    let arr_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let index_i64 =
-                        read_array_index_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
-                    let arr_offset = arr_addr as usize;
-                    let heap_len = self.heap.buffer.len();
-                    if arr_offset < 8 || arr_offset + 8 > heap_len {
-                        return Err(VmTrap::null_reference());
                     }
 
-                    // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
-                    let buf_ptr = self.heap.buffer.as_ptr();
-                    let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
-                    if tag_nibble == BlockTag::String as u8 || tag_nibble == BlockTag::Tuple as u8 {
-                        let val =
-                            self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
+                    OpCode::Return => {
+                        pop_and_return_value!(Value::Null, 'dispatch_loop);
+                    }
+
+                    OpCode::ReturnValue => {
+                        // SAFETY: Return register is within frame window
+                        let ret_val = unsafe { *reg_base.add(inst.dst() as usize) };
+                        pop_and_return_value!(ret_val, 'dispatch_loop);
+                    }
+
+                    OpCode::Exit => {
+                        let code = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        self.exit_code = Some(code);
+                        self.halted = true;
+                        break 'dispatch_loop;
+                    }
+
+                    // =============================================================
+                    // 0x70 .. 0x78: Object Model, Instance Fields & Static Memory
+                    // =============================================================
+                    OpCode::AllocObject => {
+                        let vtable_id = inst.src1() as u32;
+                        let size = inst.src2() as usize;
+                        let tag = if inst.is_pod() {
+                            BlockTag::ObjectPod
+                        } else {
+                            BlockTag::Object
+                        };
+                        let payload_addr = self.heap.allocate(size, tag)?;
+                        write_heap_u32_fast(&mut self.heap.buffer, payload_addr, vtable_id);
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
+                        }
+                    }
+
+                    OpCode::AllocObjectExtern => {
+                        let obj_ref = self.execute_alloc_object_extern(inst, pc)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = obj_ref;
+                        }
+                    }
+
+                    OpCode::GetField => {
+                        let obj_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let offset = inst.src2() as usize;
+                        let field_addr = obj_addr + offset as u32;
+                        let raw_flags = inst.flags();
+                        let val = if raw_flags > 1 {
+                            match raw_flags >> 1 {
+                                5 | 6 => Value::I32(read_heap_u32_or_zero(
+                                    &self.heap.buffer,
+                                    field_addr,
+                                ) as i32),
+                                7 | 8 => Value::I64(read_heap_u64_or_zero(
+                                    &self.heap.buffer,
+                                    field_addr,
+                                ) as i64),
+                                10 => Value::F64(f64::from_bits(read_heap_u64_or_zero(
+                                    &self.heap.buffer,
+                                    field_addr,
+                                ))),
+                                12 => {
+                                    let raw = read_heap_u64_or_zero(&self.heap.buffer, field_addr);
+                                    if raw == 0 || raw == Value::TAG_NULL {
+                                        Value::Null
+                                    } else {
+                                        Value::from_raw_u64(raw)
+                                    }
+                                }
+                                _ => self.execute_get_field_slow(obj_addr, offset, raw_flags)?,
+                            }
+                        } else {
+                            self.execute_get_field_slow(obj_addr, offset, raw_flags)?
+                        };
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = val;
                         }
-                    } else {
+                    }
+
+                    OpCode::SetField => {
+                        let obj_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let offset = inst.src2() as usize;
+                        let val_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let field_addr = obj_addr + offset as u32;
+                        let raw_flags = inst.flags();
+                        if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) == 0
+                            && (raw_flags >> 1) > 0
+                        {
+                            match raw_flags >> 1 {
+                                5 | 6 => {
+                                    write_heap_u32_fast(
+                                        &mut self.heap.buffer,
+                                        field_addr,
+                                        read_i32_fast(val_ref)? as u32,
+                                    );
+                                }
+                                7 | 8 => {
+                                    write_heap_u64_fast(
+                                        &mut self.heap.buffer,
+                                        field_addr,
+                                        read_i64_fast(val_ref)? as u64,
+                                    );
+                                }
+                                10 => {
+                                    let bits = read_f64_fast(val_ref)?.to_bits();
+                                    write_heap_u64_fast(&mut self.heap.buffer, field_addr, bits);
+                                }
+                                _ => {
+                                    if self.execute_set_field_slow(
+                                        obj_addr, offset, raw_flags, val_ref, pc,
+                                    )? {
+                                        reload_frame!();
+                                    }
+                                }
+                            }
+                        } else if self
+                            .execute_set_field_slow(obj_addr, offset, raw_flags, val_ref, pc)?
+                        {
+                            reload_frame!();
+                        }
+                    }
+
+                    OpCode::GetStaticDirect => {
+                        let slot = inst.imm32() as usize;
+                        if slot >= self.static_slots.len() {
+                            return Err(VmTrap::invalid_static_offset(
+                                slot as u32,
+                                self.static_slots.len() as u32,
+                            ));
+                        }
+                        // SAFETY: Slot is verified in bounds
+                        let static_val = unsafe { *self.static_slots.get_unchecked(slot) };
+                        // SAFETY: Destination register is within frame window
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = static_val;
+                        }
+                    }
+
+                    OpCode::GetStatic => {
+                        let static_base = self.current_frame_fast()?.static_base_offset;
+                        let slot = (static_base + inst.imm32()) as usize;
+                        if slot >= self.static_slots.len() {
+                            return Err(VmTrap::invalid_static_offset(
+                                slot as u32,
+                                self.static_slots.len() as u32,
+                            ));
+                        }
+                        // SAFETY: Slot is verified in bounds
+                        let static_val = unsafe { *self.static_slots.get_unchecked(slot) };
+                        // SAFETY: Destination register is within frame window
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = static_val;
+                        }
+                    }
+
+                    OpCode::SetStatic => {
+                        let static_base = self.current_frame_fast()?.static_base_offset;
+                        let slot_idx = static_base + inst.imm32();
+                        let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
+                        self.set_static(slot_idx, val_to_set)?;
+                    }
+
+                    OpCode::GetStaticGlobal => {
+                        let static_val = self.execute_get_static_global(inst, pc)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = static_val;
+                        }
+                    }
+
+                    OpCode::SetStaticGlobal => {
+                        let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
+                        self.execute_set_static_global(inst, pc, val_to_set)?;
+                    }
+
+                    OpCode::SetStaticDirect => {
+                        let slot = inst.imm32();
+                        let val = unsafe { *reg_base.add(inst.dst() as usize) };
+                        self.set_static(slot, val)?;
+                    }
+
+                    // =============================================================
+                    // 0x80 .. 0x85 & 0xA4: Dynamic Arrays & Tuples
+                    // =============================================================
+                    OpCode::AllocArray => {
+                        let raw_len =
+                            read_array_index_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        if raw_len < 0 {
+                            return Err(VmTrap::out_of_memory(
+                                usize::MAX,
+                                self.heap.dynamic_capacity(),
+                            ));
+                        }
+                        let array_len = raw_len as usize;
+                        let elem_size = (inst.src2() as usize).max(1);
+                        let payload_size = 8 + array_len * elem_size;
+                        let payload_addr = self.heap.allocate(payload_size, BlockTag::ArrayRef)?;
+                        self.heap.write_u32(payload_addr, array_len as u32)?;
+                        self.heap.write_u8(payload_addr + 4, elem_size as u8)?;
+                        self.heap.write_u8(payload_addr + 7, inst.flags())?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
+                        }
+                    }
+
+                    OpCode::ArrayLength => {
+                        let arr_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let header = self.heap.read_header(arr_addr)?;
+                        let array_len = if header.tag == BlockTag::String {
+                            header.size
+                        } else {
+                            self.heap.read_u32(arr_addr)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I32(array_len as i32);
+                        }
+                    }
+
+                    OpCode::GetArray => {
+                        let arr_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let index_i64 =
+                            read_array_index_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let arr_offset = arr_addr as usize;
+                        let heap_len = self.heap.buffer.len();
+                        if arr_offset < 8 || arr_offset + 8 > heap_len {
+                            return Err(VmTrap::null_reference());
+                        }
+
+                        // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
+                        let buf_ptr = self.heap.buffer.as_ptr();
+                        let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
+                        if tag_nibble == BlockTag::String as u8
+                            || tag_nibble == BlockTag::Tuple as u8
+                        {
+                            let val =
+                                self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = val;
+                            }
+                        } else {
+                            let array_len = unsafe {
+                                u32::from_le(std::ptr::read_unaligned(
+                                    buf_ptr.add(arr_offset).cast::<u32>(),
+                                ))
+                            } as usize;
+                            if (index_i64 as u64) >= (array_len as u64) {
+                                return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
+                            }
+                            let index_usize = index_i64 as usize;
+                            let elem_size =
+                                (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
+                            let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+                            if elem_offset + elem_size > heap_len {
+                                return Err(VmTrap::null_reference());
+                            }
+                            // SAFETY: elem_offset + elem_size <= heap_len verified above.
+                            let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
+                            let raw_word = match elem_size {
+                                1 => unsafe { *elem_ptr as u64 },
+                                2 => unsafe {
+                                    u16::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u16>()))
+                                        as u64
+                                },
+                                4 => unsafe {
+                                    u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>()))
+                                        as u64
+                                },
+                                _ => unsafe {
+                                    u64::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u64>()))
+                                },
+                            };
+                            let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
+                            let val = decode_array_element(elem_type_tag, elem_size, raw_word);
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) = val;
+                            }
+                        }
+                    }
+
+                    OpCode::SetArray => {
+                        let arr_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        let index_i64 =
+                            read_array_index_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let arr_offset = arr_addr as usize;
+                        let heap_len = self.heap.buffer.len();
+                        if arr_offset < 8 || arr_offset + 8 > heap_len {
+                            return Err(VmTrap::null_reference());
+                        }
+
+                        // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
+                        let buf_ptr = self.heap.buffer.as_mut_ptr();
                         let array_len = unsafe {
                             u32::from_le(std::ptr::read_unaligned(
                                 buf_ptr.add(arr_offset).cast::<u32>(),
@@ -3007,404 +3045,449 @@ impl VirtualMachine {
                             return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                         }
                         let index_usize = index_i64 as usize;
-                        let elem_size = (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
-                        let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                        if elem_offset + elem_size > heap_len {
-                            return Err(VmTrap::null_reference());
-                        }
-                        // SAFETY: elem_offset + elem_size <= heap_len verified above.
-                        let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
-                        let raw_word = match elem_size {
-                            1 => unsafe { *elem_ptr as u64 },
-                            2 => unsafe {
-                                u16::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u16>()))
-                                    as u64
-                            },
-                            4 => unsafe {
-                                u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>()))
-                                    as u64
-                            },
-                            _ => unsafe {
-                                u64::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u64>()))
-                            },
-                        };
-                        let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                        let val = decode_array_element(elem_type_tag, elem_size, raw_word);
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) = val;
-                        }
-                    }
-                }
+                        let val = unsafe { *reg_base.add(inst.src2() as usize) };
+                        let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
 
-                OpCode::SetArray => {
-                    let arr_addr =
-                        read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                    let index_i64 =
-                        read_array_index_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let arr_offset = arr_addr as usize;
-                    let heap_len = self.heap.buffer.len();
-                    if arr_offset < 8 || arr_offset + 8 > heap_len {
-                        return Err(VmTrap::null_reference());
-                    }
-
-                    // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
-                    let buf_ptr = self.heap.buffer.as_mut_ptr();
-                    let array_len = unsafe {
-                        u32::from_le(std::ptr::read_unaligned(
-                            buf_ptr.add(arr_offset).cast::<u32>(),
-                        ))
-                    } as usize;
-                    if (index_i64 as u64) >= (array_len as u64) {
-                        return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
-                    }
-                    let index_usize = index_i64 as usize;
-                    let val = unsafe { *reg_base.add(inst.src2() as usize) };
-                    let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
-
-                    if tag_nibble == BlockTag::Tuple as u8 {
-                        if self.execute_set_tuple(arr_offset, index_usize, val)? {
-                            let caller_frame = self.current_frame_mut_fast()?;
-                            caller_frame.pc = pc as u32;
-                            reload_frame!();
-                        }
-                    } else {
-                        let elem_size = (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
-                        let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                        if elem_offset + elem_size > heap_len {
-                            return Err(VmTrap::null_reference());
-                        }
-                        let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                        let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
-                        if elem_type_tag == 0 || is_reference_element || elem_size == 2 {
-                            if self.execute_set_array_slow(
-                                elem_offset,
-                                elem_size,
-                                elem_type_tag,
-                                val,
-                                pc,
-                            )? {
+                        if tag_nibble == BlockTag::Tuple as u8 {
+                            if self.execute_set_tuple(arr_offset, index_usize, val)? {
+                                let caller_frame = self.current_frame_mut_fast()?;
+                                caller_frame.pc = pc as u32;
                                 reload_frame!();
                             }
                         } else {
-                            // SAFETY: elem_offset + elem_size <= heap_len verified above.
-                            let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
-                            let primitive_val = val.to_primitive_u64();
-                            match elem_size {
-                                1 => unsafe {
-                                    *elem_ptr = primitive_val as u8;
-                                },
-                                4 => unsafe {
-                                    std::ptr::write_unaligned(
-                                        elem_ptr.cast::<u32>(),
-                                        (primitive_val as u32).to_le(),
-                                    );
-                                },
-                                _ => unsafe {
-                                    std::ptr::write_unaligned(
-                                        elem_ptr.cast::<u64>(),
-                                        primitive_val.to_le(),
-                                    );
-                                },
+                            let elem_size =
+                                (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
+                            let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+                            if elem_offset + elem_size > heap_len {
+                                return Err(VmTrap::null_reference());
                             }
-                        }
-                    }
-                }
-
-                OpCode::AllocTuple => {
-                    let tuple_ref = self.execute_alloc_tuple(inst.src1() as usize)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = tuple_ref;
-                    }
-                }
-
-                OpCode::GetTuple => {
-                    let tuple_val = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let elem_val = self.execute_get_tuple(tuple_val, inst.src2() as usize)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = elem_val;
-                    }
-                }
-
-                OpCode::TupleInstanceof => {
-                    let tuple_val = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let index_val = unsafe { *reg_base.add(inst.src2() as usize) };
-                    let is_match =
-                        self.execute_tuple_instanceof(tuple_val, index_val, inst.flags())?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_match);
-                    }
-                }
-
-                // =============================================================
-                // 0x90 .. 0x91: Closures & Captures
-                // =============================================================
-                OpCode::PackClosure => {
-                    let target_lambda_id = inst.call_target() as u32;
-                    let cap_base = inst.arg_base() as usize;
-                    let cap_count = inst.arg_count() as usize;
-                    let caller_dst = inst.call_dst() as usize;
-
-                    let closure_val = if cap_count == 0 {
-                        // Stateless closure: encode directly as a tagged FnPtr with zero heap allocation.
-                        Value::FnPtr(target_lambda_id)
-                    } else {
-                        self.execute_pack_closure_heap(target_lambda_id, cap_base, cap_count)?
-                    };
-                    unsafe {
-                        *reg_base.add(caller_dst) = closure_val;
-                    }
-                }
-
-                OpCode::UnpackCaptures => {
-                    let capture_count = inst.arg_count() as usize;
-                    if capture_count > 0 {
-                        let capture_base = inst.arg_base() as usize;
-                        self.execute_unpack_captures(capture_base, capture_count)?;
-                    }
-                }
-
-                // =============================================================
-                // 0xA0 .. 0xA1: Instanceof & Cast
-                // =============================================================
-                OpCode::Instanceof => {
-                    let obj_val = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let is_instance = self.execute_instanceof(obj_val, inst.src2() as u32)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::Bool(is_instance);
-                    }
-                }
-
-                OpCode::CastCheck => {
-                    let val = unsafe { *reg_base.add(inst.src1() as usize) };
-                    let converted =
-                        self.execute_cast_check(val, inst.flags(), inst.src2() as u32)?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = converted;
-                    }
-                }
-
-                // =============================================================
-                // 0xC0 .. 0xC1: ARC Reference Counting
-                // =============================================================
-                OpCode::IncRef => {
-                    if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
-                        && addr > 0
-                    {
-                        let addr_usize = addr as usize;
-                        if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
-                            return Err(VmTrap::null_reference());
-                        }
-                        // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
-                        let word_ptr = unsafe {
-                            self.heap
-                                .buffer
-                                .as_mut_ptr()
-                                .add(addr_usize - 4)
-                                .cast::<u32>()
-                        };
-                        let tag_and_ref =
-                            unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
-                        let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
-                        if ref_count == crate::memory::layout::MAX_REF_COUNT {
-                            // Immortal constant string or immortal object
-                        } else if ref_count + 1 >= crate::memory::layout::MAX_REF_COUNT {
-                            crate::memory::arc::inc_ref(&mut self.heap, addr)?;
-                        } else {
-                            let updated = if self.cycle_collector_enabled {
-                                // Clear bits 26..28 (GcColor::Black) and increment ref_count in place.
-                                (tag_and_ref & 0xF000_0000) | (ref_count + 1)
+                            let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
+                            let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+                            if elem_type_tag == 0 || is_reference_element || elem_size == 2 {
+                                if self.execute_set_array_slow(
+                                    elem_offset,
+                                    elem_size,
+                                    elem_type_tag,
+                                    val,
+                                    pc,
+                                )? {
+                                    reload_frame!();
+                                }
                             } else {
-                                (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
-                                    | (ref_count + 1)
-                            };
-                            unsafe {
-                                std::ptr::write_unaligned(word_ptr, updated.to_le());
+                                // SAFETY: elem_offset + elem_size <= heap_len verified above.
+                                let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
+                                match elem_size {
+                                    1 => {
+                                        let byte_val = match val {
+                                            Value::Bool(flag) => u8::from(flag),
+                                            Value::I32(num_val) => num_val as u8,
+                                            _ => val.to_primitive_u64() as u8,
+                                        };
+                                        unsafe {
+                                            *elem_ptr = byte_val;
+                                        }
+                                    }
+                                    4 => {
+                                        let word_val = match val {
+                                            Value::I32(num_val) => num_val as u32,
+                                            _ => val.to_primitive_u64() as u32,
+                                        };
+                                        unsafe {
+                                            std::ptr::write_unaligned(
+                                                elem_ptr.cast::<u32>(),
+                                                word_val.to_le(),
+                                            );
+                                        }
+                                    }
+                                    _ => {
+                                        let qword_val = match val {
+                                            Value::F64(float_val) => float_val.to_bits(),
+                                            Value::I64(num_val) => num_val as u64,
+                                            _ => val.to_primitive_u64(),
+                                        };
+                                        unsafe {
+                                            std::ptr::write_unaligned(
+                                                elem_ptr.cast::<u64>(),
+                                                qword_val.to_le(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                OpCode::DecRef => {
-                    if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
-                        && addr > 0
-                    {
-                        let addr_usize = addr as usize;
-                        if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
-                            return Err(VmTrap::null_reference());
+                    OpCode::AllocTuple => {
+                        let tuple_ref = self.execute_alloc_tuple(inst.src1() as usize)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = tuple_ref;
                         }
-                        // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
-                        let word_ptr = unsafe {
-                            self.heap
-                                .buffer
-                                .as_mut_ptr()
-                                .add(addr_usize - 4)
-                                .cast::<u32>()
+                    }
+
+                    OpCode::GetTuple => {
+                        let tuple_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                        let elem_val = self.execute_get_tuple(tuple_val, inst.src2() as usize)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = elem_val;
+                        }
+                    }
+
+                    OpCode::TupleInstanceof => {
+                        let tuple_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                        let index_val = unsafe { *reg_base.add(inst.src2() as usize) };
+                        let is_match =
+                            self.execute_tuple_instanceof(tuple_val, index_val, inst.flags())?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(is_match);
+                        }
+                    }
+
+                    // =============================================================
+                    // 0x90 .. 0x91: Closures & Captures
+                    // =============================================================
+                    OpCode::PackClosure => {
+                        let target_lambda_id = inst.call_target() as u32;
+                        let cap_base = inst.arg_base() as usize;
+                        let cap_count = inst.arg_count() as usize;
+                        let caller_dst = inst.call_dst() as usize;
+
+                        let closure_val = if cap_count == 0 {
+                            // Stateless closure: encode directly as a tagged FnPtr with zero heap allocation.
+                            Value::FnPtr(target_lambda_id)
+                        } else {
+                            self.execute_pack_closure_heap(target_lambda_id, cap_base, cap_count)?
                         };
-                        let tag_and_ref =
-                            unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
-                        let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
-                        let tag_nibble = ((tag_and_ref >> 28) & 0x0F) as u8;
-                        if ref_count == crate::memory::layout::MAX_REF_COUNT {
-                            // Immortal constant string or immortal object
-                        } else if ref_count > 1 {
-                            let decremented = (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
-                                | (ref_count - 1);
-                            unsafe {
-                                std::ptr::write_unaligned(word_ptr, decremented.to_le());
+                        unsafe {
+                            *reg_base.add(caller_dst) = closure_val;
+                        }
+                    }
+
+                    OpCode::UnpackCaptures => {
+                        let capture_count = inst.arg_count() as usize;
+                        if capture_count > 0 {
+                            let capture_base = inst.arg_base() as usize;
+                            self.execute_unpack_captures(capture_base, capture_count)?;
+                        }
+                    }
+
+                    // =============================================================
+                    // 0xA0 .. 0xA1: Instanceof & Cast
+                    // =============================================================
+                    OpCode::Instanceof => {
+                        let obj_val = unsafe { *reg_base.add(inst.src1() as usize) };
+                        let is_instance = self.execute_instanceof(obj_val, inst.src2() as u32)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::Bool(is_instance);
+                        }
+                    }
+
+                    OpCode::CastCheck => {
+                        let val = unsafe { *reg_base.add(inst.src1() as usize) };
+                        let converted =
+                            self.execute_cast_check(val, inst.flags(), inst.src2() as u32)?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = converted;
+                        }
+                    }
+
+                    // =============================================================
+                    // 0xC0 .. 0xC1: ARC Reference Counting
+                    // =============================================================
+                    OpCode::IncRef => {
+                        if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
+                            && addr > 0
+                        {
+                            let addr_usize = addr as usize;
+                            if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
+                                return Err(VmTrap::null_reference());
                             }
-                            if self.cycle_collector_enabled {
-                                self.maybe_push_cycle_candidate(
-                                    addr,
-                                    tag_and_ref,
-                                    tag_nibble,
-                                    decremented,
-                                )?;
-                            }
-                        } else if tag_nibble == BlockTag::ObjectPod as u8 {
-                            let payload_size = unsafe {
-                                u32::from_le(std::ptr::read_unaligned(
-                                    self.heap.buffer.as_ptr().add(addr_usize - 8).cast::<u32>(),
-                                ))
+                            // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
+                            let word_ptr = unsafe {
+                                self.heap
+                                    .buffer
+                                    .as_mut_ptr()
+                                    .add(addr_usize - 4)
+                                    .cast::<u32>()
                             };
-                            self.heap.deallocate_pod_fast(addr, payload_size)?;
+                            let tag_and_ref =
+                                unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+                            let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
+                            if ref_count == crate::memory::layout::MAX_REF_COUNT {
+                                // Immortal constant string or immortal object
+                            } else if ref_count + 1 >= crate::memory::layout::MAX_REF_COUNT {
+                                crate::memory::arc::inc_ref(&mut self.heap, addr)?;
+                            } else {
+                                let updated = if self.cycle_collector_enabled {
+                                    // Clear bits 26..28 (GcColor::Black) and increment ref_count in place.
+                                    (tag_and_ref & 0xF000_0000) | (ref_count + 1)
+                                } else {
+                                    (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
+                                        | (ref_count + 1)
+                                };
+                                unsafe {
+                                    std::ptr::write_unaligned(word_ptr, updated.to_le());
+                                }
+                            }
+                        }
+                    }
+
+                    OpCode::DecRef => {
+                        if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
+                            && addr > 0
+                        {
+                            let addr_usize = addr as usize;
+                            if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
+                                return Err(VmTrap::null_reference());
+                            }
+                            // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
+                            let word_ptr = unsafe {
+                                self.heap
+                                    .buffer
+                                    .as_mut_ptr()
+                                    .add(addr_usize - 4)
+                                    .cast::<u32>()
+                            };
+                            let tag_and_ref =
+                                unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+                            let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
+                            let tag_nibble = ((tag_and_ref >> 28) & 0x0F) as u8;
+                            if ref_count == crate::memory::layout::MAX_REF_COUNT {
+                                // Immortal constant string or immortal object
+                            } else if ref_count > 1 {
+                                let decremented = (tag_and_ref
+                                    & !crate::memory::layout::MAX_REF_COUNT)
+                                    | (ref_count - 1);
+                                unsafe {
+                                    std::ptr::write_unaligned(word_ptr, decremented.to_le());
+                                }
+                                if self.cycle_collector_enabled {
+                                    self.maybe_push_cycle_candidate(
+                                        addr,
+                                        tag_and_ref,
+                                        tag_nibble,
+                                        decremented,
+                                    )?;
+                                }
+                            } else if tag_nibble == BlockTag::ObjectPod as u8 {
+                                let payload_size = unsafe {
+                                    u32::from_le(std::ptr::read_unaligned(
+                                        self.heap.buffer.as_ptr().add(addr_usize - 8).cast::<u32>(),
+                                    ))
+                                };
+                                self.heap.deallocate_pod_fast(addr, payload_size)?;
+                            } else {
+                                let caller_frame = self.current_frame_mut_fast()?;
+                                caller_frame.pc = pc as u32;
+                                self.release_reference_cold(addr)?;
+                                reload_frame!();
+                            }
+                        }
+                    }
+
+                    // =============================================================
+                    // 0xD0 .. 0xD9: Superinstructions
+                    // =============================================================
+                    OpCode::AddI32Imm => {
+                        let imm_val = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I32(val_a.wrapping_add(imm_val));
+                        }
+                    }
+
+                    OpCode::SubI32Imm => {
+                        let imm_val = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I32(val_a.wrapping_sub(imm_val));
+                        }
+                    }
+
+                    OpCode::MulI32Imm => {
+                        let imm_val = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I32(val_a.wrapping_mul(imm_val));
+                        }
+                    }
+
+                    OpCode::ModI32Imm => {
+                        let imm_val = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let rem_val = if val_a >= 0 && imm_val > 0 && imm_val < 64 {
+                            if (imm_val & (imm_val - 1)) == 0 {
+                                val_a & (imm_val - 1)
+                            } else {
+                                let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
+                                let quotient =
+                                    (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
+                                val_a - quotient.wrapping_mul(imm_val)
+                            }
                         } else {
-                            let caller_frame = self.current_frame_mut_fast()?;
-                            caller_frame.pc = pc as u32;
-                            self.release_reference_cold(addr)?;
-                            reload_frame!();
+                            rem_i32_cold(val_a, imm_val)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
+                        }
+                    }
+
+                    OpCode::JumpIfLtI32 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        if val_a < val_b {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfLteI32 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        if val_a <= val_b {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfGtI32 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        if val_a > val_b {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfGteI32 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
+                        let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        if val_a >= val_b {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfEqI32 => {
+                        let target_offset = inst.src2() as i16 as i32;
+                        let first_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let second_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
+                            (*first_ref, *second_ref)
+                        {
+                            first_num == second_num
+                        } else {
+                            values_equal_slow(first_ref, second_ref)
+                        };
+                        if is_equal {
+                            pc = ((pc as i32 - 1) + target_offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfNeqI32 => {
+                        let target_offset = inst.src2() as i16 as i32;
+                        let first_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let second_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
+                            (*first_ref, *second_ref)
+                        {
+                            first_num == second_num
+                        } else {
+                            values_equal_slow(first_ref, second_ref)
+                        };
+                        if !is_equal {
+                            pc = ((pc as i32 - 1) + target_offset) as usize;
+                        }
+                    }
+
+                    // =============================================================
+                    // 0xB0 .. 0xBF: Exception Handling
+                    // =============================================================
+                    OpCode::Throw => {
+                        flush_inst_count!();
+                        let caller_frame = self.current_frame_mut_fast()?;
+                        caller_frame.pc = pc as u32;
+                        let exc_val = unsafe { *reg_base.add(inst.dst() as usize) };
+                        self.execute_throw(exc_val, target_depth)?;
+                        reload_frame!();
+                        finish_instruction!();
+                        continue 'dispatch_loop;
+                    }
+                }
+                finish_instruction!();
+                continue 'dispatch_loop;
+            };
+
+            let caller_frame = self.current_frame_mut_fast()?;
+            caller_frame.pc = pc as u32;
+            let caller_reg_base = caller_frame.register_base as usize;
+            let caller_frame_end = caller_reg_base + caller_frame.register_count as usize;
+            let caller_arg_start = caller_reg_base + call_arg_base;
+
+            let span = *self
+                .func_code
+                .get(call_func_id as usize)
+                .ok_or_else(|| function_not_found_error(call_func_id))?;
+            let num_regs = (span.num_registers as usize).max(call_arg_count);
+            let (new_reg_base, needs_arg_copy) =
+                if call_arg_count > 0 && caller_arg_start + call_arg_count >= caller_frame_end {
+                    (caller_arg_start, false)
+                } else {
+                    (caller_frame_end, call_arg_count > 0)
+                };
+            let required_regs = new_reg_base + num_regs;
+
+            if !span.is_native
+                && !span.has_references
+                && required_regs <= self.register_stack.len()
+                && call_arg_count <= 2
+                && self.call_frames.len() < self.context.options.max_call_stack_depth
+            {
+                if needs_arg_copy {
+                    // SAFETY: caller_arg_start..caller_arg_start + call_arg_count is in caller frame
+                    // and new_reg_base + call_arg_count <= required_regs <= register_stack.len().
+                    unsafe {
+                        let stack_ptr = self.register_stack.as_mut_ptr();
+                        *stack_ptr.add(new_reg_base) = *stack_ptr.add(caller_arg_start);
+                        if call_arg_count == 2 {
+                            *stack_ptr.add(new_reg_base + 1) = *stack_ptr.add(caller_arg_start + 1);
                         }
                     }
                 }
-
-                // =============================================================
-                // 0xD0 .. 0xD9: Superinstructions
-                // =============================================================
-                OpCode::AddI32Imm => {
-                    let imm_val = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) =
-                            Value::I32(val_a.wrapping_add(imm_val));
-                    }
-                }
-
-                OpCode::SubI32Imm => {
-                    let imm_val = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) =
-                            Value::I32(val_a.wrapping_sub(imm_val));
-                    }
-                }
-
-                OpCode::MulI32Imm => {
-                    let imm_val = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) =
-                            Value::I32(val_a.wrapping_mul(imm_val));
-                    }
-                }
-
-                OpCode::ModI32Imm => {
-                    let imm_val = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    let rem_val = if val_a >= 0 && imm_val > 0 && imm_val < 64 {
-                        if (imm_val & (imm_val - 1)) == 0 {
-                            val_a & (imm_val - 1)
-                        } else {
-                            let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
-                            let quotient = (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
-                            val_a - quotient.wrapping_mul(imm_val)
-                        }
-                    } else {
-                        rem_i32_cold(val_a, imm_val)?
-                    };
-                    unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(rem_val);
-                    }
-                }
-
-                OpCode::JumpIfLtI32 => {
-                    let offset = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    if val_a < val_b {
-                        pc = ((pc as i32 - 1) + offset) as usize;
-                    }
-                }
-
-                OpCode::JumpIfLteI32 => {
-                    let offset = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    if val_a <= val_b {
-                        pc = ((pc as i32 - 1) + offset) as usize;
-                    }
-                }
-
-                OpCode::JumpIfGtI32 => {
-                    let offset = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    if val_a > val_b {
-                        pc = ((pc as i32 - 1) + offset) as usize;
-                    }
-                }
-
-                OpCode::JumpIfGteI32 => {
-                    let offset = inst.src2() as i16 as i32;
-                    let val_a = read_i32_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                    let val_b = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                    if val_a >= val_b {
-                        pc = ((pc as i32 - 1) + offset) as usize;
-                    }
-                }
-
-                OpCode::JumpIfEqI32 => {
-                    let target_offset = inst.src2() as i16 as i32;
-                    let first_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
-                    let second_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
-                        (*first_ref, *second_ref)
-                    {
-                        first_num == second_num
-                    } else {
-                        values_equal_slow(first_ref, second_ref)
-                    };
-                    if is_equal {
-                        pc = ((pc as i32 - 1) + target_offset) as usize;
-                    }
-                }
-
-                OpCode::JumpIfNeqI32 => {
-                    let target_offset = inst.src2() as i16 as i32;
-                    let first_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
-                    let second_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let is_equal = if let (Value::I32(first_num), Value::I32(second_num)) =
-                        (*first_ref, *second_ref)
-                    {
-                        first_num == second_num
-                    } else {
-                        values_equal_slow(first_ref, second_ref)
-                    };
-                    if !is_equal {
-                        pc = ((pc as i32 - 1) + target_offset) as usize;
-                    }
-                }
-
-                // =============================================================
-                // 0xB0 .. 0xBF: Exception Handling
-                // =============================================================
-                OpCode::Throw => {
+                // SAFETY: new_reg_base + num_regs <= register_stack.len() checked above.
+                reg_base = unsafe { self.register_stack.as_mut_ptr().add(new_reg_base) };
+                let mut new_frame = CallFrame::new(
+                    call_func_id,
+                    span.binary_id as usize,
+                    new_reg_base,
+                    num_regs,
+                    span.static_base_offset,
+                    span.func_id_offset,
+                    call_dst,
+                );
+                new_frame.active_closure = call_closure;
+                self.call_frames.push(new_frame);
+                self.peak_call_stack_depth = self.peak_call_stack_depth.max(self.call_frames.len());
+                inst_ptr = span.inst_ptr;
+                inst_len = span.inst_len;
+                pc = 0;
+            } else {
+                if span.is_native {
                     flush_inst_count!();
-                    let caller_frame = self.current_frame_mut_fast()?;
-                    caller_frame.pc = pc as u32;
-                    let exc_val = unsafe { *reg_base.add(inst.dst() as usize) };
-                    self.execute_throw(exc_val, target_depth)?;
-                    reload_frame!();
-                    finish_instruction!();
-                    continue;
+                }
+                (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_slow(
+                    call_func_id,
+                    call_dst,
+                    caller_arg_start,
+                    call_arg_count,
+                )?;
+                if let Some(closure_nonnull) = call_closure
+                    && !span.is_native
+                    && let Some(new_frame) = self.call_frames.last_mut()
+                {
+                    new_frame.active_closure = Some(closure_nonnull);
                 }
             }
             finish_instruction!();
