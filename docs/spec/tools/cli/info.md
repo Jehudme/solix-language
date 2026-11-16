@@ -16,7 +16,7 @@ solix info <target> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<target>` | Path or String | **Yes** | Path to target compiled binary (`*.slxb`), archive (`*.slxarc`), or registered package name (`<name>` or `<name>@<version>`). |
+| `<target>` | Path or String | **Yes** | Path to target compiled binary (`*.slxb`), archive (`*.slxarc`), or registered package specification (`<name>[:<profile>][@<version>]`). |
 
 ---
 
@@ -37,8 +37,10 @@ solix info <target> [options]
 ### 1. Installed Package Resolution by Name
 
 `<target>` can be an installed package identifier:
-- `solix info solix`: Resolves the highest installed SemVer version of `solix` from `$SOLIX_PKG_DIR/registry.json`.
+- `solix info solix`: Resolves the highest installed SemVer version of `solix` (defaulting to `release` profile).
 - `solix info solix@2.0.0`: Resolves the exact specified version.
+- `solix info solix:debug@2.0.0`: Resolves the specified profile and version.
+- `solix info solix:debug`: Resolves the specified profile for the latest version.
 
 ```bash
 solix info solix

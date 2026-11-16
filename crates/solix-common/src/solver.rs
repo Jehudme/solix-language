@@ -180,9 +180,11 @@ impl DependencyRequirement {
             });
         }
 
-        // Check for -debug, -release, -test profile suffix in name before @
+        // Check if colon (':') separates profile, or fallback to -debug, -release, -test profile suffix
         let (package_name, name_profile) =
-            if let Some(stripped_name) = raw_name.strip_suffix("-debug") {
+            if let Some((base_name, colon_profile)) = raw_name.split_once(':') {
+                (base_name.trim(), Some(colon_profile.trim().to_string()))
+            } else if let Some(stripped_name) = raw_name.strip_suffix("-debug") {
                 (stripped_name, Some("debug".to_string()))
             } else if let Some(stripped_name) = raw_name.strip_suffix("-release") {
                 (stripped_name, Some("release".to_string()))
@@ -200,28 +202,35 @@ impl DependencyRequirement {
         }
 
         // Handle # after version: can be #<profile>, #<sha256>, or #<profile>#<sha256>
-        let (version_str, hash_profile, sha256_str) = if let Some((ver, hash_part)) =
+        let (version_str, hash_profile, sha256_str) = if let Some((version_part, hash_part)) =
             parts[1].split_once('#')
         {
             let trimmed_hash = hash_part.trim();
             if let Some((profile_part, sha_part)) = trimmed_hash.split_once('#') {
                 (
-                    ver.trim(),
+                    version_part.trim(),
                     Some(profile_part.trim().to_string()),
                     sha_part.trim().to_string(),
                 )
             } else if trimmed_hash == "debug" || trimmed_hash == "release" || trimmed_hash == "test"
             {
-                (ver.trim(), Some(trimmed_hash.to_string()), String::new())
+                (version_part.trim(), Some(trimmed_hash.to_string()), String::new())
             } else {
-                (ver.trim(), None, trimmed_hash.to_string())
+                (version_part.trim(), None, trimmed_hash.to_string())
             }
         } else {
             (parts[1].trim(), None, String::new())
         };
 
-        let effective_profile = name_profile.or(hash_profile);
-        let parsed_version = PackageVersion::parse(version_str)?;
+        let (version_clean, colon_version_profile) =
+            if let Some((clean_ver, profile_after_colon)) = version_str.split_once(':') {
+                (clean_ver.trim(), Some(profile_after_colon.trim().to_string()))
+            } else {
+                (version_str, None)
+            };
+
+        let effective_profile = name_profile.or(colon_version_profile).or(hash_profile);
+        let parsed_version = PackageVersion::parse(version_clean)?;
 
         Ok(Self {
             name: package_name.to_string(),

@@ -393,6 +393,18 @@ public class Physics {
         .resolve_latest("physics")
         .expect("resolve latest physics");
     assert_eq!(fallback_resolved.program.build_profile, "release");
+
+    // Uninstall release profile using colon specification syntax: physics:release@1.0.0
+    let uninstall_colon_release = Cli::try_parse_from([
+        "solix",
+        "uninstall",
+        "physics:release@1.0.0",
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("uninstall colon release cli");
+    assert_eq!(run(uninstall_colon_release).expect("uninstall colon release"), 0);
+    assert!(!release_folder.exists(), "Release folder must be deleted via colon syntax");
 }
 
 #[test]

@@ -46,15 +46,7 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
     } else {
         let registry = PackageRegistry::load_or_sync(&store_directory)?;
         let target_str = args.target.to_string_lossy();
-
-        let found_record = if target_str.contains('@') {
-            let mut parts = target_str.splitn(2, '@');
-            let package_name = parts.next().unwrap_or("");
-            let package_version = parts.next().unwrap_or("");
-            registry.get(package_name, Some(package_version))
-        } else {
-            registry.get(&target_str, None)
-        };
+        let found_record = registry.get(&target_str, None);
 
         if let Some(record) = found_record {
             (record.artifact_path.clone(), Some(record.clone()))

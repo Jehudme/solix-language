@@ -25,7 +25,7 @@ solix compile <sources...> [options]
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
 | `--output <file>` | `-o` | Path | `<name>.slxb` | Destination file path for the compiled `.slxb` binary container. |
-| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Package dependency requirements formatted as `<name>[-<profile>]@<version>` (e.g. `-d raylib-release@5.5.0`). |
+| `--deps <spec>` | `-d` | String (Repeated) | `[]` | Package dependency requirements formatted as `<name>[:<profile>][@<version>]` (e.g. `-d raylib:release@5.5.0`). |
 | `--deps-file <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxarc` archives whose API interfaces should be extracted and linked (visible alias `--lib`). |
 | `--name <name>` | `-n` | String | (Derived from sources) | Package or module identifier name. |
 | `--version <semver>` | `-V` | String | `"0.1.0"` | Semantic version string embedded into binary container metadata. |

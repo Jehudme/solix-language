@@ -216,7 +216,36 @@ public class NetworkClient {
         0
     );
 
-    // 3. Info lookup of non-existent package fails cleanly
+    // 3. Info lookup by colon syntax ("network:release@3.0.0")
+    let info_by_colon_spec = Cli::try_parse_from([
+        "solix",
+        "info",
+        "network:release@3.0.0",
+        "--pkg-dir",
+        store_str,
+        "--json",
+    ])
+    .expect("info by colon spec");
+    assert_eq!(
+        run(info_by_colon_spec).expect("info by colon spec must succeed"),
+        0
+    );
+
+    // 4. Info lookup by profile-only colon syntax ("network:release")
+    let info_by_colon_profile = Cli::try_parse_from([
+        "solix",
+        "info",
+        "network:release",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("info by colon profile");
+    assert_eq!(
+        run(info_by_colon_profile).expect("info by colon profile must succeed"),
+        0
+    );
+
+    // 5. Info lookup of non-existent package fails cleanly
     let info_non_existent =
         Cli::try_parse_from(["solix", "info", "does_not_exist", "--pkg-dir", store_str])
             .expect("info non existent");

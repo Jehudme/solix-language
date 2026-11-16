@@ -16,7 +16,7 @@ solix uninstall <spec> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<spec>` | String | **Yes** | Target specification. Can be a package name (to remove all installed versions) or `package@version` (to remove an exact version). |
+| `<spec>` | String | **Yes** | Target specification formatted as `<name>[:<profile>][@<version>]` (e.g. `raylib`, `raylib@1.0.0`, `raylib:debug@1.0.0`, or `raylib:debug`). |
 
 ---
 

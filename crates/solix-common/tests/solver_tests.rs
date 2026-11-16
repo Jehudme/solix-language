@@ -137,6 +137,24 @@ fn test_dependency_requirement_parsing() {
     assert_eq!(hash_profile_requirement.name, "raylib");
     assert_eq!(hash_profile_requirement.profile.as_deref(), Some("release"));
 
+    let colon_debug_requirement = DependencyRequirement::parse("raylib:debug@1.2.0")
+        .expect("Parsing colon debug requirement must succeed");
+    assert_eq!(colon_debug_requirement.name, "raylib");
+    assert_eq!(colon_debug_requirement.profile.as_deref(), Some("debug"));
+    assert_eq!(colon_debug_requirement.version, PackageVersion::new(1, 2, 0));
+
+    let colon_hyphenated_requirement = DependencyRequirement::parse("my-cool-package:release@2.0.0")
+        .expect("Parsing colon hyphenated package requirement must succeed");
+    assert_eq!(colon_hyphenated_requirement.name, "my-cool-package");
+    assert_eq!(colon_hyphenated_requirement.profile.as_deref(), Some("release"));
+    assert_eq!(colon_hyphenated_requirement.version, PackageVersion::new(2, 0, 0));
+
+    let colon_after_version_requirement = DependencyRequirement::parse("my-cool-package@2.0.0:debug")
+        .expect("Parsing colon after version must succeed");
+    assert_eq!(colon_after_version_requirement.name, "my-cool-package");
+    assert_eq!(colon_after_version_requirement.profile.as_deref(), Some("debug"));
+    assert_eq!(colon_after_version_requirement.version, PackageVersion::new(2, 0, 0));
+
     assert!(DependencyRequirement::parse("raylib").is_err());
     assert!(DependencyRequirement::parse("@1.2.0").is_err());
     assert!(DependencyRequirement::parse("-debug@1.2.0").is_err());

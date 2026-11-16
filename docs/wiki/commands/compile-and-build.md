@@ -12,7 +12,7 @@ solix compile <sources...> [options]
 
 ### Key Options & Flags
 * `-o, --output <path>`: Specifies destination `.slxb` output file path [default: `<name>.slxb`].
-* `-d, --deps <pkg@version>`: External package dependency requirement formatted as `<name>[-<profile>]@<version>` (can be repeated).
+* `-d, --deps <spec>`: External package dependency requirement formatted as `<name>[:<profile>][@<version>]` (can be repeated).
 * `-l, --deps-file <path>`: External library binary (`.slxb`) or archive (`.slxarc`) to link against (visible alias `--lib`, can be repeated).
 * `-n, --name <name>`: Package or module identifier name.
 * `-V, --version <semver>`: Semantic version embedded into binary metadata [default: `0.1.0`].

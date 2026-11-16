@@ -271,16 +271,8 @@ impl PackageRegistry {
         package_spec: &str,
         requested_version: Option<&str>,
     ) -> Option<&PackageRecord> {
-        let (package_name, requested_profile) =
-            if let Some(stripped) = package_spec.strip_suffix("-debug") {
-                (stripped, Some("debug"))
-            } else if let Some(stripped) = package_spec.strip_suffix("-release") {
-                (stripped, Some("release"))
-            } else if let Some(stripped) = package_spec.strip_suffix("-test") {
-                (stripped, Some("test"))
-            } else {
-                (package_spec, None)
-            };
+        let (package_name, spec_profile, spec_version) = parse_package_spec(package_spec);
+        let target_version_ref = requested_version.or(spec_version.as_deref());
 
         let mut matching_records: Vec<&PackageRecord> = self
             .packages
@@ -288,8 +280,8 @@ impl PackageRegistry {
             .filter(|record| record.name == package_name)
             .collect();
 
-        if let Some(profile) = requested_profile {
-            matching_records.retain(|record| record.build_profile == profile);
+        if let Some(ref profile) = spec_profile {
+            matching_records.retain(|record| &record.build_profile == profile);
         } else {
             // Apply profile fallback: release -> debug -> test
             let has_release = matching_records
@@ -305,7 +297,7 @@ impl PackageRegistry {
             }
         }
 
-        if let Some(target_version) = requested_version {
+        if let Some(target_version) = target_version_ref {
             matching_records
                 .into_iter()
                 .find(|record| record.version == target_version)
