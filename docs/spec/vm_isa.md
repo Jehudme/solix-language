@@ -159,8 +159,22 @@ Used for static, direct, and virtual function dispatch:
 
 ### 3.7. Array Operations & Element Tagging
 - `AllocArray`: Allocates typed `ArrayRef` on the heap with specified element capacity, stride, and element type tag.
-- `GetArray`: Retrieves array element by index. For `float32` arrays (`type_tag == 9`), transparently handles both 4-byte native bit patterns and 8-byte VM register storage representations.
-- `SetArray`: Writes array element at specified index, converting value to the primitive storage representation matching the array type tag.
+- `GetArray`: Retrieves array element by index. Directly specializes typed primitive arrays (`(elem_size == 1, type_tag == 11)` for `bool`, `(elem_size == 4, type_tag == 3)` for `int32`) using shift-based addressing and out-of-line cold decoding for `float32` (`type_tag == 9`), `String`, and `Tuple` variants.
+- `SetArray`: Writes array element at specified index, specializing `bool` (`(1, 11)`) and `int32` (`(4, 3)`) stores directly into virtual heap bytes while delegating reference-counted, `elem_type_tag == 0`, and `Tuple` stores to `execute_set_array_slow`.
+
+### 3.8. Superinstructions (`0xD0` .. `0xD9`)
+| Opcode Hex | Name | Format | Operands | Description |
+|---|---|---|---|---|
+| `0xD0` | `AddI32Imm` | A | `dst, src1, imm16` | Fused signed 32-bit immediate add: `dst = src1 + sign_extend(imm16)`. |
+| `0xD1` | `SubI32Imm` | A | `dst, src1, imm16` | Fused signed 32-bit immediate sub: `dst = src1 - sign_extend(imm16)`. |
+| `0xD2` | `JumpIfLtI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs < rhs` (`int32`). |
+| `0xD3` | `JumpIfLteI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs <= rhs` (`int32`). |
+| `0xD4` | `JumpIfGtI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs > rhs` (`int32`). |
+| `0xD5` | `JumpIfGteI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs >= rhs` (`int32`). |
+| `0xD6` | `JumpIfEqI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs == rhs`. |
+| `0xD7` | `JumpIfNeqI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs != rhs`. |
+| `0xD8` | `MulI32Imm` | A | `dst, src1, imm16` | Fused signed 32-bit immediate multiply: `dst = src1 * sign_extend(imm16)`. |
+| `0xD9` | `ModI32Imm` | A | `dst, src1, imm16` | Fused 32-bit modulo by immediate (uses bitmasking for positive power-of-two divisors and compile-time `MOD_MAGIC_TABLE` reciprocal multiplication for constants in `2..=64`). |
 
 ---
 
@@ -208,9 +222,11 @@ The virtual machine supports zero-overhead interactive debugging via the `VmDebu
 
 ## 8. Fast-Path Dispatch & Execution Optimizations
 
-The production interpreter loop (`run_fast_internal::<false>`) implements several structural optimizations while preserving exact ISA semantics:
+The production interpreter loop (`run_fast_trap::<false, TRACK_METRICS>`) implements several structural optimizations while preserving exact ISA semantics:
 
-- **Cross-Crate Opcode & Operand Inlining**: `Instruction` field accessors (`raw_opcode`, `dst`, `src1`, `src2`, `imm32`, `jump_offset`, `call_target`, `arg_base`, `arg_count`) and `OpCode::from_raw_u8` (`const fn` table decode) are `#[inline(always)]` in `solix-common`, alongside hot `Value` accessors in `solix-runtime`.
-- **Stateless Closure Encoding (`PackClosure`)**: Closures with `cap_count == 0` encode directly as tagged `Value::FnPtr(target_lambda_id)` values without heap allocation or `DecRef` cleanup.
-- **Direct Window Push & Lazy Errors**: `push_frame_window` pushes call frames and returns cached `(inst_ptr, inst_len, static_base, binary_id, reg_base)` directly without redundant frame lookups, and error constructors use lazy `.ok_or_else(...)` / `#[cold] #[inline(never)]` helpers to avoid `RuntimeError` drop glue in hot paths.
-- **Cold-Path Outlining**: Infrequent or string/heap-heavy handlers (`CallSymbol`, `CallExtern`, `CallInterface`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`, `Throw`, tuple/cast/heap-closure operations, native callback marshaling, and `release_reference_cold`) execute out-of-line from the main dispatch loop to preserve L1 instruction cache locality and minimize interpreter stack frame size.
+- **Monomorphized Metrics Gating (`TRACK_METRICS`)**: `run_fast_internal` instantiates `<false, false>` when telemetry flags (`--metrics`) are omitted via `RuntimeOptions::track_metrics`, eliding per-instruction `local_inst_count` updates and peak depth comparisons across tight loops.
+- **Compact `VmTrap` Error ABI**: Fast-path handlers return `Result<_, VmTrap>` (`VmTrap(Box<RuntimeError>)`) instead of passing 96-byte `RuntimeError` values by stack `sret`, eliminating stack drop glue and keeping interpreter state resident in machine registers.
+- **Compact 32-Byte `CallFrame` & `FunctionCodeSpan` + Unified `'call_dispatch`**: `CallFrame` (`#[repr(C)]`, compile-time asserted 32 bytes) pairs with flat `FunctionCodeSpan` metadata so `CallDirect`, `CallVirtual`, `CallInterface` (via pre-flattened `flat_itables`), and `CallCallable` (`Value::FnPtr` and heap closures) converge onto a shared capacity-checked frame push without `Vec::push` spills, while `Return`/`ReturnValue` write results directly between register windows.
+- **Cross-Crate Opcode & Operand Inlining**: `Instruction` field accessors (`raw_opcode`, `dst`, `src1`, `src2`, `imm32`, `jump_offset`, `call_target`, `arg_base`, `arg_count`) and `OpCode::from_raw_u8` (`const fn` table decode) are `#[inline(always)]` in `solix-common`, alongside in-place `Value` readers in `solix-runtime`.
+- **Stateless Closure Encoding (`PackClosure`) & Inline Unpack**: Closures with `cap_count == 0` encode directly as `Value::FnPtr(target_lambda_id)` without heap allocation or `DecRef` cleanup, and 1–2 capture `UnpackCaptures` executes inline.
+- **`idiv`-Free Modulo (`ModI32Imm`) & Cold-Path Outlining**: `ModI32Imm` uses bitmasks for powers of two and `MOD_MAGIC_TABLE` reciprocal multiplies for positive constants in `2..=64`, while `CallSymbol`, `CallExtern`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`, `Throw`, tuple/cast/heap-closure operations, native callback marshaling, and `release_reference_cold` execute out-of-line for L1 instruction cache locality.

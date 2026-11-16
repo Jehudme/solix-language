@@ -32,7 +32,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | `--max-stack <depth>` | | Integer | `1024` | Maximum call stack frame depth limit. |
 | `--verbose` | `-v` | Flag | `false` | Prints VM execution statistics and memory report upon process completion. |
 | `--safe` | | Flag | `false` | Executes in safe mode with defensive invariant validation and strict bounds checking. |
-| `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints runtime execution telemetry and memory statistics formatted as `text` or `json`. |
+| `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints runtime execution telemetry and memory statistics formatted as `text` or `json` (enables per-instruction telemetry tracking via `RuntimeOptions::with_metrics_tracking(true)`, which is otherwise disabled for lean startup and fast-loop dispatch). |
 | `--no-verify` | | Flag | `false` | Bypasses dependency and native library cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 | `-- [guest_args...]` | | Strings | `[]` | Arguments passed directly to the guest application entry point. |

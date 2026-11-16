@@ -6,7 +6,7 @@ The Solix Virtual Machine operates on a high-performance, byte-addressed virtual
 1. **Static Address Space**: Contiguous byte segment at the base of virtual memory storing global and static class variables.
 2. **Dynamic Heap Space**: Byte-addressed region governed by Automatic Reference Counting (ARC) and a segregated free-list manager (`FreeListManager`).
 
-All memory operations are implemented in safe Rust under `#![forbid(unsafe_code)]`, eliminating undefined behavior while providing bare-metal performance.
+All heap management structures are implemented in safe Rust under `#![forbid(unsafe_code)]`, while the monomorphized VM dispatch loop (`crates/solix-runtime/src/vm/fast.rs`) executes pre-validated fast-path buffer accesses guarded by explicit bounds checks and `// SAFETY:` invariants. `VirtualHeap` allocates demand-paged backing storage starting at `256 KB` (`INITIAL_DYNAMIC_COMMIT`) and grows lazily up to configured `dynamic_capacity`, paired with a `1,024`-slot initial `register_stack` and a `512`-frame pre-reserved `CallFrame` stack (`32B` layout).
 
 ---
 

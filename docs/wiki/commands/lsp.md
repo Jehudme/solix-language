@@ -91,6 +91,7 @@ The Solix Language Server supports 32 language intelligence features:
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).
 17. **Refactoring**: Safe symbol renaming across files.
 18. **Code Formatting**: 4-space indent formatter preserving inline comments, compound operators (`+=`, `-=`, `*=`, `/=`, `%=`), relational operators (`==`, `!=`, `<=`, `>=`), lambda arrows (`=>`), and mid-line blocks (`} else {`).
+19. **Zero-Panic Implementation Contract**: LSP request handlers (`code_actions`, `completion`, `folding`, `inlay_hints`, `rename`, `workspace`) propagate recoverable failures cleanly with zero production `unwrap`/`expect`/`panic` calls and strict GL-0011 naming conformance.
 
 ---
 
