@@ -15,29 +15,29 @@ use solix_common::types::{PrimitiveKind, Type};
 use std::collections::{HashMap, HashSet};
 
 /// Bytecode emitter context for transforming expressions and statements into virtual register instructions.
-pub struct Emitter<'a> {
+pub struct Emitter<'ctx> {
     /// Function descriptor currently being compiled.
-    pub function: &'a mut CompiledFunction,
+    pub function: &'ctx mut CompiledFunction,
     /// Register allocator managing local variables and temporary registers.
-    pub allocator: &'a mut RegisterAllocator,
+    pub allocator: &'ctx mut RegisterAllocator,
     /// Shared constant pool manager.
-    pub pool: &'a mut ConstantPoolBuilder,
+    pub pool: &'ctx mut ConstantPoolBuilder,
     /// Semantic types of AST nodes mapped by span (from semantic binding phase).
-    pub node_types: Option<&'a HashMap<Span, Type>>,
+    pub node_types: Option<&'ctx HashMap<Span, Type>>,
     /// Source code contents indexed by source_id.
-    pub sources: Option<&'a [String]>,
+    pub sources: Option<&'ctx [String]>,
     /// Module static memory partition layout.
-    pub static_layout: Option<&'a StaticLayout>,
+    pub static_layout: Option<&'ctx StaticLayout>,
     /// Class memory layouts indexed by class name.
-    pub class_layouts: Option<&'a HashMap<String, ClassLayout>>,
+    pub class_layouts: Option<&'ctx HashMap<String, ClassLayout>>,
     /// Function indices indexed by function signature symbol.
-    pub function_ids: Option<&'a HashMap<String, u32>>,
+    pub function_ids: Option<&'ctx HashMap<String, u32>>,
     /// Non-virtual concrete method targets indexed by `(vtable_id, slot_index) -> func_id`.
-    pub direct_method_targets: Option<&'a HashMap<(u32, usize), u32>>,
+    pub direct_method_targets: Option<&'ctx HashMap<(u32, usize), u32>>,
     /// Enum variant constant values indexed by fully qualified symbol (e.g. `Color::Red` -> 0).
-    pub enum_variants: Option<&'a HashMap<String, u32>>,
+    pub enum_variants: Option<&'ctx HashMap<String, u32>>,
     /// Synthesized functions (such as compiled lambda closure bodies) to append to the module.
-    pub synthesized_functions: Option<&'a mut Vec<CompiledFunction>>,
+    pub synthesized_functions: Option<&'ctx mut Vec<CompiledFunction>>,
     /// Active finally block statements for inlining during early returns, breaks, or continues.
     pub finally_stack: Vec<crate::phases::parser::statements::control_flow::BlockStatement>,
     /// Optional symbol of the enclosing class currently being emitted.
@@ -48,12 +48,12 @@ pub struct Emitter<'a> {
     pub unsafe_non_null_locals: HashSet<String>,
 }
 
-impl<'a> Emitter<'a> {
+impl<'ctx> Emitter<'ctx> {
     /// Creates a new emitter instance for the target function.
     pub fn new(
-        function: &'a mut CompiledFunction,
-        allocator: &'a mut RegisterAllocator,
-        pool: &'a mut ConstantPoolBuilder,
+        function: &'ctx mut CompiledFunction,
+        allocator: &'ctx mut RegisterAllocator,
+        pool: &'ctx mut ConstantPoolBuilder,
     ) -> Self {
         Self {
             function,
@@ -138,7 +138,7 @@ impl<'a> Emitter<'a> {
     #[must_use]
     pub fn with_synthesized_functions(
         mut self,
-        synthesized_functions: &'a mut Vec<CompiledFunction>,
+        synthesized_functions: &'ctx mut Vec<CompiledFunction>,
     ) -> Self {
         self.synthesized_functions = Some(synthesized_functions);
         self
@@ -146,42 +146,42 @@ impl<'a> Emitter<'a> {
 
     /// Attaches class layouts for object instantiation and field offset resolution.
     #[must_use]
-    pub fn with_class_layouts(mut self, class_layouts: &'a HashMap<String, ClassLayout>) -> Self {
+    pub fn with_class_layouts(mut self, class_layouts: &'ctx HashMap<String, ClassLayout>) -> Self {
         self.class_layouts = Some(class_layouts);
         self
     }
 
     /// Attaches function indices for direct call targets.
     #[must_use]
-    pub fn with_function_ids(mut self, function_ids: &'a HashMap<String, u32>) -> Self {
+    pub fn with_function_ids(mut self, function_ids: &'ctx HashMap<String, u32>) -> Self {
         self.function_ids = Some(function_ids);
         self
     }
 
     /// Attaches enum variant constants for direct constant loading.
     #[must_use]
-    pub fn with_enum_variants(mut self, enum_variants: &'a HashMap<String, u32>) -> Self {
+    pub fn with_enum_variants(mut self, enum_variants: &'ctx HashMap<String, u32>) -> Self {
         self.enum_variants = Some(enum_variants);
         self
     }
 
     /// Attaches module static memory partition layout.
     #[must_use]
-    pub fn with_static_layout(mut self, static_layout: &'a StaticLayout) -> Self {
+    pub fn with_static_layout(mut self, static_layout: &'ctx StaticLayout) -> Self {
         self.static_layout = Some(static_layout);
         self
     }
 
     /// Attaches semantic node types from binder artifacts.
     #[must_use]
-    pub fn with_node_types(mut self, node_types: &'a HashMap<Span, Type>) -> Self {
+    pub fn with_node_types(mut self, node_types: &'ctx HashMap<Span, Type>) -> Self {
         self.node_types = Some(node_types);
         self
     }
 
     /// Attaches source files for lexeme extraction.
     #[must_use]
-    pub fn with_sources(mut self, sources: &'a [String]) -> Self {
+    pub fn with_sources(mut self, sources: &'ctx [String]) -> Self {
         self.sources = Some(sources);
         self
     }
@@ -197,7 +197,7 @@ impl<'a> Emitter<'a> {
     #[must_use]
     pub fn with_direct_method_targets(
         mut self,
-        direct_method_targets: &'a HashMap<(u32, usize), u32>,
+        direct_method_targets: &'ctx HashMap<(u32, usize), u32>,
     ) -> Self {
         self.direct_method_targets = Some(direct_method_targets);
         self
@@ -937,7 +937,7 @@ impl<'a> Emitter<'a> {
                                 "{symbol_name}<{}>",
                                 type_arguments
                                     .iter()
-                                    .map(|t| t.to_string())
+                                    .map(|type_arg| type_arg.to_string())
                                     .collect::<Vec<_>>()
                                     .join(", ")
                             )
@@ -990,16 +990,16 @@ impl<'a> Emitter<'a> {
                 });
 
                 let dst = self.resolve_dst(target_reg)?;
-                if let Some(l) = layout_info
-                    && !l.is_extern
+                if let Some(layout) = layout_info
+                    && !layout.is_extern
                 {
                     self.emit_instruction(
                         Instruction::format_a(
                             OpCode::AllocObject,
                             0,
                             dst,
-                            l.vtable_id as u16,
-                            l.instance_size_bytes as u16,
+                            layout.vtable_id as u16,
+                            layout.instance_size_bytes as u16,
                         ),
                         Some(*span),
                     );
@@ -1055,7 +1055,8 @@ impl<'a> Emitter<'a> {
                     .copied();
 
                 let is_extern_class =
-                    layout_info.as_ref().is_some_and(|l| l.is_extern) || layout_info.is_none();
+                    layout_info.as_ref().is_some_and(|layout| layout.is_extern)
+                        || layout_info.is_none();
                 let dummy_dst = self.allocator.alloc_temp()?;
                 if !is_extern_class && let Some(cid) = ctor_id {
                     self.emit_instruction(
@@ -1327,7 +1328,7 @@ impl<'a> Emitter<'a> {
                                     .and_then(|layouts| {
                                         layouts.get(cls).or_else(|| layouts.get(simple))
                                     })
-                                    .map(|l| l.field_offsets.contains_key(&method_name))
+                                    .map(|layout| layout.field_offsets.contains_key(&method_name))
                                     .unwrap_or(false)
                             } else {
                                 false
@@ -1373,7 +1374,7 @@ impl<'a> Emitter<'a> {
                         // Virtual / interface / devirtualized method call object.method(args)
                         let arg_types: Vec<Type> = arguments
                             .iter()
-                            .map(|a| self.query_type(a.span()))
+                            .map(|arg| self.query_type(arg.span()))
                             .collect();
                         let (slot, is_interface) =
                             self.resolve_method_dispatch(object.span(), &method_name, &arg_types);
@@ -1611,8 +1612,8 @@ impl<'a> Emitter<'a> {
 
                 let base_func_id = self
                     .function_ids
-                    .and_then(|f| f.values().max().copied())
-                    .map_or(1, |m| m + 1);
+                    .and_then(|func_map| func_map.values().max().copied())
+                    .map_or(1, |max_id| max_id + 1);
 
                 let mut synth = self.synthesized_functions.take();
                 let (lambda_id, placeholder_idx) = if let Some(ref mut funcs) = synth {
@@ -1722,7 +1723,7 @@ impl<'a> Emitter<'a> {
                 let vtable_id = self
                     .class_layouts
                     .and_then(|layouts| layouts.get(&type_name).or_else(|| layouts.get(simple)))
-                    .map(|l| l.vtable_id)
+                    .map(|layout| layout.vtable_id)
                     .unwrap_or(0);
 
                 let r_obj = self.emit_expression(expression, None)?;
@@ -3397,8 +3398,8 @@ impl<'a> Emitter<'a> {
 
     #[must_use]
     pub fn query_type(&self, span: Span) -> Type {
-        if let Some(t) = self.node_types.and_then(|types| types.get(&span)) {
-            return t.clone();
+        if let Some(node_type) = self.node_types.and_then(|types| types.get(&span)) {
+            return node_type.clone();
         }
         Type::Primitive(PrimitiveKind::Int32)
     }
@@ -3770,7 +3771,7 @@ impl<'a> Emitter<'a> {
     ) -> (u16, bool) {
         let param_sig = arg_types
             .iter()
-            .map(|t| t.to_string())
+            .map(|arg_type| arg_type.to_string())
             .collect::<Vec<_>>()
             .join(",");
         let mangled_name = format!("{method_name}({param_sig})");

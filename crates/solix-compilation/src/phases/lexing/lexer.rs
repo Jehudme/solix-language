@@ -226,7 +226,9 @@ impl<'source> LexerState<'source> {
         }
 
         // Fractional part
-        if self.peek() == Some(b'.') && self.peek_next().is_some_and(|b| b.is_ascii_digit()) {
+        if self.peek() == Some(b'.')
+            && self.peek_next().is_some_and(|next_byte| next_byte.is_ascii_digit())
+        {
             self.advance(); // consume '.'
             while let Some(byte) = self.peek() {
                 if byte.is_ascii_digit() || byte == b'_' {

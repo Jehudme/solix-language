@@ -59,9 +59,9 @@ pub fn find_free_variables(
 
     if let Expression::Lambda { body, .. } = expr {
         match body {
-            LambdaBody::Expression(e) => {
+            LambdaBody::Expression(body_expr) => {
                 collect_identifiers_expr(
-                    e,
+                    body_expr,
                     &local_scope,
                     outer_allocator,
                     sources,
@@ -69,9 +69,9 @@ pub fn find_free_variables(
                     &mut visited,
                 );
             }
-            LambdaBody::Block(b) => {
+            LambdaBody::Block(block) => {
                 collect_identifiers_block(
-                    b,
+                    block,
                     &mut local_scope,
                     outer_allocator,
                     sources,
@@ -296,9 +296,9 @@ fn collect_identifiers_expr(
                 }
             }
             match body {
-                LambdaBody::Expression(e) => {
+                LambdaBody::Expression(body_expr) => {
                     collect_identifiers_expr(
-                        e,
+                        body_expr,
                         &inner_scope,
                         outer_allocator,
                         sources,
@@ -306,9 +306,9 @@ fn collect_identifiers_expr(
                         visited,
                     );
                 }
-                LambdaBody::Block(b) => {
+                LambdaBody::Block(block) => {
                     collect_identifiers_block(
-                        b,
+                        block,
                         &mut inner_scope,
                         outer_allocator,
                         sources,
@@ -399,10 +399,10 @@ fn collect_identifiers_block(
                     captured,
                     visited,
                 );
-                if let Statement::Block(b) = if_stmt.then_branch.as_ref() {
+                if let Statement::Block(then_block) = if_stmt.then_branch.as_ref() {
                     let mut then_scope = local_scope.clone();
                     collect_identifiers_block(
-                        b,
+                        then_block,
                         &mut then_scope,
                         outer_allocator,
                         sources,
@@ -410,10 +410,10 @@ fn collect_identifiers_block(
                         visited,
                     );
                 }
-                if let Some(Statement::Block(b)) = if_stmt.else_branch.as_deref() {
+                if let Some(Statement::Block(else_block)) = if_stmt.else_branch.as_deref() {
                     let mut else_scope = local_scope.clone();
                     collect_identifiers_block(
-                        b,
+                        else_block,
                         &mut else_scope,
                         outer_allocator,
                         sources,
@@ -431,10 +431,10 @@ fn collect_identifiers_block(
                     captured,
                     visited,
                 );
-                if let Statement::Block(b) = while_stmt.body.as_ref() {
+                if let Statement::Block(body_block) = while_stmt.body.as_ref() {
                     let mut body_scope = local_scope.clone();
                     collect_identifiers_block(
-                        b,
+                        body_block,
                         &mut body_scope,
                         outer_allocator,
                         sources,
@@ -452,10 +452,10 @@ fn collect_identifiers_block(
                     captured,
                     visited,
                 );
-                if let Statement::Block(b) = do_while.body.as_ref() {
+                if let Statement::Block(body_block) = do_while.body.as_ref() {
                     let mut body_scope = local_scope.clone();
                     collect_identifiers_block(
-                        b,
+                        body_block,
                         &mut body_scope,
                         outer_allocator,
                         sources,
@@ -508,9 +508,9 @@ fn collect_identifiers_block(
                         visited,
                     );
                 }
-                if let Statement::Block(b) = for_stmt.body.as_ref() {
+                if let Statement::Block(body_block) = for_stmt.body.as_ref() {
                     collect_identifiers_block(
-                        b,
+                        body_block,
                         &mut for_scope,
                         outer_allocator,
                         sources,
@@ -541,10 +541,10 @@ fn collect_identifiers_block(
                     visited,
                 );
             }
-            Statement::Block(b) => {
+            Statement::Block(inner_block) => {
                 let mut inner_scope = local_scope.clone();
                 collect_identifiers_block(
-                    b,
+                    inner_block,
                     &mut inner_scope,
                     outer_allocator,
                     sources,

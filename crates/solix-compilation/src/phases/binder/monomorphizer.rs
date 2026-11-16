@@ -355,7 +355,7 @@ impl GenericBlueprintRegistry {
 
                     let param_sig = parameter_types
                         .iter()
-                        .map(|t| t.to_string())
+                        .map(|param_type| param_type.to_string())
                         .collect::<Vec<_>>()
                         .join(",");
                     let parameter_names: Vec<String> = method_decl

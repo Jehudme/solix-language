@@ -855,8 +855,8 @@ fn handle_general_completion(
         for other_snap in workspace.all_snapshots() {
             if let Some(ast) = &other_snap.ast {
                 for decl in &ast.declarations {
-                    if let Declaration::Class(c) = decl {
-                        let name = get_span_text(&other_snap.source_text, c.name_span);
+                    if let Declaration::Class(class_decl) = decl {
+                        let name = get_span_text(&other_snap.source_text, class_decl.name_span);
                         items.push(CompletionItem {
                             label: format!("{name};"),
                             kind: Some(CompletionItemKind::CLASS),

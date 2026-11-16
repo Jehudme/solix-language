@@ -722,14 +722,14 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
         Statement::Block(block) => block
             .statements
             .iter()
-            .any(|s| statement_calls_symbol(s, sources, target_name)),
+            .any(|inner| statement_calls_symbol(inner, sources, target_name)),
         Statement::If(if_stmt) => {
             expression_calls_symbol(&if_stmt.condition, sources, target_name)
                 || statement_calls_symbol(&if_stmt.then_branch, sources, target_name)
                 || if_stmt
                     .else_branch
                     .as_deref()
-                    .is_some_and(|s| statement_calls_symbol(s, sources, target_name))
+                    .is_some_and(|else_stmt| statement_calls_symbol(else_stmt, sources, target_name))
         }
         Statement::While(while_stmt) => {
             expression_calls_symbol(&while_stmt.condition, sources, target_name)
@@ -743,15 +743,15 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
             for_stmt
                 .initializer
                 .as_deref()
-                .is_some_and(|s| statement_calls_symbol(s, sources, target_name))
+                .is_some_and(|init_stmt| statement_calls_symbol(init_stmt, sources, target_name))
                 || for_stmt
                     .condition
                     .as_ref()
-                    .is_some_and(|e| expression_calls_symbol(e, sources, target_name))
+                    .is_some_and(|cond_expr| expression_calls_symbol(cond_expr, sources, target_name))
                 || for_stmt
                     .update
                     .as_ref()
-                    .is_some_and(|e| expression_calls_symbol(e, sources, target_name))
+                    .is_some_and(|upd_expr| expression_calls_symbol(upd_expr, sources, target_name))
                 || statement_calls_symbol(&for_stmt.body, sources, target_name)
         }
         Statement::Switch(switch_stmt) => {
@@ -761,18 +761,18 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
                         || case
                             .statements
                             .iter()
-                            .any(|s| statement_calls_symbol(s, sources, target_name))
+                            .any(|case_stmt| statement_calls_symbol(case_stmt, sources, target_name))
                 })
                 || switch_stmt.default_case.as_deref().is_some_and(|stmts| {
                     stmts
                         .iter()
-                        .any(|s| statement_calls_symbol(s, sources, target_name))
+                        .any(|default_stmt| statement_calls_symbol(default_stmt, sources, target_name))
                 })
         }
         Statement::Return(return_stmt) => return_stmt
             .value
             .as_ref()
-            .is_some_and(|v| expression_calls_symbol(v, sources, target_name)),
+            .is_some_and(|ret_expr| expression_calls_symbol(ret_expr, sources, target_name)),
         Statement::Throw(throw_stmt) => {
             expression_calls_symbol(&throw_stmt.expression, sources, target_name)
         }
@@ -788,7 +788,7 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
                 || assert_stmt
                     .message
                     .as_ref()
-                    .is_some_and(|m| expression_calls_symbol(m, sources, target_name))
+                    .is_some_and(|msg_expr| expression_calls_symbol(msg_expr, sources, target_name))
         }
         Statement::Exit(exit_stmt) => {
             expression_calls_symbol(&exit_stmt.code, sources, target_name)
@@ -896,10 +896,10 @@ fn expression_calls_symbol(expression: &Expression, sources: &[String], target_n
         } => {
             statements
                 .iter()
-                .any(|s| statement_calls_symbol(s, sources, target_name))
+                .any(|stmt| statement_calls_symbol(stmt, sources, target_name))
                 || result
                     .as_deref()
-                    .is_some_and(|r| expression_calls_symbol(r, sources, target_name))
+                    .is_some_and(|ret_expr| expression_calls_symbol(ret_expr, sources, target_name))
         }
         _ => false,
     }

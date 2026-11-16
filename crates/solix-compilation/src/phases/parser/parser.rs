@@ -616,7 +616,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
 
         if self.is_constructor_lookahead() {
-            let name_span = self.cursor.advance().map(|t| t.span).unwrap_or_default();
+            let name_span = self.cursor.advance().map(|token| token.span).unwrap_or_default();
             let ctor = self.parse_constructor_declaration(modifiers, name_span)?;
             self.record_error(ParsingError::ConstructorOutsideClass {
                 span: ctor.span.to_source_span(),
@@ -820,9 +820,9 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 _ => None,
             };
 
-            if let Some(m) = modifier {
+            if let Some(parsed_modifier) = modifier {
                 self.cursor.advance();
-                modifiers.push(m);
+                modifiers.push(parsed_modifier);
             } else {
                 break;
             }
@@ -1243,8 +1243,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             if self.cursor.check(TokenKind::OperatorBitwiseNot) {
                 let dtor = self.parse_destructor_declaration();
                 let err_span = match &dtor {
-                    Ok(d) => d.span.to_source_span(),
-                    Err(e) => e.source_span(),
+                    Ok(decl) => decl.span.to_source_span(),
+                    Err(error) => error.source_span(),
                 };
                 self.record_error(ParsingError::InterfaceDestructor { span: err_span });
                 continue;
@@ -1413,8 +1413,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let is_extern = self.inside_extern_class || modifiers.contains(&Modifier::Extern);
 
         if is_extern {
-            for m in &modifiers {
-                match m {
+            for modifier in &modifiers {
+                match modifier {
                     Modifier::Native => {
                         self.record_error(ParsingError::InvalidExternModifier {
                             modifier: "native".to_string(),
@@ -1460,7 +1460,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let span = return_type
             .span()
-            .combine(body.as_ref().map(|b| b.span).unwrap_or(name_span));
+            .combine(body.as_ref().map(|block| block.span).unwrap_or(name_span));
 
         Ok(MethodDeclaration {
             span,
@@ -1641,8 +1641,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let parameters = self.parse_parameter_list()?;
 
-        let ret_type = if let Some(r) = return_type {
-            r
+        let ret_type = if let Some(explicit_return) = return_type {
+            explicit_return
         } else if self
             .cursor
             .match_token(TokenKind::OperatorFatArrow)
@@ -1834,7 +1834,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 }
 
                 if self.is_constructor_lookahead() {
-                    let name_span = self.cursor.advance().map(|t| t.span).unwrap_or_default();
+                    let name_span = self.cursor.advance().map(|token| token.span).unwrap_or_default();
                     let ctor = self.parse_constructor_declaration(Vec::new(), name_span)?;
                     self.record_error(ParsingError::ConstructorOutsideClass {
                         span: ctor.span.to_source_span(),
@@ -2021,7 +2021,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let end_span = else_branch
             .as_ref()
-            .map(|b| b.span())
+            .map(|node| node.span())
             .unwrap_or_else(|| then_branch.span());
         let span = start_span.combine(end_span);
 
@@ -2348,7 +2348,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
                 let case_end = case_stmts
                     .last()
-                    .map(|s| s.span())
+                    .map(|stmt| stmt.span())
                     .unwrap_or_else(|| case_value.span());
                 cases.push(CaseClause {
                     span: case_start.combine(case_end),
@@ -2489,8 +2489,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let end_span = finally_block
             .as_ref()
-            .map(|f| f.span)
-            .or_else(|| catch_clauses.last().map(|c| c.span))
+            .map(|block| block.span)
+            .or_else(|| catch_clauses.last().map(|clause| clause.span))
             .unwrap_or(try_block.span);
 
         let span = start_span.combine(end_span);
@@ -2833,7 +2833,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let operator = self
                 .cursor
                 .advance()
-                .map(|t| t.kind)
+                .map(|token| token.kind)
                 .unwrap_or(TokenKind::OperatorEqual);
             let right = self.parse_comparison()?;
             let span = left.span().combine(right.span());
@@ -2873,7 +2873,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 let operator = self
                     .cursor
                     .advance()
-                    .map(|t| t.kind)
+                    .map(|token| token.kind)
                     .unwrap_or(TokenKind::OperatorLessThan);
                 let right = self.parse_shift()?;
                 let span = left.span().combine(right.span());
@@ -2899,7 +2899,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let operator = self
                 .cursor
                 .advance()
-                .map(|t| t.kind)
+                .map(|token| token.kind)
                 .unwrap_or(TokenKind::OperatorShiftLeft);
             let right = self.parse_term()?;
             let span = left.span().combine(right.span());
@@ -2924,7 +2924,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let operator = self
                 .cursor
                 .advance()
-                .map(|t| t.kind)
+                .map(|token| token.kind)
                 .unwrap_or(TokenKind::OperatorPlus);
             let right = self.parse_factor()?;
             let span = left.span().combine(right.span());
@@ -2949,7 +2949,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let operator = self
                 .cursor
                 .advance()
-                .map(|t| t.kind)
+                .map(|token| token.kind)
                 .unwrap_or(TokenKind::OperatorMultiply);
             let right = self.parse_unary()?;
             let span = left.span().combine(right.span());
@@ -3348,7 +3348,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 {
                     // Object instantiation: new Type(args)
                     let arguments = self.parse_argument_list_tail()?;
-                    let close_paren = self.cursor.previous().map(|t| t.span).unwrap_or(new_span);
+                    let close_paren = self.cursor.previous().map(|token| token.span).unwrap_or(new_span);
                     let span = new_span.combine(close_paren);
                     Ok(Expression::NewInstance {
                         span,
@@ -3395,8 +3395,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     };
 
                     let end_span = match &body {
-                        LambdaBody::Expression(e) => e.span(),
-                        LambdaBody::Block(b) => b.span,
+                        LambdaBody::Expression(body_expr) => body_expr.span(),
+                        LambdaBody::Block(block) => block.span,
                     };
 
                     Ok(Expression::Lambda {
@@ -3555,8 +3555,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             LambdaBody::Expression(Box::new(self.parse_expression()?))
                         };
                         let end_span = match &body {
-                            LambdaBody::Expression(e) => e.span(),
-                            LambdaBody::Block(b) => b.span,
+                            LambdaBody::Expression(body_expr) => body_expr.span(),
+                            LambdaBody::Block(block) => block.span,
                         };
                         return Ok(Expression::Lambda {
                             span: open_paren.combine(end_span),
@@ -3598,8 +3598,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         });
                     };
                     let end_span = match &body {
-                        LambdaBody::Expression(e) => e.span(),
-                        LambdaBody::Block(b) => b.span,
+                        LambdaBody::Expression(body_expr) => body_expr.span(),
+                        LambdaBody::Block(block) => block.span,
                     };
                     return Ok(Expression::Lambda {
                         span: open_paren.combine(end_span),
@@ -3689,8 +3689,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         LambdaBody::Expression(Box::new(self.parse_expression()?))
                     };
                     let end_span = match &body {
-                        LambdaBody::Expression(e) => e.span(),
-                        LambdaBody::Block(b) => b.span,
+                        LambdaBody::Expression(body_expr) => body_expr.span(),
+                        LambdaBody::Block(block) => block.span,
                     };
                     return Ok(Expression::Lambda {
                         span: open_paren.combine(end_span),
@@ -3798,8 +3798,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         };
 
         let end_span = match &body {
-            LambdaBody::Expression(e) => e.span(),
-            LambdaBody::Block(b) => b.span,
+            LambdaBody::Expression(body_expr) => body_expr.span(),
+            LambdaBody::Block(block) => block.span,
         };
 
         Ok(Expression::Lambda {
@@ -3841,17 +3841,17 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 let (param_type, name_span) = if self.is_type_start(self.cursor.peek_kind())
                     && self.cursor.check_next(TokenKind::Identifier)
                 {
-                    let t = self.parse_type_annotation()?;
-                    let n = self.consume_identifier()?;
-                    (t, n)
+                    let parsed_type = self.parse_type_annotation()?;
+                    let parsed_name = self.consume_identifier()?;
+                    (parsed_type, parsed_name)
                 } else {
-                    let n = self.consume_identifier()?;
+                    let parsed_name = self.consume_identifier()?;
                     (
                         TypeAnnotation::Named {
-                            span: n,
-                            path: vec![n],
+                            span: parsed_name,
+                            path: vec![parsed_name],
                         },
-                        n,
+                        parsed_name,
                     )
                 };
 
@@ -3980,7 +3980,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 }
                 let span = token
                     .span
-                    .combine(elements.last().map(|e| e.span()).unwrap_or(token.span));
+                    .combine(elements.last().map(|elem| elem.span()).unwrap_or(token.span));
                 TypeAnnotation::Tuple { span, elements }
             }
             TokenKind::Identifier => {
@@ -4045,7 +4045,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             span: self.cursor.current_span().to_source_span(),
                         });
                     }
-                    let end_span = self.cursor.previous().map(|t| t.span).unwrap_or(named_span);
+                    let end_span = self.cursor.previous().map(|token| token.span).unwrap_or(named_span);
                     TypeAnnotation::Generic {
                         span: named_span.combine(end_span),
                         base: Box::new(named),
@@ -4118,7 +4118,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             let end_span = self
                 .cursor
                 .previous()
-                .map(|t| t.span)
+                .map(|token| token.span)
                 .unwrap_or_else(|| base_type.span());
             let span = base_type.span().combine(end_span);
             let current_depth = match &base_type {
@@ -4168,7 +4168,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         }
                     }
                 }
-                let span = name_span.combine(bounds.last().map(|b| b.span()).unwrap_or(name_span));
+                let span = name_span.combine(bounds.last().map(|node| node.span()).unwrap_or(name_span));
                 if is_variadic && self.cursor.check(TokenKind::PunctuationComma) {
                     self.record_error(ParsingError::VariadicParameterNotLast {
                         span: name_span.to_source_span(),
@@ -4250,7 +4250,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 let span = start_span.combine(
                     default_value
                         .as_ref()
-                        .map(|d| d.span())
+                        .map(|expr| expr.span())
                         .unwrap_or(name_span),
                 );
 

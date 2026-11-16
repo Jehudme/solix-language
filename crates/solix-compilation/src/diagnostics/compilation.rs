@@ -60,7 +60,7 @@ pub struct LocatedDiagnostic {
 }
 
 impl Diagnostic for LocatedDiagnostic {
-    fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+    fn code<'diag>(&'diag self) -> Option<Box<dyn std::fmt::Display + 'diag>> {
         self.diagnostic.code()
     }
 
@@ -68,11 +68,11 @@ impl Diagnostic for LocatedDiagnostic {
         self.diagnostic.severity()
     }
 
-    fn help<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+    fn help<'diag>(&'diag self) -> Option<Box<dyn std::fmt::Display + 'diag>> {
         self.diagnostic.help()
     }
 
-    fn url<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+    fn url<'diag>(&'diag self) -> Option<Box<dyn std::fmt::Display + 'diag>> {
         self.diagnostic.url()
     }
 
@@ -84,7 +84,7 @@ impl Diagnostic for LocatedDiagnostic {
         self.diagnostic.labels()
     }
 
-    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+    fn related<'diag>(&'diag self) -> Option<Box<dyn Iterator<Item = &'diag dyn Diagnostic> + 'diag>> {
         self.diagnostic.related()
     }
 
@@ -116,7 +116,7 @@ impl CompilationDiagnostic {
     pub fn source_id(&self) -> Option<u16> {
         match self {
             Self::Located(loc) => Some(loc.source_id),
-            Self::Lex(e) => Some(e.token().span.id),
+            Self::Lex(lex_err) => Some(lex_err.token().span.id),
             _ => None,
         }
     }
@@ -126,7 +126,7 @@ impl CompilationDiagnostic {
         Self::Custom {
             code: code.into(),
             message: message.into(),
-            span: span.map(|s| s.to_source_span()),
+            span: span.map(|item| item.to_source_span()),
         }
     }
 
@@ -134,10 +134,10 @@ impl CompilationDiagnostic {
     #[must_use]
     pub fn error_code(&self) -> &str {
         match self {
-            Self::Lex(e) => e.error_code(),
-            Self::Parse(e) => e.error_code(),
-            Self::Bind(e) => e.error_code(),
-            Self::Emit(e) => e.error_code(),
+            Self::Lex(lex_err) => lex_err.error_code(),
+            Self::Parse(parse_err) => parse_err.error_code(),
+            Self::Bind(bind_err) => bind_err.error_code(),
+            Self::Emit(emit_err) => emit_err.error_code(),
             Self::Custom { code, .. } => code.as_str(),
             Self::Located(loc) => loc.diagnostic.error_code(),
         }
@@ -147,9 +147,9 @@ impl CompilationDiagnostic {
     #[must_use]
     pub fn source_span(&self) -> Option<SourceSpan> {
         match self {
-            Self::Lex(e) => Some(e.source_span()),
-            Self::Parse(e) => Some(e.source_span()),
-            Self::Bind(e) => Some(e.source_span()),
+            Self::Lex(lex_err) => Some(lex_err.source_span()),
+            Self::Parse(parse_err) => Some(parse_err.source_span()),
+            Self::Bind(bind_err) => Some(bind_err.source_span()),
             Self::Emit(_) => None,
             Self::Custom { span, .. } => *span,
             Self::Located(loc) => loc.diagnostic.source_span(),

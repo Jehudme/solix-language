@@ -563,7 +563,7 @@ impl RuntimeContext {
             if native_fn.is_none() && !shared_libraries.is_empty() {
                 for loaded_library in &shared_libraries {
                     if let Some(c_func) = loaded_library.get_symbol(&func.symbol) {
-                        native_fn = Some(NativeCallback::C(c_func));
+                        native_fn = Some(NativeCallback::CAbi(c_func));
                         native_registry.register_c(&func.symbol, c_func);
                         break;
                     }

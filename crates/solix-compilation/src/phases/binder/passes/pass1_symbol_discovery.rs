@@ -24,18 +24,18 @@ struct RawAliasInfo {
     span: Span,
 }
 
-fn get_type_annotation_base_name<'a>(
-    annotation: &'a TypeAnnotation,
-    source_text: &'a str,
+fn get_type_annotation_base_name<'ast>(
+    annotation: &'ast TypeAnnotation,
+    source_text: &'ast str,
 ) -> (String, bool) {
     match annotation {
         TypeAnnotation::Primitive { .. } => (String::new(), true),
         TypeAnnotation::Named { path, .. } => {
             let segments: Vec<&str> = path
                 .iter()
-                .map(|s| {
-                    let start = s.start as usize;
-                    let end = s.end as usize;
+                .map(|span| {
+                    let start = span.start as usize;
+                    let end = span.end as usize;
                     if end <= source_text.len() {
                         &source_text[start..end]
                     } else {

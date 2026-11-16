@@ -8,7 +8,7 @@ use crate::phases::parser::statements::control_flow::{ThrowStatement, TryStateme
 use solix_common::bytecode::{ExceptionHandlerEntry, Instruction, OpCode};
 use solix_common::diagnostics::EmissionError;
 
-impl<'a> Emitter<'a> {
+impl<'ctx> Emitter<'ctx> {
     /// Compiles an exception-handling statement (`try { ... } catch (...) { ... } finally { ... }`).
     ///
     /// # Errors

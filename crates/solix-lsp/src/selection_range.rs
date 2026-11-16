@@ -85,26 +85,29 @@ fn collect_selection_spans_in_ast(ast: &ProgramAst, target_offset: u32, spans: &
                         spans.push(class_decl.name_span);
                     }
                     for member in &class_decl.members {
-                        if let ClassMember::Method(m) = member
-                            && m.span.start <= target_offset
-                            && target_offset <= m.span.end
+                        if let ClassMember::Method(method_decl) = member
+                            && method_decl.span.start <= target_offset
+                            && target_offset <= method_decl.span.end
                         {
-                            spans.push(m.span);
-                            if m.name_span.start <= target_offset
-                                && target_offset <= m.name_span.end
+                            spans.push(method_decl.span);
+                            if method_decl.name_span.start <= target_offset
+                                && target_offset <= method_decl.name_span.end
                             {
-                                spans.push(m.name_span);
+                                spans.push(method_decl.name_span);
                             }
                         }
                     }
                 }
             }
-            Declaration::Method(m)
-                if m.span.start <= target_offset && target_offset <= m.span.end =>
+            Declaration::Method(method_decl)
+                if method_decl.span.start <= target_offset
+                    && target_offset <= method_decl.span.end =>
             {
-                spans.push(m.span);
-                if m.name_span.start <= target_offset && target_offset <= m.name_span.end {
-                    spans.push(m.name_span);
+                spans.push(method_decl.span);
+                if method_decl.name_span.start <= target_offset
+                    && target_offset <= method_decl.name_span.end
+                {
+                    spans.push(method_decl.name_span);
                 }
             }
             _ => {}

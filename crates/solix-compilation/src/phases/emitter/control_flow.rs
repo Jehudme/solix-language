@@ -24,7 +24,7 @@ pub struct LoopContext {
     pub scope_depth: usize,
 }
 
-impl<'a> Emitter<'a> {
+impl<'ctx> Emitter<'ctx> {
     /// Recursively compiles an imperative AST statement into bytecode instructions.
     ///
     /// # Errors

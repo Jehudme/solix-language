@@ -118,24 +118,28 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     let node_types = context
         .binding_artifacts
         .as_ref()
-        .map(|b| b.node_types.clone())
+        .map(|artifacts| artifacts.node_types.clone())
         .unwrap_or_default();
 
     // 2. Collect class layouts and function symbols to allocate IDs
     let class_layouts: HashMap<String, ClassLayout> = context
         .binding_artifacts
         .as_ref()
-        .map(|b| {
-            b.layouts
+        .map(|artifacts| {
+            artifacts
+                .layouts
                 .values()
-                .flat_map(|l| {
-                    let simple = l
+                .flat_map(|layout| {
+                    let simple = layout
                         .class_name
                         .rsplit(['.', ':'])
                         .next()
-                        .unwrap_or(&l.class_name)
+                        .unwrap_or(&layout.class_name)
                         .to_string();
-                    vec![(l.class_name.clone(), l.clone()), (simple, l.clone())]
+                    vec![
+                        (layout.class_name.clone(), layout.clone()),
+                        (simple, layout.clone()),
+                    ]
                 })
                 .collect()
         })
@@ -257,7 +261,11 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
     // 4. Compile functions for each source file
     for source_id in 0..sources_count as u16 {
-        if let Some(ast) = context.ast.get(source_id as usize).and_then(|a| a.as_ref()) {
+        if let Some(ast) = context
+            .ast
+            .get(source_id as usize)
+            .and_then(|ast_opt| ast_opt.as_ref())
+        {
             compile_source_functions(
                 ast,
                 &context.sources,
@@ -407,25 +415,27 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                             let mut methods = Vec::new();
 
                             let layout_opt = context.binding_artifacts.as_ref().and_then(|ba| {
-                                ba.layouts.values().find(|l| l.class_name == cls_name)
+                                ba.layouts
+                                    .values()
+                                    .find(|layout| layout.class_name == cls_name)
                             });
 
                             for member in &cls.members {
                                 match member {
-                                    ClassMember::Field(f) => {
+                                    ClassMember::Field(field_decl) => {
                                         let field_name =
-                                            get_span_text(f.name_span, code).to_string();
+                                            get_span_text(field_decl.name_span, code).to_string();
                                         let f_type = resolve_type_annotation(
                                             ast.source_id,
                                             code,
-                                            &f.field_type,
+                                            &field_decl.field_type,
                                             sym_table,
                                         );
                                         let offset = layout_opt
-                                            .and_then(|l| l.field_offsets.get(&field_name))
+                                            .and_then(|layout| layout.field_offsets.get(&field_name))
                                             .copied()
                                             .unwrap_or(8);
-                                        let mods = f
+                                        let mods = field_decl
                                             .modifiers
                                             .iter()
                                             .filter_map(|&modifier| to_decl_modifier(modifier))
@@ -517,13 +527,14 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                         let params = ctor
                                             .parameters
                                             .iter()
-                                            .map(|p| {
+                                            .map(|param| {
                                                 let p_name =
-                                                    get_span_text(p.name_span, code).to_string();
+                                                    get_span_text(param.name_span, code)
+                                                        .to_string();
                                                 let p_type = resolve_type_annotation(
                                                     ast.source_id,
                                                     code,
-                                                    &p.param_type,
+                                                    &param.param_type,
                                                     sym_table,
                                                 );
                                                 ExportedParameter {
@@ -1653,12 +1664,12 @@ fn compile_source_functions(
         .unwrap_or_default();
 
     for decl in &ast.declarations {
-        if let Declaration::Method(m) = decl {
-            if m.modifiers.contains(&Modifier::Extern) {
+        if let Declaration::Method(method_decl) = decl {
+            if method_decl.modifiers.contains(&Modifier::Extern) {
                 continue;
             }
-            let name = get_span_text(m.name_span, code).to_string();
-            let decl_namespace = extract_namespace_path(&m.namespace_path, code);
+            let name = get_span_text(method_decl.name_span, code).to_string();
+            let decl_namespace = extract_namespace_path(&method_decl.namespace_path, code);
             let effective_package = compute_effective_package(&raw_file_package, &decl_namespace);
             let symbol_name = if effective_package.is_empty() {
                 name.clone()
@@ -1668,7 +1679,7 @@ fn compile_source_functions(
             let func = compile_single_method(
                 &symbol_name,
                 ast.source_id,
-                m,
+                method_decl,
                 false,
                 sources,
                 class_layouts,
@@ -1682,7 +1693,7 @@ fn compile_source_functions(
             )?;
             output.push(func);
 
-            if !m.generic_params.is_empty()
+            if !method_decl.generic_params.is_empty()
                 && let Some(specialization_args) =
                     generic_invocations.get(&(String::new(), name.clone()))
             {
@@ -1695,7 +1706,7 @@ fn compile_source_functions(
                     let func = compile_single_method(
                         &specialized_sym,
                         ast.source_id,
-                        m,
+                        method_decl,
                         false,
                         sources,
                         class_layouts,
@@ -1720,15 +1731,15 @@ fn compile_source_functions(
         let cls_name = get_span_text(cls.name_span, code);
         for member in &cls.members {
             match member {
-                ClassMember::Method(m) => {
-                    if m.modifiers.contains(&Modifier::Extern) {
+                ClassMember::Method(method_decl) => {
+                    if method_decl.modifiers.contains(&Modifier::Extern) {
                         continue;
                     }
-                    let method_name = get_span_text(m.name_span, code);
-                    let param_sig = m
+                    let method_name = get_span_text(method_decl.name_span, code);
+                    let param_sig = method_decl
                         .parameters
                         .iter()
-                        .map(|p| get_span_text(p.param_type.span(), code))
+                        .map(|param| get_span_text(param.param_type.span(), code))
                         .collect::<Vec<_>>()
                         .join(",");
                     let full_sym = if param_sig.is_empty() {
@@ -1736,11 +1747,11 @@ fn compile_source_functions(
                     } else {
                         format!("{cls_name}::{method_name}({param_sig})")
                     };
-                    let is_instance = !m.modifiers.contains(&Modifier::Static);
+                    let is_instance = !method_decl.modifiers.contains(&Modifier::Static);
                     let func = compile_single_method(
                         &full_sym,
                         ast.source_id,
-                        m,
+                        method_decl,
                         is_instance,
                         sources,
                         class_layouts,
@@ -1754,7 +1765,7 @@ fn compile_source_functions(
                     )?;
                     output.push(func);
 
-                    if !m.generic_params.is_empty()
+                    if !method_decl.generic_params.is_empty()
                         && let Some(specialization_args) = generic_invocations
                             .get(&(cls_name.to_string(), method_name.to_string()))
                     {
@@ -1763,7 +1774,7 @@ fn compile_source_functions(
                             let func = compile_single_method(
                                 &specialized_sym,
                                 ast.source_id,
-                                m,
+                                method_decl,
                                 is_instance,
                                 sources,
                                 class_layouts,
@@ -1854,7 +1865,7 @@ fn compile_source_functions(
         let has_explicit_ctor = cls
             .members
             .iter()
-            .any(|m| matches!(m, ClassMember::Constructor(_)));
+            .any(|member| matches!(member, ClassMember::Constructor(_)));
         if !has_explicit_ctor {
             let full_sym = format!("{cls_name}::constructor");
             let func = compile_default_constructor(
@@ -2038,7 +2049,7 @@ fn resolve_annotation_type(
 fn compile_single_method(
     symbol: &str,
     source_id: u16,
-    m: &MethodDeclaration,
+    method_decl: &MethodDeclaration,
     is_instance: bool,
     sources: &[String],
     class_layouts: &HashMap<String, ClassLayout>,
@@ -2051,14 +2062,14 @@ fn compile_single_method(
     synthesized_lambdas: &mut Vec<CompiledFunction>,
 ) -> Result<CompiledFunction, EmissionError> {
     let param_offset = if is_instance { 1 } else { 0 };
-    let param_count = (param_offset + m.parameters.len()) as u16;
+    let param_count = (param_offset + method_decl.parameters.len()) as u16;
     let mut func = CompiledFunction::new(symbol.to_string(), source_id, param_count, 0);
-    func.is_public = m.modifiers.contains(&Modifier::Public)
-        || (!m.modifiers.contains(&Modifier::Private)
-            && !m.modifiers.contains(&Modifier::Internal)
-            && !m.modifiers.contains(&Modifier::Protected));
-    func.return_type = resolve_annotation_type(&m.return_type, node_types, sources);
-    for parameter_decl in &m.parameters {
+    func.is_public = method_decl.modifiers.contains(&Modifier::Public)
+        || (!method_decl.modifiers.contains(&Modifier::Private)
+            && !method_decl.modifiers.contains(&Modifier::Internal)
+            && !method_decl.modifiers.contains(&Modifier::Protected));
+    func.return_type = resolve_annotation_type(&method_decl.return_type, node_types, sources);
+    for parameter_decl in &method_decl.parameters {
         let param_type = if let Some(semantic_type) = node_types.get(&parameter_decl.name_span) {
             semantic_type.clone()
         } else {
@@ -2086,7 +2097,7 @@ fn compile_single_method(
             });
     }
 
-    for parameter_decl in &m.parameters {
+    for parameter_decl in &method_decl.parameters {
         let param_name = get_span_text(
             parameter_decl.name_span,
             &sources[parameter_decl.name_span.id as usize],
@@ -2112,7 +2123,7 @@ fn compile_single_method(
 
     allocator.enter_scope();
 
-    if let Some(body) = &m.body {
+    if let Some(body) = &method_decl.body {
         let cls_name = symbol.split("::").next().unwrap_or("");
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
@@ -2143,7 +2154,7 @@ fn compile_single_method(
             emitter.emit_return_arc_cleanup(None);
             emitter.emit_instruction(Instruction::format_a(OpCode::Return, 0, 0, 0, 0), None);
         }
-    } else if m.modifiers.contains(&Modifier::Native) {
+    } else if method_decl.modifiers.contains(&Modifier::Native) {
         let clean_symbol = symbol.split('(').next().unwrap_or(symbol);
         let sym_idx = pool.add_string(clean_symbol)?;
         let dst = allocator.alloc_temp()?;
@@ -2152,7 +2163,7 @@ fn compile_single_method(
             None,
         );
         let is_void = matches!(
-            m.return_type,
+            method_decl.return_type,
             TypeAnnotation::Primitive {
                 kind: TokenKind::PrimitiveVoid,
                 ..
@@ -2240,7 +2251,7 @@ fn compile_constructor(
                 && let Some(base_vtable_id) = layout.base_vtable_id
                 && let Some(base_cls) = class_layouts
                     .values()
-                    .find(|l| l.vtable_id == base_vtable_id)
+                    .find(|layout| layout.vtable_id == base_vtable_id)
             {
                 let base_name = &base_cls.class_name;
                 let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
@@ -2256,8 +2267,8 @@ fn compile_constructor(
                         Instruction::format_a(OpCode::Mov, 0, arg_base, 0, 0),
                         Some(ctor.span),
                     );
-                    for (i, arg) in super_args.iter().enumerate() {
-                        emitter.emit_expression(arg, Some(arg_base + 1 + i as u16))?;
+                    for (arg_index, arg) in super_args.iter().enumerate() {
+                        emitter.emit_expression(arg, Some(arg_base + 1 + arg_index as u16))?;
                     }
                     let dummy = emitter.allocator.alloc_temp()?;
                     emitter.emit_instruction(
@@ -2341,7 +2352,7 @@ fn compile_default_constructor(
             && let Some(base_vtable_id) = layout.base_vtable_id
             && let Some(base_cls) = class_layouts
                 .values()
-                .find(|l| l.vtable_id == base_vtable_id)
+                .find(|layout| layout.vtable_id == base_vtable_id)
         {
             let base_name = &base_cls.class_name;
             let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
@@ -2374,11 +2385,17 @@ fn compile_default_constructor(
 
         // Initialize fields with default values/initializers
         for member in &cls.members {
-            if let ClassMember::Field(f) = member
-                && !f.modifiers.iter().any(|m| matches!(m, Modifier::Static))
-                && let Some(init) = &f.initializer
+            if let ClassMember::Field(field_decl) = member
+                && !field_decl
+                    .modifiers
+                    .iter()
+                    .any(|modifier| matches!(modifier, Modifier::Static))
+                && let Some(init) = &field_decl.initializer
             {
-                let field_name = get_span_text(f.name_span, &sources[f.name_span.id as usize]);
+                let field_name = get_span_text(
+                    field_decl.name_span,
+                    &sources[field_decl.name_span.id as usize],
+                );
                 let offset = if let Some(layout) = class_layouts
                     .get(cls_name)
                     .or_else(|| class_layouts.get(simple_cls))
@@ -2390,14 +2407,14 @@ fn compile_default_constructor(
                 let r_val = emitter.emit_expression(init, None)?;
                 emitter.emit_instruction(
                     Instruction::format_a(OpCode::SetField, 0, r_val, 0, offset),
-                    Some(f.span),
+                    Some(field_decl.span),
                 );
                 if emitter.query_type(init.span()).is_reference_type()
                     && !matches!(init, Expression::Identifier { .. })
                 {
                     emitter.emit_instruction(
                         Instruction::format_a(OpCode::DecRef, 0, r_val, 0, 0),
-                        Some(f.span),
+                        Some(field_decl.span),
                     );
                 }
                 emitter.allocator.free_temp(r_val);
@@ -2461,7 +2478,7 @@ fn compile_destructor(
             && let Some(base_vtable_id) = layout.base_vtable_id
             && let Some(base_cls) = class_layouts
                 .values()
-                .find(|l| l.vtable_id == base_vtable_id)
+                .find(|layout| layout.vtable_id == base_vtable_id)
         {
             let base_name = &base_cls.class_name;
             let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
@@ -2604,7 +2621,7 @@ fn index_monomorphized_class_symbols(
     let cls_id = mono_cls.resolved_symbol_id.map(SymbolId);
     let mangled_name = cls_id
         .and_then(|id| symbol_table.get_symbol(id))
-        .map(|s| s.fully_qualified_name.clone())
+        .map(|sym_entry| sym_entry.fully_qualified_name.clone())
         .unwrap_or_else(|| {
             if (mono_cls.name_span.id as usize) < sources.len() {
                 get_span_text(mono_cls.name_span, &sources[mono_cls.name_span.id as usize])
@@ -2622,17 +2639,17 @@ fn index_monomorphized_class_symbols(
     let source_id = mono_cls.name_span.id;
     let code = sources
         .get(source_id as usize)
-        .map(|s| s.as_str())
+        .map(|source_text| source_text.as_str())
         .unwrap_or("");
 
     for member in &mono_cls.members {
         match member {
-            ClassMember::Method(m) => {
-                let method_name = get_span_text(m.name_span, code);
-                let param_sig = m
+            ClassMember::Method(method_decl) => {
+                let method_name = get_span_text(method_decl.name_span, code);
+                let param_sig = method_decl
                     .parameters
                     .iter()
-                    .map(|p| get_span_text(p.param_type.span(), code))
+                    .map(|param| get_span_text(param.param_type.span(), code))
                     .collect::<Vec<_>>()
                     .join(",");
                 let full_sym_mangled = format!("{mangled_name}::{method_name}({param_sig})");
@@ -2650,7 +2667,7 @@ fn index_monomorphized_class_symbols(
                     let generic_sym = format!("{generic_base}::{method_name}{generic_suffix}");
                     let generic_arity = format!(
                         "{generic_base}::{method_name}{generic_suffix}/{}",
-                        m.parameters.len()
+                        method_decl.parameters.len()
                     );
                     function_ids.insert(generic_sym, func_id);
                     function_ids.insert(generic_arity, func_id);
@@ -2747,7 +2764,7 @@ fn compile_monomorphized_class_functions(
     let cls_id = mono_cls.resolved_symbol_id.map(SymbolId);
     let mangled_name = cls_id
         .and_then(|id| symbol_table.get_symbol(id))
-        .map(|s| s.fully_qualified_name.clone())
+        .map(|sym_entry| sym_entry.fully_qualified_name.clone())
         .unwrap_or_else(|| {
             if (mono_cls.name_span.id as usize) < sources.len() {
                 get_span_text(mono_cls.name_span, &sources[mono_cls.name_span.id as usize])
@@ -2760,29 +2777,29 @@ fn compile_monomorphized_class_functions(
     let source_id = mono_cls.name_span.id;
     let code = sources
         .get(source_id as usize)
-        .map(|s| s.as_str())
+        .map(|source_text| source_text.as_str())
         .unwrap_or("");
 
     for member in &mono_cls.members {
         match member {
-            ClassMember::Method(m) => {
-                let method_name = get_span_text(m.name_span, code);
-                let param_sig = m
+            ClassMember::Method(method_decl) => {
+                let method_name = get_span_text(method_decl.name_span, code);
+                let param_sig = method_decl
                     .parameters
                     .iter()
-                    .map(|p| get_span_text(p.param_type.span(), code))
+                    .map(|param| get_span_text(param.param_type.span(), code))
                     .collect::<Vec<_>>()
                     .join(",");
-                let full_sym = m
+                let full_sym = method_decl
                     .resolved_symbol_id
                     .and_then(|id| symbol_table.get_symbol(SymbolId(id)))
                     .map(|symbol| symbol.fully_qualified_name.clone())
                     .unwrap_or_else(|| format!("{mangled_name}::{method_name}({param_sig})"));
-                let is_instance = !m.modifiers.contains(&Modifier::Static);
+                let is_instance = !method_decl.modifiers.contains(&Modifier::Static);
                 let func = compile_single_method(
                     &full_sym,
                     source_id,
-                    m,
+                    method_decl,
                     is_instance,
                     sources,
                     class_layouts,

@@ -47,26 +47,26 @@ pub fn folding_ranges(snapshot: &AnalysisSnapshot) -> Vec<FoldingRange> {
                     );
                     for member in &class_decl.members {
                         match member {
-                            ClassMember::Method(m) => {
+                            ClassMember::Method(method_decl) => {
                                 add_folding_range_from_span(
                                     &snapshot.source_text,
-                                    m.span,
+                                    method_decl.span,
                                     Some(FoldingRangeKind::Region),
                                     &mut ranges,
                                 );
                             }
-                            ClassMember::Constructor(c) => {
+                            ClassMember::Constructor(ctor_decl) => {
                                 add_folding_range_from_span(
                                     &snapshot.source_text,
-                                    c.span,
+                                    ctor_decl.span,
                                     Some(FoldingRangeKind::Region),
                                     &mut ranges,
                                 );
                             }
-                            ClassMember::Destructor(d) => {
+                            ClassMember::Destructor(dtor_decl) => {
                                 add_folding_range_from_span(
                                     &snapshot.source_text,
-                                    d.span,
+                                    dtor_decl.span,
                                     Some(FoldingRangeKind::Region),
                                     &mut ranges,
                                 );

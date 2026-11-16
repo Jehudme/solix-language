@@ -687,7 +687,7 @@ impl VirtualMachine {
     /// Returns the current PC of the active call frame, or 0 if no active frame.
     #[must_use]
     pub fn current_pc(&self) -> u32 {
-        self.call_frames.last().map_or(0, |f| f.pc)
+        self.call_frames.last().map_or(0, |frame| frame.pc)
     }
 
     #[cold]

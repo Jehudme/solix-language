@@ -1060,15 +1060,19 @@ th {
 </html>"#,
         types
             .iter()
-            .map(|t| {
-                let file_name = format!("{}_{}.html", t.package_name.replace('.', "_"), t.name);
+            .map(|doc_item| {
+                let file_name = format!(
+                    "{}_{}.html",
+                    doc_item.package_name.replace('.', "_"),
+                    doc_item.name
+                );
                 format!(
                     "<tr><td><a href=\"{file_name}\"><code>{}</code></a></td><td><span class=\"badge badge-{}\">{}</span></td><td><code>{}</code></td><td>{}</td></tr>",
-                    t.name,
-                    t.kind,
-                    t.kind,
-                    t.package_name,
-                    if t.doc.summary.is_empty() { "—" } else { &t.doc.summary }
+                    doc_item.name,
+                    doc_item.kind,
+                    doc_item.kind,
+                    doc_item.package_name,
+                    if doc_item.doc.summary.is_empty() { "—" } else { &doc_item.doc.summary }
                 )
             })
             .collect::<Vec<String>>()

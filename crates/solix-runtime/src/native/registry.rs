@@ -17,7 +17,7 @@ pub enum NativeCallback {
     /// Host Rust function pointer callback.
     Rust(NativeFunction),
     /// Dynamic C-ABI function pointer callback.
-    C(NativeCFunctionPtr),
+    CAbi(NativeCFunctionPtr),
 }
 
 impl NativeCallback {
@@ -29,7 +29,7 @@ impl NativeCallback {
     ) -> Result<Value, RuntimeError> {
         match self {
             Self::Rust(rust_function) => rust_function(vm, arguments),
-            Self::C(c_function) => crate::native::ffi::invoke_c_native(*c_function, vm, arguments),
+            Self::CAbi(c_function) => crate::native::ffi::invoke_c_native(*c_function, vm, arguments),
         }
     }
 }
@@ -42,7 +42,7 @@ impl From<NativeFunction> for NativeCallback {
 
 impl From<NativeCFunctionPtr> for NativeCallback {
     fn from(c_function: NativeCFunctionPtr) -> Self {
-        Self::C(c_function)
+        Self::CAbi(c_function)
     }
 }
 
@@ -71,7 +71,7 @@ impl NativeRegistry {
     /// Registers a dynamic C-ABI callback.
     pub fn register_c(&mut self, symbol: impl Into<String>, callback: NativeCFunctionPtr) {
         self.functions
-            .insert(symbol.into(), NativeCallback::C(callback));
+            .insert(symbol.into(), NativeCallback::CAbi(callback));
     }
 
     /// Registers a generic native callback.

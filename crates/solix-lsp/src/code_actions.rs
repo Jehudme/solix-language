@@ -23,7 +23,7 @@ pub fn code_actions(
     // 1. Diagnostics-driven Quick Fixes
     for diagnostic in &params.context.diagnostics {
         let code_str = match &diagnostic.code {
-            Some(NumberOrString::String(s)) => s.as_str(),
+            Some(NumberOrString::String(code_text)) => code_text.as_str(),
             _ => "",
         };
 
@@ -62,9 +62,9 @@ pub fn code_actions(
                 for other_snap in workspace.all_snapshots() {
                     if let Some(ast) = &other_snap.ast {
                         for decl in &ast.declarations {
-                            if let Declaration::Class(c) = decl {
+                            if let Declaration::Class(class_decl) = decl {
                                 let class_name =
-                                    get_span_text(&other_snap.source_text, c.name_span);
+                                    get_span_text(&other_snap.source_text, class_decl.name_span);
                                 if class_name == unresolved_name {
                                     let mut changes = std::collections::HashMap::new();
                                     changes.insert(

@@ -145,7 +145,7 @@ impl RegisterAllocator {
     /// Returns the registers allocated in the innermost lexical scope.
     #[must_use]
     pub fn current_scope_allocated(&self) -> Option<Vec<u16>> {
-        self.scopes.last().map(|s| s.allocated.clone())
+        self.scopes.last().map(|scope| scope.allocated.clone())
     }
 
     /// Collects all registers allocated in scopes at depth >= `from_depth`.

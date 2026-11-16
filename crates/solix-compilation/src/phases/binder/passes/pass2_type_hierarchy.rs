@@ -1357,7 +1357,7 @@ pub fn execute_pass2_type_hierarchy(
                                 {
                                     let base_src_text = source_texts
                                         .get(base_src_id as usize)
-                                        .map(|s| s.as_str())
+                                        .map(|text| text.as_str())
                                         .unwrap_or("");
                                     for iface_annot in &base_class_decl.interfaces {
                                         let resolved_iface = resolve_type_annotation(
@@ -1374,13 +1374,14 @@ pub fn execute_pass2_type_hierarchy(
                                         {
                                             let if_text = source_texts
                                                 .get(if_src as usize)
-                                                .map(|s| s.as_str())
+                                                .map(|text| text.as_str())
                                                 .unwrap_or("");
-                                            if iface_decl.methods.iter().any(|m| {
+                                            if iface_decl.methods.iter().any(|method| {
                                                 let m_name =
-                                                    if m.name_span.end as usize <= if_text.len() {
-                                                        &if_text[m.name_span.start as usize
-                                                            ..m.name_span.end as usize]
+                                                    if method.name_span.end as usize <= if_text.len()
+                                                    {
+                                                        &if_text[method.name_span.start as usize
+                                                            ..method.name_span.end as usize]
                                                     } else {
                                                         ""
                                                     };
@@ -1904,7 +1905,7 @@ pub fn execute_pass2_type_hierarchy(
                         {
                             let iface_src_text = source_texts
                                 .get(iface_src_id as usize)
-                                .map(|s| s.as_str())
+                                .map(|text| text.as_str())
                                 .unwrap_or("");
                             for method in &iface_decl.methods {
                                 let method_name =
@@ -1958,12 +1959,14 @@ pub fn execute_pass2_type_hierarchy(
                         if let Some(&(vis_src_id, vis_decl)) = interface_by_name.get(visited_name) {
                             let vis_text = source_texts
                                 .get(vis_src_id as usize)
-                                .map(|s| s.as_str())
+                                .map(|text| text.as_str())
                                 .unwrap_or("");
                             let mut vis_methods = Vec::new();
-                            for m in &vis_decl.methods {
-                                let m_name = if m.name_span.end as usize <= vis_text.len() {
-                                    &vis_text[m.name_span.start as usize..m.name_span.end as usize]
+                            for vis_method in &vis_decl.methods {
+                                let m_name = if vis_method.name_span.end as usize <= vis_text.len()
+                                {
+                                    &vis_text[vis_method.name_span.start as usize
+                                        ..vis_method.name_span.end as usize]
                                 } else {
                                     ""
                                 };
@@ -1989,7 +1992,7 @@ pub fn execute_pass2_type_hierarchy(
                                 {
                                     let s_text = source_texts
                                         .get(s_src as usize)
-                                        .map(|s| s.as_str())
+                                        .map(|text| text.as_str())
                                         .unwrap_or("");
                                     for sm in &s_decl.methods {
                                         let sm_name = if sm.name_span.end as usize <= s_text.len() {

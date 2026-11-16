@@ -97,8 +97,8 @@ pub fn disassemble_instruction(
             let dst = instruction.dst();
             let const_idx = instruction.imm32() as usize;
             let repr = match pool.get(const_idx) {
-                Some(ConstantPoolValue::String(s)) => format!("\"{s}\""),
-                Some(ConstantPoolValue::Int64(i)) => format!("{i} (i64)"),
+                Some(ConstantPoolValue::String(text)) => format!("\"{text}\""),
+                Some(ConstantPoolValue::Int64(int_val)) => format!("{int_val} (i64)"),
                 Some(ConstantPoolValue::Float64(bits)) => {
                     format!("{} (f64)", f64::from_bits(*bits))
                 }
@@ -197,7 +197,7 @@ pub fn disassemble_function(func: &CompiledFunction, pool: &ConstantPool) -> Str
         for handler in &func.exception_handlers {
             let catch_type = handler.catch_type_symbol.as_deref().unwrap_or("<any>");
             let finally_str = match handler.finally_pc {
-                Some(f) => format!(", finally: @{f:04}"),
+                Some(finally_target) => format!(", finally: @{finally_target:04}"),
                 None => String::new(),
             };
             let _ = writeln!(
@@ -256,14 +256,14 @@ pub fn disassemble_program(program: &BinaryProgram) -> String {
         let _ = writeln!(output, ".constant_pool:");
         for (idx, val) in program.constant_pool.values.iter().enumerate() {
             match val {
-                ConstantPoolValue::Int64(i) => {
-                    let _ = writeln!(output, "  $c{idx:02}: i64 = {i}");
+                ConstantPoolValue::Int64(int_val) => {
+                    let _ = writeln!(output, "  $c{idx:02}: i64 = {int_val}");
                 }
                 ConstantPoolValue::Float64(bits) => {
                     let _ = writeln!(output, "  $c{idx:02}: f64 = {}", f64::from_bits(*bits));
                 }
-                ConstantPoolValue::String(s) => {
-                    let _ = writeln!(output, "  $c{idx:02}: string = \"{s}\"");
+                ConstantPoolValue::String(text) => {
+                    let _ = writeln!(output, "  $c{idx:02}: string = \"{text}\"");
                 }
             }
         }

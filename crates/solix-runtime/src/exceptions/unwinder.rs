@@ -15,5 +15,5 @@ pub fn find_matching_handler(
     handlers
         .iter()
         .rev()
-        .find(|h| pc >= h.try_start_pc && pc < h.try_end_pc)
+        .find(|handler| pc >= handler.try_start_pc && pc < handler.try_end_pc)
 }

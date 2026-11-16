@@ -539,7 +539,7 @@ pub unsafe extern "C" fn solix_vm_set_field_i32(
 }
 
 /// Safely resolves a `*mut c_void` context pointer into an optional `VirtualMachine` reference.
-unsafe fn resolve_vm<'a>(vm_context: *mut c_void) -> Option<&'a mut VirtualMachine> {
+unsafe fn resolve_vm<'vm>(vm_context: *mut c_void) -> Option<&'vm mut VirtualMachine> {
     if vm_context.is_null() {
         return None;
     }
