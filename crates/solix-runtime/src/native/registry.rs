@@ -29,7 +29,9 @@ impl NativeCallback {
     ) -> Result<Value, RuntimeError> {
         match self {
             Self::Rust(rust_function) => rust_function(vm, arguments),
-            Self::CAbi(c_function) => crate::native::ffi::invoke_c_native(*c_function, vm, arguments),
+            Self::CAbi(c_function) => {
+                crate::native::ffi::invoke_c_native(*c_function, vm, arguments)
+            }
         }
     }
 }

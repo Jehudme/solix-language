@@ -428,8 +428,7 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
             for back_pc in (lookback_start..pc_idx).rev() {
                 let back_inst = function.instructions[back_pc];
                 if back_inst.raw_opcode() == OpCode::IncRef as u8 && back_inst.dst() == owner_reg {
-                    function.instructions[back_pc] =
-                        Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                    function.instructions[back_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
                     break;
                 }
             }
@@ -518,25 +517,29 @@ fn inline_leaf_constructors(
         {
             continue;
         }
-        let body_ok = candidate.instructions.iter().enumerate().all(|(idx, inst)| {
-            let raw = inst.raw_opcode();
-            if idx + 1 == candidate.instructions.len() {
-                return raw == OpCode::Return as u8;
-            }
-            if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
-                return true;
-            }
-            if raw == OpCode::LoadI32 as u8
-                || raw == OpCode::LoadI64 as u8
-                || raw == OpCode::LoadF64 as u8
-                || raw == OpCode::LoadBool as u8
-                || raw == OpCode::LoadNull as u8
-                || raw == OpCode::LoadConst as u8
-            {
-                return true;
-            }
-            raw == OpCode::SetField as u8 && inst.src1() == 0
-        });
+        let body_ok = candidate
+            .instructions
+            .iter()
+            .enumerate()
+            .all(|(idx, inst)| {
+                let raw = inst.raw_opcode();
+                if idx + 1 == candidate.instructions.len() {
+                    return raw == OpCode::Return as u8;
+                }
+                if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
+                    return true;
+                }
+                if raw == OpCode::LoadI32 as u8
+                    || raw == OpCode::LoadI64 as u8
+                    || raw == OpCode::LoadF64 as u8
+                    || raw == OpCode::LoadBool as u8
+                    || raw == OpCode::LoadNull as u8
+                    || raw == OpCode::LoadConst as u8
+                {
+                    return true;
+                }
+                raw == OpCode::SetField as u8 && inst.src1() == 0
+            });
         is_leaf_ctor[func_idx] = body_ok;
     }
 
@@ -1479,7 +1482,8 @@ fn propagate_block_copies(
 
         let raw = entry.instruction.raw_opcode();
         if !copy_map.is_empty() && raw != OpCode::IncRef as u8 && raw != OpCode::DecRef as u8 {
-            let candidates: Vec<(u16, u16)> = copy_map.iter().map(|(&key, &val)| (key, val)).collect();
+            let candidates: Vec<(u16, u16)> =
+                copy_map.iter().map(|(&key, &val)| (key, val)).collect();
             for (alias_reg, orig_reg) in candidates {
                 if instruction_reads_register(&entry.instruction, alias_reg)
                     && can_rewrite_read_register(&entry.instruction, alias_reg)

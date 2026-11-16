@@ -1234,8 +1234,8 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
                 let forward_raw = forward_inst.raw_opcode();
 
                 if forward_raw == OpCode::DecRef as u8 && forward_inst.dst() == target_register {
-                    let branch_span_ok = max_forward_target
-                        .is_none_or(|max_target| max_target == forward_index);
+                    let branch_span_ok =
+                        max_forward_target.is_none_or(|max_target| max_target == forward_index);
                     if branch_span_ok {
                         matching_dec_index = Some(forward_index);
                     }
@@ -1265,7 +1265,9 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
                     || (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8)
                         .contains(&forward_raw)
                 {
-                    let Some(target_pc) = decode_branch_target(&forward_inst, forward_index, instruction_count) else {
+                    let Some(target_pc) =
+                        decode_branch_target(&forward_inst, forward_index, instruction_count)
+                    else {
                         break;
                     };
                     if target_pc <= forward_index || target_pc >= limit {

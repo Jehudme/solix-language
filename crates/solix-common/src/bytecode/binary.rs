@@ -720,28 +720,28 @@ impl BinaryProgram {
         }
 
         // 6. Metadata and Export Manifest
-        let (package_name, package_version, package_description, mut export_manifest) = if reader
-            .has_remaining()
-        {
-            let pkg_name = reader.read_string("Metadata")?;
-            let pkg_version = reader.read_string("Metadata")?;
-            let pkg_desc = reader.read_string("Metadata")?;
-            let manifest_len = reader.read_u32("Metadata")? as usize;
-            let manifest_slice = reader.read_bytes(manifest_len, "ExportManifest")?;
-            let manifest: ExportManifest = serde_json::from_slice(manifest_slice).map_err(|error| {
-                EmissionError::MalformedExportManifest {
-                    reason: error.to_string(),
-                }
-            })?;
-            (pkg_name, pkg_version, pkg_desc, manifest)
-        } else {
-            (
-                String::new(),
-                "0.1.0".to_string(),
-                String::new(),
-                ExportManifest::default(),
-            )
-        };
+        let (package_name, package_version, package_description, mut export_manifest) =
+            if reader.has_remaining() {
+                let pkg_name = reader.read_string("Metadata")?;
+                let pkg_version = reader.read_string("Metadata")?;
+                let pkg_desc = reader.read_string("Metadata")?;
+                let manifest_len = reader.read_u32("Metadata")? as usize;
+                let manifest_slice = reader.read_bytes(manifest_len, "ExportManifest")?;
+                let manifest: ExportManifest =
+                    serde_json::from_slice(manifest_slice).map_err(|error| {
+                        EmissionError::MalformedExportManifest {
+                            reason: error.to_string(),
+                        }
+                    })?;
+                (pkg_name, pkg_version, pkg_desc, manifest)
+            } else {
+                (
+                    String::new(),
+                    "0.1.0".to_string(),
+                    String::new(),
+                    ExportManifest::default(),
+                )
+            };
 
         // 7. Section 7: Exported AST
         let exported_ast_bytes = if reader.has_remaining() {

@@ -10,6 +10,4 @@ pub mod value;
 
 pub use context::{SOLIX_VM_CONTEXT_MAGIC, SolixVmContext};
 pub use registry::{NativeCFunctionPtr, NativeRegistry, RegisterNativeCallback};
-pub use value::{
-    SolixCValue, TAG_BOOL, TAG_F64, TAG_FNPTR, TAG_I32, TAG_I64, TAG_NULL, TAG_REF,
-};
+pub use value::{SolixCValue, TAG_BOOL, TAG_F64, TAG_FNPTR, TAG_I32, TAG_I64, TAG_NULL, TAG_REF};

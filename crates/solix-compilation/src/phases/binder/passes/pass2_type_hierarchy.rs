@@ -1377,14 +1377,14 @@ pub fn execute_pass2_type_hierarchy(
                                                 .map(|text| text.as_str())
                                                 .unwrap_or("");
                                             if iface_decl.methods.iter().any(|method| {
-                                                let m_name =
-                                                    if method.name_span.end as usize <= if_text.len()
-                                                    {
-                                                        &if_text[method.name_span.start as usize
-                                                            ..method.name_span.end as usize]
-                                                    } else {
-                                                        ""
-                                                    };
+                                                let m_name = if method.name_span.end as usize
+                                                    <= if_text.len()
+                                                {
+                                                    &if_text[method.name_span.start as usize
+                                                        ..method.name_span.end as usize]
+                                                } else {
+                                                    ""
+                                                };
                                                 m_name == method_name
                                             }) {
                                                 is_virtual_or_abstract = true;

@@ -616,7 +616,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
 
         if self.is_constructor_lookahead() {
-            let name_span = self.cursor.advance().map(|token| token.span).unwrap_or_default();
+            let name_span = self
+                .cursor
+                .advance()
+                .map(|token| token.span)
+                .unwrap_or_default();
             let ctor = self.parse_constructor_declaration(modifiers, name_span)?;
             self.record_error(ParsingError::ConstructorOutsideClass {
                 span: ctor.span.to_source_span(),
@@ -1834,7 +1838,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 }
 
                 if self.is_constructor_lookahead() {
-                    let name_span = self.cursor.advance().map(|token| token.span).unwrap_or_default();
+                    let name_span = self
+                        .cursor
+                        .advance()
+                        .map(|token| token.span)
+                        .unwrap_or_default();
                     let ctor = self.parse_constructor_declaration(Vec::new(), name_span)?;
                     self.record_error(ParsingError::ConstructorOutsideClass {
                         span: ctor.span.to_source_span(),
@@ -2298,7 +2306,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             if self.cursor.match_token(TokenKind::KeywordCase).is_some() {
                 seen_case = true;
                 let case_start = self.cursor.current_span();
-                let case_value = if self.cursor.match_token(TokenKind::KeywordInstanceof).is_some() {
+                let case_value = if self
+                    .cursor
+                    .match_token(TokenKind::KeywordInstanceof)
+                    .is_some()
+                {
                     let type_annotation = self.parse_type_annotation()?;
                     let type_span = type_annotation.span();
                     Expression::Instanceof {
@@ -3348,7 +3360,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 {
                     // Object instantiation: new Type(args)
                     let arguments = self.parse_argument_list_tail()?;
-                    let close_paren = self.cursor.previous().map(|token| token.span).unwrap_or(new_span);
+                    let close_paren = self
+                        .cursor
+                        .previous()
+                        .map(|token| token.span)
+                        .unwrap_or(new_span);
                     let span = new_span.combine(close_paren);
                     Ok(Expression::NewInstance {
                         span,
@@ -3913,9 +3929,15 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 let open_span = token.span;
                 self.cursor.advance();
                 let mut elements = Vec::new();
-                while !self.cursor.check(TokenKind::PunctuationCloseParen) && !self.cursor.is_at_end() {
+                while !self.cursor.check(TokenKind::PunctuationCloseParen)
+                    && !self.cursor.is_at_end()
+                {
                     elements.push(self.parse_type_annotation()?);
-                    if self.cursor.match_token(TokenKind::PunctuationComma).is_none() {
+                    if self
+                        .cursor
+                        .match_token(TokenKind::PunctuationComma)
+                        .is_none()
+                    {
                         break;
                     }
                 }
@@ -3978,9 +4000,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         });
                     }
                 }
-                let span = token
-                    .span
-                    .combine(elements.last().map(|elem| elem.span()).unwrap_or(token.span));
+                let span = token.span.combine(
+                    elements
+                        .last()
+                        .map(|elem| elem.span())
+                        .unwrap_or(token.span),
+                );
                 TypeAnnotation::Tuple { span, elements }
             }
             TokenKind::Identifier => {
@@ -4045,7 +4070,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                             span: self.cursor.current_span().to_source_span(),
                         });
                     }
-                    let end_span = self.cursor.previous().map(|token| token.span).unwrap_or(named_span);
+                    let end_span = self
+                        .cursor
+                        .previous()
+                        .map(|token| token.span)
+                        .unwrap_or(named_span);
                     TypeAnnotation::Generic {
                         span: named_span.combine(end_span),
                         base: Box::new(named),
@@ -4168,7 +4197,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         }
                     }
                 }
-                let span = name_span.combine(bounds.last().map(|node| node.span()).unwrap_or(name_span));
+                let span =
+                    name_span.combine(bounds.last().map(|node| node.span()).unwrap_or(name_span));
                 if is_variadic && self.cursor.check(TokenKind::PunctuationComma) {
                     self.record_error(ParsingError::VariadicParameterNotLast {
                         span: name_span.to_source_span(),

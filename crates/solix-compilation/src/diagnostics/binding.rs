@@ -1109,10 +1109,14 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Class '{class_name}' does not implement 'operator ==' or 'operator !=' and cannot be used in equality switch cases.")]
+    #[error(
+        "Class '{class_name}' does not implement 'operator ==' or 'operator !=' and cannot be used in equality switch cases."
+    )]
     #[diagnostic(
         code(solix::binder::switch_class_missing_equality_operator),
-        help("Implement 'operator ==' or 'operator !=' in class '{class_name}' to support switch equality dispatch.")
+        help(
+            "Implement 'operator ==' or 'operator !=' in class '{class_name}' to support switch equality dispatch."
+        )
     )]
     SwitchClassMissingEqualityOperator {
         class_name: String,
@@ -1120,10 +1124,14 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Case expression of type '{case_type}' is incompatible with switch discriminant of type '{discriminant_type}'.")]
+    #[error(
+        "Case expression of type '{case_type}' is incompatible with switch discriminant of type '{discriminant_type}'."
+    )]
     #[diagnostic(
         code(solix::binder::incompatible_switch_case_type),
-        help("Ensure the case expression type matches or is assignable to the switch discriminant type.")
+        help(
+            "Ensure the case expression type matches or is assignable to the switch discriminant type."
+        )
     )]
     IncompatibleSwitchCaseType {
         case_type: String,
@@ -1143,7 +1151,9 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Right-hand target of 'instanceof' in switch case must be a class, interface, or tuple type, found '{found}'.")]
+    #[error(
+        "Right-hand target of 'instanceof' in switch case must be a class, interface, or tuple type, found '{found}'."
+    )]
     #[diagnostic(
         code(solix::binder::invalid_switch_pattern_target),
         help("Use nominal class, interface, or tuple type in 'case instanceof <Type>'.")
@@ -1154,10 +1164,14 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Tuple case pattern arity {case_arity} does not match switch discriminant tuple arity {disc_arity}.")]
+    #[error(
+        "Tuple case pattern arity {case_arity} does not match switch discriminant tuple arity {disc_arity}."
+    )]
     #[diagnostic(
         code(solix::binder::tuple_arity_mismatch_in_case),
-        help("Ensure the tuple pattern has the same number of elements as the discriminant tuple.")
+        help(
+            "Ensure the tuple pattern has the same number of elements as the discriminant tuple."
+        )
     )]
     TupleArityMismatchInCase {
         case_arity: usize,

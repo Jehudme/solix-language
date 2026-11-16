@@ -84,7 +84,9 @@ impl Diagnostic for LocatedDiagnostic {
         self.diagnostic.labels()
     }
 
-    fn related<'diag>(&'diag self) -> Option<Box<dyn Iterator<Item = &'diag dyn Diagnostic> + 'diag>> {
+    fn related<'diag>(
+        &'diag self,
+    ) -> Option<Box<dyn Iterator<Item = &'diag dyn Diagnostic> + 'diag>> {
         self.diagnostic.related()
     }
 

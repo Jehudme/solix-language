@@ -5,9 +5,7 @@
 use crate::context::RuntimeContext;
 use crate::exceptions::RuntimeError;
 use crate::memory::heap::VirtualHeap;
-use crate::memory::layout::{
-    can_contain_references, BlockTag, GcColor, MAX_REF_COUNT,
-};
+use crate::memory::layout::{BlockTag, GcColor, MAX_REF_COUNT, can_contain_references};
 use crate::value::model::Value;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -188,8 +186,7 @@ pub fn collect_white(
         let mut collected_total = 0u64;
         let child_pointers = get_outgoing_references(heap, context, address);
         for child_address in child_pointers {
-            collected_total +=
-                collect_white(heap, context, child_address, freed_addresses)?;
+            collected_total += collect_white(heap, context, child_address, freed_addresses)?;
         }
 
         freed_addresses.insert(address);
@@ -340,12 +337,8 @@ impl CycleCollector {
         self.total_runs += 1;
 
         let candidate_roots = std::mem::take(&mut self.purple_buffer);
-        let (reclaimed_count, deferred) = run_cycle_collection(
-            heap,
-            context,
-            &candidate_roots,
-            self.budget_microseconds,
-        )?;
+        let (reclaimed_count, deferred) =
+            run_cycle_collection(heap, context, &candidate_roots, self.budget_microseconds)?;
 
         self.purple_buffer = deferred;
         self.total_cycles_collected += reclaimed_count;

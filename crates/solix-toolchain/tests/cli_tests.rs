@@ -914,8 +914,6 @@ class BrokenApp {
     assert!(error_message.contains("Compilation aborted due to previous error(s)"));
 }
 
-
-
 #[test]
 fn test_cli_run_direct_source_execution_multi_source_and_multi_lib_positional() {
     let workspace = HermeticCliWorkspace::create().unwrap();
@@ -1462,9 +1460,15 @@ class Main {
 
     let json_content = std::fs::read_to_string(&json_output_path).expect("read json");
     let parsed_json: serde_json::Value = serde_json::from_str(&json_content).expect("parse json");
-    assert_eq!(parsed_json["manifest"]["configuration"]["name"], "archive_info_test");
+    assert_eq!(
+        parsed_json["manifest"]["configuration"]["name"],
+        "archive_info_test"
+    );
     assert_eq!(parsed_json["manifest"]["configuration"]["version"], "2.5.0");
-    assert_eq!(parsed_json["manifest"]["profiles"]["release"]["entrypoint"], "Main::main");
+    assert_eq!(
+        parsed_json["manifest"]["profiles"]["release"]["entrypoint"],
+        "Main::main"
+    );
 }
 
 #[test]

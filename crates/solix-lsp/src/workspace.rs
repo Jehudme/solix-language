@@ -176,7 +176,10 @@ impl AnalysisSnapshot {
         let mut index = lines.len() - 1;
 
         // Skip the line of the declaration itself if it does not contain a doc comment
-        if index > 0 && !lines[index].trim().starts_with("///") && !lines[index].trim().ends_with("*/") {
+        if index > 0
+            && !lines[index].trim().starts_with("///")
+            && !lines[index].trim().ends_with("*/")
+        {
             index -= 1;
         }
 

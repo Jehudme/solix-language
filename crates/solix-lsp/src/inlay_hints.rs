@@ -282,18 +282,14 @@ fn collect_inlay_hints_in_expression(
                 // Look up callee parameter names in symbol table
                 if let Some(semantic) = &snapshot.last_good_semantic {
                     let direct_symbol = match &**callee {
-                        Expression::MemberAccess { member_span, .. } => {
-                            semantic
-                                .resolved_symbols
-                                .get(member_span)
-                                .and_then(|id| semantic.symbol_table.get_symbol(*id))
-                        }
-                        Expression::Identifier { span: id_span } => {
-                            semantic
-                                .resolved_symbols
-                                .get(id_span)
-                                .and_then(|id| semantic.symbol_table.get_symbol(*id))
-                        }
+                        Expression::MemberAccess { member_span, .. } => semantic
+                            .resolved_symbols
+                            .get(member_span)
+                            .and_then(|id| semantic.symbol_table.get_symbol(*id)),
+                        Expression::Identifier { span: id_span } => semantic
+                            .resolved_symbols
+                            .get(id_span)
+                            .and_then(|id| semantic.symbol_table.get_symbol(*id)),
                         _ => None,
                     };
 
@@ -472,9 +468,11 @@ fn collect_inlay_hints_in_expression(
                                         label: InlayHintLabel::String(hint_label),
                                         kind: Some(InlayHintKind::PARAMETER),
                                         text_edits: None,
-                                        tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(
-                                            format!("{param_type} {param_name}"),
-                                        )),
+                                        tooltip: Some(
+                                            tower_lsp::lsp_types::InlayHintTooltip::String(
+                                                format!("{param_type} {param_name}"),
+                                            ),
+                                        ),
                                         padding_left: Some(false),
                                         padding_right: Some(true),
                                         data: None,

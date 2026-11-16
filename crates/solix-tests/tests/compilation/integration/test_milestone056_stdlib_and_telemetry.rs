@@ -12,12 +12,9 @@ use std::path::PathBuf;
 #[test]
 fn test_vm_engine_all_56_metrics() {
     let mut binary_program = BinaryProgram::new();
-    binary_program.functions.push(CompiledFunction::new(
-        "telemetry::sample_entry",
-        0,
-        0,
-        4,
-    ));
+    binary_program
+        .functions
+        .push(CompiledFunction::new("telemetry::sample_entry", 0, 0, 4));
 
     let options = RuntimeOptions::new()
         .with_binary(binary_program)

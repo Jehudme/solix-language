@@ -1,7 +1,7 @@
 //! Function pointer types and registration helpers for native extension libraries.
 
 use crate::value::SolixCValue;
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{CString, c_char, c_void};
 
 /// Stable C-ABI function pointer signature implemented by all native Solix bridge functions.
 pub type NativeCFunctionPtr = unsafe extern "C" fn(

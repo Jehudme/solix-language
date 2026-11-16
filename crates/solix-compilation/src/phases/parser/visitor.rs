@@ -348,7 +348,10 @@ pub trait AstVisitor<ResultType = ()> {
 }
 
 /// Recursively walks a ProgramAst node.
-pub fn walk_program<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(visitor: &mut VisitorType, program: &ProgramAst) {
+pub fn walk_program<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
+    program: &ProgramAst,
+) {
     if let Some(package) = &program.package {
         visitor.visit_package_statement(package);
     }
@@ -441,7 +444,10 @@ pub fn walk_class_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, Resu
 }
 
 /// Recursively walks an InterfaceDeclaration node.
-pub fn walk_interface_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+pub fn walk_interface_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
     visitor: &mut VisitorType,
     node: &InterfaceDeclaration,
 ) {
@@ -477,7 +483,10 @@ pub fn walk_field_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, Resu
 }
 
 /// Recursively walks a MethodDeclaration node.
-pub fn walk_method_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+pub fn walk_method_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
     visitor: &mut VisitorType,
     node: &MethodDeclaration,
 ) {
@@ -494,7 +503,10 @@ pub fn walk_method_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, Res
 }
 
 /// Recursively walks a ConstructorDeclaration node.
-pub fn walk_constructor_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+pub fn walk_constructor_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
     visitor: &mut VisitorType,
     node: &ConstructorDeclaration,
 ) {
@@ -513,7 +525,10 @@ pub fn walk_constructor_declaration<VisitorType: AstVisitor<ResultType> + ?Sized
 }
 
 /// Recursively walks an OperatorDeclaration node.
-pub fn walk_operator_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+pub fn walk_operator_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
     visitor: &mut VisitorType,
     node: &OperatorDeclaration,
 ) {
@@ -528,7 +543,10 @@ pub fn walk_operator_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, R
 }
 
 /// Recursively walks a Statement node.
-pub fn walk_statement<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(visitor: &mut VisitorType, node: &Statement) {
+pub fn walk_statement<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
+    node: &Statement,
+) {
     match node {
         Statement::Block(stmt) => {
             visitor.visit_block_statement(stmt);
@@ -582,7 +600,10 @@ pub fn walk_statement<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: 
 }
 
 /// Recursively walks an Expression node.
-pub fn walk_expression<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(visitor: &mut VisitorType, node: &Expression) {
+pub fn walk_expression<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
+    node: &Expression,
+) {
     match node {
         Expression::Literal { .. } | Expression::Identifier { .. } => {}
         Expression::Binary { left, right, .. } => {
@@ -733,29 +754,44 @@ pub fn walk_type_annotation<VisitorType: AstVisitor<ResultType> + ?Sized, Result
 /// Trait implemented by AST nodes that accept an [`AstVisitor`].
 pub trait Visitable {
     /// Accepts a visitor to traverse this AST node.
-    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(&self, visitor: &mut VisitorType) -> ResultType;
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType;
 }
 
 impl Visitable for ProgramAst {
-    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(&self, visitor: &mut VisitorType) -> ResultType {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_program(self)
     }
 }
 
 impl Visitable for Statement {
-    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(&self, visitor: &mut VisitorType) -> ResultType {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_statement(self)
     }
 }
 
 impl Visitable for Declaration {
-    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(&self, visitor: &mut VisitorType) -> ResultType {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_declaration(self)
     }
 }
 
 impl Visitable for Expression {
-    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(&self, visitor: &mut VisitorType) -> ResultType {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_expression(self)
     }
 }

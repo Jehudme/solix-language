@@ -542,16 +542,12 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
     let native_cache_directory = resolve_native_cache_dir(&store_directory);
     let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
 
-    let (package_name, profile_filter, spec_version_part) =
-        parse_package_spec(specification);
+    let (package_name, profile_filter, spec_version_part) = parse_package_spec(specification);
     let version_target_ref = spec_version_part.as_deref();
     let profile_target_ref = profile_filter.as_deref();
 
-    let removed_records = registry.unregister(
-        &package_name,
-        version_target_ref,
-        profile_target_ref,
-    )?;
+    let removed_records =
+        registry.unregister(&package_name, version_target_ref, profile_target_ref)?;
 
     let mut any_folder_removed = false;
     if store_directory.exists()
@@ -839,9 +835,7 @@ pub fn execute_install_vscode() -> Result<()> {
 
         match installation_status {
             Ok(status) if status.success() => {
-                println!(
-                    "Successfully installed Solix extension into '{editor_display}'!"
-                );
+                println!("Successfully installed Solix extension into '{editor_display}'!");
                 installed_count += 1;
             }
             Ok(status) => {
@@ -851,9 +845,7 @@ pub fn execute_install_vscode() -> Result<()> {
                 );
             }
             Err(error_details) => {
-                eprintln!(
-                    "Warning: Failed to execute '{editor_display}': {error_details}"
-                );
+                eprintln!("Warning: Failed to execute '{editor_display}': {error_details}");
             }
         }
     }

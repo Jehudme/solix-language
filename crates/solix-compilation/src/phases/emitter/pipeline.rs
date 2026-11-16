@@ -432,7 +432,9 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             sym_table,
                                         );
                                         let offset = layout_opt
-                                            .and_then(|layout| layout.field_offsets.get(&field_name))
+                                            .and_then(|layout| {
+                                                layout.field_offsets.get(&field_name)
+                                            })
                                             .copied()
                                             .unwrap_or(8);
                                         let mods = field_decl
@@ -528,9 +530,8 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                             .parameters
                                             .iter()
                                             .map(|param| {
-                                                let p_name =
-                                                    get_span_text(param.name_span, code)
-                                                        .to_string();
+                                                let p_name = get_span_text(param.name_span, code)
+                                                    .to_string();
                                                 let p_type = resolve_type_annotation(
                                                     ast.source_id,
                                                     code,

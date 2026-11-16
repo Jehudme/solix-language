@@ -1054,9 +1054,8 @@ impl<'ctx> Emitter<'ctx> {
                     })
                     .copied();
 
-                let is_extern_class =
-                    layout_info.as_ref().is_some_and(|layout| layout.is_extern)
-                        || layout_info.is_none();
+                let is_extern_class = layout_info.as_ref().is_some_and(|layout| layout.is_extern)
+                    || layout_info.is_none();
                 let dummy_dst = self.allocator.alloc_temp()?;
                 if !is_extern_class && let Some(cid) = ctor_id {
                     self.emit_instruction(

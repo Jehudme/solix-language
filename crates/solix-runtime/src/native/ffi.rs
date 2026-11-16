@@ -1127,10 +1127,7 @@ pub unsafe extern "C" fn solix_vm_collect_cycles(vm_context: *mut c_void) -> u64
 /// # Safety
 /// The caller must ensure `vm_context` points to a valid `VirtualMachine` or `SolixVmContext`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn solix_vm_set_cycle_threshold(
-    vm_context: *mut c_void,
-    threshold: u32,
-) {
+pub unsafe extern "C" fn solix_vm_set_cycle_threshold(vm_context: *mut c_void, threshold: u32) {
     let vm_instance = match unsafe { resolve_vm(vm_context) } {
         Some(resolved_instance) => resolved_instance,
         None => return,

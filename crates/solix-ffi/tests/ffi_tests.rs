@@ -1,10 +1,10 @@
 //! Unit tests for `solix-ffi` tagged values, context bindings, and macros.
 
 use solix_ffi::{
-    solix_export, NativeCFunctionPtr, NativeRegistry, SolixCValue, TAG_BOOL, TAG_F64, TAG_I32,
-    TAG_I64, TAG_NULL, TAG_REF,
+    NativeCFunctionPtr, NativeRegistry, SolixCValue, TAG_BOOL, TAG_F64, TAG_I32, TAG_I64, TAG_NULL,
+    TAG_REF, solix_export,
 };
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 
 #[test]
 fn test_solix_c_value_scalar_encodings_and_decodings() {

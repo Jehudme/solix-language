@@ -778,7 +778,8 @@ mod tests {
             .expect("300 KB allocation must grow backing buffer seamlessly");
         assert!(heap.buffer.len() >= 300 * 1024);
         assert!(heap.buffer.len() <= heap.static_size() + configured_capacity);
-        heap.deallocate(addr_first).expect("deallocate should succeed");
+        heap.deallocate(addr_first)
+            .expect("deallocate should succeed");
     }
 
     #[test]
@@ -793,6 +794,7 @@ mod tests {
             matches!(second_res, Err(RuntimeError::OutOfMemory { .. })),
             "Allocation exceeding configured dynamic_capacity must fail with OutOfMemory"
         );
-        heap.deallocate(first_addr).expect("deallocate should succeed");
+        heap.deallocate(first_addr)
+            .expect("deallocate should succeed");
     }
 }

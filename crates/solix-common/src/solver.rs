@@ -445,12 +445,11 @@ impl ModuleSolver for InMemoryModuleSolver {
 
         let mut sorted_entries = package_entries.clone();
         sorted_entries.sort_by_key(|entry| entry.version);
-        let winning_entry =
-            sorted_entries
-                .last()
-                .ok_or_else(|| SolverError::PackageNotFound {
-                    name: package_name.to_string(),
-                })?;
+        let winning_entry = sorted_entries
+            .last()
+            .ok_or_else(|| SolverError::PackageNotFound {
+                name: package_name.to_string(),
+            })?;
         Ok(winning_entry.clone())
     }
 

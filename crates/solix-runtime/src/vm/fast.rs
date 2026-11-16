@@ -526,7 +526,11 @@ impl VirtualMachine {
         // SAFETY: Caller verified addr_usize >= 8 && addr_usize <= heap.buffer.len().
         unsafe {
             std::ptr::write_unaligned(
-                self.heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>(),
+                self.heap
+                    .buffer
+                    .as_mut_ptr()
+                    .add(addr_usize - 4)
+                    .cast::<u32>(),
                 updated_word.to_le(),
             );
         }
@@ -1245,10 +1249,7 @@ impl VirtualMachine {
                 }
             }
 
-            let _frame = self
-                .call_frames
-                .pop()
-                .ok_or_else(VmTrap::null_reference)?;
+            let _frame = self.call_frames.pop().ok_or_else(VmTrap::null_reference)?;
 
             if self.call_frames.len() <= target_depth {
                 return Err(VmTrap::from_error(RuntimeError::UserException {
@@ -2074,7 +2075,8 @@ impl VirtualMachine {
                 }
 
                 OpCode::JumpIfTrue => {
-                    let cond = read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
+                    let cond =
+                        read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
                     if cond {
                         let offset = inst.jump_offset();
                         pc = ((pc as i32 - 1) + offset) as usize;
@@ -2082,7 +2084,8 @@ impl VirtualMachine {
                 }
 
                 OpCode::JumpIfFalse => {
-                    let cond = read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
+                    let cond =
+                        read_truthy_fast(unsafe { &*reg_base.add(inst.cond_reg() as usize) });
                     if !cond {
                         let offset = inst.jump_offset();
                         pc = ((pc as i32 - 1) + offset) as usize;
@@ -2506,7 +2509,9 @@ impl VirtualMachine {
 
                     match field_type_tag {
                         Some(1) | Some(2) => {
-                            let _ = self.heap.write_u8(field_addr, read_i32_fast(val_ref)? as u8);
+                            let _ = self
+                                .heap
+                                .write_u8(field_addr, read_i32_fast(val_ref)? as u8);
                         }
                         Some(3) | Some(4) => {
                             let _ = self
@@ -2866,8 +2871,7 @@ impl VirtualMachine {
                                 .active_closure
                                 .ok_or_else(VmTrap::null_reference)?;
                             let closure_offset = closure_addr as usize;
-                            if closure_offset + 8 + (capture_count * 16) <= self.heap.buffer.len()
-                            {
+                            if closure_offset + 8 + (capture_count * 16) <= self.heap.buffer.len() {
                                 let buf_ptr = self.heap.buffer.as_ptr();
                                 for cap_idx in 0..capture_count {
                                     let cell_offset = closure_offset + 8 + (cap_idx * 16);
@@ -2926,9 +2930,14 @@ impl VirtualMachine {
                         }
                         // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
                         let word_ptr = unsafe {
-                            self.heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>()
+                            self.heap
+                                .buffer
+                                .as_mut_ptr()
+                                .add(addr_usize - 4)
+                                .cast::<u32>()
                         };
-                        let tag_and_ref = unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+                        let tag_and_ref =
+                            unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
                         let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
                         if ref_count == crate::memory::layout::MAX_REF_COUNT {
                             // Immortal constant string or immortal object
@@ -2959,17 +2968,21 @@ impl VirtualMachine {
                         }
                         // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
                         let word_ptr = unsafe {
-                            self.heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>()
+                            self.heap
+                                .buffer
+                                .as_mut_ptr()
+                                .add(addr_usize - 4)
+                                .cast::<u32>()
                         };
-                        let tag_and_ref = unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+                        let tag_and_ref =
+                            unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
                         let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
                         let tag_nibble = ((tag_and_ref >> 28) & 0x0F) as u8;
                         if ref_count == crate::memory::layout::MAX_REF_COUNT {
                             // Immortal constant string or immortal object
                         } else if ref_count > 1 {
-                            let decremented =
-                                (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
-                                    | (ref_count - 1);
+                            let decremented = (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
+                                | (ref_count - 1);
                             unsafe {
                                 std::ptr::write_unaligned(word_ptr, decremented.to_le());
                             }
@@ -3005,11 +3018,7 @@ impl VirtualMachine {
                         } else if tag_nibble == BlockTag::ObjectPod as u8 {
                             let payload_size = unsafe {
                                 u32::from_le(std::ptr::read_unaligned(
-                                    self.heap
-                                        .buffer
-                                        .as_ptr()
-                                        .add(addr_usize - 8)
-                                        .cast::<u32>(),
+                                    self.heap.buffer.as_ptr().add(addr_usize - 8).cast::<u32>(),
                                 ))
                             };
                             self.heap.deallocate_pod_fast(addr, payload_size)?;

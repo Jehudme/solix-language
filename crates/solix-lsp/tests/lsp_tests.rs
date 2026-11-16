@@ -526,7 +526,10 @@ fn test_feature_completion_items_include_documentation_upfront() {
 
     let list = completions(&workspace, &snapshot, &params);
     let add_item = list.items.iter().find(|i| i.label == "add").unwrap();
-    assert!(add_item.documentation.is_some(), "add method completion item must have documentation attached");
+    assert!(
+        add_item.documentation.is_some(),
+        "add method completion item must have documentation attached"
+    );
     if let Some(Documentation::MarkupContent(markup)) = &add_item.documentation {
         assert!(markup.value.contains("Adds two values"));
     }
@@ -1108,7 +1111,10 @@ fn test_breakout_real_inlay_hints() {
             },
         },
     );
-    assert!(!hints.is_empty(), "Inlay hints must not be empty! Got 0 hints.");
+    assert!(
+        !hints.is_empty(),
+        "Inlay hints must not be empty! Got 0 hints."
+    );
     let has_real_param = hints.iter().any(|hint| match &hint.label {
         InlayHintLabel::String(label_text) => {
             label_text.contains("rec: ") || label_text.contains("roundness: ")
@@ -1181,10 +1187,12 @@ fn test_breakout_semantic_tokens_clear_background() {
             // "            Raylib::ClearBackground(bg_slate);"
             if current_line == 572 {
                 if token.length == 15 {
-                    clear_bg_token = Some((current_line, current_char, token.length, token.token_type));
+                    clear_bg_token =
+                        Some((current_line, current_char, token.length, token.token_type));
                 }
                 if token.length == 8 {
-                    bg_slate_token = Some((current_line, current_char, token.length, token.token_type));
+                    bg_slate_token =
+                        Some((current_line, current_char, token.length, token.token_type));
                 }
             }
         }
@@ -1194,9 +1202,15 @@ fn test_breakout_semantic_tokens_clear_background() {
             "Expected ClearBackground semantic token with length 15 on line 572"
         );
         let (_, cb_char, cb_len, cb_type) = clear_bg_token.unwrap();
-        assert_eq!(cb_char, 20, "ClearBackground must start at character index 20");
+        assert_eq!(
+            cb_char, 20,
+            "ClearBackground must start at character index 20"
+        );
         assert_eq!(cb_len, 15, "ClearBackground must be 15 characters long");
-        assert_eq!(cb_type, 7, "ClearBackground must be classified as METHOD (7)");
+        assert_eq!(
+            cb_type, 7,
+            "ClearBackground must be classified as METHOD (7)"
+        );
 
         assert!(
             bg_slate_token.is_some(),
@@ -1303,7 +1317,10 @@ fn test_unimported_specific_symbol_emits_diagnostic() {
     let (workspace, test_uri) = create_test_workspace();
     let test_source = "import solix.collections.List;\n\npublic class Sample {\n    public int32 run() { return 0; }\n}\n";
     let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
-    assert!(!snapshot.diagnostics.is_empty(), "Must produce diagnostic for unimported package/symbol");
+    assert!(
+        !snapshot.diagnostics.is_empty(),
+        "Must produce diagnostic for unimported package/symbol"
+    );
 }
 
 #[test]

@@ -726,10 +726,9 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
         Statement::If(if_stmt) => {
             expression_calls_symbol(&if_stmt.condition, sources, target_name)
                 || statement_calls_symbol(&if_stmt.then_branch, sources, target_name)
-                || if_stmt
-                    .else_branch
-                    .as_deref()
-                    .is_some_and(|else_stmt| statement_calls_symbol(else_stmt, sources, target_name))
+                || if_stmt.else_branch.as_deref().is_some_and(|else_stmt| {
+                    statement_calls_symbol(else_stmt, sources, target_name)
+                })
         }
         Statement::While(while_stmt) => {
             expression_calls_symbol(&while_stmt.condition, sources, target_name)
@@ -744,10 +743,9 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
                 .initializer
                 .as_deref()
                 .is_some_and(|init_stmt| statement_calls_symbol(init_stmt, sources, target_name))
-                || for_stmt
-                    .condition
-                    .as_ref()
-                    .is_some_and(|cond_expr| expression_calls_symbol(cond_expr, sources, target_name))
+                || for_stmt.condition.as_ref().is_some_and(|cond_expr| {
+                    expression_calls_symbol(cond_expr, sources, target_name)
+                })
                 || for_stmt
                     .update
                     .as_ref()
@@ -758,15 +756,14 @@ fn statement_calls_symbol(statement: &Statement, sources: &[String], target_name
             expression_calls_symbol(&switch_stmt.discriminant, sources, target_name)
                 || switch_stmt.cases.iter().any(|case| {
                     expression_calls_symbol(&case.case_value, sources, target_name)
-                        || case
-                            .statements
-                            .iter()
-                            .any(|case_stmt| statement_calls_symbol(case_stmt, sources, target_name))
+                        || case.statements.iter().any(|case_stmt| {
+                            statement_calls_symbol(case_stmt, sources, target_name)
+                        })
                 })
                 || switch_stmt.default_case.as_deref().is_some_and(|stmts| {
-                    stmts
-                        .iter()
-                        .any(|default_stmt| statement_calls_symbol(default_stmt, sources, target_name))
+                    stmts.iter().any(|default_stmt| {
+                        statement_calls_symbol(default_stmt, sources, target_name)
+                    })
                 })
         }
         Statement::Return(return_stmt) => return_stmt
@@ -1030,7 +1027,12 @@ fn try_collect_local_lambda(
 
     let mut mutated_idents = HashSet::new();
     let mut escaped_idents = HashSet::new();
-    collect_mutated_and_non_callee_idents(statements, sources, &mut mutated_idents, &mut escaped_idents);
+    collect_mutated_and_non_callee_idents(
+        statements,
+        sources,
+        &mut mutated_idents,
+        &mut escaped_idents,
+    );
     if mutated_idents.contains(var_name) || escaped_idents.contains(var_name) {
         return None;
     }
@@ -1076,22 +1078,52 @@ fn collect_stmt_mutated_and_non_callee(
 ) {
     match stmt {
         Statement::Block(block) => {
-            collect_mutated_and_non_callee_idents(&block.statements, sources, mutated, non_callee_uses);
+            collect_mutated_and_non_callee_idents(
+                &block.statements,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
         }
         Statement::If(if_stmt) => {
-            collect_expr_mutated_and_non_callee(&if_stmt.condition, sources, mutated, non_callee_uses);
-            collect_stmt_mutated_and_non_callee(&if_stmt.then_branch, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &if_stmt.condition,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
+            collect_stmt_mutated_and_non_callee(
+                &if_stmt.then_branch,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
             if let Some(else_branch) = &if_stmt.else_branch {
                 collect_stmt_mutated_and_non_callee(else_branch, sources, mutated, non_callee_uses);
             }
         }
         Statement::While(while_stmt) => {
-            collect_expr_mutated_and_non_callee(&while_stmt.condition, sources, mutated, non_callee_uses);
-            collect_stmt_mutated_and_non_callee(&while_stmt.body, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &while_stmt.condition,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
+            collect_stmt_mutated_and_non_callee(
+                &while_stmt.body,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
         }
         Statement::DoWhile(do_while) => {
             collect_stmt_mutated_and_non_callee(&do_while.body, sources, mutated, non_callee_uses);
-            collect_expr_mutated_and_non_callee(&do_while.condition, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &do_while.condition,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
         }
         Statement::For(for_stmt) => {
             if let Some(initializer) = &for_stmt.initializer {
@@ -1106,13 +1138,33 @@ fn collect_stmt_mutated_and_non_callee(
             collect_stmt_mutated_and_non_callee(&for_stmt.body, sources, mutated, non_callee_uses);
         }
         Statement::Switch(switch_stmt) => {
-            collect_expr_mutated_and_non_callee(&switch_stmt.discriminant, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &switch_stmt.discriminant,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
             for case in &switch_stmt.cases {
-                collect_expr_mutated_and_non_callee(&case.case_value, sources, mutated, non_callee_uses);
-                collect_mutated_and_non_callee_idents(&case.statements, sources, mutated, non_callee_uses);
+                collect_expr_mutated_and_non_callee(
+                    &case.case_value,
+                    sources,
+                    mutated,
+                    non_callee_uses,
+                );
+                collect_mutated_and_non_callee_idents(
+                    &case.statements,
+                    sources,
+                    mutated,
+                    non_callee_uses,
+                );
             }
             if let Some(default_case) = &switch_stmt.default_case {
-                collect_mutated_and_non_callee_idents(default_case, sources, mutated, non_callee_uses);
+                collect_mutated_and_non_callee_idents(
+                    default_case,
+                    sources,
+                    mutated,
+                    non_callee_uses,
+                );
             }
         }
         Statement::Return(ret) => {
@@ -1121,7 +1173,12 @@ fn collect_stmt_mutated_and_non_callee(
             }
         }
         Statement::Throw(throw_stmt) => {
-            collect_expr_mutated_and_non_callee(&throw_stmt.expression, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &throw_stmt.expression,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
         }
         Statement::VariableDeclaration(var_decl) => {
             if let Some(initializer) = &var_decl.initializer
@@ -1131,10 +1188,20 @@ fn collect_stmt_mutated_and_non_callee(
             }
         }
         Statement::Expression(expr_stmt) => {
-            collect_expr_mutated_and_non_callee(&expr_stmt.expression, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &expr_stmt.expression,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
         }
         Statement::Assert(assert_stmt) => {
-            collect_expr_mutated_and_non_callee(&assert_stmt.condition, sources, mutated, non_callee_uses);
+            collect_expr_mutated_and_non_callee(
+                &assert_stmt.condition,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
             if let Some(message) = &assert_stmt.message {
                 collect_expr_mutated_and_non_callee(message, sources, mutated, non_callee_uses);
             }
@@ -1143,12 +1210,27 @@ fn collect_stmt_mutated_and_non_callee(
             collect_expr_mutated_and_non_callee(&exit_stmt.code, sources, mutated, non_callee_uses);
         }
         Statement::Try(try_stmt) => {
-            collect_mutated_and_non_callee_idents(&try_stmt.try_block.statements, sources, mutated, non_callee_uses);
+            collect_mutated_and_non_callee_idents(
+                &try_stmt.try_block.statements,
+                sources,
+                mutated,
+                non_callee_uses,
+            );
             for catch_clause in &try_stmt.catch_clauses {
-                collect_mutated_and_non_callee_idents(&catch_clause.block.statements, sources, mutated, non_callee_uses);
+                collect_mutated_and_non_callee_idents(
+                    &catch_clause.block.statements,
+                    sources,
+                    mutated,
+                    non_callee_uses,
+                );
             }
             if let Some(finally_block) = &try_stmt.finally_block {
-                collect_mutated_and_non_callee_idents(&finally_block.statements, sources, mutated, non_callee_uses);
+                collect_mutated_and_non_callee_idents(
+                    &finally_block.statements,
+                    sources,
+                    mutated,
+                    non_callee_uses,
+                );
             }
         }
         _ => {}
@@ -1165,8 +1247,7 @@ fn collect_expr_mutated_and_non_callee(
         Expression::Identifier { span } => {
             let source_index = span.id as usize;
             if source_index < sources.len() {
-                let ident_text =
-                    &sources[source_index][span.start as usize..span.end as usize];
+                let ident_text = &sources[source_index][span.start as usize..span.end as usize];
                 non_callee_uses.insert(ident_text.to_string());
             }
         }
@@ -1174,8 +1255,7 @@ fn collect_expr_mutated_and_non_callee(
             if let Expression::Identifier { span } = target.as_ref() {
                 let source_index = span.id as usize;
                 if source_index < sources.len() {
-                    let ident_text =
-                        &sources[source_index][span.start as usize..span.end as usize];
+                    let ident_text = &sources[source_index][span.start as usize..span.end as usize];
                     mutated.insert(ident_text.to_string());
                 }
             } else {
@@ -1194,8 +1274,7 @@ fn collect_expr_mutated_and_non_callee(
             {
                 let source_index = span.id as usize;
                 if source_index < sources.len() {
-                    let ident_text =
-                        &sources[source_index][span.start as usize..span.end as usize];
+                    let ident_text = &sources[source_index][span.start as usize..span.end as usize];
                     mutated.insert(ident_text.to_string());
                 }
             }
@@ -1235,8 +1314,12 @@ fn collect_expr_mutated_and_non_callee(
                 collect_expr_mutated_and_non_callee(elem, sources, mutated, non_callee_uses);
             }
         }
-        Expression::Cast { expression: inner, .. }
-        | Expression::Instanceof { expression: inner, .. } => {
+        Expression::Cast {
+            expression: inner, ..
+        }
+        | Expression::Instanceof {
+            expression: inner, ..
+        } => {
             collect_expr_mutated_and_non_callee(inner, sources, mutated, non_callee_uses);
         }
         Expression::Ternary {
@@ -1254,7 +1337,12 @@ fn collect_expr_mutated_and_non_callee(
                 collect_expr_mutated_and_non_callee(body_expr, sources, mutated, non_callee_uses);
             }
             LambdaBody::Block(block) => {
-                collect_mutated_and_non_callee_idents(&block.statements, sources, mutated, non_callee_uses);
+                collect_mutated_and_non_callee_idents(
+                    &block.statements,
+                    sources,
+                    mutated,
+                    non_callee_uses,
+                );
             }
         },
         Expression::Block {
@@ -1269,7 +1357,11 @@ fn collect_expr_mutated_and_non_callee(
     }
 }
 
-fn collect_all_idents_in_statement(stmt: &Statement, sources: &[String], idents: &mut HashSet<String>) {
+fn collect_all_idents_in_statement(
+    stmt: &Statement,
+    sources: &[String],
+    idents: &mut HashSet<String>,
+) {
     match stmt {
         Statement::Block(block) => {
             for inner in &block.statements {
@@ -1325,7 +1417,9 @@ fn collect_all_idents_in_expr(expr: &Expression, sources: &[String], idents: &mu
         Expression::Identifier { span } => {
             let source_index = span.id as usize;
             if source_index < sources.len() {
-                idents.insert(sources[source_index][span.start as usize..span.end as usize].to_string());
+                idents.insert(
+                    sources[source_index][span.start as usize..span.end as usize].to_string(),
+                );
             }
         }
         Expression::Binary { left, right, .. } => {
@@ -1337,7 +1431,9 @@ fn collect_all_idents_in_expr(expr: &Expression, sources: &[String], idents: &mu
             collect_all_idents_in_expr(target, sources, idents);
             collect_all_idents_in_expr(value, sources, idents);
         }
-        Expression::MemberAccess { object, .. } => collect_all_idents_in_expr(object, sources, idents),
+        Expression::MemberAccess { object, .. } => {
+            collect_all_idents_in_expr(object, sources, idents)
+        }
         Expression::MethodCall {
             callee, arguments, ..
         } => {
@@ -1361,8 +1457,12 @@ fn collect_all_idents_in_expr(expr: &Expression, sources: &[String], idents: &mu
                 collect_all_idents_in_expr(elem, sources, idents);
             }
         }
-        Expression::Cast { expression: inner, .. }
-        | Expression::Instanceof { expression: inner, .. } => {
+        Expression::Cast {
+            expression: inner, ..
+        }
+        | Expression::Instanceof {
+            expression: inner, ..
+        } => {
             collect_all_idents_in_expr(inner, sources, idents);
         }
         Expression::Ternary {
@@ -1410,13 +1510,7 @@ fn transform_statement_list(
 
     if local_lambdas.is_empty() {
         for statement in statements.iter_mut() {
-            transform_statement(
-                statement,
-                inlinable_functions,
-                context,
-                call_counter,
-                depth,
-            );
+            transform_statement(statement, inlinable_functions, context, call_counter, depth);
         }
     } else {
         let mut scoped_map = inlinable_functions.clone();

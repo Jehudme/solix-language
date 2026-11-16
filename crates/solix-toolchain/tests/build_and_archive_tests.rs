@@ -97,9 +97,15 @@ sources = ["tests"]
         manifest.configuration.description.as_deref(),
         Some("A demo package for testing")
     );
-    assert_eq!(manifest.configuration.license.as_deref(), Some("Apache-2.0"));
+    assert_eq!(
+        manifest.configuration.license.as_deref(),
+        Some("Apache-2.0")
+    );
     assert_eq!(manifest.main_entrypoint().as_deref(), Some("Demo::main"));
-    assert_eq!(manifest.test_entrypoint().as_deref(), Some("DemoTest::main"));
+    assert_eq!(
+        manifest.test_entrypoint().as_deref(),
+        Some("DemoTest::main")
+    );
 
     // 2. Minimal valid manifest
     let minimal_toml = r#"
@@ -384,12 +390,9 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
     );
 
     // Run the test archive to execute the test profile's baked entrypoint
-    let run_test_cli = Cli::try_parse_from([
-        "solix",
-        "run",
-        test_archive.to_str().expect("valid path"),
-    ])
-    .expect("Failed to parse run test archive CLI");
+    let run_test_cli =
+        Cli::try_parse_from(["solix", "run", test_archive.to_str().expect("valid path")])
+            .expect("Failed to parse run test archive CLI");
     let run_test_exit_code =
         run(run_test_cli).expect("Executing test .slxarc archive must succeed");
     assert_eq!(run_test_exit_code, 0);

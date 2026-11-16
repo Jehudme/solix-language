@@ -178,7 +178,8 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
 
                 // Check "super"
                 if identifier_name == "super" {
-                    let Some(class_id) = self.current_class.filter(|_| !self.is_static_method) else {
+                    let Some(class_id) = self.current_class.filter(|_| !self.is_static_method)
+                    else {
                         self.errors.push(BindingError::InvalidSuperCall {
                             span: span.to_source_span(),
                         });
@@ -3191,13 +3192,15 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                             for (element_index, element_expr) in elements.iter().enumerate() {
                                 let element_type = self.evaluate_expression_type(element_expr);
                                 let expected_type = &disc_elements[element_index];
-                                let is_compatible = element_type.is_assignable_to(
-                                    expected_type,
-                                    &|source, target| self.check_is_subtype(source, target),
-                                ) || expected_type.is_assignable_to(
-                                    &element_type,
-                                    &|source, target| self.check_is_subtype(source, target),
-                                ) || (element_type.is_integer() && expected_type.is_integer());
+                                let is_compatible = element_type
+                                    .is_assignable_to(expected_type, &|source, target| {
+                                        self.check_is_subtype(source, target)
+                                    })
+                                    || expected_type
+                                        .is_assignable_to(&element_type, &|source, target| {
+                                            self.check_is_subtype(source, target)
+                                        })
+                                    || (element_type.is_integer() && expected_type.is_integer());
 
                                 if !is_compatible {
                                     self.errors.push(BindingError::IncompatibleSwitchCaseType {
@@ -3268,13 +3271,12 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                         case_type.is_integer() && discriminant_type.is_integer();
                     let are_both_floats =
                         case_type.is_floating_point() && discriminant_type.is_floating_point();
-                    let is_assignable = case_type.is_assignable_to(
-                        &discriminant_type,
-                        &|source, target| self.check_is_subtype(source, target),
-                    ) || discriminant_type.is_assignable_to(
-                        &case_type,
-                        &|source, target| self.check_is_subtype(source, target),
-                    );
+                    let is_assignable =
+                        case_type.is_assignable_to(&discriminant_type, &|source, target| {
+                            self.check_is_subtype(source, target)
+                        }) || discriminant_type.is_assignable_to(&case_type, &|source, target| {
+                            self.check_is_subtype(source, target)
+                        });
 
                     if !are_both_integers
                         && !are_both_floats

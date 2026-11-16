@@ -84,8 +84,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory.clone()));
 
-    let cycle_collector_enabled =
-        !matches!(args.cycle_collector.to_lowercase().as_str(), "off" | "false" | "0");
+    let cycle_collector_enabled = !matches!(
+        args.cycle_collector.to_lowercase().as_str(),
+        "off" | "false" | "0"
+    );
     if args.cycle_threshold == 0 {
         bail!(
             "[E0341] Invalid cycle collector configuration parameter: cycle threshold must be greater than zero."
@@ -139,13 +141,13 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             || extension.eq_ignore_ascii_case("slxpac")
         {
             let cache_root = ensure_temp_cache_dir(&mut temp_cache_dir)?;
-            let loaded_archive =
-                SlxarcArchive::extract_and_load(lib_path, cache_root).with_context(|| {
-                format!(
-                    "Failed to extract dependency archive '{}'",
-                    lib_path.display()
-                )
-            })?;
+            let loaded_archive = SlxarcArchive::extract_and_load(lib_path, cache_root)
+                .with_context(|| {
+                    format!(
+                        "Failed to extract dependency archive '{}'",
+                        lib_path.display()
+                    )
+                })?;
             for native_lib in loaded_archive.native_libraries {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
@@ -232,7 +234,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     .packages
                     .iter()
                     .map(|record| {
-                        format!("{}:{}@{}", record.name, record.build_profile, record.version)
+                        format!(
+                            "{}:{}@{}",
+                            record.name, record.build_profile, record.version
+                        )
                     })
                     .collect();
                 bail!(
@@ -265,15 +270,13 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             let is_slxpac = extension.eq_ignore_ascii_case("slxpac");
             let kind_string = if is_slxpac { "slxpac" } else { "slxarc" };
             runtime_options = runtime_options.with_container_kind(kind_string);
-            let loaded_archive =
-                SlxarcArchive::extract_and_load(target_path, cache_root).with_context(
-                    || {
-                        format!(
-                            "Failed to extract archive container '{}'",
-                            target_path.display()
-                        )
-                    },
-                )?;
+            let loaded_archive = SlxarcArchive::extract_and_load(target_path, cache_root)
+                .with_context(|| {
+                    format!(
+                        "Failed to extract archive container '{}'",
+                        target_path.display()
+                    )
+                })?;
             let archive_manifest = loaded_archive.manifest.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
                     "Invalid archive container '{}': missing mandatory 'manifest.toml'",
@@ -604,7 +607,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 }
 
 /// Lazily initializes the temporary archive extraction directory on first archive use.
-fn ensure_temp_cache_dir(cache_dir_slot: &mut Option<tempfile::TempDir>) -> Result<&std::path::Path> {
+fn ensure_temp_cache_dir(
+    cache_dir_slot: &mut Option<tempfile::TempDir>,
+) -> Result<&std::path::Path> {
     if cache_dir_slot.is_none() {
         let created = tempfile::Builder::new()
             .prefix("solix_run_")
