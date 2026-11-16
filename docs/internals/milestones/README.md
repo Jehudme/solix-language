@@ -61,8 +61,8 @@ This directory maintains the historical and active engineering roadmap and deliv
 | **MS-051** | Unified Configuration Manifest Schema, Profile-Scoped Sources & Automated Crates.io CI/CD | `v1.2.0` | COMPLETED | [051-unified-configuration-manifest-and-profile-scoped-sources.md](051-unified-configuration-manifest-and-profile-scoped-sources.md) |
 | **MS-052** | Comprehensive Codebase Audit, Hardening & Production Release | `v1.2.0` | COMPLETED | [052-codebase-audit-hardening-and-release.md](052-codebase-audit-hardening-and-release.md) |
 | **MS-053** | Toolchain CLI Refactoring & Documentation Intelligence | `v2.0.0` | COMPLETED | [053-toolchain-cli-refactoring-and-doc-intelligence.md](053-toolchain-cli-refactoring-and-doc-intelligence.md) |
-| **MS-054** | Expanded Switch Statement, Operator Equality & Pattern Matching | `v2.0.0` | ACTIVE | [054-expanded-switch-statement-and-pattern-matching.md](054-expanded-switch-statement-and-pattern-matching.md) |
-| **MS-055** | Escape Analysis, Scalar Replacement & ARC Elision | `v2.0.0` | DRAFT | [055-escape-analysis-scalar-replacement-and-arc-elision.md](055-escape-analysis-scalar-replacement-and-arc-elision.md) |
+| **MS-054** | Expanded Switch Statement, Operator Equality & Pattern Matching | `v2.0.0` | COMPLETED | [054-expanded-switch-statement-and-pattern-matching.md](054-expanded-switch-statement-and-pattern-matching.md) |
+| **MS-055** | Escape Analysis, Scalar Replacement & ARC Elision | `v2.0.0` | ACTIVE | [055-escape-analysis-scalar-replacement-and-arc-elision.md](055-escape-analysis-scalar-replacement-and-arc-elision.md) |
 | **MS-056** | Standard Library Expansion, C++ std::format & VM Telemetry | `v2.0.0` | DRAFT | [056-standard-library-expansion-and-vm-telemetry.md](056-standard-library-expansion-and-vm-telemetry.md) |
 | **MS-057** | Bacon-Rajan ARC Cycle Collector with Zero-Cost Opt-Out | `v2.0.0` | DRAFT | [057-bacon-rajan-arc-cycle-collector.md](057-bacon-rajan-arc-cycle-collector.md) |
 | **MS-058** | Dynamic Release Benchmarking, Comparison Tables & CI/CD Gate | `v2.0.0` | DRAFT | [058-dynamic-release-benchmarking-and-ci-cd.md](058-dynamic-release-benchmarking-and-ci-cd.md) |

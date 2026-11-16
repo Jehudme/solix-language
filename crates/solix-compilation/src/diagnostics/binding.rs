@@ -1109,6 +1109,63 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
+    #[error("Class '{class_name}' does not implement 'operator ==' or 'operator !=' and cannot be used in equality switch cases.")]
+    #[diagnostic(
+        code(solix::binder::switch_class_missing_equality_operator),
+        help("Implement 'operator ==' or 'operator !=' in class '{class_name}' to support switch equality dispatch.")
+    )]
+    SwitchClassMissingEqualityOperator {
+        class_name: String,
+        #[label("missing 'operator ==' or 'operator !='")]
+        span: SourceSpan,
+    },
+
+    #[error("Case expression of type '{case_type}' is incompatible with switch discriminant of type '{discriminant_type}'.")]
+    #[diagnostic(
+        code(solix::binder::incompatible_switch_case_type),
+        help("Ensure the case expression type matches or is assignable to the switch discriminant type.")
+    )]
+    IncompatibleSwitchCaseType {
+        case_type: String,
+        discriminant_type: String,
+        #[label("incompatible case type '{case_type}'")]
+        span: SourceSpan,
+    },
+
+    #[error("Duplicate case value '{case_value}' detected in switch statement.")]
+    #[diagnostic(
+        code(solix::binder::duplicate_switch_case_constant),
+        help("Remove or combine duplicate case branches.")
+    )]
+    DuplicateSwitchCaseConstant {
+        case_value: String,
+        #[label("duplicate case constant")]
+        span: SourceSpan,
+    },
+
+    #[error("Right-hand target of 'instanceof' in switch case must be a class, interface, or tuple type, found '{found}'.")]
+    #[diagnostic(
+        code(solix::binder::invalid_switch_pattern_target),
+        help("Use nominal class, interface, or tuple type in 'case instanceof <Type>'.")
+    )]
+    InvalidSwitchPatternTarget {
+        found: String,
+        #[label("invalid instanceof target type")]
+        span: SourceSpan,
+    },
+
+    #[error("Tuple case pattern arity {case_arity} does not match switch discriminant tuple arity {disc_arity}.")]
+    #[diagnostic(
+        code(solix::binder::tuple_arity_mismatch_in_case),
+        help("Ensure the tuple pattern has the same number of elements as the discriminant tuple.")
+    )]
+    TupleArityMismatchInCase {
+        case_arity: usize,
+        disc_arity: usize,
+        #[label("tuple arity mismatch")]
+        span: SourceSpan,
+    },
+
     #[error(
         "Generic type constraint violation: type '{actual}' does not satisfy constraint '{expected}' for parameter '{type_param}'"
     )]
@@ -1223,6 +1280,11 @@ impl BindingError {
             Self::IncompatibleDependencyVersion { .. } => "E0289",
             Self::ExternalPackageNotFound { .. } => "E0290",
             Self::DependencyChecksumMismatch { .. } => "E0291",
+            Self::SwitchClassMissingEqualityOperator { .. } => "E0310",
+            Self::IncompatibleSwitchCaseType { .. } => "E0311",
+            Self::DuplicateSwitchCaseConstant { .. } => "E0312",
+            Self::InvalidSwitchPatternTarget { .. } => "E0313",
+            Self::TupleArityMismatchInCase { .. } => "E0314",
         }
     }
 
@@ -1321,6 +1383,11 @@ impl BindingError {
             | Self::IncompatibleDependencyVersion { span, .. }
             | Self::ExternalPackageNotFound { span, .. }
             | Self::DependencyChecksumMismatch { span, .. }
+            | Self::SwitchClassMissingEqualityOperator { span, .. }
+            | Self::IncompatibleSwitchCaseType { span, .. }
+            | Self::DuplicateSwitchCaseConstant { span, .. }
+            | Self::InvalidSwitchPatternTarget { span, .. }
+            | Self::TupleArityMismatchInCase { span, .. }
             | Self::GenericTypeConstraintViolation { span, .. } => *span,
         }
     }

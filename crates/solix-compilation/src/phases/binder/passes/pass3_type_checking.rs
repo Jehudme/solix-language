@@ -69,6 +69,23 @@ fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Opti
 }
 
 impl<'a> TypeCheckingVisitor<'a> {
+    pub fn class_implements_equality_operator(&self, symbol_name: &str) -> bool {
+        let simple_name = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+        for candidate in [symbol_name, simple_name] {
+            if let Some(class_id) = self.symbol_table.resolve_symbol(self.source_id, candidate)
+                && let Some(class_entry) = self.symbol_table.get_symbol(class_id)
+            {
+                for &child_id in &class_entry.members {
+                    if let Some(child_entry) = self.symbol_table.get_symbol(child_id)
+                        && (child_entry.name == "operator_==" || child_entry.name == "operator_!=")
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
     /// Evaluates the semantic [`Type`] of an arbitrary expression.
     pub fn evaluate_expression_type(&mut self, expression: &Expression) -> Type {
         let span = expression.span();
@@ -3113,30 +3130,173 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
     }
 
     fn visit_switch_statement(&mut self, node: &SwitchStatement) {
-        self.evaluate_expression_type(&node.discriminant);
+        let discriminant_type = self.evaluate_expression_type(&node.discriminant);
         self.switch_depth += 1;
         let mut seen_cases = std::collections::HashSet::new();
+
         for case_clause in &node.cases {
-            let case_repr = match &case_clause.case_value {
-                Expression::Literal { value, .. } => format!("{value:?}"),
-                Expression::MemberAccess { member_span, .. } => {
-                    if member_span.end as usize <= self.source_text.len() {
-                        self.source_text[member_span.start as usize..member_span.end as usize]
-                            .to_string()
-                    } else {
-                        String::new()
-                    }
+            let case_source_span = case_clause.case_value.span().to_source_span();
+            let case_span = case_clause.case_value.span();
+
+            // 1. Check for duplicate case constant representation
+            let case_repr = if (case_span.end as usize) <= self.source_text.len() {
+                self.source_text[case_span.start as usize..case_span.end as usize]
+                    .trim()
+                    .to_string()
+            } else {
+                match &case_clause.case_value {
+                    Expression::Literal { value, .. } => format!("{value:?}"),
+                    _ => String::new(),
                 }
-                _ => String::new(),
             };
+
             if !case_repr.is_empty() && !seen_cases.insert(case_repr.clone()) {
-                self.errors.push(BindingError::DuplicateSymbol {
-                    symbol_name: format!("Duplicate case constant '{case_repr}'"),
-                    span: case_clause.case_value.span().to_source_span(),
+                self.errors.push(BindingError::DuplicateSwitchCaseConstant {
+                    case_value: case_repr,
+                    span: case_source_span,
                 });
             }
-            self.visit_case_clause(case_clause);
+
+            // 2. Pattern and Type Checking
+            match &case_clause.case_value {
+                Expression::Instanceof { target_type, .. } => {
+                    let resolved_target = resolve_type_annotation(
+                        self.source_id,
+                        self.source_text,
+                        target_type,
+                        self.symbol_table,
+                    );
+                    let is_valid_pattern = matches!(
+                        resolved_target,
+                        Type::Class { .. } | Type::Interface { .. } | Type::Tuple(..)
+                    );
+                    if !is_valid_pattern {
+                        let found_description = resolved_target.to_string();
+                        self.errors.push(BindingError::InvalidSwitchPatternTarget {
+                            found: found_description,
+                            span: target_type.span().to_source_span(),
+                        });
+                    }
+                }
+                Expression::TupleCreation { elements, .. } => {
+                    if let Type::Tuple(ref disc_elements) = discriminant_type {
+                        let case_arity = elements.len();
+                        let disc_arity = disc_elements.len();
+                        if case_arity != disc_arity {
+                            self.errors.push(BindingError::TupleArityMismatchInCase {
+                                case_arity,
+                                disc_arity,
+                                span: case_source_span,
+                            });
+                        } else {
+                            for (element_index, element_expr) in elements.iter().enumerate() {
+                                let element_type = self.evaluate_expression_type(element_expr);
+                                let expected_type = &disc_elements[element_index];
+                                let is_compatible = element_type.is_assignable_to(
+                                    expected_type,
+                                    &|source, target| self.check_is_subtype(source, target),
+                                ) || expected_type.is_assignable_to(
+                                    &element_type,
+                                    &|source, target| self.check_is_subtype(source, target),
+                                ) || (element_type.is_integer() && expected_type.is_integer());
+
+                                if !is_compatible {
+                                    self.errors.push(BindingError::IncompatibleSwitchCaseType {
+                                        case_type: element_type.to_string(),
+                                        discriminant_type: expected_type.to_string(),
+                                        span: element_expr.span().to_source_span(),
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        self.errors.push(BindingError::IncompatibleSwitchCaseType {
+                            case_type: format!("tuple<{}>", elements.len()),
+                            discriminant_type: discriminant_type.to_string(),
+                            span: case_source_span,
+                        });
+                    }
+                }
+                Expression::Literal {
+                    value: LiteralValue::Null,
+                    ..
+                } => {
+                    if !discriminant_type.is_reference_type()
+                        && !matches!(
+                            discriminant_type,
+                            Type::Class { .. }
+                                | Type::Interface { .. }
+                                | Type::Tuple(_)
+                                | Type::Array { .. }
+                        )
+                    {
+                        self.errors.push(BindingError::IncompatibleSwitchCaseType {
+                            case_type: "null".to_string(),
+                            discriminant_type: discriminant_type.to_string(),
+                            span: case_source_span,
+                        });
+                    }
+                }
+                _ => {
+                    if (discriminant_type.is_integer()
+                        || discriminant_type.is_floating_point()
+                        || discriminant_type == Type::Primitive(PrimitiveKind::Bool))
+                        && matches!(&case_clause.case_value, Expression::Identifier { .. })
+                    {
+                        self.errors.push(BindingError::NonConstantCaseValue {
+                            span: case_source_span,
+                        });
+                    }
+
+                    let case_type = self.evaluate_expression_type(&case_clause.case_value);
+                    if let Type::Class {
+                        ref symbol_name, ..
+                    } = discriminant_type
+                    {
+                        let is_string = symbol_name == "std::string"
+                            || symbol_name == "std.string"
+                            || symbol_name == "string";
+                        if !is_string && !self.class_implements_equality_operator(symbol_name) {
+                            self.errors
+                                .push(BindingError::SwitchClassMissingEqualityOperator {
+                                    class_name: symbol_name.clone(),
+                                    span: case_source_span,
+                                });
+                        }
+                    }
+
+                    let are_both_integers =
+                        case_type.is_integer() && discriminant_type.is_integer();
+                    let are_both_floats =
+                        case_type.is_floating_point() && discriminant_type.is_floating_point();
+                    let is_assignable = case_type.is_assignable_to(
+                        &discriminant_type,
+                        &|source, target| self.check_is_subtype(source, target),
+                    ) || discriminant_type.is_assignable_to(
+                        &case_type,
+                        &|source, target| self.check_is_subtype(source, target),
+                    );
+
+                    if !are_both_integers
+                        && !are_both_floats
+                        && !is_assignable
+                        && case_type != Type::Error
+                        && discriminant_type != Type::Error
+                    {
+                        self.errors.push(BindingError::IncompatibleSwitchCaseType {
+                            case_type: case_type.to_string(),
+                            discriminant_type: discriminant_type.to_string(),
+                            span: case_source_span,
+                        });
+                    }
+                }
+            }
+
+            for statement in &case_clause.statements {
+                self.visit_statement(statement);
+            }
         }
+
         if let Some(default_statements) = &node.default_case {
             for statement in default_statements {
                 self.visit_statement(statement);

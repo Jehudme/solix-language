@@ -2297,12 +2297,30 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             if self.cursor.match_token(TokenKind::KeywordCase).is_some() {
                 seen_case = true;
                 let case_start = self.cursor.current_span();
-                let case_value = self.parse_expression()?;
+                let case_value = if self.cursor.match_token(TokenKind::KeywordInstanceof).is_some() {
+                    let type_annotation = self.parse_type_annotation()?;
+                    let type_span = type_annotation.span();
+                    Expression::Instanceof {
+                        span: case_start.combine(type_span),
+                        expression: Box::new(discriminant.clone()),
+                        target_type: type_annotation,
+                    }
+                } else {
+                    self.parse_expression()?
+                };
 
-                if !matches!(
+                let is_valid_case = matches!(
                     case_value,
-                    Expression::Literal { .. } | Expression::MemberAccess { .. }
-                ) {
+                    Expression::Literal { .. }
+                        | Expression::MemberAccess { .. }
+                        | Expression::Identifier { .. }
+                        | Expression::TupleCreation { .. }
+                        | Expression::Instanceof { .. }
+                ) || (matches!(&case_value, Expression::Unary { operator, operand, .. }
+                    if matches!(operator, TokenKind::OperatorMinus | TokenKind::OperatorPlus)
+                        && matches!(&**operand, Expression::Literal { .. })));
+
+                if !is_valid_case {
                     self.record_error(ParsingError::CaseLabelNotConstant {
                         span: case_value.span().to_source_span(),
                     });
@@ -3890,6 +3908,25 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let token = self.cursor.peek().copied().unwrap_or_default();
 
         let mut base_type = match token.kind {
+            TokenKind::PunctuationOpenParen => {
+                let open_span = token.span;
+                self.cursor.advance();
+                let mut elements = Vec::new();
+                while !self.cursor.check(TokenKind::PunctuationCloseParen) && !self.cursor.is_at_end() {
+                    elements.push(self.parse_type_annotation()?);
+                    if self.cursor.match_token(TokenKind::PunctuationComma).is_none() {
+                        break;
+                    }
+                }
+                let close_token = self.cursor.match_token(TokenKind::PunctuationCloseParen);
+                if close_token.is_none() {
+                    return Err(ParsingError::ExpectedClosingDelimiter {
+                        span: self.cursor.current_span().to_source_span(),
+                    });
+                }
+                let span = open_span.combine(close_token.unwrap().span);
+                TypeAnnotation::Tuple { span, elements }
+            }
             TokenKind::PrimitiveVoid
             | TokenKind::PrimitiveBool
             | TokenKind::PrimitiveInt8
@@ -4575,6 +4612,19 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
     fn is_declaration_start(&mut self) -> bool {
         let peek = self.cursor.peek_kind();
+        if peek == TokenKind::PunctuationOpenParen {
+            let saved_pos = self.cursor.position;
+            let saved_errors = self.errors.len();
+            let is_decl = match self.parse_type_annotation() {
+                Ok(_) => self.cursor.check(TokenKind::Identifier),
+                Err(_) => false,
+            };
+            self.cursor.position = saved_pos;
+            self.errors.truncate(saved_errors);
+            if is_decl {
+                return true;
+            }
+        }
         if peek.is_primitive() && peek != TokenKind::PrimitiveTuple {
             return true;
         }

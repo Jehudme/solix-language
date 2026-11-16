@@ -3361,7 +3361,7 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    fn resolve_type_tag(&self, type_name: &str) -> u8 {
+    pub(crate) fn resolve_type_tag(&self, type_name: &str) -> u8 {
         match type_name {
             "int8" | "i8" => 1,
             "int16" | "i16" => 2,

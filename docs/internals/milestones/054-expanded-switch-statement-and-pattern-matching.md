@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-054
 * **Target Version:** `v2.0.0`
 * **Milestone Branch:** `milestone/054-expanded-switch-statement-and-pattern-matching`
-* **Status:** DRAFT
+* **Status:** COMPLETED
 * **Lead Architect:** Core Systems & Compiler Architecture Team
 * **Target Delivery Date:** 2026-11-16
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)
@@ -79,3 +79,15 @@ Key objectives:
 1. All positive and negative switch test suites pass with 100% success.
 2. Zero warnings in `cargo clippy --workspace --all-targets -- -D warnings`.
 3. Language specifications in `docs/spec/` updated with new switch grammar and semantic rules.
+
+---
+
+## 6. Completed Deliverables & Verification Record
+
+* **Universal Primitive & String Switch:** Full support for `int8`..`int64`, `uint8`..`uint64`, `float32`, `float64`, `bool`, `char`, `string`, and strongly typed `enum` discriminants and cases.
+* **Class Equality Operator Dispatch (`operator ==` / `operator !=`):** Implemented validation and calling convention for nominal class equality matching with error code `E0310`.
+* **Tuple Value Equality & Tuple Arity Validation:** Implemented multi-element value matching using `OpCode::GetTuple` with error code `E0314`.
+* **Pattern Matching (`instanceof`):** Implemented `case instanceof TargetClass:` and `case instanceof (T1, T2):` with error code `E0313`.
+* **Duplicate & Incompatible Case Diagnostics:** Enforced `E0311` (incompatible case type) and `E0312` (duplicate case constant).
+* **Hermetic Integration Tests:** Added 11 new tests in `test_expanded_switch.rs` verifying 100% test passing across the compiler suite.
+* **Living Documentation:** Synchronized `docs/spec/statements/control_flow/switch_statement.md`.

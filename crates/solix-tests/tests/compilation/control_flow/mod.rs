@@ -6,6 +6,7 @@ pub mod test_call_frame_allocation;
 pub mod test_continue_statement;
 pub mod test_diagnostics_consistency;
 pub mod test_do_while_statement;
+pub mod test_expanded_switch;
 pub mod test_expression_statement;
 pub mod test_for_statement;
 pub mod test_if_statement;

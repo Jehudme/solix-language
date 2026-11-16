@@ -8,7 +8,7 @@ use crate::phases::parser::statements::control_flow::{
     BlockStatement, DoWhileStatement, ForStatement, IfStatement, ReturnStatement, SwitchStatement,
     VariableDeclarationStatement, WhileStatement,
 };
-use crate::phases::parser::statements::expressions::Expression;
+use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
 use solix_common::bytecode::{Instruction, OpCode};
 use solix_common::diagnostics::EmissionError;
 use solix_common::types::{PrimitiveKind, Type};
@@ -398,64 +398,360 @@ impl<'a> Emitter<'a> {
         switch_stmt: &SwitchStatement,
         loop_stack: &mut Vec<LoopContext>,
     ) -> Result<(), EmissionError> {
-        let r_disc = self.emit_expression(&switch_stmt.discriminant, None)?;
-        let mut case_jump_patches = Vec::new();
-        let mut switch_break_ctx = LoopContext {
+        let reg_discriminant = self.emit_expression(&switch_stmt.discriminant, None)?;
+        let mut case_exit_patches = Vec::new();
+        let mut switch_break_context = LoopContext {
             break_patches: Vec::new(),
             continue_patches: Vec::new(),
             scope_depth: self.allocator.scope_depth(),
         };
 
-        loop_stack.push(switch_break_ctx);
+        loop_stack.push(switch_break_context);
 
         let discriminant_type = self.query_type(switch_stmt.discriminant.span());
-        let comparison_opcode = if matches!(
-            &discriminant_type,
-            Type::Class { symbol_name, .. }
-                if symbol_name == "std::string"
-                    || symbol_name == "std.string"
-                    || symbol_name == "string"
-        ) {
-            OpCode::EqString
-        } else if matches!(
-            &discriminant_type,
-            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
-        ) {
-            OpCode::EqI64
-        } else if discriminant_type.is_floating_point() {
-            OpCode::EqF64
-        } else {
-            OpCode::EqI32
-        };
 
-        for case in &switch_stmt.cases {
-            let r_val = self.emit_expression(&case.case_value, None)?;
-            let r_cmp = self.allocator.alloc_temp()?;
-            self.emit_instruction(
-                Instruction::format_a(comparison_opcode, 0, r_cmp, r_disc, r_val),
-                Some(case.span),
-            );
-            self.allocator.free_temp(r_val);
+        for case_clause in &switch_stmt.cases {
+            let mut case_failure_jumps = Vec::new();
 
-            let next_case_jump = self.emit_instruction(
-                Instruction::format_c(OpCode::JumpIfFalse, 0, r_cmp, 0),
-                Some(case.span),
-            );
-            self.allocator.free_temp(r_cmp);
+            match &case_clause.case_value {
+                Expression::Instanceof { target_type, .. } => {
+                    if let crate::phases::parser::statements::types::TypeAnnotation::Tuple {
+                        elements,
+                        ..
+                    } = target_type
+                    {
+                        for (element_index, element_annotation) in elements.iter().enumerate() {
+                            let element_type_name =
+                                self.get_lexeme(element_annotation.span()).to_string();
+                            let type_tag = self.resolve_type_tag(&element_type_name);
+                            let reg_index = self.allocator.alloc_temp()?;
+                            self.emit_instruction(
+                                Instruction::format_b_signed(
+                                    OpCode::LoadI32,
+                                    0,
+                                    reg_index,
+                                    element_index as i32,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            let reg_match = self.allocator.alloc_temp()?;
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::TupleInstanceof,
+                                    type_tag,
+                                    reg_match,
+                                    reg_discriminant,
+                                    reg_index,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            self.allocator.free_temp(reg_index);
 
-            for stmt in &case.statements {
+                            let fail_jump = self.emit_instruction(
+                                Instruction::format_c(OpCode::JumpIfFalse, 0, reg_match, 0),
+                                Some(case_clause.span),
+                            );
+                            self.allocator.free_temp(reg_match);
+                            case_failure_jumps.push(fail_jump as usize);
+                        }
+                    } else {
+                        let type_name = self.get_lexeme(target_type.span()).to_string();
+                        let simple_type_name =
+                            type_name.rsplit(['.', ':']).next().unwrap_or(&type_name);
+                        let vtable_id = self
+                            .class_layouts
+                            .and_then(|layouts| {
+                                layouts
+                                    .get(&type_name)
+                                    .or_else(|| layouts.get(simple_type_name))
+                            })
+                            .map(|layout| layout.vtable_id)
+                            .unwrap_or(0);
+
+                        let reg_match = self.allocator.alloc_temp()?;
+                        self.emit_instruction(
+                            Instruction::format_a(
+                                OpCode::Instanceof,
+                                0,
+                                reg_match,
+                                reg_discriminant,
+                                vtable_id as u16,
+                            ),
+                            Some(case_clause.span),
+                        );
+                        let fail_jump = self.emit_instruction(
+                            Instruction::format_c(OpCode::JumpIfFalse, 0, reg_match, 0),
+                            Some(case_clause.span),
+                        );
+                        self.allocator.free_temp(reg_match);
+                        case_failure_jumps.push(fail_jump as usize);
+                    }
+                }
+
+                Expression::TupleCreation { elements, .. } => {
+                    for (element_index, element_expr) in elements.iter().enumerate() {
+                        let reg_disc_element = self.allocator.alloc_temp()?;
+                        self.emit_instruction(
+                            Instruction::format_a(
+                                OpCode::GetTuple,
+                                0,
+                                reg_disc_element,
+                                reg_discriminant,
+                                element_index as u16,
+                            ),
+                            Some(case_clause.span),
+                        );
+
+                        let reg_case_element = self.emit_expression(element_expr, None)?;
+                        let element_type = self.query_type(element_expr.span());
+                        let comparison_opcode = if matches!(
+                            &element_type,
+                            Type::Class { symbol_name, .. }
+                                if symbol_name == "std::string"
+                                    || symbol_name == "std.string"
+                                    || symbol_name == "string"
+                        ) {
+                            OpCode::EqString
+                        } else if matches!(
+                            &element_type,
+                            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                        ) {
+                            OpCode::EqI64
+                        } else if element_type.is_floating_point() {
+                            OpCode::EqF64
+                        } else if matches!(&element_type, Type::Primitive(PrimitiveKind::Bool)) {
+                            OpCode::EqBool
+                        } else {
+                            OpCode::EqI32
+                        };
+
+                        let reg_compare = self.allocator.alloc_temp()?;
+                        self.emit_instruction(
+                            Instruction::format_a(
+                                comparison_opcode,
+                                0,
+                                reg_compare,
+                                reg_disc_element,
+                                reg_case_element,
+                            ),
+                            Some(case_clause.span),
+                        );
+                        self.allocator.free_temp(reg_case_element);
+                        self.allocator.free_temp(reg_disc_element);
+
+                        let fail_jump = self.emit_instruction(
+                            Instruction::format_c(OpCode::JumpIfFalse, 0, reg_compare, 0),
+                            Some(case_clause.span),
+                        );
+                        self.allocator.free_temp(reg_compare);
+                        case_failure_jumps.push(fail_jump as usize);
+                    }
+                }
+
+                _ => {
+                    let reg_case_value = self.emit_expression(&case_clause.case_value, None)?;
+                    let reg_compare = self.allocator.alloc_temp()?;
+
+                    let is_class = matches!(
+                        &discriminant_type,
+                        Type::Class { symbol_name, .. }
+                            if symbol_name != "std::string"
+                                && symbol_name != "std.string"
+                                && symbol_name != "string"
+                    );
+
+                    if is_class {
+                        let symbol_name = match &discriminant_type {
+                            Type::Class { symbol_name, .. } => symbol_name,
+                            _ => unreachable!(),
+                        };
+                        let simple_class_name =
+                            symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+                        let colon_class_name = symbol_name.replace('.', "::");
+                        let dot_class_name = symbol_name.replace("::", ".");
+
+                        let mut operator_eq_candidates = Vec::new();
+                        let mut operator_ne_candidates = Vec::new();
+                        for prefix in [
+                            &colon_class_name,
+                            &dot_class_name,
+                            symbol_name,
+                            &simple_class_name.to_string(),
+                        ] {
+                            operator_eq_candidates.push(format!("{prefix}::operator_=="));
+                            operator_ne_candidates.push(format!("{prefix}::operator_!="));
+                        }
+
+                        let equal_function_id = self.function_ids.and_then(|ids| {
+                            operator_eq_candidates
+                                .iter()
+                                .find_map(|candidate| ids.get(candidate).copied())
+                        });
+                        let not_equal_function_id = self.function_ids.and_then(|ids| {
+                            operator_ne_candidates
+                                .iter()
+                                .find_map(|candidate| ids.get(candidate).copied())
+                        });
+
+                        if let Some(function_id) = equal_function_id {
+                            let window_size = 2;
+                            let arg_base = self.allocator.alloc_window(window_size)?;
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::Mov,
+                                    0,
+                                    arg_base,
+                                    reg_discriminant,
+                                    0,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::Mov,
+                                    0,
+                                    arg_base + 1,
+                                    reg_case_value,
+                                    0,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            self.emit_instruction(
+                                Instruction::format_call(
+                                    OpCode::CallDirect,
+                                    reg_compare,
+                                    function_id as u16,
+                                    arg_base,
+                                    window_size as u8,
+                                ),
+                                Some(case_clause.span),
+                            );
+                        } else if let Some(function_id) = not_equal_function_id {
+                            let window_size = 2;
+                            let arg_base = self.allocator.alloc_window(window_size)?;
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::Mov,
+                                    0,
+                                    arg_base,
+                                    reg_discriminant,
+                                    0,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::Mov,
+                                    0,
+                                    arg_base + 1,
+                                    reg_case_value,
+                                    0,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            self.emit_instruction(
+                                Instruction::format_call(
+                                    OpCode::CallDirect,
+                                    reg_compare,
+                                    function_id as u16,
+                                    arg_base,
+                                    window_size as u8,
+                                ),
+                                Some(case_clause.span),
+                            );
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::Not,
+                                    0,
+                                    reg_compare,
+                                    reg_compare,
+                                    0,
+                                ),
+                                Some(case_clause.span),
+                            );
+                        } else {
+                            self.emit_instruction(
+                                Instruction::format_a(
+                                    OpCode::EqRef,
+                                    0,
+                                    reg_compare,
+                                    reg_discriminant,
+                                    reg_case_value,
+                                ),
+                                Some(case_clause.span),
+                            );
+                        }
+                    } else {
+                        let comparison_opcode = if matches!(
+                            &discriminant_type,
+                            Type::Class { symbol_name, .. }
+                                if symbol_name == "std::string"
+                                    || symbol_name == "std.string"
+                                    || symbol_name == "string"
+                        ) {
+                            OpCode::EqString
+                        } else if matches!(
+                            &discriminant_type,
+                            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
+                        ) {
+                            OpCode::EqI64
+                        } else if discriminant_type.is_floating_point() {
+                            OpCode::EqF64
+                        } else if matches!(
+                            &discriminant_type,
+                            Type::Primitive(PrimitiveKind::Bool)
+                        ) {
+                            OpCode::EqBool
+                        } else if matches!(
+                            &case_clause.case_value,
+                            Expression::Literal {
+                                value: LiteralValue::Null,
+                                ..
+                            }
+                        ) {
+                            OpCode::EqRef
+                        } else {
+                            OpCode::EqI32
+                        };
+
+                        self.emit_instruction(
+                            Instruction::format_a(
+                                comparison_opcode,
+                                0,
+                                reg_compare,
+                                reg_discriminant,
+                                reg_case_value,
+                            ),
+                            Some(case_clause.span),
+                        );
+                    }
+
+                    self.allocator.free_temp(reg_case_value);
+
+                    let fail_jump = self.emit_instruction(
+                        Instruction::format_c(OpCode::JumpIfFalse, 0, reg_compare, 0),
+                        Some(case_clause.span),
+                    );
+                    self.allocator.free_temp(reg_compare);
+                    case_failure_jumps.push(fail_jump as usize);
+                }
+            }
+
+            for stmt in &case_clause.statements {
                 self.emit_statement(stmt, loop_stack)?;
             }
 
             let exit_jump = self.emit_instruction(
                 Instruction::format_c(OpCode::Jump, 0, 0, 0),
-                Some(case.span),
+                Some(case_clause.span),
             );
-            case_jump_patches.push(exit_jump as usize);
+            case_exit_patches.push(exit_jump as usize);
 
             let next_case_pc = self.function.instructions.len() as i32;
-            let offset = next_case_pc - next_case_jump as i32;
-            self.patch_jump_offset(next_case_jump as usize, offset);
+            for fail_jump_pc in case_failure_jumps {
+                let offset = next_case_pc - fail_jump_pc as i32;
+                self.patch_jump_offset(fail_jump_pc, offset);
+            }
         }
 
         if let Some(default_stmts) = &switch_stmt.default_case {
@@ -465,18 +761,18 @@ impl<'a> Emitter<'a> {
         }
 
         let exit_pc = self.function.instructions.len() as i32;
-        for patch in case_jump_patches {
+        for patch in case_exit_patches {
             let offset = exit_pc - patch as i32;
             self.patch_jump_offset(patch, offset);
         }
 
-        switch_break_ctx = loop_stack.pop().unwrap_or_default();
-        for break_pc in switch_break_ctx.break_patches {
+        switch_break_context = loop_stack.pop().unwrap_or_default();
+        for break_pc in switch_break_context.break_patches {
             let offset = exit_pc - break_pc as i32;
             self.patch_jump_offset(break_pc, offset);
         }
 
-        self.allocator.free_temp(r_disc);
+        self.allocator.free_temp(reg_discriminant);
         Ok(())
     }
 
