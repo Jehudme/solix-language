@@ -1960,13 +1960,7 @@ impl VirtualMachine {
             let Some(opcode) = OpCode::from_raw_u8(raw_opcode) else {
                 return Err(invalid_opcode_error(pc as u32, raw_opcode));
             };
-            let (call_func_id, call_dst, call_arg_base, call_arg_count, call_closure): (
-                u32,
-                u16,
-                usize,
-                usize,
-                Option<std::num::NonZeroU32>,
-            ) = 'call_dispatch: {
+            let (call_func_id, call_closure_addr): (u32, u32) = 'call_dispatch: {
                 match opcode {
                     // =============================================================
                     // 0x00 .. 0x07: Constants & Register Movement
@@ -2597,13 +2591,7 @@ impl VirtualMachine {
                     // 0x60 .. 0x69: Function Invocations, Returns & Exit
                     // =============================================================
                     OpCode::CallDirect => {
-                        break 'call_dispatch (
-                            inst.call_target() as u32,
-                            inst.call_dst(),
-                            inst.arg_base() as usize,
-                            inst.arg_count() as usize,
-                            None,
-                        );
+                        break 'call_dispatch (inst.call_target() as u32, 0);
                     }
 
                     OpCode::CallNativeDirect => {
@@ -2647,13 +2635,7 @@ impl VirtualMachine {
                                 return Err(self.resolve_virtual_slot_error(vtable_id, slot));
                             }
                         };
-                        break 'call_dispatch (
-                            global_func_id,
-                            inst.call_dst(),
-                            arg_base,
-                            inst.arg_count() as usize,
-                            None,
-                        );
+                        break 'call_dispatch (global_func_id, 0);
                     }
 
                     OpCode::CallInterface => {
@@ -2682,13 +2664,7 @@ impl VirtualMachine {
                                 self.resolve_interface_slot_slow(vtable_id, iface_id as u32, slot)?
                             }
                         };
-                        break 'call_dispatch (
-                            global_func_id,
-                            inst.call_dst(),
-                            arg_base,
-                            inst.arg_count() as usize,
-                            None,
-                        );
+                        break 'call_dispatch (global_func_id, 0);
                     }
 
                     OpCode::CallSymbol => {
@@ -2713,13 +2689,7 @@ impl VirtualMachine {
                         match *callable_ref {
                             Value::Null => return Err(VmTrap::null_reference()),
                             Value::FnPtr(global_func_id) => {
-                                break 'call_dispatch (
-                                    global_func_id,
-                                    inst.call_dst(),
-                                    inst.arg_base() as usize,
-                                    inst.arg_count() as usize,
-                                    None,
-                                );
+                                break 'call_dispatch (global_func_id, 0);
                             }
                             Value::Ref(closure_addr) => {
                                 if closure_addr == 0 {
@@ -2727,13 +2697,7 @@ impl VirtualMachine {
                                 }
                                 let global_func_id =
                                     read_heap_u32_fast(&self.heap.buffer, closure_addr)?;
-                                break 'call_dispatch (
-                                    global_func_id,
-                                    inst.call_dst(),
-                                    inst.arg_base() as usize,
-                                    inst.arg_count() as usize,
-                                    std::num::NonZeroU32::new(closure_addr),
-                                );
+                                break 'call_dispatch (global_func_id, closure_addr);
                             }
                             _ => {
                                 return Err(non_callable_type_mismatch_error(callable_ref));
@@ -3076,42 +3040,23 @@ impl VirtualMachine {
                             } else {
                                 // SAFETY: elem_offset + elem_size <= heap_len verified above.
                                 let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
+                                let primitive_val = val.to_primitive_u64();
                                 match elem_size {
-                                    1 => {
-                                        let byte_val = match val {
-                                            Value::Bool(flag) => u8::from(flag),
-                                            Value::I32(num_val) => num_val as u8,
-                                            _ => val.to_primitive_u64() as u8,
-                                        };
-                                        unsafe {
-                                            *elem_ptr = byte_val;
-                                        }
-                                    }
-                                    4 => {
-                                        let word_val = match val {
-                                            Value::I32(num_val) => num_val as u32,
-                                            _ => val.to_primitive_u64() as u32,
-                                        };
-                                        unsafe {
-                                            std::ptr::write_unaligned(
-                                                elem_ptr.cast::<u32>(),
-                                                word_val.to_le(),
-                                            );
-                                        }
-                                    }
-                                    _ => {
-                                        let qword_val = match val {
-                                            Value::F64(float_val) => float_val.to_bits(),
-                                            Value::I64(num_val) => num_val as u64,
-                                            _ => val.to_primitive_u64(),
-                                        };
-                                        unsafe {
-                                            std::ptr::write_unaligned(
-                                                elem_ptr.cast::<u64>(),
-                                                qword_val.to_le(),
-                                            );
-                                        }
-                                    }
+                                    1 => unsafe {
+                                        *elem_ptr = primitive_val as u8;
+                                    },
+                                    4 => unsafe {
+                                        std::ptr::write_unaligned(
+                                            elem_ptr.cast::<u32>(),
+                                            (primitive_val as u32).to_le(),
+                                        );
+                                    },
+                                    _ => unsafe {
+                                        std::ptr::write_unaligned(
+                                            elem_ptr.cast::<u64>(),
+                                            primitive_val.to_le(),
+                                        );
+                                    },
                                 }
                             }
                         }
@@ -3420,6 +3365,10 @@ impl VirtualMachine {
                 continue 'dispatch_loop;
             };
 
+            let call_dst = inst.call_dst();
+            let call_arg_base = inst.arg_base() as usize;
+            let call_arg_count = inst.arg_count() as usize;
+
             let caller_frame = self.current_frame_mut_fast()?;
             caller_frame.pc = pc as u32;
             let caller_reg_base = caller_frame.register_base as usize;
@@ -3438,12 +3387,14 @@ impl VirtualMachine {
                     (caller_frame_end, call_arg_count > 0)
                 };
             let required_regs = new_reg_base + num_regs;
+            let frame_len = self.call_frames.len();
 
             if !span.is_native
                 && !span.has_references
                 && required_regs <= self.register_stack.len()
                 && call_arg_count <= 2
-                && self.call_frames.len() < self.context.options.max_call_stack_depth
+                && frame_len < self.call_frames.capacity()
+                && frame_len < self.context.options.max_call_stack_depth
             {
                 if needs_arg_copy {
                     // SAFETY: caller_arg_start..caller_arg_start + call_arg_count is in caller frame
@@ -3456,7 +3407,7 @@ impl VirtualMachine {
                         }
                     }
                 }
-                // SAFETY: new_reg_base + num_regs <= register_stack.len() checked above.
+                // SAFETY: new_reg_base + num_regs <= register_stack.len() and frame_len < call_frames.capacity() checked above.
                 reg_base = unsafe { self.register_stack.as_mut_ptr().add(new_reg_base) };
                 let mut new_frame = CallFrame::new(
                     call_func_id,
@@ -3467,9 +3418,17 @@ impl VirtualMachine {
                     span.func_id_offset,
                     call_dst,
                 );
-                new_frame.active_closure = call_closure;
-                self.call_frames.push(new_frame);
-                self.peak_call_stack_depth = self.peak_call_stack_depth.max(self.call_frames.len());
+                new_frame.active_closure = std::num::NonZeroU32::new(call_closure_addr);
+                let new_len = frame_len + 1;
+                // SAFETY: frame_len < self.call_frames.capacity() verified above and CallFrame is Copy.
+                unsafe {
+                    self.call_frames
+                        .as_mut_ptr()
+                        .add(frame_len)
+                        .write(new_frame);
+                    self.call_frames.set_len(new_len);
+                }
+                self.peak_call_stack_depth = self.peak_call_stack_depth.max(new_len);
                 inst_ptr = span.inst_ptr;
                 inst_len = span.inst_len;
                 pc = 0;
@@ -3483,7 +3442,7 @@ impl VirtualMachine {
                     caller_arg_start,
                     call_arg_count,
                 )?;
-                if let Some(closure_nonnull) = call_closure
+                if let Some(closure_nonnull) = std::num::NonZeroU32::new(call_closure_addr)
                     && !span.is_native
                     && let Some(new_frame) = self.call_frames.last_mut()
                 {

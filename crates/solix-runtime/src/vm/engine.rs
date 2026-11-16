@@ -199,7 +199,7 @@ impl VirtualMachine {
             const_pool_cache,
             interned_string_addrs,
             register_stack: vec![Value::Null; 1024],
-            call_frames: Vec::with_capacity(64),
+            call_frames: Vec::with_capacity(512),
             halted: false,
             statics_initialized: false,
             is_shut_down: false,
