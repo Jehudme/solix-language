@@ -112,6 +112,22 @@ class TestRunner {
 }
 ```
 
+#### Generated Native Bridge (`natives/<project_name>_bridge/Cargo.toml`)
+```toml
+[package]
+name = "<project_name>_bridge"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solix-ffi = ">=1.1.3, <=1.2.0"
+```
+
 ### 2. Library Project (`--lib`)
 
 Executing `solix new my_lib --lib`:
