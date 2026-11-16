@@ -59,20 +59,22 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 ### 2.4. Optimization Phase (`Optimizer`)
 - **Input**: Semantically validated AST.
 - **Source Module**: [`crates/solix-compilation/src/phases/optimizer/mod.rs`](../../crates/solix-compilation/src/phases/optimizer/mod.rs)
-- **Output**: Optimized AST and pruned call graphs.
+- **Output**: Optimized AST, pruned call graphs, escape-analyzed bytecode, and fused instruction streams.
 - **Responsibilities**:
-  - Performs AST-level small function inlining (`ast_inliner.rs`) for leaf methods below configurable node count thresholds.
-  - Eliminates dead code branches following unconditionally terminating statements (`return`, `throw`).
-  - Constant folds compile-time arithmetic expressions.
+  - **AST Inlining & Simplification**: Performs AST-level small function inlining (`ast_inliner.rs`), dead code elimination after unconditionally terminating statements (`return`, `throw`), and compile-time constant folding.
+  - **Escape Analysis & Loop-Scoped SRA**: Classifies heap allocations (`escape_analysis.rs`) and performs Scalar Replacement of Aggregates (SRA) for both function-local objects and loop-scoped allocations whose lifetime is bounded within a single loop iteration (while rejecting loop-carried aliases), forwards pure getter calls during SRA, and elides redundant `IncRef`/`DecRef` pairs (`apply_arc_elision`).
+  - **Convergent Liveness Peephole & Constant Hoisting**: Runs fixed-point CFG-liveness-backed peephole passes (`bytecode_optimizer.rs`) using `is_dead_after_use` / `is_single_use_and_dead_after` to coalesce `Op + Mov` sequences and fuse `JumpIf*I32` / `AddI32Imm` / `SubI32Imm` superinstructions even across reused scratch registers, hoists loop-invariant constants (`LoadI32`, `LoadI64`, `LoadF64`, `LoadConst`) above loop headers (respecting call-argument windows and preserving live reference registers across potentially throwing instructions), and elides `DecRef` on immortal string constants (`elide_immortal_const_decref`).
 
 ### 2.5. Bytecode Emission (`Emitter`)
 - **Input**: Bound and optimized AST.
 - **Source Module**: [`crates/solix-compilation/src/phases/emitter/emitter.rs`](../../crates/solix-compilation/src/phases/emitter/emitter.rs)
 - **Output**: `CompiledProgram` containing function bytecode streams, constant pool, and VTable definitions.
 - **Responsibilities**:
-  - Allocates virtual registers via graph coloring / linear scan allocator (`register_allocator.rs`).
+  - Allocates virtual registers via liveness-aware scratch reuse and register allocation (`register_allocator.rs`).
+  - Emits statement expressions and loop updates directly into target/discarded registers when values are unused (`control_flow.rs`), avoiding redundant trailing `Mov` instructions.
+  - Devirtualizes non-overridden concrete instance method calls directly to `OpCode::CallDirect` via class hierarchy analysis, while keeping `CallVirtual` for `virtual` and `override` dispatch.
   - Generates 64-bit fixed-width register instructions (`Format A`, `Format B`, `Format C`, `Format Call`).
-  - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges.
+  - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges and `try_ref_regs`.
   - Constructs constant tables for strings, 64-bit floats, and large integers.
 
 ### 2.6. Binary Packaging & Serialization

@@ -110,12 +110,12 @@ Used for static, direct, and virtual function dispatch:
 ### 3.3. Bitwise & Logic Operations (`0x21` .. `0x2F`)
 | Opcode Hex | Name | Format | Operands | Description |
 |---|---|---|---|---|
-| `0x21` | `Band` | A | `dst, src1, src2` | Bitwise AND. |
-| `0x22` | `Bor` | A | `dst, src1, src2` | Bitwise OR. |
-| `0x23` | `Bxor` | A | `dst, src1, src2` | Bitwise XOR. |
-| `0x24` | `Bnot` | A | `dst, src1` | Bitwise NOT. |
-| `0x25` | `Shl` | A | `dst, src1, src2` | Bitwise left shift. |
-| `0x26` | `Shr` | A | `dst, src1, src2` | Arithmetic right shift. |
+| `0x21` | `Band` | A | `dst, src1, src2` | Bitwise AND (preserves `I32` when inputs are `I32`). |
+| `0x22` | `Bor` | A | `dst, src1, src2` | Bitwise OR (preserves `I32` when inputs are `I32`). |
+| `0x23` | `Bxor` | A | `dst, src1, src2` | Bitwise XOR (preserves `I32` when inputs are `I32`). |
+| `0x24` | `Bnot` | A | `dst, src1` | Bitwise NOT (preserves `I32` when input is `I32`). |
+| `0x25` | `Shl` | A | `dst, src1, src2` | Bitwise left shift (preserves `I32` when inputs are `I32`). |
+| `0x26` | `Shr` | A | `dst, src1, src2` | Arithmetic right shift (preserves `I32` when inputs are `I32`). |
 
 ### 3.4. Relational & Equality Comparisons (`0x30` .. `0x47`)
 | Opcode Hex | Name | Format | Operands | Description |
@@ -203,3 +203,14 @@ The virtual machine supports zero-overhead interactive debugging via the `VmDebu
   - `VirtualMachine::inspect_frame_locals(frame_index)`: inspects all active named parameters and local variables in a call frame using `LocalVariableDebugInfo`.
   - `VirtualMachine::inspect_object_fields(heap_address)`: inspects all declared fields of an object using `CompiledClass.field_names` looked up from `vtable_lookup`.
   - `VirtualMachine::inspect_array_elements(heap_address)`: inspects indexed elements of a heap-allocated array (`BlockTag::ArrayRef`), extracting elemental types and runtime values for DAP debugger visualization.
+
+---
+
+## 8. Fast-Path Dispatch & Execution Optimizations
+
+The production interpreter loop (`run_fast_internal::<false>`) implements several structural optimizations while preserving exact ISA semantics:
+
+- **Cross-Crate Opcode & Operand Inlining**: `Instruction` field accessors (`raw_opcode`, `dst`, `src1`, `src2`, `imm32`, `jump_offset`, `call_target`, `arg_base`, `arg_count`) and `OpCode::from_raw_u8` (`const fn` table decode) are `#[inline(always)]` in `solix-common`, alongside hot `Value` accessors in `solix-runtime`.
+- **Stateless Closure Encoding (`PackClosure`)**: Closures with `cap_count == 0` encode directly as tagged `Value::FnPtr(target_lambda_id)` values without heap allocation or `DecRef` cleanup.
+- **Direct Window Push & Lazy Errors**: `push_frame_window` pushes call frames and returns cached `(inst_ptr, inst_len, static_base, binary_id, reg_base)` directly without redundant frame lookups, and error constructors use lazy `.ok_or_else(...)` / `#[cold] #[inline(never)]` helpers to avoid `RuntimeError` drop glue in hot paths.
+- **Cold-Path Outlining**: Infrequent or string/heap-heavy handlers (`CallSymbol`, `CallExtern`, `CallInterface`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`, `Throw`, tuple/cast/heap-closure operations, native callback marshaling, and `release_reference_cold`) execute out-of-line from the main dispatch loop to preserve L1 instruction cache locality and minimize interpreter stack frame size.
