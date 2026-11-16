@@ -41,7 +41,7 @@ fn test_solix_c_value_scalar_encodings_and_decodings() {
     assert_eq!(large_i64.as_i64(), 9_223_372_036_854_775_000);
 
     // 5. 64-bit floating point numbers
-    let pi_f64 = SolixCValue::from_f64(3.141592653589793);
+    let pi_f64 = SolixCValue::from_f64(std::f64::consts::PI);
     assert_eq!(pi_f64.tag, TAG_F64);
     assert!((pi_f64.as_f64() - std::f64::consts::PI).abs() < 1e-12);
 
