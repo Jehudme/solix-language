@@ -893,23 +893,22 @@ impl WorkspaceManager {
         };
 
         let mut dependency_specs = Vec::new();
-        if let Some(ref manifest_file_path) = manifest_path {
-            if let Ok(project_manifest) =
+        if let Some(ref manifest_file_path) = manifest_path
+            && let Ok(project_manifest) =
                 solix_common::project::ProjectManifest::from_file(manifest_file_path)
-            {
-                for resolved_dependency in project_manifest.resolved_dependencies() {
-                    if let Ok(parsed_version) =
-                        solix_common::solver::PackageVersion::parse(&resolved_dependency.version)
-                    {
-                        let mut requirement = solix_common::solver::DependencyRequirement::new(
-                            resolved_dependency.package_name,
-                            parsed_version,
-                        );
-                        if !resolved_dependency.build_profile.is_empty() {
-                            requirement = requirement.with_profile(resolved_dependency.build_profile);
-                        }
-                        dependency_specs.push(requirement);
+        {
+            for resolved_dependency in project_manifest.resolved_dependencies() {
+                if let Ok(parsed_version) =
+                    solix_common::solver::PackageVersion::parse(&resolved_dependency.version)
+                {
+                    let mut requirement = solix_common::solver::DependencyRequirement::new(
+                        resolved_dependency.package_name,
+                        parsed_version,
+                    );
+                    if !resolved_dependency.build_profile.is_empty() {
+                        requirement = requirement.with_profile(resolved_dependency.build_profile);
                     }
+                    dependency_specs.push(requirement);
                 }
             }
         }

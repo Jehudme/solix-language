@@ -521,3 +521,20 @@ fn test_client_module_solver_profile_fallback() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_unknown_profile_rejected() {
+    let toml = r#"
+[configuration]
+name = "audit_app"
+version = "1.0.0"
+
+[profiles.release]
+entrypoint = "Main::main"
+"#;
+    let manifest = ProjectManifest::from_toml_str(toml).expect("parse manifest");
+    let unknown_result = manifest.resolve_profile("nonexistent");
+    assert!(unknown_result.is_err());
+    let err_msg = format!("{:?}", unknown_result.err().unwrap());
+    assert!(err_msg.contains("Unknown build profile 'nonexistent'"));
+}

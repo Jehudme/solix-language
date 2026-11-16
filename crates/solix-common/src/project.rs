@@ -324,6 +324,18 @@ impl ProjectManifest {
             });
         }
 
+        if target_profile != "release"
+            && target_profile != "debug"
+            && target_profile != "test"
+            && !self.profiles.contains_key(target_profile)
+        {
+            return Err(EmissionError::ContainerSerializationFailed {
+                reason: format!(
+                    "Unknown build profile '{target_profile}'; expected 'debug', 'release', 'test', or a profile defined in manifest.toml"
+                ),
+            });
+        }
+
         let mut visited_profiles: Vec<String> = Vec::new();
         let mut resolution_chain: Vec<String> = Vec::new();
         let mut current_profile_name = target_profile.to_string();
