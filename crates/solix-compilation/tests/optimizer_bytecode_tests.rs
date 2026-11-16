@@ -433,10 +433,9 @@ fn test_negative_nullable_receiver_retains_call_virtual_and_traps() {
         "Nullable receiver must retain CallVirtual null-check semantics"
     );
 
-    let runtime_context = RuntimeContext::new(
-        RuntimeOptions::new().with_binary(artifacts.program.clone()),
-    )
-    .expect("RuntimeContext creation failed");
+    let runtime_context =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(artifacts.program.clone()))
+            .expect("RuntimeContext creation failed");
     let mut virtual_machine = VirtualMachine::new(runtime_context);
     let runtime_err = virtual_machine
         .run()

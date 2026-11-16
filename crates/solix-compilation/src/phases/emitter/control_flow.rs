@@ -666,13 +666,7 @@ impl<'a> Emitter<'a> {
                                 Some(case_clause.span),
                             );
                             self.emit_instruction(
-                                Instruction::format_a(
-                                    OpCode::Not,
-                                    0,
-                                    reg_compare,
-                                    reg_compare,
-                                    0,
-                                ),
+                                Instruction::format_a(OpCode::Not, 0, reg_compare, reg_compare, 0),
                                 Some(case_clause.span),
                             );
                         } else {
@@ -703,10 +697,8 @@ impl<'a> Emitter<'a> {
                             OpCode::EqI64
                         } else if discriminant_type.is_floating_point() {
                             OpCode::EqF64
-                        } else if matches!(
-                            &discriminant_type,
-                            Type::Primitive(PrimitiveKind::Bool)
-                        ) {
+                        } else if matches!(&discriminant_type, Type::Primitive(PrimitiveKind::Bool))
+                        {
                             OpCode::EqBool
                         } else if matches!(
                             &case_clause.case_value,

@@ -183,7 +183,11 @@ fn analyze_forwarding_getter(getter_function: &CompiledFunction) -> Option<u16> 
 }
 
 /// Decodes jump/branch target PC if `instruction` is any branch/jump within `[0..=inst_count]`.
-fn decode_branch_target(instruction: &Instruction, pc_index: usize, inst_count: usize) -> Option<usize> {
+fn decode_branch_target(
+    instruction: &Instruction,
+    pc_index: usize,
+    inst_count: usize,
+) -> Option<usize> {
     let raw_opcode = instruction.raw_opcode();
     if raw_opcode == OpCode::Jump as u8
         || raw_opcode == OpCode::JumpIfTrue as u8
@@ -701,9 +705,9 @@ pub fn classify_allocations(
                     if let Some(target_pc) = jump_targets[pre_pc]
                         && target_pc > instruction_index
                         && target_pc <= outer_back
-                        && ever_aliased_registers
-                            .iter()
-                            .any(|&reg| is_reg_read_before_write_from(function, &jump_targets, target_pc, reg))
+                        && ever_aliased_registers.iter().any(|&reg| {
+                            is_reg_read_before_write_from(function, &jump_targets, target_pc, reg)
+                        })
                     {
                         overall_category = EscapeCategory::GlobalEscape;
                         break;
@@ -730,7 +734,12 @@ pub fn classify_allocations(
                         if let Some(target_pc) = jump_targets[body_pc]
                             && target_pc > outer_back
                             && ever_aliased_registers.iter().any(|&reg| {
-                                is_reg_read_before_write_from(function, &jump_targets, target_pc, reg)
+                                is_reg_read_before_write_from(
+                                    function,
+                                    &jump_targets,
+                                    target_pc,
+                                    reg,
+                                )
                             })
                         {
                             overall_category = EscapeCategory::GlobalEscape;
@@ -751,10 +760,7 @@ pub fn classify_allocations(
                 }
             }
 
-            allocation_categories.insert(
-                instruction_index,
-                (allocated_register, overall_category),
-            );
+            allocation_categories.insert(instruction_index, (allocated_register, overall_category));
         }
     }
 
@@ -854,9 +860,11 @@ fn try_scalar_replace_one(
 
     // Validate constructor argument producers if present
     let mut ctor_plan: Vec<(u16, Option<(usize, Instruction)>)> = Vec::new();
-    if let (Some(ctor_base), Some(field_to_param), Some(ctor_pc)) =
-        (constructor_arg_base, &ctor_field_to_param, constructor_call_pc)
-    {
+    if let (Some(ctor_base), Some(field_to_param), Some(ctor_pc)) = (
+        constructor_arg_base,
+        &ctor_field_to_param,
+        constructor_call_pc,
+    ) {
         let mut sorted_offsets: Vec<u16> = field_to_param.keys().copied().collect();
         sorted_offsets.sort_unstable();
         let mut missing_writer_count = 0;
@@ -890,11 +898,11 @@ fn try_scalar_replace_one(
         }
     }
 
-        let mut last_use_or_write_pc = allocation_pc;
-        let mut sim_check_aliases = HashSet::new();
-        sim_check_aliases.insert(allocated_register);
-        let mut can_finish = true;
-        for inspection_index in (allocation_pc + 1)..rewrite_limit {
+    let mut last_use_or_write_pc = allocation_pc;
+    let mut sim_check_aliases = HashSet::new();
+    sim_check_aliases.insert(allocated_register);
+    let mut can_finish = true;
+    for inspection_index in (allocation_pc + 1)..rewrite_limit {
         let inst = function.instructions[inspection_index];
         let raw_opcode = inst.raw_opcode();
 
@@ -1013,9 +1021,11 @@ fn try_scalar_replace_one(
     // Phase B: Apply scalar replacement mutations cleanly
     let mut field_values: HashMap<u16, u16> = HashMap::new();
     let mut ignored_ctor_writer_pcs: HashSet<usize> = HashSet::new();
-    if let (Some(ctor_base), Some(field_to_param), Some(ctor_pc)) =
-        (constructor_arg_base, &ctor_field_to_param, constructor_call_pc)
-    {
+    if let (Some(ctor_base), Some(field_to_param), Some(ctor_pc)) = (
+        constructor_arg_base,
+        &ctor_field_to_param,
+        constructor_call_pc,
+    ) {
         for (offset, found_writer) in ctor_plan {
             let dedicated_register = if reuse_alloc_reg_as_single_field {
                 allocated_register
@@ -1036,13 +1046,8 @@ fn try_scalar_replace_one(
             } else {
                 let param_index = field_to_param[&offset];
                 let argument_register = ctor_base + param_index;
-                function.instructions[ctor_pc] = Instruction::format_a(
-                    OpCode::Mov,
-                    0,
-                    dedicated_register,
-                    argument_register,
-                    0,
-                );
+                function.instructions[ctor_pc] =
+                    Instruction::format_a(OpCode::Mov, 0, dedicated_register, argument_register, 0);
             }
         }
     }
@@ -1082,14 +1087,17 @@ fn try_scalar_replace_one(
             let dst_reg = current_instruction.dst();
             if rewrite_aliases.contains(&src_reg) {
                 rewrite_aliases.insert(dst_reg);
-                function.instructions[current_index] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                function.instructions[current_index] =
+                    Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             } else {
                 rewrite_aliases.remove(&dst_reg);
             }
             continue;
         }
 
-        if raw_opcode == OpCode::SetField as u8 && rewrite_aliases.contains(&current_instruction.src1()) {
+        if raw_opcode == OpCode::SetField as u8
+            && rewrite_aliases.contains(&current_instruction.src1())
+        {
             let offset = current_instruction.src2();
             let value_register = current_instruction.dst();
             let field_reg = *field_values.entry(offset).or_insert_with(|| {
@@ -1107,7 +1115,9 @@ fn try_scalar_replace_one(
             continue;
         }
 
-        if raw_opcode == OpCode::GetField as u8 && rewrite_aliases.contains(&current_instruction.src1()) {
+        if raw_opcode == OpCode::GetField as u8
+            && rewrite_aliases.contains(&current_instruction.src1())
+        {
             let offset = current_instruction.src2();
             let destination_register = current_instruction.dst();
             if let Some(&source_value_register) = field_values.get(&offset) {
@@ -1138,13 +1148,8 @@ fn try_scalar_replace_one(
                     function.instructions[current_index] =
                         Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
                 } else {
-                    function.instructions[current_index] = Instruction::format_a(
-                        OpCode::Mov,
-                        0,
-                        call_dst,
-                        source_value_register,
-                        0,
-                    );
+                    function.instructions[current_index] =
+                        Instruction::format_a(OpCode::Mov, 0, call_dst, source_value_register, 0);
                 }
             }
             rewrite_aliases.remove(&call_dst);
@@ -1192,7 +1197,8 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
             let target_register = function.instructions[start_index].dst();
 
             let mut matching_dec_index = None;
-            for forward_index in start_index + 1..std::cmp::min(start_index + 32, instruction_count) {
+            for forward_index in start_index + 1..std::cmp::min(start_index + 32, instruction_count)
+            {
                 let forward_inst = function.instructions[forward_index];
                 let forward_raw = forward_inst.raw_opcode();
 

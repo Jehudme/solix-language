@@ -1100,29 +1100,17 @@ impl VirtualMachine {
             36 => {
                 let is_slxpac = self.context.options.container_kind.as_deref() == Some("slxpac")
                     || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxpac");
-                if is_slxpac {
-                    1
-                } else {
-                    0
-                }
+                if is_slxpac { 1 } else { 0 }
             }
             37 => {
                 let is_slxarc = self.context.options.container_kind.as_deref() == Some("slxarc")
                     || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxarc");
-                if is_slxarc {
-                    1
-                } else {
-                    0
-                }
+                if is_slxarc { 1 } else { 0 }
             }
             38 => {
                 let is_slxb = self.context.options.container_kind.as_deref() == Some("slxb")
                     || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxb");
-                if is_slxb {
-                    1
-                } else {
-                    0
-                }
+                if is_slxb { 1 } else { 0 }
             }
             39 => {
                 if self.safe_mode {
@@ -1155,8 +1143,7 @@ impl VirtualMachine {
             46 => self.pure_execution_time_ns / 1_000_000,
             47 => self.pure_execution_time_ns / 1_000_000,
             48 => {
-                let statm_content =
-                    std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+                let statm_content = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
                 let tokens: Vec<&str> = statm_content.split_whitespace().collect();
                 tokens
                     .get(1)
@@ -1165,8 +1152,7 @@ impl VirtualMachine {
                     * 4096
             }
             49 => {
-                let statm_content =
-                    std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+                let statm_content = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
                 let tokens: Vec<&str> = statm_content.split_whitespace().collect();
                 tokens
                     .first()
@@ -1201,8 +1187,7 @@ impl VirtualMachine {
                 .unwrap_or(1),
             53 => 4096,
             54 => {
-                let meminfo_content =
-                    std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                let meminfo_content = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
                 for mem_line in meminfo_content.lines() {
                     if mem_line.starts_with("MemTotal:") {
                         let mem_tokens: Vec<&str> = mem_line.split_whitespace().collect();
@@ -1216,8 +1201,7 @@ impl VirtualMachine {
                 16 * 1024 * 1024 * 1024
             }
             55 => {
-                let meminfo_content =
-                    std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                let meminfo_content = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
                 for mem_line in meminfo_content.lines() {
                     if mem_line.starts_with("MemAvailable:") {
                         let mem_tokens: Vec<&str> = mem_line.split_whitespace().collect();

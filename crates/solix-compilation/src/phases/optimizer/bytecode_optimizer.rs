@@ -211,25 +211,43 @@ fn optimize_peephole_passes(function: &mut CompiledFunction) {
                             &old_pc_to_stream_idx,
                         )
                     {
-                        let fused_opcode = match (current_raw, next_raw == OpCode::JumpIfFalse as u8)
-                        {
-                            (raw_val, true) if raw_val == OpCode::LtI32 as u8 => OpCode::JumpIfGteI32,
-                            (raw_val, false) if raw_val == OpCode::LtI32 as u8 => OpCode::JumpIfLtI32,
-                            (raw_val, true) if raw_val == OpCode::LteI32 as u8 => OpCode::JumpIfGtI32,
-                            (raw_val, false) if raw_val == OpCode::LteI32 as u8 => {
-                                OpCode::JumpIfLteI32
-                            }
-                            (raw_val, true) if raw_val == OpCode::GtI32 as u8 => OpCode::JumpIfLteI32,
-                            (raw_val, false) if raw_val == OpCode::GtI32 as u8 => OpCode::JumpIfGtI32,
-                            (raw_val, true) if raw_val == OpCode::GteI32 as u8 => OpCode::JumpIfLtI32,
-                            (raw_val, false) if raw_val == OpCode::GteI32 as u8 => {
-                                OpCode::JumpIfGteI32
-                            }
-                            (raw_val, true) if raw_val == OpCode::EqI32 as u8 => OpCode::JumpIfNeqI32,
-                            (raw_val, false) if raw_val == OpCode::EqI32 as u8 => OpCode::JumpIfEqI32,
-                            (raw_val, true) if raw_val == OpCode::NeqI32 as u8 => OpCode::JumpIfEqI32,
-                            _ => OpCode::JumpIfNeqI32,
-                        };
+                        let fused_opcode =
+                            match (current_raw, next_raw == OpCode::JumpIfFalse as u8) {
+                                (raw_val, true) if raw_val == OpCode::LtI32 as u8 => {
+                                    OpCode::JumpIfGteI32
+                                }
+                                (raw_val, false) if raw_val == OpCode::LtI32 as u8 => {
+                                    OpCode::JumpIfLtI32
+                                }
+                                (raw_val, true) if raw_val == OpCode::LteI32 as u8 => {
+                                    OpCode::JumpIfGtI32
+                                }
+                                (raw_val, false) if raw_val == OpCode::LteI32 as u8 => {
+                                    OpCode::JumpIfLteI32
+                                }
+                                (raw_val, true) if raw_val == OpCode::GtI32 as u8 => {
+                                    OpCode::JumpIfLteI32
+                                }
+                                (raw_val, false) if raw_val == OpCode::GtI32 as u8 => {
+                                    OpCode::JumpIfGtI32
+                                }
+                                (raw_val, true) if raw_val == OpCode::GteI32 as u8 => {
+                                    OpCode::JumpIfLtI32
+                                }
+                                (raw_val, false) if raw_val == OpCode::GteI32 as u8 => {
+                                    OpCode::JumpIfGteI32
+                                }
+                                (raw_val, true) if raw_val == OpCode::EqI32 as u8 => {
+                                    OpCode::JumpIfNeqI32
+                                }
+                                (raw_val, false) if raw_val == OpCode::EqI32 as u8 => {
+                                    OpCode::JumpIfEqI32
+                                }
+                                (raw_val, true) if raw_val == OpCode::NeqI32 as u8 => {
+                                    OpCode::JumpIfEqI32
+                                }
+                                _ => OpCode::JumpIfNeqI32,
+                            };
 
                         let reg_a = current_entry.instruction.src1();
                         let reg_b = current_entry.instruction.src2();
@@ -472,17 +490,18 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     let mut hoisted_any = false;
 
     for (header_pc, loop_end_pc) in ordered_headers {
-        let loop_has_frame_call = function.instructions[header_pc..=loop_end_pc]
-            .iter()
-            .any(|loop_inst| {
-                let loop_raw = loop_inst.raw_opcode();
-                loop_raw == OpCode::CallDirect as u8
-                    || loop_raw == OpCode::CallVirtual as u8
-                    || loop_raw == OpCode::CallInterface as u8
-                    || loop_raw == OpCode::CallCallable as u8
-                    || loop_raw == OpCode::CallSymbol as u8
-                    || loop_raw == OpCode::CallExtern as u8
-            });
+        let loop_has_frame_call =
+            function.instructions[header_pc..=loop_end_pc]
+                .iter()
+                .any(|loop_inst| {
+                    let loop_raw = loop_inst.raw_opcode();
+                    loop_raw == OpCode::CallDirect as u8
+                        || loop_raw == OpCode::CallVirtual as u8
+                        || loop_raw == OpCode::CallInterface as u8
+                        || loop_raw == OpCode::CallCallable as u8
+                        || loop_raw == OpCode::CallSymbol as u8
+                        || loop_raw == OpCode::CallExtern as u8
+                });
         if loop_has_frame_call {
             continue;
         }
@@ -549,7 +568,9 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
                 continue;
             };
 
-            let dead_after = if terminated_block && instruction_write_dst(&function.instructions[last_pc]) == Some(r_orig) {
+            let dead_after = if terminated_block
+                && instruction_write_dst(&function.instructions[last_pc]) == Some(r_orig)
+            {
                 true
             } else {
                 is_dead_after_use_raw(function, &old_pc_targets, last_pc, r_orig)
@@ -578,9 +599,11 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
             };
 
             for consumer_pc in consumer_pcs {
-                if let Some(rewritten) =
-                    rewrite_instruction_read_register(&function.instructions[consumer_pc], r_orig, hoisted_reg)
-                {
+                if let Some(rewritten) = rewrite_instruction_read_register(
+                    &function.instructions[consumer_pc],
+                    r_orig,
+                    hoisted_reg,
+                ) {
                     function.instructions[consumer_pc] = rewritten;
                 }
             }
@@ -596,7 +619,8 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     }
 
     // Rebuild instruction list with hoisted preheaders and exact forward vs back-edge targets
-    let mut rebuilt: Vec<(Instruction, Option<(usize, usize)>)> = Vec::with_capacity(inst_count + 16);
+    let mut rebuilt: Vec<(Instruction, Option<(usize, usize)>)> =
+        Vec::with_capacity(inst_count + 16);
     let sentinel_pc = u32::MAX;
     let mut old_pc_to_new_pc = vec![sentinel_pc; inst_count + 1];
     let mut preheader_start_pc: HashMap<usize, u32> = HashMap::new();
@@ -651,7 +675,11 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
 }
 
 /// Decodes a branch or jump instruction's absolute target PC within `[0..=inst_count]`.
-fn decode_jump_target(instruction: Instruction, pc_index: usize, inst_count: usize) -> Option<usize> {
+fn decode_jump_target(
+    instruction: Instruction,
+    pc_index: usize,
+    inst_count: usize,
+) -> Option<usize> {
     let raw_opcode = instruction.raw_opcode();
     if raw_opcode == OpCode::Jump as u8
         || raw_opcode == OpCode::JumpIfTrue as u8
@@ -671,7 +699,11 @@ fn decode_jump_target(instruction: Instruction, pc_index: usize, inst_count: usi
 }
 
 /// Rewrites the signed PC jump offset of a branch/jump instruction cleanly.
-fn relocate_jump_instruction(instruction: Instruction, new_pc: usize, target_new_pc: u32) -> Instruction {
+fn relocate_jump_instruction(
+    instruction: Instruction,
+    new_pc: usize,
+    target_new_pc: u32,
+) -> Instruction {
     let new_offset = (target_new_pc as i32) - (new_pc as i32);
     let raw_opcode = instruction.raw_opcode();
 
@@ -1156,8 +1188,7 @@ fn rewrite_instruction_read_register(
         ));
     }
 
-    if raw == OpCode::GetArray as u8
-        || (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+    if raw == OpCode::GetArray as u8 || (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
     {
         let new_src1 = if instruction.src1() == from_reg {
             to_reg

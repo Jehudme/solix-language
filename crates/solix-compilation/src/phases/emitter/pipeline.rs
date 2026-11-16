@@ -180,11 +180,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         HashMap::new()
     };
     let direct_method_targets = if let Some(artifacts) = &context.binding_artifacts {
-        build_direct_method_targets(
-            &artifacts.layouts,
-            &artifacts.symbol_table,
-            &sym_to_func,
-        )
+        build_direct_method_targets(&artifacts.layouts, &artifacts.symbol_table, &sym_to_func)
     } else {
         HashMap::new()
     };
@@ -2966,9 +2962,9 @@ fn build_direct_method_targets(
                 continue;
             }
 
-            let overridden_in_descendant = descendants.iter().any(|sub_layout| {
-                sub_layout.vtable_methods.get(slot_idx) != Some(&method_sym_id)
-            });
+            let overridden_in_descendant = descendants
+                .iter()
+                .any(|sub_layout| sub_layout.vtable_methods.get(slot_idx) != Some(&method_sym_id));
             if overridden_in_descendant {
                 continue;
             }

@@ -2898,8 +2898,8 @@ impl<'a> Emitter<'a> {
                     let target_type = self.query_type(target.span());
                     let needs_conv = target_type.is_floating_point()
                         && (value_type.is_signed_integer() || value_type.is_unsigned_integer());
-                    let direct_target = (!is_ref && !needs_conv && is_direct_eval_safe(value))
-                        .then_some(local_reg);
+                    let direct_target =
+                        (!is_ref && !needs_conv && is_direct_eval_safe(value)).then_some(local_reg);
 
                     let mut r_val = self.emit_expression(value, direct_target)?;
                     if needs_conv {
