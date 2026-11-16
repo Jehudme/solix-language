@@ -753,10 +753,17 @@ fn is_dead_after_use(
                 return false;
             }
 
+            if can_instruction_throw(raw) && function.reference_registers.contains(&reg) {
+                return false;
+            }
+
             if !function.exception_handlers.is_empty() && can_instruction_throw(raw) {
                 for handler in &function.exception_handlers {
                     let orig = entry.original_pc as u32;
                     if orig >= handler.try_start_pc && orig < handler.try_end_pc {
+                        if handler.try_ref_regs.contains(&reg) {
+                            return false;
+                        }
                         let handler_pc = handler.handler_pc as usize;
                         if handler_pc < old_pc_to_stream_idx.len() {
                             if let Some(h_idx) = old_pc_to_stream_idx[handler_pc]
@@ -868,10 +875,17 @@ fn is_dead_after_use_raw(
                 return false;
             }
 
+            if can_instruction_throw(raw) && function.reference_registers.contains(&reg) {
+                return false;
+            }
+
             if !function.exception_handlers.is_empty() && can_instruction_throw(raw) {
                 let cur_u32 = cur as u32;
                 for handler in &function.exception_handlers {
                     if cur_u32 >= handler.try_start_pc && cur_u32 < handler.try_end_pc {
+                        if handler.try_ref_regs.contains(&reg) {
+                            return false;
+                        }
                         let handler_pc = handler.handler_pc as usize;
                         if handler_pc < len {
                             worklist.push(handler_pc);
