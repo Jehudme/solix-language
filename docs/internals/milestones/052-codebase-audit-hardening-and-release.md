@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-052
 * **Target Version:** `v1.2.0`
 * **Milestone Branch:** `milestone/052-codebase-audit-hardening-and-release`
-* **Status:** ACTIVE
+* **Status:** COMPLETED
 * **Lead Architect:** Core Systems & Toolchain Infrastructure Team
 * **Target Delivery Date:** 2026-11-16
 * **Related Specifications:** [GL-0001](../../internals/guidelines/authoring-commits.md), [GL-0008](../../internals/guidelines/authoring-milestones.md), [GL-0011](../../internals/guidelines/language-conventions.md), [GL-0013](../../internals/guidelines/documentation-update-protocol.md), [SPEC-0001](../../spec/README.md)
@@ -56,3 +56,17 @@ Key objectives:
 4. First-party libraries and examples compile and run cleanly.
 5. All documentation passes automated drift and integrity verification (`scripts/verify_docs.py` and `scripts/doc_sync_check.py`).
 6. Production release tagged and verified.
+
+---
+
+## 4. Completed Deliverables & Audit Record
+
+* **Clippy & Code Quality Audit:** Resolved `clippy::approx_constant` in `solix-ffi` test suite and `clippy::collapsible_if` in `solix-lsp` workspace handler. All 8 workspace crates pass with zero warnings under `-D warnings`.
+* **Profile Resolution Hardening:** Added strict validation rejecting unknown build profile requests with descriptive errors and remediation hints in `solix-common` and `solix_build.py`. Added unit test `test_unknown_profile_rejected`.
+* **Native Scaffolding Version Flexibility:** Relaxed scaffolded bridge crate `solix-ffi` dependency constraint to `solix-ffi = ">=1.1.3, <=1.2.0"`, ensuring smooth resolution against both published crates.io releases and local development workspace builds.
+* **Full-Stack Verification:**
+  * Workspace test suite (`cargo test --workspace`): 100% passed.
+  * Standard library (`solixlib`): Native bridge compiled, bytecode emitted, and test suite executed cleanly with exit code 0.
+  * Breakout example (`examples/breakout`): Bytecode compiled and archive container packaged cleanly.
+  * VS Code Extension: Typechecked, bundled via esbuild, and packaged into `solix-language.vsix`.
+  * Documentation synchronization: 0 drift violations, 0 broken links, 100% GL-0011 compliance across 250 files.
