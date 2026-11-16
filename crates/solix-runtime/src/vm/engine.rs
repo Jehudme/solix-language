@@ -27,11 +27,27 @@ pub struct VmTelemetry {
     pub quickened_instructions_count: u64,
 }
 
+/// Compact 16-byte cached instruction slice header (`shl $4` indexing) for zero-overhead dispatch.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FunctionCodeSpan {
+    pub inst_ptr: *const Instruction,
+    pub inst_len: usize,
+}
+
+// SAFETY: `FunctionCodeSpan` points solely into `VirtualMachine.context.all_functions` instruction
+// buffers; `RuntimeContext` functions are never reallocated once a `VirtualMachine` is built, and
+// mutable patching takes `&mut VirtualMachine`.
+unsafe impl Send for FunctionCodeSpan {}
+// SAFETY: Shared references only read immutable instruction words when `&VirtualMachine` is shared.
+unsafe impl Sync for FunctionCodeSpan {}
+
 /// Register-based virtual machine execution coordinator.
 #[derive(Debug)]
 pub struct VirtualMachine {
     /// Active runtime context providing compiled code, constants, and layouts.
     pub context: RuntimeContext,
+    /// Cached 16-byte instruction slice descriptors indexed by global function id.
+    pub(crate) func_code: Vec<FunctionCodeSpan>,
     /// Byte-addressed virtual memory partition holding static variables and dynamic heap.
     pub heap: VirtualHeap,
     /// Host native callback and builtin function registry.
@@ -144,11 +160,21 @@ impl VirtualMachine {
             const_pool_cache.push(cached_values);
         }
 
+        let func_code: Vec<FunctionCodeSpan> = context
+            .all_functions
+            .iter()
+            .map(|compiled_fn| FunctionCodeSpan {
+                inst_ptr: compiled_fn.instructions.as_ptr(),
+                inst_len: compiled_fn.instructions.len(),
+            })
+            .collect();
+
         let safe_mode = context.options.safe_mode;
         let output_sink = context.options.output_sink.clone();
 
         Self {
             context,
+            func_code,
             heap,
             native_registry,
             active_destructors: HashSet::new(),
@@ -1266,6 +1292,12 @@ impl VirtualMachine {
     ) {
         self.context
             .patch_instruction(function_id, instruction_pc, new_instruction);
+        if let Some(code_span) = self.func_code.get_mut(function_id as usize)
+            && let Some(compiled_fn) = self.context.all_functions.get(function_id as usize)
+        {
+            code_span.inst_ptr = compiled_fn.instructions.as_ptr();
+            code_span.inst_len = compiled_fn.instructions.len();
+        }
         self.quickened_instructions_count += 1;
     }
 }

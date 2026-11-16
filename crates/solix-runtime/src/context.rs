@@ -44,10 +44,14 @@ pub struct LoadedBinary {
 pub struct FunctionRuntimeMeta {
     /// Index of the owning LoadedBinary in context.loaded_binaries.
     pub binary_id: usize,
-    /// Function ID offset for the owning binary.
-    pub func_id_offset: u32,
     /// Direct function pointer if this function is a native host function / builtin.
     pub native_fn: Option<NativeCallback>,
+    /// Function ID offset for the owning binary.
+    pub func_id_offset: u32,
+    /// Relocated static variable base slot offset for the owning module.
+    pub static_base_offset: u32,
+    /// Virtual register window size required by this function frame.
+    pub num_registers: u16,
     /// Whether this function has any reference registers that require ARC tracking.
     pub has_references: bool,
     /// Whether this function has debug symbols (source map and/or local variables).
@@ -546,8 +550,10 @@ impl RuntimeContext {
 
             function_meta.push(FunctionRuntimeMeta {
                 binary_id,
-                func_id_offset,
                 native_fn,
+                func_id_offset,
+                static_base_offset: func.static_base_offset,
+                num_registers: func.num_registers,
                 has_references,
                 has_debug_symbols,
             });
