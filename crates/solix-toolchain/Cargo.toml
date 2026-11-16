@@ -9,6 +9,9 @@ homepage.workspace = true
 documentation.workspace = true
 publish = false
 
+[package.metadata.dist]
+dist = true
+
 [lib]
 path = "src/lib.rs"
 
