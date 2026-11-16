@@ -143,131 +143,142 @@ pub enum OpCode {
 }
 
 impl OpCode {
+    /// Attempts to convert a raw 8-bit unsigned integer into a valid `OpCode` without allocating diagnostics.
+    #[must_use]
+    #[inline(always)]
+    pub const fn from_raw_u8(raw_byte: u8) -> Option<Self> {
+        match raw_byte {
+            0x00 => Some(Self::Nop),
+            0x01 => Some(Self::Mov),
+            0x02 => Some(Self::LoadI32),
+            0x03 => Some(Self::LoadI64),
+            0x04 => Some(Self::LoadF64),
+            0x05 => Some(Self::LoadBool),
+            0x06 => Some(Self::LoadNull),
+            0x07 => Some(Self::LoadConst),
+
+            0x10 => Some(Self::AddI32),
+            0x11 => Some(Self::AddI64),
+            0x12 => Some(Self::AddF64),
+            0x13 => Some(Self::SubI32),
+            0x14 => Some(Self::SubI64),
+            0x15 => Some(Self::SubF64),
+            0x16 => Some(Self::MulI32),
+            0x17 => Some(Self::MulI64),
+            0x18 => Some(Self::MulF64),
+            0x19 => Some(Self::DivI32),
+            0x1A => Some(Self::DivI64),
+            0x1B => Some(Self::DivF64),
+            0x1C => Some(Self::ModI32),
+            0x1D => Some(Self::ModI64),
+            0x1E => Some(Self::NegI32),
+            0x1F => Some(Self::NegI64),
+            0x20 => Some(Self::NegF64),
+
+            0x21 => Some(Self::Band),
+            0x22 => Some(Self::Bor),
+            0x23 => Some(Self::Bxor),
+            0x24 => Some(Self::Bnot),
+            0x25 => Some(Self::Shl),
+            0x26 => Some(Self::Shr),
+
+            0x30 => Some(Self::EqI32),
+            0x31 => Some(Self::EqI64),
+            0x32 => Some(Self::EqF64),
+            0x33 => Some(Self::EqBool),
+            0x34 => Some(Self::EqString),
+            0x35 => Some(Self::EqRef),
+            0x36 => Some(Self::NeqI32),
+            0x37 => Some(Self::NeqI64),
+            0x38 => Some(Self::NeqF64),
+            0x39 => Some(Self::NeqBool),
+            0x3A => Some(Self::NeqString),
+            0x3B => Some(Self::NeqRef),
+            0x3C => Some(Self::LtI32),
+            0x3D => Some(Self::LtI64),
+            0x3E => Some(Self::LtF64),
+            0x3F => Some(Self::LteI32),
+            0x40 => Some(Self::LteI64),
+            0x41 => Some(Self::LteF64),
+            0x42 => Some(Self::GtI32),
+            0x43 => Some(Self::GtI64),
+            0x44 => Some(Self::GtF64),
+            0x45 => Some(Self::GteI32),
+            0x46 => Some(Self::GteI64),
+            0x47 => Some(Self::GteF64),
+
+            0x48 => Some(Self::Not),
+
+            0x50 => Some(Self::Jump),
+            0x51 => Some(Self::JumpIfTrue),
+            0x52 => Some(Self::JumpIfFalse),
+            0x53 => Some(Self::Switch),
+
+            0x60 => Some(Self::CallDirect),
+            0x61 => Some(Self::CallVirtual),
+            0x62 => Some(Self::CallInterface),
+            0x63 => Some(Self::CallSymbol),
+            0x64 => Some(Self::CallCallable),
+            0x65 => Some(Self::Return),
+            0x66 => Some(Self::ReturnValue),
+            0x67 => Some(Self::Exit),
+            0x68 => Some(Self::CallExtern),
+            0x69 => Some(Self::CallNativeDirect),
+
+            0x70 => Some(Self::AllocObject),
+            0x71 => Some(Self::GetField),
+            0x72 => Some(Self::SetField),
+            0x73 => Some(Self::GetStatic),
+            0x74 => Some(Self::SetStatic),
+            0x75 => Some(Self::GetStaticGlobal),
+            0x76 => Some(Self::GetStaticDirect),
+            0x77 => Some(Self::SetStaticGlobal),
+            0x78 => Some(Self::SetStaticDirect),
+            0x79 => Some(Self::AllocObjectExtern),
+
+            0x80 => Some(Self::AllocArray),
+            0x81 => Some(Self::GetArray),
+            0x82 => Some(Self::SetArray),
+            0x83 => Some(Self::ArrayLength),
+            0x84 => Some(Self::AllocTuple),
+            0x85 => Some(Self::GetTuple),
+
+            0x90 => Some(Self::PackClosure),
+            0x91 => Some(Self::UnpackCaptures),
+
+            0xA0 => Some(Self::Instanceof),
+            0xA1 => Some(Self::CastCheck),
+            0xA2 => Some(Self::ConvIToF),
+            0xA3 => Some(Self::ConvFToI),
+            0xA4 => Some(Self::TupleInstanceof),
+
+            0xB0 => Some(Self::Throw),
+
+            0xC0 => Some(Self::IncRef),
+            0xC1 => Some(Self::DecRef),
+
+            0xD0 => Some(Self::AddI32Imm),
+            0xD1 => Some(Self::SubI32Imm),
+            0xD2 => Some(Self::JumpIfLtI32),
+            0xD3 => Some(Self::JumpIfLteI32),
+            0xD4 => Some(Self::JumpIfGtI32),
+            0xD5 => Some(Self::JumpIfGteI32),
+            0xD6 => Some(Self::JumpIfEqI32),
+            0xD7 => Some(Self::JumpIfNeqI32),
+
+            _ => None,
+        }
+    }
+
     /// Attempts to convert a raw 8-bit unsigned integer into a valid `OpCode`.
     ///
     /// # Errors
     /// Returns `EmissionError::InvalidOpcode` if `raw_byte` does not map to any recognized opcode.
+    #[inline(always)]
     pub fn from_u8(raw_byte: u8, instruction_index: usize) -> Result<Self, EmissionError> {
-        match raw_byte {
-            0x00 => Ok(Self::Nop),
-            0x01 => Ok(Self::Mov),
-            0x02 => Ok(Self::LoadI32),
-            0x03 => Ok(Self::LoadI64),
-            0x04 => Ok(Self::LoadF64),
-            0x05 => Ok(Self::LoadBool),
-            0x06 => Ok(Self::LoadNull),
-            0x07 => Ok(Self::LoadConst),
-
-            0x10 => Ok(Self::AddI32),
-            0x11 => Ok(Self::AddI64),
-            0x12 => Ok(Self::AddF64),
-            0x13 => Ok(Self::SubI32),
-            0x14 => Ok(Self::SubI64),
-            0x15 => Ok(Self::SubF64),
-            0x16 => Ok(Self::MulI32),
-            0x17 => Ok(Self::MulI64),
-            0x18 => Ok(Self::MulF64),
-            0x19 => Ok(Self::DivI32),
-            0x1A => Ok(Self::DivI64),
-            0x1B => Ok(Self::DivF64),
-            0x1C => Ok(Self::ModI32),
-            0x1D => Ok(Self::ModI64),
-            0x1E => Ok(Self::NegI32),
-            0x1F => Ok(Self::NegI64),
-            0x20 => Ok(Self::NegF64),
-
-            0x21 => Ok(Self::Band),
-            0x22 => Ok(Self::Bor),
-            0x23 => Ok(Self::Bxor),
-            0x24 => Ok(Self::Bnot),
-            0x25 => Ok(Self::Shl),
-            0x26 => Ok(Self::Shr),
-
-            0x30 => Ok(Self::EqI32),
-            0x31 => Ok(Self::EqI64),
-            0x32 => Ok(Self::EqF64),
-            0x33 => Ok(Self::EqBool),
-            0x34 => Ok(Self::EqString),
-            0x35 => Ok(Self::EqRef),
-            0x36 => Ok(Self::NeqI32),
-            0x37 => Ok(Self::NeqI64),
-            0x38 => Ok(Self::NeqF64),
-            0x39 => Ok(Self::NeqBool),
-            0x3A => Ok(Self::NeqString),
-            0x3B => Ok(Self::NeqRef),
-            0x3C => Ok(Self::LtI32),
-            0x3D => Ok(Self::LtI64),
-            0x3E => Ok(Self::LtF64),
-            0x3F => Ok(Self::LteI32),
-            0x40 => Ok(Self::LteI64),
-            0x41 => Ok(Self::LteF64),
-            0x42 => Ok(Self::GtI32),
-            0x43 => Ok(Self::GtI64),
-            0x44 => Ok(Self::GtF64),
-            0x45 => Ok(Self::GteI32),
-            0x46 => Ok(Self::GteI64),
-            0x47 => Ok(Self::GteF64),
-
-            0x48 => Ok(Self::Not),
-
-            0x50 => Ok(Self::Jump),
-            0x51 => Ok(Self::JumpIfTrue),
-            0x52 => Ok(Self::JumpIfFalse),
-            0x53 => Ok(Self::Switch),
-
-            0x60 => Ok(Self::CallDirect),
-            0x61 => Ok(Self::CallVirtual),
-            0x62 => Ok(Self::CallInterface),
-            0x63 => Ok(Self::CallSymbol),
-            0x64 => Ok(Self::CallCallable),
-            0x65 => Ok(Self::Return),
-            0x66 => Ok(Self::ReturnValue),
-            0x67 => Ok(Self::Exit),
-            0x68 => Ok(Self::CallExtern),
-            0x69 => Ok(Self::CallNativeDirect),
-
-            0x70 => Ok(Self::AllocObject),
-            0x71 => Ok(Self::GetField),
-            0x72 => Ok(Self::SetField),
-            0x73 => Ok(Self::GetStatic),
-            0x74 => Ok(Self::SetStatic),
-            0x75 => Ok(Self::GetStaticGlobal),
-            0x76 => Ok(Self::GetStaticDirect),
-            0x77 => Ok(Self::SetStaticGlobal),
-            0x78 => Ok(Self::SetStaticDirect),
-            0x79 => Ok(Self::AllocObjectExtern),
-
-            0x80 => Ok(Self::AllocArray),
-            0x81 => Ok(Self::GetArray),
-            0x82 => Ok(Self::SetArray),
-            0x83 => Ok(Self::ArrayLength),
-            0x84 => Ok(Self::AllocTuple),
-            0x85 => Ok(Self::GetTuple),
-
-            0x90 => Ok(Self::PackClosure),
-            0x91 => Ok(Self::UnpackCaptures),
-
-            0xA0 => Ok(Self::Instanceof),
-            0xA1 => Ok(Self::CastCheck),
-            0xA2 => Ok(Self::ConvIToF),
-            0xA3 => Ok(Self::ConvFToI),
-            0xA4 => Ok(Self::TupleInstanceof),
-
-            0xB0 => Ok(Self::Throw),
-
-            0xC0 => Ok(Self::IncRef),
-            0xC1 => Ok(Self::DecRef),
-
-            0xD0 => Ok(Self::AddI32Imm),
-            0xD1 => Ok(Self::SubI32Imm),
-            0xD2 => Ok(Self::JumpIfLtI32),
-            0xD3 => Ok(Self::JumpIfLteI32),
-            0xD4 => Ok(Self::JumpIfGtI32),
-            0xD5 => Ok(Self::JumpIfGteI32),
-            0xD6 => Ok(Self::JumpIfEqI32),
-            0xD7 => Ok(Self::JumpIfNeqI32),
-
-            _ => Err(EmissionError::InvalidOpcode {
+        match Self::from_raw_u8(raw_byte) {
+            Some(opcode) => Ok(opcode),
+            None => Err(EmissionError::InvalidOpcode {
                 raw_byte,
                 instruction_index,
             }),
@@ -395,6 +406,62 @@ impl OpCode {
             Self::JumpIfGteI32 => "JUMP_IF_GTE_I32",
             Self::JumpIfEqI32 => "JUMP_IF_EQ_I32",
             Self::JumpIfNeqI32 => "JUMP_IF_NEQ_I32",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OpCode;
+    use crate::diagnostics::EmissionError;
+
+    #[test]
+    fn test_positive_opcode_from_raw_u8_roundtrip() {
+        let valid_bytes: [u8; 80] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
+            0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23,
+            0x24, 0x25, 0x26, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A,
+            0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+            0x50, 0x51, 0x52, 0x53, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,
+            0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79,
+        ];
+        for raw_byte in valid_bytes {
+            let decoded = OpCode::from_raw_u8(raw_byte);
+            assert!(
+                decoded.is_some(),
+                "expected byte {raw_byte:#04x} to decode via from_raw_u8"
+            );
+            assert_eq!(
+                decoded.map(|opcode| opcode as u8),
+                Some(raw_byte),
+                "round-tripped opcode byte mismatch"
+            );
+            assert_eq!(OpCode::from_u8(raw_byte, 0).ok(), decoded);
+        }
+
+        let extra_bytes: [u8; 25] = [
+            0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x90, 0x91, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xB0,
+            0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0x00,
+        ];
+        for raw_byte in extra_bytes {
+            let decoded = OpCode::from_raw_u8(raw_byte);
+            assert!(decoded.is_some());
+            assert_eq!(Ok(decoded), OpCode::from_u8(raw_byte, 3).map(Some));
+        }
+    }
+
+    #[test]
+    fn test_negative_invalid_raw_opcode_returns_none() {
+        let invalid_bytes: [u8; 5] = [0x08, 0x2F, 0x7A, 0x9F, 0xFF];
+        for raw_byte in invalid_bytes {
+            assert_eq!(OpCode::from_raw_u8(raw_byte), None);
+            assert_eq!(
+                OpCode::from_u8(raw_byte, 42),
+                Err(EmissionError::InvalidOpcode {
+                    raw_byte,
+                    instruction_index: 42,
+                })
+            );
         }
     }
 }

@@ -27,6 +27,7 @@ pub struct Instruction(pub u64);
 impl Instruction {
     /// Constructs a Format A instruction (3 registers: dst, src1, src2).
     #[must_use]
+    #[inline(always)]
     pub const fn format_a(opcode: OpCode, flags: u8, dst: u16, src1: u16, src2: u16) -> Self {
         let raw = (opcode as u8 as u64)
             | ((flags as u64) << 8)
@@ -38,6 +39,7 @@ impl Instruction {
 
     /// Constructs a Format B instruction (dst register + 32-bit unsigned immediate/index).
     #[must_use]
+    #[inline(always)]
     pub const fn format_b(opcode: OpCode, flags: u8, dst: u16, imm: u32) -> Self {
         let raw = (opcode as u8 as u64)
             | ((flags as u64) << 8)
@@ -48,6 +50,7 @@ impl Instruction {
 
     /// Returns a copy of this Format A or Format B instruction with the destination register modified.
     #[must_use]
+    #[inline(always)]
     pub const fn with_dst(self, new_dst: u16) -> Self {
         let raw = (self.0 & !0x0000_0000_FFFF_0000) | ((new_dst as u64) << 16);
         Self(raw)
@@ -55,12 +58,14 @@ impl Instruction {
 
     /// Constructs a Format B instruction with a 32-bit signed immediate.
     #[must_use]
+    #[inline(always)]
     pub const fn format_b_signed(opcode: OpCode, flags: u8, dst: u16, imm: i32) -> Self {
         Self::format_b(opcode, flags, dst, imm as u32)
     }
 
     /// Constructs a Format C branch instruction with condition register and signed 32-bit offset.
     #[must_use]
+    #[inline(always)]
     pub const fn format_c(opcode: OpCode, flags: u8, cond_reg: u16, offset: i32) -> Self {
         let raw = (opcode as u8 as u64)
             | ((flags as u64) << 8)
@@ -71,6 +76,7 @@ impl Instruction {
 
     /// Constructs a Format Call instruction with windowed register arguments.
     #[must_use]
+    #[inline(always)]
     pub const fn format_call(
         opcode: OpCode,
         dst: u16,
@@ -88,6 +94,7 @@ impl Instruction {
 
     /// Extracts the raw 8-bit opcode byte.
     #[must_use]
+    #[inline(always)]
     pub const fn raw_opcode(&self) -> u8 {
         (self.0 & 0xFF) as u8
     }
@@ -96,30 +103,35 @@ impl Instruction {
     ///
     /// # Errors
     /// Returns `EmissionError::InvalidOpcode` if the opcode byte is unrecognized.
+    #[inline(always)]
     pub fn opcode(&self, instruction_index: usize) -> Result<OpCode, EmissionError> {
         OpCode::from_u8(self.raw_opcode(), instruction_index)
     }
 
     /// Extracts the 8-bit instruction flags byte.
     #[must_use]
+    #[inline(always)]
     pub const fn flags(&self) -> u8 {
         ((self.0 >> 8) & 0xFF) as u8
     }
 
     /// Returns `true` if this instruction has the `FLAG_WEAK` bit set.
     #[must_use]
+    #[inline(always)]
     pub const fn is_weak(&self) -> bool {
         (self.flags() & FLAG_WEAK) != 0
     }
 
     /// Returns `true` if this instruction has the `FLAG_POD` bit set.
     #[must_use]
+    #[inline(always)]
     pub const fn is_pod(&self) -> bool {
         (self.flags() & FLAG_POD) != 0
     }
 
     /// Returns a copy of the instruction with updated flags.
     #[must_use]
+    #[inline(always)]
     pub const fn with_flags(self, flags: u8) -> Self {
         let cleared = self.0 & !(0xFF << 8);
         Self(cleared | ((flags as u64) << 8))
@@ -127,66 +139,77 @@ impl Instruction {
 
     /// Extracts the destination register `dst` for Format A and B.
     #[must_use]
+    #[inline(always)]
     pub const fn dst(&self) -> u16 {
         ((self.0 >> 16) & 0xFFFF) as u16
     }
 
     /// Extracts the first source register `src1` for Format A.
     #[must_use]
+    #[inline(always)]
     pub const fn src1(&self) -> u16 {
         ((self.0 >> 32) & 0xFFFF) as u16
     }
 
     /// Extracts the second source register `src2` for Format A.
     #[must_use]
+    #[inline(always)]
     pub const fn src2(&self) -> u16 {
         ((self.0 >> 48) & 0xFFFF) as u16
     }
 
     /// Extracts the 32-bit unsigned immediate value for Format B.
     #[must_use]
+    #[inline(always)]
     pub const fn imm32(&self) -> u32 {
         (self.0 >> 32) as u32
     }
 
     /// Extracts the 32-bit signed immediate value for Format B.
     #[must_use]
+    #[inline(always)]
     pub const fn imm32_signed(&self) -> i32 {
         (self.0 >> 32) as i32
     }
 
     /// Extracts the condition register for Format C.
     #[must_use]
+    #[inline(always)]
     pub const fn cond_reg(&self) -> u16 {
         ((self.0 >> 16) & 0xFFFF) as u16
     }
 
     /// Extracts the signed 32-bit relative PC jump offset for Format C.
     #[must_use]
+    #[inline(always)]
     pub const fn jump_offset(&self) -> i32 {
         (self.0 >> 32) as i32
     }
 
     /// Extracts the destination register for Format Call.
     #[must_use]
+    #[inline(always)]
     pub const fn call_dst(&self) -> u16 {
         ((self.0 >> 8) & 0xFFFF) as u16
     }
 
     /// Extracts the target function ID / vtable slot / const index for Format Call.
     #[must_use]
+    #[inline(always)]
     pub const fn call_target(&self) -> u16 {
         ((self.0 >> 24) & 0xFFFF) as u16
     }
 
     /// Extracts the base register index of the argument window for Format Call.
     #[must_use]
+    #[inline(always)]
     pub const fn arg_base(&self) -> u16 {
         ((self.0 >> 40) & 0xFFFF) as u16
     }
 
     /// Extracts the argument count for Format Call.
     #[must_use]
+    #[inline(always)]
     pub const fn arg_count(&self) -> u8 {
         ((self.0 >> 56) & 0xFF) as u8
     }
