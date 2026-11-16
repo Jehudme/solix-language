@@ -8,8 +8,8 @@ mod common;
 use clap::Parser;
 use common::HermeticCliWorkspace;
 use solix_common::project::{ProjectManifest, SlxarcArchive};
-use solix_toolchain::cli::Cli;
-use solix_toolchain::run;
+use solix::cli::Cli;
+use solix::run;
 use std::fs;
 use std::path::{Path, PathBuf};
 

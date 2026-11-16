@@ -11,6 +11,23 @@ pub mod registry;
 pub mod solver;
 pub mod telemetry;
 
+#[cfg(feature = "compilation")]
+pub use solix_compilation as compilation;
+
+#[cfg(feature = "runtime")]
+pub use solix_runtime as runtime;
+
+#[cfg(feature = "ffi")]
+pub use solix_ffi as ffi;
+
+#[cfg(feature = "lsp")]
+pub use solix_lsp as lsp;
+
+#[cfg(feature = "dap")]
+pub use solix_dap as dap;
+
+pub use solix_common as common;
+
 pub use cli::{
     BuildArgs, CleanArgs, Cli, Commands, CompileArgs, DapArgs, FmtArgs, InfoArgs, InstallArgs,
     ListArgs, LspArgs, NewArgs, ReinstallArgs, RunArgs, SyncArgs, UninstallArgs,

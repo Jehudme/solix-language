@@ -27,12 +27,12 @@ readme = "README.md"
 
 [workspace.dependencies]
 # Internal workspace crates
-solix-common = { path = "crates/solix-common" }
-solix-compilation = { path = "crates/solix-compilation" }
-solix-runtime = { path = "crates/solix-runtime" }
-solix-lsp = { path = "crates/solix-lsp" }
-solix-dap = { path = "crates/solix-dap" }
-solix-ffi = { path = "crates/solix-ffi" }
+solix-common = { path = "crates/solix-common", version = "1.1.3" }
+solix-compilation = { path = "crates/solix-compilation", version = "1.1.3" }
+solix-runtime = { path = "crates/solix-runtime", version = "1.1.3" }
+solix-lsp = { path = "crates/solix-lsp", version = "1.1.3" }
+solix-dap = { path = "crates/solix-dap", version = "1.1.3" }
+solix-ffi = { path = "crates/solix-ffi", version = "1.1.3" }
 
 # Error handling & logging
 thiserror = "2.0"

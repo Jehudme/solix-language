@@ -9,9 +9,9 @@ use clap::Parser;
 use common::HermeticCliWorkspace;
 use solix_common::project::SlxarcArchive;
 use solix_common::solver::{ModuleSolver, PackageVersion, SolverError};
-use solix_toolchain::cli::Cli;
-use solix_toolchain::run;
-use solix_toolchain::solver::ClientModuleSolver;
+use solix::cli::Cli;
+use solix::run;
+use solix::solver::ClientModuleSolver;
 use std::fs;
 
 #[test]
@@ -568,7 +568,7 @@ fn test_bundled_default_packages_bootstrap_and_manual_install() {
 fn test_install_vscode_flag_parsing_and_resolution() {
     let install_vscode_cli = Cli::try_parse_from(["solix", "install", "--vscode"])
         .expect("Must parse 'solix install --vscode' cleanly");
-    if let solix_toolchain::Commands::Install(args) = install_vscode_cli.command {
+    if let solix::Commands::Install(args) = install_vscode_cli.command {
         assert!(args.vscode);
         assert!(args.path.is_none());
         assert!(!args.bundled);
@@ -576,7 +576,7 @@ fn test_install_vscode_flag_parsing_and_resolution() {
         panic!("Expected Install command");
     }
 
-    let resolved_vsix = solix_toolchain::assets::resolve_bundled_vscode_extension_path();
+    let resolved_vsix = solix::assets::resolve_bundled_vscode_extension_path();
     assert!(
         resolved_vsix.is_some(),
         "Must discover staged or workspace .vsix extension file"

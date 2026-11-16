@@ -3,11 +3,11 @@
 #![forbid(unsafe_code)]
 
 use clap::Parser;
-use solix_toolchain::cli::Cli;
+use solix::cli::Cli;
 
 fn main() {
     let cli = Cli::parse();
-    match solix_toolchain::run(cli) {
+    match solix::run(cli) {
         Ok(code) => {
             std::process::exit(code);
         }
