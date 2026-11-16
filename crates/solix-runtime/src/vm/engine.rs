@@ -87,6 +87,8 @@ pub struct VirtualMachine {
     pub last_return_value: Value,
     /// Execution mode: true for bounds-checked safe mode, false for unchecked fast mode.
     pub safe_mode: bool,
+    /// When true, increments instruction dispatch telemetry and tracks peak stack depth.
+    pub track_metrics: bool,
     /// Output buffer of lines printed via standard print/println builtins.
     pub stdout: Vec<String>,
     /// Pure VM bytecode execution elapsed time in nanoseconds.
@@ -186,6 +188,7 @@ impl VirtualMachine {
             .collect();
 
         let safe_mode = context.options.safe_mode;
+        let track_metrics = context.options.track_metrics;
         let output_sink = context.options.output_sink.clone();
 
         Self {
@@ -206,6 +209,7 @@ impl VirtualMachine {
             exit_code: None,
             last_return_value: Value::Null,
             safe_mode,
+            track_metrics,
             stdout: Vec::new(),
             pure_execution_time_ns: 0,
             instructions_dispatched: 0,

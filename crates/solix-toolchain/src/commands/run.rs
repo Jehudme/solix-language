@@ -94,6 +94,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         );
     }
 
+    let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
+    let is_text_metrics = args.metrics.as_deref() == Some("text");
+
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(heap_size)
         .with_max_call_stack_depth(args.max_stack)
@@ -101,6 +104,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_cycle_threshold(args.cycle_threshold)
         .with_args(args.args)
         .with_safe_mode(args.safe)
+        .with_metrics_tracking(is_json_metrics || is_text_metrics)
         .with_solver(solver.clone())
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
@@ -465,9 +469,6 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let run_result = vm.run();
     let total_process_wall_time_us = total_start.elapsed().as_micros() as u64;
     let exit_code = vm.exit_code.unwrap_or(0);
-
-    let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
-    let is_text_metrics = args.metrics.as_deref() == Some("text");
 
     if is_json_metrics || is_text_metrics {
         let vm_telemetry = vm.telemetry();

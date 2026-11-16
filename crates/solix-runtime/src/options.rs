@@ -36,6 +36,8 @@ pub struct RuntimeOptions {
     /// Execution mode: when `true`, bounds-checking and defensive invariant validations are enforced;
     /// when `false` (default), the high-performance raw-pointer inlined engine is used.
     pub safe_mode: bool,
+    /// When `true` (default), records instruction dispatch counts and peak stack depth telemetry.
+    pub track_metrics: bool,
     /// Sandboxing flag disabling non-sandboxed host native operations and filesystem access.
     pub sandboxed: bool,
     /// Flag enabling the Bacon & Rajan (2001) ARC cycle collector (default: true).
@@ -91,6 +93,7 @@ impl PartialEq for RuntimeOptions {
             && self.max_call_stack_depth == other.max_call_stack_depth
             && self.args == other.args
             && self.safe_mode == other.safe_mode
+            && self.track_metrics == other.track_metrics
             && self.sandboxed == other.sandboxed
             && self.native_functions == other.native_functions
             && self.verify_checksums == other.verify_checksums
@@ -113,6 +116,7 @@ impl Default for RuntimeOptions {
             max_call_stack_depth: DEFAULT_MAX_CALL_STACK_DEPTH,
             args: Vec::new(),
             safe_mode: false,
+            track_metrics: true,
             sandboxed: false,
             cycle_collector: true,
             cycle_threshold: 1024,
@@ -241,6 +245,13 @@ impl RuntimeOptions {
     #[must_use]
     pub fn with_safe_mode(mut self, safe_mode: bool) -> Self {
         self.safe_mode = safe_mode;
+        self
+    }
+
+    /// Sets whether per-instruction execution metrics and peak stack depth are recorded.
+    #[must_use]
+    pub fn with_metrics_tracking(mut self, track_metrics: bool) -> Self {
+        self.track_metrics = track_metrics;
         self
     }
 

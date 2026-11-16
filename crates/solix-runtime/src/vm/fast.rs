@@ -108,15 +108,6 @@ fn function_not_found_error(function_id: u32) -> VmTrap {
 
 #[cold]
 #[inline(never)]
-fn invalid_static_offset_error(offset: u32, total_static: u32) -> RuntimeError {
-    RuntimeError::InvalidStaticOffset {
-        offset,
-        total_static,
-    }
-}
-
-#[cold]
-#[inline(never)]
 fn f64_pair_type_mismatch_error(left_val: &Value, right_val: &Value) -> VmTrap {
     VmTrap::from_error(RuntimeError::TypeMismatch {
         expected: "Float64 and Float64".to_string(),
@@ -403,6 +394,88 @@ fn shl_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
     Ok(Value::I64(read_i64_fast(left_ref)?.wrapping_shl(shift)))
 }
 
+#[cold]
+#[inline(never)]
+fn to_primitive_u64_cold(val: &Value) -> u64 {
+    val.to_primitive_u64()
+}
+
+#[inline(never)]
+fn alloc_object_trap(
+    heap: &mut crate::memory::VirtualHeap,
+    payload_size: usize,
+    tag: BlockTag,
+    vtable_id: u32,
+) -> Result<u32, VmTrap> {
+    let payload_addr = heap
+        .allocate(payload_size, tag)
+        .map_err(VmTrap::from_error)?;
+    write_heap_u32_fast(&mut heap.buffer, payload_addr, vtable_id);
+    Ok(payload_addr)
+}
+
+#[inline(never)]
+fn alloc_array_trap(
+    heap: &mut crate::memory::VirtualHeap,
+    array_len: usize,
+    elem_size: usize,
+    type_tag: u8,
+) -> Result<u32, VmTrap> {
+    let payload_size = 8 + array_len * elem_size;
+    let payload_addr = heap
+        .allocate(payload_size, BlockTag::ArrayRef)
+        .map_err(VmTrap::from_error)?;
+    heap.write_u32(payload_addr, array_len as u32)
+        .map_err(VmTrap::from_error)?;
+    heap.write_u8(payload_addr + 4, elem_size as u8)
+        .map_err(VmTrap::from_error)?;
+    heap.write_u8(payload_addr + 7, type_tag)
+        .map_err(VmTrap::from_error)?;
+    Ok(payload_addr)
+}
+
+#[inline(never)]
+fn array_length_trap(heap: &crate::memory::VirtualHeap, arr_addr: u32) -> Result<u32, VmTrap> {
+    let header = heap.read_header(arr_addr).map_err(VmTrap::from_error)?;
+    if header.tag == BlockTag::String {
+        Ok(header.size)
+    } else {
+        heap.read_u32(arr_addr).map_err(VmTrap::from_error)
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn inc_ref_trap_cold(heap: &mut crate::memory::VirtualHeap, addr: u32) -> Result<(), VmTrap> {
+    crate::memory::arc::inc_ref(heap, addr)
+        .map(|_| ())
+        .map_err(VmTrap::from_error)
+}
+
+#[inline(never)]
+fn get_array_variant_cold(
+    heap: &crate::memory::VirtualHeap,
+    arr_offset: usize,
+    index_usize: usize,
+    elem_size_raw: u8,
+    elem_type_tag: u8,
+) -> Result<Value, VmTrap> {
+    let elem_size = (elem_size_raw as usize).max(1);
+    let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+    if elem_offset + elem_size > heap.buffer.len() {
+        return Err(VmTrap::null_reference());
+    }
+    // SAFETY: elem_offset + elem_size <= heap.buffer.len() verified above.
+    let elem_ptr = unsafe { heap.buffer.as_ptr().add(elem_offset) };
+    let raw_word = match elem_size {
+        1 => unsafe { *elem_ptr as u64 },
+        2 => unsafe { u16::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u16>())) as u64 },
+        4 => unsafe { u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>())) as u64 },
+        _ => unsafe { u64::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u64>())) },
+    };
+    Ok(decode_array_element(elem_type_tag, elem_size, raw_word))
+}
+
 #[inline(never)]
 fn decode_array_element_slow(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> Value {
     match elem_type_tag {
@@ -593,17 +666,19 @@ impl VirtualMachine {
         &self,
         binary_id: usize,
         pool_idx: usize,
-    ) -> Result<&str, RuntimeError> {
+    ) -> Result<&str, VmTrap> {
         let pool = self
             .context
             .get_constant_pool(binary_id)
-            .ok_or_else(|| constant_pool_missing_error(binary_id))?;
+            .ok_or_else(|| VmTrap::from_error(constant_pool_missing_error(binary_id)))?;
         let pool_val = pool
             .get(pool_idx)
-            .ok_or_else(|| constant_pool_symbol_index_error(pool_idx))?;
+            .ok_or_else(|| VmTrap::from_error(constant_pool_symbol_index_error(pool_idx)))?;
         match pool_val {
             ConstantPoolValue::String(sym) => Ok(sym.as_str()),
-            _ => Err(constant_pool_symbol_type_error(pool_val)),
+            _ => Err(VmTrap::from_error(constant_pool_symbol_type_error(
+                pool_val,
+            ))),
         }
     }
 
@@ -624,7 +699,7 @@ impl VirtualMachine {
     }
 
     #[inline(never)]
-    fn compare_heap_strings(&self, addr_left: u32, addr_right: u32) -> Result<bool, RuntimeError> {
+    fn compare_heap_strings(&self, addr_left: u32, addr_right: u32) -> Result<bool, VmTrap> {
         if addr_left == addr_right {
             return Ok(true);
         }
@@ -660,20 +735,32 @@ impl VirtualMachine {
                 }
             }
         }
-        let hdr_left = self.heap.read_header(addr_left)?;
-        let hdr_right = self.heap.read_header(addr_right)?;
+        let hdr_left = self
+            .heap
+            .read_header(addr_left)
+            .map_err(VmTrap::from_error)?;
+        let hdr_right = self
+            .heap
+            .read_header(addr_right)
+            .map_err(VmTrap::from_error)?;
         if hdr_left.size != hdr_right.size {
             return Ok(false);
         }
-        let bytes_left = self.heap.read_bytes(addr_left, hdr_left.size as usize)?;
-        let bytes_right = self.heap.read_bytes(addr_right, hdr_right.size as usize)?;
+        let bytes_left = self
+            .heap
+            .read_bytes(addr_left, hdr_left.size as usize)
+            .map_err(VmTrap::from_error)?;
+        let bytes_right = self
+            .heap
+            .read_bytes(addr_right, hdr_right.size as usize)
+            .map_err(VmTrap::from_error)?;
         Ok(bytes_left == bytes_right)
     }
 
     #[cold]
     #[inline(never)]
-    fn release_reference_cold(&mut self, addr: u32) -> Result<(), RuntimeError> {
-        self.release_reference(addr)
+    fn release_reference_cold(&mut self, addr: u32) -> Result<(), VmTrap> {
+        self.release_reference(addr).map_err(VmTrap::from_error)
     }
 
     #[cold]
@@ -1010,19 +1097,30 @@ impl VirtualMachine {
         Ok(false)
     }
 
-    #[cold]
     #[inline(never)]
     fn execute_set_array_slow(
         &mut self,
-        elem_offset: usize,
-        elem_size: usize,
-        elem_type_tag: u8,
-        val: Value,
+        arr_offset: usize,
+        index_usize: usize,
+        val_reg: u16,
         pc: usize,
     ) -> Result<bool, VmTrap> {
-        let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+        let val = {
+            let caller_frame = self.current_frame_fast()?;
+            self.register_stack[caller_frame.register_base as usize + val_reg as usize]
+        };
         let buf_ptr = self.heap.buffer.as_mut_ptr();
-        // SAFETY: Caller verified elem_offset + elem_size <= self.heap.buffer.len().
+        let heap_len = self.heap.buffer.len();
+        // SAFETY: Caller verified arr_offset >= 8 && arr_offset + 8 <= heap_len.
+        let elem_size = unsafe { (*buf_ptr.add(arr_offset + 4) as usize).max(1) };
+        let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
+        let elem_offset = arr_offset + 8 + (index_usize * elem_size);
+        if elem_offset + elem_size > heap_len {
+            return Err(VmTrap::null_reference());
+        }
+
+        let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+        // SAFETY: elem_offset + elem_size <= heap_len verified above.
         let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
         let old_child = if is_reference_element {
             unsafe { u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>())) }
@@ -1063,7 +1161,8 @@ impl VirtualMachine {
             if let Value::Ref(child_addr) = val
                 && child_addr > 0
             {
-                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                crate::memory::arc::inc_ref(&mut self.heap, child_addr)
+                    .map_err(VmTrap::from_error)?;
             }
             if old_child > 0 {
                 let caller_frame = self.current_frame_mut_fast()?;
@@ -1275,15 +1374,20 @@ impl VirtualMachine {
             .map(|_| ())
     }
 
+    #[inline(never)]
+    fn set_static_trap(&mut self, slot: u32, val: Value) -> Result<(), VmTrap> {
+        self.set_static(slot, val).map_err(VmTrap::from_error)
+    }
+
     #[cold]
     #[inline(never)]
     fn execute_alloc_object_extern(
         &mut self,
         inst: Instruction,
         pc: usize,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Value, VmTrap> {
         let (caller_func_id, binary_id) = {
-            let frame = self.current_frame()?;
+            let frame = self.current_frame_fast()?;
             (frame.function_id, frame.binary_id as usize)
         };
         let caller_pc = pc.saturating_sub(1);
@@ -1291,9 +1395,9 @@ impl VirtualMachine {
         let (vtable_id, size) = {
             let sym_str = self.resolve_constant_pool_symbol(binary_id, pool_idx)?;
             self.context.resolve_vtable_info(sym_str).ok_or_else(|| {
-                RuntimeError::FunctionNotFound {
+                VmTrap::from_error(RuntimeError::FunctionNotFound {
                     symbol_or_id: format!("class {sym_str}"),
-                }
+                })
             })?
         };
         let alloc_size = size.max(8);
@@ -1306,8 +1410,13 @@ impl VirtualMachine {
         } else {
             BlockTag::Object
         };
-        let payload_addr = self.heap.allocate(alloc_size, tag)?;
-        self.heap.write_u32(payload_addr, vtable_id)?;
+        let payload_addr = self
+            .heap
+            .allocate(alloc_size, tag)
+            .map_err(VmTrap::from_error)?;
+        self.heap
+            .write_u32(payload_addr, vtable_id)
+            .map_err(VmTrap::from_error)?;
 
         let flags = if is_pod {
             solix_common::bytecode::instruction::FLAG_POD
@@ -1327,13 +1436,9 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn execute_get_static_global(
-        &mut self,
-        inst: Instruction,
-        pc: usize,
-    ) -> Result<Value, RuntimeError> {
+    fn execute_get_static_global(&mut self, inst: Instruction, pc: usize) -> Result<Value, VmTrap> {
         let (caller_func_id, binary_id) = {
-            let frame = self.current_frame()?;
+            let frame = self.current_frame_fast()?;
             (frame.function_id, frame.binary_id as usize)
         };
         let caller_pc = pc.saturating_sub(1);
@@ -1341,13 +1446,13 @@ impl VirtualMachine {
         let resolved_slot = {
             let sym_str = self.resolve_constant_pool_symbol(binary_id, pool_idx)?;
             self.context.resolve_static_slot(sym_str).ok_or_else(|| {
-                invalid_static_offset_error(pool_idx as u32, self.static_slots.len() as u32)
+                VmTrap::invalid_static_offset(pool_idx as u32, self.static_slots.len() as u32)
             })?
         };
         let quickened =
             Instruction::format_b(OpCode::GetStaticDirect, 0, inst.dst(), resolved_slot);
         self.patch_instruction(caller_func_id, caller_pc, quickened);
-        self.get_static(resolved_slot)
+        self.get_static(resolved_slot).map_err(VmTrap::from_error)
     }
 
     #[cold]
@@ -1357,9 +1462,9 @@ impl VirtualMachine {
         inst: Instruction,
         pc: usize,
         val_to_set: Value,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), VmTrap> {
         let (caller_func_id, binary_id) = {
-            let frame = self.current_frame()?;
+            let frame = self.current_frame_fast()?;
             (frame.function_id, frame.binary_id as usize)
         };
         let caller_pc = pc.saturating_sub(1);
@@ -1367,36 +1472,41 @@ impl VirtualMachine {
         let resolved_slot = {
             let sym_str = self.resolve_constant_pool_symbol(binary_id, pool_idx)?;
             self.context.resolve_static_slot(sym_str).ok_or_else(|| {
-                invalid_static_offset_error(pool_idx as u32, self.static_slots.len() as u32)
+                VmTrap::invalid_static_offset(pool_idx as u32, self.static_slots.len() as u32)
             })?
         };
         let quickened =
             Instruction::format_b(OpCode::SetStaticDirect, 0, inst.dst(), resolved_slot);
         self.patch_instruction(caller_func_id, caller_pc, quickened);
         self.set_static(resolved_slot, val_to_set)
+            .map_err(VmTrap::from_error)
     }
 
     #[inline(never)]
-    fn execute_alloc_tuple(&mut self, tuple_count: usize) -> Result<Value, RuntimeError> {
+    fn execute_alloc_tuple(&mut self, tuple_count: usize) -> Result<Value, VmTrap> {
         let payload_size = 8 + tuple_count * 16;
-        let payload_addr = self.heap.allocate(payload_size, BlockTag::Tuple)?;
-        self.heap.write_u32(payload_addr, tuple_count as u32)?;
-        self.heap.write_u32(payload_addr + 4, 16)?;
+        let payload_addr = self
+            .heap
+            .allocate(payload_size, BlockTag::Tuple)
+            .map_err(VmTrap::from_error)?;
+        self.heap
+            .write_u32(payload_addr, tuple_count as u32)
+            .map_err(VmTrap::from_error)?;
+        self.heap
+            .write_u32(payload_addr + 4, 16)
+            .map_err(VmTrap::from_error)?;
         Ok(Value::Ref(payload_addr))
     }
 
     #[inline(never)]
-    fn execute_get_tuple(&self, tuple_val: Value, slot_idx: usize) -> Result<Value, RuntimeError> {
-        let tuple_addr = tuple_val.as_ref()?;
+    fn execute_get_tuple(&self, tuple_val: Value, slot_idx: usize) -> Result<Value, VmTrap> {
+        let tuple_addr = tuple_val.as_ref().map_err(VmTrap::from_error)?;
         if tuple_addr == 0 {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(VmTrap::null_reference());
         }
-        let tuple_len = self.heap.read_u32(tuple_addr)? as usize;
+        let tuple_len = self.heap.read_u32(tuple_addr).map_err(VmTrap::from_error)? as usize;
         if slot_idx >= tuple_len {
-            return Err(RuntimeError::IndexOutOfBounds {
-                index: slot_idx as i64,
-                length: tuple_len,
-            });
+            return Err(VmTrap::index_out_of_bounds(slot_idx as i64, tuple_len));
         }
         let elem_addr = tuple_addr + 8 + (slot_idx * 16) as u32;
         let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
@@ -1410,18 +1520,15 @@ impl VirtualMachine {
         tuple_val: Value,
         index_val: Value,
         tag: u8,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<bool, VmTrap> {
         let tuple_addr = match tuple_val.as_ref() {
             Ok(addr) if addr > 0 => addr,
             _ => return Ok(false),
         };
-        let index_i64 = index_val.as_i64()?;
-        let tuple_len = self.heap.read_u32(tuple_addr)? as usize;
+        let index_i64 = index_val.as_i64().map_err(VmTrap::from_error)?;
+        let tuple_len = self.heap.read_u32(tuple_addr).map_err(VmTrap::from_error)? as usize;
         if index_i64 < 0 || (index_i64 as usize) >= tuple_len {
-            return Err(RuntimeError::IndexOutOfBounds {
-                index: index_i64,
-                length: tuple_len,
-            });
+            return Err(VmTrap::index_out_of_bounds(index_i64, tuple_len));
         }
         let elem_addr = tuple_addr + 8 + (index_i64 as usize * 16) as u32;
         let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
@@ -1460,12 +1567,19 @@ impl VirtualMachine {
         target_lambda_id: u32,
         cap_base: usize,
         cap_count: usize,
-    ) -> Result<Value, RuntimeError> {
-        let frame_base = self.current_frame()?.register_base as usize;
+    ) -> Result<Value, VmTrap> {
+        let frame_base = self.current_frame_fast()?.register_base as usize;
         let payload_size = 8 + cap_count * 16;
-        let payload_addr = self.heap.allocate(payload_size, BlockTag::Closure)?;
-        self.heap.write_u32(payload_addr, target_lambda_id)?;
-        self.heap.write_u32(payload_addr + 4, cap_count as u32)?;
+        let payload_addr = self
+            .heap
+            .allocate(payload_size, BlockTag::Closure)
+            .map_err(VmTrap::from_error)?;
+        self.heap
+            .write_u32(payload_addr, target_lambda_id)
+            .map_err(VmTrap::from_error)?;
+        self.heap
+            .write_u32(payload_addr + 4, cap_count as u32)
+            .map_err(VmTrap::from_error)?;
 
         for index in 0..cap_count {
             let cell_addr = payload_addr + 8 + (index * 16) as u32;
@@ -1476,7 +1590,8 @@ impl VirtualMachine {
             if let Value::Ref(child_addr) = cap_val
                 && child_addr > 0
             {
-                crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+                crate::memory::arc::inc_ref(&mut self.heap, child_addr)
+                    .map_err(VmTrap::from_error)?;
             }
         }
         Ok(Value::Ref(payload_addr))
@@ -1487,13 +1602,13 @@ impl VirtualMachine {
         &mut self,
         capture_base: usize,
         capture_count: usize,
-    ) -> Result<(), RuntimeError> {
-        let frame = self.current_frame()?;
+    ) -> Result<(), VmTrap> {
+        let frame = self.current_frame_fast()?;
         let frame_base = frame.register_base as usize;
         let closure_addr = frame
             .active_closure
             .map(std::num::NonZeroU32::get)
-            .ok_or_else(Self::null_reference_error)?;
+            .ok_or_else(VmTrap::null_reference)?;
 
         for index in 0..capture_count {
             let cell_addr = closure_addr + 8 + (index * 16) as u32;
@@ -1506,18 +1621,17 @@ impl VirtualMachine {
     }
 
     #[inline(never)]
-    fn execute_instanceof(
-        &self,
-        obj_val: Value,
-        target_vtable_id: u32,
-    ) -> Result<bool, RuntimeError> {
+    fn execute_instanceof(&self, obj_val: Value, target_vtable_id: u32) -> Result<bool, VmTrap> {
         let obj_addr = match obj_val.as_ref() {
             Ok(addr) if addr > 0 => addr,
             _ => return Ok(false),
         };
-        let header = self.heap.read_header(obj_addr)?;
+        let header = self
+            .heap
+            .read_header(obj_addr)
+            .map_err(VmTrap::from_error)?;
         if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
-            let obj_vtable_id = self.heap.read_u32(obj_addr)?;
+            let obj_vtable_id = self.heap.read_u32(obj_addr).map_err(VmTrap::from_error)?;
             Ok(self.is_instance_of(obj_vtable_id, target_vtable_id))
         } else {
             Ok(false)
@@ -1530,7 +1644,7 @@ impl VirtualMachine {
         val: Value,
         tag: u8,
         target_vtable_id: u32,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Value, VmTrap> {
         if tag != 0 {
             let is_match = match tag {
                 1..=8 | 12 => matches!(val, Value::I32(_) | Value::I64(_)),
@@ -1548,7 +1662,7 @@ impl VirtualMachine {
                 _ => false,
             };
             if !is_match {
-                return Err(invalid_cast_tag_error(val, tag));
+                return Err(VmTrap::from_error(invalid_cast_tag_error(val, tag)));
             }
             let converted_value = match (tag, val) {
                 (4 | 8, Value::I32(primitive_number)) => Value::I64(primitive_number as i64),
@@ -1566,19 +1680,25 @@ impl VirtualMachine {
             return Ok(converted_value);
         }
 
-        let obj_addr = val.as_ref()?;
+        let obj_addr = val.as_ref().map_err(VmTrap::from_error)?;
         if obj_addr == 0 {
             return Ok(Value::Null);
         }
-        let header = self.heap.read_header(obj_addr)?;
+        let header = self
+            .heap
+            .read_header(obj_addr)
+            .map_err(VmTrap::from_error)?;
         let is_instance = if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
-            let obj_vtable_id = self.heap.read_u32(obj_addr)?;
+            let obj_vtable_id = self.heap.read_u32(obj_addr).map_err(VmTrap::from_error)?;
             self.is_instance_of(obj_vtable_id, target_vtable_id)
         } else {
             false
         };
         if !is_instance {
-            return Err(invalid_cast_vtable_error(obj_addr, target_vtable_id));
+            return Err(VmTrap::from_error(invalid_cast_vtable_error(
+                obj_addr,
+                target_vtable_id,
+            )));
         }
         Ok(Value::Ref(obj_addr))
     }
@@ -1862,11 +1982,19 @@ impl VirtualMachine {
         &mut self,
         target_depth: usize,
     ) -> Result<(), RuntimeError> {
-        self.run_fast_trap::<SINGLE_STEP>(target_depth)
-            .map_err(VmTrap::into_inner)
+        if SINGLE_STEP {
+            self.run_fast_trap::<true, true>(target_depth)
+                .map_err(VmTrap::into_inner)
+        } else if self.track_metrics {
+            self.run_fast_trap::<false, true>(target_depth)
+                .map_err(VmTrap::into_inner)
+        } else {
+            self.run_fast_trap::<false, false>(target_depth)
+                .map_err(VmTrap::into_inner)
+        }
     }
 
-    fn run_fast_trap<const SINGLE_STEP: bool>(
+    fn run_fast_trap<const SINGLE_STEP: bool, const TRACK_METRICS: bool>(
         &mut self,
         target_depth: usize,
     ) -> Result<(), VmTrap> {
@@ -1902,7 +2030,7 @@ impl VirtualMachine {
                     if let Some(frame) = self.call_frames.last_mut() {
                         frame.pc = pc as u32;
                     }
-                    if local_inst_count > 0 {
+                    if TRACK_METRICS && local_inst_count > 0 {
                         self.instructions_dispatched += local_inst_count;
                     }
                     return Ok(());
@@ -1912,7 +2040,7 @@ impl VirtualMachine {
 
         macro_rules! flush_inst_count {
             () => {
-                if local_inst_count > 0 {
+                if TRACK_METRICS && local_inst_count > 0 {
                     self.instructions_dispatched += local_inst_count;
                     local_inst_count = 0;
                 }
@@ -1920,11 +2048,14 @@ impl VirtualMachine {
         }
 
         macro_rules! pop_and_return_value {
-            ($ret_val:expr, $loop_lbl:lifetime) => {
-                let ret_val = $ret_val;
+            ($ret_reg:expr, $loop_lbl:lifetime) => {
+                let prev_reg_base = reg_base;
                 let frame = self.call_frames.pop().ok_or_else(VmTrap::null_reference)?;
                 if self.call_frames.len() <= target_depth {
-                    self.last_return_value = ret_val;
+                    self.last_return_value = match $ret_reg {
+                        Some(src_idx) => unsafe { *prev_reg_base.add(src_idx) },
+                        None => Value::Null,
+                    };
                     break $loop_lbl;
                 }
                 let caller_frame = self.current_frame_fast()?;
@@ -1933,9 +2064,13 @@ impl VirtualMachine {
                 inst_len = code_span.inst_len;
                 pc = caller_frame.pc as usize;
                 let caller_reg_offset = caller_frame.register_base as usize;
-                // SAFETY: caller_dst is within caller frame register window
+                // SAFETY: prev_reg_base + src_idx and caller_reg_base + caller_dst are within register_stack.
                 unsafe {
                     let caller_reg_base = self.register_stack.as_mut_ptr().add(caller_reg_offset);
+                    let ret_val = match $ret_reg {
+                        Some(src_idx) => *prev_reg_base.add(src_idx),
+                        None => Value::Null,
+                    };
                     *caller_reg_base.add(frame.caller_dst as usize) = ret_val;
                     reg_base = caller_reg_base;
                 }
@@ -1948,13 +2083,15 @@ impl VirtualMachine {
 
         'dispatch_loop: loop {
             if pc >= inst_len {
-                pop_and_return_value!(Value::Null, 'dispatch_loop);
+                pop_and_return_value!(None::<usize>, 'dispatch_loop);
             }
 
             // SAFETY: pc < inst_len, so inst_ptr.add(pc) is in-bounds
             let inst = unsafe { *inst_ptr.add(pc) };
             pc += 1;
-            local_inst_count += 1;
+            if TRACK_METRICS {
+                local_inst_count += 1;
+            }
 
             let raw_opcode = inst.raw_opcode();
             let Some(opcode) = OpCode::from_raw_u8(raw_opcode) else {
@@ -2706,13 +2843,11 @@ impl VirtualMachine {
                     }
 
                     OpCode::Return => {
-                        pop_and_return_value!(Value::Null, 'dispatch_loop);
+                        pop_and_return_value!(None::<usize>, 'dispatch_loop);
                     }
 
                     OpCode::ReturnValue => {
-                        // SAFETY: Return register is within frame window
-                        let ret_val = unsafe { *reg_base.add(inst.dst() as usize) };
-                        pop_and_return_value!(ret_val, 'dispatch_loop);
+                        pop_and_return_value!(Some(inst.dst() as usize), 'dispatch_loop);
                     }
 
                     OpCode::Exit => {
@@ -2733,8 +2868,7 @@ impl VirtualMachine {
                         } else {
                             BlockTag::Object
                         };
-                        let payload_addr = self.heap.allocate(size, tag)?;
-                        write_heap_u32_fast(&mut self.heap.buffer, payload_addr, vtable_id);
+                        let payload_addr = alloc_object_trap(&mut self.heap, size, tag, vtable_id)?;
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
                         }
@@ -2866,7 +3000,7 @@ impl VirtualMachine {
                         let static_base = self.current_frame_fast()?.static_base_offset;
                         let slot_idx = static_base + inst.imm32();
                         let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
-                        self.set_static(slot_idx, val_to_set)?;
+                        self.set_static_trap(slot_idx, val_to_set)?;
                     }
 
                     OpCode::GetStaticGlobal => {
@@ -2884,7 +3018,7 @@ impl VirtualMachine {
                     OpCode::SetStaticDirect => {
                         let slot = inst.imm32();
                         let val = unsafe { *reg_base.add(inst.dst() as usize) };
-                        self.set_static(slot, val)?;
+                        self.set_static_trap(slot, val)?;
                     }
 
                     // =============================================================
@@ -2901,11 +3035,8 @@ impl VirtualMachine {
                         }
                         let array_len = raw_len as usize;
                         let elem_size = (inst.src2() as usize).max(1);
-                        let payload_size = 8 + array_len * elem_size;
-                        let payload_addr = self.heap.allocate(payload_size, BlockTag::ArrayRef)?;
-                        self.heap.write_u32(payload_addr, array_len as u32)?;
-                        self.heap.write_u8(payload_addr + 4, elem_size as u8)?;
-                        self.heap.write_u8(payload_addr + 7, inst.flags())?;
+                        let payload_addr =
+                            alloc_array_trap(&mut self.heap, array_len, elem_size, inst.flags())?;
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
                         }
@@ -2914,22 +3045,27 @@ impl VirtualMachine {
                     OpCode::ArrayLength => {
                         let arr_addr =
                             read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let header = self.heap.read_header(arr_addr)?;
-                        let array_len = if header.tag == BlockTag::String {
-                            header.size
-                        } else {
-                            self.heap.read_u32(arr_addr)?
-                        };
+                        let array_len = array_length_trap(&self.heap, arr_addr)?;
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::I32(array_len as i32);
                         }
                     }
 
                     OpCode::GetArray => {
-                        let arr_addr =
-                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
-                        let index_i64 =
-                            read_array_index_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
+                        let arr_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let arr_addr = if let Value::Ref(addr) = *arr_ref
+                            && addr > 0
+                        {
+                            addr
+                        } else {
+                            read_nonnull_ref_slow(arr_ref)?
+                        };
+                        let idx_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let index_i64 = if let Value::I32(num_val) = *idx_ref {
+                            num_val as i64
+                        } else {
+                            read_array_index_slow(idx_ref)?
+                        };
                         let arr_offset = arr_addr as usize;
                         let heap_len = self.heap.buffer.len();
                         if arr_offset < 8 || arr_offset + 8 > heap_len {
@@ -2957,41 +3093,60 @@ impl VirtualMachine {
                                 return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                             }
                             let index_usize = index_i64 as usize;
-                            let elem_size =
-                                (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
-                            let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                            if elem_offset + elem_size > heap_len {
-                                return Err(VmTrap::null_reference());
-                            }
-                            // SAFETY: elem_offset + elem_size <= heap_len verified above.
-                            let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
-                            let raw_word = match elem_size {
-                                1 => unsafe { *elem_ptr as u64 },
-                                2 => unsafe {
-                                    u16::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u16>()))
-                                        as u64
-                                },
-                                4 => unsafe {
-                                    u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>()))
-                                        as u64
-                                },
-                                _ => unsafe {
-                                    u64::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u64>()))
-                                },
-                            };
+                            let elem_size_raw = unsafe { *buf_ptr.add(arr_offset + 4) };
                             let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                            let val = decode_array_element(elem_type_tag, elem_size, raw_word);
-                            unsafe {
-                                *reg_base.add(inst.dst() as usize) = val;
+                            if elem_type_tag == 11 && elem_size_raw == 1 {
+                                let elem_offset = arr_offset + 8 + index_usize;
+                                if elem_offset + 1 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let flag = unsafe { *buf_ptr.add(elem_offset) } != 0;
+                                unsafe {
+                                    *reg_base.add(inst.dst() as usize) = Value::Bool(flag);
+                                }
+                            } else if elem_type_tag == 3 && elem_size_raw == 4 {
+                                let elem_offset = arr_offset + 8 + (index_usize << 2);
+                                if elem_offset + 4 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let raw = unsafe {
+                                    u32::from_le(std::ptr::read_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u32>(),
+                                    ))
+                                };
+                                unsafe {
+                                    *reg_base.add(inst.dst() as usize) = Value::I32(raw as i32);
+                                }
+                            } else {
+                                let val = get_array_variant_cold(
+                                    &self.heap,
+                                    arr_offset,
+                                    index_usize,
+                                    elem_size_raw,
+                                    elem_type_tag,
+                                )?;
+                                unsafe {
+                                    *reg_base.add(inst.dst() as usize) = val;
+                                }
                             }
                         }
                     }
 
                     OpCode::SetArray => {
-                        let arr_addr =
-                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.dst() as usize) })?;
-                        let index_i64 =
-                            read_array_index_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let arr_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let arr_addr = if let Value::Ref(addr) = *arr_ref
+                            && addr > 0
+                        {
+                            addr
+                        } else {
+                            read_nonnull_ref_slow(arr_ref)?
+                        };
+                        let idx_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let index_i64 = if let Value::I32(num_val) = *idx_ref {
+                            num_val as i64
+                        } else {
+                            read_array_index_slow(idx_ref)?
+                        };
                         let arr_offset = arr_addr as usize;
                         let heap_len = self.heap.buffer.len();
                         if arr_offset < 8 || arr_offset + 8 > heap_len {
@@ -3009,55 +3164,54 @@ impl VirtualMachine {
                             return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                         }
                         let index_usize = index_i64 as usize;
-                        let val = unsafe { *reg_base.add(inst.src2() as usize) };
                         let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
 
                         if tag_nibble == BlockTag::Tuple as u8 {
+                            let val = unsafe { *reg_base.add(inst.src2() as usize) };
                             if self.execute_set_tuple(arr_offset, index_usize, val)? {
                                 let caller_frame = self.current_frame_mut_fast()?;
                                 caller_frame.pc = pc as u32;
                                 reload_frame!();
                             }
                         } else {
-                            let elem_size =
-                                (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
-                            let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                            if elem_offset + elem_size > heap_len {
-                                return Err(VmTrap::null_reference());
-                            }
+                            let elem_size_raw = unsafe { *buf_ptr.add(arr_offset + 4) };
                             let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                            let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
-                            if elem_type_tag == 0 || is_reference_element || elem_size == 2 {
-                                if self.execute_set_array_slow(
-                                    elem_offset,
-                                    elem_size,
-                                    elem_type_tag,
-                                    val,
-                                    pc,
-                                )? {
-                                    reload_frame!();
+                            let val_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                            if elem_type_tag == 11 && elem_size_raw == 1 {
+                                let elem_offset = arr_offset + 8 + index_usize;
+                                if elem_offset + 1 > heap_len {
+                                    return Err(VmTrap::null_reference());
                                 }
-                            } else {
-                                // SAFETY: elem_offset + elem_size <= heap_len verified above.
-                                let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
-                                let primitive_val = val.to_primitive_u64();
-                                match elem_size {
-                                    1 => unsafe {
-                                        *elem_ptr = primitive_val as u8;
-                                    },
-                                    4 => unsafe {
-                                        std::ptr::write_unaligned(
-                                            elem_ptr.cast::<u32>(),
-                                            (primitive_val as u32).to_le(),
-                                        );
-                                    },
-                                    _ => unsafe {
-                                        std::ptr::write_unaligned(
-                                            elem_ptr.cast::<u64>(),
-                                            primitive_val.to_le(),
-                                        );
-                                    },
+                                let byte_val = match *val_ref {
+                                    Value::Bool(flag) => u8::from(flag),
+                                    Value::I32(num_val) => num_val as u8,
+                                    _ => to_primitive_u64_cold(val_ref) as u8,
+                                };
+                                unsafe {
+                                    *buf_ptr.add(elem_offset) = byte_val;
                                 }
+                            } else if elem_type_tag == 3 && elem_size_raw == 4 {
+                                let elem_offset = arr_offset + 8 + (index_usize << 2);
+                                if elem_offset + 4 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let word_val = match *val_ref {
+                                    Value::I32(num_val) => num_val as u32,
+                                    _ => to_primitive_u64_cold(val_ref) as u32,
+                                };
+                                unsafe {
+                                    std::ptr::write_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u32>(),
+                                        word_val.to_le(),
+                                    );
+                                }
+                            } else if self.execute_set_array_slow(
+                                arr_offset,
+                                index_usize,
+                                inst.src2(),
+                                pc,
+                            )? {
+                                reload_frame!();
                             }
                         }
                     }
@@ -3160,7 +3314,7 @@ impl VirtualMachine {
                             if ref_count == crate::memory::layout::MAX_REF_COUNT {
                                 // Immortal constant string or immortal object
                             } else if ref_count + 1 >= crate::memory::layout::MAX_REF_COUNT {
-                                crate::memory::arc::inc_ref(&mut self.heap, addr)?;
+                                inc_ref_trap_cold(&mut self.heap, addr)?;
                             } else {
                                 let updated = if self.cycle_collector_enabled {
                                     // Clear bits 26..28 (GcColor::Black) and increment ref_count in place.
@@ -3428,7 +3582,9 @@ impl VirtualMachine {
                         .write(new_frame);
                     self.call_frames.set_len(new_len);
                 }
-                self.peak_call_stack_depth = self.peak_call_stack_depth.max(new_len);
+                if TRACK_METRICS {
+                    self.peak_call_stack_depth = self.peak_call_stack_depth.max(new_len);
+                }
                 inst_ptr = span.inst_ptr;
                 inst_len = span.inst_len;
                 pc = 0;
@@ -3452,7 +3608,7 @@ impl VirtualMachine {
             finish_instruction!();
         }
 
-        if local_inst_count > 0 {
+        if TRACK_METRICS && local_inst_count > 0 {
             self.instructions_dispatched += local_inst_count;
         }
 
