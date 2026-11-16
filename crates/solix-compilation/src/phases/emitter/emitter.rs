@@ -516,7 +516,7 @@ impl<'a> Emitter<'a> {
                 value,
             } => {
                 let dst = self.resolve_dst(target_reg)?;
-                self.emit_assignment(dst, target, *operator, value, *span)?;
+                self.emit_assignment(Some(dst), target, *operator, value, *span)?;
                 Ok(dst)
             }
 
@@ -2880,9 +2880,31 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
+    /// Emits an expression evaluated purely for side effects (skipping any trailing result `Mov`).
+    pub(super) fn emit_discarded_expression(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<(), EmissionError> {
+        if let Expression::Assignment {
+            span,
+            target,
+            operator,
+            value,
+        } = expr
+        {
+            return self.emit_assignment(None, target, *operator, value, *span);
+        }
+        let target_hint = self.resolve_assignment_target_local(expr);
+        let temp = self.emit_expression(expr, target_hint)?;
+        if target_hint != Some(temp) {
+            self.allocator.free_temp(temp);
+        }
+        Ok(())
+    }
+
     fn emit_assignment(
         &mut self,
-        dst: u16,
+        dst: Option<u16>,
         target: &Expression,
         operator: TokenKind,
         value: &Expression,
@@ -2929,9 +2951,11 @@ impl<'a> Emitter<'a> {
                             Some(span),
                         );
                     }
-                    if dst != local_reg {
+                    if let Some(dst_reg) = dst
+                        && dst_reg != local_reg
+                    {
                         self.emit_instruction(
-                            Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                            Instruction::format_a(OpCode::Mov, 0, dst_reg, local_reg, 0),
                             Some(span),
                         );
                     }
@@ -2975,9 +2999,11 @@ impl<'a> Emitter<'a> {
                     );
                     self.allocator.free_window(arg_base, window_size);
                     self.allocator.free_temp(r_val);
-                    if dst != local_reg {
+                    if let Some(dst_reg) = dst
+                        && dst_reg != local_reg
+                    {
                         self.emit_instruction(
-                            Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                            Instruction::format_a(OpCode::Mov, 0, dst_reg, local_reg, 0),
                             Some(span),
                         );
                     }
@@ -3046,13 +3072,18 @@ impl<'a> Emitter<'a> {
                     self.allocator.free_temp(r_val);
                 }
 
-                if dst != local_reg {
+                if let Some(dst_reg) = dst
+                    && dst_reg != local_reg
+                {
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, dst, local_reg, 0),
+                        Instruction::format_a(OpCode::Mov, 0, dst_reg, local_reg, 0),
                         Some(span),
                     );
                 }
-            } else if let Some(slot) = self.static_layout.and_then(|l| l.lookup_slot(&name)) {
+            } else if let Some(slot) = self
+                .static_layout
+                .and_then(|layout| layout.lookup_slot(&name))
+            {
                 let mut r_val = self.emit_expression(value, None)?;
                 let value_type = self.query_type(value.span());
                 let target_type = self.query_type(target.span());
@@ -3071,9 +3102,11 @@ impl<'a> Emitter<'a> {
                     Instruction::format_b(OpCode::SetStatic, 0, r_val, slot),
                     Some(span),
                 );
-                if dst != r_val {
+                if let Some(dst_reg) = dst
+                    && dst_reg != r_val
+                {
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, dst, r_val, 0),
+                        Instruction::format_a(OpCode::Mov, 0, dst_reg, r_val, 0),
                         Some(span),
                     );
                 }
@@ -3099,9 +3132,11 @@ impl<'a> Emitter<'a> {
                     Instruction::format_b(OpCode::SetStaticGlobal, 0, r_val, const_idx as u32),
                     Some(span),
                 );
-                if dst != r_val {
+                if let Some(dst_reg) = dst
+                    && dst_reg != r_val
+                {
                     self.emit_instruction(
-                        Instruction::format_a(OpCode::Mov, 0, dst, r_val, 0),
+                        Instruction::format_a(OpCode::Mov, 0, dst_reg, r_val, 0),
                         Some(span),
                     );
                 }
@@ -3152,9 +3187,11 @@ impl<'a> Emitter<'a> {
                     Some(*mem_span),
                 );
             }
-            if dst != r_val {
+            if let Some(dst_reg) = dst
+                && dst_reg != r_val
+            {
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, dst, r_val, 0),
+                    Instruction::format_a(OpCode::Mov, 0, dst_reg, r_val, 0),
                     Some(span),
                 );
             }
@@ -3230,9 +3267,11 @@ impl<'a> Emitter<'a> {
                 );
             }
 
-            if dst != r_val {
+            if let Some(dst_reg) = dst
+                && dst_reg != r_val
+            {
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, dst, r_val, 0),
+                    Instruction::format_a(OpCode::Mov, 0, dst_reg, r_val, 0),
                     Some(span),
                 );
             }
@@ -3293,9 +3332,11 @@ impl<'a> Emitter<'a> {
                 );
             }
 
-            if dst != r_val {
+            if let Some(dst_reg) = dst
+                && dst_reg != r_val
+            {
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, dst, r_val, 0),
+                    Instruction::format_a(OpCode::Mov, 0, dst_reg, r_val, 0),
                     Some(span),
                 );
             }

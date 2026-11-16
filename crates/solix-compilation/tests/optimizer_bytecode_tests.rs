@@ -715,3 +715,45 @@ fn test_positive_loop_hoist_with_frame_call_preserves_constants() {
         backedge.0, backedge.1
     );
 }
+
+#[test]
+fn test_positive_discarded_field_and_array_assignments_omit_trailing_mov() {
+    let source_code = r#"
+        class Cell {
+            public int32 value;
+            public Cell(int32 initial_val) {
+                this.value = initial_val;
+            }
+        }
+        int32 write_targets(Cell cell_obj, int32[] numbers, int32 index, int32 next_val) {
+            cell_obj.value = next_val;
+            numbers[index] = next_val + 1;
+            return cell_obj.value + numbers[index];
+        }
+        int32 main() {
+            Cell holder = new Cell(1);
+            int32[] arr = [10, 20, 30];
+            return write_targets(holder, arr, 1, 7);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(15));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let target_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("write_targets"))
+        .expect("write_targets function must exist");
+    let mov_count = target_fn
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::Mov as u8)
+        .count();
+    assert_eq!(
+        mov_count, 0,
+        "Discarded field/array assignments must emit zero trailing Mov instructions: {:?}",
+        target_fn.instructions
+    );
+}

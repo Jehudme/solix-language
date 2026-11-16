@@ -403,6 +403,37 @@ fn shl_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
     Ok(Value::I64(read_i64_fast(left_ref)?.wrapping_shl(shift)))
 }
 
+#[inline(always)]
+fn decode_array_element(elem_type_tag: u8, elem_size: usize, raw_word: u64) -> Value {
+    match elem_type_tag {
+        11 => Value::Bool(raw_word != 0),
+        10 => Value::F64(f64::from_bits(raw_word)),
+        3 => Value::I32(raw_word as i32),
+        0 => Value::from_raw_u64(raw_word),
+        13 | 0x80..=0xFF => {
+            if raw_word == 0 {
+                Value::Null
+            } else {
+                Value::Ref(raw_word as u32)
+            }
+        }
+        1 => Value::I32(raw_word as i8 as i32),
+        2 => Value::I32(raw_word as i16 as i32),
+        4 | 8 => Value::I64(raw_word as i64),
+        5 | 12 => Value::I32(raw_word as u8 as i32),
+        6 => Value::I32(raw_word as u16 as i32),
+        7 => Value::I32(raw_word as u32 as i32),
+        9 => {
+            if elem_size == 4 || (raw_word >> 32) == 0 {
+                Value::F64(f32::from_bits(raw_word as u32) as f64)
+            } else {
+                Value::F64(f64::from_bits(raw_word))
+            }
+        }
+        _ => Value::from_raw_u64(raw_word),
+    }
+}
+
 #[cold]
 #[inline(never)]
 fn shr_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
@@ -514,26 +545,23 @@ impl VirtualMachine {
         Ok(())
     }
 
+    #[cold]
     #[inline(never)]
-    fn execute_call_interface(
-        &mut self,
-        inst: Instruction,
-        pc: usize,
-    ) -> Result<(), VmTrap> {
-        let target = inst.call_target();
-        let iface_id = (target >> 8) as u32;
-        let slot = (target & 0xFF) as usize;
-        let arg_base = inst.arg_base();
-        let arg_count = inst.arg_count() as usize;
-        let caller_dst = inst.call_dst();
+    fn resolve_virtual_slot_error(&self, vtable_id: u32, slot: usize) -> VmTrap {
+        let Some(class_entry) = self.context.get_class_by_vtable_id(vtable_id) else {
+            return VmTrap::from_error(vtable_not_found_error(vtable_id));
+        };
+        VmTrap::from_error(vtable_slot_not_found_error(slot, &class_entry.symbol))
+    }
 
-        let caller_frame = self.current_frame_mut_fast()?;
-        caller_frame.pc = pc as u32;
-        let caller_arg_start = caller_frame.register_base + arg_base as usize;
-
-        let receiver = &self.register_stack[caller_arg_start];
-        let obj_addr = read_nonnull_ref_fast(receiver)?;
-        let vtable_id = self.heap.read_u32(obj_addr)?;
+    #[cold]
+    #[inline(never)]
+    fn resolve_interface_slot_slow(
+        &self,
+        vtable_id: u32,
+        iface_id: u32,
+        slot: usize,
+    ) -> Result<u32, VmTrap> {
         let class_entry = self
             .context
             .get_class_by_vtable_id(vtable_id)
@@ -555,18 +583,99 @@ impl VirtualMachine {
                 .or_else(|| class_entry.vtable.get(slot).copied())
         })
         .ok_or_else(|| interface_slot_not_found_error(slot, &class_entry.symbol))?;
+        Ok(resolved_func_id)
+    }
 
-        let meta = &self.context.function_meta[resolved_func_id as usize];
-        if let Some(native_callback) = meta.native_fn {
-            let call_result =
-                self.invoke_native_callback_fast(native_callback, caller_arg_start, arg_count)?;
-            let target_base = self.current_frame_fast()?.register_base;
-            self.register_stack[target_base + caller_dst as usize] = call_result;
-            return Ok(());
+    #[cold]
+    #[inline(never)]
+    fn execute_get_array_special(
+        &self,
+        arr_offset: usize,
+        index_i64: i64,
+        tag_nibble: u8,
+    ) -> Result<Value, VmTrap> {
+        if tag_nibble == BlockTag::String as u8 {
+            let string_len = u32::from_le_bytes(
+                self.heap.buffer[arr_offset - 8..arr_offset - 4]
+                    .try_into()
+                    .unwrap_or([0; 4]),
+            ) as usize;
+            if (index_i64 as u64) >= (string_len as u64) {
+                return Err(VmTrap::index_out_of_bounds(index_i64, string_len));
+            }
+            let byte_offset = arr_offset + index_i64 as usize;
+            if byte_offset >= self.heap.buffer.len() {
+                return Err(VmTrap::null_reference());
+            }
+            return Ok(Value::I32(self.heap.buffer[byte_offset] as i32));
         }
 
-        self.push_frame_window(resolved_func_id, caller_dst, caller_arg_start, arg_count)
-            .map(|_| ())
+        let tuple_len = u32::from_le_bytes(
+            self.heap.buffer[arr_offset..arr_offset + 4]
+                .try_into()
+                .unwrap_or([0; 4]),
+        ) as usize;
+        if (index_i64 as u64) >= (tuple_len as u64) {
+            return Err(VmTrap::index_out_of_bounds(index_i64, tuple_len));
+        }
+        let elem_offset = arr_offset + 8 + ((index_i64 as usize) * 16);
+        if elem_offset + 16 > self.heap.buffer.len() {
+            return Err(VmTrap::null_reference());
+        }
+        let tag_raw = u64::from_le_bytes(
+            self.heap.buffer[elem_offset..elem_offset + 8]
+                .try_into()
+                .unwrap_or([0; 8]),
+        );
+        let payload_raw = u64::from_le_bytes(
+            self.heap.buffer[elem_offset + 8..elem_offset + 16]
+                .try_into()
+                .unwrap_or([0; 8]),
+        );
+        Ok(Value::from_tagged_parts(tag_raw, payload_raw))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn execute_set_tuple(
+        &mut self,
+        arr_offset: usize,
+        index_usize: usize,
+        val: Value,
+    ) -> Result<bool, VmTrap> {
+        let elem_offset = arr_offset + 8 + (index_usize * 16);
+        if elem_offset + 16 > self.heap.buffer.len() {
+            return Err(VmTrap::null_reference());
+        }
+        let old_tag = u64::from_le_bytes(
+            self.heap.buffer[elem_offset..elem_offset + 8]
+                .try_into()
+                .unwrap_or([0; 8]),
+        );
+        let old_payload = u64::from_le_bytes(
+            self.heap.buffer[elem_offset + 8..elem_offset + 16]
+                .try_into()
+                .unwrap_or([0; 8]),
+        );
+        let old_val = Value::from_tagged_parts(old_tag, old_payload);
+
+        let (new_tag, new_payload) = val.to_tagged_parts();
+        self.heap.buffer[elem_offset..elem_offset + 8].copy_from_slice(&new_tag.to_le_bytes());
+        self.heap.buffer[elem_offset + 8..elem_offset + 16]
+            .copy_from_slice(&new_payload.to_le_bytes());
+
+        if let Value::Ref(child_addr) = val
+            && child_addr > 0
+        {
+            crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
+        }
+        if let Value::Ref(old_child) = old_val
+            && old_child > 0
+        {
+            self.release_reference_cold(old_child)?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     #[cold]
@@ -2068,14 +2177,13 @@ impl VirtualMachine {
                     let obj_addr =
                         read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base as usize) })?;
                     let vtable_id = self.heap.read_u32(obj_addr)?;
-                    let class_entry = self
+                    let global_func_id = self
                         .context
-                        .get_class_by_vtable_id(vtable_id)
-                        .ok_or_else(|| vtable_not_found_error(vtable_id))?;
-                    let global_func_id =
-                        class_entry.vtable.get(slot).copied().ok_or_else(|| {
-                            vtable_slot_not_found_error(slot, &class_entry.symbol)
-                        })?;
+                        .flat_vtables
+                        .get(vtable_id as usize)
+                        .and_then(|slots| slots.get(slot))
+                        .copied()
+                        .ok_or_else(|| self.resolve_virtual_slot_error(vtable_id, slot))?;
 
                     let meta = &self.context.function_meta[global_func_id as usize];
                     if let Some(native_callback) = meta.native_fn {
@@ -2106,9 +2214,61 @@ impl VirtualMachine {
                 }
 
                 OpCode::CallInterface => {
-                    flush_inst_count!();
-                    self.execute_call_interface(inst, pc)?;
-                    reload_frame!();
+                    let target = inst.call_target();
+                    let iface_id = (target >> 8) as usize;
+                    let slot = (target & 0xFF) as usize;
+                    let arg_base = inst.arg_base();
+                    let arg_count = inst.arg_count() as usize;
+                    let caller_dst = inst.call_dst();
+
+                    let caller_frame = self.current_frame_mut_fast()?;
+                    caller_frame.pc = pc as u32;
+                    let caller_arg_start = caller_frame.register_base + arg_base as usize;
+
+                    let obj_addr =
+                        read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base as usize) })?;
+                    let vtable_id = self.heap.read_u32(obj_addr)?;
+                    let direct_func_id = if iface_id != 0 {
+                        self.context
+                            .flat_itables
+                            .get(vtable_id as usize)
+                            .and_then(|iface_rows| iface_rows.get(iface_id))
+                            .and_then(|slots| slots.get(slot))
+                            .copied()
+                    } else {
+                        None
+                    };
+                    let global_func_id = match direct_func_id {
+                        Some(func_id) => func_id,
+                        None => {
+                            self.resolve_interface_slot_slow(vtable_id, iface_id as u32, slot)?
+                        }
+                    };
+
+                    let meta = &self.context.function_meta[global_func_id as usize];
+                    if let Some(native_callback) = meta.native_fn {
+                        flush_inst_count!();
+                        let call_result = self.invoke_native_callback_fast(
+                            native_callback,
+                            caller_arg_start,
+                            arg_count,
+                        )?;
+                        reload_frame!();
+                        unsafe {
+                            *reg_base.add(caller_dst as usize) = call_result;
+                        }
+                        finish_instruction!();
+                        continue;
+                    }
+
+                    (inst_ptr, inst_len, static_base, binary_id, reg_base) = self
+                        .push_frame_window(
+                            global_func_id,
+                            caller_dst,
+                            caller_arg_start,
+                            arg_count,
+                        )?;
+                    pc = 0;
                     finish_instruction!();
                     continue;
                 }
@@ -2506,114 +2666,53 @@ impl VirtualMachine {
                     let index_i64 =
                         read_array_index_fast(unsafe { &*reg_base.add(inst.src2() as usize) })?;
                     let arr_offset = arr_addr as usize;
-                    if arr_offset < 8 || arr_offset + 8 > self.heap.buffer.len() {
+                    let heap_len = self.heap.buffer.len();
+                    if arr_offset < 8 || arr_offset + 8 > heap_len {
                         return Err(VmTrap::null_reference());
                     }
 
-                    let tag_nibble = (self.heap.buffer[arr_offset - 1] >> 4) & 0x0F;
-                    if tag_nibble == BlockTag::String as u8 {
-                        let string_len = u32::from_le_bytes(
-                            self.heap.buffer[arr_offset - 8..arr_offset - 4]
-                                .try_into()
-                                .unwrap_or([0; 4]),
-                        ) as usize;
-                        if (index_i64 as u64) >= (string_len as u64) {
-                            return Err(VmTrap::index_out_of_bounds(index_i64, string_len));
-                        }
-                        let byte_val = self.heap.buffer[arr_offset + index_i64 as usize];
+                    // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
+                    let buf_ptr = self.heap.buffer.as_ptr();
+                    let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
+                    if tag_nibble == BlockTag::String as u8 || tag_nibble == BlockTag::Tuple as u8 {
+                        let val =
+                            self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::I32(byte_val as i32);
-                        }
-                    } else if tag_nibble == BlockTag::Tuple as u8 {
-                        let tuple_len = u32::from_le_bytes(
-                            self.heap.buffer[arr_offset..arr_offset + 4]
-                                .try_into()
-                                .unwrap_or([0; 4]),
-                        ) as usize;
-                        if (index_i64 as u64) >= (tuple_len as u64) {
-                            return Err(VmTrap::index_out_of_bounds(index_i64, tuple_len));
-                        }
-                        let index_usize = index_i64 as usize;
-                        let elem_offset = arr_offset + 8 + (index_usize * 16);
-                        if elem_offset + 16 > self.heap.buffer.len() {
-                            return Err(VmTrap::null_reference());
-                        }
-                        let tag_raw = u64::from_le_bytes(
-                            self.heap.buffer[elem_offset..elem_offset + 8]
-                                .try_into()
-                                .unwrap_or([0; 8]),
-                        );
-                        let payload_raw = u64::from_le_bytes(
-                            self.heap.buffer[elem_offset + 8..elem_offset + 16]
-                                .try_into()
-                                .unwrap_or([0; 8]),
-                        );
-                        unsafe {
-                            *reg_base.add(inst.dst() as usize) =
-                                Value::from_tagged_parts(tag_raw, payload_raw);
+                            *reg_base.add(inst.dst() as usize) = val;
                         }
                     } else {
-                        let array_len = u32::from_le_bytes(
-                            self.heap.buffer[arr_offset..arr_offset + 4]
-                                .try_into()
-                                .unwrap_or([0; 4]),
-                        ) as usize;
+                        let array_len = unsafe {
+                            u32::from_le(std::ptr::read_unaligned(
+                                buf_ptr.add(arr_offset).cast::<u32>(),
+                            ))
+                        } as usize;
                         if (index_i64 as u64) >= (array_len as u64) {
                             return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                         }
                         let index_usize = index_i64 as usize;
-                        let elem_size = (self.heap.buffer[arr_offset + 4] as usize).max(1);
+                        let elem_size = (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
                         let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                        if elem_offset + elem_size > self.heap.buffer.len() {
+                        if elem_offset + elem_size > heap_len {
                             return Err(VmTrap::null_reference());
                         }
+                        // SAFETY: elem_offset + elem_size <= heap_len verified above.
+                        let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
                         let raw_word = match elem_size {
-                            1 => self.heap.buffer[elem_offset] as u64,
-                            2 => u16::from_le_bytes(
-                                self.heap.buffer[elem_offset..elem_offset + 2]
-                                    .try_into()
-                                    .unwrap_or([0; 2]),
-                            ) as u64,
-                            4 => u32::from_le_bytes(
-                                self.heap.buffer[elem_offset..elem_offset + 4]
-                                    .try_into()
-                                    .unwrap_or([0; 4]),
-                            ) as u64,
-                            _ => u64::from_le_bytes(
-                                self.heap.buffer[elem_offset..elem_offset + 8]
-                                    .try_into()
-                                    .unwrap_or([0; 8]),
-                            ),
+                            1 => unsafe { *elem_ptr as u64 },
+                            2 => unsafe {
+                                u16::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u16>()))
+                                    as u64
+                            },
+                            4 => unsafe {
+                                u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>()))
+                                    as u64
+                            },
+                            _ => unsafe {
+                                u64::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u64>()))
+                            },
                         };
-                        let elem_type_tag = self.heap.buffer[arr_offset + 7];
-                        let val = match elem_type_tag {
-                            0 => Value::from_raw_u64(raw_word),
-                            1 => Value::I32(raw_word as i8 as i32),
-                            2 => Value::I32(raw_word as i16 as i32),
-                            3 => Value::I32(raw_word as i32),
-                            4 => Value::I64(raw_word as i64),
-                            5 | 12 => Value::I32(raw_word as u8 as i32),
-                            6 => Value::I32(raw_word as u16 as i32),
-                            7 => Value::I32(raw_word as u32 as i32),
-                            8 => Value::I64(raw_word as i64),
-                            9 => {
-                                if elem_size == 4 || (raw_word >> 32) == 0 {
-                                    Value::F64(f32::from_bits(raw_word as u32) as f64)
-                                } else {
-                                    Value::F64(f64::from_bits(raw_word))
-                                }
-                            }
-                            10 => Value::F64(f64::from_bits(raw_word)),
-                            11 => Value::Bool(raw_word != 0),
-                            13 | 0x80..=0xFF => {
-                                if raw_word == 0 {
-                                    Value::Null
-                                } else {
-                                    Value::Ref(raw_word as u32)
-                                }
-                            }
-                            _ => Value::from_raw_u64(raw_word),
-                        };
+                        let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
+                        let val = decode_array_element(elem_type_tag, elem_size, raw_word);
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = val;
                         }
@@ -2626,101 +2725,80 @@ impl VirtualMachine {
                     let index_i64 =
                         read_array_index_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     let arr_offset = arr_addr as usize;
-                    if arr_offset < 8 || arr_offset + 8 > self.heap.buffer.len() {
+                    let heap_len = self.heap.buffer.len();
+                    if arr_offset < 8 || arr_offset + 8 > heap_len {
                         return Err(VmTrap::null_reference());
                     }
 
-                    let array_len = u32::from_le_bytes(
-                        self.heap.buffer[arr_offset..arr_offset + 4]
-                            .try_into()
-                            .unwrap_or([0; 4]),
-                    ) as usize;
+                    // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
+                    let buf_ptr = self.heap.buffer.as_mut_ptr();
+                    let array_len = unsafe {
+                        u32::from_le(std::ptr::read_unaligned(
+                            buf_ptr.add(arr_offset).cast::<u32>(),
+                        ))
+                    } as usize;
                     if (index_i64 as u64) >= (array_len as u64) {
                         return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                     }
                     let index_usize = index_i64 as usize;
                     let val = unsafe { *reg_base.add(inst.src2() as usize) };
-                    let tag_nibble = (self.heap.buffer[arr_offset - 1] >> 4) & 0x0F;
-                    let is_tuple = tag_nibble == BlockTag::Tuple as u8;
+                    let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
 
-                    if is_tuple {
-                        let elem_offset = arr_offset + 8 + (index_usize * 16);
-                        if elem_offset + 16 > self.heap.buffer.len() {
-                            return Err(VmTrap::null_reference());
-                        }
-                        let old_tag = u64::from_le_bytes(
-                            self.heap.buffer[elem_offset..elem_offset + 8]
-                                .try_into()
-                                .unwrap_or([0; 8]),
-                        );
-                        let old_payload = u64::from_le_bytes(
-                            self.heap.buffer[elem_offset + 8..elem_offset + 16]
-                                .try_into()
-                                .unwrap_or([0; 8]),
-                        );
-                        let old_val = Value::from_tagged_parts(old_tag, old_payload);
-
-                        let (new_tag, new_payload) = val.to_tagged_parts();
-                        self.heap.buffer[elem_offset..elem_offset + 8]
-                            .copy_from_slice(&new_tag.to_le_bytes());
-                        self.heap.buffer[elem_offset + 8..elem_offset + 16]
-                            .copy_from_slice(&new_payload.to_le_bytes());
-
-                        if let Value::Ref(child_addr) = val
-                            && child_addr > 0
-                        {
-                            crate::memory::arc::inc_ref(&mut self.heap, child_addr)?;
-                        }
-                        if let Value::Ref(old_child) = old_val
-                            && old_child > 0
-                        {
+                    if tag_nibble == BlockTag::Tuple as u8 {
+                        if self.execute_set_tuple(arr_offset, index_usize, val)? {
                             let caller_frame = self.current_frame_mut_fast()?;
                             caller_frame.pc = pc as u32;
-                            self.release_reference_cold(old_child)?;
                             reload_frame!();
                         }
                     } else {
-                        let elem_size = (self.heap.buffer[arr_offset + 4] as usize).max(1);
+                        let elem_size = (unsafe { *buf_ptr.add(arr_offset + 4) } as usize).max(1);
                         let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-                        if elem_offset + elem_size > self.heap.buffer.len() {
+                        if elem_offset + elem_size > heap_len {
                             return Err(VmTrap::null_reference());
                         }
 
-                        let elem_type_tag = self.heap.buffer[arr_offset + 7];
+                        let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
                         let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+                        // SAFETY: elem_offset + elem_size <= heap_len verified above.
+                        let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
 
                         let old_child = if is_reference_element {
-                            u32::from_le_bytes(
-                                self.heap.buffer[elem_offset..elem_offset + 4]
-                                    .try_into()
-                                    .unwrap_or([0; 4]),
-                            )
+                            unsafe {
+                                u32::from_le(std::ptr::read_unaligned(elem_ptr.cast::<u32>()))
+                            }
                         } else {
                             0
                         };
 
                         if elem_type_tag == 0 {
-                            let encoded_word = val.to_raw_u64();
-                            self.heap.buffer[elem_offset..elem_offset + 8]
-                                .copy_from_slice(&encoded_word.to_le_bytes());
+                            let encoded_word = val.to_raw_u64().to_le();
+                            unsafe {
+                                std::ptr::write_unaligned(elem_ptr.cast::<u64>(), encoded_word);
+                            }
                         } else {
                             let primitive_val = val.to_primitive_u64();
                             match elem_size {
-                                1 => {
-                                    self.heap.buffer[elem_offset] = primitive_val as u8;
-                                }
-                                2 => {
-                                    self.heap.buffer[elem_offset..elem_offset + 2]
-                                        .copy_from_slice(&(primitive_val as u16).to_le_bytes());
-                                }
-                                4 => {
-                                    self.heap.buffer[elem_offset..elem_offset + 4]
-                                        .copy_from_slice(&(primitive_val as u32).to_le_bytes());
-                                }
-                                _ => {
-                                    self.heap.buffer[elem_offset..elem_offset + 8]
-                                        .copy_from_slice(&primitive_val.to_le_bytes());
-                                }
+                                1 => unsafe {
+                                    *elem_ptr = primitive_val as u8;
+                                },
+                                2 => unsafe {
+                                    std::ptr::write_unaligned(
+                                        elem_ptr.cast::<u16>(),
+                                        (primitive_val as u16).to_le(),
+                                    );
+                                },
+                                4 => unsafe {
+                                    std::ptr::write_unaligned(
+                                        elem_ptr.cast::<u32>(),
+                                        (primitive_val as u32).to_le(),
+                                    );
+                                },
+                                _ => unsafe {
+                                    std::ptr::write_unaligned(
+                                        elem_ptr.cast::<u64>(),
+                                        primitive_val.to_le(),
+                                    );
+                                },
                             }
                         }
 

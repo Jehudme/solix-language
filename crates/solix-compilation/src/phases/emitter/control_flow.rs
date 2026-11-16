@@ -96,6 +96,10 @@ impl<'a> Emitter<'a> {
             Statement::Try(try_stmt) => self.emit_try_statement(try_stmt, loop_stack),
             Statement::Throw(throw_stmt) => self.emit_throw_statement(throw_stmt),
             Statement::Expression(expr_stmt) => {
+                if matches!(&expr_stmt.expression, Expression::Assignment { .. }) {
+                    self.emit_discarded_expression(&expr_stmt.expression)?;
+                    return Ok(());
+                }
                 let target_hint = self.resolve_assignment_target_local(&expr_stmt.expression);
                 let temp = self.emit_expression(&expr_stmt.expression, target_hint)?;
                 if self
@@ -369,11 +373,7 @@ impl<'a> Emitter<'a> {
         }
 
         if let Some(update) = &for_stmt.update {
-            let target_hint = self.resolve_assignment_target_local(update);
-            let temp = self.emit_expression(update, target_hint)?;
-            if target_hint != Some(temp) {
-                self.allocator.free_temp(temp);
-            }
+            self.emit_discarded_expression(update)?;
         }
 
         let loop_end_pc = self.function.instructions.len() as i32;
@@ -911,15 +911,31 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
-    /// Returns the local variable register index when `expr` is an identifier assignment targeting a local.
-    fn resolve_assignment_target_local(&self, expr: &Expression) -> Option<u16> {
-        if let Expression::Assignment { target, .. } = expr
-            && let Expression::Identifier { span } = target.as_ref()
-        {
-            let name = self.get_lexeme(*span);
-            return self.allocator.lookup_local(name);
+    /// Returns the local variable register index when `expr` is an identifier assignment or inc/dec targeting a local.
+    pub(super) fn resolve_assignment_target_local(&self, expr: &Expression) -> Option<u16> {
+        match expr {
+            Expression::Assignment { target, .. } => {
+                if let Expression::Identifier { span } = target.as_ref() {
+                    let name = self.get_lexeme(*span);
+                    return self.allocator.lookup_local(name);
+                }
+                None
+            }
+            Expression::Unary {
+                operator:
+                    solix_common::tokens::TokenKind::OperatorIncrement
+                    | solix_common::tokens::TokenKind::OperatorDecrement,
+                operand,
+                ..
+            } => {
+                if let Expression::Identifier { span } = operand.as_ref() {
+                    let name = self.get_lexeme(*span);
+                    return self.allocator.lookup_local(name);
+                }
+                None
+            }
+            _ => None,
         }
-        None
     }
 
     pub fn patch_jump_offset(&mut self, instruction_index: usize, offset: i32) {

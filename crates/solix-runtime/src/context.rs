@@ -83,6 +83,10 @@ pub struct RuntimeContext {
     pub all_classes: Vec<CompiledClass>,
     /// Fast direct lookup table for compiled classes indexed directly by `vtable_id`.
     pub vtable_lookup: Vec<Option<CompiledClass>>,
+    /// Compact `O(1)` virtual method tables indexed by `[vtable_id][slot]`.
+    pub flat_vtables: Vec<Box<[u32]>>,
+    /// Compact `O(1)` interface method tables indexed by `[vtable_id][iface_id][slot]`.
+    pub flat_itables: Vec<Box<[Box<[u32]>]>>,
     /// Total static variable slots reserved across all loaded binaries.
     pub total_static_space: u32,
     /// Global function ID of the resolved program entry point, if available.
@@ -439,9 +443,30 @@ impl RuntimeContext {
             .map(|class_entry| class_entry.vtable_id)
             .max()
             .unwrap_or(0);
+        let max_iface_id = all_classes
+            .iter()
+            .flat_map(|class_entry| class_entry.itable.iter().map(|(iface_id, _)| *iface_id))
+            .max()
+            .unwrap_or(0)
+            .max(max_relocated_vtable_id);
+
         let mut vtable_lookup = vec![None; (max_relocated_vtable_id + 1) as usize];
+        let mut flat_vtables: Vec<Box<[u32]>> =
+            vec![Box::default(); (max_relocated_vtable_id + 1) as usize];
+        let mut flat_itables: Vec<Box<[Box<[u32]>]>> =
+            vec![Box::default(); (max_relocated_vtable_id + 1) as usize];
+
         for class_entry in &all_classes {
-            vtable_lookup[class_entry.vtable_id as usize] = Some(class_entry.clone());
+            let class_idx = class_entry.vtable_id as usize;
+            vtable_lookup[class_idx] = Some(class_entry.clone());
+            flat_vtables[class_idx] = class_entry.vtable.clone().into_boxed_slice();
+            if !class_entry.itable.is_empty() {
+                let mut iface_rows = vec![Box::<[u32]>::default(); (max_iface_id + 1) as usize];
+                for (iface_id, method_slots) in &class_entry.itable {
+                    iface_rows[*iface_id as usize] = method_slots.clone().into_boxed_slice();
+                }
+                flat_itables[class_idx] = iface_rows.into_boxed_slice();
+            }
         }
 
         let mut native_registry = NativeRegistry::with_builtins();
@@ -590,6 +615,8 @@ impl RuntimeContext {
             function_meta,
             all_classes,
             vtable_lookup,
+            flat_vtables,
+            flat_itables,
             total_static_space: current_static_offset,
             entry_point_function_id,
             init_function_ids,
