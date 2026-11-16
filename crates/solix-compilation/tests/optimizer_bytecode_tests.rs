@@ -483,3 +483,108 @@ fn test_positive_direct_assignment_eliminates_trailing_mov() {
         acc_func.instructions
     );
 }
+
+#[test]
+fn test_positive_loop_sra_eliminates_pod_alloc_and_pure_getter_call() {
+    let source_code = r#"
+        class Box<T> {
+            public T value;
+            public Box(T initial_val) {
+                this.value = initial_val;
+            }
+            public T get_val() {
+                return this.value;
+            }
+        }
+        int32 main() {
+            int32 total = 0;
+            for (int32 index = 0; index < 100; index = index + 1) {
+                Box<int32> first_box = new Box<int32>(index);
+                Box<int32> second_box = new Box<int32>(index * 2 + 1);
+                total = total + first_box.get_val() + second_box.get_val();
+            }
+            return total;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+    let expected: i32 = (0..100).map(|idx| idx + (idx * 2 + 1)).sum();
+    assert_eq!(
+        execution_result,
+        Value::I32(expected),
+        "instructions: {:#?}",
+        main_func.instructions
+    );
+
+    let alloc_count = main_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::AllocObject as u8)
+        .count();
+    let call_count = main_func
+        .instructions
+        .iter()
+        .filter(|inst| {
+            let raw = inst.raw_opcode();
+            raw == OpCode::CallDirect as u8 || raw == OpCode::CallVirtual as u8
+        })
+        .count();
+
+    assert_eq!(
+        alloc_count, 0,
+        "Loop-scoped SRA should eliminate all AllocObject instructions in main(), found {:?}",
+        main_func.instructions
+    );
+    assert_eq!(
+        call_count, 0,
+        "Pure constructor and getter calls should be scalar-replaced in main(), found {:?}",
+        main_func.instructions
+    );
+}
+
+#[test]
+fn test_negative_loop_sra_rejects_loop_carried_object_alias() {
+    let source_code = r#"
+        class Holder {
+            public int32 val;
+            public Holder(int32 initial_val) {
+                this.val = initial_val;
+            }
+        }
+        int32 main() {
+            Holder saved = new Holder(5);
+            int32 acc = 0;
+            for (int32 index = 0; index < 4; index = index + 1) {
+                acc = acc + saved.val;
+                Holder fresh = new Holder(index + 10);
+                saved = fresh;
+            }
+            return acc + saved.val;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(5 + 10 + 11 + 12 + 13));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_alloc = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::AllocObject as u8);
+    assert!(
+        has_alloc,
+        "Loop-carried object assigned to outer variable must preserve heap AllocObject"
+    );
+}

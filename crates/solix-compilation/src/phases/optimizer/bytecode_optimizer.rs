@@ -472,6 +472,21 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     let mut hoisted_any = false;
 
     for (header_pc, loop_end_pc) in ordered_headers {
+        let loop_has_frame_call = function.instructions[header_pc..=loop_end_pc]
+            .iter()
+            .any(|loop_inst| {
+                let loop_raw = loop_inst.raw_opcode();
+                loop_raw == OpCode::CallDirect as u8
+                    || loop_raw == OpCode::CallVirtual as u8
+                    || loop_raw == OpCode::CallInterface as u8
+                    || loop_raw == OpCode::CallCallable as u8
+                    || loop_raw == OpCode::CallSymbol as u8
+                    || loop_raw == OpCode::CallExtern as u8
+            });
+        if loop_has_frame_call {
+            continue;
+        }
+
         let mut cursor = header_pc;
         while cursor <= loop_end_pc && cursor < function.instructions.len() {
             let inst = function.instructions[cursor];
