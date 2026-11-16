@@ -279,7 +279,8 @@ impl ProjectManifest {
 
         if !manifest.profiles.contains_key("release") {
             return Err(EmissionError::ContainerSerializationFailed {
-                reason: "manifest.toml must define mandatory [profiles.release] profile".to_string(),
+                reason: "manifest.toml must define mandatory [profiles.release] profile"
+                    .to_string(),
             });
         }
 
@@ -320,7 +321,8 @@ impl ProjectManifest {
     pub fn resolve_profile(&self, target_profile: &str) -> Result<ResolvedProfile, EmissionError> {
         if !self.profiles.contains_key("release") {
             return Err(EmissionError::ContainerSerializationFailed {
-                reason: "manifest.toml must define mandatory [profiles.release] profile".to_string(),
+                reason: "manifest.toml must define mandatory [profiles.release] profile"
+                    .to_string(),
             });
         }
 
@@ -816,21 +818,11 @@ impl SlxarcArchive {
                     continue;
                 }
 
-                // Extract host native library to cache
-                let target_path = extract_cache_directory.join(
-                    Path::new(&entry_name)
-                        .file_name()
-                        .unwrap_or(std::ffi::OsStr::new("native.so")),
-                );
-
-                let mut out_file = File::create(&target_path).map_err(|io_error| {
-                    EmissionError::ContainerSerializationFailed {
-                        reason: format!(
-                            "failed to extract native library '{}': {io_error}",
-                            target_path.display()
-                        ),
-                    }
-                })?;
+                // Extract host native library atomically to avoid truncating cached libraries under parallel runs
+                let file_name_os = Path::new(&entry_name)
+                    .file_name()
+                    .unwrap_or(std::ffi::OsStr::new("native.so"));
+                let target_path = extract_cache_directory.join(file_name_os);
 
                 let mut library_bytes = Vec::new();
                 file_entry
@@ -839,19 +831,57 @@ impl SlxarcArchive {
                         reason: format!("failed to read native library '{entry_name}': {io_error}"),
                     })?;
 
-                out_file.write_all(&library_bytes).map_err(|io_error| {
-                    EmissionError::ContainerSerializationFailed {
-                        reason: format!(
-                            "failed to write native library '{}': {io_error}",
-                            target_path.display()
-                        ),
-                    }
-                })?;
+                let expected_hash = crate::hash::sha256_hex(&library_bytes);
+                let already_valid = target_path.exists()
+                    && crate::hash::sha256_file(&target_path)
+                        .is_ok_and(|existing_hash| existing_hash == expected_hash);
 
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = fs::set_permissions(&target_path, fs::Permissions::from_mode(0o755));
+                if !already_valid {
+                    static TEMP_EXTRACTION_SEQ: std::sync::atomic::AtomicU64 =
+                        std::sync::atomic::AtomicU64::new(0);
+                    let seq_id =
+                        TEMP_EXTRACTION_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let file_name_lossy = file_name_os.to_string_lossy();
+                    let temp_path = extract_cache_directory.join(format!(
+                        ".tmp.{}.{}.{}",
+                        std::process::id(),
+                        seq_id,
+                        file_name_lossy
+                    ));
+                    let mut out_file = File::create(&temp_path).map_err(|io_error| {
+                        EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "failed to create temp native library '{}': {io_error}",
+                                temp_path.display()
+                            ),
+                        }
+                    })?;
+                    out_file.write_all(&library_bytes).map_err(|io_error| {
+                        let _ = fs::remove_file(&temp_path);
+                        EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "failed to write native library '{}': {io_error}",
+                                temp_path.display()
+                            ),
+                        }
+                    })?;
+                    drop(out_file);
+
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o755));
+                    }
+
+                    if let Err(rename_error) = fs::rename(&temp_path, &target_path) {
+                        let _ = fs::remove_file(&temp_path);
+                        return Err(EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "failed to finalize native library '{}': {rename_error}",
+                                target_path.display()
+                            ),
+                        });
+                    }
                 }
 
                 native_libraries.push(target_path.clone());
@@ -875,14 +905,14 @@ impl SlxarcArchive {
                     .map_err(|io_error| EmissionError::ContainerSerializationFailed {
                         reason: format!("failed to read resource '{entry_name}': {io_error}"),
                     })?;
-                out_file
-                    .write_all(&resource_bytes)
-                    .map_err(|io_error| EmissionError::ContainerSerializationFailed {
+                out_file.write_all(&resource_bytes).map_err(|io_error| {
+                    EmissionError::ContainerSerializationFailed {
                         reason: format!(
                             "failed to write resource '{}': {io_error}",
                             target_path.display()
                         ),
-                    })?;
+                    }
+                })?;
                 resource_total_bytes += resource_bytes.len() as u64;
                 resource_files.push(target_path.clone());
                 extracted_files.push(target_path);
@@ -1052,7 +1082,10 @@ sources = ["tests"]
             manifest.configuration.description.as_deref(),
             Some("A sample Solix application")
         );
-        assert_eq!(manifest.configuration.license.as_deref(), Some("Apache-2.0"));
+        assert_eq!(
+            manifest.configuration.license.as_deref(),
+            Some("Apache-2.0")
+        );
         assert_eq!(
             manifest.configuration.authors,
             vec!["Jane Doe <jane@example.com>"]
@@ -1063,7 +1096,9 @@ sources = ["tests"]
             Some("TestRunner::main")
         );
 
-        let resolved_release = manifest.resolve_profile("release").expect("release profile");
+        let resolved_release = manifest
+            .resolve_profile("release")
+            .expect("release profile");
         assert_eq!(resolved_release.opt_level, 3);
         assert_eq!(resolved_release.inline_threshold, 16);
         assert_eq!(resolved_release.sources, vec!["src"]);
@@ -1091,7 +1126,9 @@ version = "0.0.1"
             manifest.test_entrypoint().as_deref(),
             Some("TestRunner::test")
         );
-        let resolved = manifest.resolve_profile("release").expect("release profile");
+        let resolved = manifest
+            .resolve_profile("release")
+            .expect("release profile");
         assert_eq!(resolved.opt_level, 3);
         assert_eq!(resolved.inline_threshold, 16);
         assert_eq!(resolved.sources, vec!["src"]);
@@ -1134,10 +1171,7 @@ version = "0.1.0"
 
         let inspection = SlxarcArchive::inspect(&archive_path).expect("inspect slxarc");
         assert!(inspection.manifest.is_some());
-        assert_eq!(
-            inspection.manifest.unwrap().configuration.name,
-            "pack_test"
-        );
+        assert_eq!(inspection.manifest.unwrap().configuration.name, "pack_test");
         assert_eq!(inspection.binaries.len(), 1);
         assert_eq!(inspection.native_libraries.len(), 1);
 

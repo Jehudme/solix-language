@@ -966,18 +966,36 @@ impl VirtualMachine {
         let inst_len = func.instructions.len();
         let static_base = func.static_base_offset;
 
-        let reg_base = if arg_count > 0 {
-            caller_arg_start
-        } else {
-            self.call_frames.last().map_or(0, |last_frame| {
-                last_frame.register_base + last_frame.register_count
-            })
-        };
+        let caller_frame_end = self.call_frames.last().map_or(0, |last_frame| {
+            last_frame.register_base + last_frame.register_count
+        });
+        // Slide the register window in-place only when the argument slice sits at the top of
+        // the caller's live register frame; otherwise allocate above caller_frame_end and copy.
+        let (reg_base, needs_arg_copy) =
+            if arg_count > 0 && caller_arg_start + arg_count >= caller_frame_end {
+                (caller_arg_start, false)
+            } else {
+                (caller_frame_end, arg_count > 0)
+            };
         let num_regs = (func.num_registers as usize).max(arg_count);
         let required_regs = reg_base + num_regs;
 
         if required_regs > self.register_stack.len() {
             grow_register_stack(&mut self.register_stack, required_regs);
+        }
+
+        if needs_arg_copy {
+            // SAFETY: caller_arg_start..caller_arg_start + arg_count lies within caller frame,
+            // reg_base == caller_frame_end >= caller_arg_start + arg_count (non-overlapping),
+            // and reg_base + arg_count <= required_regs <= self.register_stack.len().
+            unsafe {
+                let stack_ptr = self.register_stack.as_mut_ptr();
+                std::ptr::copy_nonoverlapping(
+                    stack_ptr.add(caller_arg_start),
+                    stack_ptr.add(reg_base),
+                    arg_count,
+                );
+            }
         }
 
         if has_references {
@@ -2927,5 +2945,102 @@ mod tests {
                 opcode: 0xFE
             }
         ));
+    }
+
+    #[test]
+    fn test_positive_call_window_preserves_caller_high_registers() {
+        let mut program = BinaryProgram::new();
+
+        // Callee takes 1 arg (r0), uses r0..r4 (num_registers = 5) so an unsafe overlap
+        // would overwrite caller r3..r6 if arg_base == 2 inside a 7-register caller frame.
+        let mut callee_fn = CompiledFunction::new("callee", 0, 1, 5);
+        callee_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 999));
+        callee_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 2, 888));
+        callee_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 3, 777));
+        callee_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 4, 666));
+        callee_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::AddI32, 0, 1, 0, 1));
+        callee_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 1, 0, 0));
+        program.functions.push(callee_fn);
+
+        // Caller keeps live constant r5 = 100 while calling callee(args: r2..r2).
+        let mut main_fn = CompiledFunction::new("main", 0, 0, 7);
+        main_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 5, 100));
+        main_fn
+            .instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 2, 21));
+        main_fn
+            .instructions
+            .push(Instruction::format_call(OpCode::CallDirect, 1, 0, 2, 1));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::AddI32, 0, 6, 1, 5));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 6, 0, 0));
+        program.functions.push(main_fn);
+        program.entry_point_id = Some(1);
+
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(program))
+            .expect("context should build");
+        let mut vm = VirtualMachine::new(context);
+        let result = vm.run().expect("vm execution should succeed");
+        assert_eq!(result, Value::I32(1120));
+    }
+
+    #[test]
+    fn test_positive_deep_linked_list_drop_without_stack_overflow() {
+        let mut program = BinaryProgram::new();
+        let mut node_class = solix_common::CompiledClass::new("ListNode", 0, None, 16);
+        node_class.reference_field_offsets = vec![8];
+        program.classes.push(node_class);
+
+        let mut main_fn = CompiledFunction::new("main", 0, 0, 1);
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+        program.functions.push(main_fn);
+        program.entry_point_id = Some(0);
+
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(program))
+            .expect("context should build");
+        let mut vm = VirtualMachine::new(context);
+
+        let mut head_addr: u32 = 0;
+        for _ in 0..50_000 {
+            let node_addr = vm
+                .heap
+                .allocate(16, BlockTag::Object)
+                .expect("heap allocation should succeed");
+            vm.heap
+                .write_u32(node_addr, 0)
+                .expect("vtable write should succeed");
+            let next_val = if head_addr == 0 {
+                Value::Null
+            } else {
+                Value::Ref(head_addr)
+            };
+            vm.heap
+                .write_u64(node_addr + 8, next_val.to_raw_u64())
+                .expect("field write should succeed");
+            head_addr = node_addr;
+        }
+
+        vm.release_reference(head_addr)
+            .expect("iterative release_reference must drop 50,000 nodes without stack overflow");
+        assert_eq!(vm.heap.live_objects_count(), 0);
     }
 }

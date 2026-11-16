@@ -38,6 +38,8 @@ pub struct VirtualMachine {
     pub native_registry: NativeRegistry,
     /// Active destructor addresses tracked to guard against recursive destruction cascades.
     pub active_destructors: HashSet<u32>,
+    /// Reusable scratch queue for iterative ARC child reference cascading without host recursion.
+    pub(crate) release_worklist: Vec<u32>,
     /// Static variable slot storage preserving strongly-typed `Value` instances.
     pub static_slots: Vec<Value>,
     /// Pre-allocated cached constant pool values across all loaded binaries.
@@ -150,6 +152,7 @@ impl VirtualMachine {
             heap,
             native_registry,
             active_destructors: HashSet::new(),
+            release_worklist: Vec::with_capacity(64),
             static_slots,
             const_pool_cache,
             interned_string_addrs,
@@ -425,127 +428,158 @@ impl VirtualMachine {
             return Ok(());
         }
 
-        let header = self.heap.read_header(addr)?;
-        if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
-            return Ok(());
-        }
+        let mut worklist = std::mem::take(&mut self.release_worklist);
+        worklist.clear();
+        worklist.push(addr);
 
-        if header.ref_count > 1 {
-            let mut updated_header = header;
-            updated_header.ref_count -= 1;
-            if self.cycle_collector_enabled
-                && crate::memory::layout::can_contain_references(header.tag)
-                && updated_header.color != crate::memory::layout::GcColor::Purple
-            {
-                updated_header.color = crate::memory::layout::GcColor::Purple;
-                self.purple_buffer.push(addr);
-                self.arc_cycle_collector_candidates += 1;
-            }
-            self.heap.write_header(addr, updated_header)?;
-            if self.cycle_collector_enabled && self.purple_buffer.len() >= self.cycle_threshold {
-                self.collect_cycles()?;
-            }
-            return Ok(());
-        }
-
-        // ref_count hit 0!
-        if self.active_destructors.contains(&addr) {
-            return Ok(());
-        }
-
-        if header.tag == BlockTag::ObjectPod {
-            return self.heap.deallocate_pod_fast(addr, header.size);
-        }
-
-        self.active_destructors.insert(addr);
-
-        if header.tag == BlockTag::Object {
-            let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
-            let (maybe_destructor_id, offset_count) = {
-                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                match maybe_class {
-                    Some(class_item) => (
-                        class_item.destructor_id,
-                        class_item.reference_field_offsets.len(),
-                    ),
-                    None => (None, 0),
-                }
-            };
-
-            // 1. Execute class destructor if defined
-            if let Some(destructor_id) = maybe_destructor_id {
-                let destructor_result = (|| -> Result<(), RuntimeError> {
-                    self.push_frame(destructor_id, 0, &[Value::Ref(addr)])?;
-                    let target_depth = self.call_frames.len() - 1;
-                    self.run_loop(target_depth)?;
-                    Ok(())
-                })();
-                if let Err(destructor_error) = destructor_result {
-                    self.active_destructors.remove(&addr);
-                    return Err(destructor_error);
-                }
+        while let Some(current_addr) = worklist.pop() {
+            if current_addr == 0 {
+                continue;
             }
 
-            // 2. Cascade drops to child reference fields directly from VirtualHeap in O(ref_fields)
-            for offset_idx in 0..offset_count {
-                let field_offset = self
-                    .context
-                    .get_class_by_vtable_id(vtable_id)
-                    .map_or(0, |class_item| {
-                        class_item.reference_field_offsets[offset_idx]
-                    });
-                let field_addr = addr + field_offset as u32;
-                let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
-                    && child_addr > 0
+            let header = self.heap.read_header(current_addr)?;
+            if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
+                continue;
+            }
+
+            if header.ref_count > 1 {
+                let mut updated_header = header;
+                updated_header.ref_count -= 1;
+                if self.cycle_collector_enabled
+                    && crate::memory::layout::can_contain_references(header.tag)
+                    && updated_header.color != crate::memory::layout::GcColor::Purple
                 {
-                    self.release_reference(child_addr)?;
+                    updated_header.color = crate::memory::layout::GcColor::Purple;
+                    self.purple_buffer.push(current_addr);
+                    self.arc_cycle_collector_candidates += 1;
                 }
+                self.heap.write_header(current_addr, updated_header)?;
+                if self.cycle_collector_enabled && self.purple_buffer.len() >= self.cycle_threshold
+                {
+                    self.collect_cycles()?;
+                }
+                continue;
             }
-        } else if header.tag == BlockTag::ArrayRef {
-            let len = self.heap.read_u32(addr).unwrap_or(0);
-            let elem_type_tag = self.heap.read_u8(addr + 7).unwrap_or(0);
-            if elem_type_tag == 13 || elem_type_tag >= 0x80 {
-                let elem_size = self.heap.read_u8(addr + 4).unwrap_or(8) as usize;
-                for index in 0..len {
-                    let elem_addr = addr + 8 + (index as usize * elem_size) as u32;
-                    let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
-                    if child_addr > 0 {
-                        self.release_reference(child_addr)?;
+
+            // ref_count hit 0!
+            if header.tag == BlockTag::ObjectPod {
+                self.heap.deallocate_pod_fast(current_addr, header.size)?;
+                continue;
+            }
+
+            if !self.active_destructors.is_empty()
+                && self.active_destructors.contains(&current_addr)
+            {
+                continue;
+            }
+
+            if header.tag == BlockTag::Object {
+                let vtable_id = self.heap.read_u32(current_addr).unwrap_or(0);
+                let (maybe_destructor_id, offset_count) =
+                    match self.context.get_class_by_vtable_id(vtable_id) {
+                        Some(class_item) => (
+                            class_item.destructor_id,
+                            class_item.reference_field_offsets.len(),
+                        ),
+                        None => (None, 0),
+                    };
+
+                // Only enter active_destructors HashSet when a custom guest destructor exists.
+                if let Some(destructor_id) = maybe_destructor_id {
+                    self.active_destructors.insert(current_addr);
+                    let destructor_result = (|| -> Result<(), RuntimeError> {
+                        self.push_frame(destructor_id, 0, &[Value::Ref(current_addr)])?;
+                        let target_depth = self.call_frames.len() - 1;
+                        self.run_loop(target_depth)?;
+                        Ok(())
+                    })();
+                    if let Err(destructor_error) = destructor_result {
+                        self.active_destructors.remove(&current_addr);
+                        worklist.clear();
+                        self.release_worklist = worklist;
+                        return Err(destructor_error);
+                    }
+                    for offset_idx in 0..offset_count {
+                        let field_offset = self
+                            .context
+                            .get_class_by_vtable_id(vtable_id)
+                            .map_or(0, |class_item| {
+                                class_item.reference_field_offsets[offset_idx]
+                            });
+                        let field_addr = current_addr + field_offset as u32;
+                        let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                        if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
+                            && child_addr > 0
+                        {
+                            worklist.push(child_addr);
+                        }
+                    }
+                    self.heap.deallocate(current_addr)?;
+                    self.active_destructors.remove(&current_addr);
+                    continue;
+                }
+
+                for offset_idx in 0..offset_count {
+                    let field_offset = self
+                        .context
+                        .get_class_by_vtable_id(vtable_id)
+                        .map_or(0, |class_item| {
+                            class_item.reference_field_offsets[offset_idx]
+                        });
+                    let field_addr = current_addr + field_offset as u32;
+                    let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                    if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
+                        && child_addr > 0
+                    {
+                        worklist.push(child_addr);
+                    }
+                }
+            } else if header.tag == BlockTag::ArrayRef {
+                let len = self.heap.read_u32(current_addr).unwrap_or(0);
+                let elem_type_tag = self.heap.read_u8(current_addr + 7).unwrap_or(0);
+                if elem_type_tag == 13 || elem_type_tag >= 0x80 {
+                    let elem_size = self.heap.read_u8(current_addr + 4).unwrap_or(8) as usize;
+                    for index in 0..len {
+                        let elem_addr = current_addr + 8 + (index as usize * elem_size) as u32;
+                        let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
+                        if child_addr > 0 {
+                            worklist.push(child_addr);
+                        }
+                    }
+                }
+            } else if header.tag == BlockTag::Tuple {
+                let count = self.heap.read_u32(current_addr).unwrap_or(0);
+                for index in 0..count {
+                    let elem_addr = current_addr + 8 + (index as usize * 16) as u32;
+                    let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                    let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
+                    let element_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                    if let Value::Ref(child_addr) = element_val
+                        && child_addr > 0
+                    {
+                        worklist.push(child_addr);
+                    }
+                }
+            } else if header.tag == BlockTag::Closure {
+                let cap_count = self.heap.read_u32(current_addr + 4).unwrap_or(0);
+                for index in 0..cap_count {
+                    let cell_addr = current_addr + 8 + (index as usize * 16) as u32;
+                    let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                    let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
+                    let capture_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                    if let Value::Ref(child_addr) = capture_val
+                        && child_addr > 0
+                    {
+                        worklist.push(child_addr);
                     }
                 }
             }
-        } else if header.tag == BlockTag::Tuple {
-            let count = self.heap.read_u32(addr).unwrap_or(0);
-            for index in 0..count {
-                let elem_addr = addr + 8 + (index as usize * 16) as u32;
-                let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
-                let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
-                let element_val = Value::from_tagged_parts(tag_raw, payload_raw);
-                if let Value::Ref(child_addr) = element_val
-                    && child_addr > 0
-                {
-                    self.release_reference(child_addr)?;
-                }
-            }
-        } else if header.tag == BlockTag::Closure {
-            let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
-            for index in 0..cap_count {
-                let cell_addr = addr + 8 + (index as usize * 16) as u32;
-                let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
-                let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
-                let capture_val = Value::from_tagged_parts(tag_raw, payload_raw);
-                if let Value::Ref(child_addr) = capture_val
-                    && child_addr > 0
-                {
-                    self.release_reference(child_addr)?;
-                }
-            }
+
+            self.heap.deallocate(current_addr)?;
         }
 
-        self.heap.deallocate(addr)?;
-        self.active_destructors.remove(&addr);
-
+        worklist.clear();
+        self.release_worklist = worklist;
         Ok(())
     }
 
