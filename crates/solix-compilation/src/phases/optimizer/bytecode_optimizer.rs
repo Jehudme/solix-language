@@ -74,6 +74,10 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             }
         }
 
+        for compiled_function in &mut emission_artifacts.program.functions {
+            rotate_bottom_tested_loops(compiled_function);
+        }
+
         // Keep functions_by_source synchronized with optimized functions
         for source_functions in &mut emission_artifacts.functions_by_source {
             for function in source_functions {
@@ -1755,6 +1759,150 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     }
 
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+}
+
+/// Inverts a loop-exit conditional guard into a bottom-tested loop continuation guard.
+fn invert_loop_guard(instruction: Instruction, back_offset: i32) -> Option<Instruction> {
+    let raw = instruction.raw_opcode();
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+        let offset_i16 = i16::try_from(back_offset).ok()?;
+        let inverted = match raw {
+            val if val == OpCode::JumpIfLtI32 as u8 => OpCode::JumpIfGteI32,
+            val if val == OpCode::JumpIfLteI32 as u8 => OpCode::JumpIfGtI32,
+            val if val == OpCode::JumpIfGtI32 as u8 => OpCode::JumpIfLteI32,
+            val if val == OpCode::JumpIfGteI32 as u8 => OpCode::JumpIfLtI32,
+            val if val == OpCode::JumpIfEqI32 as u8 => OpCode::JumpIfNeqI32,
+            _ => OpCode::JumpIfEqI32,
+        };
+        return Some(Instruction::format_a(
+            inverted,
+            0,
+            instruction.dst(),
+            instruction.src1(),
+            offset_i16 as u16,
+        ));
+    }
+    if raw == OpCode::JumpIfFalse as u8 {
+        return Some(Instruction::format_c(
+            OpCode::JumpIfTrue,
+            0,
+            instruction.dst(),
+            back_offset,
+        ));
+    }
+    if raw == OpCode::JumpIfTrue as u8 {
+        return Some(Instruction::format_c(
+            OpCode::JumpIfFalse,
+            0,
+            instruction.dst(),
+            back_offset,
+        ));
+    }
+    None
+}
+
+/// Converts single-entry top-tested `JumpIf* -> exit; ...; Jump -> header` loops in-place
+/// into bottom-tested `Jump -> tail; body; JumpIf<inv> -> body` loops, eliminating one
+/// unconditional `Jump` dispatch per loop iteration without shifting any instruction PCs.
+fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
+    let inst_count = function.instructions.len();
+    if inst_count < 3
+        || function
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::Switch as u8)
+    {
+        return;
+    }
+
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    for (loop_end, inst) in function.instructions.iter().enumerate() {
+        if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
+            let header_signed = (loop_end as i32) + inst.jump_offset();
+            if header_signed >= 0 && (header_signed as usize) < loop_end {
+                let header_pc = header_signed as usize;
+                if decode_jump_target(function.instructions[header_pc], header_pc, inst_count)
+                    == Some(loop_end + 1)
+                {
+                    candidates.push((header_pc, loop_end));
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return;
+    }
+
+    // Rotate innermost loops first so inner rotations preserve outer single-entry invariants.
+    candidates.sort_by_key(|&(header_pc, loop_end)| (loop_end - header_pc, header_pc));
+
+    let mut used_endpoints = HashSet::new();
+    for (header_pc, loop_end) in candidates {
+        if used_endpoints.contains(&header_pc) || used_endpoints.contains(&loop_end) {
+            continue;
+        }
+        let guard_inst = function.instructions[header_pc];
+        let body_pc = header_pc + 1;
+        let back_offset = (body_pc as i32) - (loop_end as i32);
+        let Some(inverted_guard) = invert_loop_guard(guard_inst, back_offset) else {
+            continue;
+        };
+
+        let exception_blocks_rotation = function.exception_handlers.iter().any(|handler| {
+            let start = handler.try_start_pc as usize;
+            let end = handler.try_end_pc as usize;
+            let catch_pc = handler.handler_pc as usize;
+            let finally_pc = handler.finally_pc.map(|pc_val| pc_val as usize);
+            if start == header_pc
+                || end == header_pc
+                || end == loop_end
+                || catch_pc == header_pc
+                || catch_pc == loop_end
+                || finally_pc == Some(header_pc)
+                || finally_pc == Some(loop_end)
+            {
+                return true;
+            }
+            let catches_into_body = catch_pc > header_pc && catch_pc <= loop_end;
+            let finally_into_body =
+                finally_pc.is_some_and(|pc_val| pc_val > header_pc && pc_val <= loop_end);
+            (catches_into_body || finally_into_body) && (start <= header_pc || end > loop_end)
+        });
+        if exception_blocks_rotation {
+            continue;
+        }
+
+        let has_external_entry = function
+            .instructions
+            .iter()
+            .enumerate()
+            .any(|(pc_idx, inst)| {
+                if pc_idx >= header_pc && pc_idx <= loop_end {
+                    return false;
+                }
+                decode_jump_target(*inst, pc_idx, inst_count)
+                    .is_some_and(|target| target > header_pc && target <= loop_end)
+            });
+        if has_external_entry {
+            continue;
+        }
+
+        let entry_offset = (loop_end as i32) - (header_pc as i32);
+        function.instructions[header_pc] = Instruction::format_c(OpCode::Jump, 0, 0, entry_offset);
+        function.instructions[loop_end] = inverted_guard;
+
+        // Retarget internal backward `continue` edges targeting `header_pc` directly to `loop_end`.
+        for pc_idx in body_pc..loop_end {
+            let inst = function.instructions[pc_idx];
+            if decode_jump_target(inst, pc_idx, inst_count) == Some(header_pc) {
+                function.instructions[pc_idx] =
+                    relocate_jump_instruction(inst, pc_idx, loop_end as u32);
+            }
+        }
+
+        used_endpoints.insert(header_pc);
+        used_endpoints.insert(loop_end);
+    }
 }
 
 /// Decodes a branch or jump instruction's absolute target PC within `[0..=inst_count]`.

@@ -306,19 +306,8 @@ fn test_positive_loop_hoisting_moves_constant_loads_before_loop() {
         .find(|func| func.symbol.contains("accumulate_scaled"))
         .expect("accumulate_scaled function must exist");
 
-    let backedge = loop_func
-        .instructions
-        .iter()
-        .enumerate()
-        .find_map(|(pc_idx, inst)| {
-            if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
-                let target_pc = (pc_idx as i32 + inst.jump_offset()) as usize;
-                Some((target_pc, pc_idx))
-            } else {
-                None
-            }
-        })
-        .expect("Expected backward Jump forming a loop");
+    let backedge =
+        find_loop_backedge(&loop_func.instructions).expect("Expected backward jump forming a loop");
 
     let loop_body_loads = loop_func.instructions[backedge.0..=backedge.1]
         .iter()
@@ -692,19 +681,8 @@ fn test_positive_loop_hoist_with_frame_call_preserves_constants() {
         .iter()
         .find(|func| func.symbol.contains("run_calls"))
         .expect("run_calls function must exist");
-    let backedge = loop_func
-        .instructions
-        .iter()
-        .enumerate()
-        .find_map(|(pc_idx, inst)| {
-            if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
-                let target_pc = (pc_idx as i32 + inst.jump_offset()) as usize;
-                Some((target_pc, pc_idx))
-            } else {
-                None
-            }
-        })
-        .expect("Expected backward Jump forming a loop");
+    let backedge =
+        find_loop_backedge(&loop_func.instructions).expect("Expected backward jump forming a loop");
     let loop_body_f64_loads = loop_func.instructions[backedge.0..=backedge.1]
         .iter()
         .filter(|inst| inst.raw_opcode() == OpCode::LoadF64 as u8)
@@ -1032,18 +1010,7 @@ fn test_positive_borrowed_array_element_and_immortal_closure_arc_elision() {
         .iter()
         .find(|func| func.symbol.contains("main"))
         .expect("main function must exist");
-    let backedge = main_fn
-        .instructions
-        .iter()
-        .enumerate()
-        .find_map(|(pc_idx, inst)| {
-            if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
-                Some(((pc_idx as i32 + inst.jump_offset()) as usize, pc_idx))
-            } else {
-                None
-            }
-        })
-        .expect("Expected loop backedge");
+    let backedge = find_loop_backedge(&main_fn.instructions).expect("Expected loop backedge");
     let loop_arc_ops = main_fn.instructions[backedge.0..=backedge.1]
         .iter()
         .filter(|inst| {
@@ -1069,5 +1036,66 @@ fn test_positive_borrowed_array_element_and_immortal_closure_arc_elision() {
     assert_eq!(
         heap_telemetry.total_deallocations_count,
         heap_telemetry.total_allocations_count
+    );
+}
+
+fn find_loop_backedge(
+    instructions: &[solix_common::bytecode::Instruction],
+) -> Option<(usize, usize)> {
+    instructions.iter().enumerate().find_map(|(pc_idx, inst)| {
+        let raw = inst.raw_opcode();
+        let offset = if raw == OpCode::Jump as u8
+            || raw == OpCode::JumpIfTrue as u8
+            || raw == OpCode::JumpIfFalse as u8
+        {
+            inst.jump_offset()
+        } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+            inst.src2() as i16 as i32
+        } else {
+            0
+        };
+        if offset < 0 {
+            Some(((pc_idx as i32 + offset) as usize, pc_idx))
+        } else {
+            None
+        }
+    })
+}
+
+#[test]
+fn test_positive_loop_rotation_eliminates_loop_backedge_jump() {
+    let source_code = r#"
+        int32 sum_to(int32 limit_val) {
+            int32 acc = 0;
+            for (int32 idx = 0; idx < limit_val; idx = idx + 1) {
+                if (idx == 2) {
+                    continue;
+                }
+                acc = acc + idx;
+            }
+            return acc;
+        }
+        int32 main() {
+            return sum_to(6) * 100 + sum_to(0);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(1300));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let sum_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("sum_to"))
+        .expect("sum_to function must exist");
+    let has_backward_unconditional_jump = sum_fn
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0);
+    assert!(
+        !has_backward_unconditional_jump,
+        "Expected rotated for-loop with bottom-tested JumpIfLtI32 and zero backward Jump: {:?}",
+        sum_fn.instructions
     );
 }
