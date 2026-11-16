@@ -136,8 +136,12 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         // Check authenticated extraction cache status
         let cache = FilesystemPackageCache::new();
         let cache_status = if let Some(manifest) = &inspection.manifest {
-            if let Ok(parsed_version) = PackageVersion::parse(&manifest.info.version) {
-                match cache.get_cached_binary(&manifest.info.name, parsed_version, &target_path) {
+            if let Ok(parsed_version) = PackageVersion::parse(&manifest.configuration.version) {
+                match cache.get_cached_binary(
+                    &manifest.configuration.name,
+                    parsed_version,
+                    &target_path,
+                ) {
                     Ok(Some(_)) => "Cached (verified SHA-256 match in ~/.solix/cache/)".to_string(),
                     Ok(None) => "Not cached (will extract on first compile)".to_string(),
                     Err(cache_err) => format!("Cache invalid: {cache_err}"),
@@ -375,31 +379,31 @@ fn format_slxarc_info_summary(
         let _ = writeln!(
             out,
             "Package:          {} v{}",
-            manifest.info.name, manifest.info.version
+            manifest.configuration.name, manifest.configuration.version
         );
-        if let Some(description) = &manifest.info.description {
+        if let Some(description) = &manifest.configuration.description {
             let _ = writeln!(out, "Description:      {description}");
         }
-        if let Some(license) = &manifest.info.license {
+        if let Some(license) = &manifest.configuration.license {
             let _ = writeln!(out, "License:          {license}");
         }
-        if !manifest.info.authors.is_empty() {
+        if !manifest.configuration.authors.is_empty() {
             let _ = writeln!(
                 out,
                 "Authors:          {}",
-                manifest.info.authors.join(", ")
+                manifest.configuration.authors.join(", ")
             );
         }
         let _ = writeln!(out, "\n--- Entry Points ---");
         let _ = writeln!(
             out,
             "  • main: {}",
-            manifest.entrypoints.main.as_deref().unwrap_or("<none>")
+            manifest.main_entrypoint().as_deref().unwrap_or("<none>")
         );
         let _ = writeln!(
             out,
             "  • test: {}",
-            manifest.entrypoints.test.as_deref().unwrap_or("<none>")
+            manifest.test_entrypoint().as_deref().unwrap_or("<none>")
         );
 
         if !manifest.native_library_checksums.is_empty() {

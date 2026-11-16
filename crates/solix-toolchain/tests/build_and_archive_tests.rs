@@ -70,63 +70,84 @@ fn host_cdylib_filename(base_name: &str) -> String {
 fn test_manifest_toml_parsing_and_validation() {
     // 1. Valid full manifest
     let valid_toml = r#"
-[info]
+[configuration]
 name = "demo_package"
 version = "1.2.3"
 description = "A demo package for testing"
 license = "Apache-2.0"
 authors = ["Tester"]
 
-[entrypoints]
-main = "Demo::main"
-test = "DemoTest::main"
+[profiles.release]
+entrypoint = "Demo::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
+
+[profiles.test]
+inherits = "release"
+entrypoint = "DemoTest::main"
+sources = ["tests"]
 "#;
     let manifest = ProjectManifest::from_toml_str(valid_toml).expect("Valid manifest should parse");
-    assert_eq!(manifest.info.name, "demo_package");
-    assert_eq!(manifest.info.version, "1.2.3");
+    assert_eq!(manifest.configuration.name, "demo_package");
+    assert_eq!(manifest.configuration.version, "1.2.3");
     assert_eq!(
-        manifest.info.description.as_deref(),
+        manifest.configuration.description.as_deref(),
         Some("A demo package for testing")
     );
-    assert_eq!(manifest.info.license.as_deref(), Some("Apache-2.0"));
-    assert_eq!(manifest.entrypoints.main.as_deref(), Some("Demo::main"));
-    assert_eq!(manifest.entrypoints.test.as_deref(), Some("DemoTest::main"));
+    assert_eq!(manifest.configuration.license.as_deref(), Some("Apache-2.0"));
+    assert_eq!(manifest.main_entrypoint().as_deref(), Some("Demo::main"));
+    assert_eq!(manifest.test_entrypoint().as_deref(), Some("DemoTest::main"));
 
     // 2. Minimal valid manifest
     let minimal_toml = r#"
-[info]
+[configuration]
 name = "minimal_package"
+
+[profiles.release]
 "#;
     let minimal_manifest =
         ProjectManifest::from_toml_str(minimal_toml).expect("Minimal manifest should parse");
-    assert_eq!(minimal_manifest.info.name, "minimal_package");
-    assert_eq!(minimal_manifest.info.version, "0.1.0");
-    assert!(minimal_manifest.entrypoints.main.is_none());
-    assert!(minimal_manifest.entrypoints.test.is_none());
+    assert_eq!(minimal_manifest.configuration.name, "minimal_package");
+    assert_eq!(minimal_manifest.configuration.version, "0.1.0");
 
-    // 3. Negative: missing [info] section
-    let missing_info_toml = r#"
-[entrypoints]
-main = "Main::main"
+    // 3. Negative: missing [configuration] section
+    let missing_configuration_toml = r#"
+[profiles.release]
+entrypoint = "Main::main"
 "#;
     assert!(
-        ProjectManifest::from_toml_str(missing_info_toml).is_err(),
-        "Manifest without [info] must fail to parse"
+        ProjectManifest::from_toml_str(missing_configuration_toml).is_err(),
+        "Manifest without [configuration] must fail to parse"
     );
 
-    // 4. Negative: missing 'name' in [info] section
+    // 4. Negative: missing 'name' in [configuration] section
     let missing_name_toml = r#"
-[info]
+[configuration]
 version = "1.0.0"
+
+[profiles.release]
 "#;
     assert!(
         ProjectManifest::from_toml_str(missing_name_toml).is_err(),
-        "Manifest without [info.name] must fail to parse"
+        "Manifest without [configuration.name] must fail to parse"
     );
 
-    // 5. Negative: invalid TOML syntax
+    // 5. Negative: missing [profiles.release] section
+    let missing_release_toml = r#"
+[configuration]
+name = "no_release"
+"#;
+    assert!(
+        ProjectManifest::from_toml_str(missing_release_toml).is_err(),
+        "Manifest without mandatory [profiles.release] profile must fail to parse"
+    );
+
+    // 6. Negative: invalid TOML syntax
     let syntax_error_toml = r#"
-[info
+[configuration
 name = broken
 "#;
     assert!(
@@ -274,8 +295,8 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
         .manifest
         .as_ref()
         .expect("manifest must be present in archive");
-    assert_eq!(manifest.info.name, "untitled");
-    assert_eq!(manifest.info.version, "0.1.0");
+    assert_eq!(manifest.configuration.name, "untitled");
+    assert_eq!(manifest.configuration.version, "0.1.0");
     assert!(
         debug_inspection
             .file_entries
@@ -549,12 +570,11 @@ fn test_info_command_on_slxarc_archive() {
     let parsed_json: serde_json::Value =
         serde_json::from_str(&json_text).expect("Failed to deserialize JSON");
 
-    assert_eq!(parsed_json["manifest"]["info"]["name"], "untitled");
-    assert_eq!(parsed_json["manifest"]["info"]["version"], "0.1.0");
-    assert_eq!(parsed_json["manifest"]["entrypoints"]["main"], "Main::main");
+    assert_eq!(parsed_json["manifest"]["configuration"]["name"], "untitled");
+    assert_eq!(parsed_json["manifest"]["configuration"]["version"], "0.1.0");
     assert_eq!(
-        parsed_json["manifest"]["entrypoints"]["test"],
-        "TestRunner::test"
+        parsed_json["manifest"]["profiles"]["release"]["entrypoint"],
+        "Main::main"
     );
 
     let files_array = parsed_json["contained_files"]
@@ -741,18 +761,28 @@ public class Math {
 
     // 3. Update manifest.toml to declare dependency
     let manifest_content = r#"
-[info]
+[configuration]
 name = "deps_project"
 version = "0.1.0"
 description = "Project with dependencies"
 license = "Apache-2.0"
 authors = ["Tester"]
 
-[entrypoints]
-main = "Main::main"
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
+dependencies = { math = { version = "1.0.0", profile = "release" } }
 
-[dependencies]
-math = { version = "1.0.0", profile = "release" }
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 8
+debug_symbols = true
+static = false
 "#;
     fs::write(project_root.join("manifest.toml"), manifest_content).expect("write manifest");
 

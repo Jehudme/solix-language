@@ -366,7 +366,9 @@ pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<u
         }
     }
 
-    if let Ok(entries) = fs::read_dir(&bundled_directory) {
+    if candidates.is_empty()
+        && let Ok(entries) = fs::read_dir(&bundled_directory)
+    {
         for entry_result in entries.flatten() {
             let entry_path = entry_result.path();
             if !entry_path.is_dir() {

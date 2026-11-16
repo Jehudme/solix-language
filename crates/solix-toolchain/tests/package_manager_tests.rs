@@ -79,10 +79,13 @@ public class MathUtils {
     fs::write(
         stage_v100.join("manifest.toml"),
         r#"
-[info]
+[configuration]
 name = "raylib"
 version = "1.0.0"
 description = "Raylib graphics"
+
+[profiles.release]
+entrypoint = "Window::init"
 "#,
     )
     .expect("Failed to write manifest");
@@ -133,10 +136,13 @@ public class Window {
     fs::write(
         stage_v120.join("manifest.toml"),
         r#"
-[info]
+[configuration]
 name = "raylib"
 version = "1.2.0"
 description = "Raylib graphics updated"
+
+[profiles.release]
+entrypoint = "Window::init"
 "#,
     )
     .expect("Failed to write manifest");
@@ -501,9 +507,12 @@ fn test_reinstall_command_with_source_validation() {
     // Tamper the manifest name: reinstall must fail due to source mismatch
     let manifest_path = project_dir.join("manifest.toml");
     let tampered_manifest = r#"
-[info]
+[configuration]
 name = "tampered_name"
 version = "1.0.0"
+
+[profiles.release]
+entrypoint = "Main::main"
 "#;
     fs::write(&manifest_path, tampered_manifest).expect("write tampered manifest");
 

@@ -6,16 +6,16 @@
       "version": "5.5.0",
       "profile": "release",
       "archive_rel_path": "raylib-release@5.5.0/raylib.slxarc",
-      "sha256": "bfc8b87af6bbfbb627dfaa9c481946a6b0329796fb8bf1706dee267b09d4f420",
-      "size_bytes": 2445432
+      "sha256": "292971f5c81fd84f8face3ada9f9fe2f912bdde3ccd73a8c346ae5eff8f76269",
+      "size_bytes": 2445566
     },
     {
       "name": "solix",
       "version": "2.0.0",
       "profile": "release",
       "archive_rel_path": "solix-release@2.0.0/solix.slxarc",
-      "sha256": "749ffc2b22821149e6fde6d00fdfe7ac8603957a01c500a8b1c5d4767c41a974",
-      "size_bytes": 1077507
+      "sha256": "911f35a56120bbc29a504418b45721b01c729189aa27a80e74446a5de54223f3",
+      "size_bytes": 1077587
     }
   ]
 }

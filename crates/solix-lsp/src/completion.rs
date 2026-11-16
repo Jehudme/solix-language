@@ -1098,9 +1098,9 @@ fn handle_import_completion(
         }
 
         if let Some(manifest) = workspace.project_manifest_for_uri(&snapshot.uri)
-            && !manifest.info.name.is_empty()
+            && !manifest.configuration.name.is_empty()
         {
-            package_candidates.push(manifest.info.name);
+            package_candidates.push(manifest.configuration.name);
         }
 
         let mut seen_packages = std::collections::HashSet::new();

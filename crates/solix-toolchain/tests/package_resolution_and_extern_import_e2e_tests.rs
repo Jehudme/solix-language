@@ -716,10 +716,13 @@ public int32 run_graphics() {
     fs::write(
         raylib_stage.join("manifest.toml"),
         r#"
-[info]
+[configuration]
 name = "raylib"
 version = "1.2.0"
 description = "Raylib cross-pc"
+
+[profiles.release]
+entrypoint = "Window::init"
 "#,
     )
     .expect("write raylib manifest");
@@ -818,9 +821,12 @@ public class App {
     fs::write(
         raylib_v110_stage.join("manifest.toml"),
         r#"
-[info]
+[configuration]
 name = "raylib"
 version = "1.1.0"
+
+[profiles.release]
+entrypoint = "Window::init"
 "#,
     )
     .expect("write v110 manifest");
@@ -880,9 +886,12 @@ version = "1.1.0"
     fs::write(
         raylib_v200_stage.join("manifest.toml"),
         r#"
-[info]
+[configuration]
 name = "raylib"
 version = "2.0.0"
+
+[profiles.release]
+entrypoint = "Window::init"
 "#,
     )
     .expect("write v200 manifest");
@@ -942,9 +951,12 @@ version = "2.0.0"
     fs::write(
         raylib_v142_stage.join("manifest.toml"),
         r#"
-[info]
+[configuration]
 name = "raylib"
 version = "1.4.2"
+
+[profiles.release]
+entrypoint = "Window::init"
 "#,
     )
     .expect("write v142 manifest");

@@ -167,17 +167,18 @@ pub fn install_package_artifact(
             )
         })?;
 
-        let package_name = manifest.info.name.trim();
+        let package_name = manifest.configuration.name.trim();
         if package_name.is_empty() {
             bail!("Cannot install archive with empty package name in manifest.toml");
         }
 
-        let package_version = PackageVersion::parse(&manifest.info.version).with_context(|| {
-            format!(
-                "Cannot install package '{}': invalid version '{}' in manifest.toml",
-                package_name, manifest.info.version
-            )
-        })?;
+        let package_version =
+            PackageVersion::parse(&manifest.configuration.version).with_context(|| {
+                format!(
+                    "Cannot install package '{}': invalid version '{}' in manifest.toml",
+                    package_name, manifest.configuration.version
+                )
+            })?;
 
         let effective_profile = profile_override.unwrap_or("release");
 
@@ -243,9 +244,9 @@ pub fn install_package_artifact(
             source: source_project_dir,
             artifact_path: target_file.clone(),
             native_libraries: manifest.native_library_checksums.clone(),
-            description: manifest.info.description.unwrap_or_default(),
-            license: manifest.info.license.unwrap_or_default(),
-            authors: manifest.info.authors,
+            description: manifest.configuration.description.unwrap_or_default(),
+            license: manifest.configuration.license.unwrap_or_default(),
+            authors: manifest.configuration.authors,
         };
 
         registry.register(record.clone())?;
@@ -311,7 +312,7 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
 
         let manifest = ProjectManifest::from_file(&manifest_path)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
-        let package_name = manifest.info.name.clone();
+        let package_name = manifest.configuration.name.clone();
         let profile = args.resolved_profile();
 
         execute_build(BuildArgs {
@@ -440,7 +441,7 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
         if manifest_path.exists() {
             let manifest = ProjectManifest::from_file(&manifest_path)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
-            let matching_records = registry.find_all(&manifest.info.name);
+            let matching_records = registry.find_all(&manifest.configuration.name);
             for record in matching_records {
                 targets_to_reinstall.push(record.clone());
             }
@@ -487,17 +488,17 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
 
         let source_manifest = ProjectManifest::from_file(&manifest_path)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
-        if source_manifest.info.name != record.name {
+        if source_manifest.configuration.name != record.name {
             bail!(
                 "Source directory manifest name '{}' does not match package name '{}'",
-                source_manifest.info.name,
+                source_manifest.configuration.name,
                 record.name
             );
         }
-        if source_manifest.info.version != record.version {
+        if source_manifest.configuration.version != record.version {
             bail!(
                 "Source directory manifest version '{}' does not match package version '{}'",
-                source_manifest.info.version,
+                source_manifest.configuration.version,
                 record.version
             );
         }

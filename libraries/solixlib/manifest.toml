@@ -1,27 +1,26 @@
-[info]
+[configuration]
 name = "solix"
 version = "2.0.0"
 description = "Solix Standard Library"
 license = "Apache-2.0"
 authors = []
 
-[entrypoints]
-main = "Main::main"
-test = "TestRunner::test"
-
-[build]
-profile = "release"
-
-[profile.default]
-opt_level = 0
-inline_threshold = 8
-debug_symbols = true
-
-[profile.release]
-inherits = "default"
-opt_level = 3
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
 inline_threshold = 16
 debug_symbols = false
+static = true
+sources = ["src"]
 
-[dependencies]
-# solix = { version = "2.0.0", profile = "release" }
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 8
+debug_symbols = true
+static = false
+
+[profiles.test]
+inherits = "debug"
+entrypoint = "TestRunner::test"
+sources = ["src", "tests"]

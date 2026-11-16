@@ -1,19 +1,26 @@
-[info]
+[configuration]
 name = "untitled"
 version = "0.1.0"
 description = "An untitled Solix project with Rust native interoperability"
 license = "Apache-2.0"
 authors = ["Jehud Metellus"]
 
-[entrypoints]
-main = "Main::main"
-test = "TestRunner::test"
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
 
-[profile.default]
-opt_level = 0
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
 inline_threshold = 8
 debug_symbols = true
+static = false
 
-[profile.release]
-opt_level = 3
-debug_symbols = false
+[profiles.test]
+inherits = "debug"
+entrypoint = "TestRunner::test"
+sources = ["src", "tests"]

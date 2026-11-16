@@ -15,9 +15,9 @@ fn default_project_version() -> String {
     "0.1.0".to_string()
 }
 
-/// User-editable project identity metadata declared in the `[info]` table of `manifest.toml`.
+/// User-editable project identity metadata declared in the `[configuration]` table of `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectInfo {
+pub struct ProjectConfiguration {
     /// Package or project canonical identifier name.
     pub name: String,
     /// Semantic version string (e.g., `"0.1.0"`).
@@ -34,88 +34,33 @@ pub struct ProjectInfo {
     pub authors: Vec<String>,
 }
 
-/// Entry point symbol overrides declared in the `[entrypoints]` table of `manifest.toml`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ProjectEntryPoints {
-    /// Canonical entry point symbol for standard execution (`debug` and `release`).
-    #[serde(default)]
-    pub main: Option<String>,
-    /// Canonical entry point symbol for test suite execution (`test`).
-    #[serde(default)]
-    pub test: Option<String>,
-}
+/// Backwards compatibility alias for `ProjectConfiguration`.
+pub type ProjectInfo = ProjectConfiguration;
 
-fn default_build_profile() -> String {
-    "debug".to_string()
-}
-
-fn default_build_link() -> String {
-    "dynamic".to_string()
-}
-
-const fn default_verify_checksum() -> bool {
-    true
-}
-
-const fn default_inline_threshold() -> usize {
-    8
-}
-
-/// Declarative build settings declared in the `[build]` table of `manifest.toml`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BuildConfig {
-    /// Target build profile: `"debug"`, `"release"`, or `"test"`.
-    #[serde(default = "default_build_profile")]
-    pub profile: String,
-    /// Linking mode for dependencies and executable emission: `"dynamic"` or `"static"`.
-    #[serde(default = "default_build_link")]
-    pub link: String,
-    /// Optional package store root directory override.
-    #[serde(default)]
-    pub pkg_dir: String,
-    /// Automatically install the built archive container into the local package store.
-    #[serde(default)]
-    pub install: bool,
-    /// Force overwrite if package is already installed.
-    #[serde(default)]
-    pub force_install: bool,
-    /// Verify cryptographic SHA-256 checksums of dependencies.
-    #[serde(default = "default_verify_checksum")]
-    pub verify_checksum: bool,
-    /// Inlining statement threshold limit for AstInlinerPhase.
-    #[serde(default = "default_inline_threshold")]
-    pub inline_threshold: usize,
-}
-
-impl Default for BuildConfig {
-    fn default() -> Self {
-        Self {
-            profile: default_build_profile(),
-            link: default_build_link(),
-            pkg_dir: String::new(),
-            install: false,
-            force_install: false,
-            verify_checksum: true,
-            inline_threshold: 8,
-        }
-    }
-}
-
-/// Profile-specific compilation and build options declared in `[profile.<name>]`.
+/// Profile-specific compilation, dependency, and source configuration declared in `[profiles.<name>]`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ProfileConfig {
-    /// Optional parent profile to inherit from (e.g. `"default"`, `"release"`).
+    /// Optional parent profile to inherit from (defaults to `"release"` if omitted on non-release profiles).
     #[serde(default)]
     pub inherits: Option<String>,
-    /// Optimization level: 0 (none), 1 (basic), 2 (standard), 3 (aggressive).
+    /// Optional canonical entrypoint method symbol (e.g. `"Main::main"`, `"TestRunner::test"`).
     #[serde(default)]
-    pub opt_level: Option<u8>,
+    pub entrypoint: Option<String>,
+    /// Optimization level: 0..=3.
+    #[serde(default, alias = "opt_level")]
+    pub optimization_level: Option<u8>,
     /// Inlining threshold statement limit.
     #[serde(default)]
     pub inline_threshold: Option<usize>,
     /// Whether to generate debug line numbers and symbol information.
     #[serde(default)]
     pub debug_symbols: Option<bool>,
+    /// Whether to link statically (`true`) or dynamically (`false`).
+    #[serde(default, rename = "static")]
+    pub is_static: Option<bool>,
+    /// Explicit linking mode: `"dynamic"` or `"static"`.
+    #[serde(default)]
+    pub link: Option<String>,
     /// Whether to emit VM disassembly alongside the binary.
     #[serde(default)]
     pub emit_disassembly: Option<bool>,
@@ -125,52 +70,80 @@ pub struct ProfileConfig {
     /// Verify cryptographic checksums of packages.
     #[serde(default)]
     pub verify_checksum: Option<bool>,
-    /// Linking mode: `"dynamic"` or `"static"`.
-    #[serde(default)]
-    pub link: Option<String>,
     /// Custom maximum memory limit in megabytes.
     #[serde(default)]
     pub memory_limit_mb: Option<usize>,
+    /// List of directory paths (recursive) relative to project root containing `.slx` sources.
+    #[serde(default)]
+    pub sources: Option<Vec<String>>,
+    /// Profile-scoped dependencies mapped as `name => specification`.
+    #[serde(default)]
+    pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
 }
 
 /// Fully resolved, flattened profile configuration with all inheritance applied.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedProfile {
-    /// Profile identifier name (e.g. `"debug"`, `"release"`, `"bench"`).
+    /// Profile identifier name (e.g. `"debug"`, `"release"`, `"test"`).
     pub name: String,
+    /// Canonical entrypoint symbol override.
+    pub entrypoint: Option<String>,
     /// Optimization level: 0..=3.
     pub opt_level: u8,
     /// Inlining threshold statement limit.
     pub inline_threshold: usize,
     /// Whether debug symbol tables and line maps are emitted.
     pub debug_symbols: bool,
+    /// Whether static linking is enabled.
+    pub is_static: bool,
     /// Whether human-readable VM disassembly is emitted.
     pub emit_disassembly: bool,
     /// Whether warnings are treated as fatal errors.
     pub warnings_as_errors: bool,
     /// Verify cryptographic checksums.
     pub verify_checksum: bool,
-    /// Dynamic or static link mode.
+    /// Dynamic or static link mode string.
     pub link: String,
     /// Maximum virtual heap allocation limit in megabytes.
     pub memory_limit_mb: Option<usize>,
+    /// Recursive source directories to compile.
+    pub sources: Vec<String>,
+    /// Profile-scoped resolved dependencies.
+    pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
 }
 
 impl ResolvedProfile {
-    /// Creates the standard default baseline profile.
+    /// Creates the standard default baseline profile for release builds.
     #[must_use]
-    pub fn default_baseline() -> Self {
+    pub fn default_release_baseline() -> Self {
         Self {
-            name: "default".to_string(),
-            opt_level: 0,
-            inline_threshold: 8,
-            debug_symbols: true,
+            name: "release".to_string(),
+            entrypoint: Some("Main::main".to_string()),
+            opt_level: 3,
+            inline_threshold: 16,
+            debug_symbols: false,
+            is_static: true,
             emit_disassembly: false,
             warnings_as_errors: false,
             verify_checksum: true,
-            link: "dynamic".to_string(),
+            link: "static".to_string(),
             memory_limit_mb: None,
+            sources: vec!["src".to_string()],
+            dependencies: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Resolves all dependencies into structured `ResolvedDependency` records.
+    #[must_use]
+    pub fn resolved_dependencies(&self) -> Vec<ResolvedDependency> {
+        self.dependencies
+            .iter()
+            .map(|(package_name, specification)| ResolvedDependency {
+                package_name: package_name.clone(),
+                version: specification.version.clone(),
+                build_profile: specification.profile.clone(),
+            })
+            .collect()
     }
 }
 
@@ -178,7 +151,7 @@ fn default_dependency_profile() -> String {
     "release".to_string()
 }
 
-/// Representation of a dependency requirement in `[dependencies]`.
+/// Representation of a dependency requirement in `[profiles.<profile>.dependencies]`.
 ///
 /// Only strictly-typed table notation is supported:
 /// `raylib = { version = "5.5.0", profile = "debug" }`.
@@ -222,36 +195,95 @@ pub struct ResolvedDependency {
     pub build_profile: String,
 }
 
-/// Minimal, user-editable project manifest contract parsed from `manifest.toml`.
+/// Unified, user-editable project manifest contract parsed from `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectManifest {
-    /// Project identity and metadata.
-    pub info: ProjectInfo,
-    /// Entry point symbol mappings.
-    #[serde(default)]
-    pub entrypoints: ProjectEntryPoints,
-    /// Declarative build configuration declared in `[build]`.
-    #[serde(default)]
-    pub build: BuildConfig,
-    /// Granular profile configurations mapped as `[profile.<name>]`.
-    #[serde(default)]
-    pub profile: std::collections::BTreeMap<String, ProfileConfig>,
-    /// Explicit external dependencies mapped as `name => specification` declared in `[dependencies]`.
-    #[serde(default)]
-    pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
+    /// Unified project identity and metadata.
+    pub configuration: ProjectConfiguration,
+    /// First-class profiles table mapped as `[profiles.<name>]`.
+    pub profiles: std::collections::BTreeMap<String, ProfileConfig>,
     /// Cryptographic SHA-256 digests of bundled native shared libraries.
     #[serde(default)]
     pub native_library_checksums: std::collections::HashMap<String, String>,
 }
 
 impl ProjectManifest {
+    /// Project identifier name convenience accessor.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.configuration.name
+    }
+
+    /// Project version string convenience accessor.
+    #[must_use]
+    pub fn version(&self) -> &str {
+        &self.configuration.version
+    }
+
+    /// Optional project description convenience accessor.
+    #[must_use]
+    pub fn description(&self) -> Option<&str> {
+        self.configuration.description.as_deref()
+    }
+
+    /// Optional software license identifier convenience accessor.
+    #[must_use]
+    pub fn license(&self) -> Option<&str> {
+        self.configuration.license.as_deref()
+    }
+
+    /// Project authors list convenience accessor.
+    #[must_use]
+    pub fn authors(&self) -> &[String] {
+        &self.configuration.authors
+    }
+
+    /// Canonical main entrypoint symbol.
+    #[must_use]
+    pub fn main_entrypoint(&self) -> Option<String> {
+        self.resolve_profile("release")
+            .ok()
+            .and_then(|resolved| resolved.entrypoint)
+            .or_else(|| Some("Main::main".to_string()))
+    }
+
+    /// Canonical test entrypoint symbol.
+    #[must_use]
+    pub fn test_entrypoint(&self) -> Option<String> {
+        self.resolve_profile("test")
+            .ok()
+            .and_then(|resolved| resolved.entrypoint)
+            .or_else(|| Some("TestRunner::test".to_string()))
+    }
+
     /// Parses a `manifest.toml` string into a strongly-typed `ProjectManifest`.
     pub fn from_toml_str(toml_content: &str) -> Result<Self, EmissionError> {
-        toml::from_str(toml_content).map_err(|parse_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!("failed to parse manifest.toml: {parse_error}"),
+        let manifest: Self = toml::from_str(toml_content).map_err(|parse_error| {
+            if toml_content.contains("[info]")
+                || toml_content.contains("[entrypoints]")
+                || toml_content.contains("[build]")
+                || toml_content.contains("[profile.")
+            {
+                EmissionError::ContainerSerializationFailed {
+                    reason: format!(
+                        "failed to parse manifest.toml: legacy manifest sections ([info], [entrypoints], [build], [profile.<name>]) are no longer supported; please update to [configuration] and [profiles]: {parse_error}"
+                    ),
+                }
+            } else {
+                EmissionError::ContainerSerializationFailed {
+                    reason: format!("failed to parse manifest.toml: {parse_error}"),
+                }
             }
-        })
+        })?;
+
+        if !manifest.profiles.contains_key("release") {
+            return Err(EmissionError::ContainerSerializationFailed {
+                reason: "manifest.toml must define mandatory [profiles.release] profile".to_string(),
+            });
+        }
+
+        Ok(manifest)
     }
 
     /// Reads and parses `manifest.toml` from a file path on disk.
@@ -279,15 +311,21 @@ impl ProjectManifest {
 
     /// Resolves the hierarchical profile configuration for the requested profile name.
     ///
-    /// Evaluates inheritance chains (e.g. `bench` -> `release` -> `default`), detects cycles,
-    /// and applies user-defined overrides on top of standard built-in compiler profiles.
+    /// The only mandatory base profile is `"release"`. If a profile does not define `inherits`,
+    /// it automatically inherits from `"release"`. Profile sources and dependencies are
+    /// inherited and merged hierarchically.
     ///
     /// # Errors
-    /// Returns an error if a cyclic profile inheritance loop is detected.
+    /// Returns an error if the mandatory `"release"` profile is missing or a cyclic loop is detected.
     pub fn resolve_profile(&self, target_profile: &str) -> Result<ResolvedProfile, EmissionError> {
+        if !self.profiles.contains_key("release") {
+            return Err(EmissionError::ContainerSerializationFailed {
+                reason: "manifest.toml must define mandatory [profiles.release] profile".to_string(),
+            });
+        }
+
         let mut visited_profiles: Vec<String> = Vec::new();
         let mut resolution_chain: Vec<String> = Vec::new();
-
         let mut current_profile_name = target_profile.to_string();
 
         while !current_profile_name.is_empty() {
@@ -304,52 +342,31 @@ impl ProjectManifest {
             visited_profiles.push(current_profile_name.clone());
             resolution_chain.push(current_profile_name.clone());
 
-            let next_parent = if let Some(config) = self.profile.get(&current_profile_name)
-                && let Some(ref inherits_from) = config.inherits
-            {
-                Some(inherits_from.clone())
-            } else {
-                match current_profile_name.as_str() {
-                    "release" => Some("default".to_string()),
-                    "debug" => Some("default".to_string()),
-                    "test" => Some("debug".to_string()),
-                    "default" => None,
-                    _ => Some("default".to_string()),
-                }
-            };
-
-            if let Some(parent_name) = next_parent {
-                if current_profile_name == "default" {
-                    break;
-                }
-                current_profile_name = parent_name;
-            } else {
+            if current_profile_name == "release" {
                 break;
             }
+
+            let next_parent = if let Some(config) = self.profiles.get(&current_profile_name) {
+                if let Some(ref inherits_from) = config.inherits {
+                    inherits_from.clone()
+                } else {
+                    "release".to_string()
+                }
+            } else {
+                "release".to_string()
+            };
+
+            current_profile_name = next_parent;
         }
 
-        let mut resolved = ResolvedProfile::default_baseline();
+        let mut resolved = ResolvedProfile::default_release_baseline();
 
         while let Some(step_profile) = resolution_chain.pop() {
-            match step_profile.as_str() {
-                "release" => {
-                    resolved.opt_level = 3;
-                    resolved.inline_threshold = 8;
-                    resolved.debug_symbols = false;
+            if let Some(user_config) = self.profiles.get(&step_profile) {
+                if let Some(ref entrypoint) = user_config.entrypoint {
+                    resolved.entrypoint = Some(entrypoint.clone());
                 }
-                "debug" => {
-                    resolved.opt_level = 0;
-                    resolved.debug_symbols = true;
-                }
-                "test" => {
-                    resolved.opt_level = 0;
-                    resolved.debug_symbols = true;
-                }
-                _ => {}
-            }
-
-            if let Some(user_config) = self.profile.get(&step_profile) {
-                if let Some(opt_level) = user_config.opt_level {
+                if let Some(opt_level) = user_config.optimization_level {
                     resolved.opt_level = opt_level;
                 }
                 if let Some(inline_threshold) = user_config.inline_threshold {
@@ -357,6 +374,18 @@ impl ProjectManifest {
                 }
                 if let Some(debug_symbols) = user_config.debug_symbols {
                     resolved.debug_symbols = debug_symbols;
+                }
+                if let Some(is_static) = user_config.is_static {
+                    resolved.is_static = is_static;
+                    resolved.link = if is_static {
+                        "static".to_string()
+                    } else {
+                        "dynamic".to_string()
+                    };
+                }
+                if let Some(ref link) = user_config.link {
+                    resolved.link = link.clone();
+                    resolved.is_static = link.eq_ignore_ascii_case("static");
                 }
                 if let Some(emit_disassembly) = user_config.emit_disassembly {
                     resolved.emit_disassembly = emit_disassembly;
@@ -367,11 +396,42 @@ impl ProjectManifest {
                 if let Some(verify_checksum) = user_config.verify_checksum {
                     resolved.verify_checksum = verify_checksum;
                 }
-                if let Some(ref link) = user_config.link {
-                    resolved.link = link.clone();
-                }
                 if let Some(memory_limit_mb) = user_config.memory_limit_mb {
                     resolved.memory_limit_mb = Some(memory_limit_mb);
+                }
+
+                if let Some(ref step_sources) = user_config.sources {
+                    if step_profile == "release" {
+                        resolved.sources = step_sources.clone();
+                    } else {
+                        for source_dir in step_sources {
+                            if !resolved.sources.contains(source_dir) {
+                                resolved.sources.push(source_dir.clone());
+                            }
+                        }
+                    }
+                }
+
+                for (dep_name, dep_spec) in &user_config.dependencies {
+                    resolved
+                        .dependencies
+                        .insert(dep_name.clone(), dep_spec.clone());
+                }
+            } else if step_profile == "debug" {
+                resolved.opt_level = 0;
+                resolved.inline_threshold = 8;
+                resolved.debug_symbols = true;
+                resolved.is_static = false;
+                resolved.link = "dynamic".to_string();
+            } else if step_profile == "test" {
+                resolved.opt_level = 0;
+                resolved.inline_threshold = 8;
+                resolved.debug_symbols = true;
+                resolved.entrypoint = Some("TestRunner::test".to_string());
+                if !resolved.sources.contains(&"tests".to_string())
+                    && !resolved.sources.contains(&"test".to_string())
+                {
+                    resolved.sources.push("tests".to_string());
                 }
             }
         }
@@ -380,18 +440,21 @@ impl ProjectManifest {
         Ok(resolved)
     }
 
-    /// Resolves all dependencies into structured `ResolvedDependency` records.
+    /// Resolves all dependencies for the default `"release"` profile.
     #[must_use]
     pub fn resolved_dependencies(&self) -> Vec<ResolvedDependency> {
-        let mut results = Vec::new();
-        for (package_name, specification) in &self.dependencies {
-            results.push(ResolvedDependency {
-                package_name: package_name.clone(),
-                version: specification.version.clone(),
-                build_profile: specification.profile.clone(),
-            });
-        }
-        results
+        self.resolve_profile("release")
+            .map(|profile| profile.resolved_dependencies())
+            .unwrap_or_default()
+    }
+
+    /// Resolves all dependencies for the specified profile.
+    pub fn resolved_dependencies_for_profile(
+        &self,
+        target_profile: &str,
+    ) -> Result<Vec<ResolvedDependency>, EmissionError> {
+        let profile = self.resolve_profile(target_profile)?;
+        Ok(profile.resolved_dependencies())
     }
 }
 
@@ -912,47 +975,76 @@ mod tests {
     #[test]
     fn test_manifest_parse_minimal_valid() {
         let toml_sample = r#"
-[info]
+[configuration]
 name = "my_app"
 version = "1.2.3"
 description = "A sample Solix application"
 license = "Apache-2.0"
 authors = ["Jane Doe <jane@example.com>"]
 
-[entrypoints]
-main = "Main::main"
-test = "TestRunner::main"
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
+
+[profiles.test]
+inherits = "release"
+entrypoint = "TestRunner::main"
+sources = ["tests"]
 "#;
         let manifest = ProjectManifest::from_toml_str(toml_sample).expect("valid toml");
-        assert_eq!(manifest.info.name, "my_app");
-        assert_eq!(manifest.info.version, "1.2.3");
+        assert_eq!(manifest.configuration.name, "my_app");
+        assert_eq!(manifest.configuration.version, "1.2.3");
         assert_eq!(
-            manifest.info.description.as_deref(),
+            manifest.configuration.description.as_deref(),
             Some("A sample Solix application")
         );
-        assert_eq!(manifest.info.license.as_deref(), Some("Apache-2.0"));
-        assert_eq!(manifest.info.authors, vec!["Jane Doe <jane@example.com>"]);
-        assert_eq!(manifest.entrypoints.main.as_deref(), Some("Main::main"));
+        assert_eq!(manifest.configuration.license.as_deref(), Some("Apache-2.0"));
         assert_eq!(
-            manifest.entrypoints.test.as_deref(),
+            manifest.configuration.authors,
+            vec!["Jane Doe <jane@example.com>"]
+        );
+        assert_eq!(manifest.main_entrypoint().as_deref(), Some("Main::main"));
+        assert_eq!(
+            manifest.test_entrypoint().as_deref(),
             Some("TestRunner::main")
         );
+
+        let resolved_release = manifest.resolve_profile("release").expect("release profile");
+        assert_eq!(resolved_release.opt_level, 3);
+        assert_eq!(resolved_release.inline_threshold, 16);
+        assert_eq!(resolved_release.sources, vec!["src"]);
+
+        let resolved_test = manifest.resolve_profile("test").expect("test profile");
+        assert_eq!(resolved_test.sources, vec!["src", "tests"]);
     }
 
     #[test]
     fn test_manifest_parse_defaults() {
         let toml_sample = r#"
-[info]
+[configuration]
 name = "minimal"
 version = "0.0.1"
+
+[profiles.release]
 "#;
         let manifest = ProjectManifest::from_toml_str(toml_sample).expect("valid toml");
-        assert_eq!(manifest.info.name, "minimal");
-        assert_eq!(manifest.info.version, "0.0.1");
-        assert_eq!(manifest.info.description, None);
-        assert!(manifest.info.authors.is_empty());
-        assert_eq!(manifest.entrypoints.main, None);
-        assert_eq!(manifest.entrypoints.test, None);
+        assert_eq!(manifest.configuration.name, "minimal");
+        assert_eq!(manifest.configuration.version, "0.0.1");
+        assert_eq!(manifest.configuration.description, None);
+        assert!(manifest.configuration.authors.is_empty());
+        assert_eq!(manifest.main_entrypoint().as_deref(), Some("Main::main"));
+        assert_eq!(
+            manifest.test_entrypoint().as_deref(),
+            Some("TestRunner::test")
+        );
+        let resolved = manifest.resolve_profile("release").expect("release profile");
+        assert_eq!(resolved.opt_level, 3);
+        assert_eq!(resolved.inline_threshold, 16);
+        assert_eq!(resolved.sources, vec!["src"]);
     }
 
     #[test]
@@ -965,9 +1057,11 @@ version = "0.0.1"
         fs::create_dir_all(&lib_dir).unwrap();
 
         let manifest_content = r#"
-[info]
+[configuration]
 name = "pack_test"
 version = "0.1.0"
+
+[profiles.release]
 "#;
         fs::write(stage_dir.join("manifest.toml"), manifest_content).unwrap();
 
@@ -990,7 +1084,10 @@ version = "0.1.0"
 
         let inspection = SlxarcArchive::inspect(&archive_path).expect("inspect slxarc");
         assert!(inspection.manifest.is_some());
-        assert_eq!(inspection.manifest.unwrap().info.name, "pack_test");
+        assert_eq!(
+            inspection.manifest.unwrap().configuration.name,
+            "pack_test"
+        );
         assert_eq!(inspection.binaries.len(), 1);
         assert_eq!(inspection.native_libraries.len(), 1);
 

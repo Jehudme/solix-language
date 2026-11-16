@@ -1,25 +1,26 @@
-[info]
+[configuration]
 name = "sample_workspace"
 version = "0.1.0"
 description = "Sample Solix project for interactive VS Code testing"
 license = "Apache-2.0"
 authors = ["Solix Team"]
 
-[entrypoints]
-main = "main"
-test = "test_addition"
+[profiles.release]
+entrypoint = "main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
 
-[build]
-profile = "debug"
-
-[profile.default]
-opt_level = 0
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
 inline_threshold = 8
 debug_symbols = true
+static = false
 
-[profile.release]
-inherits = "default"
-opt_level = 3
-debug_symbols = false
-
-[dependencies]
+[profiles.test]
+inherits = "debug"
+entrypoint = "test_addition"
+sources = ["src", "tests"]

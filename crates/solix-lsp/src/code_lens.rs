@@ -21,17 +21,11 @@ pub fn code_lenses(workspace: &WorkspaceManager, snapshot: &AnalysisSnapshot) ->
     let (configured_main, configured_test) =
         if let Some(manifest) = workspace.project_manifest_for_uri(&snapshot.uri) {
             let main_symbol = manifest
-                .entrypoints
-                .main
-                .as_deref()
-                .unwrap_or("main")
-                .to_string();
+                .main_entrypoint()
+                .unwrap_or_else(|| "main".to_string());
             let test_symbol = manifest
-                .entrypoints
-                .test
-                .as_deref()
-                .unwrap_or("test")
-                .to_string();
+                .test_entrypoint()
+                .unwrap_or_else(|| "test".to_string());
             (main_symbol, test_symbol)
         } else {
             ("main".to_string(), "test".to_string())

@@ -116,7 +116,12 @@ pub fn run_dependency_resolution(
 
             if *existing_version < requirement.version {
                 if let Some(solver) = &context.solver {
-                    match solver.resolve_compatible(&requirement.name, requirement.version) {
+                    let lookup_name = if let Some(ref target_profile) = requirement.profile {
+                        format!("{}-{}", requirement.name, target_profile)
+                    } else {
+                        requirement.name.clone()
+                    };
+                    match solver.resolve_compatible(&lookup_name, requirement.version) {
                         Ok(upgraded_package) => {
                             *existing_version = upgraded_package.version;
                             *existing_program = upgraded_package.program.clone();
@@ -153,7 +158,12 @@ pub fn run_dependency_resolution(
                 }
             }
         } else if let Some(solver) = &context.solver {
-            match solver.resolve_compatible(&requirement.name, requirement.version) {
+            let lookup_name = if let Some(ref target_profile) = requirement.profile {
+                format!("{}-{}", requirement.name, target_profile)
+            } else {
+                requirement.name.clone()
+            };
+            match solver.resolve_compatible(&lookup_name, requirement.version) {
                 Ok(solved_package) => {
                     let program = solved_package.program.clone();
                     let version = solved_package.version;
