@@ -1022,7 +1022,7 @@ fn test_positive_borrowed_array_element_and_immortal_closure_arc_elision() {
         loop_arc_ops,
         0,
         "Expected zero IncRef/DecRef ops inside loop body for immutable local array & zero-cap closures (full: {:?}): {:?}",
-        &main_fn.instructions,
+        main_fn.instructions,
         &main_fn.instructions[backedge.0..=backedge.1]
     );
 
