@@ -447,7 +447,13 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
     }
 
     for record in targets_to_reinstall {
-        let project_directory = record.source.as_ref().unwrap();
+        let Some(project_directory) = record.source.as_ref() else {
+            eprintln!(
+                "warning: Source directory for '{}-{}@{}' is missing; skipping.",
+                record.name, record.build_profile, record.version,
+            );
+            continue;
+        };
         if !project_directory.exists() {
             eprintln!(
                 "warning: Source directory for '{}-{}@{}' at '{}' no longer exists; skipping.",

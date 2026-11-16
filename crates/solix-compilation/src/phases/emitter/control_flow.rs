@@ -558,19 +558,18 @@ impl<'a> Emitter<'a> {
                     let reg_case_value = self.emit_expression(&case_clause.case_value, None)?;
                     let reg_compare = self.allocator.alloc_temp()?;
 
-                    let is_class = matches!(
-                        &discriminant_type,
+                    let class_symbol_name = match &discriminant_type {
                         Type::Class { symbol_name, .. }
                             if symbol_name != "std::string"
                                 && symbol_name != "std.string"
-                                && symbol_name != "string"
-                    );
+                                && symbol_name != "string" =>
+                        {
+                            Some(symbol_name)
+                        }
+                        _ => None,
+                    };
 
-                    if is_class {
-                        let symbol_name = match &discriminant_type {
-                            Type::Class { symbol_name, .. } => symbol_name,
-                            _ => unreachable!(),
-                        };
+                    if let Some(symbol_name) = class_symbol_name {
                         let simple_class_name =
                             symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
                         let colon_class_name = symbol_name.replace('.', "::");

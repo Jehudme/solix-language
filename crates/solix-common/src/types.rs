@@ -590,23 +590,18 @@ impl Display for Type {
                 write!(formatter, "{normalized_name}")?;
                 if !type_arguments.is_empty() {
                     write!(formatter, "<")?;
+                    let mut last_ends_with_gt = false;
                     for (index, argument) in type_arguments.iter().enumerate() {
                         if index > 0 {
                             write!(formatter, ", ")?;
                         }
-                        // Format each argument and add a trailing space before `>` when the
-                        // argument itself ends with `>` to avoid the parser seeing `>>` as
-                        // the OperatorShiftRight token.
+                        // Format each argument and remember whether the last argument ends with `>`
+                        // so we avoid the parser seeing `>>` as the OperatorShiftRight token.
                         let argument_text = format!("{argument}");
+                        last_ends_with_gt = argument_text.ends_with('>');
                         write!(formatter, "{argument_text}")?;
                     }
-                    // If the last argument's formatted text ends with `>`, emit a separating
-                    // space so the closing `>` does not form a `>>` shift-right token.
-                    let last_argument_text = format!(
-                        "{}",
-                        type_arguments.last().expect("checked non-empty above")
-                    );
-                    if last_argument_text.ends_with('>') {
+                    if last_ends_with_gt {
                         write!(formatter, " ")?;
                     }
                     write!(formatter, ">")?;

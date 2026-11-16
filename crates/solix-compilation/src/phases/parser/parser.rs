@@ -1927,16 +1927,17 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
     fn parse_statement(&mut self) -> Result<Statement, ParsingError> {
         let mut stmts = self.parse_statement_in_block()?;
-        if stmts.len() == 1 {
-            Ok(stmts.pop().unwrap())
-        } else {
-            let start_span = stmts.first().map(|s| s.span()).unwrap_or_default();
-            let end_span = stmts.last().map(|s| s.span()).unwrap_or_default();
-            Ok(Statement::Block(BlockStatement {
-                span: start_span.combine(end_span),
-                statements: stmts,
-            }))
+        if stmts.len() == 1
+            && let Some(single_stmt) = stmts.pop()
+        {
+            return Ok(single_stmt);
         }
+        let start_span = stmts.first().map(|stmt| stmt.span()).unwrap_or_default();
+        let end_span = stmts.last().map(|stmt| stmt.span()).unwrap_or_default();
+        Ok(Statement::Block(BlockStatement {
+            span: start_span.combine(end_span),
+            statements: stmts,
+        }))
     }
 
     fn parse_block(&mut self) -> Result<BlockStatement, ParsingError> {
@@ -3918,13 +3919,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                         break;
                     }
                 }
-                let close_token = self.cursor.match_token(TokenKind::PunctuationCloseParen);
-                if close_token.is_none() {
+                let Some(close_token) = self.cursor.match_token(TokenKind::PunctuationCloseParen)
+                else {
                     return Err(ParsingError::ExpectedClosingDelimiter {
                         span: self.cursor.current_span().to_source_span(),
                     });
-                }
-                let span = open_span.combine(close_token.unwrap().span);
+                };
+                let span = open_span.combine(close_token.span);
                 TypeAnnotation::Tuple { span, elements }
             }
             TokenKind::PrimitiveVoid

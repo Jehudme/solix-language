@@ -178,13 +178,12 @@ impl<'a> TypeCheckingVisitor<'a> {
 
                 // Check "super"
                 if identifier_name == "super" {
-                    if self.is_static_method || self.current_class.is_none() {
+                    let Some(class_id) = self.current_class.filter(|_| !self.is_static_method) else {
                         self.errors.push(BindingError::InvalidSuperCall {
                             span: span.to_source_span(),
                         });
                         return Type::Error;
-                    }
-                    let class_id = self.current_class.unwrap();
+                    };
                     let parent_class_id = self
                         .symbol_table
                         .get_symbol(class_id)

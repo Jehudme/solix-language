@@ -478,7 +478,12 @@ impl CompilationContext {
             let artifacts = crate::phases::emitter::pipeline::emit_context(self)?;
             self.emission_artifacts = Some(artifacts);
         }
-        Ok(self.emission_artifacts.as_ref().unwrap())
+        self.emission_artifacts.as_ref().ok_or_else(|| {
+            solix_common::diagnostics::EmissionError::CorruptBinaryContainer {
+                section: "emission_artifacts".to_string(),
+                details: "Bytecode emission completed without populating artifacts".to_string(),
+            }
+        })
     }
 
     /// Returns the compiled functions for a specific source file index.
@@ -490,10 +495,7 @@ impl CompilationContext {
         source_id: u16,
     ) -> Result<&[solix_common::bytecode::CompiledFunction], solix_common::diagnostics::EmissionError>
     {
-        if self.emission_artifacts.is_none() {
-            self.emit_context()?;
-        }
-        let artifacts = self.emission_artifacts.as_ref().unwrap();
+        let artifacts = self.emit_context()?;
         let index = source_id as usize;
         if index < artifacts.functions_by_source.len() {
             Ok(&artifacts.functions_by_source[index])

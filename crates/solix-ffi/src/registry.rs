@@ -35,18 +35,16 @@ impl NativeRegistry {
     }
 
     /// Registers a native function symbol with the Solix virtual machine.
-    ///
-    /// # Panics
-    /// Panics if `symbol_name` contains an embedded interior null byte.
+    /// Symbols containing embedded interior null bytes are ignored.
     pub fn register(&mut self, symbol_name: &str, function_pointer: NativeCFunctionPtr) {
-        let c_symbol = CString::new(symbol_name)
-            .expect("Symbol name cannot contain embedded null characters");
-        unsafe {
-            (self.register_callback)(
-                self.collector_context,
-                c_symbol.as_ptr(),
-                function_pointer,
-            );
+        if let Ok(c_symbol) = CString::new(symbol_name) {
+            unsafe {
+                (self.register_callback)(
+                    self.collector_context,
+                    c_symbol.as_ptr(),
+                    function_pointer,
+                );
+            }
         }
     }
 }

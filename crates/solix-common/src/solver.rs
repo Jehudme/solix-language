@@ -419,7 +419,13 @@ impl ModuleSolver for InMemoryModuleSolver {
         }
 
         compatible_entries.sort_by_key(|entry| entry.version);
-        let winning_entry = compatible_entries.last().expect("non-empty collection");
+        let Some(winning_entry) = compatible_entries.last() else {
+            return Err(SolverError::NoCompatibleVersion {
+                name: package_name.to_string(),
+                required: min_version,
+                available: Vec::new(),
+            });
+        };
         Ok((*winning_entry).clone())
     }
 
@@ -439,7 +445,12 @@ impl ModuleSolver for InMemoryModuleSolver {
 
         let mut sorted_entries = package_entries.clone();
         sorted_entries.sort_by_key(|entry| entry.version);
-        let winning_entry = sorted_entries.last().expect("non-empty collection");
+        let winning_entry =
+            sorted_entries
+                .last()
+                .ok_or_else(|| SolverError::PackageNotFound {
+                    name: package_name.to_string(),
+                })?;
         Ok(winning_entry.clone())
     }
 
@@ -925,9 +936,11 @@ impl ModuleSolver for ClientModuleSolver {
         }
 
         compatible_versions.sort_by_key(|(version, _)| *version);
-        let (winning_version, winning_dir) = compatible_versions
-            .last()
-            .expect("compatible versions non-empty");
+        let Some((winning_version, winning_dir)) = compatible_versions.last() else {
+            return Err(SolverError::PackageNotFound {
+                name: package_name.to_string(),
+            });
+        };
 
         self.load_package_from_dir(base_name, *winning_version, winning_dir)
     }
@@ -946,9 +959,11 @@ impl ModuleSolver for ClientModuleSolver {
         let mut discovered_versions = self.scan_installed_versions(base_name, req_profile)?;
         discovered_versions.sort_by_key(|(version, _)| *version);
 
-        let (winning_version, winning_dir) = discovered_versions
-            .last()
-            .expect("discovered versions non-empty");
+        let Some((winning_version, winning_dir)) = discovered_versions.last() else {
+            return Err(SolverError::PackageNotFound {
+                name: package_name.to_string(),
+            });
+        };
 
         self.load_package_from_dir(base_name, *winning_version, winning_dir)
     }
