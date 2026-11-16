@@ -250,6 +250,16 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     None
 }
 
+/// Returns `true` if `instruction` writes to `target_reg` (including `UnpackCaptures` register windows).
+fn instruction_writes_reg(instruction: &Instruction, target_reg: u16) -> bool {
+    if instruction.raw_opcode() == OpCode::UnpackCaptures as u8 {
+        let base = instruction.arg_base();
+        let count = instruction.arg_count() as u16;
+        return target_reg >= base && target_reg < base + count;
+    }
+    instruction_write_dst(instruction) == Some(target_reg)
+}
+
 /// Returns `true` if `instruction` reads `target_reg`.
 fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
     let raw = instruction.raw_opcode();
@@ -275,7 +285,6 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
-        || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::CastCheck as u8
         || raw == OpCode::Instanceof as u8
     {
@@ -1173,7 +1182,13 @@ fn try_scalar_replace_one(
             continue;
         }
 
-        if let Some(written) = instruction_write_dst(&current_instruction) {
+        if current_instruction.raw_opcode() == OpCode::UnpackCaptures as u8 {
+            let cap_base = current_instruction.arg_base();
+            let cap_count = current_instruction.arg_count() as u16;
+            for cap_reg in cap_base..cap_base + cap_count {
+                rewrite_aliases.remove(&cap_reg);
+            }
+        } else if let Some(written) = instruction_write_dst(&current_instruction) {
             rewrite_aliases.remove(&written);
         }
     }
@@ -1181,7 +1196,7 @@ fn try_scalar_replace_one(
     // 4. Clean up reference_registers when no remaining instruction writes a potential reference to that register
     for &alias_register in &ever_aliases {
         let can_still_hold_reference = function.instructions.iter().any(|inst| {
-            instruction_write_dst(inst) == Some(alias_register)
+            instruction_writes_reg(inst, alias_register)
                 && instruction_can_write_reference(inst.raw_opcode())
         });
         if !can_still_hold_reference {

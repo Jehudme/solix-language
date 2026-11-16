@@ -319,7 +319,18 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
             scan_block_non_heap.clear();
         }
         let raw = inst.raw_opcode();
-        if let Some(dst_reg) = instruction_write_dst(inst) {
+        if raw == OpCode::UnpackCaptures as u8 {
+            let cap_base = inst.arg_base();
+            let cap_count = inst.arg_count() as u16;
+            for cap_reg in cap_base..cap_base + cap_count {
+                let cap_idx = cap_reg as usize;
+                if cap_idx < has_any_write.len() {
+                    has_any_write[cap_idx] = true;
+                    has_non_immortal_direct_write[cap_idx] = true;
+                    scan_block_non_heap.remove(&cap_reg);
+                }
+            }
+        } else if let Some(dst_reg) = instruction_write_dst(inst) {
             let idx = dst_reg as usize;
             if idx < has_any_write.len() {
                 has_any_write[idx] = true;
@@ -413,6 +424,12 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
                 block_immortals.insert(mov_dst);
             } else {
                 block_immortals.remove(&mov_dst);
+            }
+        } else if raw == OpCode::UnpackCaptures as u8 {
+            let cap_base = inst.arg_base();
+            let cap_count = inst.arg_count() as u16;
+            for cap_reg in cap_base..cap_base + cap_count {
+                block_immortals.remove(&cap_reg);
             }
         } else if let Some(written) = instruction_write_dst(&inst) {
             block_immortals.remove(&written);
@@ -668,6 +685,7 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
     // Also elide local `(GetArray reg, immut_arr -> IncRef reg ... DecRef reg)` windows
     // (including across closed forward branch diamonds and non-escaping calls)
     // when `reg` is reused elsewhere in the function or calls occur inside the window.
+    let mut window_elided_regs: HashSet<u16> = HashSet::new();
     if !immutable_local_arrays.is_empty() {
         let mut jump_bounds_to_target: HashMap<usize, (usize, usize)> = HashMap::new();
         for (src_pc, inst) in function.instructions.iter().enumerate() {
@@ -770,7 +788,50 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
             if let Some(dec_pc) = matched_dec_pc {
                 function.instructions[inc_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
                 function.instructions[dec_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                window_elided_regs.insert(target_reg);
             }
+        }
+    }
+
+    let mut unowned_borrowed_regs = borrowed_aliases.clone();
+    for candidate_reg in window_elided_regs {
+        if candidate_reg < function.param_count {
+            continue;
+        }
+        let still_owns_ref = function.instructions.iter().any(|inst| {
+            let raw = inst.raw_opcode();
+            if (raw == OpCode::IncRef as u8
+                || raw == OpCode::DecRef as u8
+                || raw == OpCode::ReturnValue as u8
+                || raw == OpCode::Throw as u8)
+                && inst.dst() == candidate_reg
+            {
+                return true;
+            }
+            if instruction_writes_register(inst, candidate_reg) {
+                let is_borrowed_write = (raw == OpCode::GetArray as u8
+                    && immutable_local_arrays.contains(&inst.src1()))
+                    || (raw == OpCode::Mov as u8
+                        && (stable_owners.contains_key(&inst.src1())
+                            || borrowed_aliases.contains(&inst.src1())))
+                    || is_guaranteed_non_heap_write(*inst, &immutable_local_arrays);
+                return !is_borrowed_write;
+            }
+            false
+        });
+        if !still_owns_ref {
+            unowned_borrowed_regs.insert(candidate_reg);
+        }
+    }
+
+    if !unowned_borrowed_regs.is_empty() {
+        function
+            .reference_registers
+            .retain(|reg| !unowned_borrowed_regs.contains(reg));
+        for handler in &mut function.exception_handlers {
+            handler
+                .try_ref_regs
+                .retain(|reg| !unowned_borrowed_regs.contains(reg));
         }
     }
 }
@@ -1992,10 +2053,10 @@ fn is_reg_non_reference_at(
     let mut scan_idx = at_idx;
     loop {
         let inst = &stream[scan_idx].instruction;
-        if scan_idx != at_idx && instruction_write_dst(inst) == Some(target_reg) {
+        if scan_idx != at_idx && instruction_writes_register(inst, target_reg) {
             return opcode_writes_only_non_reference(inst.raw_opcode());
         }
-        if scan_idx == at_idx && instruction_write_dst(inst) == Some(target_reg) {
+        if scan_idx == at_idx && instruction_writes_register(inst, target_reg) {
             let cur_raw = inst.raw_opcode();
             if opcode_writes_only_non_reference(cur_raw) {
                 return true;
@@ -2034,7 +2095,7 @@ fn is_reg_non_reference_raw(
     let mut scan_pc = at_pc;
     loop {
         let inst = &function.instructions[scan_pc];
-        if instruction_write_dst(inst) == Some(target_reg) {
+        if instruction_writes_register(inst, target_reg) {
             return opcode_writes_only_non_reference(inst.raw_opcode());
         }
         if scan_pc == 0 || critical_targets.contains(&scan_pc) {
@@ -2091,7 +2152,14 @@ fn propagate_block_copies(
                 copy_map.insert(mov_dst, canonical_src);
             }
         } else {
-            if let Some(written_reg) = instruction_write_dst(&entry.instruction) {
+            if updated_raw == OpCode::UnpackCaptures as u8 {
+                let cap_base = entry.instruction.arg_base();
+                let cap_count = entry.instruction.arg_count() as u16;
+                copy_map.retain(|&key_reg, &mut val_reg| {
+                    !(key_reg >= cap_base && key_reg < cap_base + cap_count)
+                        && !(val_reg >= cap_base && val_reg < cap_base + cap_count)
+                });
+            } else if let Some(written_reg) = instruction_write_dst(&entry.instruction) {
                 copy_map.retain(|&key_reg, &mut val_reg| {
                     key_reg != written_reg && val_reg != written_reg
                 });
@@ -2129,7 +2197,13 @@ fn propagate_single_def_copies(
 
     for (idx, entry) in stream.iter().enumerate() {
         let inst = entry.instruction;
-        if let Some(written) = instruction_write_dst(&inst) {
+        if inst.raw_opcode() == OpCode::UnpackCaptures as u8 {
+            let cap_base = inst.arg_base();
+            let cap_count = inst.arg_count() as u16;
+            for cap_reg in cap_base..cap_base + cap_count {
+                *def_counts.entry(cap_reg).or_insert(0) += 1;
+            }
+        } else if let Some(written) = instruction_write_dst(&inst) {
             *def_counts.entry(written).or_insert(0) += 1;
         }
         if inst.raw_opcode() == OpCode::Mov as u8 && inst.dst() != inst.src1() {
@@ -2164,7 +2238,7 @@ fn propagate_single_def_copies(
             {
                 break;
             }
-            if instruction_write_dst(&stream[scan_idx].instruction) == Some(orig_reg) {
+            if instruction_writes_register(&stream[scan_idx].instruction, orig_reg) {
                 orig_def_idx = Some(scan_idx);
                 break;
             }
@@ -2201,7 +2275,7 @@ fn propagate_single_def_copies(
         }
 
         let orig_modified_in_span = ((orig_idx + 1)..=max_read_idx)
-            .any(|idx| instruction_write_dst(&stream[idx].instruction) == Some(orig_reg));
+            .any(|idx| instruction_writes_register(&stream[idx].instruction, orig_reg));
         if orig_modified_in_span {
             continue;
         }
@@ -2318,7 +2392,7 @@ fn is_dead_after_use(
                 }
             }
 
-            if instruction_write_dst(inst) == Some(reg) {
+            if instruction_writes_register(inst, reg) {
                 break;
             }
 
@@ -2436,7 +2510,7 @@ fn is_dead_after_use_raw(
                 }
             }
 
-            if instruction_write_dst(inst) == Some(reg) {
+            if instruction_writes_register(inst, reg) {
                 break;
             }
 
@@ -2540,6 +2614,16 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     }
 
     None
+}
+
+/// Returns `true` if `instruction` writes to `target_reg` (including `UnpackCaptures` register windows).
+fn instruction_writes_register(instruction: &Instruction, target_reg: u16) -> bool {
+    if instruction.raw_opcode() == OpCode::UnpackCaptures as u8 {
+        let base = instruction.arg_base();
+        let count = instruction.arg_count() as u16;
+        return target_reg >= base && target_reg < base + count;
+    }
+    instruction_write_dst(instruction) == Some(target_reg)
 }
 
 /// Checks whether a register read inside `instruction` can be cleanly rewritten from `from_reg` to `to_reg`.
@@ -3042,7 +3126,7 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         return instruction.src1() == target_reg;
     }
 
-    // Format A: Mov, Unary ops, GetField, ArrayLength, UnpackCaptures, CastCheck, Instanceof read src1
+    // Format A: Mov, Unary ops, GetField, ArrayLength, CastCheck, Instanceof read src1
     if raw == OpCode::Mov as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
@@ -3055,7 +3139,6 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
-        || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::CastCheck as u8
         || raw == OpCode::Instanceof as u8
     {

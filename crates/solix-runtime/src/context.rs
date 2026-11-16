@@ -265,7 +265,8 @@ impl RuntimeContext {
                 for slot_func in &mut relocated_class.vtable {
                     *slot_func += func_offset;
                 }
-                for (_iface_id, iface_methods) in &mut relocated_class.itable {
+                for (iface_id, iface_methods) in &mut relocated_class.itable {
+                    *iface_id += vtable_offset;
                     for slot_func in iface_methods {
                         *slot_func += func_offset;
                     }
@@ -405,15 +406,32 @@ impl RuntimeContext {
                                 && (inst.flags() & 0x80) != 0
                             {
                                 let old_vtable_id = inst.flags() & 0x7F;
-                                let new_flags =
-                                    0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
-                                *inst = Instruction::format_a(
-                                    OpCode::TupleInstanceof,
-                                    new_flags,
-                                    inst.dst(),
-                                    inst.src1(),
-                                    inst.src2(),
-                                );
+                                if old_vtable_id > 0 {
+                                    let new_flags =
+                                        0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
+                                    *inst = Instruction::format_a(
+                                        OpCode::TupleInstanceof,
+                                        new_flags,
+                                        inst.dst(),
+                                        inst.src1(),
+                                        inst.src2(),
+                                    );
+                                }
+                            } else if inst.raw_opcode() == OpCode::AllocArray as u8
+                                && (inst.flags() & 0x80) != 0
+                            {
+                                let old_vtable_id = inst.flags() & 0x7F;
+                                if old_vtable_id > 0 {
+                                    let new_flags =
+                                        0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
+                                    *inst = Instruction::format_a(
+                                        OpCode::AllocArray,
+                                        new_flags,
+                                        inst.dst(),
+                                        inst.src1(),
+                                        inst.src2(),
+                                    );
+                                }
                             }
                         }
                     }
