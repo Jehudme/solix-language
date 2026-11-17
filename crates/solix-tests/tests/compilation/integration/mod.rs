@@ -6,3 +6,4 @@ pub mod test_milestone055_escape_and_arc;
 pub mod test_milestone056_stdlib_and_telemetry;
 pub mod test_milestone057_cycle_collector;
 pub mod test_milestone058_benchmarking_and_ci;
+pub mod test_milestone061_domination;

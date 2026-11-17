@@ -549,11 +549,23 @@ pub fn parse_package_spec(specification: &str) -> (String, Option<String>, Optio
 
     // Legacy fallback check: does name_part end with '-debug', '-release', or '-test'?
     if let Some(base_name) = name_part.strip_suffix("-debug") {
-        (base_name.to_string(), Some("debug".to_string()), version_filter)
+        (
+            base_name.to_string(),
+            Some("debug".to_string()),
+            version_filter,
+        )
     } else if let Some(base_name) = name_part.strip_suffix("-release") {
-        (base_name.to_string(), Some("release".to_string()), version_filter)
+        (
+            base_name.to_string(),
+            Some("release".to_string()),
+            version_filter,
+        )
     } else if let Some(base_name) = name_part.strip_suffix("-test") {
-        (base_name.to_string(), Some("test".to_string()), version_filter)
+        (
+            base_name.to_string(),
+            Some("test".to_string()),
+            version_filter,
+        )
     } else {
         (name_part.to_string(), None, version_filter)
     }

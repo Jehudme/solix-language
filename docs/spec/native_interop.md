@@ -72,7 +72,9 @@ pub type NativeCFunctionPtr = unsafe extern "C" fn(
 3. **`arg_count`**: Number of passed arguments.
 4. **`out_error`**: Error output slot. If set to non-zero `tag`, the runtime raises `RuntimeError::NativeFunctionError`.
 
-### 3.2. Batch Registration Hook: `solix_register_natives`
+### 3.2. Batch Registration Hook & Registry Representation
+`NativeRegistry` stores dynamic C callbacks under `NativeCallback::CAbi(NativeCFunctionPtr)` alongside host `NativeCallback::Rust(NativeFunction)` builtins, resolving `*mut c_void` runtime contexts safely through checked helpers in [`crates/solix-runtime/src/native/ffi.rs`](../../crates/solix-runtime/src/native/ffi.rs).
+
 Shared libraries export an optional batch registration entry point:
 
 ```rust

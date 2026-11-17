@@ -22,10 +22,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DocTag {
     /// `@param <name> <description>`
-    Param {
-        name: String,
-        description: String,
-    },
+    Param { name: String, description: String },
     /// `@return <description>`
     Return { description: String },
     /// `@throws <type> <description>`
@@ -92,12 +89,13 @@ pub fn execute_doc(args: DocArgs) -> Result<()> {
                 manifest_path.display()
             )
         })?;
-        let project_manifest = ProjectManifest::from_toml_str(&manifest_content).with_context(|| {
-            format!(
-                "[E0303] Failed to parse project manifest at '{}'",
-                manifest_path.display()
-            )
-        })?;
+        let project_manifest =
+            ProjectManifest::from_toml_str(&manifest_content).with_context(|| {
+                format!(
+                    "[E0303] Failed to parse project manifest at '{}'",
+                    manifest_path.display()
+                )
+            })?;
 
         project_name = project_manifest.configuration.name.clone();
         project_version = project_manifest.configuration.version.clone();
@@ -155,7 +153,8 @@ pub fn execute_doc(args: DocArgs) -> Result<()> {
             .display()
             .to_string();
 
-        compilation_options = compilation_options.with_source(relative_display.clone(), source_content.clone());
+        compilation_options =
+            compilation_options.with_source(relative_display.clone(), source_content.clone());
         file_sources.push((relative_display, source_content));
     }
 
@@ -187,7 +186,9 @@ pub fn execute_doc(args: DocArgs) -> Result<()> {
                 .unwrap_or_else(|| "global".to_string());
 
             for declaration in &program_ast.declarations {
-                if let Some(doc_type) = extract_declaration_doc(declaration, &package_name, source_content) {
+                if let Some(doc_type) =
+                    extract_declaration_doc(declaration, &package_name, source_content)
+                {
                     documented_types.push(doc_type);
                 }
             }
@@ -201,7 +202,8 @@ pub fn execute_doc(args: DocArgs) -> Result<()> {
         )
     })?;
 
-    let is_markdown = args.format.eq_ignore_ascii_case("markdown") || args.format.eq_ignore_ascii_case("md");
+    let is_markdown =
+        args.format.eq_ignore_ascii_case("markdown") || args.format.eq_ignore_ascii_case("md");
 
     if is_markdown {
         generate_markdown_docs(
@@ -239,15 +241,22 @@ fn collect_solix_sources(current_dir: &Path, discovered_paths: &mut Vec<PathBuf>
     if !current_dir.exists() {
         return Ok(());
     }
-    let read_dir = fs::read_dir(current_dir)
-        .with_context(|| format!("[E0303] Failed to read directory '{}'", current_dir.display()))?;
+    let read_dir = fs::read_dir(current_dir).with_context(|| {
+        format!(
+            "[E0303] Failed to read directory '{}'",
+            current_dir.display()
+        )
+    })?;
 
     for entry_result in read_dir {
         let entry = entry_result?;
         let entry_path = entry.path();
         if entry_path.is_dir() {
             let directory_name = entry.file_name().to_string_lossy().to_string();
-            if !directory_name.starts_with('.') && directory_name != "target" && directory_name != "build" {
+            if !directory_name.starts_with('.')
+                && directory_name != "target"
+                && directory_name != "build"
+            {
                 collect_solix_sources(&entry_path, discovered_paths)?;
             }
         } else if entry_path.extension().is_some_and(|ext| ext == "slx") {
@@ -263,10 +272,22 @@ fn extract_declaration_doc(
     source_content: &str,
 ) -> Option<DocumentedType> {
     match declaration {
-        Declaration::Class(class_decl) => Some(extract_class_doc(class_decl, package_name, source_content)),
-        Declaration::Interface(iface_decl) => Some(extract_interface_doc(iface_decl, package_name, source_content)),
-        Declaration::Enum(enum_decl) => Some(extract_enum_doc(enum_decl, package_name, source_content)),
-        Declaration::Method(method_decl) => Some(extract_top_level_method_doc(method_decl, package_name, source_content)),
+        Declaration::Class(class_decl) => {
+            Some(extract_class_doc(class_decl, package_name, source_content))
+        }
+        Declaration::Interface(iface_decl) => Some(extract_interface_doc(
+            iface_decl,
+            package_name,
+            source_content,
+        )),
+        Declaration::Enum(enum_decl) => {
+            Some(extract_enum_doc(enum_decl, package_name, source_content))
+        }
+        Declaration::Method(method_decl) => Some(extract_top_level_method_doc(
+            method_decl,
+            package_name,
+            source_content,
+        )),
         _ => None,
     }
 }
@@ -311,10 +332,10 @@ fn extract_class_doc(
                     .map(|mod_item| mod_item.as_str().to_string())
                     .collect();
 
-                let return_type_str = get_span_string(source_content, method_decl.return_type.span());
-                let signature_display = format!(
-                    "{return_type_str} {method_name}({parameters_signature})"
-                );
+                let return_type_str =
+                    get_span_string(source_content, method_decl.return_type.span());
+                let signature_display =
+                    format!("{return_type_str} {method_name}({parameters_signature})");
 
                 members_list.push(DocumentedMember {
                     name: method_name,
@@ -374,10 +395,10 @@ fn extract_class_doc(
                     .map(|mod_item| mod_item.as_str().to_string())
                     .collect();
 
-                let return_type_str = get_span_string(source_content, operator_decl.return_type.span());
-                let signature_display = format!(
-                    "{return_type_str} operator{operator_token_str}(...)"
-                );
+                let return_type_str =
+                    get_span_string(source_content, operator_decl.return_type.span());
+                let signature_display =
+                    format!("{return_type_str} operator{operator_token_str}(...)");
 
                 members_list.push(DocumentedMember {
                     name: operator_name,
@@ -426,9 +447,7 @@ fn extract_interface_doc(
         let method_name = get_span_string(source_content, method_decl.name_span);
         let parameters_signature = format_method_parameters(source_content, method_decl);
         let return_type_str = get_span_string(source_content, method_decl.return_type.span());
-        let signature_display = format!(
-            "{return_type_str} {method_name}({parameters_signature})"
-        );
+        let signature_display = format!("{return_type_str} {method_name}({parameters_signature})");
 
         members_list.push(DocumentedMember {
             name: method_name,
@@ -510,9 +529,7 @@ fn extract_top_level_method_doc(
         .collect();
 
     let return_type_str = get_span_string(source_content, method_decl.return_type.span());
-    let signature_display = format!(
-        "{return_type_str} {method_name}({parameters_signature})"
-    );
+    let signature_display = format!("{return_type_str} {method_name}({parameters_signature})");
 
     let member_entry = DocumentedMember {
         name: method_name.clone(),
@@ -548,7 +565,10 @@ fn format_method_parameters(source_content: &str, method_decl: &MethodDeclaratio
         .join(", ")
 }
 
-fn format_constructor_parameters(source_content: &str, ctor_decl: &ConstructorDeclaration) -> String {
+fn format_constructor_parameters(
+    source_content: &str,
+    ctor_decl: &ConstructorDeclaration,
+) -> String {
     ctor_decl
         .parameters
         .iter()
@@ -587,7 +607,8 @@ fn extract_preceding_doc_comment(source_text: &str, span: Span) -> String {
     let mut index = lines.len() - 1;
 
     // Skip the declaration line itself if it does not contain a doc comment
-    if index > 0 && !lines[index].trim().starts_with("///") && !lines[index].trim().ends_with("*/") {
+    if index > 0 && !lines[index].trim().starts_with("///") && !lines[index].trim().ends_with("*/")
+    {
         index -= 1;
     }
 
@@ -814,11 +835,17 @@ fn generate_markdown_docs(
                         DocTag::Return { description } => {
                             type_page.push_str(&format!("**Returns:** {description}\n\n"));
                         }
-                        DocTag::Throws { exception_type, description } => {
-                            type_page.push_str(&format!("**Throws `{exception_type}`:** {description}\n\n"));
+                        DocTag::Throws {
+                            exception_type,
+                            description,
+                        } => {
+                            type_page.push_str(&format!(
+                                "**Throws `{exception_type}`:** {description}\n\n"
+                            ));
                         }
                         DocTag::Deprecated { reason } => {
-                            type_page.push_str(&format!("> [!WARNING]\n> **Deprecated:** {reason}\n\n"));
+                            type_page
+                                .push_str(&format!("> [!WARNING]\n> **Deprecated:** {reason}\n\n"));
                         }
                         _ => {}
                     }
@@ -1013,7 +1040,11 @@ th {
             "<div class=\"nav-group\"><div class=\"nav-title\">{pkg_name}</div><ul>"
         ));
         for doc_type in pkg_types {
-            let file_name = format!("{}_{}.html", doc_type.package_name.replace('.', "_"), doc_type.name);
+            let file_name = format!(
+                "{}_{}.html",
+                doc_type.package_name.replace('.', "_"),
+                doc_type.name
+            );
             sidebar_html.push_str(&format!(
                 "<li><a href=\"{file_name}\"><span class=\"badge badge-{}\">{}</span>{}</a></li>",
                 doc_type.kind,
@@ -1060,15 +1091,19 @@ th {
 </html>"#,
         types
             .iter()
-            .map(|t| {
-                let file_name = format!("{}_{}.html", t.package_name.replace('.', "_"), t.name);
+            .map(|doc_item| {
+                let file_name = format!(
+                    "{}_{}.html",
+                    doc_item.package_name.replace('.', "_"),
+                    doc_item.name
+                );
                 format!(
                     "<tr><td><a href=\"{file_name}\"><code>{}</code></a></td><td><span class=\"badge badge-{}\">{}</span></td><td><code>{}</code></td><td>{}</td></tr>",
-                    t.name,
-                    t.kind,
-                    t.kind,
-                    t.package_name,
-                    if t.doc.summary.is_empty() { "—" } else { &t.doc.summary }
+                    doc_item.name,
+                    doc_item.kind,
+                    doc_item.kind,
+                    doc_item.package_name,
+                    if doc_item.doc.summary.is_empty() { "—" } else { &doc_item.doc.summary }
                 )
             })
             .collect::<Vec<String>>()
@@ -1079,7 +1114,11 @@ th {
         .with_context(|| "[E0302] Failed to write index.html")?;
 
     for doc_type in types {
-        let file_name = format!("{}_{}.html", doc_type.package_name.replace('.', "_"), doc_type.name);
+        let file_name = format!(
+            "{}_{}.html",
+            doc_type.package_name.replace('.', "_"),
+            doc_type.name
+        );
         let mut members_html = String::new();
 
         if !doc_type.enum_variants.is_empty() {
@@ -1100,12 +1139,19 @@ th {
                 for tag in &member.doc.tags {
                     match tag {
                         DocTag::Param { name, description } => {
-                            tags_html.push_str(&format!("<li><strong><code>{name}</code></strong>: {description}</li>"));
+                            tags_html.push_str(&format!(
+                                "<li><strong><code>{name}</code></strong>: {description}</li>"
+                            ));
                         }
                         DocTag::Return { description } => {
-                            tags_html.push_str(&format!("<li><strong>Returns</strong>: {description}</li>"));
+                            tags_html.push_str(&format!(
+                                "<li><strong>Returns</strong>: {description}</li>"
+                            ));
                         }
-                        DocTag::Throws { exception_type, description } => {
+                        DocTag::Throws {
+                            exception_type,
+                            description,
+                        } => {
                             tags_html.push_str(&format!("<li><strong>Throws <code>{exception_type}</code></strong>: {description}</li>"));
                         }
                         DocTag::Deprecated { reason } => {
@@ -1124,7 +1170,11 @@ th {
                         {tags_html}
                     </div>"#,
                     member.signature,
-                    if member.doc.description.is_empty() { "—" } else { &member.doc.description }
+                    if member.doc.description.is_empty() {
+                        "—"
+                    } else {
+                        &member.doc.description
+                    }
                 ));
             }
         }
@@ -1156,7 +1206,11 @@ th {
             doc_type.kind,
             doc_type.name,
             doc_type.package_name,
-            if doc_type.doc.description.is_empty() { "—" } else { &doc_type.doc.description }
+            if doc_type.doc.description.is_empty() {
+                "—"
+            } else {
+                &doc_type.doc.description
+            }
         );
 
         fs::write(output_dir.join(file_name), type_html)
@@ -1177,7 +1231,9 @@ fn capitalize(text: &str) -> String {
 fn open_in_browser(file_path: &Path) {
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open").arg(file_path).spawn();
+        let _ = std::process::Command::new("xdg-open")
+            .arg(file_path)
+            .spawn();
     }
     #[cfg(target_os = "macos")]
     {
@@ -1185,6 +1241,8 @@ fn open_in_browser(file_path: &Path) {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd").args(["/C", "start", &file_path.to_string_lossy()]).spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", &file_path.to_string_lossy()])
+            .spawn();
     }
 }

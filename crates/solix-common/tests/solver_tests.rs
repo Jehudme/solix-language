@@ -141,19 +141,36 @@ fn test_dependency_requirement_parsing() {
         .expect("Parsing colon debug requirement must succeed");
     assert_eq!(colon_debug_requirement.name, "raylib");
     assert_eq!(colon_debug_requirement.profile.as_deref(), Some("debug"));
-    assert_eq!(colon_debug_requirement.version, PackageVersion::new(1, 2, 0));
+    assert_eq!(
+        colon_debug_requirement.version,
+        PackageVersion::new(1, 2, 0)
+    );
 
-    let colon_hyphenated_requirement = DependencyRequirement::parse("my-cool-package:release@2.0.0")
-        .expect("Parsing colon hyphenated package requirement must succeed");
+    let colon_hyphenated_requirement =
+        DependencyRequirement::parse("my-cool-package:release@2.0.0")
+            .expect("Parsing colon hyphenated package requirement must succeed");
     assert_eq!(colon_hyphenated_requirement.name, "my-cool-package");
-    assert_eq!(colon_hyphenated_requirement.profile.as_deref(), Some("release"));
-    assert_eq!(colon_hyphenated_requirement.version, PackageVersion::new(2, 0, 0));
+    assert_eq!(
+        colon_hyphenated_requirement.profile.as_deref(),
+        Some("release")
+    );
+    assert_eq!(
+        colon_hyphenated_requirement.version,
+        PackageVersion::new(2, 0, 0)
+    );
 
-    let colon_after_version_requirement = DependencyRequirement::parse("my-cool-package@2.0.0:debug")
-        .expect("Parsing colon after version must succeed");
+    let colon_after_version_requirement =
+        DependencyRequirement::parse("my-cool-package@2.0.0:debug")
+            .expect("Parsing colon after version must succeed");
     assert_eq!(colon_after_version_requirement.name, "my-cool-package");
-    assert_eq!(colon_after_version_requirement.profile.as_deref(), Some("debug"));
-    assert_eq!(colon_after_version_requirement.version, PackageVersion::new(2, 0, 0));
+    assert_eq!(
+        colon_after_version_requirement.profile.as_deref(),
+        Some("debug")
+    );
+    assert_eq!(
+        colon_after_version_requirement.version,
+        PackageVersion::new(2, 0, 0)
+    );
 
     assert!(DependencyRequirement::parse("raylib").is_err());
     assert!(DependencyRequirement::parse("@1.2.0").is_err());
@@ -284,7 +301,11 @@ dependencies = { math_utils = { version = "2.0.0", profile = "debug" } }
         .expect("resolve debug deps");
     assert_eq!(debug_deps.len(), 2);
     assert!(debug_deps.iter().any(|dep| dep.package_name == "raylib"));
-    assert!(debug_deps.iter().any(|dep| dep.package_name == "math_utils"));
+    assert!(
+        debug_deps
+            .iter()
+            .any(|dep| dep.package_name == "math_utils")
+    );
 }
 
 #[test]
@@ -555,4 +576,80 @@ entrypoint = "Main::main"
     assert!(unknown_result.is_err());
     let err_msg = format!("{:?}", unknown_result.err().unwrap());
     assert!(err_msg.contains("Unknown build profile 'nonexistent'"));
+}
+
+#[test]
+fn test_positive_native_package_cache_hit_and_parallel_safety() {
+    use solix_common::project::SlxarcArchive;
+    use solix_common::solver::ClientModuleSolver;
+
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    let stage_dir = temp_dir.path().join("stage");
+    let bin_dir = stage_dir.join("bin");
+    let lib_dir = stage_dir.join("lib");
+    std::fs::create_dir_all(&bin_dir).expect("create bin dir");
+    std::fs::create_dir_all(&lib_dir).expect("create lib dir");
+
+    let manifest_content = r#"
+[configuration]
+name = "nativepkg"
+version = "1.0.0"
+
+[profiles.release]
+"#;
+    std::fs::write(stage_dir.join("manifest.toml"), manifest_content).expect("write manifest");
+
+    #[cfg(target_os = "windows")]
+    let host_lib_name = "libnativepkg.dll";
+    #[cfg(target_os = "macos")]
+    let host_lib_name = "libnativepkg.dylib";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let host_lib_name = "libnativepkg.so";
+
+    let lib_bytes = b"simulated_native_library_payload_for_atomic_cache_test";
+    let lib_path = lib_dir.join(host_lib_name);
+    std::fs::write(&lib_path, lib_bytes).expect("write dummy native lib");
+    let expected_hash = solix_common::hash::sha256_hex(lib_bytes);
+
+    let mut program = BinaryProgram::new();
+    program
+        .native_library_checksums
+        .insert(format!("lib/{host_lib_name}"), expected_hash.clone());
+    std::fs::write(bin_dir.join("nativepkg.slxb"), program.to_bytes()).expect("write binary");
+
+    let store_dir = temp_dir.path().join("packages");
+    let pkg_dir = store_dir.join("nativepkg-release@1.0.0");
+    std::fs::create_dir_all(&pkg_dir).expect("create pkg dir");
+    let archive_path = pkg_dir.join("nativepkg.slxarc");
+    SlxarcArchive::pack_directory(&stage_dir, &archive_path).expect("pack archive");
+
+    // Resolve across parallel threads against the shared store and native cache
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let store_clone = store_dir.clone();
+            std::thread::spawn(move || {
+                let solver = ClientModuleSolver::with_store_dir(store_clone);
+                solver
+                    .resolve_compatible("nativepkg", PackageVersion::new(1, 0, 0))
+                    .expect("parallel native package resolution must succeed")
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        let resolved = handle.join().expect("thread join");
+        assert_eq!(resolved.native_libraries.len(), 1);
+        assert!(resolved.native_libraries[0].exists());
+    }
+
+    // Subsequent resolution hits authenticated cache with preserved native library
+    let solver = ClientModuleSolver::with_store_dir(store_dir);
+    let cached = solver
+        .resolve_compatible("nativepkg", PackageVersion::new(1, 0, 0))
+        .expect("cache-hit resolution must succeed");
+    assert_eq!(cached.native_libraries.len(), 1);
+    assert_eq!(
+        solix_common::hash::sha256_file(&cached.native_libraries[0]).expect("hash cached lib"),
+        expected_hash
+    );
 }

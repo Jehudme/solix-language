@@ -27,17 +27,47 @@ pub struct VmTelemetry {
     pub quickened_instructions_count: u64,
 }
 
+/// Compact 32-byte cached instruction slice and frame metadata header (`shl $5` indexing).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FunctionCodeSpan {
+    pub inst_ptr: *const Instruction,
+    pub inst_len: usize,
+    pub static_base_offset: u32,
+    pub trivial_leaf_imm: i16,
+    pub trivial_leaf_kind: u8,
+    pub trivial_leaf_param: u8,
+    pub binary_id: u16,
+    pub num_registers: u16,
+    pub has_references: bool,
+    pub is_native: bool,
+}
+
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<FunctionCodeSpan>() == 32);
+
+// SAFETY: `FunctionCodeSpan` points solely into `VirtualMachine.context.all_functions` instruction
+// buffers; `RuntimeContext` functions are never reallocated once a `VirtualMachine` is built, and
+// mutable patching takes `&mut VirtualMachine`.
+unsafe impl Send for FunctionCodeSpan {}
+// SAFETY: Shared references only read immutable instruction words when `&VirtualMachine` is shared.
+unsafe impl Sync for FunctionCodeSpan {}
+
 /// Register-based virtual machine execution coordinator.
 #[derive(Debug)]
 pub struct VirtualMachine {
     /// Active runtime context providing compiled code, constants, and layouts.
     pub context: RuntimeContext,
+    /// Cached 16-byte instruction slice descriptors indexed by global function id.
+    pub(crate) func_code: Vec<FunctionCodeSpan>,
     /// Byte-addressed virtual memory partition holding static variables and dynamic heap.
     pub heap: VirtualHeap,
     /// Host native callback and builtin function registry.
     pub native_registry: NativeRegistry,
     /// Active destructor addresses tracked to guard against recursive destruction cascades.
     pub active_destructors: HashSet<u32>,
+    /// Reusable scratch queue for iterative ARC child reference cascading without host recursion.
+    pub(crate) release_worklist: Vec<u32>,
     /// Static variable slot storage preserving strongly-typed `Value` instances.
     pub static_slots: Vec<Value>,
     /// Pre-allocated cached constant pool values across all loaded binaries.
@@ -60,6 +90,8 @@ pub struct VirtualMachine {
     pub last_return_value: Value,
     /// Execution mode: true for bounds-checked safe mode, false for unchecked fast mode.
     pub safe_mode: bool,
+    /// When true, increments instruction dispatch telemetry and tracks peak stack depth.
+    pub track_metrics: bool,
     /// Output buffer of lines printed via standard print/println builtins.
     pub stdout: Vec<String>,
     /// Pure VM bytecode execution elapsed time in nanoseconds.
@@ -142,25 +174,47 @@ impl VirtualMachine {
             const_pool_cache.push(cached_values);
         }
 
+        let func_code: Vec<FunctionCodeSpan> = context
+            .all_functions
+            .iter()
+            .zip(context.function_meta.iter())
+            .map(|(compiled_fn, meta)| FunctionCodeSpan {
+                inst_ptr: compiled_fn.instructions.as_ptr(),
+                inst_len: meta.logical_inst_len,
+                static_base_offset: meta.static_base_offset,
+                trivial_leaf_imm: meta.trivial_leaf_imm,
+                trivial_leaf_kind: meta.trivial_leaf_kind,
+                trivial_leaf_param: meta.trivial_leaf_param,
+                binary_id: meta.binary_id as u16,
+                num_registers: meta.num_registers,
+                has_references: meta.has_references,
+                is_native: meta.native_fn.is_some(),
+            })
+            .collect();
+
         let safe_mode = context.options.safe_mode;
+        let track_metrics = context.options.track_metrics;
         let output_sink = context.options.output_sink.clone();
 
         Self {
             context,
+            func_code,
             heap,
             native_registry,
             active_destructors: HashSet::new(),
+            release_worklist: Vec::with_capacity(64),
             static_slots,
             const_pool_cache,
             interned_string_addrs,
-            register_stack: vec![Value::Null; 65536],
-            call_frames: Vec::with_capacity(64),
+            register_stack: vec![Value::Null; 1024],
+            call_frames: Vec::with_capacity(512),
             halted: false,
             statics_initialized: false,
             is_shut_down: false,
             exit_code: None,
             last_return_value: Value::Null,
             safe_mode,
+            track_metrics,
             stdout: Vec::new(),
             pure_execution_time_ns: 0,
             instructions_dispatched: 0,
@@ -171,7 +225,7 @@ impl VirtualMachine {
             cycle_collector_enabled,
             cycle_threshold,
             cycle_budget_us,
-            purple_buffer: Vec::with_capacity(cycle_threshold.max(16)),
+            purple_buffer: Vec::new(),
             arc_cycle_collector_runs: 0,
             arc_cycle_collector_candidates: 0,
             arc_cycles_collected: 0,
@@ -425,127 +479,158 @@ impl VirtualMachine {
             return Ok(());
         }
 
-        let header = self.heap.read_header(addr)?;
-        if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
-            return Ok(());
-        }
+        let mut worklist = std::mem::take(&mut self.release_worklist);
+        worklist.clear();
+        worklist.push(addr);
 
-        if header.ref_count > 1 {
-            let mut updated_header = header;
-            updated_header.ref_count -= 1;
-            if self.cycle_collector_enabled
-                && crate::memory::layout::can_contain_references(header.tag)
-                && updated_header.color != crate::memory::layout::GcColor::Purple
-            {
-                updated_header.color = crate::memory::layout::GcColor::Purple;
-                self.purple_buffer.push(addr);
-                self.arc_cycle_collector_candidates += 1;
-            }
-            self.heap.write_header(addr, updated_header)?;
-            if self.cycle_collector_enabled && self.purple_buffer.len() >= self.cycle_threshold {
-                self.collect_cycles()?;
-            }
-            return Ok(());
-        }
-
-        // ref_count hit 0!
-        if self.active_destructors.contains(&addr) {
-            return Ok(());
-        }
-
-        if header.tag == BlockTag::ObjectPod {
-            return self.heap.deallocate_pod_fast(addr, header.size);
-        }
-
-        self.active_destructors.insert(addr);
-
-        if header.tag == BlockTag::Object {
-            let vtable_id = self.heap.read_u32(addr).unwrap_or(0);
-            let (maybe_destructor_id, offset_count) = {
-                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                match maybe_class {
-                    Some(class_item) => (
-                        class_item.destructor_id,
-                        class_item.reference_field_offsets.len(),
-                    ),
-                    None => (None, 0),
-                }
-            };
-
-            // 1. Execute class destructor if defined
-            if let Some(destructor_id) = maybe_destructor_id {
-                let destructor_result = (|| -> Result<(), RuntimeError> {
-                    self.push_frame(destructor_id, 0, &[Value::Ref(addr)])?;
-                    let target_depth = self.call_frames.len() - 1;
-                    self.run_loop(target_depth)?;
-                    Ok(())
-                })();
-                if let Err(destructor_error) = destructor_result {
-                    self.active_destructors.remove(&addr);
-                    return Err(destructor_error);
-                }
+        while let Some(current_addr) = worklist.pop() {
+            if current_addr == 0 {
+                continue;
             }
 
-            // 2. Cascade drops to child reference fields directly from VirtualHeap in O(ref_fields)
-            for offset_idx in 0..offset_count {
-                let field_offset = self
-                    .context
-                    .get_class_by_vtable_id(vtable_id)
-                    .map_or(0, |class_item| {
-                        class_item.reference_field_offsets[offset_idx]
-                    });
-                let field_addr = addr + field_offset as u32;
-                let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
-                    && child_addr > 0
+            let header = self.heap.read_header(current_addr)?;
+            if header.ref_count == crate::memory::layout::MAX_REF_COUNT {
+                continue;
+            }
+
+            if header.ref_count > 1 {
+                let mut updated_header = header;
+                updated_header.ref_count -= 1;
+                if self.cycle_collector_enabled
+                    && crate::memory::layout::can_contain_references(header.tag)
+                    && updated_header.color != crate::memory::layout::GcColor::Purple
                 {
-                    self.release_reference(child_addr)?;
+                    updated_header.color = crate::memory::layout::GcColor::Purple;
+                    self.purple_buffer.push(current_addr);
+                    self.arc_cycle_collector_candidates += 1;
                 }
+                self.heap.write_header(current_addr, updated_header)?;
+                if self.cycle_collector_enabled && self.purple_buffer.len() >= self.cycle_threshold
+                {
+                    self.collect_cycles()?;
+                }
+                continue;
             }
-        } else if header.tag == BlockTag::ArrayRef {
-            let len = self.heap.read_u32(addr).unwrap_or(0);
-            let elem_type_tag = self.heap.read_u8(addr + 7).unwrap_or(0);
-            if elem_type_tag == 13 || elem_type_tag >= 0x80 {
-                let elem_size = self.heap.read_u8(addr + 4).unwrap_or(8) as usize;
-                for index in 0..len {
-                    let elem_addr = addr + 8 + (index as usize * elem_size) as u32;
-                    let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
-                    if child_addr > 0 {
-                        self.release_reference(child_addr)?;
+
+            // ref_count hit 0!
+            if header.tag == BlockTag::ObjectPod {
+                self.heap.deallocate_pod_fast(current_addr, header.size)?;
+                continue;
+            }
+
+            if !self.active_destructors.is_empty()
+                && self.active_destructors.contains(&current_addr)
+            {
+                continue;
+            }
+
+            if header.tag == BlockTag::Object {
+                let vtable_id = self.heap.read_u32(current_addr).unwrap_or(0);
+                let (maybe_destructor_id, offset_count) =
+                    match self.context.get_class_by_vtable_id(vtable_id) {
+                        Some(class_item) => (
+                            class_item.destructor_id,
+                            class_item.reference_field_offsets.len(),
+                        ),
+                        None => (None, 0),
+                    };
+
+                // Only enter active_destructors HashSet when a custom guest destructor exists.
+                if let Some(destructor_id) = maybe_destructor_id {
+                    self.active_destructors.insert(current_addr);
+                    let destructor_result = (|| -> Result<(), RuntimeError> {
+                        self.push_frame(destructor_id, 0, &[Value::Ref(current_addr)])?;
+                        let target_depth = self.call_frames.len() - 1;
+                        self.run_loop(target_depth)?;
+                        Ok(())
+                    })();
+                    if let Err(destructor_error) = destructor_result {
+                        self.active_destructors.remove(&current_addr);
+                        worklist.clear();
+                        self.release_worklist = worklist;
+                        return Err(destructor_error);
+                    }
+                    for offset_idx in 0..offset_count {
+                        let field_offset = self
+                            .context
+                            .get_class_by_vtable_id(vtable_id)
+                            .map_or(0, |class_item| {
+                                class_item.reference_field_offsets[offset_idx]
+                            });
+                        let field_addr = current_addr + field_offset as u32;
+                        let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                        if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
+                            && child_addr > 0
+                        {
+                            worklist.push(child_addr);
+                        }
+                    }
+                    self.heap.deallocate(current_addr)?;
+                    self.active_destructors.remove(&current_addr);
+                    continue;
+                }
+
+                for offset_idx in 0..offset_count {
+                    let field_offset = self
+                        .context
+                        .get_class_by_vtable_id(vtable_id)
+                        .map_or(0, |class_item| {
+                            class_item.reference_field_offsets[offset_idx]
+                        });
+                    let field_addr = current_addr + field_offset as u32;
+                    let child_raw = self.heap.read_u64(field_addr).unwrap_or(0);
+                    if let Value::Ref(child_addr) = Value::from_raw_u64(child_raw)
+                        && child_addr > 0
+                    {
+                        worklist.push(child_addr);
+                    }
+                }
+            } else if header.tag == BlockTag::ArrayRef {
+                let len = self.heap.read_u32(current_addr).unwrap_or(0);
+                let elem_type_tag = self.heap.read_u8(current_addr + 7).unwrap_or(0);
+                if elem_type_tag == 13 || elem_type_tag >= 0x80 {
+                    let elem_size = self.heap.read_u8(current_addr + 4).unwrap_or(8) as usize;
+                    for index in 0..len {
+                        let elem_addr = current_addr + 8 + (index as usize * elem_size) as u32;
+                        let child_addr = self.heap.read_u64(elem_addr).unwrap_or(0) as u32;
+                        if child_addr > 0 {
+                            worklist.push(child_addr);
+                        }
+                    }
+                }
+            } else if header.tag == BlockTag::Tuple {
+                let count = self.heap.read_u32(current_addr).unwrap_or(0);
+                for index in 0..count {
+                    let elem_addr = current_addr + 8 + (index as usize * 16) as u32;
+                    let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
+                    let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
+                    let element_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                    if let Value::Ref(child_addr) = element_val
+                        && child_addr > 0
+                    {
+                        worklist.push(child_addr);
+                    }
+                }
+            } else if header.tag == BlockTag::Closure {
+                let cap_count = self.heap.read_u32(current_addr + 4).unwrap_or(0);
+                for index in 0..cap_count {
+                    let cell_addr = current_addr + 8 + (index as usize * 16) as u32;
+                    let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
+                    let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
+                    let capture_val = Value::from_tagged_parts(tag_raw, payload_raw);
+                    if let Value::Ref(child_addr) = capture_val
+                        && child_addr > 0
+                    {
+                        worklist.push(child_addr);
                     }
                 }
             }
-        } else if header.tag == BlockTag::Tuple {
-            let count = self.heap.read_u32(addr).unwrap_or(0);
-            for index in 0..count {
-                let elem_addr = addr + 8 + (index as usize * 16) as u32;
-                let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
-                let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
-                let element_val = Value::from_tagged_parts(tag_raw, payload_raw);
-                if let Value::Ref(child_addr) = element_val
-                    && child_addr > 0
-                {
-                    self.release_reference(child_addr)?;
-                }
-            }
-        } else if header.tag == BlockTag::Closure {
-            let cap_count = self.heap.read_u32(addr + 4).unwrap_or(0);
-            for index in 0..cap_count {
-                let cell_addr = addr + 8 + (index as usize * 16) as u32;
-                let tag_raw = self.heap.read_u64(cell_addr).unwrap_or(0);
-                let payload_raw = self.heap.read_u64(cell_addr + 8).unwrap_or(0);
-                let capture_val = Value::from_tagged_parts(tag_raw, payload_raw);
-                if let Value::Ref(child_addr) = capture_val
-                    && child_addr > 0
-                {
-                    self.release_reference(child_addr)?;
-                }
-            }
+
+            self.heap.deallocate(current_addr)?;
         }
 
-        self.heap.deallocate(addr)?;
-        self.active_destructors.remove(&addr);
-
+        worklist.clear();
+        self.release_worklist = worklist;
         Ok(())
     }
 
@@ -591,7 +676,7 @@ impl VirtualMachine {
     ) -> Result<(), RuntimeError> {
         self.push_frame(function_id, caller_dst, args)?;
         if let Some(frame) = self.call_frames.last_mut() {
-            frame.active_closure = Some(closure_addr);
+            frame.active_closure = std::num::NonZeroU32::new(closure_addr);
         }
         Ok(())
     }
@@ -627,27 +712,35 @@ impl VirtualMachine {
     /// Returns the current PC of the active call frame, or 0 if no active frame.
     #[must_use]
     pub fn current_pc(&self) -> u32 {
-        self.call_frames.last().map_or(0, |f| f.pc)
+        self.call_frames.last().map_or(0, |frame| frame.pc)
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn null_reference_error() -> RuntimeError {
+        RuntimeError::NullReferenceAccess
     }
 
     /// Returns a reference to the topmost active call frame.
     ///
     /// # Errors
     /// Returns `RuntimeError::NullReferenceAccess` if the call stack is empty.
+    #[inline(always)]
     pub fn current_frame(&self) -> Result<&CallFrame, RuntimeError> {
         self.call_frames
             .last()
-            .ok_or(RuntimeError::NullReferenceAccess)
+            .ok_or_else(Self::null_reference_error)
     }
 
     /// Returns a mutable reference to the topmost active call frame.
     ///
     /// # Errors
     /// Returns `RuntimeError::NullReferenceAccess` if the call stack is empty.
+    #[inline(always)]
     pub fn current_frame_mut(&mut self) -> Result<&mut CallFrame, RuntimeError> {
         self.call_frames
             .last_mut()
-            .ok_or(RuntimeError::NullReferenceAccess)
+            .ok_or_else(Self::null_reference_error)
     }
 
     /// Reads a value from local register `reg` within the current call frame.
@@ -657,13 +750,14 @@ impl VirtualMachine {
     pub fn get_reg(&self, reg: u16) -> Result<Value, RuntimeError> {
         let frame = self.current_frame()?;
         let reg_idx = reg as usize;
-        if reg_idx >= frame.register_count {
+        let frame_regs = frame.register_count as usize;
+        if reg_idx >= frame_regs {
             return Err(RuntimeError::IndexOutOfBounds {
                 index: reg_idx as i64,
-                length: frame.register_count,
+                length: frame_regs,
             });
         }
-        let abs_idx = frame.register_base + reg_idx;
+        let abs_idx = frame.register_base as usize + reg_idx;
         self.register_stack
             .get(abs_idx)
             .copied()
@@ -680,13 +774,14 @@ impl VirtualMachine {
     pub fn set_reg(&mut self, reg: u16, val: Value) -> Result<(), RuntimeError> {
         let frame = self.current_frame()?;
         let reg_idx = reg as usize;
-        if reg_idx >= frame.register_count {
+        let frame_regs = frame.register_count as usize;
+        if reg_idx >= frame_regs {
             return Err(RuntimeError::IndexOutOfBounds {
                 index: reg_idx as i64,
-                length: frame.register_count,
+                length: frame_regs,
             });
         }
-        let abs_idx = frame.register_base + reg_idx;
+        let abs_idx = frame.register_base as usize + reg_idx;
         let reg_len = self.register_stack.len();
         let cell = self
             .register_stack
@@ -767,10 +862,10 @@ impl VirtualMachine {
 
         let meta = &self.context.function_meta[function_id as usize];
         let binary_id = meta.binary_id;
-        let func_id_offset = meta.func_id_offset;
+        let inst_ptr = func.instructions.as_ptr();
 
         let reg_base = self.call_frames.last().map_or(0, |last_frame| {
-            last_frame.register_base + last_frame.register_count
+            last_frame.register_base as usize + last_frame.register_count as usize
         });
         let num_regs = (func.num_registers as usize).max(args.len());
 
@@ -794,8 +889,7 @@ impl VirtualMachine {
             binary_id,
             reg_base,
             num_regs,
-            func.static_base_offset,
-            func_id_offset,
+            inst_ptr,
             caller_dst,
         );
 
@@ -814,7 +908,7 @@ impl VirtualMachine {
         let frame = self
             .call_frames
             .pop()
-            .ok_or(RuntimeError::NullReferenceAccess)?;
+            .ok_or_else(Self::null_reference_error)?;
 
         if self.call_frames.is_empty() {
             self.last_return_value = return_val;
@@ -983,6 +1077,16 @@ impl VirtualMachine {
         self.heap.verify_clean_memory()
     }
 
+    /// Returns the number of live guest-allocated heap objects, excluding immortal
+    /// constant-pool strings interned at VM initialization.
+    #[must_use]
+    pub fn active_guest_objects(&self) -> usize {
+        self.heap
+            .telemetry()
+            .active_live_objects
+            .saturating_sub(self.interned_string_addrs.len())
+    }
+
     /// Returns the live telemetry metrics of the virtual machine execution.
     #[must_use]
     pub fn telemetry(&self) -> VmTelemetry {
@@ -1011,7 +1115,7 @@ impl VirtualMachine {
             2 => self.heap.telemetry().current_allocated_bytes as u64,
             3 => self.heap.telemetry().peak_allocated_bytes as u64,
             4 => self.heap.telemetry().total_allocations_count,
-            5 => self.heap.telemetry().active_live_objects as u64,
+            5 => self.active_guest_objects() as u64,
             6 => {
                 let (strings, _arrays, _objects, _closures) = self.heap.count_blocks_by_tag();
                 strings as u64
@@ -1058,7 +1162,7 @@ impl VirtualMachine {
             25 => self
                 .call_frames
                 .last()
-                .map(|frame| (frame.register_base + frame.register_count) as u64)
+                .map(|frame| frame.register_base as u64 + frame.register_count as u64)
                 .unwrap_or(0),
             26 => self
                 .call_frames
@@ -1092,29 +1196,17 @@ impl VirtualMachine {
             36 => {
                 let is_slxpac = self.context.options.container_kind.as_deref() == Some("slxpac")
                     || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxpac");
-                if is_slxpac {
-                    1
-                } else {
-                    0
-                }
+                if is_slxpac { 1 } else { 0 }
             }
             37 => {
                 let is_slxarc = self.context.options.container_kind.as_deref() == Some("slxarc")
                     || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxarc");
-                if is_slxarc {
-                    1
-                } else {
-                    0
-                }
+                if is_slxarc { 1 } else { 0 }
             }
             38 => {
                 let is_slxb = self.context.options.container_kind.as_deref() == Some("slxb")
                     || std::env::var("SOLIX_CONTAINER_KIND").as_deref() == Ok("slxb");
-                if is_slxb {
-                    1
-                } else {
-                    0
-                }
+                if is_slxb { 1 } else { 0 }
             }
             39 => {
                 if self.safe_mode {
@@ -1147,8 +1239,7 @@ impl VirtualMachine {
             46 => self.pure_execution_time_ns / 1_000_000,
             47 => self.pure_execution_time_ns / 1_000_000,
             48 => {
-                let statm_content =
-                    std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+                let statm_content = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
                 let tokens: Vec<&str> = statm_content.split_whitespace().collect();
                 tokens
                     .get(1)
@@ -1157,8 +1248,7 @@ impl VirtualMachine {
                     * 4096
             }
             49 => {
-                let statm_content =
-                    std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
+                let statm_content = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
                 let tokens: Vec<&str> = statm_content.split_whitespace().collect();
                 tokens
                     .first()
@@ -1193,8 +1283,7 @@ impl VirtualMachine {
                 .unwrap_or(1),
             53 => 4096,
             54 => {
-                let meminfo_content =
-                    std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                let meminfo_content = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
                 for mem_line in meminfo_content.lines() {
                     if mem_line.starts_with("MemTotal:") {
                         let mem_tokens: Vec<&str> = mem_line.split_whitespace().collect();
@@ -1208,8 +1297,7 @@ impl VirtualMachine {
                 16 * 1024 * 1024 * 1024
             }
             55 => {
-                let meminfo_content =
-                    std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                let meminfo_content = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
                 for mem_line in meminfo_content.lines() {
                     if mem_line.starts_with("MemAvailable:") {
                         let mem_tokens: Vec<&str> = mem_line.split_whitespace().collect();
@@ -1240,6 +1328,11 @@ impl VirtualMachine {
     ) {
         self.context
             .patch_instruction(function_id, instruction_pc, new_instruction);
+        if let Some(code_span) = self.func_code.get_mut(function_id as usize)
+            && let Some(compiled_fn) = self.context.all_functions.get(function_id as usize)
+        {
+            code_span.inst_ptr = compiled_fn.instructions.as_ptr();
+        }
         self.quickened_instructions_count += 1;
     }
 }

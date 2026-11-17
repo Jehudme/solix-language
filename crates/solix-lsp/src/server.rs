@@ -290,7 +290,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -304,7 +304,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -318,7 +318,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -331,7 +331,7 @@ impl LanguageServer for SolixLanguageServer {
         let position = params.text_document_position.position;
         let include_decl = params.context.include_declaration;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -350,7 +350,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -364,7 +364,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -392,7 +392,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -458,7 +458,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document.uri;
         let range = params.range;
         let snapshot = match self.workspace.get_live_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -495,7 +495,7 @@ impl LanguageServer for SolixLanguageServer {
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
         let uri = &params.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -508,7 +508,7 @@ impl LanguageServer for SolixLanguageServer {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = &params.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -527,7 +527,7 @@ impl LanguageServer for SolixLanguageServer {
                     .into_iter()
                     .map(|ws| {
                         let loc = match ws.location {
-                            OneOf::Left(l) => l,
+                            OneOf::Left(location) => location,
                             OneOf::Right(wsl) => Location {
                                 uri: wsl.uri,
                                 range: Range::default(),
@@ -553,7 +553,7 @@ impl LanguageServer for SolixLanguageServer {
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = &params.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -567,7 +567,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document.uri;
         let positions = &params.positions;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -577,7 +577,7 @@ impl LanguageServer for SolixLanguageServer {
     async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         let uri = &params.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -587,7 +587,7 @@ impl LanguageServer for SolixLanguageServer {
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = &params.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -601,7 +601,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document.uri;
         let position = params.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -613,7 +613,7 @@ impl LanguageServer for SolixLanguageServer {
         let position = params.text_document_position.position;
         let new_name = params.new_name;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -628,7 +628,7 @@ impl LanguageServer for SolixLanguageServer {
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -642,7 +642,7 @@ impl LanguageServer for SolixLanguageServer {
         let uri = &params.text_document.uri;
         let range = params.range;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
@@ -655,7 +655,7 @@ impl LanguageServer for SolixLanguageServer {
     ) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document_position.text_document.uri;
         let snapshot = match self.workspace.get_snapshot(uri) {
-            Some(s) => s,
+            Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 

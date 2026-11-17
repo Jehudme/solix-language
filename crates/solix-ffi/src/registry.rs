@@ -1,7 +1,7 @@
 //! Function pointer types and registration helpers for native extension libraries.
 
 use crate::value::SolixCValue;
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{CString, c_char, c_void};
 
 /// Stable C-ABI function pointer signature implemented by all native Solix bridge functions.
 pub type NativeCFunctionPtr = unsafe extern "C" fn(
@@ -35,18 +35,16 @@ impl NativeRegistry {
     }
 
     /// Registers a native function symbol with the Solix virtual machine.
-    ///
-    /// # Panics
-    /// Panics if `symbol_name` contains an embedded interior null byte.
+    /// Symbols containing embedded interior null bytes are ignored.
     pub fn register(&mut self, symbol_name: &str, function_pointer: NativeCFunctionPtr) {
-        let c_symbol = CString::new(symbol_name)
-            .expect("Symbol name cannot contain embedded null characters");
-        unsafe {
-            (self.register_callback)(
-                self.collector_context,
-                c_symbol.as_ptr(),
-                function_pointer,
-            );
+        if let Ok(c_symbol) = CString::new(symbol_name) {
+            unsafe {
+                (self.register_callback)(
+                    self.collector_context,
+                    c_symbol.as_ptr(),
+                    function_pointer,
+                );
+            }
         }
     }
 }

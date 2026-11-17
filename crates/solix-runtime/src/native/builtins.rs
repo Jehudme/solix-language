@@ -89,12 +89,12 @@ pub fn builtin_assert(vm: &mut VirtualMachine, args: &[Value]) -> Result<Value, 
 
 /// Standard clock builtin: returns milliseconds elapsed since the Unix epoch.
 pub fn builtin_clock(_vm: &mut VirtualMachine, _args: &[Value]) -> Result<Value, RuntimeError> {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| {
-        RuntimeError::NativeFunctionError {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| RuntimeError::NativeFunctionError {
             name: "clock".to_string(),
-            reason: format!("{e}"),
-        }
-    })?;
+            reason: format!("{error}"),
+        })?;
     Ok(Value::I64(now.as_millis() as i64))
 }
 

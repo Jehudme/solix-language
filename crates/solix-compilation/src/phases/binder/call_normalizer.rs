@@ -148,18 +148,18 @@ fn collect_callable_catalog(
 }
 
 /// Finds the most compatible callable metadata entry matching the target invocation.
-fn find_matching_callable<'a>(
-    catalog: &'a [CallableMetadata],
+fn find_matching_callable<'catalog>(
+    catalog: &'catalog [CallableMetadata],
     target_class: Option<&str>,
     target_name: &str,
     argument_count: usize,
-) -> Option<&'a CallableMetadata> {
+) -> Option<&'catalog CallableMetadata> {
     if target_name.is_empty() {
         return None;
     }
 
     // Step 1: Filter candidates by name and optional class
-    let mut candidates: Vec<&'a CallableMetadata> = catalog
+    let mut candidates: Vec<&'catalog CallableMetadata> = catalog
         .iter()
         .filter(|candidate| {
             if candidate.name != target_name {

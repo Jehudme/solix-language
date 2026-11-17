@@ -157,7 +157,9 @@ fn test_solix_new_library_no_native_and_deps() {
     assert!(manifest_content.contains("name = \"math_utilities\""));
     assert!(manifest_content.contains("version = \"1.2.3\""));
     assert!(manifest_content.contains("solix = { version = \"2.0.0\", profile = \"release\" }"));
-    assert!(manifest_content.contains("extra_helpers = { version = \"0.5.1\", profile = \"release\" }"));
+    assert!(
+        manifest_content.contains("extra_helpers = { version = \"0.5.1\", profile = \"release\" }")
+    );
 
     assert!(
         target_project_directory
@@ -281,6 +283,7 @@ fn test_solix_new_explicit_native_flag() {
         .join("native_app_bridge");
     assert!(bridge_directory.join("Cargo.toml").exists());
     assert!(bridge_directory.join("src").join("lib.rs").exists());
-    let cargo_toml = fs::read_to_string(bridge_directory.join("Cargo.toml")).expect("read bridge Cargo.toml");
+    let cargo_toml =
+        fs::read_to_string(bridge_directory.join("Cargo.toml")).expect("read bridge Cargo.toml");
     assert!(cargo_toml.contains("solix-ffi = \">=1.1.3, <=1.3.0\""));
 }

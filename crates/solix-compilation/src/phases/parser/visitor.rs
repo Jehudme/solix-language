@@ -9,179 +9,179 @@ use crate::phases::parser::statements::*;
 /// Provides default recursive walking implementations for all nodes, allowing
 /// implementors (type checkers, bytecode compilers, linters, formatters) to only
 /// override the specific node handlers they require.
-pub trait AstVisitor<R = ()> {
+pub trait AstVisitor<ResultType = ()> {
     /// Visits the root compilation unit.
-    fn visit_program(&mut self, program: &ProgramAst) -> R
+    fn visit_program(&mut self, program: &ProgramAst) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_program(self, program);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a package declaration statement.
-    fn visit_package_statement(&mut self, _node: &PackageStatement) -> R
+    fn visit_package_statement(&mut self, _node: &PackageStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an import statement.
-    fn visit_import_statement(&mut self, _node: &ImportStatement) -> R
+    fn visit_import_statement(&mut self, _node: &ImportStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a type alias statement.
-    fn visit_alias_statement(&mut self, node: &AliasStatement) -> R
+    fn visit_alias_statement(&mut self, node: &AliasStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_type_annotation(&node.target_type);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a top-level or member declaration.
-    fn visit_declaration(&mut self, node: &Declaration) -> R
+    fn visit_declaration(&mut self, node: &Declaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a class declaration.
-    fn visit_class_declaration(&mut self, node: &ClassDeclaration) -> R
+    fn visit_class_declaration(&mut self, node: &ClassDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_class_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an interface declaration.
-    fn visit_interface_declaration(&mut self, node: &InterfaceDeclaration) -> R
+    fn visit_interface_declaration(&mut self, node: &InterfaceDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_interface_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an enumeration declaration.
-    fn visit_enum_declaration(&mut self, node: &EnumDeclaration) -> R
+    fn visit_enum_declaration(&mut self, node: &EnumDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_enum_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a field declaration.
-    fn visit_field_declaration(&mut self, node: &FieldDeclaration) -> R
+    fn visit_field_declaration(&mut self, node: &FieldDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_field_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a method declaration.
-    fn visit_method_declaration(&mut self, node: &MethodDeclaration) -> R
+    fn visit_method_declaration(&mut self, node: &MethodDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_method_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a constructor declaration.
-    fn visit_constructor_declaration(&mut self, node: &ConstructorDeclaration) -> R
+    fn visit_constructor_declaration(&mut self, node: &ConstructorDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_constructor_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a destructor declaration.
-    fn visit_destructor_declaration(&mut self, node: &DestructorDeclaration) -> R
+    fn visit_destructor_declaration(&mut self, node: &DestructorDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_block_statement(&node.body);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an operator overload declaration.
-    fn visit_operator_declaration(&mut self, node: &OperatorDeclaration) -> R
+    fn visit_operator_declaration(&mut self, node: &OperatorDeclaration) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_operator_declaration(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a statement.
-    fn visit_statement(&mut self, node: &Statement) -> R
+    fn visit_statement(&mut self, node: &Statement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_statement(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a compound block statement.
-    fn visit_block_statement(&mut self, node: &BlockStatement) -> R
+    fn visit_block_statement(&mut self, node: &BlockStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         for statement in &node.statements {
             self.visit_statement(statement);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an if-conditional branch statement.
-    fn visit_if_statement(&mut self, node: &IfStatement) -> R
+    fn visit_if_statement(&mut self, node: &IfStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.condition);
         self.visit_statement(&node.then_branch);
         if let Some(else_branch) = &node.else_branch {
             self.visit_statement(else_branch);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a while loop statement.
-    fn visit_while_statement(&mut self, node: &WhileStatement) -> R
+    fn visit_while_statement(&mut self, node: &WhileStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.condition);
         self.visit_statement(&node.body);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a do-while loop statement.
-    fn visit_do_while_statement(&mut self, node: &DoWhileStatement) -> R
+    fn visit_do_while_statement(&mut self, node: &DoWhileStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_statement(&node.body);
         self.visit_expression(&node.condition);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a 3-clause for loop statement.
-    fn visit_for_statement(&mut self, node: &ForStatement) -> R
+    fn visit_for_statement(&mut self, node: &ForStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         if let Some(initializer) = &node.initializer {
             self.visit_statement(initializer);
@@ -193,13 +193,13 @@ pub trait AstVisitor<R = ()> {
             self.visit_expression(update);
         }
         self.visit_statement(&node.body);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a switch-case statement.
-    fn visit_switch_statement(&mut self, node: &SwitchStatement) -> R
+    fn visit_switch_statement(&mut self, node: &SwitchStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.discriminant);
         for case_clause in &node.cases {
@@ -210,25 +210,25 @@ pub trait AstVisitor<R = ()> {
                 self.visit_statement(statement);
             }
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a single case clause in a switch statement.
-    fn visit_case_clause(&mut self, node: &CaseClause) -> R
+    fn visit_case_clause(&mut self, node: &CaseClause) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.case_value);
         for statement in &node.statements {
             self.visit_statement(statement);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an exception handling try statement.
-    fn visit_try_statement(&mut self, node: &TryStatement) -> R
+    fn visit_try_statement(&mut self, node: &TryStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_block_statement(&node.try_block);
         for catch_clause in &node.catch_clauses {
@@ -237,118 +237,121 @@ pub trait AstVisitor<R = ()> {
         if let Some(finally_block) = &node.finally_block {
             self.visit_block_statement(finally_block);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a catch clause.
-    fn visit_catch_clause(&mut self, node: &CatchClause) -> R
+    fn visit_catch_clause(&mut self, node: &CatchClause) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_type_annotation(&node.exception_type);
         self.visit_block_statement(&node.block);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an exception throw statement.
-    fn visit_throw_statement(&mut self, node: &ThrowStatement) -> R
+    fn visit_throw_statement(&mut self, node: &ThrowStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.expression);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a function/method return statement.
-    fn visit_return_statement(&mut self, node: &ReturnStatement) -> R
+    fn visit_return_statement(&mut self, node: &ReturnStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         if let Some(value) = &node.value {
             self.visit_expression(value);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a loop break statement.
-    fn visit_break_statement(&mut self, _node: &BreakStatement) -> R
+    fn visit_break_statement(&mut self, _node: &BreakStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a loop continue statement.
-    fn visit_continue_statement(&mut self, _node: &ContinueStatement) -> R
+    fn visit_continue_statement(&mut self, _node: &ContinueStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a variable declaration statement.
-    fn visit_variable_declaration(&mut self, node: &VariableDeclarationStatement) -> R
+    fn visit_variable_declaration(&mut self, node: &VariableDeclarationStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_type_annotation(&node.var_type);
         if let Some(initializer) = &node.initializer {
             self.visit_expression(initializer);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a bare expression statement.
-    fn visit_expression_statement(&mut self, node: &ExpressionStatement) -> R
+    fn visit_expression_statement(&mut self, node: &ExpressionStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.expression);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an assertion intrinsic statement.
-    fn visit_assert_statement(&mut self, node: &AssertStatement) -> R
+    fn visit_assert_statement(&mut self, node: &AssertStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.condition);
         if let Some(message) = &node.message {
             self.visit_expression(message);
         }
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a process exit statement.
-    fn visit_exit_statement(&mut self, node: &ExitStatement) -> R
+    fn visit_exit_statement(&mut self, node: &ExitStatement) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         self.visit_expression(&node.code);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits an expression node.
-    fn visit_expression(&mut self, node: &Expression) -> R
+    fn visit_expression(&mut self, node: &Expression) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_expression(self, node);
-        R::default()
+        ResultType::default()
     }
 
     /// Visits a type annotation node.
-    fn visit_type_annotation(&mut self, node: &TypeAnnotation) -> R
+    fn visit_type_annotation(&mut self, node: &TypeAnnotation) -> ResultType
     where
-        R: Default,
+        ResultType: Default,
     {
         walk_type_annotation(self, node);
-        R::default()
+        ResultType::default()
     }
 }
 
 /// Recursively walks a ProgramAst node.
-pub fn walk_program<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, program: &ProgramAst) {
+pub fn walk_program<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
+    program: &ProgramAst,
+) {
     if let Some(package) = &program.package {
         visitor.visit_package_statement(package);
     }
@@ -367,8 +370,8 @@ pub fn walk_program<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, prog
 }
 
 /// Recursively walks a Declaration node.
-pub fn walk_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
     node: &Declaration,
 ) {
     match node {
@@ -400,8 +403,8 @@ pub fn walk_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks a ClassDeclaration node.
-pub fn walk_class_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_class_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
     node: &ClassDeclaration,
 ) {
     if let Some(super_class) = &node.super_class {
@@ -441,8 +444,11 @@ pub fn walk_class_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks an InterfaceDeclaration node.
-pub fn walk_interface_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_interface_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
+    visitor: &mut VisitorType,
     node: &InterfaceDeclaration,
 ) {
     for interface in &node.super_interfaces {
@@ -454,8 +460,8 @@ pub fn walk_interface_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks an EnumDeclaration node.
-pub fn walk_enum_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_enum_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
     node: &EnumDeclaration,
 ) {
     for variant in &node.variants {
@@ -466,8 +472,8 @@ pub fn walk_enum_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks a FieldDeclaration node.
-pub fn walk_field_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_field_declaration<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
     node: &FieldDeclaration,
 ) {
     visitor.visit_type_annotation(&node.field_type);
@@ -477,8 +483,11 @@ pub fn walk_field_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks a MethodDeclaration node.
-pub fn walk_method_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_method_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
+    visitor: &mut VisitorType,
     node: &MethodDeclaration,
 ) {
     visitor.visit_type_annotation(&node.return_type);
@@ -494,8 +503,11 @@ pub fn walk_method_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks a ConstructorDeclaration node.
-pub fn walk_constructor_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_constructor_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
+    visitor: &mut VisitorType,
     node: &ConstructorDeclaration,
 ) {
     for param in &node.parameters {
@@ -513,8 +525,11 @@ pub fn walk_constructor_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks an OperatorDeclaration node.
-pub fn walk_operator_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_operator_declaration<
+    VisitorType: AstVisitor<ResultType> + ?Sized,
+    ResultType: Default,
+>(
+    visitor: &mut VisitorType,
     node: &OperatorDeclaration,
 ) {
     for param in &node.parameters {
@@ -528,7 +543,10 @@ pub fn walk_operator_declaration<V: AstVisitor<R> + ?Sized, R: Default>(
 }
 
 /// Recursively walks a Statement node.
-pub fn walk_statement<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, node: &Statement) {
+pub fn walk_statement<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
+    node: &Statement,
+) {
     match node {
         Statement::Block(stmt) => {
             visitor.visit_block_statement(stmt);
@@ -582,7 +600,10 @@ pub fn walk_statement<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, no
 }
 
 /// Recursively walks an Expression node.
-pub fn walk_expression<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, node: &Expression) {
+pub fn walk_expression<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
+    node: &Expression,
+) {
     match node {
         Expression::Literal { .. } | Expression::Identifier { .. } => {}
         Expression::Binary { left, right, .. } => {
@@ -695,8 +716,8 @@ pub fn walk_expression<V: AstVisitor<R> + ?Sized, R: Default>(visitor: &mut V, n
 }
 
 /// Recursively walks a TypeAnnotation node.
-pub fn walk_type_annotation<V: AstVisitor<R> + ?Sized, R: Default>(
-    visitor: &mut V,
+pub fn walk_type_annotation<VisitorType: AstVisitor<ResultType> + ?Sized, ResultType: Default>(
+    visitor: &mut VisitorType,
     node: &TypeAnnotation,
 ) {
     match node {
@@ -733,29 +754,44 @@ pub fn walk_type_annotation<V: AstVisitor<R> + ?Sized, R: Default>(
 /// Trait implemented by AST nodes that accept an [`AstVisitor`].
 pub trait Visitable {
     /// Accepts a visitor to traverse this AST node.
-    fn accept<V: AstVisitor<R>, R: Default>(&self, visitor: &mut V) -> R;
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType;
 }
 
 impl Visitable for ProgramAst {
-    fn accept<V: AstVisitor<R>, R: Default>(&self, visitor: &mut V) -> R {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_program(self)
     }
 }
 
 impl Visitable for Statement {
-    fn accept<V: AstVisitor<R>, R: Default>(&self, visitor: &mut V) -> R {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_statement(self)
     }
 }
 
 impl Visitable for Declaration {
-    fn accept<V: AstVisitor<R>, R: Default>(&self, visitor: &mut V) -> R {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_declaration(self)
     }
 }
 
 impl Visitable for Expression {
-    fn accept<V: AstVisitor<R>, R: Default>(&self, visitor: &mut V) -> R {
+    fn accept<VisitorType: AstVisitor<ResultType>, ResultType: Default>(
+        &self,
+        visitor: &mut VisitorType,
+    ) -> ResultType {
         visitor.visit_expression(self)
     }
 }

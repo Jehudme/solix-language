@@ -167,10 +167,8 @@ fn test_case_3_6_package_direct_symbol_import() {
             }
         }
     "#;
-    let (execution_result, _) = compile_and_run_multi(&[
-        ("test_pkg/io.slx", pkg_code),
-        ("main.slx", main_code),
-    ]);
+    let (execution_result, _) =
+        compile_and_run_multi(&[("test_pkg/io.slx", pkg_code), ("main.slx", main_code)]);
     assert_eq!(execution_result, Value::I32(0));
 }
 
@@ -194,10 +192,8 @@ fn test_case_3_7_package_wildcard_import() {
             }
         }
     "#;
-    let (execution_result, _) = compile_and_run_multi(&[
-        ("test_pkg/io.slx", pkg_code),
-        ("main.slx", main_code),
-    ]);
+    let (execution_result, _) =
+        compile_and_run_multi(&[("test_pkg/io.slx", pkg_code), ("main.slx", main_code)]);
     assert_eq!(execution_result, Value::I32(0));
 }
 

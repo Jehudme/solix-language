@@ -24,7 +24,7 @@ pub struct LoopContext {
     pub scope_depth: usize,
 }
 
-impl<'a> Emitter<'a> {
+impl<'ctx> Emitter<'ctx> {
     /// Recursively compiles an imperative AST statement into bytecode instructions.
     ///
     /// # Errors
@@ -96,7 +96,12 @@ impl<'a> Emitter<'a> {
             Statement::Try(try_stmt) => self.emit_try_statement(try_stmt, loop_stack),
             Statement::Throw(throw_stmt) => self.emit_throw_statement(throw_stmt),
             Statement::Expression(expr_stmt) => {
-                let temp = self.emit_expression(&expr_stmt.expression, None)?;
+                if matches!(&expr_stmt.expression, Expression::Assignment { .. }) {
+                    self.emit_discarded_expression(&expr_stmt.expression)?;
+                    return Ok(());
+                }
+                let target_hint = self.resolve_assignment_target_local(&expr_stmt.expression);
+                let temp = self.emit_expression(&expr_stmt.expression, target_hint)?;
                 if self
                     .query_type(expr_stmt.expression.span())
                     .is_reference_type()
@@ -116,7 +121,9 @@ impl<'a> Emitter<'a> {
                         Some(expr_stmt.span),
                     );
                 }
-                self.allocator.free_temp(temp);
+                if target_hint != Some(temp) {
+                    self.allocator.free_temp(temp);
+                }
                 Ok(())
             }
             Statement::Assert(assert_stmt) => self.emit_assert_statement(assert_stmt),
@@ -366,8 +373,7 @@ impl<'a> Emitter<'a> {
         }
 
         if let Some(update) = &for_stmt.update {
-            let temp = self.emit_expression(update, None)?;
-            self.allocator.free_temp(temp);
+            self.emit_discarded_expression(update)?;
         }
 
         let loop_end_pc = self.function.instructions.len() as i32;
@@ -552,19 +558,18 @@ impl<'a> Emitter<'a> {
                     let reg_case_value = self.emit_expression(&case_clause.case_value, None)?;
                     let reg_compare = self.allocator.alloc_temp()?;
 
-                    let is_class = matches!(
-                        &discriminant_type,
+                    let class_symbol_name = match &discriminant_type {
                         Type::Class { symbol_name, .. }
                             if symbol_name != "std::string"
                                 && symbol_name != "std.string"
-                                && symbol_name != "string"
-                    );
+                                && symbol_name != "string" =>
+                        {
+                            Some(symbol_name)
+                        }
+                        _ => None,
+                    };
 
-                    if is_class {
-                        let symbol_name = match &discriminant_type {
-                            Type::Class { symbol_name, .. } => symbol_name,
-                            _ => unreachable!(),
-                        };
+                    if let Some(symbol_name) = class_symbol_name {
                         let simple_class_name =
                             symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
                         let colon_class_name = symbol_name.replace('.', "::");
@@ -660,13 +665,7 @@ impl<'a> Emitter<'a> {
                                 Some(case_clause.span),
                             );
                             self.emit_instruction(
-                                Instruction::format_a(
-                                    OpCode::Not,
-                                    0,
-                                    reg_compare,
-                                    reg_compare,
-                                    0,
-                                ),
+                                Instruction::format_a(OpCode::Not, 0, reg_compare, reg_compare, 0),
                                 Some(case_clause.span),
                             );
                         } else {
@@ -697,10 +696,8 @@ impl<'a> Emitter<'a> {
                             OpCode::EqI64
                         } else if discriminant_type.is_floating_point() {
                             OpCode::EqF64
-                        } else if matches!(
-                            &discriminant_type,
-                            Type::Primitive(PrimitiveKind::Bool)
-                        ) {
+                        } else if matches!(&discriminant_type, Type::Primitive(PrimitiveKind::Bool))
+                        {
                             OpCode::EqBool
                         } else if matches!(
                             &case_clause.case_value,
@@ -797,12 +794,19 @@ impl<'a> Emitter<'a> {
                 self.allocator.free_temp(r_val);
                 r_val = converted_reg;
             }
-            if (self.query_type(val.span()).is_reference_type()
-                || matches!(
-                    self.query_type(val.span()),
-                    solix_common::types::Type::GenericParameter { .. }
-                        | solix_common::types::Type::Unresolved(_)
-                ))
+            let returning_owned_local = matches!(
+                val,
+                Expression::Identifier { span }
+                    if self.allocator.lookup_local(self.get_lexeme(*span)) == Some(r_val)
+                        && self.function.reference_registers.contains(&r_val)
+            );
+            if !returning_owned_local
+                && (self.query_type(val.span()).is_reference_type()
+                    || matches!(
+                        self.query_type(val.span()),
+                        solix_common::types::Type::GenericParameter { .. }
+                            | solix_common::types::Type::Unresolved(_)
+                    ))
                 && self.is_borrowed_reference(val)
             {
                 self.emit_instruction(
@@ -832,6 +836,7 @@ impl<'a> Emitter<'a> {
         var_decl: &VariableDeclarationStatement,
     ) -> Result<(), EmissionError> {
         let name = self.get_lexeme(var_decl.name_span).to_string();
+        let tracked_name = name.clone();
         let local_reg = self.allocator.alloc_local(name.clone())?;
 
         let var_type = self.query_type(var_decl.span);
@@ -898,6 +903,11 @@ impl<'a> Emitter<'a> {
                     Some(var_decl.span),
                 );
             }
+            if !self.unsafe_non_null_locals.contains(&tracked_name)
+                && self.is_guaranteed_non_null(init)
+            {
+                self.non_null_locals.insert(tracked_name);
+            }
         } else {
             self.emit_instruction(
                 Instruction::format_b(OpCode::LoadNull, 0, local_reg, 0),
@@ -905,6 +915,33 @@ impl<'a> Emitter<'a> {
             );
         }
         Ok(())
+    }
+
+    /// Returns the local variable register index when `expr` is an identifier assignment or inc/dec targeting a local.
+    pub(super) fn resolve_assignment_target_local(&self, expr: &Expression) -> Option<u16> {
+        match expr {
+            Expression::Assignment { target, .. } => {
+                if let Expression::Identifier { span } = target.as_ref() {
+                    let name = self.get_lexeme(*span);
+                    return self.allocator.lookup_local(name);
+                }
+                None
+            }
+            Expression::Unary {
+                operator:
+                    solix_common::tokens::TokenKind::OperatorIncrement
+                    | solix_common::tokens::TokenKind::OperatorDecrement,
+                operand,
+                ..
+            } => {
+                if let Expression::Identifier { span } = operand.as_ref() {
+                    let name = self.get_lexeme(*span);
+                    return self.allocator.lookup_local(name);
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     pub fn patch_jump_offset(&mut self, instruction_index: usize, offset: i32) {

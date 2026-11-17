@@ -90,6 +90,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+strip = "symbols"
 
 [profile.dist]
 inherits = "release"

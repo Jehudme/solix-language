@@ -176,7 +176,10 @@ impl AnalysisSnapshot {
         let mut index = lines.len() - 1;
 
         // Skip the line of the declaration itself if it does not contain a doc comment
-        if index > 0 && !lines[index].trim().starts_with("///") && !lines[index].trim().ends_with("*/") {
+        if index > 0
+            && !lines[index].trim().starts_with("///")
+            && !lines[index].trim().ends_with("*/")
+        {
             index -= 1;
         }
 
@@ -856,7 +859,7 @@ impl WorkspaceManager {
 
             let target_name = target_path
                 .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
+                .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_else(|| target_uri.to_string());
 
             if !map.contains_key(&target_name) {
@@ -868,7 +871,7 @@ impl WorkspaceManager {
             let mut map = HashMap::new();
             let target_name = target_path
                 .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
+                .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_else(|| target_uri.to_string());
             map.insert(target_name.clone(), current_content.to_string());
             (map, target_name)

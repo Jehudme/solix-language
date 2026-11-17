@@ -236,9 +236,9 @@ impl CompilationOptions {
 
     /// Appends a custom compilation phase to the pipeline.
     #[must_use]
-    pub fn with_phase<P: crate::phases::phase::CompilationPhase + 'static>(
+    pub fn with_phase<PhaseType: crate::phases::phase::CompilationPhase + 'static>(
         mut self,
-        phase: P,
+        phase: PhaseType,
     ) -> Self {
         let mut pipeline = self.pipeline.unwrap_or_default();
         pipeline = pipeline.add_phase(phase);
@@ -416,30 +416,36 @@ impl CompilationContext {
     }
 
     /// Inserts a typed extension into the context blackboard.
-    pub fn insert_extension<T: Send + Sync + 'static>(&mut self, value: T) {
-        self.extensions.insert(TypeId::of::<T>(), Box::new(value));
+    pub fn insert_extension<ExtensionType: Send + Sync + 'static>(&mut self, value: ExtensionType) {
+        self.extensions
+            .insert(TypeId::of::<ExtensionType>(), Box::new(value));
     }
 
     /// Retrieves an immutable reference to a typed extension from the blackboard.
     #[must_use]
-    pub fn get_extension<T: 'static>(&self) -> Option<&T> {
+    pub fn get_extension<ExtensionType: 'static>(&self) -> Option<&ExtensionType> {
         self.extensions
-            .get(&TypeId::of::<T>())
-            .and_then(|boxed| boxed.downcast_ref::<T>())
+            .get(&TypeId::of::<ExtensionType>())
+            .and_then(|boxed| boxed.downcast_ref::<ExtensionType>())
     }
 
     /// Retrieves a mutable reference to a typed extension from the blackboard.
-    pub fn get_extension_mut<T: 'static>(&mut self) -> Option<&mut T> {
+    pub fn get_extension_mut<ExtensionType: 'static>(&mut self) -> Option<&mut ExtensionType> {
         self.extensions
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|boxed| boxed.downcast_mut::<T>())
+            .get_mut(&TypeId::of::<ExtensionType>())
+            .and_then(|boxed| boxed.downcast_mut::<ExtensionType>())
     }
 
     /// Removes and returns a typed extension from the blackboard.
-    pub fn remove_extension<T: 'static>(&mut self) -> Option<T> {
+    pub fn remove_extension<ExtensionType: 'static>(&mut self) -> Option<ExtensionType> {
         self.extensions
-            .remove(&TypeId::of::<T>())
-            .and_then(|boxed| boxed.downcast::<T>().ok().map(|b| *b))
+            .remove(&TypeId::of::<ExtensionType>())
+            .and_then(|boxed| {
+                boxed
+                    .downcast::<ExtensionType>()
+                    .ok()
+                    .map(|unboxed| *unboxed)
+            })
     }
 
     /// Executes the compilation pipeline (either configured in options or the default standard pipeline).
@@ -478,7 +484,12 @@ impl CompilationContext {
             let artifacts = crate::phases::emitter::pipeline::emit_context(self)?;
             self.emission_artifacts = Some(artifacts);
         }
-        Ok(self.emission_artifacts.as_ref().unwrap())
+        self.emission_artifacts.as_ref().ok_or_else(|| {
+            solix_common::diagnostics::EmissionError::CorruptBinaryContainer {
+                section: "emission_artifacts".to_string(),
+                details: "Bytecode emission completed without populating artifacts".to_string(),
+            }
+        })
     }
 
     /// Returns the compiled functions for a specific source file index.
@@ -490,10 +501,7 @@ impl CompilationContext {
         source_id: u16,
     ) -> Result<&[solix_common::bytecode::CompiledFunction], solix_common::diagnostics::EmissionError>
     {
-        if self.emission_artifacts.is_none() {
-            self.emit_context()?;
-        }
-        let artifacts = self.emission_artifacts.as_ref().unwrap();
+        let artifacts = self.emit_context()?;
         let index = source_id as usize;
         if index < artifacts.functions_by_source.len() {
             Ok(&artifacts.functions_by_source[index])

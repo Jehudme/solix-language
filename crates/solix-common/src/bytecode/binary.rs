@@ -66,7 +66,7 @@ impl ConstantPool {
     /// Adds or deduplicates a 64-bit signed integer, returning its index.
     pub fn add_i64(&mut self, value: i64) -> Result<u16, EmissionError> {
         let entry = ConstantPoolValue::Int64(value);
-        if let Some(pos) = self.values.iter().position(|v| *v == entry) {
+        if let Some(pos) = self.values.iter().position(|existing| *existing == entry) {
             return Ok(pos as u16);
         }
         self.push_value(entry)
@@ -75,7 +75,7 @@ impl ConstantPool {
     /// Adds or deduplicates a 64-bit float, returning its index.
     pub fn add_f64(&mut self, value: f64) -> Result<u16, EmissionError> {
         let entry = ConstantPoolValue::from_f64(value);
-        if let Some(pos) = self.values.iter().position(|v| *v == entry) {
+        if let Some(pos) = self.values.iter().position(|existing| *existing == entry) {
             return Ok(pos as u16);
         }
         self.push_value(entry)
@@ -85,7 +85,7 @@ impl ConstantPool {
     pub fn add_string(&mut self, value: impl Into<String>) -> Result<u16, EmissionError> {
         let text = value.into();
         let entry = ConstantPoolValue::String(text);
-        if let Some(pos) = self.values.iter().position(|v| *v == entry) {
+        if let Some(pos) = self.values.iter().position(|existing| *existing == entry) {
             return Ok(pos as u16);
         }
         self.push_value(entry)
@@ -257,9 +257,9 @@ impl BinaryProgram {
                     buffer.push(2);
                     buffer.extend_from_slice(&bits.to_le_bytes());
                 }
-                ConstantPoolValue::String(s) => {
+                ConstantPoolValue::String(text) => {
                     buffer.push(3);
-                    write_string(&mut buffer, s);
+                    write_string(&mut buffer, text);
                 }
             }
         }
@@ -301,16 +301,16 @@ impl BinaryProgram {
             for (iface_id, methods) in &cls.itable {
                 buffer.extend_from_slice(&iface_id.to_le_bytes());
                 buffer.extend_from_slice(&(methods.len() as u32).to_le_bytes());
-                for &m in methods {
-                    buffer.extend_from_slice(&m.to_le_bytes());
+                for &method_id in methods {
+                    buffer.extend_from_slice(&method_id.to_le_bytes());
                 }
             }
 
             // Destructor
             match cls.destructor_id {
-                Some(d) => {
+                Some(destructor_id) => {
                     buffer.push(1);
-                    buffer.extend_from_slice(&d.to_le_bytes());
+                    buffer.extend_from_slice(&destructor_id.to_le_bytes());
                 }
                 None => buffer.push(0),
             }
@@ -358,9 +358,9 @@ impl BinaryProgram {
                 buffer.extend_from_slice(&handler.try_start_pc.to_le_bytes());
                 buffer.extend_from_slice(&handler.try_end_pc.to_le_bytes());
                 match &handler.catch_type_symbol {
-                    Some(s) => {
+                    Some(symbol) => {
                         buffer.push(1);
-                        write_string(&mut buffer, s);
+                        write_string(&mut buffer, symbol);
                     }
                     None => buffer.push(0),
                 }
@@ -720,28 +720,28 @@ impl BinaryProgram {
         }
 
         // 6. Metadata and Export Manifest
-        let (package_name, package_version, package_description, mut export_manifest) = if reader
-            .has_remaining()
-        {
-            let pkg_name = reader.read_string("Metadata")?;
-            let pkg_version = reader.read_string("Metadata")?;
-            let pkg_desc = reader.read_string("Metadata")?;
-            let manifest_len = reader.read_u32("Metadata")? as usize;
-            let manifest_slice = reader.read_bytes(manifest_len, "ExportManifest")?;
-            let manifest: ExportManifest = serde_json::from_slice(manifest_slice).map_err(|e| {
-                EmissionError::MalformedExportManifest {
-                    reason: e.to_string(),
-                }
-            })?;
-            (pkg_name, pkg_version, pkg_desc, manifest)
-        } else {
-            (
-                String::new(),
-                "0.1.0".to_string(),
-                String::new(),
-                ExportManifest::default(),
-            )
-        };
+        let (package_name, package_version, package_description, mut export_manifest) =
+            if reader.has_remaining() {
+                let pkg_name = reader.read_string("Metadata")?;
+                let pkg_version = reader.read_string("Metadata")?;
+                let pkg_desc = reader.read_string("Metadata")?;
+                let manifest_len = reader.read_u32("Metadata")? as usize;
+                let manifest_slice = reader.read_bytes(manifest_len, "ExportManifest")?;
+                let manifest: ExportManifest =
+                    serde_json::from_slice(manifest_slice).map_err(|error| {
+                        EmissionError::MalformedExportManifest {
+                            reason: error.to_string(),
+                        }
+                    })?;
+                (pkg_name, pkg_version, pkg_desc, manifest)
+            } else {
+                (
+                    String::new(),
+                    "0.1.0".to_string(),
+                    String::new(),
+                    ExportManifest::default(),
+                )
+            };
 
         // 7. Section 7: Exported AST
         let exported_ast_bytes = if reader.has_remaining() {
@@ -785,19 +785,19 @@ impl BinaryProgram {
     }
 }
 
-fn write_string(buffer: &mut Vec<u8>, s: &str) {
-    let bytes = s.as_bytes();
+fn write_string(buffer: &mut Vec<u8>, text: &str) {
+    let bytes = text.as_bytes();
     buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
     buffer.extend_from_slice(bytes);
 }
 
-struct ByteReader<'a> {
-    data: &'a [u8],
+struct ByteReader<'buf> {
+    data: &'buf [u8],
     offset: usize,
 }
 
-impl<'a> ByteReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
+impl<'buf> ByteReader<'buf> {
+    fn new(data: &'buf [u8]) -> Self {
         Self { data, offset: 0 }
     }
 
@@ -805,7 +805,7 @@ impl<'a> ByteReader<'a> {
         self.offset < self.data.len()
     }
 
-    fn read_bytes(&mut self, count: usize, section: &str) -> Result<&'a [u8], EmissionError> {
+    fn read_bytes(&mut self, count: usize, section: &str) -> Result<&'buf [u8], EmissionError> {
         if self.offset + count > self.data.len() {
             return Err(EmissionError::UnexpectedEof {
                 section: section.to_string(),

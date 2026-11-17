@@ -6,21 +6,21 @@ use crate::value::model::Value;
 use std::fmt;
 
 impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Null => write!(f, "null"),
-            Self::Bool(b) => write!(f, "{b}"),
-            Self::I32(n) => write!(f, "{n}"),
-            Self::I64(n) => write!(f, "{n}"),
-            Self::F64(v) => {
-                if v.fract() == 0.0 && !v.is_infinite() && !v.is_nan() {
-                    write!(f, "{v:.1}")
+            Self::Null => write!(formatter, "null"),
+            Self::Bool(flag) => write!(formatter, "{flag}"),
+            Self::I32(int_val) => write!(formatter, "{int_val}"),
+            Self::I64(int_val) => write!(formatter, "{int_val}"),
+            Self::F64(float_val) => {
+                if float_val.fract() == 0.0 && !float_val.is_infinite() && !float_val.is_nan() {
+                    write!(formatter, "{float_val:.1}")
                 } else {
-                    write!(f, "{v}")
+                    write!(formatter, "{float_val}")
                 }
             }
-            Self::Ref(addr) => write!(f, "<ref 0x{addr:08X}>"),
-            Self::FnPtr(id) => write!(f, "<fn_ptr #{id}>"),
+            Self::Ref(addr) => write!(formatter, "<ref 0x{addr:08X}>"),
+            Self::FnPtr(id) => write!(formatter, "<fn_ptr #{id}>"),
         }
     }
 }

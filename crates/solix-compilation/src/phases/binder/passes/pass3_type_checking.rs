@@ -21,15 +21,15 @@ use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 
 /// Semantic type checking and expression evaluation visitor traversing the parsed AST.
-pub struct TypeCheckingVisitor<'a> {
+pub struct TypeCheckingVisitor<'ctx> {
     pub source_id: u16,
-    pub source_text: &'a str,
-    pub symbol_table: &'a mut SymbolTable,
-    pub blueprint_registry: &'a mut GenericBlueprintRegistry,
-    pub layouts: &'a mut HashMap<SymbolId, ClassLayout>,
-    pub node_types: &'a mut HashMap<Span, Type>,
-    pub resolved_symbols: &'a mut HashMap<Span, SymbolId>,
-    pub errors: &'a mut Vec<BindingError>,
+    pub source_text: &'ctx str,
+    pub symbol_table: &'ctx mut SymbolTable,
+    pub blueprint_registry: &'ctx mut GenericBlueprintRegistry,
+    pub layouts: &'ctx mut HashMap<SymbolId, ClassLayout>,
+    pub node_types: &'ctx mut HashMap<Span, Type>,
+    pub resolved_symbols: &'ctx mut HashMap<Span, SymbolId>,
+    pub errors: &'ctx mut Vec<BindingError>,
     pub current_class: Option<SymbolId>,
     pub current_class_generic_names: std::collections::HashSet<String>,
     pub current_method_generic_names: std::collections::HashSet<String>,
@@ -38,8 +38,8 @@ pub struct TypeCheckingVisitor<'a> {
     pub is_inside_destructor: bool,
     pub loop_depth: usize,
     pub switch_depth: usize,
-    pub next_vtable_id: &'a mut u32,
-    pub source_texts: &'a [String],
+    pub next_vtable_id: &'ctx mut u32,
+    pub source_texts: &'ctx [String],
 }
 
 fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Option<String> {
@@ -68,7 +68,7 @@ fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Opti
     }
 }
 
-impl<'a> TypeCheckingVisitor<'a> {
+impl<'ctx> TypeCheckingVisitor<'ctx> {
     pub fn class_implements_equality_operator(&self, symbol_name: &str) -> bool {
         let simple_name = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
         for candidate in [symbol_name, simple_name] {
@@ -178,13 +178,13 @@ impl<'a> TypeCheckingVisitor<'a> {
 
                 // Check "super"
                 if identifier_name == "super" {
-                    if self.is_static_method || self.current_class.is_none() {
+                    let Some(class_id) = self.current_class.filter(|_| !self.is_static_method)
+                    else {
                         self.errors.push(BindingError::InvalidSuperCall {
                             span: span.to_source_span(),
                         });
                         return Type::Error;
-                    }
-                    let class_id = self.current_class.unwrap();
+                    };
                     let parent_class_id = self
                         .symbol_table
                         .get_symbol(class_id)
@@ -476,25 +476,25 @@ impl<'a> TypeCheckingVisitor<'a> {
                             });
                             Type::Error
                         } else if let Expression::Literal {
-                            value: LiteralValue::Int(v),
+                            value: LiteralValue::Int(int_val),
                             ..
                         } = &**operand
                         {
-                            if *v == 2147483648 {
+                            if *int_val == 2147483648 {
                                 Type::Primitive(PrimitiveKind::Int32)
-                            } else if *v > i32::MAX as i64 {
+                            } else if *int_val > i32::MAX as i64 {
                                 Type::Primitive(PrimitiveKind::Int64)
                             } else {
                                 operand_type
                             }
                         } else if let Expression::Literal {
-                            value: LiteralValue::UInt(v),
+                            value: LiteralValue::UInt(uint_val),
                             ..
                         } = &**operand
                         {
-                            if *v == 2147483648 {
+                            if *uint_val == 2147483648 {
                                 Type::Primitive(PrimitiveKind::Int32)
-                            } else if *v == 9223372036854775808 {
+                            } else if *uint_val == 9223372036854775808 {
                                 Type::Primitive(PrimitiveKind::Int64)
                             } else {
                                 operand_type
@@ -568,13 +568,13 @@ impl<'a> TypeCheckingVisitor<'a> {
                     Type::Tuple(elements) => {
                         let idx_opt = match &**index {
                             Expression::Literal {
-                                value: LiteralValue::Int(i),
+                                value: LiteralValue::Int(int_val),
                                 ..
-                            } => Some(*i as usize),
+                            } => Some(*int_val as usize),
                             Expression::Literal {
-                                value: LiteralValue::UInt(u),
+                                value: LiteralValue::UInt(uint_val),
                                 ..
-                            } => Some(*u as usize),
+                            } => Some(*uint_val as usize),
                             _ => None,
                         };
                         match idx_opt {
@@ -1035,7 +1035,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                             } else {
                                 let arg_str = evaluated_arg_types
                                     .iter()
-                                    .map(|t| t.to_string())
+                                    .map(|arg_type| arg_type.to_string())
                                     .collect::<Vec<_>>()
                                     .join(", ");
                                 self.errors.push(BindingError::NoMatchingOverload {
@@ -1296,8 +1296,8 @@ impl<'a> TypeCheckingVisitor<'a> {
                         .members
                         .iter()
                         .filter_map(|&mid| {
-                            self.symbol_table.get_symbol(mid).and_then(|s| {
-                                if s.name == "constructor" {
+                            self.symbol_table.get_symbol(mid).and_then(|sym_entry| {
+                                if sym_entry.name == "constructor" {
                                     Some(mid)
                                 } else {
                                     None
@@ -1353,7 +1353,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                         if !found_ctor {
                             let arg_str = evaluated_arg_types
                                 .iter()
-                                .map(|t| t.to_string())
+                                .map(|arg_type| arg_type.to_string())
                                 .collect::<Vec<_>>()
                                 .join(", ");
                             self.errors.push(BindingError::NoMatchingOverload {
@@ -1365,7 +1365,7 @@ impl<'a> TypeCheckingVisitor<'a> {
                     } else if !evaluated_arg_types.is_empty() {
                         let arg_str = evaluated_arg_types
                             .iter()
-                            .map(|t| t.to_string())
+                            .map(|arg_type| arg_type.to_string())
                             .collect::<Vec<_>>()
                             .join(", ");
                         self.errors.push(BindingError::NoMatchingOverload {
@@ -1945,7 +1945,7 @@ impl<'a> TypeCheckingVisitor<'a> {
             curr_id = self
                 .symbol_table
                 .get_symbol(cid)
-                .and_then(|s| s.parent_symbol);
+                .and_then(|sym_entry| sym_entry.parent_symbol);
         }
 
         false
@@ -2289,7 +2289,7 @@ impl<'a> TypeCheckingVisitor<'a> {
     }
 }
 
-impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
+impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
     fn visit_class_declaration(&mut self, node: &ClassDeclaration) {
         let class_name = if node.name_span.end as usize <= self.source_text.len() {
             &self.source_text[node.name_span.start as usize..node.name_span.end as usize]
@@ -2883,9 +2883,9 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
         if let TypeAnnotation::Named { path, .. } = &node.var_type {
             let segments: Vec<&str> = path
                 .iter()
-                .map(|s| {
-                    let start = s.start as usize;
-                    let end = s.end as usize;
+                .map(|span| {
+                    let start = span.start as usize;
+                    let end = span.end as usize;
                     if end <= self.source_text.len() {
                         &self.source_text[start..end]
                     } else {
@@ -3192,13 +3192,15 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                             for (element_index, element_expr) in elements.iter().enumerate() {
                                 let element_type = self.evaluate_expression_type(element_expr);
                                 let expected_type = &disc_elements[element_index];
-                                let is_compatible = element_type.is_assignable_to(
-                                    expected_type,
-                                    &|source, target| self.check_is_subtype(source, target),
-                                ) || expected_type.is_assignable_to(
-                                    &element_type,
-                                    &|source, target| self.check_is_subtype(source, target),
-                                ) || (element_type.is_integer() && expected_type.is_integer());
+                                let is_compatible = element_type
+                                    .is_assignable_to(expected_type, &|source, target| {
+                                        self.check_is_subtype(source, target)
+                                    })
+                                    || expected_type
+                                        .is_assignable_to(&element_type, &|source, target| {
+                                            self.check_is_subtype(source, target)
+                                        })
+                                    || (element_type.is_integer() && expected_type.is_integer());
 
                                 if !is_compatible {
                                     self.errors.push(BindingError::IncompatibleSwitchCaseType {
@@ -3269,13 +3271,12 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                         case_type.is_integer() && discriminant_type.is_integer();
                     let are_both_floats =
                         case_type.is_floating_point() && discriminant_type.is_floating_point();
-                    let is_assignable = case_type.is_assignable_to(
-                        &discriminant_type,
-                        &|source, target| self.check_is_subtype(source, target),
-                    ) || discriminant_type.is_assignable_to(
-                        &case_type,
-                        &|source, target| self.check_is_subtype(source, target),
-                    );
+                    let is_assignable =
+                        case_type.is_assignable_to(&discriminant_type, &|source, target| {
+                            self.check_is_subtype(source, target)
+                        }) || discriminant_type.is_assignable_to(&case_type, &|source, target| {
+                            self.check_is_subtype(source, target)
+                        });
 
                     if !are_both_integers
                         && !are_both_floats
@@ -3475,7 +3476,7 @@ impl<'a> AstVisitor for TypeCheckingVisitor<'a> {
                 .symbol_table
                 .scope_stack
                 .iter()
-                .any(|s| s.contains_key(&sym_entry.name))
+                .any(|scope| scope.contains_key(&sym_entry.name))
         {
             self.errors.push(BindingError::TypeMismatch {
                 expected: "throw target must be an Exception instance".to_string(),
@@ -3679,7 +3680,7 @@ fn block_definitely_returns(body: &BlockStatement) -> bool {
 fn statement_definitely_returns(statement: &Statement) -> bool {
     match statement {
         Statement::Return(_) | Statement::Throw(_) | Statement::Exit(_) => true,
-        Statement::Block(b) => block_definitely_returns(b),
+        Statement::Block(block) => block_definitely_returns(block),
         Statement::If(if_stmt) => {
             if let Some(else_branch) = &if_stmt.else_branch {
                 statement_definitely_returns(&if_stmt.then_branch)
@@ -3704,7 +3705,7 @@ fn statement_definitely_returns(statement: &Statement) -> bool {
                     && try_stmt
                         .catch_clauses
                         .iter()
-                        .all(|c| block_definitely_returns(&c.block))
+                        .all(|clause| block_definitely_returns(&clause.block))
             }
         }
         Statement::Switch(switch_stmt) => {
@@ -3713,7 +3714,7 @@ fn statement_definitely_returns(statement: &Statement) -> bool {
                 let cases_return = switch_stmt
                     .cases
                     .iter()
-                    .all(|c| c.statements.iter().any(statement_definitely_returns));
+                    .all(|clause| clause.statements.iter().any(statement_definitely_returns));
                 default_returns && cases_return
             } else {
                 false

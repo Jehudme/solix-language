@@ -4,6 +4,15 @@
 
 use crate::exceptions::RuntimeError;
 
+#[cold]
+#[inline(never)]
+fn type_mismatch_error(expected: &'static str, found_value: &Value) -> RuntimeError {
+    RuntimeError::TypeMismatch {
+        expected: expected.to_string(),
+        found: found_value.type_name().to_string(),
+    }
+}
+
 /// Strongly-typed 64-bit tagged value representation for register and heap variables.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Value {
@@ -47,20 +56,22 @@ impl Value {
     /// - `F64(f)` is `!f.is_nan() && f != 0.0`
     /// - `Ref(addr)` is `addr != 0`
     /// - `FnPtr(id)` is true
+    #[inline(always)]
     #[must_use]
     pub fn is_truthy(&self) -> bool {
         match self {
             Self::Null => false,
-            Self::Bool(b) => *b,
-            Self::I32(n) => *n != 0,
-            Self::I64(n) => *n != 0,
-            Self::F64(f) => !f.is_nan() && *f != 0.0,
+            Self::Bool(boolean_val) => *boolean_val,
+            Self::I32(integer_val) => *integer_val != 0,
+            Self::I64(integer_val) => *integer_val != 0,
+            Self::F64(float_val) => !float_val.is_nan() && *float_val != 0.0,
             Self::Ref(addr) => *addr != 0,
             Self::FnPtr(_) => true,
         }
     }
 
     /// Evaluates equality between two values with support for mixed primitive/reference types.
+    #[inline(always)]
     #[must_use]
     pub fn is_equal_to(&self, other: &Self) -> bool {
         match (self, other) {
@@ -86,80 +97,112 @@ impl Value {
         }
     }
 
+    #[cold]
+    #[inline(never)]
+    fn as_i32_slow(&self) -> Result<i32, RuntimeError> {
+        match self {
+            Self::I64(primitive_number) => Ok(*primitive_number as i32),
+            _ => Err(type_mismatch_error("int32", self)),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn as_i64_slow(&self) -> Result<i64, RuntimeError> {
+        match self {
+            Self::I32(number_val) => Ok(*number_val as i64),
+            _ => Err(type_mismatch_error("int64", self)),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn as_f64_slow(&self) -> Result<f64, RuntimeError> {
+        match self {
+            Self::I32(number_val) => Ok(*number_val as f64),
+            Self::I64(number_val) => Ok(*number_val as f64),
+            _ => Err(type_mismatch_error("float64", self)),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn as_ref_slow(&self) -> Result<u32, RuntimeError> {
+        match self {
+            Self::Null => Ok(0),
+            _ => Err(type_mismatch_error("ref", self)),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn as_bool_slow(&self) -> Result<bool, RuntimeError> {
+        Err(type_mismatch_error("bool", self))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn as_fn_ptr_slow(&self) -> Result<u32, RuntimeError> {
+        Err(type_mismatch_error("fn_ptr", self))
+    }
+
     /// Extracts a boolean value or returns a `TypeMismatch` error.
     #[inline(always)]
     pub fn as_bool(&self) -> Result<bool, RuntimeError> {
-        match self {
-            Self::Bool(boolean_value) => Ok(*boolean_value),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "bool".to_string(),
-                found: self.type_name().to_string(),
-            }),
+        if let Self::Bool(boolean_value) = self {
+            Ok(*boolean_value)
+        } else {
+            self.as_bool_slow()
         }
     }
 
     /// Extracts a 32-bit signed integer or returns a `TypeMismatch` error.
     #[inline(always)]
     pub fn as_i32(&self) -> Result<i32, RuntimeError> {
-        match self {
-            Self::I32(primitive_number) => Ok(*primitive_number),
-            Self::I64(primitive_number) => Ok(*primitive_number as i32),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "int32".to_string(),
-                found: self.type_name().to_string(),
-            }),
+        if let Self::I32(primitive_number) = self {
+            Ok(*primitive_number)
+        } else {
+            self.as_i32_slow()
         }
     }
 
     /// Extracts a 64-bit signed integer or returns a `TypeMismatch` error.
     #[inline(always)]
     pub fn as_i64(&self) -> Result<i64, RuntimeError> {
-        match self {
-            Self::I64(number_val) => Ok(*number_val),
-            Self::I32(number_val) => Ok(*number_val as i64),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "int64".to_string(),
-                found: self.type_name().to_string(),
-            }),
+        if let Self::I64(number_val) = self {
+            Ok(*number_val)
+        } else {
+            self.as_i64_slow()
         }
     }
 
     /// Extracts a 64-bit float or returns a `TypeMismatch` error.
     #[inline(always)]
     pub fn as_f64(&self) -> Result<f64, RuntimeError> {
-        match self {
-            Self::F64(float_val) => Ok(*float_val),
-            Self::I32(number_val) => Ok(*number_val as f64),
-            Self::I64(number_val) => Ok(*number_val as f64),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "float64".to_string(),
-                found: self.type_name().to_string(),
-            }),
+        if let Self::F64(float_val) = self {
+            Ok(*float_val)
+        } else {
+            self.as_f64_slow()
         }
     }
 
     /// Extracts a heap reference address or returns a `TypeMismatch` error.
     #[inline(always)]
     pub fn as_ref(&self) -> Result<u32, RuntimeError> {
-        match self {
-            Self::Ref(heap_address) => Ok(*heap_address),
-            Self::Null => Ok(0),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "ref".to_string(),
-                found: self.type_name().to_string(),
-            }),
+        if let Self::Ref(heap_address) = self {
+            Ok(*heap_address)
+        } else {
+            self.as_ref_slow()
         }
     }
 
     /// Extracts a function pointer or returns a `TypeMismatch` error.
     #[inline(always)]
     pub fn as_fn_ptr(&self) -> Result<u32, RuntimeError> {
-        match self {
-            Self::FnPtr(func_id) => Ok(*func_id),
-            _ => Err(RuntimeError::TypeMismatch {
-                expected: "fn_ptr".to_string(),
-                found: self.type_name().to_string(),
-            }),
+        if let Self::FnPtr(func_id) = self {
+            Ok(*func_id)
+        } else {
+            self.as_fn_ptr_slow()
         }
     }
 
@@ -235,6 +278,7 @@ impl Value {
     }
 
     /// Encodes this value into a raw 64-bit NaN-boxed word representation for memory storage.
+    #[inline(always)]
     #[must_use]
     pub fn to_raw_u64(&self) -> u64 {
         match self {
@@ -267,6 +311,7 @@ impl Value {
     }
 
     /// Decodes a value from its raw 64-bit NaN-boxed word representation.
+    #[inline(always)]
     #[must_use]
     pub fn from_raw_u64(raw: u64) -> Self {
         if raw == 0 || raw == Self::TAG_NULL {

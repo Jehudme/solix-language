@@ -110,7 +110,7 @@ impl VirtualMachine {
         for local_entry in &compiled_function.local_variables {
             if target_frame.pc >= local_entry.start_pc && target_frame.pc <= local_entry.end_pc {
                 let absolute_register_index =
-                    target_frame.register_base + local_entry.register as usize;
+                    target_frame.register_base as usize + local_entry.register as usize;
                 let register_value = self
                     .register_stack
                     .get(absolute_register_index)
@@ -247,7 +247,7 @@ impl VirtualMachine {
         }
 
         let target_frame = &self.call_frames[frame_index];
-        let absolute_register_index = target_frame.register_base + register as usize;
+        let absolute_register_index = target_frame.register_base as usize + register as usize;
         if absolute_register_index < self.register_stack.len() {
             self.register_stack[absolute_register_index] = new_value;
         }

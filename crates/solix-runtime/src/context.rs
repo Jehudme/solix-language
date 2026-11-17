@@ -44,10 +44,22 @@ pub struct LoadedBinary {
 pub struct FunctionRuntimeMeta {
     /// Index of the owning LoadedBinary in context.loaded_binaries.
     pub binary_id: usize,
-    /// Function ID offset for the owning binary.
-    pub func_id_offset: u32,
     /// Direct function pointer if this function is a native host function / builtin.
     pub native_fn: Option<NativeCallback>,
+    /// Function ID offset for the owning binary.
+    pub func_id_offset: u32,
+    /// Relocated static variable base slot offset for the owning module.
+    pub static_base_offset: u32,
+    /// Virtual register window size required by this function frame.
+    pub num_registers: u16,
+    /// Logical instruction length before optional load-time sentinel `Return`.
+    pub logical_inst_len: usize,
+    /// Pre-classified trivial leaf kind (`0` = none, `1` = return param, `2` = add_imm, `3` = sub_imm, `4` = mul_imm).
+    pub trivial_leaf_kind: u8,
+    /// Parameter register index read by the trivial leaf fast-call evaluator.
+    pub trivial_leaf_param: u8,
+    /// Signed 16-bit immediate used by trivial 2-instruction arithmetic leaf fast-call evaluation.
+    pub trivial_leaf_imm: i16,
     /// Whether this function has any reference registers that require ARC tracking.
     pub has_references: bool,
     /// Whether this function has debug symbols (source map and/or local variables).
@@ -79,6 +91,12 @@ pub struct RuntimeContext {
     pub all_classes: Vec<CompiledClass>,
     /// Fast direct lookup table for compiled classes indexed directly by `vtable_id`.
     pub vtable_lookup: Vec<Option<CompiledClass>>,
+    /// Compact `O(1)` virtual method tables indexed by `[vtable_id][slot]`.
+    pub flat_vtables: Vec<Box<[u32]>>,
+    /// Compact `O(1)` interface method tables indexed by `[vtable_id][iface_id][slot]`.
+    pub flat_itables: Vec<Box<[Box<[u32]>]>>,
+    /// Pre-computed static acyclicity flag per `vtable_id` (skips cycle collector purple push when `true`).
+    pub class_acyclic: Vec<bool>,
     /// Total static variable slots reserved across all loaded binaries.
     pub total_static_space: u32,
     /// Global function ID of the resolved program entry point, if available.
@@ -255,7 +273,8 @@ impl RuntimeContext {
                 for slot_func in &mut relocated_class.vtable {
                     *slot_func += func_offset;
                 }
-                for (_iface_id, iface_methods) in &mut relocated_class.itable {
+                for (iface_id, iface_methods) in &mut relocated_class.itable {
+                    *iface_id += vtable_offset;
                     for slot_func in iface_methods {
                         *slot_func += func_offset;
                     }
@@ -332,6 +351,7 @@ impl RuntimeContext {
                     for inst in &mut relocated_func.instructions {
                         if func_offset > 0
                             && (inst.raw_opcode() == OpCode::CallDirect as u8
+                                || inst.raw_opcode() == OpCode::TailCallDirect as u8
                                 || inst.raw_opcode() == OpCode::PackClosure as u8)
                         {
                             let old_target = inst.call_target();
@@ -395,15 +415,32 @@ impl RuntimeContext {
                                 && (inst.flags() & 0x80) != 0
                             {
                                 let old_vtable_id = inst.flags() & 0x7F;
-                                let new_flags =
-                                    0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
-                                *inst = Instruction::format_a(
-                                    OpCode::TupleInstanceof,
-                                    new_flags,
-                                    inst.dst(),
-                                    inst.src1(),
-                                    inst.src2(),
-                                );
+                                if old_vtable_id > 0 {
+                                    let new_flags =
+                                        0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
+                                    *inst = Instruction::format_a(
+                                        OpCode::TupleInstanceof,
+                                        new_flags,
+                                        inst.dst(),
+                                        inst.src1(),
+                                        inst.src2(),
+                                    );
+                                }
+                            } else if inst.raw_opcode() == OpCode::AllocArray as u8
+                                && (inst.flags() & 0x80) != 0
+                            {
+                                let old_vtable_id = inst.flags() & 0x7F;
+                                if old_vtable_id > 0 {
+                                    let new_flags =
+                                        0x80 | ((old_vtable_id + vtable_offset as u8) & 0x7F);
+                                    *inst = Instruction::format_a(
+                                        OpCode::AllocArray,
+                                        new_flags,
+                                        inst.dst(),
+                                        inst.src1(),
+                                        inst.src2(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -435,10 +472,32 @@ impl RuntimeContext {
             .map(|class_entry| class_entry.vtable_id)
             .max()
             .unwrap_or(0);
+        let max_iface_id = all_classes
+            .iter()
+            .flat_map(|class_entry| class_entry.itable.iter().map(|(iface_id, _)| *iface_id))
+            .max()
+            .unwrap_or(0)
+            .max(max_relocated_vtable_id);
+
         let mut vtable_lookup = vec![None; (max_relocated_vtable_id + 1) as usize];
+        let mut flat_vtables: Vec<Box<[u32]>> =
+            vec![Box::default(); (max_relocated_vtable_id + 1) as usize];
+        let mut flat_itables: Vec<Box<[Box<[u32]>]>> =
+            vec![Box::default(); (max_relocated_vtable_id + 1) as usize];
+
         for class_entry in &all_classes {
-            vtable_lookup[class_entry.vtable_id as usize] = Some(class_entry.clone());
+            let class_idx = class_entry.vtable_id as usize;
+            vtable_lookup[class_idx] = Some(class_entry.clone());
+            flat_vtables[class_idx] = class_entry.vtable.clone().into_boxed_slice();
+            if !class_entry.itable.is_empty() {
+                let mut iface_rows = vec![Box::<[u32]>::default(); (max_iface_id + 1) as usize];
+                for (iface_id, method_slots) in &class_entry.itable {
+                    iface_rows[*iface_id as usize] = method_slots.clone().into_boxed_slice();
+                }
+                flat_itables[class_idx] = iface_rows.into_boxed_slice();
+            }
         }
+        let class_acyclic = compute_class_acyclicity(&vtable_lookup);
 
         let mut native_registry = NativeRegistry::with_builtins();
         for (native_name, native_callback) in &options.native_functions {
@@ -531,7 +590,7 @@ impl RuntimeContext {
             if native_fn.is_none() && !shared_libraries.is_empty() {
                 for loaded_library in &shared_libraries {
                     if let Some(c_func) = loaded_library.get_symbol(&func.symbol) {
-                        native_fn = Some(NativeCallback::C(c_func));
+                        native_fn = Some(NativeCallback::CAbi(c_func));
                         native_registry.register_c(&func.symbol, c_func);
                         break;
                     }
@@ -543,11 +602,20 @@ impl RuntimeContext {
                 .get(binary_id)
                 .is_some_and(|binary| binary.is_debug_profile);
             let has_debug_symbols = is_debug_profile && !func.source_map.is_empty();
+            let logical_inst_len = func.instructions.len();
+            let (trivial_leaf_kind, trivial_leaf_param, trivial_leaf_imm) =
+                classify_trivial_leaf(func, has_references, has_debug_symbols, native_fn.is_some());
 
             function_meta.push(FunctionRuntimeMeta {
                 binary_id,
-                func_id_offset,
                 native_fn,
+                func_id_offset,
+                static_base_offset: func.static_base_offset,
+                num_registers: func.num_registers,
+                logical_inst_len,
+                trivial_leaf_kind,
+                trivial_leaf_param,
+                trivial_leaf_imm,
                 has_references,
                 has_debug_symbols,
             });
@@ -572,6 +640,15 @@ impl RuntimeContext {
         // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, and static space
         crate::verifier::verify_program(&loaded_binaries, &all_functions, current_static_offset)?;
 
+        // Append a sentinel `OpCode::Return` to functions whose execution can reach `instructions.len()`
+        // so `run_fast_trap::<false, _>` never needs a per-instruction `pc >= inst_len` bounds check.
+        for func in &mut all_functions {
+            if needs_sentinel_return(func) {
+                func.instructions
+                    .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+            }
+        }
+
         Ok(Self {
             options,
             shared_libraries,
@@ -584,6 +661,9 @@ impl RuntimeContext {
             function_meta,
             all_classes,
             vtable_lookup,
+            flat_vtables,
+            flat_itables,
+            class_acyclic,
             total_static_space: current_static_offset,
             entry_point_function_id,
             init_function_ids,
@@ -596,6 +676,16 @@ impl RuntimeContext {
         self.vtable_lookup
             .get(vtable_id as usize)
             .and_then(Option::as_ref)
+    }
+
+    /// Returns `true` if instances of `vtable_id` cannot form ownership cycles on the reference graph.
+    #[inline(always)]
+    #[must_use]
+    pub fn is_class_acyclic(&self, vtable_id: u32) -> bool {
+        self.class_acyclic
+            .get(vtable_id as usize)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Resolves a function's global ID for entry point invocation using exact, package-qualified,
@@ -982,4 +1072,181 @@ fn verify_and_resolve_runtime_dependencies(
     }
 
     Ok(())
+}
+
+/// Computes static acyclicity per `vtable_id`.
+///
+/// A class is guaranteed acyclic if it has no strong reference fields or every strong reference
+/// field strictly targets `String` (tag `13`) or statically acyclic concrete classes without
+/// untyped/unknown edges.
+fn compute_class_acyclicity(vtable_lookup: &[Option<CompiledClass>]) -> Vec<bool> {
+    let class_count = vtable_lookup.len();
+    let mut subtypes: Vec<Vec<usize>> = vec![Vec::new(); class_count];
+    for (class_idx, class_opt) in vtable_lookup.iter().enumerate() {
+        if let Some(class_entry) = class_opt
+            && let Some(base_id) = class_entry.base_vtable_id
+            && (base_id as usize) < class_count
+        {
+            subtypes[base_id as usize].push(class_idx);
+        }
+    }
+
+    let mut edges: Vec<Option<Vec<usize>>> = vec![None; class_count];
+    for (class_idx, class_opt) in vtable_lookup.iter().enumerate() {
+        let Some(class_entry) = class_opt else {
+            continue;
+        };
+        if class_entry.reference_field_offsets.is_empty() {
+            edges[class_idx] = Some(Vec::new());
+            continue;
+        }
+        let mut targets: Vec<usize> = Vec::new();
+        let mut all_known = true;
+        for &offset in &class_entry.reference_field_offsets {
+            match class_entry.get_field_type(offset) {
+                Some(13) => {}
+                Some(tag_val) if (tag_val & 0x80) != 0 => {
+                    let target_vid = (tag_val & 0x7F) as usize;
+                    if target_vid < class_count && vtable_lookup[target_vid].is_some() {
+                        let mut queue = vec![target_vid];
+                        while let Some(subclass_id) = queue.pop() {
+                            if !targets.contains(&subclass_id) {
+                                targets.push(subclass_id);
+                                queue.extend_from_slice(&subtypes[subclass_id]);
+                            }
+                        }
+                    } else {
+                        all_known = false;
+                        break;
+                    }
+                }
+                _ => {
+                    all_known = false;
+                    break;
+                }
+            }
+        }
+        if all_known {
+            edges[class_idx] = Some(targets);
+        }
+    }
+
+    fn check_acyclic(
+        node_idx: usize,
+        edges: &[Option<Vec<usize>>],
+        memo: &mut [Option<bool>],
+        visiting: &mut [bool],
+    ) -> bool {
+        if let Some(cached) = memo[node_idx] {
+            return cached;
+        }
+        if visiting[node_idx] {
+            return false;
+        }
+        let Some(ref target_list) = edges[node_idx] else {
+            memo[node_idx] = Some(false);
+            return false;
+        };
+        visiting[node_idx] = true;
+        let mut is_clean = true;
+        for &next_idx in target_list {
+            if !check_acyclic(next_idx, edges, memo, visiting) {
+                is_clean = false;
+                break;
+            }
+        }
+        visiting[node_idx] = false;
+        memo[node_idx] = Some(is_clean);
+        is_clean
+    }
+
+    let mut memo: Vec<Option<bool>> = vec![None; class_count];
+    let mut visiting = vec![false; class_count];
+    let mut acyclic = vec![false; class_count];
+    for class_idx in 0..class_count {
+        if vtable_lookup[class_idx].is_some() {
+            acyclic[class_idx] = check_acyclic(class_idx, &edges, &mut memo, &mut visiting);
+        }
+    }
+    acyclic
+}
+
+/// Classifies 1- and 2-instruction pure leaf functions eligible for inline frame-free evaluation.
+fn classify_trivial_leaf(
+    func: &CompiledFunction,
+    has_references: bool,
+    has_debug_symbols: bool,
+    is_native: bool,
+) -> (u8, u8, i16) {
+    if is_native || has_references || has_debug_symbols || !func.exception_handlers.is_empty() {
+        return (0, 0, 0);
+    }
+    if func.instructions.len() == 1 {
+        let ret = func.instructions[0];
+        if ret.raw_opcode() == OpCode::ReturnValue as u8 {
+            let param = ret.dst();
+            if param < func.param_count && param <= u8::MAX as u16 {
+                return (1, param as u8, 0);
+            }
+        }
+    } else if func.instructions.len() == 2 {
+        let alu = func.instructions[0];
+        let ret = func.instructions[1];
+        if ret.raw_opcode() == OpCode::ReturnValue as u8 && alu.dst() == ret.dst() {
+            let param = alu.src1();
+            if param < func.param_count && param <= u8::MAX as u16 {
+                let kind = match alu.raw_opcode() {
+                    raw if raw == OpCode::AddI32Imm as u8 => 2,
+                    raw if raw == OpCode::SubI32Imm as u8 => 3,
+                    raw if raw == OpCode::MulI32Imm as u8 => 4,
+                    _ => 0,
+                };
+                if kind != 0 {
+                    return (kind, param as u8, alu.src2() as i16);
+                }
+            }
+        }
+    }
+    (0, 0, 0)
+}
+
+/// Returns `true` if `func` can fall through past `func.instructions.len()` or jump to `len`.
+fn needs_sentinel_return(func: &CompiledFunction) -> bool {
+    let inst_count = func.instructions.len();
+    let Some(&last_inst) = func.instructions.last() else {
+        return true;
+    };
+    let last_raw = last_inst.raw_opcode();
+    let terminated_at_end = last_raw == OpCode::Return as u8
+        || last_raw == OpCode::ReturnValue as u8
+        || last_raw == OpCode::Exit as u8
+        || last_raw == OpCode::Throw as u8
+        || last_raw == OpCode::Jump as u8
+        || last_raw == OpCode::Switch as u8;
+    if !terminated_at_end {
+        return true;
+    }
+
+    for (pc_idx, &inst) in func.instructions.iter().enumerate() {
+        let raw = inst.raw_opcode();
+        let target_opt = if raw == OpCode::Jump as u8
+            || raw == OpCode::JumpIfTrue as u8
+            || raw == OpCode::JumpIfFalse as u8
+            || raw == OpCode::Switch as u8
+        {
+            Some((pc_idx as i32) + inst.jump_offset())
+        } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+            || raw == OpCode::ForLoopI32 as u8
+            || raw == OpCode::JumpIfI32Imm as u8
+            || raw == OpCode::GetArrayJumpIfFalse as u8
+        {
+            Some((pc_idx as i32) + (inst.src2() as i16 as i32))
+        } else {
+            None
+        };
+        if target_opt == Some(inst_count as i32) {
+            return true;
+        }
+    }
+    false
 }

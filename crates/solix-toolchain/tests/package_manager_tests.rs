@@ -403,8 +403,14 @@ public class Physics {
         store_string,
     ])
     .expect("uninstall colon release cli");
-    assert_eq!(run(uninstall_colon_release).expect("uninstall colon release"), 0);
-    assert!(!release_folder.exists(), "Release folder must be deleted via colon syntax");
+    assert_eq!(
+        run(uninstall_colon_release).expect("uninstall colon release"),
+        0
+    );
+    assert!(
+        !release_folder.exists(),
+        "Release folder must be deleted via colon syntax"
+    );
 }
 
 #[test]

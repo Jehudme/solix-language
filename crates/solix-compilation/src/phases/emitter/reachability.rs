@@ -219,7 +219,7 @@ pub fn apply_reachability_and_static_linking(
         // Scan instructions of reachable function
         for instruction in &current_function.instructions {
             let raw_op = instruction.raw_opcode();
-            if raw_op == OpCode::CallDirect as u8 {
+            if raw_op == OpCode::CallDirect as u8 || raw_op == OpCode::TailCallDirect as u8 {
                 let target_id = instruction.call_target() as usize;
                 if let Some(target_func) = program.functions.get(target_id)
                     && reachable_symbols.insert(target_func.symbol.clone())
@@ -367,14 +367,17 @@ pub fn apply_reachability_and_static_linking(
             }
         }
 
-        // Remap CallDirect instructions to new function indices
+        // Remap CallDirect/TailCallDirect instructions to new function indices
         for function in &mut pruned_functions {
             for instruction in &mut function.instructions {
-                if instruction.raw_opcode() == OpCode::CallDirect as u8 {
+                let raw_op = instruction.raw_opcode();
+                if (raw_op == OpCode::CallDirect as u8 || raw_op == OpCode::TailCallDirect as u8)
+                    && let Ok(call_op) = instruction.opcode(0)
+                {
                     let old_id = instruction.call_target() as usize;
                     if let Some(&new_id) = old_to_new_index.get(&old_id) {
                         *instruction = Instruction::format_call(
-                            OpCode::CallDirect,
+                            call_op,
                             instruction.call_dst(),
                             new_id as u16,
                             instruction.arg_base(),

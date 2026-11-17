@@ -232,14 +232,9 @@ public class NetworkClient {
     );
 
     // 4. Info lookup by profile-only colon syntax ("network:release")
-    let info_by_colon_profile = Cli::try_parse_from([
-        "solix",
-        "info",
-        "network:release",
-        "--pkg-dir",
-        store_str,
-    ])
-    .expect("info by colon profile");
+    let info_by_colon_profile =
+        Cli::try_parse_from(["solix", "info", "network:release", "--pkg-dir", store_str])
+            .expect("info by colon profile");
     assert_eq!(
         run(info_by_colon_profile).expect("info by colon profile must succeed"),
         0

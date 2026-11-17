@@ -191,10 +191,10 @@ fn test_non_inlining_nine_statement_function() {
         .find(|func| func.symbol.contains("main"))
         .expect("main function must exist");
 
-    let contains_direct_call = main_function
-        .instructions
-        .iter()
-        .any(|instruction| instruction.raw_opcode() == OpCode::CallDirect as u8);
+    let contains_direct_call = main_function.instructions.iter().any(|instruction| {
+        let raw = instruction.raw_opcode();
+        raw == OpCode::CallDirect as u8 || raw == OpCode::TailCallDirect as u8
+    });
     assert!(
         contains_direct_call,
         "9-statement function 'accumulate_nine' should NOT be inlined when threshold is 8"
@@ -398,13 +398,13 @@ fn test_threshold_zero_disables_automatic_inlining() {
         .find(|func| func.symbol.contains("main"))
         .expect("main function must exist");
 
-    let contains_direct_call = main_function
-        .instructions
-        .iter()
-        .any(|instruction| instruction.raw_opcode() == OpCode::CallDirect as u8);
+    let contains_direct_call = main_function.instructions.iter().any(|instruction| {
+        let raw = instruction.raw_opcode();
+        raw == OpCode::CallDirect as u8 || raw == OpCode::TailCallDirect as u8
+    });
     assert!(
         contains_direct_call,
-        "With threshold 0, simple_inc should NOT be inlined and must preserve CallDirect"
+        "With threshold 0, simple_inc should NOT be inlined and must preserve a direct call"
     );
 
     let execution_value = run_program(&context);

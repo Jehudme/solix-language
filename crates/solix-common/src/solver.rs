@@ -214,7 +214,11 @@ impl DependencyRequirement {
                 )
             } else if trimmed_hash == "debug" || trimmed_hash == "release" || trimmed_hash == "test"
             {
-                (version_part.trim(), Some(trimmed_hash.to_string()), String::new())
+                (
+                    version_part.trim(),
+                    Some(trimmed_hash.to_string()),
+                    String::new(),
+                )
             } else {
                 (version_part.trim(), None, trimmed_hash.to_string())
             }
@@ -224,7 +228,10 @@ impl DependencyRequirement {
 
         let (version_clean, colon_version_profile) =
             if let Some((clean_ver, profile_after_colon)) = version_str.split_once(':') {
-                (clean_ver.trim(), Some(profile_after_colon.trim().to_string()))
+                (
+                    clean_ver.trim(),
+                    Some(profile_after_colon.trim().to_string()),
+                )
             } else {
                 (version_str, None)
             };
@@ -412,7 +419,13 @@ impl ModuleSolver for InMemoryModuleSolver {
         }
 
         compatible_entries.sort_by_key(|entry| entry.version);
-        let winning_entry = compatible_entries.last().expect("non-empty collection");
+        let Some(winning_entry) = compatible_entries.last() else {
+            return Err(SolverError::NoCompatibleVersion {
+                name: package_name.to_string(),
+                required: min_version,
+                available: Vec::new(),
+            });
+        };
         Ok((*winning_entry).clone())
     }
 
@@ -432,7 +445,11 @@ impl ModuleSolver for InMemoryModuleSolver {
 
         let mut sorted_entries = package_entries.clone();
         sorted_entries.sort_by_key(|entry| entry.version);
-        let winning_entry = sorted_entries.last().expect("non-empty collection");
+        let winning_entry = sorted_entries
+            .last()
+            .ok_or_else(|| SolverError::PackageNotFound {
+                name: package_name.to_string(),
+            })?;
         Ok(winning_entry.clone())
     }
 
@@ -747,17 +764,57 @@ impl ClientModuleSolver {
                 self.package_cache
                     .get_cached_binary(package_name, version, &slxarc_candidate)
             {
-                let mut solved_package = SolvedPackage::new(package_name, version, cached_program);
-
-                let native_lib_dir = extraction_target.join("lib");
-                if native_lib_dir.exists() && native_lib_dir.is_dir() {
-                    if let Ok(entries) = std::fs::read_dir(&native_lib_dir) {
+                let mut discovered_libs = Vec::new();
+                let candidate_dirs = [&extraction_target, &extraction_target.join("lib")];
+                for candidate_dir in candidate_dirs {
+                    if candidate_dir.exists()
+                        && candidate_dir.is_dir()
+                        && let Ok(entries) = std::fs::read_dir(candidate_dir)
+                    {
                         for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.is_file() {
-                                solved_package = solved_package.with_native_library(path);
+                            let entry_path = entry.path();
+                            if entry_path.is_file()
+                                && entry_path
+                                    .extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .is_some_and(|ext_str| {
+                                        ext_str.eq_ignore_ascii_case("so")
+                                            || ext_str.eq_ignore_ascii_case("dll")
+                                            || ext_str.eq_ignore_ascii_case("dylib")
+                                    })
+                            {
+                                discovered_libs.push(entry_path);
                             }
                         }
+                    }
+                }
+
+                let expected_checksums_satisfied = cached_program
+                    .native_library_checksums
+                    .iter()
+                    .all(|(key, expected_hash)| {
+                        discovered_libs.iter().any(|lib_path| {
+                            let file_name = lib_path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("");
+                            (key.ends_with(file_name) || lib_path.to_string_lossy().ends_with(key))
+                                && crate::hash::sha256_file(lib_path)
+                                    .is_ok_and(|actual_hash| &actual_hash == expected_hash)
+                        })
+                    });
+
+                let cache_valid = if cached_program.native_library_checksums.is_empty() {
+                    !discovered_libs.is_empty()
+                } else {
+                    expected_checksums_satisfied
+                };
+
+                if cache_valid {
+                    let mut solved_package =
+                        SolvedPackage::new(package_name, version, cached_program);
+                    for lib_path in discovered_libs {
+                        solved_package = solved_package.with_native_library(lib_path);
                     }
                     return Ok(solved_package);
                 }
@@ -878,9 +935,11 @@ impl ModuleSolver for ClientModuleSolver {
         }
 
         compatible_versions.sort_by_key(|(version, _)| *version);
-        let (winning_version, winning_dir) = compatible_versions
-            .last()
-            .expect("compatible versions non-empty");
+        let Some((winning_version, winning_dir)) = compatible_versions.last() else {
+            return Err(SolverError::PackageNotFound {
+                name: package_name.to_string(),
+            });
+        };
 
         self.load_package_from_dir(base_name, *winning_version, winning_dir)
     }
@@ -899,9 +958,11 @@ impl ModuleSolver for ClientModuleSolver {
         let mut discovered_versions = self.scan_installed_versions(base_name, req_profile)?;
         discovered_versions.sort_by_key(|(version, _)| *version);
 
-        let (winning_version, winning_dir) = discovered_versions
-            .last()
-            .expect("discovered versions non-empty");
+        let Some((winning_version, winning_dir)) = discovered_versions.last() else {
+            return Err(SolverError::PackageNotFound {
+                name: package_name.to_string(),
+            });
+        };
 
         self.load_package_from_dir(base_name, *winning_version, winning_dir)
     }

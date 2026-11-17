@@ -135,7 +135,8 @@ fn compute_semantic_tokens(
                             Type::Class { symbol_name, .. } => {
                                 let simple_class_name =
                                     symbol_name.split("::").last().unwrap_or(symbol_name);
-                                if symbol.name == *simple_class_name || symbol.name == *symbol_name {
+                                if symbol.name == *simple_class_name || symbol.name == *symbol_name
+                                {
                                     Some(2) // class
                                 } else if symbol.parent_symbol.is_some() {
                                     Some(8) // property/field
@@ -157,7 +158,8 @@ fn compute_semantic_tokens(
                             Type::Interface { symbol_name, .. } => {
                                 let simple_iface_name =
                                     symbol_name.split("::").last().unwrap_or(symbol_name);
-                                if symbol.name == *simple_iface_name || symbol.name == *symbol_name {
+                                if symbol.name == *simple_iface_name || symbol.name == *symbol_name
+                                {
                                     Some(3) // interface
                                 } else if symbol.parent_symbol.is_some() {
                                     Some(8) // property/field
@@ -284,10 +286,10 @@ fn compute_semantic_tokens(
     }
 
     // Sort tokens strictly: line first, then start_char
-    raw_tokens.sort_by(|a, b| {
-        a.line
-            .cmp(&b.line)
-            .then_with(|| a.start_char.cmp(&b.start_char))
+    raw_tokens.sort_by(|left, right| {
+        left.line
+            .cmp(&right.line)
+            .then_with(|| left.start_char.cmp(&right.start_char))
     });
 
     // Delta-encode with non-overlapping sanitization

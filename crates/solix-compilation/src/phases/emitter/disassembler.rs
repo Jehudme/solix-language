@@ -22,12 +22,14 @@ pub fn disassemble_instruction(
 
     match opcode {
         OpCode::CallDirect
+        | OpCode::TailCallDirect
         | OpCode::CallVirtual
         | OpCode::CallInterface
         | OpCode::CallSymbol
         | OpCode::CallCallable
         | OpCode::CallExtern
-        | OpCode::CallNativeDirect => {
+        | OpCode::CallNativeDirect
+        | OpCode::PackClosure => {
             let dst = instruction.call_dst();
             let target = instruction.call_target();
             let base = instruction.arg_base();
@@ -43,6 +45,20 @@ pub fn disassemble_instruction(
                     "{pc:04}  {:<16} r{}, target:{target}, args:r{base}..r{}",
                     opcode.mnemonic(),
                     dst,
+                    base + count as u16 - 1
+                )
+            }
+        }
+
+        OpCode::UnpackCaptures => {
+            let base = instruction.arg_base();
+            let count = instruction.arg_count();
+            if count == 0 {
+                format!("{pc:04}  {:<16} args:[]", opcode.mnemonic())
+            } else {
+                format!(
+                    "{pc:04}  {:<16} args:r{base}..r{}",
+                    opcode.mnemonic(),
                     base + count as u16 - 1
                 )
             }
@@ -72,7 +88,9 @@ pub fn disassemble_instruction(
         | OpCode::JumpIfGtI32
         | OpCode::JumpIfGteI32
         | OpCode::JumpIfEqI32
-        | OpCode::JumpIfNeqI32 => {
+        | OpCode::JumpIfNeqI32
+        | OpCode::ForLoopI32
+        | OpCode::GetArrayJumpIfFalse => {
             let offset = instruction.src2() as i16 as i32;
             let target_pc = pc as i32 + offset;
             format!(
@@ -83,7 +101,29 @@ pub fn disassemble_instruction(
             )
         }
 
-        OpCode::AddI32Imm | OpCode::SubI32Imm => {
+        OpCode::JumpIfI32Imm => {
+            let imm = instruction.src1() as i16;
+            let offset = instruction.src2() as i16 as i32;
+            let target_pc = pc as i32 + offset;
+            format!(
+                "{pc:04}  {:<16} r{}, {imm:+}, @{target_pc:04} ({offset:+})",
+                opcode.mnemonic(),
+                instruction.dst()
+            )
+        }
+
+        OpCode::AddBandI32 | OpCode::MulAddF64 => {
+            format!(
+                "{pc:04}  {:<16} r{}, r{}, r{}, r{}",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.flags(),
+                instruction.src1(),
+                instruction.src2()
+            )
+        }
+
+        OpCode::AddI32Imm | OpCode::SubI32Imm | OpCode::MulI32Imm | OpCode::ModI32Imm => {
             let imm = instruction.src2() as i16;
             format!(
                 "{pc:04}  {:<16} r{}, r{}, {imm:+}",
@@ -93,12 +133,12 @@ pub fn disassemble_instruction(
             )
         }
 
-        OpCode::LoadConst => {
+        OpCode::LoadConst | OpCode::LoadI64 | OpCode::LoadF64 => {
             let dst = instruction.dst();
             let const_idx = instruction.imm32() as usize;
             let repr = match pool.get(const_idx) {
-                Some(ConstantPoolValue::String(s)) => format!("\"{s}\""),
-                Some(ConstantPoolValue::Int64(i)) => format!("{i} (i64)"),
+                Some(ConstantPoolValue::String(text)) => format!("\"{text}\""),
+                Some(ConstantPoolValue::Int64(int_val)) => format!("{int_val} (i64)"),
                 Some(ConstantPoolValue::Float64(bits)) => {
                     format!("{} (f64)", f64::from_bits(*bits))
                 }
@@ -107,6 +147,36 @@ pub fn disassemble_instruction(
             format!(
                 "{pc:04}  {:<16} r{dst}, $c{const_idx}               ; {repr}",
                 opcode.mnemonic()
+            )
+        }
+
+        OpCode::AllocObject => {
+            format!(
+                "{pc:04}  {:<16} r{}, vtable:{}, size:{}B",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.src1(),
+                instruction.src2()
+            )
+        }
+
+        OpCode::GetField | OpCode::SetField => {
+            format!(
+                "{pc:04}  {:<16} r{}, r{}, offset:{}",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.src1(),
+                instruction.src2()
+            )
+        }
+
+        OpCode::AllocArray => {
+            format!(
+                "{pc:04}  {:<16} r{}, len:r{}, elem_size:{}B",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.src1(),
+                instruction.src2()
             )
         }
 
@@ -197,7 +267,7 @@ pub fn disassemble_function(func: &CompiledFunction, pool: &ConstantPool) -> Str
         for handler in &func.exception_handlers {
             let catch_type = handler.catch_type_symbol.as_deref().unwrap_or("<any>");
             let finally_str = match handler.finally_pc {
-                Some(f) => format!(", finally: @{f:04}"),
+                Some(finally_target) => format!(", finally: @{finally_target:04}"),
                 None => String::new(),
             };
             let _ = writeln!(
@@ -256,14 +326,14 @@ pub fn disassemble_program(program: &BinaryProgram) -> String {
         let _ = writeln!(output, ".constant_pool:");
         for (idx, val) in program.constant_pool.values.iter().enumerate() {
             match val {
-                ConstantPoolValue::Int64(i) => {
-                    let _ = writeln!(output, "  $c{idx:02}: i64 = {i}");
+                ConstantPoolValue::Int64(int_val) => {
+                    let _ = writeln!(output, "  $c{idx:02}: i64 = {int_val}");
                 }
                 ConstantPoolValue::Float64(bits) => {
                     let _ = writeln!(output, "  $c{idx:02}: f64 = {}", f64::from_bits(*bits));
                 }
-                ConstantPoolValue::String(s) => {
-                    let _ = writeln!(output, "  $c{idx:02}: string = \"{s}\"");
+                ConstantPoolValue::String(text) => {
+                    let _ = writeln!(output, "  $c{idx:02}: string = \"{text}\"");
                 }
             }
         }

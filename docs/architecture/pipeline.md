@@ -59,20 +59,22 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 ### 2.4. Optimization Phase (`Optimizer`)
 - **Input**: Semantically validated AST.
 - **Source Module**: [`crates/solix-compilation/src/phases/optimizer/mod.rs`](../../crates/solix-compilation/src/phases/optimizer/mod.rs)
-- **Output**: Optimized AST and pruned call graphs.
+- **Output**: Optimized AST, pruned call graphs, escape-analyzed bytecode, and fused instruction streams.
 - **Responsibilities**:
-  - Performs AST-level small function inlining (`ast_inliner.rs`) for leaf methods below configurable node count thresholds.
-  - Eliminates dead code branches following unconditionally terminating statements (`return`, `throw`).
-  - Constant folds compile-time arithmetic expressions.
+  - **AST Inlining & Simplification**: Performs AST-level small function inlining (`ast_inliner.rs`), dead code elimination after unconditionally terminating statements (`return`, `throw`), and compile-time constant folding.
+  - **Escape Analysis, SRA Pruning & ARC Elision**: Classifies heap allocations (`escape_analysis.rs`), tracks `UnpackCaptures` windows, performs Scalar Replacement of Aggregates (SRA) for function-local and single-iteration loop-scoped allocations, prunes non-escaping scalars and fixed-point `always_immortal_regs` (`LoadNull`/`LoadConst`/0-capture `PackClosure`) plus un-owned borrowed aliases from `function.reference_registers` and `handler.try_ref_regs`, forwards pure getters, and elides redundant `IncRef`/`DecRef` pairs (`apply_arc_elision`, `elide_borrowed_local_arc_ops`).
+  - **Convergent Liveness Peephole, CSE, Specialization & Loop Rotation**: Runs fixed-point CFG-liveness-backed peephole passes (`bytecode_optimizer.rs`) performing extended-basic-block Local CSE (invalidated at sliding call windows), single-definition constant propagation into ALU/branch opcodes (`LoadI32` -> `JumpIfI32Imm`, `AddI32Imm`, `MulI32Imm`, `ModI32Imm`), branch-diamond 0-capture `PackClosure` specialization (`CallDirect`), small leaf function inlining, dead `PackClosure + DecRef` elimination, loop-invariant expression/constant hoisting, post-hoist peephole convergence, tail-call lowering (`TailCallDirect`), `FLAG_MOVE` store fusion (`SetField`/`SetArray`), `ForLoopI32` (including tight array-fill loop tagging), `AddBandI32`, `MulAddF64`, `GetArrayJumpIfFalse` superinstruction fusion, and bottom-tested loop rotation (`rotate_bottom_tested_loops`).
 
 ### 2.5. Bytecode Emission (`Emitter`)
 - **Input**: Bound and optimized AST.
 - **Source Module**: [`crates/solix-compilation/src/phases/emitter/emitter.rs`](../../crates/solix-compilation/src/phases/emitter/emitter.rs)
 - **Output**: `CompiledProgram` containing function bytecode streams, constant pool, and VTable definitions.
 - **Responsibilities**:
-  - Allocates virtual registers via graph coloring / linear scan allocator (`register_allocator.rs`).
+  - Allocates virtual registers via liveness-aware scratch reuse and register allocation (`register_allocator.rs`).
+  - Emits statement expressions and loop updates directly into target/discarded registers when values are unused (`control_flow.rs`), avoiding redundant trailing `Mov` instructions.
+  - Devirtualizes non-overridden concrete instance method calls directly to `OpCode::CallDirect` via class hierarchy analysis, while keeping `CallVirtual` for `virtual` and `override` dispatch.
   - Generates 64-bit fixed-width register instructions (`Format A`, `Format B`, `Format C`, `Format Call`).
-  - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges.
+  - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges and `try_ref_regs`.
   - Constructs constant tables for strings, 64-bit floats, and large integers.
 
 ### 2.6. Binary Packaging & Serialization

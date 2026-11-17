@@ -32,7 +32,7 @@ impl CompilationPipeline {
 
     /// Appends a new phase to the pipeline sequence.
     #[must_use]
-    pub fn add_phase<P: CompilationPhase + 'static>(mut self, phase: P) -> Self {
+    pub fn add_phase<PhaseType: CompilationPhase + 'static>(mut self, phase: PhaseType) -> Self {
         self.phases.push(Box::new(phase));
         self
     }

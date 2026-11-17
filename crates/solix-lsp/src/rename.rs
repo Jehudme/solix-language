@@ -59,13 +59,12 @@ pub fn rename_symbol(
 }
 
 fn is_valid_identifier(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
     let mut chars = name.chars();
-    let first = chars.next().unwrap();
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !first.is_alphabetic() && first != '_' {
         return false;
     }
-    chars.all(|c| c.is_alphanumeric() || c == '_')
+    chars.all(|ch| ch.is_alphanumeric() || ch == '_')
 }

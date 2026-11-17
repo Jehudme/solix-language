@@ -162,7 +162,10 @@ public enum Mode {
 
     assert!(index_file.exists(), "index.html must be generated");
     assert!(css_file.exists(), "style.css must be generated");
-    assert!(class_file.exists(), "math_Calculator.html must be generated");
+    assert!(
+        class_file.exists(),
+        "math_Calculator.html must be generated"
+    );
     assert!(enum_file.exists(), "math_Mode.html must be generated");
 
     let class_html = std::fs::read_to_string(&class_file).expect("read class html");

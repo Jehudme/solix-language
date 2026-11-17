@@ -81,16 +81,27 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let heap_size = parse_byte_size(&args.heap_size)?;
 
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
-    let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
+    let mut bundled_bootstrapped = false;
+    let mut ensure_bundled = || {
+        if !bundled_bootstrapped {
+            let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
+            bundled_bootstrapped = true;
+        }
+    };
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory.clone()));
 
-    let cycle_collector_enabled =
-        !matches!(args.cycle_collector.to_lowercase().as_str(), "off" | "false" | "0");
+    let cycle_collector_enabled = !matches!(
+        args.cycle_collector.to_lowercase().as_str(),
+        "off" | "false" | "0"
+    );
     if args.cycle_threshold == 0 {
         bail!(
             "[E0341] Invalid cycle collector configuration parameter: cycle threshold must be greater than zero."
         );
     }
+
+    let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
+    let is_text_metrics = args.metrics.as_deref() == Some("text");
 
     let mut runtime_options = RuntimeOptions::new()
         .with_heap_size(heap_size)
@@ -99,6 +110,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         .with_cycle_threshold(args.cycle_threshold)
         .with_args(args.args)
         .with_safe_mode(args.safe)
+        .with_metrics_tracking(is_json_metrics || is_text_metrics)
         .with_solver(solver.clone())
         .with_native_function("println", builtin_println)
         .with_native_function("print", builtin_print)
@@ -121,10 +133,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         runtime_options = runtime_options.with_entry_point(entry);
     }
 
-    let temp_cache_dir = tempfile::Builder::new()
-        .prefix("solix_run_")
-        .tempdir()
-        .with_context(|| "Failed to create temporary directory for run extraction")?;
+    let mut temp_cache_dir: Option<tempfile::TempDir> = None;
     let mut loaded_binary_programs = Vec::new();
 
     // Mount extra libraries passed via -l, --lib
@@ -141,13 +150,14 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         } else if extension.eq_ignore_ascii_case("slxarc")
             || extension.eq_ignore_ascii_case("slxpac")
         {
-            let loaded_archive = SlxarcArchive::extract_and_load(lib_path, temp_cache_dir.path())
+            let cache_root = ensure_temp_cache_dir(&mut temp_cache_dir)?;
+            let loaded_archive = SlxarcArchive::extract_and_load(lib_path, cache_root)
                 .with_context(|| {
-                format!(
-                    "Failed to extract dependency archive '{}'",
-                    lib_path.display()
-                )
-            })?;
+                    format!(
+                        "Failed to extract dependency archive '{}'",
+                        lib_path.display()
+                    )
+                })?;
             for native_lib in loaded_archive.native_libraries {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
@@ -184,6 +194,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 }));
 
         if looks_like_package_spec {
+            ensure_bundled();
             let (package_name, spec_profile, spec_version) = parse_package_spec(&spec_string);
             let effective_profile = spec_profile
                 .as_deref()
@@ -234,7 +245,10 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     .packages
                     .iter()
                     .map(|record| {
-                        format!("{}:{}@{}", record.name, record.build_profile, record.version)
+                        format!(
+                            "{}:{}@{}",
+                            record.name, record.build_profile, record.version
+                        )
                     })
                     .collect();
                 bail!(
@@ -263,18 +277,17 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         } else if extension.eq_ignore_ascii_case("slxarc")
             || extension.eq_ignore_ascii_case("slxpac")
         {
+            let cache_root = ensure_temp_cache_dir(&mut temp_cache_dir)?;
             let is_slxpac = extension.eq_ignore_ascii_case("slxpac");
             let kind_string = if is_slxpac { "slxpac" } else { "slxarc" };
             runtime_options = runtime_options.with_container_kind(kind_string);
-            let loaded_archive =
-                SlxarcArchive::extract_and_load(target_path, temp_cache_dir.path()).with_context(
-                    || {
-                        format!(
-                            "Failed to extract archive container '{}'",
-                            target_path.display()
-                        )
-                    },
-                )?;
+            let loaded_archive = SlxarcArchive::extract_and_load(target_path, cache_root)
+                .with_context(|| {
+                    format!(
+                        "Failed to extract archive container '{}'",
+                        target_path.display()
+                    )
+                })?;
             let archive_manifest = loaded_archive.manifest.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
                     "Invalid archive container '{}': missing mandatory 'manifest.toml'",
@@ -282,7 +295,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 )
             })?;
             runtime_options = runtime_options
-                .with_container_resource_root(temp_cache_dir.path().join("resources"))
+                .with_container_resource_root(cache_root.join("resources"))
                 .with_container_resources(
                     loaded_archive.resource_files.len() as u32,
                     loaded_archive.resource_total_bytes,
@@ -348,15 +361,36 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             .with_inline_threshold(args.inline_threshold)
             .with_solver(solver.clone());
 
-        let parent_manifest = source_paths
-            .first()
-            .and_then(|source_path| crate::commands::compile::find_parent_manifest(source_path))
-            .and_then(|manifest_path| {
-                solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
-            });
+        let mut read_sources = Vec::with_capacity(source_paths.len());
+        let mut needs_packages_or_manifest =
+            !args.libs.is_empty() || !loaded_binary_programs.is_empty();
+        for source_path in &source_paths {
+            let source_code = fs::read_to_string(source_path).with_context(|| {
+                format!("Failed to read source file '{}'", source_path.display())
+            })?;
+            if source_code.contains("import") || source_code.contains("extern") {
+                needs_packages_or_manifest = true;
+            }
+            read_sources.push((source_path, source_code));
+        }
+
+        let parent_manifest = if needs_packages_or_manifest || args.profile.is_some() {
+            source_paths
+                .first()
+                .and_then(|source_path| crate::commands::compile::find_parent_manifest(source_path))
+                .and_then(|manifest_path| {
+                    solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
+                })
+        } else {
+            None
+        };
 
         if let Some(ref manifest) = parent_manifest {
-            for resolved_dependency in manifest.resolved_dependencies() {
+            let deps = manifest.resolved_dependencies();
+            if !deps.is_empty() {
+                ensure_bundled();
+            }
+            for resolved_dependency in deps {
                 let spec_string = if resolved_dependency.build_profile.is_empty() {
                     format!(
                         "{}@{}",
@@ -389,16 +423,15 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     runtime_options = runtime_options.with_entry_point(target_symbol);
                 }
             }
+        } else if needs_packages_or_manifest {
+            ensure_bundled();
         }
 
         if let Some(entry) = &args.entry {
             compilation_options = compilation_options.with_entry_point(Some(entry.clone()));
         }
 
-        for source_path in &source_paths {
-            let source_code = fs::read_to_string(source_path).with_context(|| {
-                format!("Failed to read source file '{}'", source_path.display())
-            })?;
+        for (source_path, source_code) in read_sources {
             compilation_options =
                 compilation_options.with_source(source_path.display().to_string(), source_code);
         }
@@ -462,119 +495,116 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     // Run virtual machine
     let run_result = vm.run();
     let total_process_wall_time_us = total_start.elapsed().as_micros() as u64;
-
     let exit_code = vm.exit_code.unwrap_or(0);
-    let vm_telemetry = vm.telemetry();
-    let heap_telemetry = vm.heap.telemetry();
-    let process_telemetry = capture_process_telemetry();
 
-    let heap_amplification_ratio = if heap_telemetry.peak_allocated_bytes > 0 {
-        let raw_ratio = (process_telemetry.peak_rss_kb as f64 * 1024.0)
-            / (heap_telemetry.peak_allocated_bytes as f64);
-        (raw_ratio * 100.0).round() / 100.0
-    } else {
-        1.0
-    };
+    if is_json_metrics || is_text_metrics {
+        let vm_telemetry = vm.telemetry();
+        let heap_telemetry = vm.heap.telemetry();
+        let active_guest_leaks = vm.active_guest_objects();
+        let process_telemetry = capture_process_telemetry();
 
-    let workload_name = target_binaries
-        .first()
-        .and_then(|path| path.file_stem())
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("app")
-        .to_string();
-
-    let status_str = if run_result.is_ok() {
-        "success"
-    } else {
-        "error"
-    };
-
-    let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
-    let is_text_metrics = args.metrics.as_deref() == Some("text");
-
-    if is_json_metrics {
-        let report = RunMetricsReport {
-            workload: workload_name,
-            status: status_str.to_string(),
-            exit_code,
-            timings: TimingsTelemetry {
-                total_process_wall_time_us,
-                pure_vm_execution_time_us: vm_telemetry.pure_execution_time_ns / 1_000,
-                binary_load_time_us,
-                static_init_time_us: 0,
-            },
-            memory: MemoryTelemetry {
-                peak_virtual_heap_bytes: heap_telemetry.peak_allocated_bytes,
-                peak_os_rss_kb: process_telemetry.peak_rss_kb,
-                heap_amplification_ratio,
-                total_allocations: heap_telemetry.total_allocations_count,
-                total_deallocations: heap_telemetry.total_deallocations_count,
-                active_leaks: heap_telemetry.active_live_objects,
-            },
-            execution: ExecutionTelemetry {
-                instructions_dispatched: vm_telemetry.instructions_dispatched,
-                peak_stack_depth: vm_telemetry.peak_call_stack_depth,
-                quickened_calls: vm_telemetry.quickened_instructions_count,
-            },
+        let heap_amplification_ratio = if heap_telemetry.peak_allocated_bytes > 0 {
+            let raw_ratio = (process_telemetry.peak_rss_kb as f64 * 1024.0)
+                / (heap_telemetry.peak_allocated_bytes as f64);
+            (raw_ratio * 100.0).round() / 100.0
+        } else {
+            1.0
         };
-        let json_output = serde_json::to_string_pretty(&report)
-            .context("Failed to serialize run metrics to JSON")?;
-        println!("{json_output}");
-    } else if is_text_metrics {
-        println!("=== Solix VM Telemetry ===");
-        println!("Workload:       {workload_name}");
-        println!("Status:         {status_str} (exit code: {exit_code})");
-        println!("Timings:");
-        println!(
-            "  Total Process Wall Time : {:.2} ms",
-            total_process_wall_time_us as f64 / 1000.0
-        );
-        println!(
-            "  Pure VM Execution Time  : {:.2} ms",
-            vm_telemetry.pure_execution_time_ns as f64 / 1_000_000.0
-        );
-        println!(
-            "  Binary Load Time        : {:.2} ms",
-            binary_load_time_us as f64 / 1000.0
-        );
-        println!("Memory:");
-        println!(
-            "  Peak VirtualHeap Bytes  : {} B",
-            heap_telemetry.peak_allocated_bytes
-        );
-        println!(
-            "  Peak Host OS RSS        : {} KB",
-            process_telemetry.peak_rss_kb
-        );
-        println!(
-            "  Heap Amplification Ratio: {:.2}x",
-            heap_amplification_ratio
-        );
-        println!(
-            "  Total Allocations       : {}",
-            heap_telemetry.total_allocations_count
-        );
-        println!(
-            "  Total Deallocations     : {}",
-            heap_telemetry.total_deallocations_count
-        );
-        println!(
-            "  Active Leaks            : {}",
-            heap_telemetry.active_live_objects
-        );
-        println!("Execution:");
-        println!(
-            "  Instructions Dispatched : {}",
-            vm_telemetry.instructions_dispatched
-        );
-        println!(
-            "  Peak Call Stack Depth   : {}",
-            vm_telemetry.peak_call_stack_depth
-        );
-        println!(
-            "  Quickened Instructions  : {}",
-            vm_telemetry.quickened_instructions_count
-        );
+
+        let workload_name = target_binaries
+            .first()
+            .and_then(|path| path.file_stem())
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("app")
+            .to_string();
+
+        let status_str = if run_result.is_ok() {
+            "success"
+        } else {
+            "error"
+        };
+
+        if is_json_metrics {
+            let report = RunMetricsReport {
+                workload: workload_name,
+                status: status_str.to_string(),
+                exit_code,
+                timings: TimingsTelemetry {
+                    total_process_wall_time_us,
+                    pure_vm_execution_time_us: vm_telemetry.pure_execution_time_ns / 1_000,
+                    binary_load_time_us,
+                    static_init_time_us: 0,
+                },
+                memory: MemoryTelemetry {
+                    peak_virtual_heap_bytes: heap_telemetry.peak_allocated_bytes,
+                    peak_os_rss_kb: process_telemetry.peak_rss_kb,
+                    heap_amplification_ratio,
+                    total_allocations: heap_telemetry.total_allocations_count,
+                    total_deallocations: heap_telemetry.total_deallocations_count,
+                    active_leaks: active_guest_leaks,
+                },
+                execution: ExecutionTelemetry {
+                    instructions_dispatched: vm_telemetry.instructions_dispatched,
+                    peak_stack_depth: vm_telemetry.peak_call_stack_depth,
+                    quickened_calls: vm_telemetry.quickened_instructions_count,
+                },
+            };
+            let json_output = serde_json::to_string_pretty(&report)
+                .context("Failed to serialize run metrics to JSON")?;
+            println!("{json_output}");
+        } else {
+            println!("=== Solix VM Telemetry ===");
+            println!("Workload:       {workload_name}");
+            println!("Status:         {status_str} (exit code: {exit_code})");
+            println!("Timings:");
+            println!(
+                "  Total Process Wall Time : {:.2} ms",
+                total_process_wall_time_us as f64 / 1000.0
+            );
+            println!(
+                "  Pure VM Execution Time  : {:.2} ms",
+                vm_telemetry.pure_execution_time_ns as f64 / 1_000_000.0
+            );
+            println!(
+                "  Binary Load Time        : {:.2} ms",
+                binary_load_time_us as f64 / 1000.0
+            );
+            println!("Memory:");
+            println!(
+                "  Peak VirtualHeap Bytes  : {} B",
+                heap_telemetry.peak_allocated_bytes
+            );
+            println!(
+                "  Peak Host OS RSS        : {} KB",
+                process_telemetry.peak_rss_kb
+            );
+            println!(
+                "  Heap Amplification Ratio: {:.2}x",
+                heap_amplification_ratio
+            );
+            println!(
+                "  Total Allocations       : {}",
+                heap_telemetry.total_allocations_count
+            );
+            println!(
+                "  Total Deallocations     : {}",
+                heap_telemetry.total_deallocations_count
+            );
+            println!("  Active Leaks            : {}", active_guest_leaks);
+            println!("Execution:");
+            println!(
+                "  Instructions Dispatched : {}",
+                vm_telemetry.instructions_dispatched
+            );
+            println!(
+                "  Peak Call Stack Depth   : {}",
+                vm_telemetry.peak_call_stack_depth
+            );
+            println!(
+                "  Quickened Instructions  : {}",
+                vm_telemetry.quickened_instructions_count
+            );
+        }
     }
 
     if let Err(runtime_error) = run_result {
@@ -600,4 +630,21 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     }
 
     Ok(exit_code)
+}
+
+/// Lazily initializes the temporary archive extraction directory on first archive use.
+fn ensure_temp_cache_dir(
+    cache_dir_slot: &mut Option<tempfile::TempDir>,
+) -> Result<&std::path::Path> {
+    if cache_dir_slot.is_none() {
+        let created = tempfile::Builder::new()
+            .prefix("solix_run_")
+            .tempdir()
+            .with_context(|| "Failed to create temporary directory for run extraction")?;
+        *cache_dir_slot = Some(created);
+    }
+    cache_dir_slot
+        .as_ref()
+        .map(tempfile::TempDir::path)
+        .ok_or_else(|| anyhow::anyhow!("Temporary cache directory unavailable"))
 }
