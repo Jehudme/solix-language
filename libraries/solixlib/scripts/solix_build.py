@@ -29,6 +29,17 @@ SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
 ]
 
 
+def normalize_host_path(path: Path) -> Path:
+    """Strips Windows verbatim path prefixes (`\\\\?\\`) so external tools like CMake work cleanly."""
+    if os.name == "nt":
+        raw_path = str(path)
+        if raw_path.startswith("\\\\?\\UNC\\"):
+            return Path("\\\\" + raw_path[8:])
+        if raw_path.startswith("\\\\?\\"):
+            return Path(raw_path[4:])
+    return path
+
+
 # ============================================================================
 # Structured Build Error & Diagnostic UI
 # ============================================================================
@@ -266,6 +277,8 @@ def compile_rust_project(
     profile: str,
 ) -> list[Path]:
     """Compiles a Rust cdylib project with strict CARGO_TARGET_DIR isolation."""
+    project_directory = normalize_host_path(project_directory)
+    cache_directory = normalize_host_path(cache_directory)
     cargo_target_directory = cache_directory / "cargo"
     host_target_triple = get_host_target_triple()
 
@@ -341,6 +354,7 @@ def compile_rust_project(
     # Release mode: Build forced target (when SOLIX_TARGET_TRIPLE is set) or multi-platform targets
     has_cargo_zigbuild = bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
     successful_targets = 0
+    last_target_error_output: str | None = None
     candidate_targets = (
         [
             (
@@ -431,9 +445,11 @@ def compile_rust_project(
             if "can't find crate for `std`" in error_output or "can't find crate for std" in error_output:
                 print(f"  [warning] Cross-compilation skipped for '{target_triple}': rust standard library not installed")
             else:
-                lines = error_output.strip().splitlines()
-                last_line = lines[-1] if lines else "build failed"
-                print(f"  [warning] Target '{target_triple}' compilation failed: {last_line}")
+                trimmed_output = error_output.strip()
+                last_target_error_output = trimmed_output or None
+                print(f"  [warning] Target '{target_triple}' compilation failed:")
+                if trimmed_output:
+                    print(trimmed_output)
             continue
 
         used_explicit_target_dir = use_zigbuild or bool(forced_target_triple) or (
@@ -462,6 +478,7 @@ def compile_rust_project(
             phase="Native Rust Build",
             message=f"All target builds failed for native project '{project_directory.name}'",
             cwd=project_directory,
+            stderr=last_target_error_output,
             hint="Ensure host build dependencies and headers are available.",
         )
 

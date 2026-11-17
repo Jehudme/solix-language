@@ -27,7 +27,7 @@ pub use hash::{Sha256Hasher, format_hex_digest, sha256_bytes, sha256_file, sha25
 pub use project::{
     DependencySpec, LoadedSlxarc, ProfileConfig, ProjectConfiguration, ProjectInfo,
     ProjectManifest, ResolvedDependency, ResolvedProfile, SlxarcArchive, SlxarcFileEntry,
-    SlxarcInspection,
+    SlxarcInspection, canonicalize_host_path, strip_windows_verbatim_prefix,
 };
 pub use solver::{
     ClientModuleSolver, DependencyRequirement, InMemoryModuleSolver, ModuleSolver, PackageVersion,

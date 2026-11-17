@@ -19,9 +19,12 @@ project_root = scripts_directory.parent
 sys.path.insert(0, str(scripts_directory))
 import solix_build
 
+project_root = solix_build.normalize_host_path(project_root)
+
 
 def step_1_extract_api(root_path: Path) -> Path:
     """Configures CMake in build/.cache/cmake/host, builds rlparser and extracts API JSON."""
+    root_path = solix_build.normalize_host_path(root_path)
     cache_directory = root_path / "build" / ".cache"
     cmake_host_directory = cache_directory / "cmake" / "host"
     api_schema_path = cache_directory / "api" / "raylib_api.json"
@@ -91,7 +94,7 @@ def step_2_codegen(root_path: Path, api_schema_path: Path) -> None:
 
 def run_pipeline(build_profile: str = "debug", root_path: Path | None = None) -> Path:
     """Executes the complete 3-step pipeline."""
-    target_root = root_path if root_path is not None else project_root
+    target_root = solix_build.normalize_host_path(root_path if root_path is not None else project_root)
 
     # Step 1: Host rlparser & API extraction
     api_schema = step_1_extract_api(target_root)

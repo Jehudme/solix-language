@@ -11,6 +11,37 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+fn strip_verbatim_prefix_text(path_text: &str) -> Option<PathBuf> {
+    if let Some(unc_tail) = path_text.strip_prefix(r"\\?\UNC\") {
+        return Some(PathBuf::from(format!(r"\\{unc_tail}")));
+    }
+    if let Some(drive_tail) = path_text.strip_prefix(r"\\?\") {
+        return Some(PathBuf::from(drive_tail));
+    }
+    None
+}
+
+/// Strips Windows verbatim path prefixes (`\\?\` and `\\?\UNC\`) so external tools
+/// such as CMake and MSBuild receive standard host paths instead of failing in `cmd.exe`.
+#[must_use]
+pub fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    if cfg!(windows)
+        && let Some(stripped) = path.to_str().and_then(strip_verbatim_prefix_text)
+    {
+        return stripped;
+    }
+    path
+}
+
+/// Canonicalizes `path` and normalizes any Windows verbatim (`\\?\`) prefix.
+///
+/// # Errors
+/// Propagates any I/O failure returned by [`Path::canonicalize`].
+pub fn canonicalize_host_path(path: &Path) -> std::io::Result<PathBuf> {
+    let canonical = path.canonicalize()?;
+    Ok(strip_windows_verbatim_prefix(canonical))
+}
+
 fn default_project_version() -> String {
     "0.1.0".to_string()
 }
@@ -1319,5 +1350,18 @@ version = "0.1.0"
             fs::read(&loaded.native_libraries[0]).unwrap(),
             b"host_triple_bytes"
         );
+    }
+
+    #[test]
+    fn test_strip_verbatim_prefix_text_normalizes_drive_and_unc_paths() {
+        assert_eq!(
+            strip_verbatim_prefix_text(r"\\?\D:\a\solix-language\libraries\raylib"),
+            Some(PathBuf::from(r"D:\a\solix-language\libraries\raylib"))
+        );
+        assert_eq!(
+            strip_verbatim_prefix_text(r"\\?\UNC\server\share\solix"),
+            Some(PathBuf::from(r"\\server\share\solix"))
+        );
+        assert_eq!(strip_verbatim_prefix_text("/home/jehud/solix"), None);
     }
 }

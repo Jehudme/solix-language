@@ -64,11 +64,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
 
-      - name: Install Zig compiler
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: "0.13.0"
-
       - name: Build host solix toolchain and native ARM64 libraries
         env:
           SOLIX_TARGET_TRIPLE: aarch64-unknown-linux-gnu
@@ -107,11 +102,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev lua5.4 luajit gcc
-
-      - name: Install Zig compiler
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: "0.13.0"
 
       - name: Build optimized Solix release binary and stage default libraries
         run: |
@@ -215,8 +205,8 @@ jobs:
         run: ${{ matrix.install_dist.run }}
 
       - name: Set up Zig compiler
-        if: runner.os == 'Linux'
-        uses: goto-bus-stop/setup-zig@v2
+        if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64-unknown-linux-gnu')
+        uses: mlugg/setup-zig@v2.2.1
         with:
           version: "0.13.0"
 

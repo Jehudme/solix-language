@@ -2,6 +2,20 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        if let Some(raw_text) = path.to_str() {
+            if let Some(unc_tail) = raw_text.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{unc_tail}"));
+            }
+            if let Some(drive_tail) = raw_text.strip_prefix(r"\\?\") {
+                return PathBuf::from(drive_tail);
+            }
+        }
+    }
+    path
+}
+
 fn find_libraylib(cache_directory: &Path, prefer_msvc: bool) -> Option<PathBuf> {
     let msvc_candidates = [
         cache_directory
@@ -53,8 +67,9 @@ fn find_libraylib(cache_directory: &Path, prefer_msvc: bool) -> Option<PathBuf> 
 }
 
 fn main() {
-    let manifest_directory =
-        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_directory = strip_windows_verbatim_prefix(PathBuf::from(
+        env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"),
+    ));
     let project_root = manifest_directory
         .parent()
         .expect("natives directory")
@@ -163,7 +178,11 @@ fn main() {
             println!("cargo:rustc-link-lib=framework=OpenGL");
             println!("cargo:rustc-link-lib=framework=Cocoa");
             println!("cargo:rustc-link-lib=framework=IOKit");
+            println!("cargo:rustc-link-lib=framework=CoreFoundation");
+            println!("cargo:rustc-link-lib=framework=QuartzCore");
+            println!("cargo:rustc-link-lib=framework=CoreAudio");
             println!("cargo:rustc-link-lib=framework=CoreVideo");
+            println!("cargo:rustc-link-lib=framework=AudioToolbox");
         }
         other_os => {
             println!("cargo:warning=Untested target OS for raylib: {}", other_os);

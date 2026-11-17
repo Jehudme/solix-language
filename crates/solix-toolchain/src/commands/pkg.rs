@@ -31,12 +31,13 @@ pub fn install_package_artifact(
     profile_override: Option<&str>,
     pkg_dir: Option<&Path>,
 ) -> Result<PackageRecord> {
-    let resolved_artifact = artifact_path.canonicalize().with_context(|| {
-        format!(
-            "Failed to resolve package artifact at '{}'",
-            artifact_path.display()
-        )
-    })?;
+    let resolved_artifact =
+        solix_common::canonicalize_host_path(artifact_path).with_context(|| {
+            format!(
+                "Failed to resolve package artifact at '{}'",
+                artifact_path.display()
+            )
+        })?;
 
     if !resolved_artifact.exists() {
         bail!(
@@ -292,7 +293,7 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
         )
     })?;
 
-    let resolved_path = input_path.canonicalize().with_context(|| {
+    let resolved_path = solix_common::canonicalize_host_path(input_path).with_context(|| {
         format!(
             "Failed to resolve package path at '{}'",
             input_path.display()
