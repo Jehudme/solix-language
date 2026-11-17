@@ -353,8 +353,14 @@ impl PackageCache for FilesystemPackageCache {
             cached_binary_sha256,
         };
 
+        static CACHE_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq_id = CACHE_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let target_binary = bin_dir.join(format!("{package_name}.slxb"));
-        let temp_binary = bin_dir.join(format!("{package_name}.slxb.tmp.{}", std::process::id()));
+        let temp_binary = bin_dir.join(format!(
+            "{package_name}.slxb.{}.{}.tmp",
+            std::process::id(),
+            seq_id
+        ));
 
         // Write binary via atomic rename
         {
@@ -368,13 +374,17 @@ impl PackageCache for FilesystemPackageCache {
             })?;
             file_handle
                 .write_all(raw_binary_bytes)
-                .map_err(|io_error| EmissionError::ContainerSerializationFailed {
-                    reason: format!(
-                        "Failed to write temp cache file '{}': {io_error}",
-                        temp_binary.display()
-                    ),
+                .map_err(|io_error| {
+                    let _ = fs::remove_file(&temp_binary);
+                    EmissionError::ContainerSerializationFailed {
+                        reason: format!(
+                            "Failed to write temp cache file '{}': {io_error}",
+                            temp_binary.display()
+                        ),
+                    }
                 })?;
             file_handle.flush().map_err(|io_error| {
+                let _ = fs::remove_file(&temp_binary);
                 EmissionError::ContainerSerializationFailed {
                     reason: format!(
                         "Failed to flush temp cache file '{}': {io_error}",
@@ -384,18 +394,21 @@ impl PackageCache for FilesystemPackageCache {
             })?;
         }
 
-        fs::rename(&temp_binary, &target_binary).map_err(|io_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!(
-                    "Failed to atomically rename cache file to '{}': {io_error}",
-                    target_binary.display()
-                ),
+        if let Err(io_error) = fs::rename(&temp_binary, &target_binary) {
+            let _ = fs::remove_file(&temp_binary);
+            if !target_binary.exists() {
+                return Err(EmissionError::ContainerSerializationFailed {
+                    reason: format!(
+                        "Failed to atomically rename cache file to '{}': {io_error}",
+                        target_binary.display()
+                    ),
+                });
             }
-        })?;
+        }
 
         // Write meta.json via atomic rename
         let meta_target = entry_dir.join("meta.json");
-        let meta_temp = entry_dir.join(format!("meta.json.tmp.{}", std::process::id()));
+        let meta_temp = entry_dir.join(format!("meta.json.{}.{}.tmp", std::process::id(), seq_id));
 
         let meta_json_string = serde_json::to_string_pretty(&meta).map_err(|json_error| {
             EmissionError::ContainerSerializationFailed {
@@ -404,6 +417,7 @@ impl PackageCache for FilesystemPackageCache {
         })?;
 
         fs::write(&meta_temp, meta_json_string).map_err(|io_error| {
+            let _ = fs::remove_file(&meta_temp);
             EmissionError::ContainerSerializationFailed {
                 reason: format!(
                     "Failed to write temp meta file '{}': {io_error}",
@@ -412,14 +426,17 @@ impl PackageCache for FilesystemPackageCache {
             }
         })?;
 
-        fs::rename(&meta_temp, &meta_target).map_err(|io_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!(
-                    "Failed to atomically rename meta file to '{}': {io_error}",
-                    meta_target.display()
-                ),
+        if let Err(io_error) = fs::rename(&meta_temp, &meta_target) {
+            let _ = fs::remove_file(&meta_temp);
+            if !meta_target.exists() {
+                return Err(EmissionError::ContainerSerializationFailed {
+                    reason: format!(
+                        "Failed to atomically rename meta file to '{}': {io_error}",
+                        meta_target.display()
+                    ),
+                });
             }
-        })?;
+        }
 
         Ok(())
     }

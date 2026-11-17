@@ -875,10 +875,10 @@ impl SlxarcArchive {
                         TEMP_EXTRACTION_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let file_name_lossy = file_name_os.to_string_lossy();
                     let temp_path = extract_cache_directory.join(format!(
-                        ".tmp.{}.{}.{}",
+                        ".{}.{}.{}.tmp",
+                        file_name_lossy,
                         std::process::id(),
-                        seq_id,
-                        file_name_lossy
+                        seq_id
                     ));
                     let mut out_file = File::create(&temp_path).map_err(|io_error| {
                         EmissionError::ContainerSerializationFailed {
@@ -907,12 +907,17 @@ impl SlxarcArchive {
 
                     if let Err(rename_error) = fs::rename(&temp_path, &target_path) {
                         let _ = fs::remove_file(&temp_path);
-                        return Err(EmissionError::ContainerSerializationFailed {
-                            reason: format!(
-                                "failed to finalize native library '{}': {rename_error}",
-                                target_path.display()
-                            ),
-                        });
+                        let raced_valid = target_path.exists()
+                            && crate::hash::sha256_file(&target_path)
+                                .is_ok_and(|existing_hash| existing_hash == expected_hash);
+                        if !raced_valid {
+                            return Err(EmissionError::ContainerSerializationFailed {
+                                reason: format!(
+                                    "failed to finalize native library '{}': {rename_error}",
+                                    target_path.display()
+                                ),
+                            });
+                        }
                     }
                 }
 

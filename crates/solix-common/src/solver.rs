@@ -553,10 +553,7 @@ impl ClientModuleSolver {
     #[must_use]
     pub fn with_store_dir(store_directory: PathBuf) -> Self {
         let native_cache_directory = resolve_native_cache_dir(&store_directory);
-        let cache_root = store_directory
-            .parent()
-            .map(|parent_path| parent_path.join("cache").join("packages"))
-            .unwrap_or_else(|| crate::cache::resolve_packages_cache_dir(None));
+        let cache_root = store_directory.join(".cache").join("packages");
         Self {
             store_directory,
             native_cache_directory,
@@ -773,6 +770,11 @@ impl ClientModuleSolver {
                     {
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
+                            let entry_name = entry.file_name();
+                            let entry_name_str = entry_name.to_string_lossy();
+                            if entry_name_str.starts_with('.') || entry_name_str.ends_with(".tmp") {
+                                continue;
+                            }
                             if entry_path.is_file()
                                 && entry_path
                                     .extension()

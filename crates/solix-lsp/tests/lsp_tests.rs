@@ -1122,7 +1122,8 @@ fn test_breakout_real_inlay_hints() {
         return;
     }
 
-    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let canonical_main =
+        solix_common::canonicalize_host_path(&breakout_main).unwrap_or(breakout_main);
     let Ok(uri) = Url::from_file_path(&canonical_main) else {
         return;
     };
@@ -1148,7 +1149,11 @@ fn test_breakout_real_inlay_hints() {
     );
     assert!(
         !hints.is_empty(),
-        "Inlay hints must not be empty! Got 0 hints."
+        "Inlay hints must not be empty! Got 0 hints. ast={}, semantic={}, diags={:?}, lines={}",
+        snapshot.ast.is_some(),
+        snapshot.last_good_semantic.is_some(),
+        snapshot.diagnostics,
+        snapshot.source_text.lines().count()
     );
     let has_real_param = hints.iter().any(|hint| match &hint.label {
         InlayHintLabel::String(label_text) => {
@@ -1189,7 +1194,8 @@ fn test_breakout_semantic_tokens_clear_background() {
         return;
     }
 
-    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let canonical_main =
+        solix_common::canonicalize_host_path(&breakout_main).unwrap_or(breakout_main);
     let Ok(uri) = Url::from_file_path(&canonical_main) else {
         return;
     };
@@ -1319,7 +1325,8 @@ fn test_breakout_unimported_solix_collections_list_produces_diagnostic() {
         return;
     }
 
-    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let canonical_main =
+        solix_common::canonicalize_host_path(&breakout_main).unwrap_or(breakout_main);
     let Ok(uri) = Url::from_file_path(&canonical_main) else {
         return;
     };
