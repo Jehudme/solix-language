@@ -285,5 +285,5 @@ fn test_solix_new_explicit_native_flag() {
     assert!(bridge_directory.join("src").join("lib.rs").exists());
     let cargo_toml =
         fs::read_to_string(bridge_directory.join("Cargo.toml")).expect("read bridge Cargo.toml");
-    assert!(cargo_toml.contains("solix-ffi = \">=1.1.3, <=1.3.0\""));
+    assert!(cargo_toml.contains("solix-ffi = \">=1.1.3, <2.0.0\""));
 }

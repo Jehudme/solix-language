@@ -142,13 +142,19 @@ class BenchmarkRunner:
                 return str(Path(candidate_binary).resolve())
         engines = self.config.get("engines", {})
         cmd = engines.get(engine_name, engine_name)
+        exe_suffix = ".exe" if OS_NAME == "Windows" else ""
         if cmd.startswith("./") or cmd.startswith("../"):
-            abs_cmd = (self.root_dir / cmd).resolve()
-            if abs_cmd.exists() and os.access(abs_cmd, os.X_OK):
+            abs_cmd = (self.root_dir / f"{cmd}{exe_suffix}").resolve()
+            if abs_cmd.exists() and (OS_NAME == "Windows" or os.access(abs_cmd, os.X_OK)):
                 return str(abs_cmd)
-            debug_fallback = self.root_dir / "target" / "debug" / "solix"
-            if debug_fallback.exists() and os.access(debug_fallback, os.X_OK):
+            debug_fallback = self.root_dir / "target" / "debug" / f"solix{exe_suffix}"
+            if debug_fallback.exists() and (OS_NAME == "Windows" or os.access(debug_fallback, os.X_OK)):
                 return str(debug_fallback)
+        if engine_name == "python3":
+            resolved_py = shutil.which(cmd)
+            if resolved_py and "WindowsApps" not in resolved_py:
+                return resolved_py
+            return sys.executable
         resolved = shutil.which(cmd)
         return resolved
 
