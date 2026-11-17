@@ -52,6 +52,14 @@ pub struct FunctionRuntimeMeta {
     pub static_base_offset: u32,
     /// Virtual register window size required by this function frame.
     pub num_registers: u16,
+    /// Logical instruction length before optional load-time sentinel `Return`.
+    pub logical_inst_len: usize,
+    /// Pre-classified trivial leaf kind (`0` = none, `1` = return param, `2` = add_imm, `3` = sub_imm, `4` = mul_imm).
+    pub trivial_leaf_kind: u8,
+    /// Parameter register index read by the trivial leaf fast-call evaluator.
+    pub trivial_leaf_param: u8,
+    /// Signed 16-bit immediate used by trivial 2-instruction arithmetic leaf fast-call evaluation.
+    pub trivial_leaf_imm: i16,
     /// Whether this function has any reference registers that require ARC tracking.
     pub has_references: bool,
     /// Whether this function has debug symbols (source map and/or local variables).
@@ -593,6 +601,9 @@ impl RuntimeContext {
                 .get(binary_id)
                 .is_some_and(|binary| binary.is_debug_profile);
             let has_debug_symbols = is_debug_profile && !func.source_map.is_empty();
+            let logical_inst_len = func.instructions.len();
+            let (trivial_leaf_kind, trivial_leaf_param, trivial_leaf_imm) =
+                classify_trivial_leaf(func, has_references, has_debug_symbols, native_fn.is_some());
 
             function_meta.push(FunctionRuntimeMeta {
                 binary_id,
@@ -600,6 +611,10 @@ impl RuntimeContext {
                 func_id_offset,
                 static_base_offset: func.static_base_offset,
                 num_registers: func.num_registers,
+                logical_inst_len,
+                trivial_leaf_kind,
+                trivial_leaf_param,
+                trivial_leaf_imm,
                 has_references,
                 has_debug_symbols,
             });
@@ -623,6 +638,15 @@ impl RuntimeContext {
 
         // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, and static space
         crate::verifier::verify_program(&loaded_binaries, &all_functions, current_static_offset)?;
+
+        // Append a sentinel `OpCode::Return` to functions whose execution can reach `instructions.len()`
+        // so `run_fast_trap::<false, _>` never needs a per-instruction `pc >= inst_len` bounds check.
+        for func in &mut all_functions {
+            if needs_sentinel_return(func) {
+                func.instructions
+                    .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+            }
+        }
 
         Ok(Self {
             options,
@@ -1144,4 +1168,83 @@ fn compute_class_acyclicity(vtable_lookup: &[Option<CompiledClass>]) -> Vec<bool
         }
     }
     acyclic
+}
+
+/// Classifies 1- and 2-instruction pure leaf functions eligible for inline frame-free evaluation.
+fn classify_trivial_leaf(
+    func: &CompiledFunction,
+    has_references: bool,
+    has_debug_symbols: bool,
+    is_native: bool,
+) -> (u8, u8, i16) {
+    if is_native || has_references || has_debug_symbols || !func.exception_handlers.is_empty() {
+        return (0, 0, 0);
+    }
+    if func.instructions.len() == 1 {
+        let ret = func.instructions[0];
+        if ret.raw_opcode() == OpCode::ReturnValue as u8 {
+            let param = ret.dst();
+            if param < func.param_count && param <= u8::MAX as u16 {
+                return (1, param as u8, 0);
+            }
+        }
+    } else if func.instructions.len() == 2 {
+        let alu = func.instructions[0];
+        let ret = func.instructions[1];
+        if ret.raw_opcode() == OpCode::ReturnValue as u8 && alu.dst() == ret.dst() {
+            let param = alu.src1();
+            if param < func.param_count && param <= u8::MAX as u16 {
+                let kind = match alu.raw_opcode() {
+                    raw if raw == OpCode::AddI32Imm as u8 => 2,
+                    raw if raw == OpCode::SubI32Imm as u8 => 3,
+                    raw if raw == OpCode::MulI32Imm as u8 => 4,
+                    _ => 0,
+                };
+                if kind != 0 {
+                    return (kind, param as u8, alu.src2() as i16);
+                }
+            }
+        }
+    }
+    (0, 0, 0)
+}
+
+/// Returns `true` if `func` can fall through past `func.instructions.len()` or jump to `len`.
+fn needs_sentinel_return(func: &CompiledFunction) -> bool {
+    let inst_count = func.instructions.len();
+    let Some(&last_inst) = func.instructions.last() else {
+        return true;
+    };
+    let last_raw = last_inst.raw_opcode();
+    let terminated_at_end = last_raw == OpCode::Return as u8
+        || last_raw == OpCode::ReturnValue as u8
+        || last_raw == OpCode::Exit as u8
+        || last_raw == OpCode::Throw as u8
+        || last_raw == OpCode::Jump as u8
+        || last_raw == OpCode::Switch as u8;
+    if !terminated_at_end {
+        return true;
+    }
+
+    for (pc_idx, &inst) in func.instructions.iter().enumerate() {
+        let raw = inst.raw_opcode();
+        let target_opt = if raw == OpCode::Jump as u8
+            || raw == OpCode::JumpIfTrue as u8
+            || raw == OpCode::JumpIfFalse as u8
+            || raw == OpCode::Switch as u8
+        {
+            Some((pc_idx as i32) + inst.jump_offset())
+        } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+            || raw == OpCode::ForLoopI32 as u8
+            || raw == OpCode::JumpIfI32Imm as u8
+        {
+            Some((pc_idx as i32) + (inst.src2() as i16 as i32))
+        } else {
+            None
+        };
+        if target_opt == Some(inst_count as i32) {
+            return true;
+        }
+    }
+    false
 }

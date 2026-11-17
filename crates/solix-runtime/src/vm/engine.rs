@@ -34,13 +34,16 @@ pub(crate) struct FunctionCodeSpan {
     pub inst_ptr: *const Instruction,
     pub inst_len: usize,
     pub static_base_offset: u32,
-    pub func_id_offset: u32,
+    pub trivial_leaf_imm: i16,
+    pub trivial_leaf_kind: u8,
+    pub trivial_leaf_param: u8,
     pub binary_id: u16,
     pub num_registers: u16,
     pub has_references: bool,
     pub is_native: bool,
 }
 
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<FunctionCodeSpan>() == 32);
 
 // SAFETY: `FunctionCodeSpan` points solely into `VirtualMachine.context.all_functions` instruction
@@ -177,9 +180,11 @@ impl VirtualMachine {
             .zip(context.function_meta.iter())
             .map(|(compiled_fn, meta)| FunctionCodeSpan {
                 inst_ptr: compiled_fn.instructions.as_ptr(),
-                inst_len: compiled_fn.instructions.len(),
+                inst_len: meta.logical_inst_len,
                 static_base_offset: meta.static_base_offset,
-                func_id_offset: meta.func_id_offset,
+                trivial_leaf_imm: meta.trivial_leaf_imm,
+                trivial_leaf_kind: meta.trivial_leaf_kind,
+                trivial_leaf_param: meta.trivial_leaf_param,
                 binary_id: meta.binary_id as u16,
                 num_registers: meta.num_registers,
                 has_references: meta.has_references,
@@ -857,7 +862,7 @@ impl VirtualMachine {
 
         let meta = &self.context.function_meta[function_id as usize];
         let binary_id = meta.binary_id;
-        let func_id_offset = meta.func_id_offset;
+        let inst_ptr = func.instructions.as_ptr();
 
         let reg_base = self.call_frames.last().map_or(0, |last_frame| {
             last_frame.register_base as usize + last_frame.register_count as usize
@@ -884,8 +889,7 @@ impl VirtualMachine {
             binary_id,
             reg_base,
             num_regs,
-            func.static_base_offset,
-            func_id_offset,
+            inst_ptr,
             caller_dst,
         );
 
@@ -1318,7 +1322,6 @@ impl VirtualMachine {
             && let Some(compiled_fn) = self.context.all_functions.get(function_id as usize)
         {
             code_span.inst_ptr = compiled_fn.instructions.as_ptr();
-            code_span.inst_len = compiled_fn.instructions.len();
         }
         self.quickened_instructions_count += 1;
     }

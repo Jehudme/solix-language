@@ -1876,9 +1876,7 @@ impl VirtualMachine {
             .copied()
             .ok_or_else(|| function_not_found_error(function_id))?;
         let binary_id = code_span.binary_id as usize;
-        let func_id_offset = code_span.func_id_offset;
         let has_references = code_span.has_references;
-        let static_base = code_span.static_base_offset;
         let inst_ptr = code_span.inst_ptr;
         let inst_len = code_span.inst_len;
         let num_regs = (code_span.num_registers as usize).max(arg_count);
@@ -1937,8 +1935,7 @@ impl VirtualMachine {
             binary_id,
             reg_base,
             num_regs,
-            static_base,
-            func_id_offset,
+            inst_ptr,
             caller_dst,
         );
 
@@ -2022,7 +2019,7 @@ impl VirtualMachine {
         }
 
         let mut inst_ptr: *const Instruction;
-        let mut inst_len: usize;
+        let mut inst_len: usize = 0;
         let mut pc: usize;
         let mut reg_base: *mut Value;
         let mut local_inst_count: u64 = 0;
@@ -2030,9 +2027,10 @@ impl VirtualMachine {
         macro_rules! reload_frame {
             () => {
                 let curr = self.current_frame_fast()?;
-                let code_span = self.func_code[curr.function_id as usize];
-                inst_ptr = code_span.inst_ptr;
-                inst_len = code_span.inst_len;
+                inst_ptr = curr.inst_ptr;
+                if SINGLE_STEP {
+                    inst_len = self.func_code[curr.function_id as usize].inst_len;
+                }
                 pc = curr.pc as usize;
                 let curr_reg_base = curr.register_base as usize;
                 // SAFETY: curr.register_base is guaranteed within register_stack bounds
@@ -2075,9 +2073,10 @@ impl VirtualMachine {
                     break $loop_lbl;
                 }
                 let caller_frame = self.current_frame_fast()?;
-                let code_span = self.func_code[caller_frame.function_id as usize];
-                inst_ptr = code_span.inst_ptr;
-                inst_len = code_span.inst_len;
+                inst_ptr = caller_frame.inst_ptr;
+                if SINGLE_STEP {
+                    inst_len = self.func_code[caller_frame.function_id as usize].inst_len;
+                }
                 pc = caller_frame.pc as usize;
                 let caller_reg_offset = caller_frame.register_base as usize;
                 // SAFETY: prev_reg_base + src_idx and caller_reg_base + caller_dst are within register_stack.
@@ -2098,11 +2097,11 @@ impl VirtualMachine {
         reload_frame!();
 
         'dispatch_loop: loop {
-            if pc >= inst_len {
+            if SINGLE_STEP && pc >= inst_len {
                 pop_and_return_value!(None::<usize>, 'dispatch_loop);
             }
 
-            // SAFETY: pc < inst_len, so inst_ptr.add(pc) is in-bounds
+            // SAFETY: pc < verified length + sentinel Return, so inst_ptr.add(pc) is in-bounds
             let inst = unsafe { *inst_ptr.add(pc) };
             pc += 1;
             if TRACK_METRICS {
@@ -3187,7 +3186,9 @@ impl VirtualMachine {
                     }
 
                     OpCode::GetStatic => {
-                        let static_base = self.current_frame_fast()?.static_base_offset;
+                        let static_base = self.func_code
+                            [self.current_frame_fast()?.function_id as usize]
+                            .static_base_offset;
                         let slot = (static_base + inst.imm32()) as usize;
                         if slot >= self.static_slots.len() {
                             return Err(VmTrap::invalid_static_offset(
@@ -3204,7 +3205,9 @@ impl VirtualMachine {
                     }
 
                     OpCode::SetStatic => {
-                        let static_base = self.current_frame_fast()?.static_base_offset;
+                        let static_base = self.func_code
+                            [self.current_frame_fast()?.function_id as usize]
+                            .static_base_offset;
                         let slot_idx = static_base + inst.imm32();
                         let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
                         self.set_static_trap(slot_idx, val_to_set)?;
@@ -3905,16 +3908,87 @@ impl VirtualMachine {
             let call_arg_base = inst.arg_base() as usize;
             let call_arg_count = inst.arg_count() as usize;
 
+            let span = *self
+                .func_code
+                .get(call_func_id as usize)
+                .ok_or_else(|| function_not_found_error(call_func_id))?;
+
+            if !SINGLE_STEP
+                && span.trivial_leaf_kind != 0
+                && (span.trivial_leaf_param as usize) < call_arg_count
+                && self.call_frames.len() < self.context.options.max_call_stack_depth
+            {
+                let arg_val =
+                    unsafe { *reg_base.add(call_arg_base + span.trivial_leaf_param as usize) };
+                let leaf_done = match span.trivial_leaf_kind {
+                    1 => {
+                        unsafe {
+                            *reg_base.add(call_dst as usize) = arg_val;
+                        }
+                        if TRACK_METRICS {
+                            local_inst_count += 1;
+                        }
+                        true
+                    }
+                    2 => {
+                        if let Value::I32(num_val) = arg_val {
+                            unsafe {
+                                *reg_base.add(call_dst as usize) =
+                                    Value::I32(num_val.wrapping_add(span.trivial_leaf_imm as i32));
+                            }
+                            if TRACK_METRICS {
+                                local_inst_count += 2;
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    3 => {
+                        if let Value::I32(num_val) = arg_val {
+                            unsafe {
+                                *reg_base.add(call_dst as usize) =
+                                    Value::I32(num_val.wrapping_sub(span.trivial_leaf_imm as i32));
+                            }
+                            if TRACK_METRICS {
+                                local_inst_count += 2;
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    4 => {
+                        if let Value::I32(num_val) = arg_val {
+                            unsafe {
+                                *reg_base.add(call_dst as usize) =
+                                    Value::I32(num_val.wrapping_mul(span.trivial_leaf_imm as i32));
+                            }
+                            if TRACK_METRICS {
+                                local_inst_count += 2;
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+                if leaf_done {
+                    if TRACK_METRICS {
+                        self.peak_call_stack_depth =
+                            self.peak_call_stack_depth.max(self.call_frames.len() + 1);
+                    }
+                    continue 'dispatch_loop;
+                }
+            }
+
             let caller_frame = self.current_frame_mut_fast()?;
             caller_frame.pc = pc as u32;
             let caller_reg_base = caller_frame.register_base as usize;
             let caller_frame_end = caller_reg_base + caller_frame.register_count as usize;
             let caller_arg_start = caller_reg_base + call_arg_base;
 
-            let span = *self
-                .func_code
-                .get(call_func_id as usize)
-                .ok_or_else(|| function_not_found_error(call_func_id))?;
             let num_regs = (span.num_registers as usize).max(call_arg_count);
             let (new_reg_base, needs_arg_copy) =
                 if call_arg_count > 0 && caller_arg_start + call_arg_count >= caller_frame_end {
@@ -3950,8 +4024,7 @@ impl VirtualMachine {
                     span.binary_id as usize,
                     new_reg_base,
                     num_regs,
-                    span.static_base_offset,
-                    span.func_id_offset,
+                    span.inst_ptr,
                     call_dst,
                 );
                 new_frame.active_closure = std::num::NonZeroU32::new(call_closure_addr);
