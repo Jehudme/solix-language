@@ -2,6 +2,14 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [1.4.0] - 2026-11-17
+
+### Bug Fixes
+
+- *(compilation,runtime,toolchain)* Fix static linking relocation, native bundling, and test profile entrypoints
+
+
+
 ## [1.3.1] - 2026-11-17
 
 ### Bug Fixes
