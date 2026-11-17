@@ -29,6 +29,17 @@ SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
 ]
 
 
+def normalize_host_path(path: Path) -> Path:
+    """Strips Windows verbatim path prefixes (`\\\\?\\`) so external tools like CMake work cleanly."""
+    if os.name == "nt":
+        raw_path = str(path)
+        if raw_path.startswith("\\\\?\\UNC\\"):
+            return Path("\\\\" + raw_path[8:])
+        if raw_path.startswith("\\\\?\\"):
+            return Path(raw_path[4:])
+    return path
+
+
 # ============================================================================
 # Structured Build Error & Diagnostic UI
 # ============================================================================
@@ -266,6 +277,8 @@ def compile_rust_project(
     profile: str,
 ) -> list[Path]:
     """Compiles a Rust cdylib project with strict CARGO_TARGET_DIR isolation."""
+    project_directory = normalize_host_path(project_directory)
+    cache_directory = normalize_host_path(cache_directory)
     cargo_target_directory = cache_directory / "cargo"
     host_target_triple = get_host_target_triple()
 
@@ -276,35 +289,51 @@ def compile_rust_project(
     if home_cargo_bin not in current_system_path:
         cargo_environment["PATH"] = f"{home_cargo_bin}{os.pathsep}{current_system_path}"
 
-    if sys.platform.startswith("linux"):
-        cargo_environment["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + cargo_environment.get("RUSTFLAGS", "")
-
     emitted_libraries: list[Path] = []
+    forced_target_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
 
     if profile != "release":
-        # Debug/Test: Compile only for the host machine
+        # Debug/Test: Compile only for the active host (or explicitly requested cross target)
+        active_target_triple = forced_target_triple or host_target_triple
+        is_cross_target = active_target_triple != host_target_triple
+        target_cargo_env = cargo_environment.copy()
+        if sys.platform.startswith("linux") and not is_cross_target:
+            target_cargo_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + target_cargo_env.get("RUSTFLAGS", "")
+
+        use_zigbuild_for_debug = (
+            is_cross_target
+            and sys.platform.startswith("linux")
+            and bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
+        )
         cargo_command = [
             "cargo",
-            "build",
+            "zigbuild" if use_zigbuild_for_debug else "build",
             "--manifest-path",
             str(project_directory / "Cargo.toml"),
             "--target-dir",
             str(cargo_target_directory),
         ]
-        print(f"  [cargo] Building native Rust project '{project_directory.name}' ({profile})...")
+        if is_cross_target:
+            cargo_command.extend(["--target", active_target_triple])
+
+        print(f"  [cargo] Building native Rust project '{project_directory.name}' ({profile}, {active_target_triple})...")
         run_command(
             cargo_command,
             cwd=project_directory,
-            env=cargo_environment,
+            env=target_cargo_env,
             phase="Native Rust Host Build",
             hint="Check that Rust toolchain is installed and Cargo.toml has no errors.",
             capture_output=False,
         )
 
-        artifact_directory = cargo_target_directory / "debug"
-        if sys.platform == "win32":
+        artifact_directory = (
+            cargo_target_directory / active_target_triple / "debug"
+            if is_cross_target
+            else cargo_target_directory / "debug"
+        )
+        if active_target_triple.endswith("-windows-msvc") or active_target_triple.endswith("-windows-gnu") or (not is_cross_target and sys.platform == "win32"):
             allowed_extensions = [".dll"]
-        elif sys.platform == "darwin":
+        elif active_target_triple.endswith("-apple-darwin") or (not is_cross_target and sys.platform == "darwin"):
             allowed_extensions = [".dylib"]
         else:
             allowed_extensions = [".so"]
@@ -312,32 +341,66 @@ def compile_rust_project(
         if artifact_directory.exists():
             for file_path in artifact_directory.iterdir():
                 if file_path.is_file() and any(file_path.name.endswith(extension) for extension in allowed_extensions):
-                    destination_path = stage_lib_directory / file_path.name
+                    if is_cross_target:
+                        target_stage_dir = stage_lib_directory / active_target_triple
+                        target_stage_dir.mkdir(parents=True, exist_ok=True)
+                        destination_path = target_stage_dir / file_path.name
+                    else:
+                        destination_path = stage_lib_directory / file_path.name
                     shutil.copy2(file_path, destination_path)
                     emitted_libraries.append(destination_path)
         return emitted_libraries
 
-    # Release mode: Multi-platform cross-compilation via cargo zigbuild
+    # Release mode: Build forced target (when SOLIX_TARGET_TRIPLE is set) or multi-platform targets
     has_cargo_zigbuild = bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
     successful_targets = 0
-
-    for target_triple, target_extension in SUPPORTED_RELEASE_TARGETS:
-        is_host_platform = (
-            target_triple == host_target_triple
-            or (
-                target_triple.startswith("x86_64-pc-windows")
-                and host_target_triple.startswith("x86_64-pc-windows")
+    last_target_error_output: str | None = None
+    candidate_targets = (
+        [
+            (
+                forced_target_triple,
+                ".dll"
+                if "windows" in forced_target_triple
+                else (".dylib" if "apple-darwin" in forced_target_triple else ".so"),
             )
-        )
+        ]
+        if forced_target_triple
+        else SUPPORTED_RELEASE_TARGETS
+    )
+
+    for target_triple, target_extension in candidate_targets:
+        is_exact_host = target_triple == host_target_triple
+        is_host_platform = is_exact_host
         target_stage_directory = stage_lib_directory / target_triple
         target_stage_directory.mkdir(parents=True, exist_ok=True)
 
-        if has_cargo_zigbuild:
-            if "msvc" in target_triple:
-                continue
+        target_cargo_env = cargo_environment.copy()
+        if sys.platform.startswith("linux") and is_exact_host:
+            target_cargo_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + target_cargo_env.get("RUSTFLAGS", "")
+
+        use_zigbuild = (
+            has_cargo_zigbuild
+            and sys.platform.startswith("linux")
+            and "msvc" not in target_triple
+            and "apple-darwin" not in target_triple
+        )
+
+        if use_zigbuild:
             cargo_command = [
                 "cargo",
                 "zigbuild",
+                "--manifest-path",
+                str(project_directory / "Cargo.toml"),
+                "--target-dir",
+                str(cargo_target_directory),
+                "--release",
+                "--target",
+                target_triple,
+            ]
+        elif forced_target_triple or (is_exact_host and not sys.platform.startswith("linux")):
+            cargo_command = [
+                "cargo",
+                "build",
                 "--manifest-path",
                 str(project_directory / "Cargo.toml"),
                 "--target-dir",
@@ -365,7 +428,7 @@ def compile_rust_project(
             run_command(
                 cargo_command,
                 cwd=project_directory,
-                env=cargo_environment,
+                env=target_cargo_env,
                 phase=f"Native Rust Target Build ({target_triple})",
                 hint="Install target standard library via: rustup target add " + target_triple,
             )
@@ -375,14 +438,19 @@ def compile_rust_project(
             if "can't find crate for `std`" in error_output or "can't find crate for std" in error_output:
                 print(f"  [warning] Cross-compilation skipped for '{target_triple}': rust standard library not installed")
             else:
-                lines = error_output.strip().splitlines()
-                last_line = lines[-1] if lines else "build failed"
-                print(f"  [warning] Target '{target_triple}' compilation failed: {last_line}")
+                trimmed_output = error_output.strip()
+                last_target_error_output = trimmed_output or None
+                print(f"  [warning] Target '{target_triple}' compilation failed:")
+                if trimmed_output:
+                    print(trimmed_output)
             continue
 
+        used_explicit_target_dir = use_zigbuild or bool(forced_target_triple) or (
+            is_exact_host and not sys.platform.startswith("linux")
+        )
         artifact_directory = (
             cargo_target_directory / target_triple / "release"
-            if has_cargo_zigbuild
+            if used_explicit_target_dir
             else cargo_target_directory / "release"
         )
 
@@ -403,6 +471,7 @@ def compile_rust_project(
             phase="Native Rust Build",
             message=f"All target builds failed for native project '{project_directory.name}'",
             cwd=project_directory,
+            stderr=last_target_error_output,
             hint="Ensure host build dependencies and headers are available.",
         )
 

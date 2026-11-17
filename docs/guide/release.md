@@ -70,8 +70,11 @@ Generated release packages distribute the following directory hierarchy:
 
 ## 4. Automated CI/CD Release Pipeline
 
-The release workflow triggers on semantic tag pushes (e.g. `v2.0.0`):
+The two-workflow CI/CD pipeline separates continuous verification from binary distribution:
 
-1. **Build Matrix**: Concurrently compiles release binaries across `ubuntu-latest`, `macos-latest`, and `windows-latest` using `cross` / `cargo`.
-2. **Packaging**: Generates native `.deb`, `.rpm`, `.tar.gz`, and `.zip` archives.
-3. **Asset Publishing**: Publishes all artifacts, checksums (SHA-256), and the VS Code `.vsix` extension to GitHub Releases automatically.
+1. **Continuous Verification & `release-plz` ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))**:
+   - Enforces formatting, strict production Clippy lints, documentation synchronization (`doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py`), hermetic workspace tests, `--verify` correctness checks, and `examples/breakout` debug/release compilation across `ubuntu-latest`, `macos-latest`, and `windows-latest`.
+   - On green `master` pushes, runs `release-plz` (`release` + `release-pr`) via `RELEASE_TOKEN` to publish crates in topological order, tag releases, and open/update changelog PRs.
+2. **Multi-Platform Distribution ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))**:
+   - Triggered on `v*.*.*` tag pushes and manual `workflow_dispatch`.
+   - Builds target-native bundled `.slxarc` libraries (`solix` and `raylib`, `release` + `debug` profiles) for each of the 6 `cargo-dist` targets (`x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`), packages `solix-language.vsix`, generates release-to-release benchmark comparisons, and finalizes the GitHub Release.

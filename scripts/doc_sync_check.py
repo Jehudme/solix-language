@@ -27,7 +27,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Lexer & Tokens",
-        "pattern": r"^crates/solix-compilation/src/(lexer|tokens)/",
+        "pattern": r"^crates/solix-compilation/src/phases/lexing/",
         "required_docs": [
             "docs/spec/lexical.md",
             "docs/wiki/keywords/",
@@ -37,7 +37,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Parser & AST",
-        "pattern": r"^crates/solix-compilation/src/(parser|ast)/",
+        "pattern": r"^crates/solix-compilation/src/phases/parser/",
         "required_docs": [
             "docs/spec/statements/",
             "docs/spec/expressions/",
@@ -47,7 +47,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Type Binder",
-        "pattern": r"^crates/solix-compilation/src/binder/",
+        "pattern": r"^crates/solix-compilation/src/phases/binder/",
         "required_docs": [
             "docs/spec/types.md",
             "docs/spec/declarations/",
@@ -56,8 +56,17 @@ TRIGGER_MATRIX = [
         ],
     },
     {
+        "name": "Bytecode Optimizer & Escape Analysis",
+        "pattern": r"^crates/solix-compilation/src/phases/optimizer/",
+        "required_docs": [
+            "docs/architecture/pipeline.md",
+            "docs/spec/vm_isa.md",
+            "docs/architecture/arc_internals.md",
+        ],
+    },
+    {
         "name": "Bytecode Emitter",
-        "pattern": r"^crates/solix-compilation/src/phases/emitter\.rs",
+        "pattern": r"^crates/solix-compilation/src/phases/emitter/",
         "required_docs": [
             "docs/spec/vm_isa.md",
             "docs/architecture/pipeline.md",
@@ -65,7 +74,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Register VM & Bytecode Opcodes",
-        "pattern": r"^(crates/solix-runtime/src/vm/|crates/solix-common/src/bytecode\.rs)",
+        "pattern": r"^(crates/solix-runtime/src/vm/|crates/solix-common/src/bytecode/)",
         "required_docs": [
             "docs/spec/vm_isa.md",
             "docs/architecture/memory_model.md",
@@ -116,6 +125,8 @@ SINGLE_LETTER_VAR_REGEX = re.compile(
 
 def get_git_diff_files(base_ref: str | None) -> list[str]:
     """Retrieves the list of modified files relative to the base ref or working tree."""
+    if base_ref and set(base_ref) == {"0"}:
+        base_ref = "HEAD~1"
     cmd = ["git", "diff", "--name-only"]
     if base_ref:
         cmd.append(f"{base_ref}...HEAD" if "..." not in base_ref else base_ref)

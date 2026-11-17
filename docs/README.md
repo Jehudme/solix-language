@@ -91,5 +91,5 @@ Solix v2.0 represents a modern, ground-up rewrite in safe Rust under `#![forbid(
 * [Rust Military Safety Standards (`GL-0011`)](internals/guidelines/language-conventions.md)
 * [Tripartite Documentation Guidelines (`GL-0012`)](internals/guidelines/authoring-features-and-wiki.md)
 * [Documentation Update Protocol (`GL-0013`)](internals/guidelines/documentation-update-protocol.md)
-* [Engineering Milestones Index (`MS-001` to `MS-061`)](internals/milestones/README.md)
+* [Engineering Milestones Index (`MS-001` to `MS-062`)](internals/milestones/README.md)
 * [Milestone 061 Cross-Language Benchmarks](BENCHMARKS.md)

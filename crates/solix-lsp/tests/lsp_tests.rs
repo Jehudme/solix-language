@@ -37,6 +37,44 @@ fn create_test_workspace() -> (Arc<WorkspaceManager>, Url) {
     (workspace, uri)
 }
 
+/// Stages bundled first-party archives (such as `raylib@5.5.0`) into an isolated temp store
+/// so LSP integration tests do not depend on pre-populated `~/.solix/packages` state.
+fn create_hermetic_bundled_solver(
+    repo_root: &std::path::Path,
+) -> (
+    tempfile::TempDir,
+    Arc<solix_common::solver::ClientModuleSolver>,
+) {
+    let temp_store = tempfile::tempdir().expect("create temp package store");
+    let bundled_root = repo_root
+        .join("crates")
+        .join("solix-toolchain")
+        .join("assets")
+        .join("packages");
+    if let Ok(entries) = std::fs::read_dir(&bundled_root) {
+        for entry in entries.flatten() {
+            let source_path = entry.path();
+            if source_path.is_dir() {
+                let target_dir = temp_store.path().join(entry.file_name());
+                let _ = std::fs::create_dir_all(&target_dir);
+                if let Ok(files) = std::fs::read_dir(&source_path) {
+                    for file_entry in files.flatten() {
+                        let file_path = file_entry.path();
+                        if file_path.is_file() {
+                            let _ =
+                                std::fs::copy(&file_path, target_dir.join(file_entry.file_name()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let solver = Arc::new(solix_common::solver::ClientModuleSolver::with_store_dir(
+        temp_store.path().to_path_buf(),
+    ));
+    (temp_store, solver)
+}
+
 // -----------------------------------------------------------------------------
 // Feature 1: Lifecycle & Handshake
 // -----------------------------------------------------------------------------
@@ -1071,7 +1109,6 @@ void main() {
 
 #[test]
 fn test_breakout_real_inlay_hints() {
-    use solix_common::solver::ClientModuleSolver;
     use std::path::{Path, PathBuf};
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1085,7 +1122,8 @@ fn test_breakout_real_inlay_hints() {
         return;
     }
 
-    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let canonical_main =
+        solix_common::canonicalize_host_path(&breakout_main).unwrap_or(breakout_main);
     let Ok(uri) = Url::from_file_path(&canonical_main) else {
         return;
     };
@@ -1093,10 +1131,8 @@ fn test_breakout_real_inlay_hints() {
         return;
     };
 
-    let workspace = WorkspaceManager::new(
-        Some(breakout_dir),
-        Some(Arc::new(ClientModuleSolver::new())),
-    );
+    let (_temp_store, solver) = create_hermetic_bundled_solver(&repo_root);
+    let workspace = WorkspaceManager::new(Some(breakout_dir), Some(solver));
     let snapshot = workspace.did_open(uri, 1, source);
     let hints = inlay_hints(
         &snapshot,
@@ -1113,7 +1149,11 @@ fn test_breakout_real_inlay_hints() {
     );
     assert!(
         !hints.is_empty(),
-        "Inlay hints must not be empty! Got 0 hints."
+        "Inlay hints must not be empty! Got 0 hints. ast={}, semantic={}, diags={:?}, lines={}",
+        snapshot.ast.is_some(),
+        snapshot.last_good_semantic.is_some(),
+        snapshot.diagnostics,
+        snapshot.source_text.lines().count()
     );
     let has_real_param = hints.iter().any(|hint| match &hint.label {
         InlayHintLabel::String(label_text) => {
@@ -1141,7 +1181,6 @@ fn test_breakout_real_inlay_hints() {
 
 #[test]
 fn test_breakout_semantic_tokens_clear_background() {
-    use solix_common::solver::ClientModuleSolver;
     use std::path::{Path, PathBuf};
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1155,7 +1194,8 @@ fn test_breakout_semantic_tokens_clear_background() {
         return;
     }
 
-    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let canonical_main =
+        solix_common::canonicalize_host_path(&breakout_main).unwrap_or(breakout_main);
     let Ok(uri) = Url::from_file_path(&canonical_main) else {
         return;
     };
@@ -1163,10 +1203,8 @@ fn test_breakout_semantic_tokens_clear_background() {
         return;
     };
 
-    let workspace = WorkspaceManager::new(
-        Some(breakout_dir),
-        Some(Arc::new(ClientModuleSolver::new())),
-    );
+    let (_temp_store, solver) = create_hermetic_bundled_solver(&repo_root);
+    let workspace = WorkspaceManager::new(Some(breakout_dir), Some(solver));
     let snapshot = workspace.did_open(uri, 1, source);
     let result = semantic_tokens_full(&snapshot).expect("Expected full semantic tokens");
     if let SemanticTokensResult::Tokens(tokens) = result {
@@ -1274,7 +1312,6 @@ fn test_import_wildcard_undeclared_package_fails_with_e0232() {
 
 #[test]
 fn test_breakout_unimported_solix_collections_list_produces_diagnostic() {
-    use solix_common::solver::ClientModuleSolver;
     use std::path::{Path, PathBuf};
 
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1288,17 +1325,16 @@ fn test_breakout_unimported_solix_collections_list_produces_diagnostic() {
         return;
     }
 
-    let canonical_main = breakout_main.canonicalize().unwrap_or(breakout_main);
+    let canonical_main =
+        solix_common::canonicalize_host_path(&breakout_main).unwrap_or(breakout_main);
     let Ok(uri) = Url::from_file_path(&canonical_main) else {
         return;
     };
     let mut source = std::fs::read_to_string(&canonical_main).unwrap();
     source = format!("import solix.collections.List;\n{source}");
 
-    let workspace = WorkspaceManager::new(
-        Some(breakout_dir),
-        Some(Arc::new(ClientModuleSolver::new())),
-    );
+    let (_temp_store, solver) = create_hermetic_bundled_solver(&repo_root);
+    let workspace = WorkspaceManager::new(Some(breakout_dir), Some(solver));
     let snapshot = workspace.did_open(uri, 1, source);
     let has_cannot_resolve = snapshot.diagnostics.iter().any(|diagnostic| {
         diagnostic

@@ -204,10 +204,13 @@ def main() -> None:
 
     if arguments.solix_binary:
         solix_executable = [arguments.solix_binary]
+    elif os.environ.get("SOLIX_BIN"):
+        solix_executable = [os.environ["SOLIX_BIN"]]
     else:
-        # Check if cargo run is preferred or local target binary exists
-        debug_binary = workspace_root / "target" / "debug" / "solix"
-        release_binary = workspace_root / "target" / "release" / "solix"
+        # Check if cargo run is preferred or local target binary exists (including .exe on Windows)
+        exe_suffix = ".exe" if os.name == "nt" else ""
+        debug_binary = workspace_root / "target" / "debug" / f"solix{exe_suffix}"
+        release_binary = workspace_root / "target" / "release" / f"solix{exe_suffix}"
         if debug_binary.exists():
             solix_executable = [str(debug_binary)]
         elif release_binary.exists():

@@ -11,7 +11,7 @@ use std::process::Command;
 /// # Errors
 /// Returns an error if `manifest.toml` is missing, `python3` fails, or the build script fails.
 pub fn execute_build(args: BuildArgs) -> Result<()> {
-    let project_root = args.path.canonicalize().with_context(|| {
+    let project_root = solix_common::canonicalize_host_path(&args.path).with_context(|| {
         format!(
             "failed to resolve project directory '{}'",
             args.path.display()

@@ -553,10 +553,7 @@ impl ClientModuleSolver {
     #[must_use]
     pub fn with_store_dir(store_directory: PathBuf) -> Self {
         let native_cache_directory = resolve_native_cache_dir(&store_directory);
-        let cache_root = store_directory
-            .parent()
-            .map(|parent_path| parent_path.join("cache").join("packages"))
-            .unwrap_or_else(|| crate::cache::resolve_packages_cache_dir(None));
+        let cache_root = store_directory.join(".cache").join("packages");
         Self {
             store_directory,
             native_cache_directory,
@@ -773,6 +770,11 @@ impl ClientModuleSolver {
                     {
                         for entry in entries.flatten() {
                             let entry_path = entry.path();
+                            let entry_name = entry.file_name();
+                            let entry_name_str = entry_name.to_string_lossy();
+                            if entry_name_str.starts_with('.') || entry_name_str.ends_with(".tmp") {
+                                continue;
+                            }
                             if entry_path.is_file()
                                 && entry_path
                                     .extension()
@@ -789,20 +791,28 @@ impl ClientModuleSolver {
                     }
                 }
 
-                let expected_checksums_satisfied = cached_program
+                let has_applicable_checksum = cached_program
                     .native_library_checksums
-                    .iter()
-                    .all(|(key, expected_hash)| {
-                        discovered_libs.iter().any(|lib_path| {
+                    .keys()
+                    .any(|key| crate::project::native_checksum_key_applies_to_host(key));
+
+                let expected_checksums_satisfied = !has_applicable_checksum
+                    || (!discovered_libs.is_empty()
+                        && discovered_libs.iter().all(|lib_path| {
                             let file_name = lib_path
                                 .file_name()
                                 .and_then(|name| name.to_str())
                                 .unwrap_or("");
-                            (key.ends_with(file_name) || lib_path.to_string_lossy().ends_with(key))
-                                && crate::hash::sha256_file(lib_path)
-                                    .is_ok_and(|actual_hash| &actual_hash == expected_hash)
-                        })
-                    });
+                            crate::project::resolve_expected_native_checksum(
+                                &cached_program.native_library_checksums,
+                                file_name,
+                                None,
+                            )
+                            .is_some_and(|expected_hash| {
+                                crate::hash::sha256_file(lib_path)
+                                    .is_ok_and(|actual_hash| actual_hash == expected_hash)
+                            })
+                        }));
 
                 let cache_valid = if cached_program.native_library_checksums.is_empty() {
                     !discovered_libs.is_empty()

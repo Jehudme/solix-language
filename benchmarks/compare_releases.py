@@ -19,6 +19,11 @@ import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 def load_benchmark_data(source_target: str) -> Dict[str, Any]:
     """Loads benchmark JSON data from a filesystem path or raw JSON string."""
@@ -63,6 +68,7 @@ def find_local_baseline_fallback(baselines_directory: Path) -> Optional[Path]:
 
 def fetch_previous_release_baseline_from_github(
     target_tag: Optional[str] = None,
+    exclude_tag: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Attempts to fetch previous release baseline JSON using GitHub CLI (gh)."""
     try:
@@ -74,7 +80,7 @@ def fetch_previous_release_baseline_from_github(
                 "release",
                 "list",
                 "--limit",
-                "5",
+                "10",
                 "--json",
                 "tagName,isPrerelease,isDraft",
             ]
@@ -87,8 +93,13 @@ def fetch_previous_release_baseline_from_github(
             if list_process.returncode == 0 and list_process.stdout.strip():
                 releases_list = json.loads(list_process.stdout)
                 for release_entry in releases_list:
-                    if not release_entry.get("isDraft", False):
-                        resolved_tag = release_entry.get("tagName")
+                    tag_candidate = release_entry.get("tagName")
+                    if release_entry.get("isDraft", False):
+                        continue
+                    if exclude_tag and tag_candidate == exclude_tag:
+                        continue
+                    if tag_candidate:
+                        resolved_tag = tag_candidate
                         break
 
         if not resolved_tag:
@@ -440,7 +451,10 @@ def main() -> int:
         previous_benchmark_data = fetch_previous_release_baseline_from_github(
             target_tag=parsed_args.previous_tag
             if parsed_args.previous_tag != "Previous Release"
-            else None
+            else None,
+            exclude_tag=parsed_args.current_tag
+            if parsed_args.current_tag != "Current Build"
+            else None,
         )
 
     # If previous benchmark data is still not found, search local baselines folder

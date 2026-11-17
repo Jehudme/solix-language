@@ -1083,14 +1083,12 @@ dependencies = [
 name = "solix-common"
 version = "1.3.0"
 dependencies = [
- "compact_str",
  "miette",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "toml",
- "unicode-ident",
  "zip",
 ]
 
@@ -1157,7 +1155,6 @@ dependencies = [
  "solix-common",
  "tempfile",
  "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]
