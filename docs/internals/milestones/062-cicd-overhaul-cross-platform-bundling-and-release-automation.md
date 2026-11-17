@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-062
 * **Target Version:** `v1.3.1`
 * **Milestone Branch:** `milestone/062-cicd-overhaul-cross-platform-bundling-and-release-automation`
-* **Status:** ACTIVE
+* **Status:** COMPLETED
 * **Lead Architect:** Release Engineering, Build Tooling & Platform Maintainers
 * **Target Delivery Date:** 2026-12-01
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
@@ -100,7 +100,7 @@ flowchart LR
 ### 4.1 P0: Critical Blockers (Must Land First)
 - [x] `[P0]` **`MS062-T01` (Consolidate to 2 Workflows, Fix `release-plz` Auth, Fail-Loud Behavior & Ordered Publishing — `CICD-01`, `CICD-02`, `CICD-03`):** Move `release-plz` into [`ci.yml`](../../../.github/workflows/ci.yml) gated on `needs: [lint-and-docs, test-matrix]` (push to `master`/`main` only, keeping `push` tests on `master` + branch `concurrency:` rules), delete standalone `release-plz.yml`, authenticate with `secrets.RELEASE_TOKEN`, remove `continue-on-error: true`, run `release` + `release-pr`, configure `publish = true` and `semver_check` scoping in `release-plz.toml`, update `solix_scaffold.py` FFI version range cleanly, and delete `publish-crates` (`|| true`) from `release.yml`.
 - [x] `[P0]` **`MS062-T02` (Make `test_breakout_real_inlay_hints` Hermetic & Unblock macOS/Windows CI — `CICD-04`):** Update [`crates/solix-lsp/tests/lsp_tests.rs`](../../../crates/solix-lsp/tests/lsp_tests.rs) so Breakout LSP tests stage `raylib` into a `tempfile::TempDir` store via `ClientModuleSolver::with_store_dir` instead of relying on `~/.solix/packages`, and build/install default libraries across `ubuntu-latest`, `macos-latest`, and `windows-latest` in `ci.yml`.
-- [ ] `[P0]` **`MS062-T03` (Per-Target Native Bundling & Canonical Triple Extraction — `CICD-05`):** Update [`crates/solix-common/src/project.rs`](../../../crates/solix-common/src/project.rs#L800-L819) to match canonical target triples cleanly, and update `release.yml` so every `build-local-artifacts` target compiles/bundles its matching OS/arch native `.slxarc` libraries instead of copying Ubuntu x86_64 `.so` assets across Windows, macOS, and ARM64. *(Triple matching & host-ABI verification landed and tested; awaiting live `v1.3.1` `release.yml` tag execution.)*
+- [x] `[P0]` **`MS062-T03` (Per-Target Native Bundling & Canonical Triple Extraction — `CICD-05`):** Update [`crates/solix-common/src/project.rs`](../../../crates/solix-common/src/project.rs#L800-L819) to match canonical target triples cleanly, and update `release.yml` so every `build-local-artifacts` target compiles/bundles its matching OS/arch native `.slxarc` libraries instead of copying Ubuntu x86_64 `.so` assets across Windows, macOS, and ARM64. *(Verified live in `v1.3.1` release workflow run `44019840669` across all 6 target triples and uploaded release assets.)*
 
 ### 4.2 P1: High Priority (Core Pipeline Correctness)
 - [x] `[P1]` **`MS062-T04` (Windows `.exe` Resolution & Multi-Profile Release Staging — `CICD-06`):** Update [`scripts/build_default_libraries.py`](../../../scripts/build_default_libraries.py#L209-L214) to locate `solix.exe` on Windows, build both `release` and `debug` profiles cleanly, and name uploaded standalone `.slxarc` assets unambiguously (`<name>-<profile>-<target>@<version>.slxarc` or archive zip) without overwriting `debug` with `release`.
@@ -132,4 +132,4 @@ flowchart LR
 | **3-OS CI Green** | `ubuntu-latest`, `macos-latest`, `windows-latest` all pass | `.github/workflows/ci.yml` | [x] Verified |
 | **Real Doc Sync Gate** | Non-zero diff check & updated `TRIGGER_MATRIX` | `scripts/doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py` | [x] Verified |
 | **Release-plz Green Without Masking** | Opens Release PR cleanly inside `ci.yml` only after 3-OS CI passes | `.github/workflows/ci.yml`, `release-plz.toml` | [x] Verified |
-| **True Multi-Platform Bundles** | Native `.dll`/`.dylib`/`.so` per target triple | `.github/workflows/release.yml`, `crates/solix-common/src/project.rs` | [ ] Pending (`v1.3.1` tag run) |
+| **True Multi-Platform Bundles** | Native `.dll`/`.dylib`/`.so` per target triple | `.github/workflows/release.yml`, `crates/solix-common/src/project.rs` | [x] Verified |
