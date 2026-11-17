@@ -24,6 +24,11 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 OS_NAME = platform.system()  # 'Linux', 'Darwin', 'Windows'
 
 # Try importing psutil if available
@@ -178,7 +183,15 @@ class BenchmarkRunner:
         out_bin = temp_build_dir / (c_file.parent.name + "_" + c_file.stem + ("" if OS_NAME != "Windows" else ".exe"))
         try:
             cmd = [gcc, "-O3", str(c_file), "-o", str(out_bin), "-lm"]
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
             if res.returncode == 0 and out_bin.exists():
                 self.c_bins_cache[str(c_file)] = out_bin
                 return out_bin
@@ -196,6 +209,8 @@ class BenchmarkRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=str(self.root_dir),
         )
         stdout, stderr = process.communicate()
