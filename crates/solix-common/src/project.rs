@@ -769,6 +769,8 @@ impl SlxarcArchive {
         let mut binaries = Vec::new();
         let mut secondary_binaries = Vec::new();
         let mut native_libraries = Vec::new();
+        let mut native_entry_names: std::collections::HashMap<PathBuf, String> =
+            std::collections::HashMap::new();
         let mut extracted_files = Vec::new();
         let mut qualified_native_names: std::collections::HashSet<std::ffi::OsString> =
             std::collections::HashSet::new();
@@ -923,6 +925,11 @@ impl SlxarcArchive {
 
                 if is_qualified_subdir {
                     qualified_native_names.insert(file_name_os.to_os_string());
+                    native_entry_names.insert(target_path.clone(), entry_name.clone());
+                } else {
+                    native_entry_names
+                        .entry(target_path.clone())
+                        .or_insert_with(|| entry_name.clone());
                 }
                 if !native_libraries.contains(&target_path) {
                     native_libraries.push(target_path.clone());
@@ -979,17 +986,16 @@ impl SlxarcArchive {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("");
-            let expected_checksum = manifest_checksums
-                .iter()
-                .chain(binary_checksums.iter())
-                .find_map(|(key, hash)| {
-                    if key.ends_with(file_name) || native_lib_path.to_string_lossy().ends_with(key)
-                    {
-                        Some(hash)
-                    } else {
-                        None
-                    }
-                });
+            let preferred_entry = native_entry_names.get(native_lib_path).map(String::as_str);
+            let expected_checksum =
+                resolve_expected_native_checksum(manifest_checksums, file_name, preferred_entry)
+                    .or_else(|| {
+                        resolve_expected_native_checksum(
+                            binary_checksums,
+                            file_name,
+                            preferred_entry,
+                        )
+                    });
 
             if let Some(expected) = expected_checksum {
                 let actual = crate::hash::sha256_file(native_lib_path).map_err(|io_error| {
@@ -1000,7 +1006,7 @@ impl SlxarcArchive {
                         ),
                     }
                 })?;
-                if &actual != expected {
+                if actual != expected {
                     return Err(EmissionError::ContainerSerializationFailed {
                         reason: format!(
                             "native library checksum verification failed for '{}': expected {expected}, found {actual}",
@@ -1093,7 +1099,10 @@ fn collect_directory_entries(
 }
 
 /// Checks whether a `lib/<subdirectory>/` archive directory matches the active host OS and CPU architecture.
-fn matches_native_target_subdir(subdirectory: &str) -> bool {
+/// Returns `true` if `subdirectory` under `lib/` matches the current host OS, architecture,
+/// and (on Windows) ABI toolchain (`-pc-windows-msvc` vs `-pc-windows-gnu`).
+#[must_use]
+pub fn matches_native_target_subdir(subdirectory: &str) -> bool {
     let host_os = std::env::consts::OS;
     let host_arch = std::env::consts::ARCH;
     let short_pair = format!("{host_os}-{host_arch}");
@@ -1105,7 +1114,15 @@ fn matches_native_target_subdir(subdirectory: &str) -> bool {
     let triple_matches_os = match host_os {
         "linux" => subdirectory.contains("-linux-"),
         "macos" => subdirectory.contains("-apple-darwin"),
-        "windows" => subdirectory.contains("-pc-windows-"),
+        "windows" => {
+            if cfg!(target_env = "msvc") {
+                subdirectory.contains("-pc-windows-msvc")
+            } else if cfg!(target_env = "gnu") {
+                subdirectory.contains("-pc-windows-gnu")
+            } else {
+                subdirectory.contains("-pc-windows-")
+            }
+        }
         _ => false,
     };
 
@@ -1118,6 +1135,48 @@ fn matches_native_target_subdir(subdirectory: &str) -> bool {
         "aarch64" => subdirectory.starts_with("aarch64-") || subdirectory.starts_with("arm64-"),
         _ => subdirectory.starts_with(host_arch),
     }
+}
+
+/// Returns `true` when an archive checksum key under `lib/` targets the active host platform
+/// (either unqualified `lib/<file>` or `lib/<matching-subdir>/<file>`).
+#[must_use]
+pub fn native_checksum_key_applies_to_host(checksum_key: &str) -> bool {
+    let Some(relative) = checksum_key.strip_prefix("lib/") else {
+        return !checksum_key.contains('/');
+    };
+    match relative.split_once('/') {
+        Some((subdir, _)) => matches_native_target_subdir(subdir),
+        None => true,
+    }
+}
+
+/// Resolves the expected SHA-256 digest for `file_name` from a `native_library_checksums` map,
+/// preferring `preferred_entry_name` or host-matching `lib/<triple>/<file_name>` entries before
+/// falling back to `lib/<file_name>`.
+#[must_use]
+pub fn resolve_expected_native_checksum<'a>(
+    checksums: &'a std::collections::HashMap<String, String>,
+    file_name: &str,
+    preferred_entry_name: Option<&str>,
+) -> Option<&'a str> {
+    if let Some(entry_name) = preferred_entry_name
+        && let Some(hash) = checksums.get(entry_name)
+    {
+        return Some(hash.as_str());
+    }
+    let suffix = format!("/{file_name}");
+    if let Some((_, hash)) = checksums.iter().find(|(key, _)| {
+        key.strip_prefix("lib/")
+            .and_then(|rel| rel.strip_suffix(&suffix))
+            .is_some_and(|subdir| !subdir.contains('/') && matches_native_target_subdir(subdir))
+    }) {
+        return Some(hash.as_str());
+    }
+    let unqualified_key = format!("lib/{file_name}");
+    checksums
+        .get(&unqualified_key)
+        .or_else(|| checksums.get(file_name))
+        .map(String::as_str)
 }
 
 #[cfg(test)]
@@ -1280,12 +1339,64 @@ version = "0.1.0"
             assert!(matches_native_target_subdir("x86_64-apple-darwin"));
             assert!(!matches_native_target_subdir("aarch64-apple-darwin"));
         }
-        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
         {
             assert!(matches_native_target_subdir("x86_64-pc-windows-msvc"));
-            assert!(matches_native_target_subdir("x86_64-pc-windows-gnu"));
+            assert!(!matches_native_target_subdir("x86_64-pc-windows-gnu"));
             assert!(!matches_native_target_subdir("aarch64-pc-windows-msvc"));
         }
+        #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "gnu"))]
+        {
+            assert!(matches_native_target_subdir("x86_64-pc-windows-gnu"));
+            assert!(!matches_native_target_subdir("x86_64-pc-windows-msvc"));
+            assert!(!matches_native_target_subdir("aarch64-pc-windows-gnu"));
+        }
+    }
+
+    #[test]
+    fn test_resolve_expected_native_checksum_prefers_host_abi_over_sibling_targets() {
+        let mut checksums = std::collections::HashMap::new();
+        checksums.insert("lib/native_demo.so".to_string(), "fallback_sha".to_string());
+        checksums.insert(
+            "lib/aarch64-unknown-linux-gnu/native_demo.so".to_string(),
+            "arm64_sha".to_string(),
+        );
+        checksums.insert(
+            "lib/x86_64-unknown-linux-gnu/native_demo.so".to_string(),
+            "x64_linux_sha".to_string(),
+        );
+        checksums.insert(
+            "lib/x86_64-pc-windows-gnu/native_demo.so".to_string(),
+            "win_gnu_sha".to_string(),
+        );
+        checksums.insert(
+            "lib/x86_64-pc-windows-msvc/native_demo.so".to_string(),
+            "win_msvc_sha".to_string(),
+        );
+
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        assert_eq!(
+            resolve_expected_native_checksum(&checksums, "native_demo.so", None),
+            Some("x64_linux_sha")
+        );
+        #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+        assert_eq!(
+            resolve_expected_native_checksum(&checksums, "native_demo.so", None),
+            Some("win_msvc_sha")
+        );
+        #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "gnu"))]
+        assert_eq!(
+            resolve_expected_native_checksum(&checksums, "native_demo.so", None),
+            Some("win_gnu_sha")
+        );
+        assert_eq!(
+            resolve_expected_native_checksum(
+                &checksums,
+                "native_demo.so",
+                Some("lib/x86_64-unknown-linux-gnu/native_demo.so")
+            ),
+            Some("x64_linux_sha")
+        );
     }
 
     #[test]

@@ -370,14 +370,7 @@ def compile_rust_project(
 
     for target_triple, target_extension in candidate_targets:
         is_exact_host = target_triple == host_target_triple
-        is_host_platform = (
-            is_exact_host
-            or (
-                not forced_target_triple
-                and target_triple.startswith("x86_64-pc-windows")
-                and host_target_triple.startswith("x86_64-pc-windows")
-            )
-        )
+        is_host_platform = is_exact_host
         target_stage_directory = stage_lib_directory / target_triple
         target_stage_directory.mkdir(parents=True, exist_ok=True)
 

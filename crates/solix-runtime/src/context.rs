@@ -512,18 +512,12 @@ impl RuntimeContext {
                     .and_then(|name| name.to_str())
                     .unwrap_or("");
                 let expected_checksum = options.binaries.iter().find_map(|binary_program| {
-                    binary_program
-                        .native_library_checksums
-                        .iter()
-                        .find_map(|(path_key, hash)| {
-                            if path_key.ends_with(file_name)
-                                || library_path.to_string_lossy().ends_with(path_key)
-                            {
-                                Some(hash.clone())
-                            } else {
-                                None
-                            }
-                        })
+                    solix_common::project::resolve_expected_native_checksum(
+                        &binary_program.native_library_checksums,
+                        file_name,
+                        None,
+                    )
+                    .map(str::to_string)
                 });
 
                 if let Some(expected) = expected_checksum {

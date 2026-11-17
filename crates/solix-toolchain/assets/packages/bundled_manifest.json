@@ -6,32 +6,32 @@
       "version": "5.5.0",
       "profile": "release",
       "archive_rel_path": "raylib-release@5.5.0/raylib.slxarc",
-      "sha256": "17987313207ae9348561b656a437fba98d0c6f86102c44abbfffb19db8966c87",
-      "size_bytes": 2442805
+      "sha256": "4ddffec99cdc81cbde5f2d8885db96a04b14ae15c3a42e1fd81b78d62439ade6",
+      "size_bytes": 2442857
     },
     {
       "name": "raylib",
       "version": "5.5.0",
       "profile": "debug",
       "archive_rel_path": "raylib-debug@5.5.0/raylib.slxarc",
-      "sha256": "0793e9c5122aff88ac1538adb75918962fcfad34e6dafc0a2defaf06d0858132",
-      "size_bytes": 1838697
+      "sha256": "7c3f6eec3f998db344ee84310bf420c1105c1a40900b9bfec57b099e20251c9d",
+      "size_bytes": 1838687
     },
     {
       "name": "solix",
       "version": "2.0.0",
       "profile": "release",
       "archive_rel_path": "solix-release@2.0.0/solix.slxarc",
-      "sha256": "6f4165c8f0c6b698e17c2f1aa75542d4c46abb1c989486aef135f8af3f45a48c",
-      "size_bytes": 1333245
+      "sha256": "d55e0c108f6f203c977ac6fd7683a100a4989947c8a90b7ac2373b6891580c15",
+      "size_bytes": 1333262
     },
     {
       "name": "solix",
       "version": "2.0.0",
       "profile": "debug",
       "archive_rel_path": "solix-debug@2.0.0/solix.slxarc",
-      "sha256": "e35e38a861755de3aa42651eb22c17bb38d5f696500d241adc860c67253cb243",
-      "size_bytes": 2562896
+      "sha256": "51d9f737f6a5780fbbd2a0174b10a7c2c7a2e9436b5e8cf68b097f1cf4a0979d",
+      "size_bytes": 2562912
     }
   ]
 }
