@@ -94,10 +94,11 @@ When assigning an element into a reference array (`ArrayRef`):
 2. If non-null, the existing reference is decremented (`DecRef`).
 3. The new reference is written to the array slot and incremented (`IncRef`).
 
-### 3.3. Iterative Worklist Teardown, Cycle Bypasses & Return Transfer
+### 3.3. Iterative Worklist Teardown, Cycle Bypasses & Ownership Transfers
 - **Iterative Worklist `release_reference`**: Reference teardown drains child references through a reusable `release_worklist` vector rather than recursive Rust stack frames, preventing host stack overflow on deep object graphs (verified across 50,000-node linked chains).
 - **`HashSet` & Cycle-Collector Bypasses**: `release_reference` skips `active_destructors` `HashSet` insert/remove tracking when `destructor_id.is_none()`, and classes statically proven acyclic skip cycle-collector purple-buffer buffering on positive-ref decrement.
-- **Owned-Local Return Ownership Transfer**: Returning an owned reference-counted local directly from `emit_return_statement` omits the extra `IncRef` and self-`DecRef` cleanup pair, transferring ownership straight to the caller without retaining dead temporaries.
+- **Owned-Local Return & `FLAG_MOVE` Field/Array Store Ownership Transfer**: Returning an owned reference-counted local from `emit_return_statement` omits the extra `IncRef`/`DecRef` pair, and `SetField`/`SetArray` fused with a trailing dead `DecRef` encode `FLAG_MOVE` (`0x80`) to move the address into the heap slot, zero the source register (`Value::Null`), and skip unnecessary reference-count churn and `purple_buffer` sweeps.
+- **Exception-Safe Borrow Pruning & Capture Write Tracking**: When `elide_borrowed_local_arc_ops` removes borrow pairs, un-owned alias registers are pruned from `function.reference_registers` and `ExceptionHandlerEntry::try_ref_regs` to prevent double-frees during stack unwinding; closure `UnpackCaptures` register windows are tracked across ARC elision so reassigned captured references retain necessary cleanup decrements.
 
 ---
 

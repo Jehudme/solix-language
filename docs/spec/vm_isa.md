@@ -158,11 +158,11 @@ Used for static, direct, and virtual function dispatch:
 | `0x87` | `RetVoid` | A | — | Returns `void`. |
 
 ### 3.7. Array Operations & Element Tagging
-- `AllocArray`: Allocates typed `ArrayRef` on the heap with specified element capacity, stride, and element type tag.
-- `GetArray`: Retrieves array element by index. Directly specializes typed primitive arrays (`(elem_size == 1, type_tag == 11)` for `bool`, `(elem_size == 4, type_tag == 3)` for `int32`) using shift-based addressing and out-of-line cold decoding for `float32` (`type_tag == 9`), `String`, and `Tuple` variants.
-- `SetArray`: Writes array element at specified index, specializing `bool` (`(1, 11)`) and `int32` (`(4, 3)`) stores directly into virtual heap bytes while delegating reference-counted, `elem_type_tag == 0`, and `Tuple` stores to `execute_set_array_slow`.
+- `AllocArray`: Allocates typed `ArrayRef` on the heap with element count capacity, exact storage byte stride (`1` byte for `int8`/`uint8`/`bool`/`char`, `2` bytes for `int16`/`uint16`, `4` bytes for `int32`/`uint32`/`float32`, and `8` bytes for 64-bit scalars and object references), and element type tag.
+- `GetArray`: Retrieves array element by index using single-qword header validation and typed inline fast paths for `bool` (`(elem_size == 1, type_tag == 11)`), `int32` (`(elem_size == 4, type_tag == 3)`), `float64` (`(elem_size == 8, type_tag == 10)`), and 8-byte reference/`string` arrays (`elem_size == 8` with reference/string tags), delegating `float32`, `Tuple`, and cold fallback variants out of line.
+- `SetArray`: Writes array element at specified index with specialized inline stores for `bool`, `int32`, `float32` (32-bit float conversion), `float64`, and reference arrays (including `FLAG_MOVE` `0x80` ownership transfer without extra `IncRef`/`DecRef`), delegating remaining variants to `execute_set_array_slow`.
 
-### 3.8. Superinstructions (`0xD0` .. `0xD9`)
+### 3.8. Superinstructions (`0xD0` .. `0xDF`)
 | Opcode Hex | Name | Format | Operands | Description |
 |---|---|---|---|---|
 | `0xD0` | `AddI32Imm` | A | `dst, src1, imm16` | Fused signed 32-bit immediate add: `dst = src1 + sign_extend(imm16)`. |
@@ -174,7 +174,13 @@ Used for static, direct, and virtual function dispatch:
 | `0xD6` | `JumpIfEqI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs == rhs`. |
 | `0xD7` | `JumpIfNeqI32` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs != rhs`. |
 | `0xD8` | `MulI32Imm` | A | `dst, src1, imm16` | Fused signed 32-bit immediate multiply: `dst = src1 * sign_extend(imm16)`. |
-| `0xD9` | `ModI32Imm` | A | `dst, src1, imm16` | Fused 32-bit modulo by immediate (uses bitmasking for positive power-of-two divisors and compile-time `MOD_MAGIC_TABLE` reciprocal multiplication for constants in `2..=64`). |
+| `0xD9` | `ModI32Imm` | A | `dst, src1, imm16` | Fused 32-bit modulo by immediate using bitmasking for powers of two and compile-time `MOD_MAGIC_TABLE` reciprocal multiplication for positive divisors. |
+| `0xDA` | `ForLoopI32` | A | `idx, bound, offset` (`flags`: step/cmp/fill) | Increments `reg[idx]` in place (`+1` when bit `7` clear, `+reg[flags & 0x1F]` when bit `7` set), tests `<` (bit `6` clear) or `<=` (bit `6` set) against `reg[bound]`, and branches back by `offset`. Bit `5` (`0x20`) marks tight 2-instruction `SetArray` primitive array fill loops for bulk completion (`try_complete_array_fill_loop`). |
+| `0xDB` | `AddBandI32` | A | `dst, src1, src2` (`flags`: `acc`) | Fused signed add and bitwise mask: `reg[dst] = (reg[acc] + reg[src1]) & reg[src2]`. |
+| `0xDC` | `JumpIfI32Imm` | A | `lhs, imm16, offset` (`flags`: cmp kind) | Compares `reg[lhs]` (`int32`) directly against signed `imm16` (`Eq`/`Neq`/`Lt`/`Lte`/`Gt`/`Gte`) and branches by `offset`. |
+| `0xDD` | `TailCallDirect` | Call | `dst, fn_id, arg_base, arg_count` | Tail-call replacement reusing the current caller `CallFrame` and register window directly when caller and callee hold no reference registers or exception handlers. |
+| `0xDE` | `MulAddF64` | A | `dst, src1, src2` (`flags`: `addend`) | Fused IEEE-754 float64 multiply-add step: `reg[dst] = reg[src1] * reg[src2] + reg[addend]`. |
+| `0xDF` | `GetArrayJumpIfFalse` | A | `arr, idx, offset` (`flags`: invert) | Loads primitive array element `reg[arr][reg[idx]]` and branches immediately on falsy (`flags == 0`) or truthy (`flags != 0`) without materializing an intermediate boolean register. |
 
 ---
 
@@ -226,7 +232,8 @@ The production interpreter loop (`run_fast_trap::<false, TRACK_METRICS>`) implem
 
 - **Monomorphized Metrics Gating (`TRACK_METRICS`)**: `run_fast_internal` instantiates `<false, false>` when telemetry flags (`--metrics`) are omitted via `RuntimeOptions::track_metrics`, eliding per-instruction `local_inst_count` updates and peak depth comparisons across tight loops.
 - **Compact `VmTrap` Error ABI**: Fast-path handlers return `Result<_, VmTrap>` (`VmTrap(Box<RuntimeError>)`) instead of passing 96-byte `RuntimeError` values by stack `sret`, eliminating stack drop glue and keeping interpreter state resident in machine registers.
-- **Compact 32-Byte `CallFrame` & `FunctionCodeSpan` + Unified `'call_dispatch`**: `CallFrame` (`#[repr(C)]`, compile-time asserted 32 bytes) pairs with flat `FunctionCodeSpan` metadata so `CallDirect`, `CallVirtual`, `CallInterface` (via pre-flattened `flat_itables`), and `CallCallable` (`Value::FnPtr` and heap closures) converge onto a shared capacity-checked frame push without `Vec::push` spills, while `Return`/`ReturnValue` write results directly between register windows.
-- **Cross-Crate Opcode & Operand Inlining**: `Instruction` field accessors (`raw_opcode`, `dst`, `src1`, `src2`, `imm32`, `jump_offset`, `call_target`, `arg_base`, `arg_count`) and `OpCode::from_raw_u8` (`const fn` table decode) are `#[inline(always)]` in `solix-common`, alongside in-place `Value` readers in `solix-runtime`.
+- **Compact 32-Byte `CallFrame`, Cached `inst_ptr`, Sentinel `Return`, & Trivial Leaf Fast-Call**: `CallFrame` (`#[repr(C)]`, compile-time asserted 32 bytes) caches `inst_ptr: *const Instruction` directly so `Return`/`ReturnValue` restore caller instruction pointers without re-indexing `func_code`. `RuntimeContext::new` appends a sentinel `OpCode::Return` when needed so `run_fast_trap::<false, _>` omits per-instruction `pc >= inst_len` bounds checks, and `'call_dispatch` evaluates 1–2 instruction trivial leaf functions inline without pushing a `CallFrame`.
+- **Zero-Spill Direct Register Writeback & Pair Pattern Matching**: Arithmetic, bitwise, comparison, branch, `GetField`, and `GetArray` arms write fast-path results directly to `*reg_base.add(dst)` inside each branch (eliminating 16-byte `Value` phi-node stack spills) and match `(Value::I32(left_val), Value::I32(right_val))` in a single check before calling `#[cold]` fallbacks (eliminating callee-saved `inst_ptr` spills).
+- **Ownership-Transfer Stores (`FLAG_MOVE`) & Cross-Crate Inlining**: `SetField` and `SetArray` support `FLAG_MOVE` (`0x80`) to move fresh owned rvalues straight into heap slots and null out the dead source register without `IncRef`/`DecRef` cycles. `Instruction` field accessors (`raw_opcode`, `dst`, `src1`, `src2`, `imm32`, `jump_offset`, `call_target`, `arg_base`, `arg_count`) and `OpCode::from_raw_u8` (`const fn` table decode) are `#[inline(always)]` in `solix-common`, alongside in-place `Value` readers in `solix-runtime`.
 - **Stateless Closure Encoding (`PackClosure`) & Inline Unpack**: Closures with `cap_count == 0` encode directly as `Value::FnPtr(target_lambda_id)` without heap allocation or `DecRef` cleanup, and 1–2 capture `UnpackCaptures` executes inline.
-- **`idiv`-Free Modulo (`ModI32Imm`) & Cold-Path Outlining**: `ModI32Imm` uses bitmasks for powers of two and `MOD_MAGIC_TABLE` reciprocal multiplies for positive constants in `2..=64`, while `CallSymbol`, `CallExtern`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`, `Throw`, tuple/cast/heap-closure operations, native callback marshaling, and `release_reference_cold` execute out-of-line for L1 instruction cache locality.
+- **`idiv`-Free Modulo (`ModI32Imm`) & Cold-Path Outlining**: `ModI32Imm` uses bitmasks for powers of two and compile-time `MOD_MAGIC_TABLE` reciprocal multiplies for positive constants, while `CallSymbol`, `CallExtern`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`, `Throw`, tuple/cast/heap-closure operations, native callback marshaling, and `release_reference_cold` execute out-of-line for L1 instruction cache locality.
