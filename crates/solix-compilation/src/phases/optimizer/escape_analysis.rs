@@ -503,8 +503,13 @@ fn find_constructor_call(
     let limit = std::cmp::min(allocation_pc + 64, function.instructions.len());
     let mut mov_base_to_pc: HashMap<u16, usize> = HashMap::new();
 
-    for check_pc in (allocation_pc + 1)..limit {
-        let inst = &function.instructions[check_pc];
+    for (check_pc, inst) in function
+        .instructions
+        .iter()
+        .enumerate()
+        .take(limit)
+        .skip(allocation_pc + 1)
+    {
         let raw = inst.raw_opcode();
 
         if raw == OpCode::AllocObject as u8
@@ -646,8 +651,13 @@ pub fn classify_allocations(
             let mut ever_aliased_registers = target_registers.clone();
             let mut overall_category = EscapeCategory::NoEscape;
 
-            for inspection_index in (instruction_index + 1)..scan_end {
-                let inspection_instruction = &function.instructions[inspection_index];
+            for (inspection_index, inspection_instruction) in function
+                .instructions
+                .iter()
+                .enumerate()
+                .take(scan_end)
+                .skip(instruction_index + 1)
+            {
                 let raw_opcode = inspection_instruction.raw_opcode();
 
                 // Check for aliasing assignment or register overwrite
@@ -952,8 +962,13 @@ fn try_scalar_replace_one(
     let mut sim_check_aliases = HashSet::new();
     sim_check_aliases.insert(allocated_register);
     let mut can_finish = true;
-    for inspection_index in (allocation_pc + 1)..rewrite_limit {
-        let inst = function.instructions[inspection_index];
+    for (inspection_index, &inst) in function
+        .instructions
+        .iter()
+        .enumerate()
+        .take(rewrite_limit)
+        .skip(allocation_pc + 1)
+    {
         let raw_opcode = inst.raw_opcode();
 
         if raw_opcode == OpCode::Mov as u8 {
@@ -1035,8 +1050,13 @@ fn try_scalar_replace_one(
 
     if !reuse_alloc_reg_as_single_field {
         let mut intervening_call_indices: Vec<usize> = Vec::new();
-        for check_pc in (allocation_pc + 1)..=last_use_or_write_pc {
-            let check_inst = &function.instructions[check_pc];
+        for (check_pc, check_inst) in function
+            .instructions
+            .iter()
+            .enumerate()
+            .take(last_use_or_write_pc + 1)
+            .skip(allocation_pc + 1)
+        {
             let raw = check_inst.raw_opcode();
             if raw == OpCode::CallDirect as u8
                 || raw == OpCode::CallVirtual as u8
@@ -1110,13 +1130,17 @@ fn try_scalar_replace_one(
         if function.instructions[ctor_pc].raw_opcode() == OpCode::CallDirect as u8 {
             function.instructions[ctor_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
         }
-        for back_index in (allocation_pc + 1)..ctor_pc {
-            let check_inst = &function.instructions[back_index];
+        for check_inst in function
+            .instructions
+            .iter_mut()
+            .take(ctor_pc)
+            .skip(allocation_pc + 1)
+        {
             if check_inst.raw_opcode() == OpCode::Mov as u8
                 && check_inst.dst() == ctor_base
                 && ever_aliases.contains(&check_inst.src1())
             {
-                function.instructions[back_index] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                *check_inst = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             }
         }
     }
@@ -1277,9 +1301,14 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
             let mut matching_dec_index = None;
             let mut max_forward_target: Option<usize> = None;
             let limit = std::cmp::min(start_index + 48, instruction_count);
-            for forward_index in (start_index + 1)..limit {
+            for (forward_index, &forward_inst) in function
+                .instructions
+                .iter()
+                .enumerate()
+                .take(limit)
+                .skip(start_index + 1)
+            {
                 // Reject external control-flow jumps entering the middle of a diamond before a branch saw it.
-                let forward_inst = function.instructions[forward_index];
                 let forward_raw = forward_inst.raw_opcode();
 
                 if forward_raw == OpCode::DecRef as u8 && forward_inst.dst() == target_register {

@@ -423,18 +423,23 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
     }
 
     let mut block_immortals: HashSet<u16> = HashSet::new();
-    for pc_idx in 0..inst_count {
+    for (pc_idx, inst_slot) in function
+        .instructions
+        .iter_mut()
+        .enumerate()
+        .take(inst_count)
+    {
         if critical_targets.contains(&pc_idx) {
             block_immortals.clear();
         }
 
-        let inst = function.instructions[pc_idx];
+        let inst = *inst_slot;
         let raw = inst.raw_opcode();
 
         if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
             && (block_immortals.contains(&inst.dst()) || always_immortal_regs.contains(&inst.dst()))
         {
-            function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            *inst_slot = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             continue;
         }
 
@@ -519,8 +524,13 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
         }
         let all_in_epilogues = owner_decs.iter().all(|&dec_pc| {
             let mut epilogue_ok = false;
-            for scan_pc in (dec_pc + 1)..inst_count {
-                let scan_raw = function.instructions[scan_pc].raw_opcode();
+            for scan_inst in function
+                .instructions
+                .iter()
+                .take(inst_count)
+                .skip(dec_pc + 1)
+            {
+                let scan_raw = scan_inst.raw_opcode();
                 if scan_raw == OpCode::Return as u8 || scan_raw == OpCode::ReturnValue as u8 {
                     epilogue_ok = true;
                     break;
@@ -763,8 +773,13 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
             let search_end = epilogue_dec_pc.min(inst_count).min(inc_pc + 48);
             let mut matched_dec_pc: Option<usize> = None;
             let mut max_forward_target: Option<usize> = None;
-            for fwd_pc in (inc_pc + 1)..search_end {
-                let fwd_inst = function.instructions[fwd_pc];
+            for (fwd_pc, &fwd_inst) in function
+                .instructions
+                .iter()
+                .enumerate()
+                .take(search_end)
+                .skip(inc_pc + 1)
+            {
                 let fwd_raw = fwd_inst.raw_opcode();
                 if let Some(&(min_src, max_src)) = jump_bounds_to_target.get(&fwd_pc)
                     && (min_src <= inc_pc || max_src >= fwd_pc)
@@ -1443,14 +1458,19 @@ fn eliminate_common_subexpressions(function: &mut CompiledFunction) -> bool {
     let mut duplicate_expr_pcs: Vec<(usize, u16)> = Vec::new();
     let mut any_changed = false;
 
-    for pc_idx in 0..inst_count {
+    for (pc_idx, inst_slot) in function
+        .instructions
+        .iter_mut()
+        .enumerate()
+        .take(inst_count)
+    {
         if critical_targets.contains(&pc_idx) {
             reg_to_val.clear();
             val_holders.clear();
             expr_to_val.clear();
         }
 
-        let inst = function.instructions[pc_idx];
+        let inst = *inst_slot;
         let raw = inst.raw_opcode();
 
         if raw == OpCode::CallDirect as u8
@@ -1489,7 +1509,7 @@ fn eliminate_common_subexpressions(function: &mut CompiledFunction) -> bool {
                 vid
             };
             if reg_to_val.get(&dst) == Some(&src_vid) {
-                function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                *inst_slot = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
                 any_changed = true;
             } else {
                 invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
@@ -1512,14 +1532,12 @@ fn eliminate_common_subexpressions(function: &mut CompiledFunction) -> bool {
                 });
                 if let Some(holder_reg) = live_holder {
                     if holder_reg == dst {
-                        function.instructions[pc_idx] =
-                            Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                        *inst_slot = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
                     } else {
                         invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
                         reg_to_val.insert(dst, existing_vid);
                         val_holders.entry(existing_vid).or_default().push(dst);
-                        function.instructions[pc_idx] =
-                            Instruction::format_a(OpCode::Mov, 0, dst, holder_reg, 0);
+                        *inst_slot = Instruction::format_a(OpCode::Mov, 0, dst, holder_reg, 0);
                     }
                     any_changed = true;
                 } else {
@@ -1583,19 +1601,24 @@ fn elide_fresh_null_set_fields(function: &mut CompiledFunction) {
         fresh_zero_regs.insert(0);
     }
 
-    for pc_idx in 0..inst_count {
+    for (pc_idx, inst_slot) in function
+        .instructions
+        .iter_mut()
+        .enumerate()
+        .take(inst_count)
+    {
         if critical_targets.contains(&pc_idx) {
             fresh_zero_regs.clear();
             block_null_regs.clear();
         }
-        let inst = function.instructions[pc_idx];
+        let inst = *inst_slot;
         let raw = inst.raw_opcode();
 
         if raw == OpCode::SetField as u8
             && fresh_zero_regs.contains(&inst.src1())
             && block_null_regs.contains(&inst.dst())
         {
-            function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            *inst_slot = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             continue;
         }
 
@@ -3069,11 +3092,16 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
             let mut aborted_rewrite = false;
             let mut terminated_block = false;
 
-            for scan_pc in (cursor + 1)..inst_count {
+            for (scan_pc, &scan_inst) in function
+                .instructions
+                .iter()
+                .enumerate()
+                .take(inst_count)
+                .skip(cursor + 1)
+            {
                 if critical_targets.contains(&scan_pc) {
                     break;
                 }
-                let scan_inst = function.instructions[scan_pc];
                 let scan_raw = scan_inst.raw_opcode();
 
                 let reads_orig = instruction_reads_register(&scan_inst, r_orig);
@@ -3387,11 +3415,16 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
                     Instruction::format_c(OpCode::Jump, 0, 0, entry_offset);
                 function.instructions[loop_end] = inverted_guard;
 
-                for pc_idx in body_pc..loop_end {
-                    let inst = function.instructions[pc_idx];
+                for (pc_idx, inst_slot) in function
+                    .instructions
+                    .iter_mut()
+                    .enumerate()
+                    .take(loop_end)
+                    .skip(body_pc)
+                {
+                    let inst = *inst_slot;
                     if decode_jump_target(inst, pc_idx, inst_count) == Some(header_pc) {
-                        function.instructions[pc_idx] =
-                            relocate_jump_instruction(inst, pc_idx, loop_end as u32);
+                        *inst_slot = relocate_jump_instruction(inst, pc_idx, loop_end as u32);
                     }
                 }
             }
@@ -4190,15 +4223,11 @@ fn can_rewrite_read_register(instruction: &Instruction, target_reg: u16) -> bool
         }
         return instruction.call_target() == target_reg;
     }
-    if raw == OpCode::AllocTuple as u8
+    !(raw == OpCode::AllocTuple as u8
         || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
-        || raw == OpCode::MulAddF64 as u8
-    {
-        return false;
-    }
-    true
+        || raw == OpCode::MulAddF64 as u8)
 }
 
 /// Rewrites input register operands matching `from_reg` to `to_reg`, returning the updated instruction.
