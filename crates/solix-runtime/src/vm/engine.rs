@@ -225,7 +225,7 @@ impl VirtualMachine {
             cycle_collector_enabled,
             cycle_threshold,
             cycle_budget_us,
-            purple_buffer: Vec::with_capacity(cycle_threshold.max(16)),
+            purple_buffer: Vec::new(),
             arc_cycle_collector_runs: 0,
             arc_cycle_collector_candidates: 0,
             arc_cycles_collected: 0,

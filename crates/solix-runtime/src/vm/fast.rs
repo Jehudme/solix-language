@@ -117,6 +117,15 @@ fn f64_pair_type_mismatch_error(left_val: &Value, right_val: &Value) -> VmTrap {
 
 #[cold]
 #[inline(never)]
+fn mul_add_f64_type_mismatch_cold(left_val: &Value, right_val: &Value, acc_val: &Value) -> VmTrap {
+    VmTrap::from_error(RuntimeError::TypeMismatch {
+        expected: "Float64, Float64, and Float64".to_string(),
+        found: format!("{left_val:?}, {right_val:?}, {acc_val:?}"),
+    })
+}
+
+#[cold]
+#[inline(never)]
 fn f64_type_mismatch_error(found_val: &Value) -> VmTrap {
     VmTrap::from_error(RuntimeError::TypeMismatch {
         expected: "Float64".to_string(),
@@ -462,6 +471,137 @@ fn inc_ref_trap_cold(heap: &mut crate::memory::VirtualHeap, addr: u32) -> Result
     crate::memory::arc::inc_ref(heap, addr)
         .map(|_| ())
         .map_err(VmTrap::from_error)
+}
+
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn try_complete_array_fill_loop(
+    heap_buf: &mut [u8],
+    reg_base: *mut Value,
+    set_inst: Instruction,
+    idx_reg: usize,
+    next_idx: i32,
+    bound: i32,
+    step: i32,
+    is_lte: bool,
+) -> Option<u64> {
+    if step <= 0 || next_idx < 0 || set_inst.flags() != 0 {
+        return None;
+    }
+    let upper = if is_lte {
+        bound as i64
+    } else {
+        (bound as i64) - 1
+    };
+    let next_i64 = next_idx as i64;
+    if upper < next_i64 {
+        return None;
+    }
+    let step_i64 = step as i64;
+    let count_minus_1 = (upper - next_i64) / step_i64;
+    let last_idx = next_i64 + count_minus_1 * step_i64;
+    let exit_idx = last_idx + step_i64;
+    if exit_idx > i32::MAX as i64 {
+        return None;
+    }
+
+    // SAFETY: Caller verified `set_inst` registers are valid within the active frame.
+    let arr_val = unsafe { *reg_base.add(set_inst.dst() as usize) };
+    let Value::Ref(arr_addr) = arr_val else {
+        return None;
+    };
+    if arr_addr == 0 {
+        return None;
+    }
+    let arr_offset = arr_addr as usize;
+    if arr_offset < 8 || arr_offset + 8 > heap_buf.len() {
+        return None;
+    }
+    let tag_nibble = (heap_buf[arr_offset - 1] >> 4) & 0x0F;
+    if tag_nibble != BlockTag::ArrayRef as u8 {
+        return None;
+    }
+    let header_qword =
+        u64::from_le(unsafe { std::ptr::read_unaligned(heap_buf.as_ptr().add(arr_offset).cast()) });
+    let array_len = (header_qword as u32) as i64;
+    if last_idx >= array_len {
+        return None;
+    }
+    let meta_masked = ((header_qword >> 32) as u32) & 0xFF00_00FF;
+    let fill_val = unsafe { *reg_base.add(set_inst.src2() as usize) };
+    let next_usize = next_idx as usize;
+    let last_usize = last_idx as usize;
+    let step_usize = step as usize;
+    let data_base = arr_offset + 8;
+
+    const META_BOOL_1B: u32 = (11 << 24) | 1;
+    const META_I32_4B: u32 = (3 << 24) | 4;
+    const META_F64_8B: u32 = (10 << 24) | 8;
+
+    match meta_masked {
+        META_BOOL_1B => {
+            let end_offset = data_base + last_usize + 1;
+            if end_offset > heap_buf.len() {
+                return None;
+            }
+            let byte_val = match fill_val {
+                Value::Bool(flag) => u8::from(flag),
+                Value::I32(num_val) => num_val as u8,
+                _ => return None,
+            };
+            let slice = &mut heap_buf[data_base..end_offset];
+            if step_usize == 1 {
+                slice[next_usize..=last_usize].fill(byte_val);
+            } else {
+                let mut cursor = next_usize;
+                while cursor <= last_usize {
+                    slice[cursor] = byte_val;
+                    cursor += step_usize;
+                }
+            }
+        }
+        META_I32_4B => {
+            let end_offset = data_base + ((last_usize + 1) << 2);
+            if end_offset > heap_buf.len() {
+                return None;
+            }
+            let word_bytes = match fill_val {
+                Value::I32(num_val) => (num_val as u32).to_le_bytes(),
+                _ => return None,
+            };
+            let slice = &mut heap_buf[data_base..end_offset];
+            let mut cursor = next_usize;
+            while cursor <= last_usize {
+                let byte_idx = cursor << 2;
+                slice[byte_idx..byte_idx + 4].copy_from_slice(&word_bytes);
+                cursor += step_usize;
+            }
+        }
+        META_F64_8B => {
+            let end_offset = data_base + ((last_usize + 1) << 3);
+            if end_offset > heap_buf.len() {
+                return None;
+            }
+            let float_bytes = match fill_val {
+                Value::F64(float_val) => float_val.to_bits().to_le_bytes(),
+                _ => return None,
+            };
+            let slice = &mut heap_buf[data_base..end_offset];
+            let mut cursor = next_usize;
+            while cursor <= last_usize {
+                let byte_idx = cursor << 3;
+                slice[byte_idx..byte_idx + 8].copy_from_slice(&float_bytes);
+                cursor += step_usize;
+            }
+        }
+        _ => return None,
+    }
+
+    // SAFETY: Caller verified `idx_reg` lies within active frame register window.
+    unsafe {
+        *reg_base.add(idx_reg) = Value::I32(exit_idx as i32);
+    }
+    Some(((count_minus_1 + 1) as u64) * 2)
 }
 
 #[inline(always)]
@@ -2876,6 +3016,56 @@ impl VirtualMachine {
                         break 'call_dispatch (inst.call_target() as u32, 0);
                     }
 
+                    OpCode::TailCallDirect => {
+                        let call_func_id = inst.call_target() as u32;
+                        let call_arg_base = inst.arg_base() as usize;
+                        let call_arg_count = inst.arg_count() as usize;
+                        let span = *self
+                            .func_code
+                            .get(call_func_id as usize)
+                            .ok_or_else(|| function_not_found_error(call_func_id))?;
+                        if !SINGLE_STEP
+                            && !span.is_native
+                            && !span.has_references
+                            && span.trivial_leaf_kind == 0
+                        {
+                            let reg_stack_len = self.register_stack.len();
+                            let caller_frame = self.current_frame_mut_fast()?;
+                            let caller_reg_base = caller_frame.register_base as usize;
+                            let num_regs = (span.num_registers as usize).max(call_arg_count);
+                            if caller_reg_base + num_regs <= reg_stack_len {
+                                match call_arg_count {
+                                    0 => {}
+                                    1 => unsafe {
+                                        *reg_base = *reg_base.add(call_arg_base);
+                                    },
+                                    2 => unsafe {
+                                        let arg0 = *reg_base.add(call_arg_base);
+                                        let arg1 = *reg_base.add(call_arg_base + 1);
+                                        *reg_base = arg0;
+                                        *reg_base.add(1) = arg1;
+                                    },
+                                    _ => unsafe {
+                                        std::ptr::copy(
+                                            reg_base.add(call_arg_base),
+                                            reg_base,
+                                            call_arg_count,
+                                        );
+                                    },
+                                }
+                                caller_frame.function_id = call_func_id;
+                                caller_frame.binary_id = span.binary_id;
+                                caller_frame.register_count = num_regs as u32;
+                                caller_frame.inst_ptr = span.inst_ptr;
+                                caller_frame.active_closure = None;
+                                inst_ptr = span.inst_ptr;
+                                pc = 0;
+                                continue 'dispatch_loop;
+                            }
+                        }
+                        break 'call_dispatch (call_func_id, 0);
+                    }
+
                     OpCode::CallNativeDirect => {
                         let global_func_id = inst.call_target() as u32;
                         let arg_base = inst.arg_base() as usize;
@@ -3303,28 +3493,22 @@ impl VirtualMachine {
                         // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
                         let buf_ptr = self.heap.buffer.as_ptr();
                         let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
-                        if tag_nibble == BlockTag::String as u8
-                            || tag_nibble == BlockTag::Tuple as u8
-                        {
-                            let val =
-                                self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
-                            unsafe {
-                                *reg_base.add(inst.dst() as usize) = val;
-                            }
-                        } else {
-                            let array_len = unsafe {
-                                u32::from_le(std::ptr::read_unaligned(
-                                    buf_ptr.add(arr_offset).cast::<u32>(),
+                        let dst_idx = inst.dst() as usize;
+                        if tag_nibble == BlockTag::ArrayRef as u8 {
+                            let header_qword = unsafe {
+                                u64::from_le(std::ptr::read_unaligned(
+                                    buf_ptr.add(arr_offset).cast::<u64>(),
                                 ))
-                            } as usize;
+                            };
+                            let array_len = (header_qword as u32) as usize;
                             if (index_i64 as u64) >= (array_len as u64) {
                                 return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                             }
                             let index_usize = index_i64 as usize;
-                            let elem_size_raw = unsafe { *buf_ptr.add(arr_offset + 4) };
-                            let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                            let dst_idx = inst.dst() as usize;
-                            if elem_type_tag == 11 && elem_size_raw == 1 {
+                            let meta_masked = ((header_qword >> 32) as u32) & 0xFF00_00FF;
+                            const META_BOOL_1B: u32 = (11 << 24) | 1;
+                            const META_I32_4B: u32 = (3 << 24) | 4;
+                            if meta_masked == META_BOOL_1B {
                                 let elem_offset = arr_offset + 8 + index_usize;
                                 if elem_offset + 1 > heap_len {
                                     return Err(VmTrap::null_reference());
@@ -3333,7 +3517,7 @@ impl VirtualMachine {
                                 unsafe {
                                     *reg_base.add(dst_idx) = Value::Bool(flag);
                                 }
-                            } else if elem_type_tag == 3 && elem_size_raw == 4 {
+                            } else if meta_masked == META_I32_4B {
                                 let elem_offset = arr_offset + 8 + (index_usize << 2);
                                 if elem_offset + 4 > heap_len {
                                     return Err(VmTrap::null_reference());
@@ -3346,44 +3530,55 @@ impl VirtualMachine {
                                 unsafe {
                                     *reg_base.add(dst_idx) = Value::I32(raw as i32);
                                 }
-                            } else if elem_size_raw == 8
-                                && (elem_type_tag >= 13
-                                    || elem_type_tag == 10
-                                    || elem_type_tag == 0)
-                            {
-                                let elem_offset = arr_offset + 8 + (index_usize << 3);
-                                if elem_offset + 8 > heap_len {
-                                    return Err(VmTrap::null_reference());
-                                }
-                                let raw = unsafe {
-                                    u64::from_le(std::ptr::read_unaligned(
-                                        buf_ptr.add(elem_offset).cast::<u64>(),
-                                    ))
-                                };
-                                unsafe {
-                                    if elem_type_tag >= 13 {
-                                        if raw == 0 {
-                                            *reg_base.add(dst_idx) = Value::Null;
+                            } else {
+                                let elem_size_raw = (meta_masked & 0xFF) as u8;
+                                let elem_type_tag = (meta_masked >> 24) as u8;
+                                if elem_size_raw == 8
+                                    && (elem_type_tag >= 13
+                                        || elem_type_tag == 10
+                                        || elem_type_tag == 0)
+                                {
+                                    let elem_offset = arr_offset + 8 + (index_usize << 3);
+                                    if elem_offset + 8 > heap_len {
+                                        return Err(VmTrap::null_reference());
+                                    }
+                                    let raw = unsafe {
+                                        u64::from_le(std::ptr::read_unaligned(
+                                            buf_ptr.add(elem_offset).cast::<u64>(),
+                                        ))
+                                    };
+                                    unsafe {
+                                        if elem_type_tag >= 13 {
+                                            if raw == 0 {
+                                                *reg_base.add(dst_idx) = Value::Null;
+                                            } else {
+                                                *reg_base.add(dst_idx) = Value::Ref(raw as u32);
+                                            }
+                                        } else if elem_type_tag == 10 {
+                                            *reg_base.add(dst_idx) =
+                                                Value::F64(f64::from_bits(raw));
                                         } else {
-                                            *reg_base.add(dst_idx) = Value::Ref(raw as u32);
+                                            *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
                                         }
-                                    } else if elem_type_tag == 10 {
-                                        *reg_base.add(dst_idx) = Value::F64(f64::from_bits(raw));
-                                    } else {
-                                        *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
+                                    }
+                                } else {
+                                    let val = get_array_variant_cold(
+                                        &self.heap,
+                                        arr_offset,
+                                        index_usize,
+                                        elem_size_raw,
+                                        elem_type_tag,
+                                    )?;
+                                    unsafe {
+                                        *reg_base.add(dst_idx) = val;
                                     }
                                 }
-                            } else {
-                                let val = get_array_variant_cold(
-                                    &self.heap,
-                                    arr_offset,
-                                    index_usize,
-                                    elem_size_raw,
-                                    elem_type_tag,
-                                )?;
-                                unsafe {
-                                    *reg_base.add(dst_idx) = val;
-                                }
+                            }
+                        } else {
+                            let val =
+                                self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
+                            unsafe {
+                                *reg_base.add(dst_idx) = val;
                             }
                         }
                     }
@@ -3411,18 +3606,112 @@ impl VirtualMachine {
 
                         // SAFETY: arr_offset >= 8 and arr_offset + 8 <= heap_len verified above.
                         let buf_ptr = self.heap.buffer.as_mut_ptr();
-                        let array_len = unsafe {
-                            u32::from_le(std::ptr::read_unaligned(
-                                buf_ptr.add(arr_offset).cast::<u32>(),
+                        let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
+                        let header_qword = unsafe {
+                            u64::from_le(std::ptr::read_unaligned(
+                                buf_ptr.add(arr_offset).cast::<u64>(),
                             ))
-                        } as usize;
+                        };
+                        let array_len = (header_qword as u32) as usize;
                         if (index_i64 as u64) >= (array_len as u64) {
                             return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
                         }
                         let index_usize = index_i64 as usize;
-                        let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
 
-                        if tag_nibble == BlockTag::Tuple as u8 {
+                        if tag_nibble == BlockTag::ArrayRef as u8 {
+                            let meta_masked = ((header_qword >> 32) as u32) & 0xFF00_00FF;
+                            let val_idx = inst.src2() as usize;
+                            let val_ref = unsafe { &*reg_base.add(val_idx) };
+                            const META_BOOL_1B: u32 = (11 << 24) | 1;
+                            const META_I32_4B: u32 = (3 << 24) | 4;
+                            const META_F64_8B: u32 = (10 << 24) | 8;
+                            if meta_masked == META_BOOL_1B {
+                                let elem_offset = arr_offset + 8 + index_usize;
+                                if elem_offset + 1 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let byte_val = match *val_ref {
+                                    Value::Bool(flag) => u8::from(flag),
+                                    Value::I32(num_val) => num_val as u8,
+                                    _ => to_primitive_u64_cold(val_ref) as u8,
+                                };
+                                unsafe {
+                                    *buf_ptr.add(elem_offset) = byte_val;
+                                }
+                            } else if meta_masked == META_I32_4B {
+                                let elem_offset = arr_offset + 8 + (index_usize << 2);
+                                if elem_offset + 4 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let word_val = match *val_ref {
+                                    Value::I32(num_val) => num_val as u32,
+                                    _ => to_primitive_u64_cold(val_ref) as u32,
+                                };
+                                unsafe {
+                                    std::ptr::write_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u32>(),
+                                        word_val.to_le(),
+                                    );
+                                }
+                            } else if meta_masked == META_F64_8B {
+                                let elem_offset = arr_offset + 8 + (index_usize << 3);
+                                if elem_offset + 8 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                let bits = read_f64_fast(val_ref)?.to_bits();
+                                unsafe {
+                                    std::ptr::write_unaligned(
+                                        buf_ptr.add(elem_offset).cast::<u64>(),
+                                        bits.to_le(),
+                                    );
+                                }
+                            } else {
+                                let elem_size_raw = (meta_masked & 0xFF) as u8;
+                                let elem_type_tag = (meta_masked >> 24) as u8;
+                                if (elem_type_tag == 13 || elem_type_tag >= 0x80)
+                                    && elem_size_raw == 8
+                                    && (inst.flags()
+                                        & solix_common::bytecode::instruction::FLAG_MOVE)
+                                        != 0
+                                {
+                                    let elem_offset = arr_offset + 8 + (index_usize << 3);
+                                    if elem_offset + 8 > heap_len {
+                                        return Err(VmTrap::null_reference());
+                                    }
+                                    let old_child = unsafe {
+                                        u32::from_le(std::ptr::read_unaligned(
+                                            buf_ptr.add(elem_offset).cast::<u32>(),
+                                        ))
+                                    };
+                                    if old_child == 0 {
+                                        let new_val = *val_ref;
+                                        unsafe {
+                                            *reg_base.add(val_idx) = Value::Null;
+                                            std::ptr::write_unaligned(
+                                                buf_ptr.add(elem_offset).cast::<u64>(),
+                                                new_val.to_primitive_u64().to_le(),
+                                            );
+                                        }
+                                    } else if self.execute_set_array_slow(
+                                        arr_offset,
+                                        index_usize,
+                                        inst.src2(),
+                                        inst.flags(),
+                                        pc,
+                                    )? {
+                                        reload_frame!();
+                                    }
+                                } else if self.execute_set_array_slow(
+                                    arr_offset,
+                                    index_usize,
+                                    inst.src2(),
+                                    inst.flags(),
+                                    pc,
+                                )? {
+                                    reload_frame!();
+                                }
+                            }
+                        } else if tag_nibble == BlockTag::Tuple as u8 {
                             let val_idx = inst.src2() as usize;
                             let is_move = (inst.flags()
                                 & solix_common::bytecode::instruction::FLAG_MOVE)
@@ -3438,92 +3727,14 @@ impl VirtualMachine {
                                 caller_frame.pc = pc as u32;
                                 reload_frame!();
                             }
-                        } else {
-                            let elem_size_raw = unsafe { *buf_ptr.add(arr_offset + 4) };
-                            let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-                            let val_idx = inst.src2() as usize;
-                            let val_ref = unsafe { &*reg_base.add(val_idx) };
-                            if elem_type_tag == 11 && elem_size_raw == 1 {
-                                let elem_offset = arr_offset + 8 + index_usize;
-                                if elem_offset + 1 > heap_len {
-                                    return Err(VmTrap::null_reference());
-                                }
-                                let byte_val = match *val_ref {
-                                    Value::Bool(flag) => u8::from(flag),
-                                    Value::I32(num_val) => num_val as u8,
-                                    _ => to_primitive_u64_cold(val_ref) as u8,
-                                };
-                                unsafe {
-                                    *buf_ptr.add(elem_offset) = byte_val;
-                                }
-                            } else if elem_type_tag == 3 && elem_size_raw == 4 {
-                                let elem_offset = arr_offset + 8 + (index_usize << 2);
-                                if elem_offset + 4 > heap_len {
-                                    return Err(VmTrap::null_reference());
-                                }
-                                let word_val = match *val_ref {
-                                    Value::I32(num_val) => num_val as u32,
-                                    _ => to_primitive_u64_cold(val_ref) as u32,
-                                };
-                                unsafe {
-                                    std::ptr::write_unaligned(
-                                        buf_ptr.add(elem_offset).cast::<u32>(),
-                                        word_val.to_le(),
-                                    );
-                                }
-                            } else if elem_type_tag == 10 && elem_size_raw == 8 {
-                                let elem_offset = arr_offset + 8 + (index_usize << 3);
-                                if elem_offset + 8 > heap_len {
-                                    return Err(VmTrap::null_reference());
-                                }
-                                let bits = read_f64_fast(val_ref)?.to_bits();
-                                unsafe {
-                                    std::ptr::write_unaligned(
-                                        buf_ptr.add(elem_offset).cast::<u64>(),
-                                        bits.to_le(),
-                                    );
-                                }
-                            } else if (elem_type_tag == 13 || elem_type_tag >= 0x80)
-                                && elem_size_raw == 8
-                                && (inst.flags() & solix_common::bytecode::instruction::FLAG_MOVE)
-                                    != 0
-                            {
-                                let elem_offset = arr_offset + 8 + (index_usize << 3);
-                                if elem_offset + 8 > heap_len {
-                                    return Err(VmTrap::null_reference());
-                                }
-                                let old_child = unsafe {
-                                    u32::from_le(std::ptr::read_unaligned(
-                                        buf_ptr.add(elem_offset).cast::<u32>(),
-                                    ))
-                                };
-                                if old_child == 0 {
-                                    let new_val = *val_ref;
-                                    unsafe {
-                                        *reg_base.add(val_idx) = Value::Null;
-                                        std::ptr::write_unaligned(
-                                            buf_ptr.add(elem_offset).cast::<u64>(),
-                                            new_val.to_primitive_u64().to_le(),
-                                        );
-                                    }
-                                } else if self.execute_set_array_slow(
-                                    arr_offset,
-                                    index_usize,
-                                    inst.src2(),
-                                    inst.flags(),
-                                    pc,
-                                )? {
-                                    reload_frame!();
-                                }
-                            } else if self.execute_set_array_slow(
-                                arr_offset,
-                                index_usize,
-                                inst.src2(),
-                                inst.flags(),
-                                pc,
-                            )? {
-                                reload_frame!();
-                            }
+                        } else if self.execute_set_array_slow(
+                            arr_offset,
+                            index_usize,
+                            inst.src2(),
+                            inst.flags(),
+                            pc,
+                        )? {
+                            reload_frame!();
                         }
                     }
 
@@ -3816,7 +4027,7 @@ impl VirtualMachine {
                         let step = if (flags & 0x80) == 0 {
                             1
                         } else {
-                            read_i32_fast(unsafe { &*reg_base.add((flags & 0x3F) as usize) })?
+                            read_i32_fast(unsafe { &*reg_base.add((flags & 0x1F) as usize) })?
                         };
                         let next_idx = if let Value::I32(cur) = *idx_slot {
                             cur.wrapping_add(step)
@@ -3835,8 +4046,31 @@ impl VirtualMachine {
                             next_idx <= bound
                         };
                         if keep_going {
-                            let offset = inst.src2() as i16 as i32;
-                            pc = ((pc as i32 - 1) + offset) as usize;
+                            if !SINGLE_STEP && (flags & 0x20) != 0 && pc >= 2 {
+                                let set_inst = unsafe { *inst_ptr.add(pc - 2) };
+                                if set_inst.raw_opcode() == OpCode::SetArray as u8
+                                    && let Some(done_steps) = try_complete_array_fill_loop(
+                                        &mut self.heap.buffer,
+                                        reg_base,
+                                        set_inst,
+                                        inst.dst() as usize,
+                                        next_idx,
+                                        bound,
+                                        step,
+                                        (flags & 0x40) != 0,
+                                    )
+                                {
+                                    if TRACK_METRICS {
+                                        local_inst_count += done_steps;
+                                    }
+                                } else {
+                                    let offset = inst.src2() as i16 as i32;
+                                    pc = ((pc as i32 - 1) + offset) as usize;
+                                }
+                            } else {
+                                let offset = inst.src2() as i16 as i32;
+                                pc = ((pc as i32 - 1) + offset) as usize;
+                            }
                         }
                     }
 
@@ -3870,6 +4104,93 @@ impl VirtualMachine {
                             _ => val_a >= imm_val,
                         };
                         if take_branch {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::MulAddF64 => {
+                        let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                        let acc_ref = unsafe { &*reg_base.add(inst.flags() as usize) };
+                        if let (Value::F64(left_val), Value::F64(right_val), Value::F64(acc_val)) =
+                            (*left_ref, *right_ref, *acc_ref)
+                        {
+                            unsafe {
+                                *reg_base.add(inst.dst() as usize) =
+                                    Value::F64(left_val * right_val + acc_val);
+                            }
+                        } else {
+                            return Err(mul_add_f64_type_mismatch_cold(
+                                left_ref, right_ref, acc_ref,
+                            ));
+                        }
+                    }
+
+                    OpCode::GetArrayJumpIfFalse => {
+                        let arr_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let arr_addr = if let Value::Ref(addr) = *arr_ref
+                            && addr > 0
+                        {
+                            addr
+                        } else {
+                            read_nonnull_ref_slow(arr_ref)?
+                        };
+                        let idx_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let index_i64 = if let Value::I32(num_val) = *idx_ref {
+                            num_val as i64
+                        } else {
+                            read_array_index_slow(idx_ref)?
+                        };
+                        let arr_offset = arr_addr as usize;
+                        let heap_len = self.heap.buffer.len();
+                        if arr_offset < 8 || arr_offset + 8 > heap_len {
+                            return Err(VmTrap::null_reference());
+                        }
+                        let buf_ptr = self.heap.buffer.as_ptr();
+                        let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
+                        let elem_truthy = if tag_nibble == BlockTag::ArrayRef as u8 {
+                            let header_qword = unsafe {
+                                u64::from_le(std::ptr::read_unaligned(
+                                    buf_ptr.add(arr_offset).cast::<u64>(),
+                                ))
+                            };
+                            let array_len = (header_qword as u32) as usize;
+                            if (index_i64 as u64) >= (array_len as u64) {
+                                return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
+                            }
+                            let index_usize = index_i64 as usize;
+                            let meta_masked = ((header_qword >> 32) as u32) & 0xFF00_00FF;
+                            const META_BOOL_1B: u32 = (11 << 24) | 1;
+                            if meta_masked == META_BOOL_1B {
+                                let elem_offset = arr_offset + 8 + index_usize;
+                                if elem_offset + 1 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                unsafe { *buf_ptr.add(elem_offset) != 0 }
+                            } else {
+                                let elem_size_raw = (meta_masked & 0xFF) as u8;
+                                let elem_type_tag = (meta_masked >> 24) as u8;
+                                let val = get_array_variant_cold(
+                                    &self.heap,
+                                    arr_offset,
+                                    index_usize,
+                                    elem_size_raw,
+                                    elem_type_tag,
+                                )?;
+                                read_truthy_fast(&val)
+                            }
+                        } else {
+                            let val =
+                                self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
+                            read_truthy_fast(&val)
+                        };
+                        let take_branch = if inst.flags() == 0 {
+                            !elem_truthy
+                        } else {
+                            elem_truthy
+                        };
+                        if take_branch {
+                            let offset = inst.src2() as i16 as i32;
                             pc = ((pc as i32 - 1) + offset) as usize;
                         }
                     }

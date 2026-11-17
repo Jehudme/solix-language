@@ -1271,3 +1271,179 @@ fn test_negative_cse_invalidates_registers_clobbered_by_call_window() {
     // alpha=4, beta=5 -> prod_one=20, clobber(5, 7) => a=22, b=46, c=68 => 69, prod_two=20 => 109
     assert_eq!(execution_result, Value::I32(109));
 }
+
+#[test]
+fn test_positive_tail_call_direct_and_deep_tail_recursion() {
+    let source_code = r#"
+        int32 sum_tail(int32 remaining, int32 acc) {
+            if (remaining <= 0) {
+                return acc;
+            }
+            return sum_tail(remaining - 1, acc + 1);
+        }
+
+        int32 main() {
+            return sum_tail(5000, 0);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    // Default max stack depth is 1024; 5000 tail calls succeed via frame-reusing TailCallDirect.
+    assert_eq!(execution_result, Value::I32(5000));
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Artifacts must exist");
+    let sum_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("sum_tail"))
+        .expect("sum_tail function must exist");
+    assert!(
+        sum_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::TailCallDirect as u8),
+        "Expected TailCallDirect lowering in sum_tail: {:?}",
+        sum_fn.instructions
+    );
+}
+
+#[test]
+fn test_positive_mul_add_f64_and_get_array_jump_if_false_fusion() {
+    let source_code = r#"
+        float64 norm_sq(float64 alpha, float64 beta) {
+            float64 term_a = alpha * alpha;
+            float64 term_b = beta * beta;
+            return term_a + term_b + 0.5;
+        }
+
+        int32 count_flags(int32 limit) {
+            bool[] flags = new bool[8];
+            flags[0] = true;
+            flags[2] = true;
+            flags[5] = true;
+            int32 total = 0;
+            for (int32 idx = 0; idx < limit; idx = idx + 1) {
+                if (flags[idx]) {
+                    total = total + 10;
+                }
+            }
+            return total;
+        }
+
+        int32 main() {
+            float64 squared = norm_sq(3.0, 4.0);
+            int32 flagged = count_flags(8);
+            return (int32)squared + flagged;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    // 3*3 + 4*4 + 0.5 = 25.5 -> 25 + 30 = 55
+    assert_eq!(execution_result, Value::I32(55));
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Artifacts must exist");
+    let norm_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("norm_sq"))
+        .expect("norm_sq function must exist");
+    assert!(
+        norm_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::MulAddF64 as u8),
+        "Expected MulAddF64 fusion in norm_sq: {:?}",
+        norm_fn.instructions
+    );
+    let count_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("count_flags"))
+        .expect("count_flags function must exist");
+    assert!(
+        count_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::GetArrayJumpIfFalse as u8),
+        "Expected GetArrayJumpIfFalse fusion in count_flags: {:?}",
+        count_fn.instructions
+    );
+}
+
+#[test]
+fn test_positive_array_fill_loop_flag_and_bounds_fallback() {
+    let source_code = r#"
+        int32 fill_sum(int32 limit) {
+            bool[] flags = new bool[16];
+            for (int32 idx = 1; idx < limit; idx = idx + 1) {
+                flags[idx] = true;
+            }
+            for (int32 mult = 4; mult < limit; mult = mult + 2) {
+                flags[mult] = false;
+            }
+            int32 acc = 0;
+            for (int32 check_idx = 0; check_idx < limit; check_idx = check_idx + 1) {
+                if (flags[check_idx]) {
+                    acc = acc + 1;
+                }
+            }
+            return acc;
+        }
+
+        int32 main() {
+            // Indices 1..15 = 15 true minus evens 4,6,8,10,12,14 (6 false) = 9
+            return fill_sum(16);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(9));
+    let artifacts = context
+        .emission_artifacts
+        .as_ref()
+        .expect("Artifacts must exist");
+    let fill_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("fill_sum"))
+        .expect("fill_sum function must exist");
+    assert!(
+        fill_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::ForLoopI32 as u8
+                && (inst.flags() & 0x20) != 0),
+        "Expected FLAG_ARRAY_FILL_LOOP (0x20) on ForLoopI32: {:?}",
+        fill_fn.instructions
+    );
+
+    // Out-of-bounds loop fallback must trap accurately rather than writing past array end.
+    let oob_source = r#"
+        int32 main() {
+            bool[] flags = new bool[4];
+            for (int32 idx = 0; idx < 6; idx = idx + 1) {
+                flags[idx] = true;
+            }
+            return 0;
+        }
+    "#;
+    let compile_opts = CompilationOptions::new().with_source("oob_fill.slx", oob_source);
+    let mut comp = CompilationContext::new(compile_opts);
+    comp.execute().expect("compilation must succeed");
+    let program = comp.emission_artifacts.expect("artifacts").program;
+    let rt = RuntimeContext::new(RuntimeOptions::new().with_binary(program))
+        .expect("runtime context must build");
+    let mut vm = VirtualMachine::new(rt);
+    let err = vm
+        .run()
+        .expect_err("out-of-bounds array fill loop must trap cleanly");
+    assert!(
+        matches!(err, solix_runtime::RuntimeError::IndexOutOfBounds { .. }),
+        "expected IndexOutOfBounds, got {err:?}"
+    );
+}

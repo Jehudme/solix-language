@@ -200,6 +200,7 @@ fn decode_branch_target(
     } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode)
         || raw_opcode == OpCode::ForLoopI32 as u8
         || raw_opcode == OpCode::JumpIfI32Imm as u8
+        || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
     {
         let target_pc = (pc_index as i32) + (instruction.src2() as i16 as i32);
         if target_pc >= 0 && (target_pc as usize) <= inst_count {
@@ -220,6 +221,7 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::AllocObject as u8
         || raw == OpCode::AllocObjectExtern as u8
         || raw == OpCode::GetField as u8
@@ -241,6 +243,7 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     }
 
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -276,13 +279,16 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
     }
     if raw == OpCode::ForLoopI32 as u8 {
         let reads_step =
-            (instruction.flags() & 0x80) != 0 && (instruction.flags() & 0x3F) as u16 == target_reg;
+            (instruction.flags() & 0x80) != 0 && (instruction.flags() & 0x1F) as u16 == target_reg;
         return instruction.dst() == target_reg || instruction.src1() == target_reg || reads_step;
     }
-    if raw == OpCode::AddBandI32 as u8 {
+    if raw == OpCode::AddBandI32 as u8 || raw == OpCode::MulAddF64 as u8 {
         return (instruction.flags() as u16) == target_reg
             || instruction.src1() == target_reg
             || instruction.src2() == target_reg;
+    }
+    if raw == OpCode::GetArrayJumpIfFalse as u8 {
+        return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
     if raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
@@ -346,6 +352,7 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
         return instruction.cond_reg() == target_reg;
     }
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -421,6 +428,7 @@ fn is_reg_read_before_write_from(
                 || (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
                 || raw == OpCode::ForLoopI32 as u8
                 || raw == OpCode::JumpIfI32Imm as u8
+                || raw == OpCode::GetArrayJumpIfFalse as u8
             {
                 if let Some(target_pc) = jump_targets[cur] {
                     worklist.push(target_pc);
@@ -446,6 +454,7 @@ fn rewrite_any_write_dst(instruction: &Instruction, new_dst: u16) -> Option<Inst
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::GetField as u8
         || raw == OpCode::GetArray as u8
         || raw == OpCode::GetTuple as u8
@@ -463,6 +472,7 @@ fn rewrite_any_write_dst(instruction: &Instruction, new_dst: u16) -> Option<Inst
     }
 
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -1244,6 +1254,7 @@ fn instruction_can_write_reference(raw: u8) -> bool {
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || raw == OpCode::Instanceof as u8
@@ -1304,6 +1315,7 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
                         .contains(&forward_raw)
                     || forward_raw == OpCode::ForLoopI32 as u8
                     || forward_raw == OpCode::JumpIfI32Imm as u8
+                    || forward_raw == OpCode::GetArrayJumpIfFalse as u8
                 {
                     let Some(target_pc) =
                         decode_branch_target(&forward_inst, forward_index, instruction_count)
@@ -1320,6 +1332,7 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
 
                 // Prohibit calls, heap mutations, or escapes that could alias or release the source.
                 if forward_raw == OpCode::CallDirect as u8
+                    || forward_raw == OpCode::TailCallDirect as u8
                     || forward_raw == OpCode::CallVirtual as u8
                     || forward_raw == OpCode::CallInterface as u8
                     || forward_raw == OpCode::CallCallable as u8

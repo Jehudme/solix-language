@@ -22,6 +22,7 @@ pub fn disassemble_instruction(
 
     match opcode {
         OpCode::CallDirect
+        | OpCode::TailCallDirect
         | OpCode::CallVirtual
         | OpCode::CallInterface
         | OpCode::CallSymbol
@@ -88,7 +89,8 @@ pub fn disassemble_instruction(
         | OpCode::JumpIfGteI32
         | OpCode::JumpIfEqI32
         | OpCode::JumpIfNeqI32
-        | OpCode::ForLoopI32 => {
+        | OpCode::ForLoopI32
+        | OpCode::GetArrayJumpIfFalse => {
             let offset = instruction.src2() as i16 as i32;
             let target_pc = pc as i32 + offset;
             format!(
@@ -110,7 +112,7 @@ pub fn disassemble_instruction(
             )
         }
 
-        OpCode::AddBandI32 => {
+        OpCode::AddBandI32 | OpCode::MulAddF64 => {
             format!(
                 "{pc:04}  {:<16} r{}, r{}, r{}, r{}",
                 opcode.mnemonic(),

@@ -79,6 +79,17 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             propagate_entry_constants(compiled_function, true);
         }
 
+        let func_has_refs: Vec<bool> = emission_artifacts
+            .program
+            .functions
+            .iter()
+            .map(|func| !func.reference_registers.is_empty())
+            .collect();
+        for compiled_function in &mut emission_artifacts.program.functions {
+            mark_array_fill_loops(compiled_function);
+            lower_tail_calls(compiled_function, &func_has_refs);
+        }
+
         // Keep functions_by_source synchronized with optimized functions
         for source_functions in &mut emission_artifacts.functions_by_source {
             for function in source_functions {
@@ -307,6 +318,7 @@ fn is_guaranteed_non_heap_write(inst: Instruction, immortal_arrays: &HashSet<u16
             | OpCode::ModI32Imm
             | OpCode::ForLoopI32
             | OpCode::AddBandI32
+            | OpCode::MulAddF64
     ) || (opc == OpCode::PackClosure && inst.arg_count() == 0)
         || (opc == OpCode::GetArray && immortal_arrays.contains(&inst.src1()))
 }
@@ -1683,6 +1695,7 @@ fn is_pure_leaf_arith_inst(inst: Instruction, param_count: u16) -> bool {
             | OpCode::SubI32Imm
             | OpCode::MulI32Imm
             | OpCode::AddBandI32
+            | OpCode::MulAddF64
             | OpCode::ConvIToF
             | OpCode::ConvFToI
     )
@@ -1725,9 +1738,11 @@ fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> 
             inst.src2(),
         );
     }
-    if raw == OpCode::AddBandI32 as u8 {
+    if (raw == OpCode::AddBandI32 as u8 || raw == OpCode::MulAddF64 as u8)
+        && let Some(opcode) = OpCode::from_raw_u8(raw)
+    {
         return Instruction::format_a(
-            OpCode::AddBandI32,
+            opcode,
             remap_reg(inst.flags() as u16) as u8,
             remap_reg(inst.dst()),
             remap_reg(inst.src1()),
@@ -1818,7 +1833,9 @@ fn inline_leaf_functions(
                     is_pure_leaf_arith_inst(*inst, candidate.param_count)
                 })
                 && candidate.instructions.iter().all(|inst| {
-                    inst.raw_opcode() != OpCode::AddBandI32 as u8 || candidate.num_registers <= 200
+                    (inst.raw_opcode() != OpCode::AddBandI32 as u8
+                        && inst.raw_opcode() != OpCode::MulAddF64 as u8)
+                        || candidate.num_registers <= 200
                 });
             if body_ok {
                 leaf_kinds[func_idx] = LeafKind::PureArith;
@@ -1872,11 +1889,10 @@ fn inline_leaf_functions(
             if leaf_kind != LeafKind::None && arg_count == all_functions[target_idx].param_count {
                 let callee = &all_functions[target_idx];
                 let scratch_needed = callee.num_registers.saturating_sub(arg_count);
-                let limit_regs = if callee
-                    .instructions
-                    .iter()
-                    .any(|ci| ci.raw_opcode() == OpCode::AddBandI32 as u8)
-                {
+                let limit_regs = if callee.instructions.iter().any(|callee_inst| {
+                    let raw = callee_inst.raw_opcode();
+                    raw == OpCode::AddBandI32 as u8 || raw == OpCode::MulAddF64 as u8
+                }) {
                     255usize
                 } else {
                     u16::MAX as usize
@@ -2491,6 +2507,120 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                 }
 
                 // ---------------------------------------------------------
+                // Pattern 2b-2: MulF64 + AddF64 Fusion -> MulAddF64
+                // ---------------------------------------------------------
+                if allow_imm_branch_fusion
+                    && !next_is_critical
+                    && current_raw == OpCode::MulF64 as u8
+                    && next_raw == OpCode::AddF64 as u8
+                {
+                    let r_tmp = current_entry.instruction.dst();
+                    let mul_a = current_entry.instruction.src1();
+                    let mul_b = current_entry.instruction.src2();
+                    let add_dst = next_entry.instruction.dst();
+                    let add_a = next_entry.instruction.src1();
+                    let add_b = next_entry.instruction.src2();
+
+                    let acc_reg_opt = if add_a == r_tmp && add_b != r_tmp {
+                        Some(add_b)
+                    } else if add_b == r_tmp && add_a != r_tmp {
+                        Some(add_a)
+                    } else {
+                        None
+                    };
+
+                    if r_tmp != mul_a
+                        && r_tmp != mul_b
+                        && let Some(r_acc) = acc_reg_opt
+                        && r_acc <= 255
+                        && (r_tmp == add_dst
+                            || is_dead_after_use(
+                                &stream,
+                                cursor + 1,
+                                r_tmp,
+                                function,
+                                &old_pc_to_stream_idx,
+                                &stream_critical,
+                            ))
+                    {
+                        let mut merged_pcs = {
+                            let mut combined_pcs = std::mem::take(&mut pending_orphaned_pcs);
+                            combined_pcs.extend_from_slice(&current_entry.covered_original_pcs);
+                            combined_pcs
+                        };
+                        merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                        next_stream.push(IntermediateInstruction {
+                            instruction: Instruction::format_a(
+                                OpCode::MulAddF64,
+                                r_acc as u8,
+                                add_dst,
+                                mul_a,
+                                mul_b,
+                            ),
+                            original_pc: current_entry.original_pc,
+                            covered_original_pcs: merged_pcs,
+                            jump_target_old_pc: None,
+                        });
+
+                        changed = true;
+                        cursor += 2;
+                        continue;
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // Pattern 2b-3: GetArray + JumpIfFalse/JumpIfTrue -> GetArrayJumpIfFalse
+                // ---------------------------------------------------------
+                if allow_imm_branch_fusion
+                    && !next_is_critical
+                    && current_raw == OpCode::GetArray as u8
+                    && (next_raw == OpCode::JumpIfFalse as u8
+                        || next_raw == OpCode::JumpIfTrue as u8)
+                {
+                    let cond_reg = current_entry.instruction.dst();
+                    let arr_reg = current_entry.instruction.src1();
+                    let idx_reg = current_entry.instruction.src2();
+                    if next_entry.instruction.cond_reg() == cond_reg
+                        && arr_reg != cond_reg
+                        && idx_reg != cond_reg
+                        && is_dead_after_use(
+                            &stream,
+                            cursor + 1,
+                            cond_reg,
+                            function,
+                            &old_pc_to_stream_idx,
+                            &stream_critical,
+                        )
+                    {
+                        let cond_flag = u8::from(next_raw == OpCode::JumpIfTrue as u8);
+                        let mut merged_pcs = {
+                            let mut combined_pcs = std::mem::take(&mut pending_orphaned_pcs);
+                            combined_pcs.extend_from_slice(&current_entry.covered_original_pcs);
+                            combined_pcs
+                        };
+                        merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+
+                        next_stream.push(IntermediateInstruction {
+                            instruction: Instruction::format_a(
+                                OpCode::GetArrayJumpIfFalse,
+                                cond_flag,
+                                arr_reg,
+                                idx_reg,
+                                0,
+                            ),
+                            original_pc: current_entry.original_pc,
+                            covered_original_pcs: merged_pcs,
+                            jump_target_old_pc: next_entry.jump_target_old_pc,
+                        });
+
+                        changed = true;
+                        cursor += 2;
+                        continue;
+                    }
+                }
+
+                // ---------------------------------------------------------
                 // Pattern 2c: AddI32Imm(+1) / AddI32(step) + JumpIfLtI32/JumpIfLteI32 -> ForLoopI32
                 // ---------------------------------------------------------
                 if !next_is_critical
@@ -2516,9 +2646,9 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                         {
                             let s1 = current_entry.instruction.src1();
                             let s2 = current_entry.instruction.src2();
-                            if s1 == r_idx && s2 < 64 && s2 != r_idx {
+                            if s1 == r_idx && s2 < 32 && s2 != r_idx {
                                 Some(0x80 | is_lte | (s2 as u8))
-                            } else if s2 == r_idx && s1 < 64 && s1 != r_idx {
+                            } else if s2 == r_idx && s1 < 32 && s1 != r_idx {
                                 Some(0x80 | is_lte | (s1 as u8))
                             } else {
                                 None
@@ -3105,7 +3235,9 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
 /// Inverts a loop-exit conditional guard into a bottom-tested loop continuation guard.
 fn invert_loop_guard(instruction: Instruction, back_offset: i32) -> Option<Instruction> {
     let raw = instruction.raw_opcode();
-    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+        || raw == OpCode::GetArrayJumpIfFalse as u8
+    {
         let offset_i16 = i16::try_from(back_offset).ok()?;
         let inverted = match raw {
             val if val == OpCode::JumpIfLtI32 as u8 => OpCode::JumpIfGteI32,
@@ -3376,6 +3508,7 @@ fn decode_jump_target(
     } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode)
         || raw_opcode == OpCode::ForLoopI32 as u8
         || raw_opcode == OpCode::JumpIfI32Imm as u8
+        || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
     {
         let target_pc = (pc_index as i32) + (instruction.src2() as i16 as i32);
         if target_pc >= 0 && (target_pc as usize) <= inst_count {
@@ -3397,6 +3530,7 @@ fn relocate_jump_instruction(
     if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode)
         || raw_opcode == OpCode::ForLoopI32 as u8
         || raw_opcode == OpCode::JumpIfI32Imm as u8
+        || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
     {
         if let Some(opcode) = OpCode::from_raw_u8(raw_opcode) {
             return Instruction::format_a(
@@ -3437,6 +3571,7 @@ fn opcode_writes_only_non_reference(raw: u8) -> bool {
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || raw == OpCode::Instanceof as u8
@@ -3957,6 +4092,7 @@ fn is_conditional_branch(raw: u8) -> bool {
         || (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::JumpIfI32Imm as u8
+        || raw == OpCode::GetArrayJumpIfFalse as u8
 }
 
 fn can_instruction_throw(raw: u8) -> bool {
@@ -3985,6 +4121,7 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::AllocObject as u8
         || raw == OpCode::AllocObjectExtern as u8
         || raw == OpCode::GetField as u8
@@ -4006,6 +4143,7 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     }
 
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -4034,6 +4172,7 @@ fn instruction_writes_register(instruction: &Instruction, target_reg: u16) -> bo
 fn can_rewrite_read_register(instruction: &Instruction, target_reg: u16) -> bool {
     let raw = instruction.raw_opcode();
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallNativeDirect as u8
@@ -4055,6 +4194,7 @@ fn can_rewrite_read_register(instruction: &Instruction, target_reg: u16) -> bool
         || raw == OpCode::UnpackCaptures as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
     {
         return false;
     }
@@ -4085,7 +4225,9 @@ fn rewrite_instruction_read_register(
         ));
     }
 
-    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+        || raw == OpCode::GetArrayJumpIfFalse as u8
+    {
         let new_dst = if instruction.dst() == from_reg {
             to_reg
         } else {
@@ -4385,6 +4527,7 @@ fn collect_critical_targets(function: &CompiledFunction) -> HashSet<usize> {
         } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode)
             || raw_opcode == OpCode::ForLoopI32 as u8
             || raw_opcode == OpCode::JumpIfI32Imm as u8
+            || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
         {
             let offset = instruction.src2() as i16 as i32;
             let target_pc = (pc_index as i32) + offset;
@@ -4418,6 +4561,7 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || (OpCode::LoadI32 as u8..=OpCode::LoadConst as u8).contains(&raw);
@@ -4433,6 +4577,7 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
         || raw == OpCode::AddBandI32 as u8
+        || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || raw == OpCode::GetField as u8
@@ -4471,6 +4616,7 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
 
     // Format Call instructions that write to call_dst
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -4494,6 +4640,7 @@ fn rewrite_instruction_destination(instruction: &Instruction, new_dst: u16) -> I
 
     // Format Call
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -4541,7 +4688,9 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     let raw = instruction.raw_opcode();
 
     // Format A: compare-and-jump instructions read dst and src1
-    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+        || raw == OpCode::GetArrayJumpIfFalse as u8
+    {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
 
@@ -4551,14 +4700,18 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
 
     if raw == OpCode::ForLoopI32 as u8 {
         let reads_step =
-            (instruction.flags() & 0x80) != 0 && (instruction.flags() & 0x3F) as u16 == target_reg;
+            (instruction.flags() & 0x80) != 0 && (instruction.flags() & 0x1F) as u16 == target_reg;
         return instruction.dst() == target_reg || instruction.src1() == target_reg || reads_step;
     }
 
-    if raw == OpCode::AddBandI32 as u8 {
+    if raw == OpCode::AddBandI32 as u8 || raw == OpCode::MulAddF64 as u8 {
         return (instruction.flags() as u16) == target_reg
             || instruction.src1() == target_reg
             || instruction.src2() == target_reg;
+    }
+
+    if raw == OpCode::GetArrayJumpIfFalse as u8 {
+        return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
 
     // Format A: superinstructions AddI32Imm, SubI32Imm, MulI32Imm, and ModI32Imm read src1
@@ -4639,6 +4792,7 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
 
     // Format Call: windowed argument registers (plus call_target for CallCallable)
     if raw == OpCode::CallDirect as u8
+        || raw == OpCode::TailCallDirect as u8
         || raw == OpCode::CallVirtual as u8
         || raw == OpCode::CallInterface as u8
         || raw == OpCode::CallCallable as u8
@@ -4656,4 +4810,83 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     }
 
     false
+}
+
+/// Lowers tail-position `CallDirect` + `ReturnValue` pairs into frame-reusing `TailCallDirect`
+/// when the caller holds no owning ARC registers or exception handlers and the callee has no ARC cleanup.
+fn lower_tail_calls(function: &mut CompiledFunction, func_has_refs: &[bool]) {
+    if !function.reference_registers.is_empty()
+        || !function.exception_handlers.is_empty()
+        || function.instructions.len() < 2
+    {
+        return;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let last_idx = function.instructions.len() - 1;
+    for pc_idx in 0..last_idx {
+        let inst = function.instructions[pc_idx];
+        let next_inst = function.instructions[pc_idx + 1];
+        if inst.raw_opcode() == OpCode::CallDirect as u8
+            && next_inst.raw_opcode() == OpCode::ReturnValue as u8
+            && next_inst.dst() == inst.call_dst()
+            && !critical_targets.contains(&(pc_idx + 1))
+        {
+            let target_id = inst.call_target() as usize;
+            let callee_has_refs = func_has_refs.get(target_id).copied().unwrap_or(true);
+            if !callee_has_refs {
+                function.instructions[pc_idx] = Instruction::format_call(
+                    OpCode::TailCallDirect,
+                    inst.call_dst(),
+                    inst.call_target(),
+                    inst.arg_base(),
+                    inst.arg_count(),
+                );
+            }
+        }
+    }
+}
+
+/// Flags tight 2-instruction `SetArray` + `ForLoopI32(offset = -1)` primitive fill/strided loops
+/// with bit `0x20` on `ForLoopI32` for batch native slice execution at runtime.
+fn mark_array_fill_loops(function: &mut CompiledFunction) {
+    if function.instructions.len() < 2 {
+        return;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    for pc_idx in 1..function.instructions.len() {
+        if critical_targets.contains(&pc_idx) {
+            continue;
+        }
+        let for_inst = function.instructions[pc_idx];
+        if for_inst.raw_opcode() != OpCode::ForLoopI32 as u8 {
+            continue;
+        }
+        if (for_inst.src2() as i16) != -1 {
+            continue;
+        }
+        let prev = function.instructions[pc_idx - 1];
+        if prev.raw_opcode() != OpCode::SetArray as u8 {
+            continue;
+        }
+        let idx_reg = for_inst.dst();
+        let bound_reg = for_inst.src1();
+        let flags = for_inst.flags();
+        let step_aliases_idx = (flags & 0x80) != 0 && (flags & 0x1F) as u16 == idx_reg;
+        if prev.src1() == idx_reg
+            && prev.dst() != idx_reg
+            && prev.src2() != idx_reg
+            && idx_reg != bound_reg
+            && !step_aliases_idx
+        {
+            function.instructions[pc_idx] = Instruction::format_a(
+                OpCode::ForLoopI32,
+                flags | 0x20,
+                idx_reg,
+                bound_reg,
+                for_inst.src2(),
+            );
+        }
+    }
 }

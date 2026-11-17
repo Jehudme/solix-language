@@ -351,6 +351,7 @@ impl RuntimeContext {
                     for inst in &mut relocated_func.instructions {
                         if func_offset > 0
                             && (inst.raw_opcode() == OpCode::CallDirect as u8
+                                || inst.raw_opcode() == OpCode::TailCallDirect as u8
                                 || inst.raw_opcode() == OpCode::PackClosure as u8)
                         {
                             let old_target = inst.call_target();
@@ -1237,6 +1238,7 @@ fn needs_sentinel_return(func: &CompiledFunction) -> bool {
         } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
             || raw == OpCode::ForLoopI32 as u8
             || raw == OpCode::JumpIfI32Imm as u8
+            || raw == OpCode::GetArrayJumpIfFalse as u8
         {
             Some((pc_idx as i32) + (inst.src2() as i16 as i32))
         } else {

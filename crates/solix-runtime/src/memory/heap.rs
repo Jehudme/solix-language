@@ -65,7 +65,7 @@ pub struct VirtualHeap {
 }
 
 /// Initial heap buffer allocation committed upfront before growing on demand up to `dynamic_capacity`.
-const INITIAL_DYNAMIC_COMMIT: usize = 256 * 1024;
+const INITIAL_DYNAMIC_COMMIT: usize = 32 * 1024;
 
 impl VirtualHeap {
     /// Creates a new virtual heap with the specified static slot count and dynamic capacity.

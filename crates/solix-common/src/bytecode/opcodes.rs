@@ -145,6 +145,9 @@ pub enum OpCode {
     ForLoopI32 = 0xDA,
     AddBandI32 = 0xDB,
     JumpIfI32Imm = 0xDC,
+    TailCallDirect = 0xDD,
+    MulAddF64 = 0xDE,
+    GetArrayJumpIfFalse = 0xDF,
 }
 
 impl OpCode {
@@ -275,6 +278,9 @@ impl OpCode {
             0xDA => Some(Self::ForLoopI32),
             0xDB => Some(Self::AddBandI32),
             0xDC => Some(Self::JumpIfI32Imm),
+            0xDD => Some(Self::TailCallDirect),
+            0xDE => Some(Self::MulAddF64),
+            0xDF => Some(Self::GetArrayJumpIfFalse),
 
             _ => None,
         }
@@ -421,6 +427,9 @@ impl OpCode {
             Self::ForLoopI32 => "FOR_LOOP_I32",
             Self::AddBandI32 => "ADD_BAND_I32",
             Self::JumpIfI32Imm => "JUMP_IF_I32_IMM",
+            Self::TailCallDirect => "TAIL_CALL_DIRECT",
+            Self::MulAddF64 => "MUL_ADD_F64",
+            Self::GetArrayJumpIfFalse => "GET_ARRAY_JMP_FALSE",
         }
     }
 }
@@ -454,10 +463,10 @@ mod tests {
             assert_eq!(OpCode::from_u8(raw_byte, 0).ok(), decoded);
         }
 
-        let extra_bytes: [u8; 30] = [
+        let extra_bytes: [u8; 33] = [
             0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x90, 0x91, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xB0,
             0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB,
-            0xDC, 0x00,
+            0xDC, 0xDD, 0xDE, 0xDF, 0x00,
         ];
         for raw_byte in extra_bytes {
             let decoded = OpCode::from_raw_u8(raw_byte);

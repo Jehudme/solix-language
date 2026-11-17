@@ -251,6 +251,7 @@ impl fmt::Display for Instruction {
         match OpCode::from_u8(raw_op, 0) {
             Ok(opcode) => match opcode {
                 OpCode::CallDirect
+                | OpCode::TailCallDirect
                 | OpCode::CallVirtual
                 | OpCode::CallInterface
                 | OpCode::CallSymbol
@@ -306,7 +307,7 @@ impl fmt::Display for Instruction {
                         self.imm32()
                     )
                 }
-                OpCode::AddBandI32 => {
+                OpCode::AddBandI32 | OpCode::MulAddF64 => {
                     write!(
                         f,
                         "{:<14} r{}, r{}, r{}, r{}",

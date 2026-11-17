@@ -205,6 +205,7 @@ fn verify_instruction(
 
         // Windowed Function Invocations
         OpCode::CallDirect
+        | OpCode::TailCallDirect
         | OpCode::CallVirtual
         | OpCode::CallInterface
         | OpCode::CallSymbol
@@ -351,18 +352,25 @@ fn verify_instruction(
             check_reg(instruction.src1(), "src1")?;
         }
 
-        OpCode::AddBandI32 => {
+        OpCode::AddBandI32 | OpCode::MulAddF64 => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.flags() as u16, "acc_reg")?;
             check_reg(instruction.src1(), "val_reg")?;
-            check_reg(instruction.src2(), "mask_reg")?;
+            check_reg(instruction.src2(), "src2_reg")?;
+        }
+
+        OpCode::GetArrayJumpIfFalse => {
+            check_reg(instruction.dst(), "arr_reg")?;
+            check_reg(instruction.src1(), "idx_reg")?;
+            let offset = instruction.src2() as i16 as i32;
+            check_branch_target(offset)?;
         }
 
         OpCode::ForLoopI32 => {
             check_reg(instruction.dst(), "idx_reg")?;
             check_reg(instruction.src1(), "bound_reg")?;
             if (instruction.flags() & 0x80) != 0 {
-                let step_reg = (instruction.flags() & 0x3F) as u16;
+                let step_reg = (instruction.flags() & 0x1F) as u16;
                 check_reg(step_reg, "step_reg")?;
             }
             let offset = instruction.src2() as i16 as i32;
