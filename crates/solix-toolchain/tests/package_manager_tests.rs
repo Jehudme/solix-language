@@ -563,6 +563,24 @@ fn test_bundled_default_packages_bootstrap_and_manual_install() {
     let registry_file = package_store_directory.join("registry.json");
     assert!(registry_file.exists(), "registry.json must be created");
 
+    let registry =
+        solix_toolchain::registry::PackageRegistry::load_or_sync(&package_store_directory)
+            .expect("load registry");
+    assert!(
+        registry
+            .packages
+            .iter()
+            .any(|record| record.name == "solix"),
+        "Bundled 'solix' library must be installed"
+    );
+    assert!(
+        registry
+            .packages
+            .iter()
+            .any(|record| record.name == "raylib"),
+        "Bundled 'raylib' library must be installed"
+    );
+
     let marker_file = package_store_directory.join(format!(
         ".bundled_bootstrapped_v{}",
         env!("CARGO_PKG_VERSION")
@@ -606,11 +624,254 @@ fn test_install_vscode_flag_parsing_and_resolution() {
     let resolved_vsix = solix_toolchain::assets::resolve_bundled_vscode_extension_path();
     assert!(
         resolved_vsix.is_some(),
-        "Must discover staged or workspace .vsix extension file"
+        "Must discover staged or embedded .vsix extension file"
     );
-    let extension_path = resolved_vsix.unwrap();
+    let extension_path = resolved_vsix.expect("resolved vsix path");
     assert!(
         extension_path.is_file(),
         "Resolved extension must be an existing file"
+    );
+}
+
+fn create_isolated_solix_command(
+    solix_home: &std::path::Path,
+    working_dir: &std::path::Path,
+    empty_path_dir: &std::path::Path,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_solix"));
+    command
+        .current_dir(working_dir)
+        .env("SOLIX_HOME", solix_home)
+        .env("PATH", empty_path_dir)
+        .env_remove("SOLIX_PKG_DIR")
+        .env_remove("SOLIX_CACHE_DIR")
+        .env_remove("SOLIX_BUNDLED_PACKAGES_DIR")
+        .env_remove("SOLIX_VSCODE_VSIX_PATH")
+        .env_remove("SOLIX_NO_AUTO_BOOTSTRAP")
+        .env_remove("SOLIX_FORCE_AUTO_BOOTSTRAP")
+        .env_remove("SOLIX_FORCE_EMBEDDED_ASSETS");
+    command
+}
+
+#[test]
+fn test_standalone_embedded_list_and_install_bundled_without_disk_assets() {
+    assert!(
+        solix_toolchain::assets::has_embedded_bundled_packages(),
+        "solix binary must embed default .slxarc packages when assets/packages is populated"
+    );
+
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("empty_cwd");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+
+    // 1. Fresh install: 'solix list --json' in an empty cwd must auto-bootstrap from embedded assets
+    let mut list_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    list_cmd
+        .args(["list", "--json"])
+        .env("SOLIX_FORCE_EMBEDDED_ASSETS", "1");
+    let list_output = list_cmd.output().expect("execute solix list --json");
+    assert!(
+        list_output.status.success(),
+        "solix list failed: stderr={}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+
+    let parsed_list: serde_json::Value =
+        serde_json::from_slice(&list_output.stdout).expect("parse list JSON");
+    let packages_array = parsed_list.as_array().expect("list JSON array");
+    assert!(
+        packages_array
+            .iter()
+            .any(|item| item["name"].as_str() == Some("solix")),
+        "Fresh 'solix list' must auto-install bundled 'solix' package; got: {parsed_list}"
+    );
+    assert!(
+        packages_array
+            .iter()
+            .any(|item| item["name"].as_str() == Some("raylib")),
+        "Fresh 'solix list' must auto-install bundled 'raylib' package; got: {parsed_list}"
+    );
+
+    let materialized_manifest = solix_home
+        .join("cache")
+        .join("bundled_packages")
+        .join("bundled_manifest.json");
+    assert!(
+        materialized_manifest.is_file(),
+        "Embedded bundled_manifest.json must be materialized into cache"
+    );
+
+    // 2. 'solix install --bundled --force' must succeed using embedded archives
+    let mut force_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    force_cmd
+        .args(["install", "--bundled", "--force"])
+        .env("SOLIX_FORCE_EMBEDDED_ASSETS", "1");
+    let force_output = force_cmd
+        .output()
+        .expect("execute solix install --bundled --force");
+    assert!(
+        force_output.status.success(),
+        "solix install --bundled --force failed: stderr={}",
+        String::from_utf8_lossy(&force_output.stderr)
+    );
+    let force_stdout = String::from_utf8_lossy(&force_output.stdout);
+    assert!(
+        !force_stdout.contains("Installed 0 bundled"),
+        "solix install --bundled --force must install embedded packages, got: {force_stdout}"
+    );
+}
+
+#[test]
+fn test_standalone_embedded_vscode_extension_materialization() {
+    assert!(
+        solix_toolchain::assets::has_embedded_vscode_extension(),
+        "solix binary must embed solix-language.vsix"
+    );
+
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("empty_cwd");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+
+    let mut vscode_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    vscode_cmd
+        .args(["install", "--vscode"])
+        .env("SOLIX_FORCE_EMBEDDED_ASSETS", "1");
+    let vscode_output = vscode_cmd.output().expect("execute solix install --vscode");
+    assert!(
+        vscode_output.status.success(),
+        "solix install --vscode failed: stderr={}",
+        String::from_utf8_lossy(&vscode_output.stderr)
+    );
+
+    let materialized_vsix = solix_home
+        .join("cache")
+        .join("vscode")
+        .join("solix-language.vsix");
+    assert!(
+        materialized_vsix.is_file(),
+        "Embedded solix-language.vsix must materialize into cache at '{}'",
+        materialized_vsix.display()
+    );
+    assert!(
+        fs::metadata(&materialized_vsix)
+            .expect("vsix metadata")
+            .len()
+            > 1024,
+        "Materialized .vsix must contain extension payload bytes"
+    );
+
+    let vscode_stdout = String::from_utf8_lossy(&vscode_output.stdout);
+    let expected_path_str = materialized_vsix.to_string_lossy();
+    assert!(
+        vscode_stdout.contains(expected_path_str.as_ref()),
+        "Expected stdout to report materialized extension path '{expected_path_str}', got:\n{vscode_stdout}"
+    );
+}
+
+#[test]
+fn test_auto_bootstrap_does_not_poison_marker_when_bundled_source_is_empty() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("empty_cwd");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    let empty_bundled_dir = workspace.root_path().join("empty_bundled");
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+    fs::create_dir_all(&empty_bundled_dir).expect("create empty bundled dir");
+
+    // 1. Auto-bootstrap against an empty bundled source must not create the bootstrap marker
+    let mut empty_list_cmd =
+        create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    empty_list_cmd
+        .args(["list", "--json"])
+        .env("SOLIX_BUNDLED_PACKAGES_DIR", &empty_bundled_dir);
+    let empty_list_output = empty_list_cmd.output().expect("execute solix list");
+    assert!(
+        empty_list_output.status.success(),
+        "solix list failed cleanly check: stderr={}",
+        String::from_utf8_lossy(&empty_list_output.stderr)
+    );
+    let marker_file = solix_home.join("packages").join(format!(
+        ".bundled_bootstrapped_v{}",
+        env!("CARGO_PKG_VERSION")
+    ));
+    assert!(
+        !marker_file.exists(),
+        "Empty bundled source must not write permanent .bundled_bootstrapped marker"
+    );
+
+    // 2. Subsequent run without empty override must still auto-bootstrap embedded packages
+    let mut recovery_cmd =
+        create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    recovery_cmd
+        .args(["list", "--json"])
+        .env("SOLIX_FORCE_EMBEDDED_ASSETS", "1");
+    let recovery_output = recovery_cmd
+        .output()
+        .expect("execute solix list after empty run");
+    assert!(recovery_output.status.success());
+    let parsed_list: serde_json::Value =
+        serde_json::from_slice(&recovery_output.stdout).expect("parse list JSON");
+    assert!(
+        !parsed_list.as_array().expect("JSON array").is_empty(),
+        "Expected auto-bootstrap recovery once embedded packages are available"
+    );
+    assert!(
+        marker_file.exists(),
+        "Marker file must be created once bundled packages are installed"
+    );
+
+    // 3. Explicit --bundled --force against an empty directory must fail loudly
+    let mut force_empty_cmd =
+        create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    force_empty_cmd
+        .args(["install", "--bundled", "--force"])
+        .env("SOLIX_BUNDLED_PACKAGES_DIR", &empty_bundled_dir);
+    let force_empty_output = force_empty_cmd
+        .output()
+        .expect("execute solix install --bundled --force against empty dir");
+    assert!(
+        !force_empty_output.status.success(),
+        "install --bundled --force must fail when no .slxarc archives exist"
+    );
+}
+
+#[test]
+fn test_custom_pkg_dir_list_remains_empty_without_auto_bootstrapping() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("empty_cwd");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    let custom_pkg_dir = workspace.root_path().join("custom_store");
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+
+    let mut list_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    list_cmd
+        .args([
+            "list",
+            "--json",
+            "--pkg-dir",
+            custom_pkg_dir.to_str().expect("valid utf-8 path"),
+        ])
+        .env("SOLIX_FORCE_EMBEDDED_ASSETS", "1");
+    let output = list_cmd.output().expect("execute solix list --pkg-dir");
+    assert!(
+        output.status.success(),
+        "solix list --pkg-dir failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed_list: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse custom list JSON");
+    assert_eq!(
+        parsed_list.as_array().expect("JSON array").len(),
+        0,
+        "Non-default --pkg-dir store must remain empty until explicitly installed"
     );
 }

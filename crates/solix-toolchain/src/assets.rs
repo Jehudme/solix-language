@@ -5,9 +5,12 @@
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static IS_BOOTSTRAPPING: AtomicBool = AtomicBool::new(false);
+static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
+
+include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
 /// Compile-time embedded copy of `solix_scaffold.py`.
 pub const EMBEDDED_SOLIX_SCAFFOLD_SCRIPT: &str =
@@ -42,9 +45,10 @@ pub fn resolve_scaffold_script_path() -> Result<PathBuf> {
     }
 
     // Check sibling assets/ directory next to current executable
-    if let Some(executable_directory) = std::env::current_exe()
-        .ok()
-        .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
+    if !should_force_embedded_assets()
+        && let Some(executable_directory) = std::env::current_exe()
+            .ok()
+            .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
     {
         let candidate = executable_directory
             .join("assets")
@@ -80,33 +84,102 @@ fn materialize_embedded_scripts() -> Result<PathBuf> {
     let scaffold_path = cache_directory.join("solix_scaffold.py");
     let build_path = cache_directory.join("solix_build.py");
 
-    // Write scripts if missing or updated
-    if !scaffold_path.exists()
-        || fs::read_to_string(&scaffold_path)
-            .map_or(true, |content| content != EMBEDDED_SOLIX_SCAFFOLD_SCRIPT)
-    {
-        fs::write(&scaffold_path, EMBEDDED_SOLIX_SCAFFOLD_SCRIPT)?;
-    }
-
-    if !build_path.exists()
-        || fs::read_to_string(&build_path)
-            .map_or(true, |content| content != EMBEDDED_SOLIX_BUILD_SCRIPT)
-    {
-        fs::write(&build_path, EMBEDDED_SOLIX_BUILD_SCRIPT)?;
-    }
+    write_bytes_if_changed(&scaffold_path, EMBEDDED_SOLIX_SCAFFOLD_SCRIPT.as_bytes())?;
+    write_bytes_if_changed(&build_path, EMBEDDED_SOLIX_BUILD_SCRIPT.as_bytes())?;
 
     Ok(scaffold_path)
 }
 
+/// Writes `expected_bytes` to `target_path` atomically only when missing or different.
+fn write_bytes_if_changed(target_path: &Path, expected_bytes: &[u8]) -> Result<()> {
+    if target_path.is_file()
+        && fs::read(target_path).is_ok_and(|existing_bytes| existing_bytes == expected_bytes)
+    {
+        return Ok(());
+    }
+
+    let parent_directory = target_path.parent().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Cannot determine parent directory for '{}'",
+            target_path.display()
+        )
+    })?;
+    fs::create_dir_all(parent_directory).with_context(|| {
+        format!(
+            "Failed to create parent directory at '{}'",
+            parent_directory.display()
+        )
+    })?;
+
+    let unique_id = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+    let file_name = target_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("asset");
+    let temp_path = parent_directory.join(format!(
+        ".{file_name}.tmp.{}.{unique_id}",
+        std::process::id()
+    ));
+
+    fs::write(&temp_path, expected_bytes).with_context(|| {
+        format!(
+            "Failed to write temporary asset file at '{}'",
+            temp_path.display()
+        )
+    })?;
+
+    if let Err(rename_error) = fs::rename(&temp_path, target_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(rename_error).with_context(|| {
+            format!(
+                "Failed to move temporary asset file into '{}'",
+                target_path.display()
+            )
+        });
+    }
+
+    Ok(())
+}
+
+/// Resolves a cache subdirectory inside `$SOLIX_HOME/cache/`, `~/.solix/cache/`, or temp dir.
+fn resolve_solix_cache_subdir(subdir: &str, temp_fallback_name: &str) -> PathBuf {
+    if let Ok(solix_home) = std::env::var("SOLIX_HOME") {
+        let trimmed_home = solix_home.trim();
+        if !trimmed_home.is_empty() {
+            return PathBuf::from(trimmed_home).join("cache").join(subdir);
+        }
+    }
+
+    if let Some(home_directory) = dirs_home_dir() {
+        home_directory.join(".solix").join("cache").join(subdir)
+    } else {
+        std::env::temp_dir().join(temp_fallback_name)
+    }
+}
+
 /// Resolves the cache directory where materialized scripts should reside.
 fn resolve_scripts_cache_dir() -> PathBuf {
-    if let Ok(solix_home) = std::env::var("SOLIX_HOME") {
-        PathBuf::from(solix_home).join("cache").join("scripts")
-    } else if let Some(home_directory) = dirs_home_dir() {
-        home_directory.join(".solix").join("cache").join("scripts")
-    } else {
-        std::env::temp_dir().join("solix_cache_scripts")
-    }
+    resolve_solix_cache_subdir("scripts", "solix_cache_scripts")
+}
+
+/// Resolves the cache directory where materialized bundled default packages reside.
+fn resolve_bundled_packages_cache_dir() -> PathBuf {
+    resolve_solix_cache_subdir("bundled_packages", "solix_cache_bundled_packages")
+}
+
+/// Resolves the cache directory where the materialized VS Code extension `.vsix` resides.
+fn resolve_vscode_cache_dir() -> PathBuf {
+    resolve_solix_cache_subdir("vscode", "solix_cache_vscode")
+}
+
+/// Returns `true` when `SOLIX_FORCE_EMBEDDED_ASSETS` forces skipping workspace/exe disk probes.
+fn should_force_embedded_assets() -> bool {
+    std::env::var("SOLIX_FORCE_EMBEDDED_ASSETS")
+        .map(|value| {
+            let trimmed = value.trim();
+            trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
 }
 
 /// Helper to get user home directory cross-platform.
@@ -123,59 +196,164 @@ fn dirs_home_dir() -> Option<PathBuf> {
     }
 }
 
-/// Resolves the filesystem path to the directory containing bundled default packages.
-///
-/// Priority:
-/// 1. `SOLIX_BUNDLED_PACKAGES_DIR` environment variable override.
-/// 2. Sibling `<exe_dir>/assets/packages/`.
-/// 3. Sibling `<exe_dir>/../assets/packages/`.
-/// 4. Compile-time `CARGO_MANIFEST_DIR/assets/packages/` (fallback during local development).
-/// 5. `<current_dir>/crates/solix-toolchain/assets/packages/`.
+/// Returns `true` when `EMBEDDED_BUNDLED_PACKAGES` contains at least one embedded archive.
 #[must_use]
-pub fn resolve_bundled_packages_dir() -> Option<PathBuf> {
-    if let Ok(custom_dir) = std::env::var("SOLIX_BUNDLED_PACKAGES_DIR") {
-        let candidate = PathBuf::from(custom_dir);
-        if candidate.exists() {
-            return Some(candidate);
-        }
+pub const fn has_embedded_bundled_packages() -> bool {
+    !EMBEDDED_BUNDLED_PACKAGES.is_empty()
+}
+
+/// Returns `true` when `EMBEDDED_VSCODE_VSIX` contains an embedded VS Code extension archive.
+#[must_use]
+pub const fn has_embedded_vscode_extension() -> bool {
+    EMBEDDED_VSCODE_VSIX.is_some()
+}
+
+/// Materializes compile-time embedded bundled `.slxarc` archives and manifest into cache.
+///
+/// # Errors
+/// Returns an error if cache directory creation or file writing fails.
+pub fn materialize_embedded_bundled_packages() -> Result<Option<PathBuf>> {
+    if EMBEDDED_BUNDLED_PACKAGES.is_empty() {
+        return Ok(None);
     }
 
-    if let Some(executable_directory) = std::env::current_exe()
-        .ok()
-        .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
-    {
-        let candidate = executable_directory.join("assets").join("packages");
-        if candidate.exists() {
-            return Some(candidate);
-        }
+    let cache_directory = resolve_bundled_packages_cache_dir();
+    fs::create_dir_all(&cache_directory).with_context(|| {
+        format!(
+            "Failed to create bundled packages cache directory at '{}'",
+            cache_directory.display()
+        )
+    })?;
 
-        if let Some(parent_directory) = executable_directory.parent() {
-            let alt_candidate = parent_directory.join("assets").join("packages");
-            if alt_candidate.exists() {
-                return Some(alt_candidate);
+    for (archive_rel_path, archive_bytes) in EMBEDDED_BUNDLED_PACKAGES {
+        let mut target_path = cache_directory.clone();
+        for segment in archive_rel_path.split('/') {
+            if !segment.is_empty() {
+                target_path.push(segment);
+            }
+        }
+        write_bytes_if_changed(&target_path, archive_bytes)?;
+    }
+
+    if let Some(manifest_bytes) = EMBEDDED_BUNDLED_MANIFEST {
+        write_bytes_if_changed(
+            &cache_directory.join("bundled_manifest.json"),
+            manifest_bytes,
+        )?;
+    }
+
+    Ok(Some(cache_directory))
+}
+
+/// Materializes the compile-time embedded Solix VS Code extension `.vsix` into cache.
+///
+/// # Errors
+/// Returns an error if cache directory creation or file writing fails.
+pub fn materialize_embedded_vscode_extension() -> Result<Option<PathBuf>> {
+    let Some((extension_name, extension_bytes)) = EMBEDDED_VSCODE_VSIX else {
+        return Ok(None);
+    };
+
+    let cache_directory = resolve_vscode_cache_dir();
+    let target_path = cache_directory.join(extension_name);
+    write_bytes_if_changed(&target_path, extension_bytes)?;
+
+    Ok(Some(target_path))
+}
+
+/// Checks whether a candidate `packages/` directory actually contains at least one `.slxarc` archive.
+fn directory_has_bundled_packages(directory: &Path) -> bool {
+    if !directory.is_dir() {
+        return false;
+    }
+
+    let Ok(entries) = fs::read_dir(directory) else {
+        return false;
+    };
+
+    for entry_result in entries.flatten() {
+        let entry_path = entry_result.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let Ok(sub_entries) = fs::read_dir(&entry_path) else {
+            continue;
+        };
+        for sub_entry in sub_entries.flatten() {
+            let file_path = sub_entry.path();
+            if file_path.is_file()
+                && file_path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext_str| ext_str.eq_ignore_ascii_case("slxarc"))
+            {
+                return true;
             }
         }
     }
 
-    let manifest_assets = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("packages");
-    if manifest_assets.exists() {
-        return Some(manifest_assets);
-    }
+    false
+}
 
-    if let Ok(current_dir) = std::env::current_dir() {
-        let repo_candidate = current_dir
-            .join("crates")
-            .join("solix-toolchain")
-            .join("assets")
-            .join("packages");
-        if repo_candidate.exists() {
-            return Some(repo_candidate);
+/// Resolves the filesystem path to the directory containing bundled default packages.
+///
+/// Priority:
+/// 1. `SOLIX_BUNDLED_PACKAGES_DIR` environment variable override.
+/// 2. Sibling `<exe_dir>/assets/packages/` containing `.slxarc` archives.
+/// 3. Sibling `<exe_dir>/../assets/packages/` containing `.slxarc` archives.
+/// 4. Compile-time `CARGO_MANIFEST_DIR/assets/packages/` containing `.slxarc` archives.
+/// 5. `<current_dir>/crates/solix-toolchain/assets/packages/` containing `.slxarc` archives.
+/// 6. Materialized fallback from compile-time embedded `.slxarc` archives into cache.
+#[must_use]
+pub fn resolve_bundled_packages_dir() -> Option<PathBuf> {
+    if let Ok(custom_dir) = std::env::var("SOLIX_BUNDLED_PACKAGES_DIR") {
+        let trimmed_dir = custom_dir.trim();
+        if !trimmed_dir.is_empty() {
+            let candidate = PathBuf::from(trimmed_dir);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
     }
 
-    None
+    if !should_force_embedded_assets() {
+        if let Some(executable_directory) = std::env::current_exe()
+            .ok()
+            .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
+        {
+            let candidate = executable_directory.join("assets").join("packages");
+            if directory_has_bundled_packages(&candidate) {
+                return Some(candidate);
+            }
+
+            if let Some(parent_directory) = executable_directory.parent() {
+                let alt_candidate = parent_directory.join("assets").join("packages");
+                if directory_has_bundled_packages(&alt_candidate) {
+                    return Some(alt_candidate);
+                }
+            }
+        }
+
+        let manifest_assets = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("packages");
+        if directory_has_bundled_packages(&manifest_assets) {
+            return Some(manifest_assets);
+        }
+
+        if let Ok(current_dir) = std::env::current_dir() {
+            let repo_candidate = current_dir
+                .join("crates")
+                .join("solix-toolchain")
+                .join("assets")
+                .join("packages");
+            if directory_has_bundled_packages(&repo_candidate) {
+                return Some(repo_candidate);
+            }
+        }
+    }
+
+    materialize_embedded_bundled_packages().ok().flatten()
 }
 
 /// Resolves the filesystem path to the bundled Solix Visual Studio Code extension (`.vsix`).
@@ -186,55 +364,61 @@ pub fn resolve_bundled_packages_dir() -> Option<PathBuf> {
 /// 3. Sibling `<exe_dir>/../assets/vscode/*.vsix`.
 /// 4. Compile-time `CARGO_MANIFEST_DIR/assets/vscode/*.vsix`.
 /// 5. Repository fallback: `<workspace_root>/editors/vscode/*.vsix`.
+/// 6. Materialized fallback from the compile-time embedded `.vsix` into cache.
 #[must_use]
 pub fn resolve_bundled_vscode_extension_path() -> Option<PathBuf> {
     if let Ok(custom_path) = std::env::var("SOLIX_VSCODE_VSIX_PATH") {
-        let candidate = PathBuf::from(custom_path);
-        if candidate.exists() {
-            return Some(candidate);
+        let trimmed_path = custom_path.trim();
+        if !trimmed_path.is_empty() {
+            let candidate = PathBuf::from(trimmed_path);
+            if candidate.exists() {
+                return Some(candidate);
+            }
         }
     }
 
-    if let Some(executable_directory) = std::env::current_exe()
-        .ok()
-        .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
-    {
-        let candidate_directory = executable_directory.join("assets").join("vscode");
-        if let Some(extension_path) = find_vsix_in_directory(&candidate_directory) {
+    if !should_force_embedded_assets() {
+        if let Some(executable_directory) = std::env::current_exe()
+            .ok()
+            .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
+        {
+            let candidate_directory = executable_directory.join("assets").join("vscode");
+            if let Some(extension_path) = find_vsix_in_directory(&candidate_directory) {
+                return Some(extension_path);
+            }
+
+            if let Some(parent_directory) = executable_directory.parent() {
+                let alternative_directory = parent_directory.join("assets").join("vscode");
+                if let Some(extension_path) = find_vsix_in_directory(&alternative_directory) {
+                    return Some(extension_path);
+                }
+            }
+        }
+
+        let manifest_directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("vscode");
+        if let Some(extension_path) = find_vsix_in_directory(&manifest_directory) {
             return Some(extension_path);
         }
 
-        if let Some(parent_directory) = executable_directory.parent() {
-            let alternative_directory = parent_directory.join("assets").join("vscode");
-            if let Some(extension_path) = find_vsix_in_directory(&alternative_directory) {
+        if let Ok(current_dir) = std::env::current_dir() {
+            let editors_directory = current_dir.join("editors").join("vscode");
+            if let Some(extension_path) = find_vsix_in_directory(&editors_directory) {
+                return Some(extension_path);
+            }
+            let workspace_toolchain_directory = current_dir
+                .join("crates")
+                .join("solix-toolchain")
+                .join("assets")
+                .join("vscode");
+            if let Some(extension_path) = find_vsix_in_directory(&workspace_toolchain_directory) {
                 return Some(extension_path);
             }
         }
     }
 
-    let manifest_directory = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("assets")
-        .join("vscode");
-    if let Some(extension_path) = find_vsix_in_directory(&manifest_directory) {
-        return Some(extension_path);
-    }
-
-    if let Ok(current_dir) = std::env::current_dir() {
-        let editors_directory = current_dir.join("editors").join("vscode");
-        if let Some(extension_path) = find_vsix_in_directory(&editors_directory) {
-            return Some(extension_path);
-        }
-        let workspace_toolchain_directory = current_dir
-            .join("crates")
-            .join("solix-toolchain")
-            .join("assets")
-            .join("vscode");
-        if let Some(extension_path) = find_vsix_in_directory(&workspace_toolchain_directory) {
-            return Some(extension_path);
-        }
-    }
-
-    None
+    materialize_embedded_vscode_extension().ok().flatten()
 }
 
 /// Discovers a `.vsix` file in the specified directory.
@@ -275,6 +459,14 @@ fn find_vsix_in_directory(directory: &Path) -> Option<PathBuf> {
 /// # Errors
 /// Returns an error if archive reading, unpacking, or registry writing fails.
 pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<usize> {
+    install_bundled_packages_inner(store_directory, force, false)
+}
+
+fn install_bundled_packages_inner(
+    store_directory: &Path,
+    force: bool,
+    quiet: bool,
+) -> Result<usize> {
     if IS_BOOTSTRAPPING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -294,7 +486,9 @@ pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<u
         Some(dir) => dir,
         None => {
             if force {
-                bail!("No bundled packages directory found in 'assets/packages/'");
+                bail!(
+                    "No bundled packages directory found in 'assets/packages/' or embedded in the Solix binary."
+                );
             }
             return Ok(0);
         }
@@ -404,6 +598,23 @@ pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<u
         }
     }
 
+    if candidates.is_empty() {
+        if force {
+            bail!(
+                "No bundled package archives (.slxarc) found in '{}'",
+                bundled_directory.display()
+            );
+        }
+        return Ok(0);
+    }
+
+    fs::create_dir_all(store_directory).with_context(|| {
+        format!(
+            "Failed to create package store directory at '{}'",
+            store_directory.display()
+        )
+    })?;
+
     for (package_name, package_profile, package_version, archive_path) in candidates {
         let already_installed =
             existing_records
@@ -418,12 +629,13 @@ pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<u
             continue;
         }
 
-        crate::commands::install_package_artifact(
+        crate::commands::pkg::install_package_artifact_with_options(
             &archive_path,
             None,
             force,
             Some(&package_profile),
             Some(store_directory),
+            quiet,
         )?;
         installed_count += 1;
     }
@@ -475,7 +687,6 @@ pub fn ensure_bundled_packages_installed(pkg_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let _ = fs::write(&marker_path, "1");
-    let result = install_bundled_packages(pkg_dir, false);
+    let result = install_bundled_packages_inner(pkg_dir, false, true);
     result.map(|_| ())
 }

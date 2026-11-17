@@ -31,6 +31,28 @@ pub fn install_package_artifact(
     profile_override: Option<&str>,
     pkg_dir: Option<&Path>,
 ) -> Result<PackageRecord> {
+    install_package_artifact_with_options(
+        artifact_path,
+        source_project_dir,
+        force,
+        profile_override,
+        pkg_dir,
+        false,
+    )
+}
+
+/// Internal implementation of [`install_package_artifact`] with optional quiet mode for auto-bootstrap.
+///
+/// # Errors
+/// Returns an error if reading the artifact fails, collision occurs without `--force`, or writing fails.
+pub(crate) fn install_package_artifact_with_options(
+    artifact_path: &Path,
+    source_project_dir: Option<PathBuf>,
+    force: bool,
+    profile_override: Option<&str>,
+    pkg_dir: Option<&Path>,
+    quiet: bool,
+) -> Result<PackageRecord> {
     let resolved_artifact =
         solix_common::canonicalize_host_path(artifact_path).with_context(|| {
             format!(
@@ -144,10 +166,12 @@ pub fn install_package_artifact(
 
         registry.register(record.clone())?;
 
-        println!(
-            "Installed '{package_name}-{effective_profile}@{package_version}' (.slxb) to {}",
-            target_file.display()
-        );
+        if !quiet {
+            println!(
+                "Installed '{package_name}-{effective_profile}@{package_version}' (.slxb) to {}",
+                target_file.display()
+            );
+        }
         Ok(record)
     } else if extension.eq_ignore_ascii_case("slxarc") {
         let computed_sha256 = sha256_file(&resolved_artifact).with_context(|| {
@@ -254,10 +278,12 @@ pub fn install_package_artifact(
 
         registry.register(record.clone())?;
 
-        println!(
-            "Installed '{package_name}-{effective_profile}@{package_version}' (.slxarc) to {}",
-            target_file.display()
-        );
+        if !quiet {
+            println!(
+                "Installed '{package_name}-{effective_profile}@{package_version}' (.slxarc) to {}",
+                target_file.display()
+            );
+        }
         Ok(record)
     } else {
         bail!(
@@ -650,6 +676,10 @@ fn format_human_size(size_in_bytes: u64) -> String {
 /// Returns an error if reading store directory entries fails.
 pub fn execute_list(args: ListArgs) -> Result<()> {
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+    if let Err(bootstrap_error) = crate::assets::ensure_bundled_packages_installed(&store_directory)
+    {
+        eprintln!("Warning: Failed to auto-bootstrap bundled packages: {bootstrap_error}");
+    }
     let registry = PackageRegistry::load_or_sync(&store_directory)?;
 
     let mut filtered_packages: Vec<PackageRecord> = registry.packages;
@@ -788,7 +818,7 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
 pub fn execute_install_vscode() -> Result<()> {
     let extension_path = crate::assets::resolve_bundled_vscode_extension_path().ok_or_else(|| {
         anyhow::anyhow!(
-            "Could not locate bundled Solix VS Code extension (.vsix).\n\
+            "Could not locate bundled Solix VS Code extension (.vsix) on disk or embedded in this binary.\n\
              Please ensure 'assets/vscode/solix-language.vsix' exists or set SOLIX_VSCODE_VSIX_PATH."
         )
     })?;

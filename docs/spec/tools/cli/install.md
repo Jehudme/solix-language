@@ -82,18 +82,18 @@ solix install build/release/raylib.slxarc --force
 
 ### 5. Bundled Standard Libraries Installation (`--bundled`)
 
-When invoked with `--bundled`, Solix scans `<exe_dir>/assets/packages/` and extracts the first-party libraries (`solix-release@2.0.0`, `raylib-release@5.5.0`) into `$SOLIX_PKG_DIR`.
+When invoked with `--bundled`, Solix locates bundled first-party `.slxarc` archives (checking `SOLIX_BUNDLED_PACKAGES_DIR`, sibling `<exe_dir>/assets/packages/`, workspace assets, or materializing the compile-time embedded archives into `~/.solix/cache/bundled_packages/`) and installs both `release` and `debug` profiles of `solix` and `raylib` into `$SOLIX_PKG_DIR`.
 
 ```bash
 # Re-extract bundled standard libraries
 solix install --bundled --force
 ```
 
-First-party libraries are also automatically bootstrapped on first run when invoking `solix list`, `solix compile`, or `solix run` on an empty package store (unless `SOLIX_NO_AUTO_BOOTSTRAP=1` is set).
+First-party libraries are also automatically bootstrapped on first run when invoking `solix list`, `solix compile`, or `solix run` against the default package store (unless `SOLIX_NO_AUTO_BOOTSTRAP=1` is set). Custom stores passed via `--pkg-dir` remain isolated and do not auto-bootstrap.
 
 ### 6. VS Code Extension Installation (`--vscode`)
 
-When invoked with `--vscode`, Solix locates the bundled `.vsix` extension archive (`assets/vscode/solix-language.vsix`), discovers installed editor command-line tools (`code`, `codium`, `cursor`) in the system `PATH`, and executes the extension installation:
+When invoked with `--vscode`, Solix locates the bundled `.vsix` extension archive (`SOLIX_VSCODE_VSIX_PATH`, `<exe_dir>/assets/vscode/solix-language.vsix`, workspace assets, or by materializing the compile-time embedded extension into `~/.solix/cache/vscode/solix-language.vsix`), discovers installed editor command-line tools (`code`, `codium`, `cursor`) in the system `PATH`, and executes the extension installation:
 
 ```bash
 solix install --vscode

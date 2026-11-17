@@ -171,6 +171,7 @@ jobs:
     needs:
       - plan
       - build-arm64-linux-bundled-libs
+      - build-vscode-extension
     if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null }}
     strategy:
       fail-fast: false
@@ -264,6 +265,12 @@ jobs:
               cp "$arc" "target/distrib/${pkg_id}.slxarc"
             done
           done
+
+      - name: Download bundled VS Code extension artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts-vscode-extension
+          path: crates/solix-toolchain/assets/vscode/
 
       - name: Build artifacts
         run: |
