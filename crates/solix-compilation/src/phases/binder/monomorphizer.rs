@@ -261,7 +261,7 @@ impl GenericBlueprintRegistry {
                     );
 
                     let unwrapped_field_type = field_type.unwrap_alias();
-                    let is_ref = unwrapped_field_type.is_reference_type();
+                    let is_gc_managed_ref = unwrapped_field_type.is_gc_managed_reference_type();
                     let field_size = match unwrapped_field_type {
                         Type::Primitive(prim) => prim.byte_size(),
                         Type::Enum { .. } => 4,
@@ -273,7 +273,7 @@ impl GenericBlueprintRegistry {
                         .insert(field_name.to_string(), current_field_offset);
                     if field_decl.modifiers.contains(&Modifier::Weak) {
                         class_layout.weak_field_offsets.push(current_field_offset);
-                    } else if is_ref {
+                    } else if is_gc_managed_ref {
                         class_layout
                             .reference_field_offsets
                             .push(current_field_offset);

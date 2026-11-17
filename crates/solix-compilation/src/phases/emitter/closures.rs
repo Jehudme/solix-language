@@ -605,9 +605,12 @@ pub fn synthesize_lambda_function(
 
         allocator.enter_scope();
 
+        let mut capture_base_opt = None;
+
         // Bind captured variables unpacked into registers at lambda entry
         if !captured_vars.is_empty() {
             let capture_base = allocator.alloc_window(captured_vars.len())?;
+            capture_base_opt = Some(capture_base);
             func.emit(
                 Instruction::format_call(
                     OpCode::UnpackCaptures,
@@ -649,6 +652,23 @@ pub fn synthesize_lambda_function(
             }
             if let LambdaBody::Block(block) = body {
                 emitter.populate_reassigned_locals_from_block(block);
+                if let Some(capture_base) = capture_base_opt {
+                    // Reassigned reference captures must hold their own RC increment so
+                    // local reassignments (`captured = null`) and cleanup never drop the
+                    // closure object's own capture slot prematurely.
+                    for (idx, var_name) in captured_vars.iter().enumerate() {
+                        if emitter.unsafe_non_null_locals.contains(var_name)
+                            && capture_may_be_reference(block, var_name, node_types, sources)
+                        {
+                            let reg = capture_base + idx as u16;
+                            emitter.emit_instruction(
+                                Instruction::format_a(OpCode::IncRef, 0, reg, 0, 0),
+                                Some(*span),
+                            );
+                            emitter.track_reference_register(reg);
+                        }
+                    }
+                }
             }
 
             match body {
@@ -687,4 +707,38 @@ pub fn synthesize_lambda_function(
             details: "Expression is not a lambda".to_string(),
         })
     }
+}
+
+fn capture_may_be_reference(
+    block: &BlockStatement,
+    var_name: &str,
+    node_types: Option<&HashMap<Span, Type>>,
+    sources: Option<&[String]>,
+) -> bool {
+    let (Some(types), Some(srcs)) = (node_types, sources) else {
+        return true;
+    };
+    let src_id = block.span.id;
+    let Some(src_text) = srcs.get(src_id as usize) else {
+        return true;
+    };
+    let mut found_known_non_ref = false;
+    for (&span, resolved_type) in types {
+        if span.id == src_id && span.start >= block.span.start && span.end <= block.span.end {
+            let end = (span.end as usize).min(src_text.len());
+            let start = (span.start as usize).min(end);
+            if &src_text[start..end] == var_name {
+                let unwrapped = resolved_type.unwrap_alias();
+                if unwrapped.is_reference_type()
+                    || matches!(unwrapped, Type::GenericParameter { .. })
+                {
+                    return true;
+                }
+                if !matches!(unwrapped, Type::Unresolved(_) | Type::Error) {
+                    found_known_non_ref = true;
+                }
+            }
+        }
+    }
+    !found_known_non_ref
 }

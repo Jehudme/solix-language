@@ -1077,6 +1077,16 @@ impl VirtualMachine {
         self.heap.verify_clean_memory()
     }
 
+    /// Returns the number of live guest-allocated heap objects, excluding immortal
+    /// constant-pool strings interned at VM initialization.
+    #[must_use]
+    pub fn active_guest_objects(&self) -> usize {
+        self.heap
+            .telemetry()
+            .active_live_objects
+            .saturating_sub(self.interned_string_addrs.len())
+    }
+
     /// Returns the live telemetry metrics of the virtual machine execution.
     #[must_use]
     pub fn telemetry(&self) -> VmTelemetry {
@@ -1105,7 +1115,7 @@ impl VirtualMachine {
             2 => self.heap.telemetry().current_allocated_bytes as u64,
             3 => self.heap.telemetry().peak_allocated_bytes as u64,
             4 => self.heap.telemetry().total_allocations_count,
-            5 => self.heap.telemetry().active_live_objects as u64,
+            5 => self.active_guest_objects() as u64,
             6 => {
                 let (strings, _arrays, _objects, _closures) = self.heap.count_blocks_by_tag();
                 strings as u64

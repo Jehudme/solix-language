@@ -1109,3 +1109,165 @@ fn test_positive_loop_rotation_eliminates_loop_backedge_jump() {
         sum_fn.instructions
     );
 }
+
+#[test]
+fn test_positive_for_loop_i32_and_add_band_i32_fusion() {
+    let source_code = r#"
+        int32 main() {
+            int32 total = 0;
+            for (int32 idx = 0; idx < 100; idx = idx + 1) {
+                total = (total + (idx ^ 3)) & 0x7FFFFFFF;
+            }
+            return total;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    let expected: i32 = (0..100).fold(0i32, |acc, idx| (acc.wrapping_add(idx ^ 3)) & 0x7FFF_FFFF);
+    assert_eq!(execution_result, Value::I32(expected));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    assert!(
+        main_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::ForLoopI32 as u8),
+        "Expected ForLoopI32 superinstruction in main loop: {:?}",
+        main_fn.instructions
+    );
+    assert!(
+        main_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::AddBandI32 as u8),
+        "Expected AddBandI32 superinstruction in main loop: {:?}",
+        main_fn.instructions
+    );
+}
+
+#[test]
+fn test_positive_jump_if_i32_imm_fusion() {
+    let source_code = r#"
+        int32 fib(int32 num) {
+            if (num <= 1) {
+                return num;
+            }
+            return fib(num - 1) + fib(num - 2);
+        }
+        int32 main() {
+            return fib(10);
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(55));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let fib_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("fib"))
+        .expect("fib function must exist");
+
+    assert!(
+        fib_fn
+            .instructions
+            .iter()
+            .any(|inst| inst.raw_opcode() == OpCode::JumpIfI32Imm as u8),
+        "Expected JumpIfI32Imm superinstruction in fib: {:?}",
+        fib_fn.instructions
+    );
+}
+
+#[test]
+fn test_positive_local_cse_eliminates_duplicate_mul_f64_and_mul_i32() {
+    let source_code = r#"
+        float64 step_pair(float64 force_val, float64 scale_val) {
+            float64 vx = 0.5;
+            float64 vy = 1.5;
+            vx = vx + force_val * scale_val;
+            vy = vy + force_val * scale_val;
+            return vx + vy;
+        }
+        int32 count_primes_guard(int32 prime_val, int32 limit_val) {
+            int32 square_prod = 0;
+            for (int32 cand = prime_val; cand * cand <= limit_val; cand = cand + 1) {
+                square_prod = square_prod + cand * cand;
+            }
+            return square_prod;
+        }
+        int32 main() {
+            float64 scaled = step_pair(4.0, 0.25);
+            int32 guard_sum = count_primes_guard(2, 10);
+            return (int32)(scaled * 10.0) + guard_sum;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    // step_pair(4.0, 0.25) = (0.5 + 1.0) + (1.5 + 1.0) = 4.0 -> 40; cand in 2..=3 -> 4 + 9 = 13 -> 53
+    assert_eq!(execution_result, Value::I32(53));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let step_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("step_pair"))
+        .expect("step_pair function must exist");
+    let mul_f64_count = step_fn
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::MulF64 as u8)
+        .count();
+    assert_eq!(
+        mul_f64_count, 1,
+        "Local CSE must eliminate duplicate MulF64: {:?}",
+        step_fn.instructions
+    );
+
+    let guard_fn = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("count_primes_guard"))
+        .expect("count_primes_guard function must exist");
+    let mul_i32_count = guard_fn
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::MulI32 as u8)
+        .count();
+    assert_eq!(
+        mul_i32_count, 2,
+        "Expected only entry + rotated back-edge guard MulI32 (0 in-body duplicates) after CSE: {:?}",
+        guard_fn.instructions
+    );
+}
+
+#[test]
+fn test_negative_cse_invalidates_registers_clobbered_by_call_window() {
+    let source_code = r#"
+        int32 clobber(int32 arg0, int32 arg1) {
+            int32 scratch_a = arg0 * 3 + 7;
+            int32 scratch_b = arg1 * 5 + 11;
+            int32 scratch_c = scratch_a + scratch_b;
+            return scratch_c + 1;
+        }
+        int32 compute(int32 alpha, int32 beta) {
+            int32 prod_one = alpha * beta;
+            int32 call_res = clobber(alpha + 1, beta + 2);
+            int32 prod_two = alpha * beta;
+            return prod_one + call_res + prod_two;
+        }
+        int32 main() {
+            return compute(4, 5);
+        }
+    "#;
+    let (_context, execution_result) = compile_and_execute(source_code);
+    // alpha=4, beta=5 -> prod_one=20, clobber(5, 7) => a=22, b=46, c=68 => 69, prod_two=20 => 109
+    assert_eq!(execution_result, Value::I32(109));
+}

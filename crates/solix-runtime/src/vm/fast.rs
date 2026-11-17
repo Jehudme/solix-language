@@ -464,6 +464,38 @@ fn inc_ref_trap_cold(heap: &mut crate::memory::VirtualHeap, addr: u32) -> Result
         .map_err(VmTrap::from_error)
 }
 
+#[inline(always)]
+fn inc_ref_inline(
+    heap: &mut crate::memory::VirtualHeap,
+    addr: u32,
+    cycle_collector_enabled: bool,
+) -> Result<(), VmTrap> {
+    let addr_usize = addr as usize;
+    if addr_usize < 8 || addr_usize > heap.buffer.len() {
+        return Err(VmTrap::null_reference());
+    }
+    // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len() verified above.
+    let word_ptr = unsafe { heap.buffer.as_mut_ptr().add(addr_usize - 4).cast::<u32>() };
+    let tag_and_ref = unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
+    let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
+    if ref_count == crate::memory::layout::MAX_REF_COUNT {
+        return Ok(());
+    }
+    if ref_count == 0 || ref_count + 1 >= crate::memory::layout::MAX_REF_COUNT {
+        return inc_ref_trap_cold(heap, addr);
+    }
+    let updated = if cycle_collector_enabled {
+        // Clear bits 26..28 (GcColor::Black) and increment ref_count in place.
+        (tag_and_ref & 0xF000_0000) | (ref_count + 1)
+    } else {
+        (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT) | (ref_count + 1)
+    };
+    unsafe {
+        std::ptr::write_unaligned(word_ptr, updated.to_le());
+    }
+    Ok(())
+}
+
 #[inline(never)]
 fn get_array_variant_cold(
     heap: &crate::memory::VirtualHeap,
@@ -1147,6 +1179,11 @@ impl VirtualMachine {
             let encoded_word = val.to_raw_u64().to_le();
             unsafe {
                 std::ptr::write_unaligned(elem_ptr.cast::<u64>(), encoded_word);
+            }
+        } else if elem_type_tag == 9 && elem_size == 4 {
+            let bits = (read_f64_fast(&val)? as f32).to_bits();
+            unsafe {
+                std::ptr::write_unaligned(elem_ptr.cast::<u32>(), bits.to_le());
             }
         } else {
             let primitive_val = val.to_primitive_u64();
@@ -3100,30 +3137,11 @@ impl VirtualMachine {
                                             if let Value::Ref(child_addr) = new_val
                                                 && child_addr > 0
                                             {
-                                                let rc_offset = (child_addr as usize) - 4;
-                                                let buf_ptr = self.heap.buffer.as_mut_ptr();
-                                                if rc_offset + 4 <= self.heap.buffer.len() {
-                                                    let rc = unsafe {
-                                                        u32::from_le(std::ptr::read_unaligned(
-                                                            buf_ptr.add(rc_offset).cast::<u32>(),
-                                                        ))
-                                                    };
-                                                    if rc > 0 && rc != u32::MAX {
-                                                        unsafe {
-                                                            std::ptr::write_unaligned(
-                                                                buf_ptr
-                                                                    .add(rc_offset)
-                                                                    .cast::<u32>(),
-                                                                (rc + 1).to_le(),
-                                                            );
-                                                        }
-                                                    } else if rc == 0 {
-                                                        inc_ref_trap_cold(
-                                                            &mut self.heap,
-                                                            child_addr,
-                                                        )?;
-                                                    }
-                                                }
+                                                inc_ref_inline(
+                                                    &mut self.heap,
+                                                    child_addr,
+                                                    self.cycle_collector_enabled,
+                                                )?;
                                             }
                                         }
                                     } else {
@@ -3589,37 +3607,7 @@ impl VirtualMachine {
                         if let Value::Ref(addr) = unsafe { *reg_base.add(inst.dst() as usize) }
                             && addr > 0
                         {
-                            let addr_usize = addr as usize;
-                            if addr_usize < 8 || addr_usize > self.heap.buffer.len() {
-                                return Err(VmTrap::null_reference());
-                            }
-                            // SAFETY: addr_usize >= 8 && addr_usize <= heap.buffer.len().
-                            let word_ptr = unsafe {
-                                self.heap
-                                    .buffer
-                                    .as_mut_ptr()
-                                    .add(addr_usize - 4)
-                                    .cast::<u32>()
-                            };
-                            let tag_and_ref =
-                                unsafe { u32::from_le(std::ptr::read_unaligned(word_ptr)) };
-                            let ref_count = tag_and_ref & crate::memory::layout::MAX_REF_COUNT;
-                            if ref_count == crate::memory::layout::MAX_REF_COUNT {
-                                // Immortal constant string or immortal object
-                            } else if ref_count + 1 >= crate::memory::layout::MAX_REF_COUNT {
-                                inc_ref_trap_cold(&mut self.heap, addr)?;
-                            } else {
-                                let updated = if self.cycle_collector_enabled {
-                                    // Clear bits 26..28 (GcColor::Black) and increment ref_count in place.
-                                    (tag_and_ref & 0xF000_0000) | (ref_count + 1)
-                                } else {
-                                    (tag_and_ref & !crate::memory::layout::MAX_REF_COUNT)
-                                        | (ref_count + 1)
-                                };
-                                unsafe {
-                                    std::ptr::write_unaligned(word_ptr, updated.to_le());
-                                }
-                            }
+                            inc_ref_inline(&mut self.heap, addr, self.cycle_collector_enabled)?;
                         }
                     }
 
@@ -3836,8 +3824,8 @@ impl VirtualMachine {
                             read_i32_fast(idx_slot)?.wrapping_add(step)
                         };
                         *idx_slot = Value::I32(next_idx);
-                        let bound = if let Value::I32(b) = *bound_ref {
-                            b
+                        let bound = if let Value::I32(bound_val) = *bound_ref {
+                            bound_val
                         } else {
                             read_i32_fast(bound_ref)?
                         };

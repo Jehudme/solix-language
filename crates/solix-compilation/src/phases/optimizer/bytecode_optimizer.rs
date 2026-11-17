@@ -905,11 +905,9 @@ fn eliminate_dead_pack_closures(function: &mut CompiledFunction) -> bool {
     let mut removed_any = false;
     for inst in &mut function.instructions {
         let raw = inst.raw_opcode();
-        if raw == OpCode::PackClosure as u8 && dead_closure_regs.contains(&inst.call_dst()) {
-            *inst = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
-            removed_any = true;
-        } else if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
-            && dead_closure_regs.contains(&inst.dst())
+        if (raw == OpCode::PackClosure as u8 && dead_closure_regs.contains(&inst.call_dst()))
+            || ((raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
+                && dead_closure_regs.contains(&inst.dst()))
         {
             *inst = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
             removed_any = true;
@@ -1132,9 +1130,7 @@ fn specialize_diamond_pack_closure_calls(function: &mut CompiledFunction) -> boo
                     ),
                     None,
                 ));
-                for merge_old_pc in merge_pc..=call_pc {
-                    old_pc_to_new_pc[merge_old_pc] = rebuilt.len() as u32;
-                }
+                old_pc_to_new_pc[merge_pc..=call_pc].fill(rebuilt.len() as u32);
                 cursor = after_call_old_pc;
                 continue;
             }
@@ -1277,28 +1273,14 @@ fn propagate_entry_constants(function: &mut CompiledFunction, fold_branches: boo
             if let Some(&imm16) = entry_consts.get(&reg_b)
                 && reg_a != reg_b
             {
-                let flag = match raw {
-                    v if v == OpCode::JumpIfEqI32 as u8 => 0u8,
-                    v if v == OpCode::JumpIfNeqI32 as u8 => 1u8,
-                    v if v == OpCode::JumpIfLtI32 as u8 => 2u8,
-                    v if v == OpCode::JumpIfLteI32 as u8 => 3u8,
-                    v if v == OpCode::JumpIfGtI32 as u8 => 4u8,
-                    _ => 5u8,
-                };
+                let flag = jump_i32_to_imm_flag(raw, false);
                 *inst =
                     Instruction::format_a(OpCode::JumpIfI32Imm, flag, reg_a, imm16 as u16, offset);
                 changed = true;
             } else if let Some(&imm16) = entry_consts.get(&reg_a)
                 && reg_a != reg_b
             {
-                let flag = match raw {
-                    v if v == OpCode::JumpIfEqI32 as u8 => 0u8,
-                    v if v == OpCode::JumpIfNeqI32 as u8 => 1u8,
-                    v if v == OpCode::JumpIfLtI32 as u8 => 4u8,
-                    v if v == OpCode::JumpIfLteI32 as u8 => 5u8,
-                    v if v == OpCode::JumpIfGtI32 as u8 => 2u8,
-                    _ => 3u8,
-                };
+                let flag = jump_i32_to_imm_flag(raw, true);
                 *inst =
                     Instruction::format_a(OpCode::JumpIfI32Imm, flag, reg_b, imm16 as u16, offset);
                 changed = true;
@@ -1307,6 +1289,41 @@ fn propagate_entry_constants(function: &mut CompiledFunction, fold_branches: boo
     }
 
     changed
+}
+
+fn jump_i32_to_imm_flag(raw_opcode: u8, swapped: bool) -> u8 {
+    match raw_opcode {
+        raw_val if raw_val == OpCode::JumpIfEqI32 as u8 => 0,
+        raw_val if raw_val == OpCode::JumpIfNeqI32 as u8 => 1,
+        raw_val if raw_val == OpCode::JumpIfLtI32 as u8 => {
+            if swapped {
+                4
+            } else {
+                2
+            }
+        }
+        raw_val if raw_val == OpCode::JumpIfLteI32 as u8 => {
+            if swapped {
+                5
+            } else {
+                3
+            }
+        }
+        raw_val if raw_val == OpCode::JumpIfGtI32 as u8 => {
+            if swapped {
+                2
+            } else {
+                4
+            }
+        }
+        _ => {
+            if swapped {
+                3
+            } else {
+                5
+            }
+        }
+    }
 }
 
 /// Symbolic expression key used by extended-basic-block Local Common Subexpression Elimination.
@@ -1479,7 +1496,7 @@ fn eliminate_common_subexpressions(function: &mut CompiledFunction) -> bool {
                     holders
                         .iter()
                         .copied()
-                        .find(|&r| reg_to_val.get(&r) == Some(&existing_vid))
+                        .find(|&candidate| reg_to_val.get(&candidate) == Some(&existing_vid))
                 });
                 if let Some(holder_reg) = live_holder {
                     if holder_reg == dst {
@@ -1683,38 +1700,30 @@ fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> 
             inst.src2(),
         );
     }
-    if raw == OpCode::Mov as u8
+    if (raw == OpCode::Mov as u8
         || raw == OpCode::Not as u8
         || raw == OpCode::Bnot as u8
         || raw == OpCode::NegI32 as u8
         || raw == OpCode::NegI64 as u8
         || raw == OpCode::NegF64 as u8
         || raw == OpCode::ConvIToF as u8
-        || raw == OpCode::ConvFToI as u8
+        || raw == OpCode::ConvFToI as u8)
+        && let Some(opcode) = OpCode::from_raw_u8(raw)
     {
-        if let Some(opcode) = OpCode::from_raw_u8(raw) {
-            return Instruction::format_a(
-                opcode,
-                0,
-                remap_reg(inst.dst()),
-                remap_reg(inst.src1()),
-                0,
-            );
-        }
+        return Instruction::format_a(opcode, 0, remap_reg(inst.dst()), remap_reg(inst.src1()), 0);
     }
-    if raw == OpCode::AddI32Imm as u8
+    if (raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
-        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8)
+        && let Some(opcode) = OpCode::from_raw_u8(raw)
     {
-        if let Some(opcode) = OpCode::from_raw_u8(raw) {
-            return Instruction::format_a(
-                opcode,
-                0,
-                remap_reg(inst.dst()),
-                remap_reg(inst.src1()),
-                inst.src2(),
-            );
-        }
+        return Instruction::format_a(
+            opcode,
+            0,
+            remap_reg(inst.dst()),
+            remap_reg(inst.src1()),
+            inst.src2(),
+        );
     }
     if raw == OpCode::AddBandI32 as u8 {
         return Instruction::format_a(
@@ -1725,16 +1734,16 @@ fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> 
             remap_reg(inst.src2()),
         );
     }
-    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw) {
-        if let Some(opcode) = OpCode::from_raw_u8(raw) {
-            return Instruction::format_a(
-                opcode,
-                inst.flags(),
-                remap_reg(inst.dst()),
-                remap_reg(inst.src1()),
-                remap_reg(inst.src2()),
-            );
-        }
+    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        && let Some(opcode) = OpCode::from_raw_u8(raw)
+    {
+        return Instruction::format_a(
+            opcode,
+            inst.flags(),
+            remap_reg(inst.dst()),
+            remap_reg(inst.src1()),
+            remap_reg(inst.src2()),
+        );
     }
     rewrite_instruction_destination(&inst, remap_reg(inst.dst()))
 }
@@ -2367,25 +2376,9 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                             let reg_a = next_entry.instruction.dst();
                             let reg_b = next_entry.instruction.src1();
                             let cmp_info = if reg_b == r_imm && reg_a != r_imm {
-                                let flag = match next_raw {
-                                    v if v == OpCode::JumpIfEqI32 as u8 => 0u8,
-                                    v if v == OpCode::JumpIfNeqI32 as u8 => 1u8,
-                                    v if v == OpCode::JumpIfLtI32 as u8 => 2u8,
-                                    v if v == OpCode::JumpIfLteI32 as u8 => 3u8,
-                                    v if v == OpCode::JumpIfGtI32 as u8 => 4u8,
-                                    _ => 5u8,
-                                };
-                                Some((reg_a, flag))
+                                Some((reg_a, jump_i32_to_imm_flag(next_raw, false)))
                             } else if reg_a == r_imm && reg_b != r_imm {
-                                let flag = match next_raw {
-                                    v if v == OpCode::JumpIfEqI32 as u8 => 0u8,
-                                    v if v == OpCode::JumpIfNeqI32 as u8 => 1u8,
-                                    v if v == OpCode::JumpIfLtI32 as u8 => 4u8,
-                                    v if v == OpCode::JumpIfLteI32 as u8 => 5u8,
-                                    v if v == OpCode::JumpIfGtI32 as u8 => 2u8,
-                                    _ => 3u8,
-                                };
-                                Some((reg_b, flag))
+                                Some((reg_b, jump_i32_to_imm_flag(next_raw, true)))
                             } else {
                                 None
                             };
@@ -3304,7 +3297,7 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
             (start >= header_pc && start <= loop_end)
                 || (end >= header_pc && end <= loop_end)
                 || (catch_pc >= header_pc && catch_pc <= loop_end)
-                || finally_pc.is_some_and(|p| p >= header_pc && p <= loop_end)
+                || finally_pc.is_some_and(|fin_pc| fin_pc >= header_pc && fin_pc <= loop_end)
         });
         if exception_blocks {
             continue;

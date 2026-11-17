@@ -81,7 +81,13 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let heap_size = parse_byte_size(&args.heap_size)?;
 
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
-    let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
+    let mut bundled_bootstrapped = false;
+    let mut ensure_bundled = || {
+        if !bundled_bootstrapped {
+            let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
+            bundled_bootstrapped = true;
+        }
+    };
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory.clone()));
 
     let cycle_collector_enabled = !matches!(
@@ -188,6 +194,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 }));
 
         if looks_like_package_spec {
+            ensure_bundled();
             let (package_name, spec_profile, spec_version) = parse_package_spec(&spec_string);
             let effective_profile = spec_profile
                 .as_deref()
@@ -354,15 +361,36 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             .with_inline_threshold(args.inline_threshold)
             .with_solver(solver.clone());
 
-        let parent_manifest = source_paths
-            .first()
-            .and_then(|source_path| crate::commands::compile::find_parent_manifest(source_path))
-            .and_then(|manifest_path| {
-                solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
-            });
+        let mut read_sources = Vec::with_capacity(source_paths.len());
+        let mut needs_packages_or_manifest =
+            !args.libs.is_empty() || !loaded_binary_programs.is_empty();
+        for source_path in &source_paths {
+            let source_code = fs::read_to_string(source_path).with_context(|| {
+                format!("Failed to read source file '{}'", source_path.display())
+            })?;
+            if source_code.contains("import") || source_code.contains("extern") {
+                needs_packages_or_manifest = true;
+            }
+            read_sources.push((source_path, source_code));
+        }
+
+        let parent_manifest = if needs_packages_or_manifest || args.profile.is_some() {
+            source_paths
+                .first()
+                .and_then(|source_path| crate::commands::compile::find_parent_manifest(source_path))
+                .and_then(|manifest_path| {
+                    solix_common::project::ProjectManifest::from_file(&manifest_path).ok()
+                })
+        } else {
+            None
+        };
 
         if let Some(ref manifest) = parent_manifest {
-            for resolved_dependency in manifest.resolved_dependencies() {
+            let deps = manifest.resolved_dependencies();
+            if !deps.is_empty() {
+                ensure_bundled();
+            }
+            for resolved_dependency in deps {
                 let spec_string = if resolved_dependency.build_profile.is_empty() {
                     format!(
                         "{}@{}",
@@ -395,16 +423,15 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     runtime_options = runtime_options.with_entry_point(target_symbol);
                 }
             }
+        } else if needs_packages_or_manifest {
+            ensure_bundled();
         }
 
         if let Some(entry) = &args.entry {
             compilation_options = compilation_options.with_entry_point(Some(entry.clone()));
         }
 
-        for source_path in &source_paths {
-            let source_code = fs::read_to_string(source_path).with_context(|| {
-                format!("Failed to read source file '{}'", source_path.display())
-            })?;
+        for (source_path, source_code) in read_sources {
             compilation_options =
                 compilation_options.with_source(source_path.display().to_string(), source_code);
         }
@@ -473,6 +500,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     if is_json_metrics || is_text_metrics {
         let vm_telemetry = vm.telemetry();
         let heap_telemetry = vm.heap.telemetry();
+        let active_guest_leaks = vm.active_guest_objects();
         let process_telemetry = capture_process_telemetry();
 
         let heap_amplification_ratio = if heap_telemetry.peak_allocated_bytes > 0 {
@@ -513,7 +541,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                     heap_amplification_ratio,
                     total_allocations: heap_telemetry.total_allocations_count,
                     total_deallocations: heap_telemetry.total_deallocations_count,
-                    active_leaks: heap_telemetry.active_live_objects,
+                    active_leaks: active_guest_leaks,
                 },
                 execution: ExecutionTelemetry {
                     instructions_dispatched: vm_telemetry.instructions_dispatched,
@@ -562,10 +590,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 "  Total Deallocations     : {}",
                 heap_telemetry.total_deallocations_count
             );
-            println!(
-                "  Active Leaks            : {}",
-                heap_telemetry.active_live_objects
-            );
+            println!("  Active Leaks            : {}", active_guest_leaks);
             println!("Execution:");
             println!(
                 "  Instructions Dispatched : {}",
