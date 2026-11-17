@@ -66,9 +66,11 @@ When given an archive container, the runtime:
 1. Inspects embedded `manifest.toml`.
 2. Automatically stages and loads bundled native shared libraries (`natives/*.so`).
 3. Sets `SOLIX_RESOURCE_ROOT` to the archive resources directory.
-4. Selects the target entry point:
-   - Default: `[entrypoints].main` (e.g. `Main::main`) or custom profile entrypoint (e.g. `[entrypoints].test` for a test profile container).
-   - Overridden dynamically by `--entry <symbol>` (validating symbol existence, throwing `[E0301]` on missing entrypoint).
+4. Selects the target entry point using strict precedence:
+   - Explicit `--entry <symbol>` override on the CLI (validating symbol existence, throwing `[E0301]` on missing entrypoint).
+   - Explicit `--profile <profile>` (or package spec profile such as `pkg:test`), resolving `[profiles.<profile>].entrypoint` from the bundled `manifest.toml`.
+   - The compiled entry point recorded in the primary `.slxb` container (`entry_point_id` / `entry_point`), so archives built with `--test` or custom profiles execute their built entrypoint without extra CLI flags.
+   - Fallback to `[profiles.<build_profile>].entrypoint` or `[profiles.release].entrypoint` when no entry point is embedded in the binary.
 5. Invokes the entry point in the VM.
 
 ```bash

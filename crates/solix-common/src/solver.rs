@@ -899,6 +899,26 @@ impl ClientModuleSolver {
     }
 }
 
+/// Ranks installed package directories of equal version so unqualified lookups are deterministic.
+///
+/// Preference order: explicit profile layout (`<name>-release@` > legacy `<name>/<ver>` > `-test@` > `-debug@`).
+fn installed_profile_rank(directory: &Path) -> u8 {
+    let directory_name = directory
+        .file_name()
+        .or_else(|| directory.parent().and_then(Path::file_name))
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if directory_name.contains("-release@") {
+        3
+    } else if directory_name.contains("-test@") {
+        1
+    } else if directory_name.contains("-debug@") {
+        0
+    } else {
+        2
+    }
+}
+
 /// Helper struct for discovered package directories in the package store.
 #[derive(Debug, Clone)]
 struct InstalledCandidate {
@@ -944,7 +964,12 @@ impl ModuleSolver for ClientModuleSolver {
             });
         }
 
-        compatible_versions.sort_by_key(|(version, _)| *version);
+        compatible_versions.sort_by(|(version_a, dir_a), (version_b, dir_b)| {
+            version_a
+                .cmp(version_b)
+                .then_with(|| installed_profile_rank(dir_a).cmp(&installed_profile_rank(dir_b)))
+                .then_with(|| dir_a.cmp(dir_b))
+        });
         let Some((winning_version, winning_dir)) = compatible_versions.last() else {
             return Err(SolverError::PackageNotFound {
                 name: package_name.to_string(),
@@ -966,7 +991,12 @@ impl ModuleSolver for ClientModuleSolver {
         };
 
         let mut discovered_versions = self.scan_installed_versions(base_name, req_profile)?;
-        discovered_versions.sort_by_key(|(version, _)| *version);
+        discovered_versions.sort_by(|(version_a, dir_a), (version_b, dir_b)| {
+            version_a
+                .cmp(version_b)
+                .then_with(|| installed_profile_rank(dir_a).cmp(&installed_profile_rank(dir_b)))
+                .then_with(|| dir_a.cmp(dir_b))
+        });
 
         let Some((winning_version, winning_dir)) = discovered_versions.last() else {
             return Err(SolverError::PackageNotFound {

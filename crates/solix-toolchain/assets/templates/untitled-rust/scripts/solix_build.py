@@ -765,6 +765,160 @@ def package_slxarc(stage_directory: Path, output_slxarc: Path) -> Path:
     return output_slxarc
 
 
+def resolve_package_store_directory(resolved_options: dict[str, Any]) -> Path:
+    """Resolves the local package store directory using the same precedence as the Solix toolchain."""
+    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR", "").strip()
+    if pkg_dir_override:
+        return Path(pkg_dir_override)
+
+    profile_pkg_dir = resolved_options.get("pkg_dir")
+    if profile_pkg_dir:
+        return Path(str(profile_pkg_dir))
+
+    solix_home = os.environ.get("SOLIX_HOME", "").strip()
+    if solix_home:
+        return Path(solix_home) / "packages"
+
+    if sys.platform == "win32":
+        user_profile = os.environ.get("USERPROFILE", "").strip()
+        if user_profile:
+            return Path(user_profile) / ".solix" / "packages"
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            return Path(local_app_data) / "solix" / "packages"
+
+    home_env = os.environ.get("HOME", "").strip()
+    if home_env:
+        return Path(home_env) / ".solix" / "packages"
+
+    return Path.home() / ".solix" / "packages"
+
+
+def _find_dependency_archive(
+    package_store: Path,
+    dependency_name: str,
+    dependency_version: str,
+    dependency_profile: str | None,
+) -> Path | None:
+    """Finds the best matching `.slxarc` archive for a dependency requirement in `package_store`."""
+    candidate_archives: list[Path] = []
+    if dependency_profile:
+        candidate_archives.append(
+            package_store
+            / f"{dependency_name}-{dependency_profile}@{dependency_version}"
+            / f"{dependency_name}.slxarc"
+        )
+        candidate_archives.extend(
+            reversed(sorted(package_store.glob(f"{dependency_name}-{dependency_profile}@*/{dependency_name}.slxarc")))
+        )
+    else:
+        for fallback_profile in ("release", "debug", "test"):
+            candidate_archives.append(
+                package_store
+                / f"{dependency_name}-{fallback_profile}@{dependency_version}"
+                / f"{dependency_name}.slxarc"
+            )
+            candidate_archives.extend(
+                reversed(sorted(package_store.glob(f"{dependency_name}-{fallback_profile}@*/{dependency_name}.slxarc")))
+            )
+
+    candidate_archives.append(
+        package_store / f"{dependency_name}@{dependency_version}" / f"{dependency_name}.slxarc"
+    )
+    candidate_archives.append(
+        package_store / dependency_name / dependency_version / f"{dependency_name}.slxarc"
+    )
+    candidate_archives.extend(
+        reversed(sorted(package_store.glob(f"{dependency_name}/*/{dependency_name}.slxarc")))
+    )
+    return next((path for path in candidate_archives if path.is_file()), None)
+
+
+def stage_dependency_native_libraries(
+    manifest: dict[str, Any],
+    profile: str,
+    stage_lib_directory: Path,
+) -> list[Path]:
+    """Bundles native shared libraries from statically linked dependencies into `stage/lib/`.
+
+    Static linking (`--link static`) merges reachable Solix bytecode and clears external bytecode
+    dependencies from the compiled binary's runtime requirements. Any native `.so`/`.dll`/`.dylib`
+    shared libraries owned by those dependencies must therefore be packaged inside the static
+    `.slxarc` archive so `solix run` can load them cleanly without requiring the dependency package
+    at runtime.
+    """
+    resolved_options = resolve_profile_options(manifest, profile)
+    link_mode = os.environ.get("SOLIX_LINK_MODE") or resolved_options.get("link")
+    if link_mode != "static":
+        return []
+
+    dependencies = resolved_options.get("dependencies", {})
+    if not isinstance(dependencies, dict) or not dependencies:
+        return []
+
+    package_store = resolve_package_store_directory(resolved_options)
+    if not package_store.exists():
+        return []
+
+    pending_dependencies: list[tuple[str, str, str | None]] = []
+    for dependency_name, dependency_spec in sorted(dependencies.items()):
+        if isinstance(dependency_spec, dict):
+            dep_version = str(dependency_spec.get("version", "*"))
+            dep_profile = dependency_spec.get("profile")
+            pending_dependencies.append((dependency_name, dep_version, dep_profile))
+
+    visited_archives: set[Path] = set()
+    staged_libraries: list[Path] = []
+
+    while pending_dependencies:
+        dep_name, dep_version, dep_profile = pending_dependencies.pop(0)
+        dependency_archive = _find_dependency_archive(
+            package_store,
+            dep_name,
+            dep_version,
+            dep_profile,
+        )
+        if dependency_archive is None or dependency_archive in visited_archives:
+            continue
+        visited_archives.add(dependency_archive)
+
+        with zipfile.ZipFile(dependency_archive) as archive_file:
+            for archive_entry in archive_file.infolist():
+                entry_name = archive_entry.filename
+                if not entry_name.startswith("lib/") or not entry_name.endswith((".so", ".dll", ".dylib")):
+                    continue
+                relative_subpath = entry_name[len("lib/"):]
+                destination_path = stage_lib_directory / relative_subpath
+                if destination_path.exists():
+                    continue
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                destination_path.write_bytes(archive_file.read(archive_entry))
+                staged_libraries.append(destination_path)
+
+            if "manifest.toml" in archive_file.namelist():
+                try:
+                    dep_manifest = tomllib.loads(archive_file.read("manifest.toml").decode("utf-8"))
+                    dep_resolved = resolve_profile_options(dep_manifest, dep_profile or "release")
+                    transitive_deps = dep_resolved.get("dependencies", {})
+                    if isinstance(transitive_deps, dict):
+                        for trans_name, trans_spec in sorted(transitive_deps.items()):
+                            if isinstance(trans_spec, dict):
+                                pending_dependencies.append((
+                                    trans_name,
+                                    str(trans_spec.get("version", "*")),
+                                    trans_spec.get("profile"),
+                                ))
+                except (tomllib.TOMLDecodeError, BuildError, UnicodeDecodeError):
+                    pass
+
+    if staged_libraries:
+        print(
+            f"  [static] Bundled {len(staged_libraries)} dependency native "
+            f"librar{'y' if len(staged_libraries) == 1 else 'ies'} into static archive"
+        )
+    return staged_libraries
+
+
 # ============================================================================
 # Tier 2: Turnkey Orchestrator
 # ============================================================================
@@ -830,6 +984,9 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
         effective_profile,
     )
     solix_duration_ms = (time.perf_counter() - solix_start_time) * 1000.0
+
+    # Bundle native shared libraries from dependencies for statically linked archives
+    stage_dependency_native_libraries(manifest, effective_profile, staging["stage_lib"])
 
     # Record cryptographic checksums for native shared libraries
     staged_manifest_file = staging["stage"] / "manifest.toml"

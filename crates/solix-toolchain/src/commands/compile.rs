@@ -150,9 +150,13 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         .with_verify_checksums(!args.no_verify);
 
     let effective_entry = args.entry.or_else(|| {
-        parent_manifest
-            .as_ref()
-            .and_then(|manifest| manifest.main_entrypoint())
+        parent_manifest.as_ref().and_then(|manifest| {
+            manifest
+                .resolve_profile(&args.profile)
+                .ok()
+                .and_then(|resolved| resolved.entrypoint)
+                .or_else(|| manifest.main_entrypoint())
+        })
     });
 
     if let Some(entry_sym) = effective_entry {
@@ -184,7 +188,10 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     if args.deps.is_empty()
         && let Some(ref manifest) = parent_manifest
     {
-        for resolved_dependency in manifest.resolved_dependencies() {
+        let resolved_deps = manifest
+            .resolved_dependencies_for_profile(&args.profile)
+            .unwrap_or_else(|_| manifest.resolved_dependencies());
+        for resolved_dependency in resolved_deps {
             let spec_string = if resolved_dependency.build_profile.is_empty() {
                 format!(
                     "{}@{}",

@@ -904,6 +904,40 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         }
     }
 
+    // Pre-calculate exact 1-based line and column coordinates for local functions before
+    // static linking merges pre-compiled dependency functions with separate source tables.
+    for compiled_function in &mut program.functions {
+        let source_index = compiled_function.source_id as usize;
+        if let Some(source_content) = context.sources.get(source_index) {
+            let mut line_starting_offsets = Vec::new();
+            line_starting_offsets.push(0);
+            for (byte_offset, character_byte) in source_content.bytes().enumerate() {
+                if character_byte == b'\n' {
+                    line_starting_offsets.push(byte_offset + 1);
+                }
+            }
+
+            for source_entry in &mut compiled_function.source_map {
+                let token_start_offset = source_entry.span.start as usize;
+                let found_line_index =
+                    match line_starting_offsets.binary_search(&token_start_offset) {
+                        Ok(exact_line) => exact_line,
+                        Err(insertion_point) => insertion_point.saturating_sub(1),
+                    };
+                source_entry.line = (found_line_index + 1) as u32;
+                source_entry.column = (token_start_offset
+                    .saturating_sub(line_starting_offsets[found_line_index])
+                    + 1) as u32;
+            }
+        }
+
+        for local_debug_entry in &mut compiled_function.local_variables {
+            if local_debug_entry.end_pc == u32::MAX {
+                local_debug_entry.end_pc = compiled_function.instructions.len() as u32;
+            }
+        }
+    }
+
     let is_static_mode = context.options.link_mode == crate::CompilationContext::LinkMode::Static;
     super::reachability::apply_reachability_and_static_linking(
         &mut program,
@@ -948,39 +982,6 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         source_files: context.source_names.clone(),
         exported_ast_bytes,
     };
-
-    // Pre-calculate exact 1-based line and column coordinates for all source map entries
-    for compiled_function in &mut program.functions {
-        let source_index = compiled_function.source_id as usize;
-        if let Some(source_content) = context.sources.get(source_index) {
-            let mut line_starting_offsets = Vec::new();
-            line_starting_offsets.push(0);
-            for (byte_offset, character_byte) in source_content.bytes().enumerate() {
-                if character_byte == b'\n' {
-                    line_starting_offsets.push(byte_offset + 1);
-                }
-            }
-
-            for source_entry in &mut compiled_function.source_map {
-                let token_start_offset = source_entry.span.start as usize;
-                let found_line_index =
-                    match line_starting_offsets.binary_search(&token_start_offset) {
-                        Ok(exact_line) => exact_line,
-                        Err(insertion_point) => insertion_point.saturating_sub(1),
-                    };
-                source_entry.line = (found_line_index + 1) as u32;
-                source_entry.column = (token_start_offset
-                    .saturating_sub(line_starting_offsets[found_line_index])
-                    + 1) as u32;
-            }
-        }
-
-        for local_debug_entry in &mut compiled_function.local_variables {
-            if local_debug_entry.end_pc == u32::MAX {
-                local_debug_entry.end_pc = compiled_function.instructions.len() as u32;
-            }
-        }
-    }
 
     Ok(EmissionArtifacts {
         functions_by_source,

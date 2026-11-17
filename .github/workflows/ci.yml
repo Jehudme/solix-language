@@ -156,6 +156,8 @@ jobs:
           "$SOLIX_EXE" list
           "$SOLIX_EXE" build examples/breakout --profile debug
           "$SOLIX_EXE" build examples/breakout --profile release
+          "$SOLIX_EXE" build examples/breakout --profile test
+          "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxarc
 
       - name: Verify stripped release build
         if: runner.os == 'Linux'

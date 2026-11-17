@@ -464,6 +464,7 @@ impl RuntimeContext {
         let entry_point_function_id = Self::resolve_entry_point(
             &options.entry_point,
             &loaded_binaries,
+            &all_functions,
             &symbol_to_function_id,
         );
 
@@ -760,26 +761,50 @@ impl RuntimeContext {
         })
     }
 
-    /// Resolves the global entry point function ID.
+    /// Resolves the global entry point function ID, preferring exact/primary binary symbols.
     fn resolve_entry_point(
         entry_override: &Option<String>,
         loaded_binaries: &[LoadedBinary],
+        all_functions: &[CompiledFunction],
         symbol_to_function_id: &HashMap<String, u32>,
     ) -> Option<u32> {
+        let matches_entry_symbol = |candidate_sym: &str, entry_sym: &str| -> bool {
+            let sym_base = candidate_sym.split('(').next().unwrap_or(candidate_sym);
+            sym_base == entry_sym
+                || (sym_base.ends_with(entry_sym)
+                    && (sym_base.len() == entry_sym.len()
+                        || sym_base.as_bytes()[sym_base.len() - entry_sym.len() - 1] == b'.'
+                        || sym_base.as_bytes()[sym_base.len() - entry_sym.len() - 1] == b':'))
+        };
+
         // 1. Explicit override in RuntimeOptions
         if let Some(entry_sym) = entry_override {
+            // Search primary binary deterministically first
+            if let Some(primary) = loaded_binaries.first() {
+                let start_idx = primary.function_id_offset as usize;
+                let end_idx = start_idx.saturating_add(primary.function_count);
+                if let Some(primary_funcs) = all_functions.get(start_idx..end_idx) {
+                    for (local_idx, func) in primary_funcs.iter().enumerate() {
+                        if func.symbol == *entry_sym
+                            || func.symbol.split('(').next().unwrap_or(&func.symbol) == entry_sym
+                        {
+                            return Some((start_idx + local_idx) as u32);
+                        }
+                    }
+                    for (local_idx, func) in primary_funcs.iter().enumerate() {
+                        if matches_entry_symbol(&func.symbol, entry_sym) {
+                            return Some((start_idx + local_idx) as u32);
+                        }
+                    }
+                }
+            }
+
             if let Some(id) = symbol_to_function_id.get(entry_sym) {
                 return Some(*id);
             }
-            for (sym, id) in symbol_to_function_id {
-                let sym_base = sym.split('(').next().unwrap_or(sym);
-                if sym_base == entry_sym
-                    || sym_base.ends_with(entry_sym)
-                        && (sym_base.len() == entry_sym.len()
-                            || sym_base.as_bytes()[sym_base.len() - entry_sym.len() - 1] == b'.'
-                            || sym_base.as_bytes()[sym_base.len() - entry_sym.len() - 1] == b':')
-                {
-                    return Some(*id);
+            for (func_idx, func) in all_functions.iter().enumerate() {
+                if matches_entry_symbol(&func.symbol, entry_sym) {
+                    return Some(func_idx as u32);
                 }
             }
             return None;
@@ -990,7 +1015,12 @@ fn verify_and_resolve_runtime_dependencies(
                 }
             }
         } else if let Some(solver) = &options.solver {
-            match solver.resolve_compatible(&requirement.name, requirement.version) {
+            let lookup_name = if let Some(ref target_profile) = requirement.profile {
+                format!("{}-{target_profile}", requirement.name)
+            } else {
+                requirement.name.clone()
+            };
+            match solver.resolve_compatible(&lookup_name, requirement.version) {
                 Ok(solved_package) => {
                     if !solved_package
                         .version

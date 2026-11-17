@@ -29,6 +29,17 @@ SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
 ]
 
 
+def normalize_host_path(path: Path) -> Path:
+    """Strips Windows verbatim path prefixes (`\\\\?\\`) so external tools like CMake work cleanly."""
+    if os.name == "nt":
+        raw_path = str(path)
+        if raw_path.startswith("\\\\?\\UNC\\"):
+            return Path("\\\\" + raw_path[8:])
+        if raw_path.startswith("\\\\?\\"):
+            return Path(raw_path[4:])
+    return path
+
+
 # ============================================================================
 # Structured Build Error & Diagnostic UI
 # ============================================================================
@@ -266,6 +277,8 @@ def compile_rust_project(
     profile: str,
 ) -> list[Path]:
     """Compiles a Rust cdylib project with strict CARGO_TARGET_DIR isolation."""
+    project_directory = normalize_host_path(project_directory)
+    cache_directory = normalize_host_path(cache_directory)
     cargo_target_directory = cache_directory / "cargo"
     host_target_triple = get_host_target_triple()
 
@@ -276,35 +289,51 @@ def compile_rust_project(
     if home_cargo_bin not in current_system_path:
         cargo_environment["PATH"] = f"{home_cargo_bin}{os.pathsep}{current_system_path}"
 
-    if sys.platform.startswith("linux"):
-        cargo_environment["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + cargo_environment.get("RUSTFLAGS", "")
-
     emitted_libraries: list[Path] = []
+    forced_target_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
 
     if profile != "release":
-        # Debug/Test: Compile only for the host machine
+        # Debug/Test: Compile only for the active host (or explicitly requested cross target)
+        active_target_triple = forced_target_triple or host_target_triple
+        is_cross_target = active_target_triple != host_target_triple
+        target_cargo_env = cargo_environment.copy()
+        if sys.platform.startswith("linux") and not is_cross_target:
+            target_cargo_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + target_cargo_env.get("RUSTFLAGS", "")
+
+        use_zigbuild_for_debug = (
+            is_cross_target
+            and sys.platform.startswith("linux")
+            and bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
+        )
         cargo_command = [
             "cargo",
-            "build",
+            "zigbuild" if use_zigbuild_for_debug else "build",
             "--manifest-path",
             str(project_directory / "Cargo.toml"),
             "--target-dir",
             str(cargo_target_directory),
         ]
-        print(f"  [cargo] Building native Rust project '{project_directory.name}' ({profile})...")
+        if is_cross_target:
+            cargo_command.extend(["--target", active_target_triple])
+
+        print(f"  [cargo] Building native Rust project '{project_directory.name}' ({profile}, {active_target_triple})...")
         run_command(
             cargo_command,
             cwd=project_directory,
-            env=cargo_environment,
+            env=target_cargo_env,
             phase="Native Rust Host Build",
             hint="Check that Rust toolchain is installed and Cargo.toml has no errors.",
             capture_output=False,
         )
 
-        artifact_directory = cargo_target_directory / "debug"
-        if sys.platform == "win32":
+        artifact_directory = (
+            cargo_target_directory / active_target_triple / "debug"
+            if is_cross_target
+            else cargo_target_directory / "debug"
+        )
+        if active_target_triple.endswith("-windows-msvc") or active_target_triple.endswith("-windows-gnu") or (not is_cross_target and sys.platform == "win32"):
             allowed_extensions = [".dll"]
-        elif sys.platform == "darwin":
+        elif active_target_triple.endswith("-apple-darwin") or (not is_cross_target and sys.platform == "darwin"):
             allowed_extensions = [".dylib"]
         else:
             allowed_extensions = [".so"]
@@ -312,32 +341,66 @@ def compile_rust_project(
         if artifact_directory.exists():
             for file_path in artifact_directory.iterdir():
                 if file_path.is_file() and any(file_path.name.endswith(extension) for extension in allowed_extensions):
-                    destination_path = stage_lib_directory / file_path.name
+                    if is_cross_target:
+                        target_stage_dir = stage_lib_directory / active_target_triple
+                        target_stage_dir.mkdir(parents=True, exist_ok=True)
+                        destination_path = target_stage_dir / file_path.name
+                    else:
+                        destination_path = stage_lib_directory / file_path.name
                     shutil.copy2(file_path, destination_path)
                     emitted_libraries.append(destination_path)
         return emitted_libraries
 
-    # Release mode: Multi-platform cross-compilation via cargo zigbuild
+    # Release mode: Build forced target (when SOLIX_TARGET_TRIPLE is set) or multi-platform targets
     has_cargo_zigbuild = bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
     successful_targets = 0
-
-    for target_triple, target_extension in SUPPORTED_RELEASE_TARGETS:
-        is_host_platform = (
-            target_triple == host_target_triple
-            or (
-                target_triple.startswith("x86_64-pc-windows")
-                and host_target_triple.startswith("x86_64-pc-windows")
+    last_target_error_output: str | None = None
+    candidate_targets = (
+        [
+            (
+                forced_target_triple,
+                ".dll"
+                if "windows" in forced_target_triple
+                else (".dylib" if "apple-darwin" in forced_target_triple else ".so"),
             )
-        )
+        ]
+        if forced_target_triple
+        else SUPPORTED_RELEASE_TARGETS
+    )
+
+    for target_triple, target_extension in candidate_targets:
+        is_exact_host = target_triple == host_target_triple
+        is_host_platform = is_exact_host
         target_stage_directory = stage_lib_directory / target_triple
         target_stage_directory.mkdir(parents=True, exist_ok=True)
 
-        if has_cargo_zigbuild:
-            if "msvc" in target_triple:
-                continue
+        target_cargo_env = cargo_environment.copy()
+        if sys.platform.startswith("linux") and is_exact_host:
+            target_cargo_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + target_cargo_env.get("RUSTFLAGS", "")
+
+        use_zigbuild = (
+            has_cargo_zigbuild
+            and sys.platform.startswith("linux")
+            and "msvc" not in target_triple
+            and "apple-darwin" not in target_triple
+        )
+
+        if use_zigbuild:
             cargo_command = [
                 "cargo",
                 "zigbuild",
+                "--manifest-path",
+                str(project_directory / "Cargo.toml"),
+                "--target-dir",
+                str(cargo_target_directory),
+                "--release",
+                "--target",
+                target_triple,
+            ]
+        elif forced_target_triple or (is_exact_host and not sys.platform.startswith("linux")):
+            cargo_command = [
+                "cargo",
+                "build",
                 "--manifest-path",
                 str(project_directory / "Cargo.toml"),
                 "--target-dir",
@@ -365,7 +428,7 @@ def compile_rust_project(
             run_command(
                 cargo_command,
                 cwd=project_directory,
-                env=cargo_environment,
+                env=target_cargo_env,
                 phase=f"Native Rust Target Build ({target_triple})",
                 hint="Install target standard library via: rustup target add " + target_triple,
             )
@@ -375,14 +438,19 @@ def compile_rust_project(
             if "can't find crate for `std`" in error_output or "can't find crate for std" in error_output:
                 print(f"  [warning] Cross-compilation skipped for '{target_triple}': rust standard library not installed")
             else:
-                lines = error_output.strip().splitlines()
-                last_line = lines[-1] if lines else "build failed"
-                print(f"  [warning] Target '{target_triple}' compilation failed: {last_line}")
+                trimmed_output = error_output.strip()
+                last_target_error_output = trimmed_output or None
+                print(f"  [warning] Target '{target_triple}' compilation failed:")
+                if trimmed_output:
+                    print(trimmed_output)
             continue
 
+        used_explicit_target_dir = use_zigbuild or bool(forced_target_triple) or (
+            is_exact_host and not sys.platform.startswith("linux")
+        )
         artifact_directory = (
             cargo_target_directory / target_triple / "release"
-            if has_cargo_zigbuild
+            if used_explicit_target_dir
             else cargo_target_directory / "release"
         )
 
@@ -403,6 +471,7 @@ def compile_rust_project(
             phase="Native Rust Build",
             message=f"All target builds failed for native project '{project_directory.name}'",
             cwd=project_directory,
+            stderr=last_target_error_output,
             hint="Ensure host build dependencies and headers are available.",
         )
 
@@ -696,6 +765,160 @@ def package_slxarc(stage_directory: Path, output_slxarc: Path) -> Path:
     return output_slxarc
 
 
+def resolve_package_store_directory(resolved_options: dict[str, Any]) -> Path:
+    """Resolves the local package store directory using the same precedence as the Solix toolchain."""
+    pkg_dir_override = os.environ.get("SOLIX_PKG_DIR", "").strip()
+    if pkg_dir_override:
+        return Path(pkg_dir_override)
+
+    profile_pkg_dir = resolved_options.get("pkg_dir")
+    if profile_pkg_dir:
+        return Path(str(profile_pkg_dir))
+
+    solix_home = os.environ.get("SOLIX_HOME", "").strip()
+    if solix_home:
+        return Path(solix_home) / "packages"
+
+    if sys.platform == "win32":
+        user_profile = os.environ.get("USERPROFILE", "").strip()
+        if user_profile:
+            return Path(user_profile) / ".solix" / "packages"
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            return Path(local_app_data) / "solix" / "packages"
+
+    home_env = os.environ.get("HOME", "").strip()
+    if home_env:
+        return Path(home_env) / ".solix" / "packages"
+
+    return Path.home() / ".solix" / "packages"
+
+
+def _find_dependency_archive(
+    package_store: Path,
+    dependency_name: str,
+    dependency_version: str,
+    dependency_profile: str | None,
+) -> Path | None:
+    """Finds the best matching `.slxarc` archive for a dependency requirement in `package_store`."""
+    candidate_archives: list[Path] = []
+    if dependency_profile:
+        candidate_archives.append(
+            package_store
+            / f"{dependency_name}-{dependency_profile}@{dependency_version}"
+            / f"{dependency_name}.slxarc"
+        )
+        candidate_archives.extend(
+            reversed(sorted(package_store.glob(f"{dependency_name}-{dependency_profile}@*/{dependency_name}.slxarc")))
+        )
+    else:
+        for fallback_profile in ("release", "debug", "test"):
+            candidate_archives.append(
+                package_store
+                / f"{dependency_name}-{fallback_profile}@{dependency_version}"
+                / f"{dependency_name}.slxarc"
+            )
+            candidate_archives.extend(
+                reversed(sorted(package_store.glob(f"{dependency_name}-{fallback_profile}@*/{dependency_name}.slxarc")))
+            )
+
+    candidate_archives.append(
+        package_store / f"{dependency_name}@{dependency_version}" / f"{dependency_name}.slxarc"
+    )
+    candidate_archives.append(
+        package_store / dependency_name / dependency_version / f"{dependency_name}.slxarc"
+    )
+    candidate_archives.extend(
+        reversed(sorted(package_store.glob(f"{dependency_name}/*/{dependency_name}.slxarc")))
+    )
+    return next((path for path in candidate_archives if path.is_file()), None)
+
+
+def stage_dependency_native_libraries(
+    manifest: dict[str, Any],
+    profile: str,
+    stage_lib_directory: Path,
+) -> list[Path]:
+    """Bundles native shared libraries from statically linked dependencies into `stage/lib/`.
+
+    Static linking (`--link static`) merges reachable Solix bytecode and clears external bytecode
+    dependencies from the compiled binary's runtime requirements. Any native `.so`/`.dll`/`.dylib`
+    shared libraries owned by those dependencies must therefore be packaged inside the static
+    `.slxarc` archive so `solix run` can load them cleanly without requiring the dependency package
+    at runtime.
+    """
+    resolved_options = resolve_profile_options(manifest, profile)
+    link_mode = os.environ.get("SOLIX_LINK_MODE") or resolved_options.get("link")
+    if link_mode != "static":
+        return []
+
+    dependencies = resolved_options.get("dependencies", {})
+    if not isinstance(dependencies, dict) or not dependencies:
+        return []
+
+    package_store = resolve_package_store_directory(resolved_options)
+    if not package_store.exists():
+        return []
+
+    pending_dependencies: list[tuple[str, str, str | None]] = []
+    for dependency_name, dependency_spec in sorted(dependencies.items()):
+        if isinstance(dependency_spec, dict):
+            dep_version = str(dependency_spec.get("version", "*"))
+            dep_profile = dependency_spec.get("profile")
+            pending_dependencies.append((dependency_name, dep_version, dep_profile))
+
+    visited_archives: set[Path] = set()
+    staged_libraries: list[Path] = []
+
+    while pending_dependencies:
+        dep_name, dep_version, dep_profile = pending_dependencies.pop(0)
+        dependency_archive = _find_dependency_archive(
+            package_store,
+            dep_name,
+            dep_version,
+            dep_profile,
+        )
+        if dependency_archive is None or dependency_archive in visited_archives:
+            continue
+        visited_archives.add(dependency_archive)
+
+        with zipfile.ZipFile(dependency_archive) as archive_file:
+            for archive_entry in archive_file.infolist():
+                entry_name = archive_entry.filename
+                if not entry_name.startswith("lib/") or not entry_name.endswith((".so", ".dll", ".dylib")):
+                    continue
+                relative_subpath = entry_name[len("lib/"):]
+                destination_path = stage_lib_directory / relative_subpath
+                if destination_path.exists():
+                    continue
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                destination_path.write_bytes(archive_file.read(archive_entry))
+                staged_libraries.append(destination_path)
+
+            if "manifest.toml" in archive_file.namelist():
+                try:
+                    dep_manifest = tomllib.loads(archive_file.read("manifest.toml").decode("utf-8"))
+                    dep_resolved = resolve_profile_options(dep_manifest, dep_profile or "release")
+                    transitive_deps = dep_resolved.get("dependencies", {})
+                    if isinstance(transitive_deps, dict):
+                        for trans_name, trans_spec in sorted(transitive_deps.items()):
+                            if isinstance(trans_spec, dict):
+                                pending_dependencies.append((
+                                    trans_name,
+                                    str(trans_spec.get("version", "*")),
+                                    trans_spec.get("profile"),
+                                ))
+                except (tomllib.TOMLDecodeError, BuildError, UnicodeDecodeError):
+                    pass
+
+    if staged_libraries:
+        print(
+            f"  [static] Bundled {len(staged_libraries)} dependency native "
+            f"librar{'y' if len(staged_libraries) == 1 else 'ies'} into static archive"
+        )
+    return staged_libraries
+
+
 # ============================================================================
 # Tier 2: Turnkey Orchestrator
 # ============================================================================
@@ -761,6 +984,9 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
         effective_profile,
     )
     solix_duration_ms = (time.perf_counter() - solix_start_time) * 1000.0
+
+    # Bundle native shared libraries from dependencies for statically linked archives
+    stage_dependency_native_libraries(manifest, effective_profile, staging["stage_lib"])
 
     # Record cryptographic checksums for native shared libraries
     staged_manifest_file = staging["stage"] / "manifest.toml"

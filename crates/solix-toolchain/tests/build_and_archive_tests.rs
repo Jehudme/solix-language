@@ -833,3 +833,524 @@ public class Main {
     .expect("parse run");
     assert_eq!(run(run_cli).expect("run built archive"), 70);
 }
+
+// ============================================================================
+// Test B.9: Test Profile Baked Entrypoint & CLI Entry/Profile Overrides
+// ============================================================================
+
+#[test]
+fn test_test_profile_and_entry_point_override_execute_distinct_exit_codes() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let template_source = locate_template_source();
+    let project_root = workspace.root_path().join("entry_override_app");
+
+    // Copy only scripts/ from template so we have a clean self-contained project without natives.
+    fs::create_dir_all(project_root.join("src")).expect("create src");
+    fs::create_dir_all(project_root.join("tests")).expect("create tests");
+    copy_project_tree(
+        &template_source.join("scripts"),
+        &project_root.join("scripts"),
+    )
+    .expect("copy scripts");
+
+    let manifest_toml = r#"
+[configuration]
+name = "entry_override_app"
+version = "0.1.0"
+description = "Verifies profile and CLI entrypoint precedence"
+license = "Apache-2.0"
+authors = ["Tester"]
+
+[profiles.release]
+entrypoint = "Main::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
+
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 8
+debug_symbols = true
+static = false
+
+[profiles.test]
+inherits = "debug"
+entrypoint = "TestRunner::test"
+sources = ["tests"]
+"#;
+    fs::write(project_root.join("manifest.toml"), manifest_toml).expect("write manifest");
+
+    let main_slx = r#"
+public class Main {
+    public static int32 main() {
+        return 11;
+    }
+
+    public static int32 alternate() {
+        return 33;
+    }
+}
+"#;
+    fs::write(project_root.join("src").join("main.slx"), main_slx).expect("write src/main.slx");
+
+    let test_slx = r#"
+public class TestRunner {
+    public static int32 test() {
+        return 22;
+    }
+
+    public static int32 alt_test() {
+        return 44;
+    }
+}
+"#;
+    fs::write(project_root.join("tests").join("test_main.slx"), test_slx)
+        .expect("write tests/test_main.slx");
+
+    let store_dir = workspace.root_path().join("store");
+    fs::create_dir_all(&store_dir).expect("create store");
+    let store_str = store_dir.to_str().expect("valid path");
+
+    // 1. Build --release and run without flags -> Main::main() = 11
+    let build_release = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid path"),
+        "--release",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse build release");
+    assert_eq!(run(build_release).expect("build release"), 0);
+
+    let release_archive = project_root
+        .join("build")
+        .join("release")
+        .join("entry_override_app.slxarc");
+    let run_release = Cli::try_parse_from([
+        "solix",
+        "run",
+        release_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run release");
+    assert_eq!(run(run_release).expect("run release"), 11);
+
+    // 2. Build --test and run WITHOUT --profile or --entry -> MUST run TestRunner::test() = 22
+    let build_test = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid path"),
+        "--test",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse build test");
+    assert_eq!(run(build_test).expect("build test"), 0);
+
+    let test_archive = project_root
+        .join("build")
+        .join("test")
+        .join("entry_override_app.slxarc");
+    let run_test_default = Cli::try_parse_from([
+        "solix",
+        "run",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run test archive without flags");
+    assert_eq!(
+        run(run_test_default).expect("run test archive default"),
+        22,
+        "Running a --test .slxarc without flags must execute TestRunner::test (22), not release Main::main (11)"
+    );
+
+    // 3. Explicit --profile overrides on test archive
+    let run_with_test_profile = Cli::try_parse_from([
+        "solix",
+        "run",
+        "--profile",
+        "test",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run -p test");
+    assert_eq!(run(run_with_test_profile).expect("run -p test"), 22);
+
+    let run_with_release_profile = Cli::try_parse_from([
+        "solix",
+        "run",
+        "--profile",
+        "release",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run -p release");
+    assert_eq!(run(run_with_release_profile).expect("run -p release"), 11);
+
+    // 4. Explicit -e / --entry overrides on test archive
+    let run_entry_alt = Cli::try_parse_from([
+        "solix",
+        "run",
+        "-e",
+        "Main::alternate",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run -e Main::alternate");
+    assert_eq!(run(run_entry_alt).expect("run -e Main::alternate"), 33);
+
+    let run_entry_alt_test = Cli::try_parse_from([
+        "solix",
+        "run",
+        "-e",
+        "TestRunner::alt_test",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run -e TestRunner::alt_test");
+    assert_eq!(
+        run(run_entry_alt_test).expect("run -e TestRunner::alt_test"),
+        44
+    );
+
+    // 5. Unknown --profile on archive must fail loudly instead of silently running release entrypoint
+    let run_unknown_profile = Cli::try_parse_from([
+        "solix",
+        "run",
+        "--profile",
+        "does_not_exist",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run -p unknown");
+    assert!(
+        run(run_unknown_profile).is_err(),
+        "Unknown --profile on .slxarc must return an error"
+    );
+
+    // 6. `solix compile --profile test` respects [profiles.test].entrypoint automatically
+    let compiled_test_bin = workspace.file_path("compiled_test.slxb");
+    let compile_test = Cli::try_parse_from([
+        "solix",
+        "compile",
+        project_root
+            .join("src")
+            .join("main.slx")
+            .to_str()
+            .expect("valid path"),
+        project_root
+            .join("tests")
+            .join("test_main.slx")
+            .to_str()
+            .expect("valid path"),
+        "--profile",
+        "test",
+        "-o",
+        compiled_test_bin.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse compile --profile test");
+    assert_eq!(run(compile_test).expect("compile --profile test"), 0);
+
+    let run_compiled_test = Cli::try_parse_from([
+        "solix",
+        "run",
+        compiled_test_bin.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run compiled test slxb");
+    assert_eq!(
+        run(run_compiled_test).expect("run compiled test slxb"),
+        22,
+        "`solix compile --profile test` must bake TestRunner::test entrypoint"
+    );
+
+    // 7. `solix run --profile test tests/test_main.slx` discovers parent manifest test profile
+    let run_source_test_profile = Cli::try_parse_from([
+        "solix",
+        "run",
+        "--profile",
+        "test",
+        project_root
+            .join("tests")
+            .join("test_main.slx")
+            .to_str()
+            .expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run -p test test_main.slx");
+    assert_eq!(
+        run(run_source_test_profile).expect("run -p test test_main.slx"),
+        22
+    );
+}
+
+// ============================================================================
+// Test B.10: Static Release Build with Native Dependency + Standalone Execution
+// ============================================================================
+
+#[test]
+fn test_static_release_build_bundles_dependency_natives_and_runs_standalone() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let store_dir = workspace.root_path().join("pkg_store");
+    let empty_store_dir = workspace.root_path().join("empty_pkg_store");
+    fs::create_dir_all(&store_dir).expect("create store dir");
+    fs::create_dir_all(&empty_store_dir).expect("create empty store dir");
+
+    let template_source = locate_template_source();
+
+    // 1. Build and install a native-backed dependency package `widget_dep` with overloaded
+    //    constructors, virtual methods, static globals, and native `CallSymbol` bridge.
+    let dep_root = workspace.root_path().join("widget_dep");
+    copy_project_tree(&template_source, &dep_root).expect("copy template for widget_dep");
+
+    let dep_manifest = r#"
+[configuration]
+name = "widget_dep"
+version = "0.1.0"
+description = "Dependency with native bridge, overloaded ctors, vtable, and static global"
+license = "Apache-2.0"
+authors = ["Tester"]
+
+[profiles.release]
+optimization_level = 3
+inline_threshold = 0
+debug_symbols = false
+static = true
+sources = ["src"]
+
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 0
+debug_symbols = true
+static = false
+"#;
+    fs::write(dep_root.join("manifest.toml"), dep_manifest).expect("write dep manifest");
+
+    let dep_source = r#"
+package widget_dep;
+
+public class MathBridge {
+    public static native int32 fast_add(int32 left, int32 right);
+}
+
+public class WidgetConfig {
+    public static int32 BIAS = 4;
+}
+
+public class Widget {
+    public int32 first;
+    public int32 second;
+
+    public Widget() {
+        this.first = 1;
+        this.second = 1;
+    }
+
+    public Widget(int32 init_first, int32 init_second) {
+        this.first = init_first;
+        this.second = init_second;
+    }
+
+    public virtual int32 compute(int32 delta) {
+        return MathBridge::fast_add(this.first, this.second) + WidgetConfig::BIAS + delta;
+    }
+
+    public static int32 unused_main() {
+        return 0;
+    }
+}
+"#;
+    fs::write(dep_root.join("src").join("main.slx"), dep_source).expect("write dep main.slx");
+
+    let store_str = store_dir.to_str().expect("valid path");
+    let build_install_dep = Cli::try_parse_from([
+        "solix",
+        "build",
+        dep_root.to_str().expect("valid path"),
+        "--release",
+        "--install",
+        "--force",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse dep build --install");
+    assert_eq!(run(build_install_dep).expect("build+install widget_dep"), 0);
+
+    // 2. Create consumer project linking statically in `[profiles.release]` against `widget_dep`
+    //    and defining its own classes + distinct `[profiles.test]` entrypoint.
+    let app_root = workspace.root_path().join("static_app");
+    fs::create_dir_all(app_root.join("src")).expect("create app src");
+    fs::create_dir_all(app_root.join("tests")).expect("create app tests");
+    copy_project_tree(&template_source.join("scripts"), &app_root.join("scripts"))
+        .expect("copy app scripts");
+
+    let app_manifest = r#"
+[configuration]
+name = "static_app"
+version = "0.1.0"
+description = "Consumer app testing static release build with native dep"
+license = "Apache-2.0"
+authors = ["Tester"]
+
+[profiles.release]
+entrypoint = "App::main"
+optimization_level = 3
+inline_threshold = 16
+debug_symbols = false
+static = true
+sources = ["src"]
+dependencies = { widget_dep = { version = "0.1.0", profile = "release" } }
+
+[profiles.debug]
+inherits = "release"
+optimization_level = 0
+inline_threshold = 8
+debug_symbols = true
+static = false
+
+[profiles.test]
+inherits = "debug"
+entrypoint = "TestRunner::test"
+sources = ["tests"]
+"#;
+    fs::write(app_root.join("manifest.toml"), app_manifest).expect("write app manifest");
+
+    let app_main = r#"
+import widget_dep.*;
+
+public class LocalFirst {
+    public int32 val;
+    public LocalFirst(int32 v_in) {
+        this.val = v_in;
+    }
+    public virtual int32 read_val() {
+        return this.val;
+    }
+}
+
+public class LocalSecond {
+    public int32 extra;
+    public LocalSecond(int32 e_in) {
+        this.extra = e_in;
+    }
+    public virtual int32 read_extra() {
+        return this.extra + 2;
+    }
+}
+
+public class App {
+    public static int32 main() {
+        LocalFirst alpha = new LocalFirst(3);
+        LocalSecond beta = new LocalSecond(5);
+        Widget widget = new Widget(10, 20);
+        // fast_add(10, 20) = 30, + BIAS(4) + delta(6) = 40; + alpha(3) + beta(7) = 50
+        return widget.compute(6) + alpha.read_val() + beta.read_extra();
+    }
+}
+"#;
+    fs::write(app_root.join("src").join("main.slx"), app_main).expect("write app main.slx");
+
+    let app_test = r#"
+import widget_dep.*;
+
+public class TestRunner {
+    public static int32 test() {
+        Widget widget = new Widget(4, 5);
+        // fast_add(4, 5) = 9, + BIAS(4) + delta(0) = 13
+        return widget.compute(0);
+    }
+}
+"#;
+    fs::write(app_root.join("tests").join("test_main.slx"), app_test)
+        .expect("write app test_main.slx");
+
+    let build_app_release = Cli::try_parse_from([
+        "solix",
+        "build",
+        app_root.to_str().expect("valid path"),
+        "--release",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse app release build");
+    assert_eq!(run(build_app_release).expect("build static_app release"), 0);
+
+    let release_archive = app_root
+        .join("build")
+        .join("release")
+        .join("static_app.slxarc");
+    assert!(release_archive.exists(), "release archive must exist");
+
+    let inspection = SlxarcArchive::inspect(&release_archive).expect("inspect static release");
+    let expected_native = host_cdylib_filename("rust_bridge");
+    assert!(
+        inspection
+            .native_libraries
+            .iter()
+            .any(|lib_path| lib_path.ends_with(&expected_native)),
+        "Static release archive must bundle dependency native library '{expected_native}', found {:?}",
+        inspection.native_libraries
+    );
+    let primary_binary = &inspection.binaries[0].1;
+    assert!(
+        primary_binary.export_manifest.dependencies.is_empty(),
+        "Static release binary must not keep external runtime bytecode dependencies"
+    );
+
+    // 3. Execute release archive using an EMPTY package store to prove 100% standalone operation!
+    let empty_store_str = empty_store_dir.to_str().expect("valid path");
+    let run_standalone = Cli::try_parse_from([
+        "solix",
+        "run",
+        release_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        empty_store_str,
+    ])
+    .expect("parse run standalone static release");
+    assert_eq!(
+        run(run_standalone).expect("run standalone static release archive"),
+        50
+    );
+
+    // 4. Build & run consumer test profile -> must execute TestRunner::test (13), not App::main (50)
+    let build_app_test = Cli::try_parse_from([
+        "solix",
+        "build",
+        app_root.to_str().expect("valid path"),
+        "--test",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse app test build");
+    assert_eq!(run(build_app_test).expect("build static_app test"), 0);
+
+    let test_archive = app_root
+        .join("build")
+        .join("test")
+        .join("static_app.slxarc");
+    let run_test = Cli::try_parse_from([
+        "solix",
+        "run",
+        test_archive.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse run static_app test archive");
+    assert_eq!(run(run_test).expect("run static_app test archive"), 13);
+}

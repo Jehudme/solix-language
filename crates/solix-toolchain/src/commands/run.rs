@@ -178,6 +178,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     }
 
     let mut target_binaries = args.binaries.clone();
+    let mut resolved_spec_profile: Option<String> = None;
 
     if target_binaries.len() == 1 {
         let single_target = &target_binaries[0];
@@ -200,6 +201,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 .as_deref()
                 .or(args.profile.as_deref())
                 .unwrap_or("release");
+            resolved_spec_profile = spec_profile.clone();
 
             let registry = PackageRegistry::load_or_sync(&store_directory)?;
 
@@ -304,14 +306,39 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
             if runtime_options.entry_point.is_none() {
-                let target_profile = args.profile.as_deref().unwrap_or("release");
-                let selected_entry = archive_manifest
-                    .resolve_profile(target_profile)
-                    .ok()
-                    .and_then(|profile| profile.entrypoint)
-                    .or_else(|| archive_manifest.main_entrypoint());
-                if let Some(ref target_symbol) = selected_entry {
-                    runtime_options = runtime_options.with_entry_point(target_symbol);
+                let explicit_profile = args.profile.as_deref().or(resolved_spec_profile.as_deref());
+                if let Some(target_profile) = explicit_profile {
+                    let resolved_profile = archive_manifest
+                        .resolve_profile(target_profile)
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    if let Some(target_symbol) = resolved_profile.entrypoint {
+                        runtime_options = runtime_options.with_entry_point(target_symbol);
+                    }
+                } else {
+                    let primary_has_baked_entry =
+                        loaded_archive.binaries.first().is_some_and(|binary| {
+                            binary.entry_point_id.is_some()
+                                || binary
+                                    .entry_point
+                                    .as_deref()
+                                    .is_some_and(|entry| !entry.is_empty())
+                        });
+                    if !primary_has_baked_entry {
+                        let fallback_profile = loaded_archive
+                            .binaries
+                            .first()
+                            .map(|binary| binary.build_profile.as_str())
+                            .filter(|profile_name| !profile_name.is_empty())
+                            .unwrap_or("release");
+                        let selected_entry = archive_manifest
+                            .resolve_profile(fallback_profile)
+                            .ok()
+                            .and_then(|profile| profile.entrypoint)
+                            .or_else(|| archive_manifest.main_entrypoint());
+                        if let Some(ref target_symbol) = selected_entry {
+                            runtime_options = runtime_options.with_entry_point(target_symbol);
+                        }
+                    }
                 }
             }
             loaded_binary_programs.extend(loaded_archive.binaries);
@@ -386,7 +413,20 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         };
 
         if let Some(ref manifest) = parent_manifest {
-            let deps = manifest.resolved_dependencies();
+            let target_profile = args.profile.as_deref().unwrap_or("release");
+            let resolved_profile_config = if args.profile.is_some() {
+                Some(
+                    manifest
+                        .resolve_profile(target_profile)
+                        .map_err(|error| anyhow::anyhow!("{error}"))?,
+                )
+            } else {
+                manifest.resolve_profile(target_profile).ok()
+            };
+            let deps = resolved_profile_config
+                .as_ref()
+                .map(|profile_cfg| profile_cfg.resolved_dependencies())
+                .unwrap_or_else(|| manifest.resolved_dependencies());
             if !deps.is_empty() {
                 ensure_bundled();
             }
@@ -411,11 +451,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 }
             }
             if runtime_options.entry_point.is_none() && args.entry.is_none() {
-                let target_profile = args.profile.as_deref().unwrap_or("release");
-                let selected_entry = manifest
-                    .resolve_profile(target_profile)
-                    .ok()
-                    .and_then(|profile| profile.entrypoint)
+                let selected_entry = resolved_profile_config
+                    .as_ref()
+                    .and_then(|profile| profile.entrypoint.clone())
                     .or_else(|| manifest.main_entrypoint());
                 if let Some(ref target_symbol) = selected_entry {
                     compilation_options =

@@ -76,6 +76,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
   - Generates 64-bit fixed-width register instructions (`Format A`, `Format B`, `Format C`, `Format Call`).
   - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges and `try_ref_regs`.
   - Constructs constant tables for strings, 64-bit floats, and large integers.
+  - Performs whole-program reachability analysis and static linking (`--link static`): relocates constant pool references (`LoadConst`, `LoadF64`, `CallExtern`, `CallSymbol`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`), remaps `CallDirect` / `TailCallDirect` / `PackClosure`, imports dependency classes with collision-free vtable IDs and arity-matched constructor overloads, merges dependency static spaces and `@init` initializers, and preserves exported library functions when compiling library containers without an executable entrypoint.
 
 ### 2.6. Binary Packaging & Serialization
 - **Input**: `CompiledProgram` and manifest configuration (`manifest.toml`).

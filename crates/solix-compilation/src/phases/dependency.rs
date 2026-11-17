@@ -43,7 +43,8 @@ pub fn run_dependency_resolution(
     context: &mut CompilationContext,
 ) -> Result<(), Vec<CompilationDiagnostic>> {
     let mut work_queue: VecDeque<(DependencyRequirement, String)> = VecDeque::new();
-    let mut solved_map: HashMap<String, (PackageVersion, BinaryProgram)> = HashMap::new();
+    let mut solved_map: HashMap<String, (PackageVersion, BinaryProgram, Option<String>)> =
+        HashMap::new();
     let mut accumulated_diagnostics = Vec::new();
 
     // 1. Enqueue pre-loaded binary programs
@@ -62,9 +63,11 @@ pub fn run_dependency_resolution(
         };
         let parsed_version =
             PackageVersion::parse(raw_version).unwrap_or_else(|_| PackageVersion::new(0, 1, 0));
+        let preloaded_profile = (!binary_program.build_profile.is_empty())
+            .then(|| binary_program.build_profile.clone());
         solved_map.insert(
             package_name.clone(),
-            (parsed_version, binary_program.clone()),
+            (parsed_version, binary_program.clone(), preloaded_profile),
         );
         for transitive_requirement in &binary_program.export_manifest.dependencies {
             work_queue.push_back((transitive_requirement.clone(), package_name.clone()));
@@ -78,7 +81,9 @@ pub fn run_dependency_resolution(
 
     // 3. Resolve the transitive requirement queue
     while let Some((requirement, requester_name)) = work_queue.pop_front() {
-        if let Some((existing_version, existing_program)) = solved_map.get_mut(&requirement.name) {
+        if let Some((existing_version, existing_program, existing_profile)) =
+            solved_map.get_mut(&requirement.name)
+        {
             if existing_version.major != requirement.version.major {
                 accumulated_diagnostics.push(CompilationDiagnostic::from(
                     BindingError::IncompatibleDependencyVersion {
@@ -125,6 +130,7 @@ pub fn run_dependency_resolution(
                         Ok(upgraded_package) => {
                             *existing_version = upgraded_package.version;
                             *existing_program = upgraded_package.program.clone();
+                            *existing_profile = requirement.profile.clone();
                             for transitive in &upgraded_package.program.export_manifest.dependencies
                             {
                                 work_queue
@@ -189,7 +195,10 @@ pub fn run_dependency_resolution(
                         }
                     }
 
-                    solved_map.insert(requirement.name.clone(), (version, program.clone()));
+                    solved_map.insert(
+                        requirement.name.clone(),
+                        (version, program.clone(), requirement.profile.clone()),
+                    );
                     for transitive in &program.export_manifest.dependencies {
                         work_queue.push_back((transitive.clone(), requirement.name.clone()));
                     }
@@ -236,18 +245,25 @@ pub fn run_dependency_resolution(
     }
 
     // 4. Record into dependencies_map and synthesize API interfaces
-    let mut sorted_packages: Vec<(String, PackageVersion, BinaryProgram)> = solved_map
-        .into_iter()
-        .map(|(package_name, (version, program))| (package_name, version, program))
-        .collect();
+    let mut sorted_packages: Vec<(String, PackageVersion, BinaryProgram, Option<String>)> =
+        solved_map
+            .into_iter()
+            .map(|(package_name, (version, program, profile))| {
+                (package_name, version, program, profile)
+            })
+            .collect();
     sorted_packages.sort_by(|package_a, package_b| package_a.0.cmp(&package_b.0));
 
-    for (package_name, version, program) in sorted_packages {
+    for (package_name, version, program, resolved_profile) in sorted_packages {
         let package_sha256 = program.compute_sha256();
-        context.dependencies_map.insert(
-            package_name.clone(),
-            DependencyRequirement::new(package_name.clone(), version).with_sha256(package_sha256),
-        );
+        let mut recorded_requirement =
+            DependencyRequirement::new(package_name.clone(), version).with_sha256(package_sha256);
+        if let Some(profile_name) = resolved_profile {
+            recorded_requirement = recorded_requirement.with_profile(profile_name);
+        }
+        context
+            .dependencies_map
+            .insert(package_name.clone(), recorded_requirement);
 
         if context.loaded_api_packages.insert(package_name.clone()) {
             ingest_package_api_source(

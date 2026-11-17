@@ -142,7 +142,7 @@ Child profiles inherit parent dependencies and can override version or build pro
 
 ### 4. `[native_library_checksums]` Table (Generated / Optional)
 
-Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_build.py` during packaging to ensure binary tamper resistance across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
+Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_build.py` during packaging (including native libraries carried transitively from statically linked dependencies when `static = true`) to ensure binary tamper resistance across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
 
 ```toml
 [native_library_checksums]
