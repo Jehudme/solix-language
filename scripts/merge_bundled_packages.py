@@ -80,6 +80,16 @@ def parse_folder_identity(folder_name: str, manifest_text: str) -> tuple[str, st
     return package_name, build_profile, package_version
 
 
+def infer_triple_from_archive_path(source_archive: Path) -> str | None:
+    """Infers target triple from a parent directory named `bundled-packages-<triple>`."""
+    for parent in source_archive.parents:
+        if parent.name.startswith("bundled-packages-"):
+            candidate = parent.name[len("bundled-packages-"):].strip()
+            if candidate and candidate != "universal":
+                return candidate
+    return None
+
+
 def merge_package_group(
     archive_paths: list[Path],
     destination_archive: Path,
@@ -92,6 +102,9 @@ def merge_package_group(
     unqualified_natives: dict[str, bytes] = {}
 
     for source_archive in archive_paths:
+        archive_qualified: dict[str, bytes] = {}
+        archive_unqualified: dict[str, bytes] = {}
+
         with zipfile.ZipFile(source_archive, "r") as zip_reader:
             for entry_info in zip_reader.infolist():
                 if entry_info.is_dir():
@@ -107,12 +120,25 @@ def merge_package_group(
                 if entry_name.startswith("lib/") and entry_name.endswith(NATIVE_EXTENSIONS):
                     relative_lib_path = entry_name[len("lib/"):]
                     if "/" in relative_lib_path:
-                        qualified_natives.setdefault(entry_name, payload)
+                        archive_qualified[entry_name] = payload
                     else:
-                        unqualified_natives.setdefault(entry_name, payload)
+                        archive_unqualified[entry_name] = payload
                     continue
 
                 static_entries.setdefault(entry_name, payload)
+
+        for entry_name, payload in archive_qualified.items():
+            qualified_natives.setdefault(entry_name, payload)
+
+        if archive_unqualified:
+            inferred_triple = infer_triple_from_archive_path(source_archive)
+            if not archive_qualified and inferred_triple:
+                for entry_name, payload in archive_unqualified.items():
+                    file_name = Path(entry_name).name
+                    qualified_natives.setdefault(f"lib/{inferred_triple}/{file_name}", payload)
+            else:
+                for entry_name, payload in archive_unqualified.items():
+                    unqualified_natives.setdefault(entry_name, payload)
 
     if not base_manifest_text:
         raise ValueError(f"Cannot merge archives without manifest.toml: {archive_paths}")

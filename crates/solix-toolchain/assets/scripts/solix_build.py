@@ -480,7 +480,7 @@ def compile_rust_project(
         if artifact_directory.exists():
             for file_path in artifact_directory.iterdir():
                 if file_path.is_file() and any(file_path.name.endswith(extension) for extension in allowed_extensions):
-                    if is_cross_target:
+                    if is_cross_target or forced_target_triple:
                         target_stage_dir = stage_lib_directory / active_target_triple
                         target_stage_dir.mkdir(parents=True, exist_ok=True)
                         destination_path = target_stage_dir / file_path.name

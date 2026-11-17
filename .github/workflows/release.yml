@@ -391,10 +391,11 @@ jobs:
     needs:
       - plan
       - build-vscode-extension
+      - merge-universal-bundled-packages
       - build-local-artifacts
       - build-global-artifacts
       - benchmark-release
-    if: ${{ always() && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && needs.build-vscode-extension.result == 'success' && needs.benchmark-release.result == 'success' }}
+    if: ${{ always() && needs.merge-universal-bundled-packages.result == 'success' && needs.build-local-artifacts.result == 'success' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && needs.build-vscode-extension.result == 'success' && needs.benchmark-release.result == 'success' }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: ubuntu-latest

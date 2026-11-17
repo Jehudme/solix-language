@@ -1728,4 +1728,52 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
             consumer_inspection.native_libraries
         );
     }
+
+    // Also verify unqualified debug-style archives under `bundled-packages-<triple>/` infer their target triple
+    let debug_merge_workspace =
+        HermeticCliWorkspace::create().expect("create debug merge workspace");
+    let mut inferred_input_dirs: Vec<PathBuf> = Vec::new();
+    for (triple, lib_filename, lib_payload) in &platform_targets {
+        let bundled_dir = debug_merge_workspace
+            .root_path()
+            .join(format!("bundled-packages-{triple}"));
+        let stage_dir = debug_merge_workspace
+            .root_path()
+            .join(format!("dbg_stage_{triple}"));
+        fs::create_dir_all(stage_dir.join("bin")).expect("create dbg bin dir");
+        fs::create_dir_all(stage_dir.join("lib")).expect("create dbg lib dir");
+        fs::write(
+            stage_dir.join("manifest.toml"),
+            "[configuration]\nname = \"demo\"\nversion = \"1.0.0\"\n[profiles.release]\nsources = [\"src\"]\n[profiles.debug]\ninherits = \"release\"\nstatic = false\n",
+        )
+        .expect("write dbg manifest");
+        fs::write(
+            stage_dir.join("bin").join("demo.slxb"),
+            solix_common::BinaryProgram::new().to_bytes(),
+        )
+        .expect("write dbg bytecode");
+        fs::write(stage_dir.join("lib").join(lib_filename), lib_payload).expect("write dbg lib");
+
+        let pkg_dir = bundled_dir.join("demo-debug@1.0.0");
+        fs::create_dir_all(&pkg_dir).expect("create dbg pkg dir");
+        SlxarcArchive::pack_directory(&stage_dir, &pkg_dir.join("demo.slxarc"))
+            .expect("pack debug archive");
+        inferred_input_dirs.push(bundled_dir);
+    }
+
+    let inferred_output_dir = debug_merge_workspace.root_path().join("merged_debug");
+    let mut inferred_cmd = std::process::Command::new(python_exe);
+    inferred_cmd.arg(&merge_script).arg("--input-dirs");
+    for input_dir in &inferred_input_dirs {
+        inferred_cmd.arg(input_dir);
+    }
+    inferred_cmd.arg("--output-dir").arg(&inferred_output_dir).arg("--require-targets").arg(
+        "x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin",
+    );
+    let inferred_out = inferred_cmd.output().expect("run inferred debug merge");
+    assert!(
+        inferred_out.status.success(),
+        "Inferred debug merge failed: stderr={}",
+        String::from_utf8_lossy(&inferred_out.stderr)
+    );
 }
