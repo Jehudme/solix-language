@@ -234,14 +234,15 @@ CLI flags and environment variables take precedence over `manifest.toml`:
 
 ## 6. Multi-Target Cross-Compilation
 
-In `release` mode, `solix_build.py` orchestrates cross-compilation of native extensions across major desktop platforms:
+In `release` mode, `solix_build.py` orchestrates cross-compilation of native extensions across all supported desktop platforms (`SUPPORTED_RELEASE_TARGETS`):
 
-| Target Triple | Platform | Toolchain Compiler |
+| Target Triple | Platform | Toolchain Compiler Strategy |
 |---|---|---|
-| `x86_64-unknown-linux-gnu` | Linux x86_64 | `cargo zigbuild` / `zig cc` |
-| `aarch64-unknown-linux-gnu` | Linux ARM64 | `cargo zigbuild` / `zig cc` |
-| `x86_64-pc-windows-gnu` | Windows x86_64 | `cargo zigbuild` / `zig cc` |
-| `x86_64-apple-darwin` | macOS Intel | `cargo zigbuild` / `zig cc` |
-| `aarch64-apple-darwin` | macOS Apple Silicon | `cargo zigbuild` / `zig cc` |
+| `x86_64-unknown-linux-gnu` | Linux x86_64 | Native Cargo or `cargo zigbuild` / `zig cc` |
+| `aarch64-unknown-linux-gnu` | Linux ARM64 | `cargo zigbuild` / `zig cc` or `aarch64-linux-gnu-gcc` |
+| `x86_64-pc-windows-gnu` | Windows x86_64 (GNU) | `cargo zigbuild` / `zig cc` or `x86_64-w64-mingw32-gcc` |
+| `x86_64-pc-windows-msvc` | Windows x86_64 (MSVC) | Windows MSVC host or `cargo xwin build` |
+| `x86_64-apple-darwin` | macOS Intel | Native macOS Clang (`--target`) or `cargo zigbuild` |
+| `aarch64-apple-darwin` | macOS Apple Silicon | Native macOS Clang (`--target`) or `cargo zigbuild` |
 
-When standard library artifacts for a secondary target are not installed on the developer's host machine, the engine issues an informative warning and continues packaging available platforms without interrupting local development.
+When `rustup` is installed and a cross-linker strategy is active for a target, `solix_build.py` automatically ensures missing Rust target standard libraries via `rustup target add` (disable with `SOLIX_NO_AUTO_RUSTUP=1`). Statically linked release builds (`static = true`) bundle every target architecture present in dependency `.slxarc` archives (`lib/<target_triple>/*`), and Windows MSVC hosts fall back to compatible `-pc-windows-gnu` binaries when no `-msvc` binary is packaged. Set `SOLIX_STRICT_CROSS=1` (or pass `--strict-cross` to `scripts/build.py`) to fail the build if any desktop architecture is missing.

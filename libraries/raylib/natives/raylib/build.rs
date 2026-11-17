@@ -116,6 +116,51 @@ fn main() {
                 .arg("-DBUILD_EXAMPLES=OFF")
                 .arg("-DBUILD_SHARED_LIBS=OFF");
 
+            let underscored_triple = target_triple.replace('-', "_");
+            let is_cross_target = !host_triple.is_empty() && target_triple != host_triple;
+            if is_cross_target {
+                if target_triple.contains("-windows-") {
+                    cmake_cmd.arg("-DCMAKE_SYSTEM_NAME=Windows");
+                    cmake_cmd.arg("-DPLATFORM=Desktop");
+                    if target_triple.starts_with("x86_64-") {
+                        cmake_cmd.arg("-DCMAKE_SYSTEM_PROCESSOR=AMD64");
+                    } else if target_triple.starts_with("aarch64-") {
+                        cmake_cmd.arg("-DCMAKE_SYSTEM_PROCESSOR=ARM64");
+                    }
+                } else if target_triple.contains("-linux-") {
+                    cmake_cmd.arg("-DCMAKE_SYSTEM_NAME=Linux");
+                    if target_triple.starts_with("aarch64-") {
+                        cmake_cmd.arg("-DCMAKE_SYSTEM_PROCESSOR=aarch64");
+                    } else if target_triple.starts_with("x86_64-") {
+                        cmake_cmd.arg("-DCMAKE_SYSTEM_PROCESSOR=x86_64");
+                    }
+                } else if target_triple.contains("-apple-darwin") {
+                    cmake_cmd.arg("-DCMAKE_SYSTEM_NAME=Darwin");
+                }
+            }
+
+            let target_cc = env::var(format!("CC_{underscored_triple}"))
+                .or_else(|_| env::var("TARGET_CC"))
+                .ok()
+                .filter(|val| !val.trim().is_empty());
+            if let Some(c_compiler) = target_cc {
+                cmake_cmd.arg(format!("-DCMAKE_C_COMPILER={c_compiler}"));
+            }
+            let target_ar = env::var(format!("AR_{underscored_triple}"))
+                .or_else(|_| env::var("TARGET_AR"))
+                .ok()
+                .filter(|val| !val.trim().is_empty());
+            if let Some(archiver) = target_ar {
+                cmake_cmd.arg(format!("-DCMAKE_AR={archiver}"));
+            }
+            let target_ranlib = env::var(format!("RANLIB_{underscored_triple}"))
+                .or_else(|_| env::var("TARGET_RANLIB"))
+                .ok()
+                .filter(|val| !val.trim().is_empty());
+            if let Some(ranlib_tool) = target_ranlib {
+                cmake_cmd.arg(format!("-DCMAKE_RANLIB={ranlib_tool}"));
+            }
+
             if target_triple == "x86_64-apple-darwin" {
                 cmake_cmd.arg("-DCMAKE_OSX_ARCHITECTURES=x86_64");
             } else if target_triple == "aarch64-apple-darwin" {

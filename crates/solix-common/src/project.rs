@@ -772,8 +772,8 @@ impl SlxarcArchive {
         let mut native_entry_names: std::collections::HashMap<PathBuf, String> =
             std::collections::HashMap::new();
         let mut extracted_files = Vec::new();
-        let mut qualified_native_names: std::collections::HashSet<std::ffi::OsString> =
-            std::collections::HashSet::new();
+        let mut native_entry_priorities: std::collections::HashMap<std::ffi::OsString, u8> =
+            std::collections::HashMap::new();
         let mut resource_files = Vec::new();
         let mut resource_total_bytes = 0u64;
 
@@ -839,21 +839,25 @@ impl SlxarcArchive {
                     .split('/')
                     .collect();
                 let is_qualified_subdir = relative_parts.len() > 1;
-                let matches_platform = if is_qualified_subdir {
-                    matches_native_target_subdir(relative_parts[0])
+                let entry_priority = if is_qualified_subdir {
+                    native_target_subdir_priority(relative_parts[0])
                 } else {
-                    true
+                    1
                 };
 
-                if !matches_platform {
+                if entry_priority == 0 {
                     continue;
                 }
 
-                // Extract host native library atomically, preferring target-qualified paths over fallback `lib/<file>`.
+                // Extract host native library atomically, preferring exact ABI > compatible sibling ABI > unqualified `lib/<file>`.
                 let file_name_os = Path::new(&entry_name)
                     .file_name()
                     .unwrap_or(std::ffi::OsStr::new("native.so"));
-                if !is_qualified_subdir && qualified_native_names.contains(file_name_os) {
+                let existing_priority = native_entry_priorities
+                    .get(file_name_os)
+                    .copied()
+                    .unwrap_or(0);
+                if existing_priority >= entry_priority {
                     continue;
                 }
                 let target_path = extract_cache_directory.join(file_name_os);
@@ -923,14 +927,8 @@ impl SlxarcArchive {
                     }
                 }
 
-                if is_qualified_subdir {
-                    qualified_native_names.insert(file_name_os.to_os_string());
-                    native_entry_names.insert(target_path.clone(), entry_name.clone());
-                } else {
-                    native_entry_names
-                        .entry(target_path.clone())
-                        .or_insert_with(|| entry_name.clone());
-                }
+                native_entry_priorities.insert(file_name_os.to_os_string(), entry_priority);
+                native_entry_names.insert(target_path.clone(), entry_name.clone());
                 if !native_libraries.contains(&target_path) {
                     native_libraries.push(target_path.clone());
                 }
@@ -1137,6 +1135,31 @@ pub fn matches_native_target_subdir(subdirectory: &str) -> bool {
     }
 }
 
+/// Scores how well a `lib/<subdirectory>/` archive directory matches the active host platform:
+/// - `3`: Exact host OS, CPU architecture, and ABI (`matches_native_target_subdir`).
+/// - `2`: Compatible Windows sibling ABI for C-ABI `cdylib` fallback (`-pc-windows-gnu` on MSVC or vice versa).
+/// - `0`: Incompatible platform or architecture.
+#[must_use]
+pub fn native_target_subdir_priority(subdirectory: &str) -> u8 {
+    if matches_native_target_subdir(subdirectory) {
+        return 3;
+    }
+
+    if std::env::consts::OS == "windows" && subdirectory.contains("-pc-windows-") {
+        let host_arch = std::env::consts::ARCH;
+        let arch_matches = match host_arch {
+            "x86_64" => subdirectory.starts_with("x86_64-"),
+            "aarch64" => subdirectory.starts_with("aarch64-") || subdirectory.starts_with("arm64-"),
+            _ => subdirectory.starts_with(host_arch),
+        };
+        if arch_matches {
+            return 2;
+        }
+    }
+
+    0
+}
+
 /// Returns `true` when an archive checksum key under `lib/` targets the active host platform
 /// (either unqualified `lib/<file>` or `lib/<matching-subdir>/<file>`).
 #[must_use]
@@ -1145,14 +1168,14 @@ pub fn native_checksum_key_applies_to_host(checksum_key: &str) -> bool {
         return !checksum_key.contains('/');
     };
     match relative.split_once('/') {
-        Some((subdir, _)) => matches_native_target_subdir(subdir),
+        Some((subdir, _)) => native_target_subdir_priority(subdir) > 0,
         None => true,
     }
 }
 
 /// Resolves the expected SHA-256 digest for `file_name` from a `native_library_checksums` map,
-/// preferring `preferred_entry_name` or host-matching `lib/<triple>/<file_name>` entries before
-/// falling back to `lib/<file_name>`.
+/// preferring `preferred_entry_name`, exact-ABI host entries (`priority = 3`), and compatible
+/// sibling-ABI entries (`priority = 2`) before falling back to `lib/<file_name>`.
 #[must_use]
 pub fn resolve_expected_native_checksum<'a>(
     checksums: &'a std::collections::HashMap<String, String>,
@@ -1165,12 +1188,21 @@ pub fn resolve_expected_native_checksum<'a>(
         return Some(hash.as_str());
     }
     let suffix = format!("/{file_name}");
-    if let Some((_, hash)) = checksums.iter().find(|(key, _)| {
-        key.strip_prefix("lib/")
+    let mut best_match: Option<(u8, &'a str)> = None;
+    for (key, hash) in checksums {
+        if let Some(subdir) = key
+            .strip_prefix("lib/")
             .and_then(|rel| rel.strip_suffix(&suffix))
-            .is_some_and(|subdir| !subdir.contains('/') && matches_native_target_subdir(subdir))
-    }) {
-        return Some(hash.as_str());
+            && !subdir.contains('/')
+        {
+            let priority = native_target_subdir_priority(subdir);
+            if priority > 0 && best_match.is_none_or(|(best_prio, _)| priority > best_prio) {
+                best_match = Some((priority, hash.as_str()));
+            }
+        }
+    }
+    if let Some((_, hash)) = best_match {
+        return Some(hash);
     }
     let unqualified_key = format!("lib/{file_name}");
     checksums
@@ -1466,6 +1498,34 @@ version = "0.1.0"
             fs::read(&loaded.native_libraries[0]).unwrap(),
             b"host_triple_bytes"
         );
+    }
+
+    #[test]
+    fn test_windows_sibling_abi_fallback_priority() {
+        #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "msvc"))]
+        {
+            assert_eq!(native_target_subdir_priority("x86_64-pc-windows-msvc"), 3);
+            assert_eq!(native_target_subdir_priority("x86_64-pc-windows-gnu"), 2);
+            let mut gnu_only = std::collections::HashMap::new();
+            gnu_only.insert(
+                "lib/x86_64-pc-windows-gnu/demo.dll".to_string(),
+                "gnu_only_sha".to_string(),
+            );
+            assert_eq!(
+                resolve_expected_native_checksum(&gnu_only, "demo.dll", None),
+                Some("gnu_only_sha")
+            );
+        }
+        #[cfg(all(target_os = "windows", target_arch = "x86_64", target_env = "gnu"))]
+        {
+            assert_eq!(native_target_subdir_priority("x86_64-pc-windows-gnu"), 3);
+            assert_eq!(native_target_subdir_priority("x86_64-pc-windows-msvc"), 2);
+        }
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            assert_eq!(native_target_subdir_priority("x86_64-unknown-linux-gnu"), 3);
+            assert_eq!(native_target_subdir_priority("x86_64-pc-windows-gnu"), 0);
+        }
     }
 
     #[test]

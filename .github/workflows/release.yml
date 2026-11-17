@@ -42,10 +42,29 @@ jobs:
           name: artifacts-vscode-extension
           path: editors/vscode/solix-language.vsix
 
-  build-arm64-linux-bundled-libs:
-    name: Build Bundled Libraries (aarch64-unknown-linux-gnu)
-    runs-on: ubuntu-24.04-arm
+  build-bundled-libs:
+    name: Build Bundled Libraries (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
     steps:
+      - name: Enable long paths on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
@@ -53,28 +72,68 @@ jobs:
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
+          targets: ${{ matrix.target }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - name: Install Linux ARM64 system dependencies
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
 
-      - name: Build host solix toolchain and native ARM64 libraries
+      - name: Install macOS system dependencies
+        if: runner.os == 'macOS'
+        run: command -v cmake >/dev/null 2>&1 || brew install cmake
+
+      - name: Build host solix toolchain and native libraries for ${{ matrix.target }}
+        shell: bash
         env:
-          SOLIX_TARGET_TRIPLE: aarch64-unknown-linux-gnu
+          SOLIX_TARGET_TRIPLE: ${{ matrix.target }}
         run: |
           cargo build --bin solix
           python3 scripts/build_default_libraries.py --profiles release,debug
 
-      - name: Upload ARM64 bundled packages artifact
+      - name: Upload bundled packages artifact (${{ matrix.target }})
         uses: actions/upload-artifact@v7
         with:
-          name: bundled-packages-aarch64-unknown-linux-gnu
+          name: bundled-packages-${{ matrix.target }}
+          path: crates/solix-toolchain/assets/packages/
+
+  merge-universal-bundled-packages:
+    name: Merge Universal Cross-Platform Bundled Libraries
+    needs:
+      - build-bundled-libs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Download per-target bundled packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: bundled-packages-*
+          path: staging-bundled-libs
+
+      - name: Merge per-platform libraries into universal cross-platform archives
+        run: |
+          python3 scripts/merge_bundled_packages.py \
+            --input-dirs staging-bundled-libs/bundled-packages-* \
+            --output-dir crates/solix-toolchain/assets/packages \
+            --require-targets x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Upload universal cross-platform bundled packages artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundled-packages-universal
           path: crates/solix-toolchain/assets/packages/
 
   benchmark-release:
@@ -170,7 +229,7 @@ jobs:
     name: build-local-artifacts (${{ join(matrix.targets, ', ') }})
     needs:
       - plan
-      - build-arm64-linux-bundled-libs
+      - merge-universal-bundled-packages
       - build-vscode-extension
     if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null }}
     strategy:
@@ -233,25 +292,11 @@ jobs:
         run: |
           ${{ matrix.packages_install }}
 
-      - name: Download ARM64 bundled packages artifact
-        if: contains(matrix.targets, 'aarch64-unknown-linux-gnu')
+      - name: Download universal cross-platform bundled packages artifact
         uses: actions/download-artifact@v8
         with:
-          name: bundled-packages-aarch64-unknown-linux-gnu
+          name: bundled-packages-universal
           path: crates/solix-toolchain/assets/packages/
-
-      - name: Build host-target bundled libraries natively
-        if: ${{ !contains(matrix.targets, 'aarch64-unknown-linux-gnu') }}
-        shell: bash
-        run: |
-          TARGET_TRIPLE="${{ join(matrix.targets, ',') }}"
-          if [ "$TARGET_TRIPLE" = "x86_64-unknown-linux-musl" ]; then
-            export SOLIX_TARGET_TRIPLE="x86_64-unknown-linux-gnu"
-          else
-            export SOLIX_TARGET_TRIPLE="$TARGET_TRIPLE"
-          fi
-          cargo build --bin solix
-          python3 scripts/build_default_libraries.py --profiles release,debug
 
       - name: Stage non-colliding standalone bundled archives (Linux x86_64)
         if: contains(matrix.targets, 'x86_64-unknown-linux-gnu')

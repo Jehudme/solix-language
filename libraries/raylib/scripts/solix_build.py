@@ -270,6 +270,140 @@ def detect_native_projects(natives_directory: Path) -> list[Path]:
     return discovered_projects
 
 
+_SYSTEM_CROSS_LINKERS: dict[str, tuple[str, str]] = {
+    "aarch64-unknown-linux-gnu": ("aarch64-linux-gnu-gcc", "aarch64-linux-gnu-ar"),
+    "x86_64-pc-windows-gnu": ("x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-ar"),
+}
+
+
+def _resolve_rustup_installed_targets(cargo_environment: dict[str, str]) -> set[str] | None:
+    """Returns installed rustup target triples, or None when rustup is unavailable."""
+    rustup_executable = shutil.which("rustup", path=cargo_environment.get("PATH", ""))
+    if not rustup_executable:
+        return None
+    try:
+        result = subprocess.run(
+            [rustup_executable, "target", "list", "--installed"],
+            capture_output=True,
+            text=True,
+            env=cargo_environment,
+            check=False,
+        )
+        if result.returncode == 0:
+            return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    except OSError:
+        pass
+    return None
+
+
+def _ensure_rustup_target(
+    target_triple: str,
+    installed_targets: set[str] | None,
+    cargo_environment: dict[str, str],
+) -> tuple[bool, str | None]:
+    """Ensures `target_triple` stdlib is installed via rustup when available."""
+    if installed_targets is None:
+        return True, None
+    if target_triple in installed_targets:
+        return True, None
+    if os.environ.get("SOLIX_NO_AUTO_RUSTUP", "").strip().lower() in ("1", "true", "yes"):
+        return False, f"rustup target '{target_triple}' not installed (SOLIX_NO_AUTO_RUSTUP=1)"
+
+    rustup_executable = shutil.which("rustup", path=cargo_environment.get("PATH", ""))
+    if not rustup_executable:
+        return False, f"rustup target '{target_triple}' not installed"
+
+    print(f"  [rustup] Installing target standard library '{target_triple}'...")
+    add_result = subprocess.run(
+        [rustup_executable, "target", "add", target_triple],
+        capture_output=True,
+        text=True,
+        env=cargo_environment,
+        check=False,
+    )
+    if add_result.returncode == 0:
+        installed_targets.add(target_triple)
+        return True, None
+
+    error_detail = (add_result.stderr or add_result.stdout or "").strip()
+    return False, f"rustup target add failed ({error_detail})" if error_detail else "rustup target add failed"
+
+
+def _select_release_target_plan(
+    target_triple: str,
+    host_target_triple: str,
+    project_directory: Path,
+    cargo_target_directory: Path,
+    cargo_environment: dict[str, str],
+    *,
+    has_cargo_zigbuild: bool,
+    has_zig: bool,
+    has_cargo_xwin: bool,
+    forced_target: bool,
+) -> tuple[list[str] | None, dict[str, str], bool, str]:
+    """Resolves Cargo invocation strategy for a single release target triple.
+
+    Returns `(command_or_none, env_copy, uses_explicit_target_dir, label_or_skip_reason)`.
+    """
+    target_env = cargo_environment.copy()
+    is_exact_host = target_triple == host_target_triple
+    is_darwin_host = sys.platform == "darwin" and "apple-darwin" in target_triple
+    is_msvc_target = "-pc-windows-msvc" in target_triple
+
+    if sys.platform.startswith("linux") and is_exact_host:
+        target_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + target_env.get("RUSTFLAGS", "")
+
+    base_manifest_args = [
+        "--manifest-path",
+        str(project_directory / "Cargo.toml"),
+        "--target-dir",
+        str(cargo_target_directory),
+        "--release",
+    ]
+
+    # 1. Native macOS Clang compiles both Intel & Apple Silicon Darwin binaries cleanly.
+    if is_darwin_host:
+        return ["cargo", "build", *base_manifest_args, "--target", target_triple], target_env, True, "native-clang"
+
+    # 2. Zig + cargo-zigbuild cross-compiles all non-MSVC targets across Linux/macOS/Windows hosts.
+    if has_cargo_zigbuild and has_zig and not is_msvc_target:
+        return ["cargo", "zigbuild", *base_manifest_args, "--target", target_triple], target_env, True, "zigbuild"
+
+    # 3. cargo-xwin cross-compiles Windows MSVC targets on non-Windows hosts when installed.
+    if has_cargo_xwin and is_msvc_target and sys.platform != "win32":
+        return ["cargo", "xwin", "build", *base_manifest_args, "--target", target_triple], target_env, True, "cargo-xwin"
+
+    # 4. System cross-GCC (e.g. aarch64-linux-gnu-gcc, x86_64-w64-mingw32-gcc) when present.
+    cross_tools = _SYSTEM_CROSS_LINKERS.get(target_triple)
+    if cross_tools and not is_exact_host:
+        cross_cc, cross_ar = cross_tools
+        resolved_cc = shutil.which(cross_cc, path=cargo_environment.get("PATH", ""))
+        if resolved_cc:
+            underscored = target_triple.replace("-", "_")
+            upper_triple = underscored.upper()
+            target_env[f"CARGO_TARGET_{upper_triple}_LINKER"] = resolved_cc
+            target_env[f"CC_{underscored}"] = resolved_cc
+            resolved_ar = shutil.which(cross_ar, path=cargo_environment.get("PATH", ""))
+            if resolved_ar:
+                target_env[f"AR_{underscored}"] = resolved_ar
+            return ["cargo", "build", *base_manifest_args, "--target", target_triple], target_env, True, cross_cc
+
+    # 5. Exact host toolchain fallback (or explicit forced target).
+    if is_exact_host:
+        if sys.platform.startswith("linux"):
+            return ["cargo", "build", *base_manifest_args], target_env, False, "host-cargo"
+        return ["cargo", "build", *base_manifest_args, "--target", target_triple], target_env, True, "host-cargo"
+
+    if forced_target:
+        return ["cargo", "build", *base_manifest_args, "--target", target_triple], target_env, True, "explicit-cargo"
+
+    if is_msvc_target:
+        return None, target_env, False, "requires Windows MSVC host or cargo-xwin"
+    if has_cargo_zigbuild and not has_zig:
+        return None, target_env, False, "cargo-zigbuild found but 'zig' executable is missing in PATH"
+    return None, target_env, False, "requires cargo-zigbuild + zig (or system cross-compiler)"
+
+
 def compile_rust_project(
     project_directory: Path,
     cache_directory: Path,
@@ -286,11 +420,12 @@ def compile_rust_project(
     cargo_environment["CARGO_TARGET_DIR"] = str(cargo_target_directory)
     home_cargo_bin = str(Path.home() / ".cargo" / "bin")
     current_system_path = cargo_environment.get("PATH", "")
-    if home_cargo_bin not in current_system_path:
+    if home_cargo_bin not in current_system_path.split(os.pathsep):
         cargo_environment["PATH"] = f"{home_cargo_bin}{os.pathsep}{current_system_path}"
 
     emitted_libraries: list[Path] = []
     forced_target_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
+    installed_targets = _resolve_rustup_installed_targets(cargo_environment)
 
     if profile != "release":
         # Debug/Test: Compile only for the active host (or explicitly requested cross target)
@@ -302,9 +437,13 @@ def compile_rust_project(
 
         use_zigbuild_for_debug = (
             is_cross_target
-            and sys.platform.startswith("linux")
             and bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
+            and bool(shutil.which("zig", path=cargo_environment["PATH"]))
+            and "-pc-windows-msvc" not in active_target_triple
         )
+        if is_cross_target:
+            _ensure_rustup_target(active_target_triple, installed_targets, cargo_environment)
+
         cargo_command = [
             "cargo",
             "zigbuild" if use_zigbuild_for_debug else "build",
@@ -351,9 +490,14 @@ def compile_rust_project(
                     emitted_libraries.append(destination_path)
         return emitted_libraries
 
-    # Release mode: Build forced target (when SOLIX_TARGET_TRIPLE is set) or multi-platform targets
+    # Release mode: Build forced target (when SOLIX_TARGET_TRIPLE is set) or all supported platforms
     has_cargo_zigbuild = bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
-    successful_targets = 0
+    has_zig = bool(shutil.which("zig", path=cargo_environment["PATH"]))
+    has_cargo_xwin = bool(shutil.which("cargo-xwin", path=cargo_environment["PATH"]))
+    strict_cross = os.environ.get("SOLIX_STRICT_CROSS", "").strip().lower() in ("1", "true", "yes")
+
+    built_targets: list[str] = []
+    skipped_targets: list[tuple[str, str]] = []
     last_target_error_output: str | None = None
     candidate_targets = (
         [
@@ -369,61 +513,39 @@ def compile_rust_project(
     )
 
     for target_triple, target_extension in candidate_targets:
-        is_exact_host = target_triple == host_target_triple
-        is_host_platform = is_exact_host
+        cargo_command, target_cargo_env, uses_explicit_target_dir, strategy_label = (
+            _select_release_target_plan(
+                target_triple,
+                host_target_triple,
+                project_directory,
+                cargo_target_directory,
+                cargo_environment,
+                has_cargo_zigbuild=has_cargo_zigbuild,
+                has_zig=has_zig,
+                has_cargo_xwin=has_cargo_xwin,
+                forced_target=bool(forced_target_triple),
+            )
+        )
+        if cargo_command is None:
+            skipped_targets.append((target_triple, strategy_label))
+            print(f"  [warning] Skipping cross-target '{target_triple}': {strategy_label}")
+            continue
+
+        if installed_targets is not None:
+            target_ready, rustup_reason = _ensure_rustup_target(
+                target_triple,
+                installed_targets,
+                cargo_environment,
+            )
+            if not target_ready:
+                skipped_targets.append((target_triple, rustup_reason or "target not installed"))
+                print(f"  [warning] Skipping cross-target '{target_triple}': {rustup_reason}")
+                continue
+
         target_stage_directory = stage_lib_directory / target_triple
         target_stage_directory.mkdir(parents=True, exist_ok=True)
 
-        target_cargo_env = cargo_environment.copy()
-        if sys.platform.startswith("linux") and is_exact_host:
-            target_cargo_env["RUSTFLAGS"] = "-C link-arg=-L/usr/lib " + target_cargo_env.get("RUSTFLAGS", "")
-
-        use_zigbuild = (
-            has_cargo_zigbuild
-            and sys.platform.startswith("linux")
-            and "msvc" not in target_triple
-            and "apple-darwin" not in target_triple
-        )
-
-        if use_zigbuild:
-            cargo_command = [
-                "cargo",
-                "zigbuild",
-                "--manifest-path",
-                str(project_directory / "Cargo.toml"),
-                "--target-dir",
-                str(cargo_target_directory),
-                "--release",
-                "--target",
-                target_triple,
-            ]
-        elif forced_target_triple or (is_exact_host and not sys.platform.startswith("linux")):
-            cargo_command = [
-                "cargo",
-                "build",
-                "--manifest-path",
-                str(project_directory / "Cargo.toml"),
-                "--target-dir",
-                str(cargo_target_directory),
-                "--release",
-                "--target",
-                target_triple,
-            ]
-        else:
-            if not is_host_platform:
-                print(f"  [warning] Skipping cross-target '{target_triple}': cargo-zigbuild not installed")
-                continue
-            cargo_command = [
-                "cargo",
-                "build",
-                "--manifest-path",
-                str(project_directory / "Cargo.toml"),
-                "--target-dir",
-                str(cargo_target_directory),
-                "--release",
-            ]
-
-        print(f"  [cargo] Building target '{target_triple}' ({profile})...")
+        print(f"  [cargo] Building target '{target_triple}' ({profile}, {strategy_label})...")
         try:
             run_command(
                 cargo_command,
@@ -432,41 +554,52 @@ def compile_rust_project(
                 phase=f"Native Rust Target Build ({target_triple})",
                 hint="Install target standard library via: rustup target add " + target_triple,
             )
-            successful_targets += 1
         except BuildError as target_error:
             error_output = target_error.stderr or ""
             if "can't find crate for `std`" in error_output or "can't find crate for std" in error_output:
-                print(f"  [warning] Cross-compilation skipped for '{target_triple}': rust standard library not installed")
+                reason = (
+                    "rust stdlib target not installed (install rustup or add target sysroot)"
+                    if installed_targets is None
+                    else "rustup stdlib target not installed"
+                )
+                skipped_targets.append((target_triple, reason))
+                print(f"  [warning] Cross-compilation skipped for '{target_triple}': {reason}")
             else:
                 trimmed_output = error_output.strip()
                 last_target_error_output = trimmed_output or None
+                first_line = trimmed_output.splitlines()[-1] if trimmed_output else "compilation error"
+                skipped_targets.append((target_triple, first_line))
                 print(f"  [warning] Target '{target_triple}' compilation failed:")
                 if trimmed_output:
                     print(trimmed_output)
+            try:
+                if target_stage_directory.exists() and not any(target_stage_directory.iterdir()):
+                    target_stage_directory.rmdir()
+            except OSError:
+                pass
             continue
 
-        used_explicit_target_dir = use_zigbuild or bool(forced_target_triple) or (
-            is_exact_host and not sys.platform.startswith("linux")
-        )
         artifact_directory = (
             cargo_target_directory / target_triple / "release"
-            if used_explicit_target_dir
+            if uses_explicit_target_dir
             else cargo_target_directory / "release"
         )
 
+        copied_for_target = False
         if artifact_directory.exists():
-            for file_path in artifact_directory.iterdir():
+            for file_path in sorted(artifact_directory.iterdir()):
                 if file_path.is_file() and file_path.name.endswith(target_extension):
                     destination_target_path = target_stage_directory / file_path.name
                     shutil.copy2(file_path, destination_target_path)
                     emitted_libraries.append(destination_target_path)
+                    copied_for_target = True
 
-                    if is_host_platform:
-                        destination_host_path = stage_lib_directory / file_path.name
-                        shutil.copy2(file_path, destination_host_path)
-                        emitted_libraries.append(destination_host_path)
+        if copied_for_target:
+            built_targets.append(target_triple)
+        else:
+            skipped_targets.append((target_triple, f"no *{target_extension} produced"))
 
-    if successful_targets == 0:
+    if not built_targets:
         raise BuildError(
             phase="Native Rust Build",
             message=f"All target builds failed for native project '{project_directory.name}'",
@@ -474,6 +607,50 @@ def compile_rust_project(
             stderr=last_target_error_output,
             hint="Ensure host build dependencies and headers are available.",
         )
+
+    if not forced_target_triple:
+        print(
+            f"  [cross] Built native targets ({len(built_targets)}/{len(candidate_targets)}) "
+            f"for '{project_directory.name}': {', '.join(built_targets)}"
+        )
+        if skipped_targets:
+            if installed_targets is None:
+                print(
+                    "  [cross] Hint: Active rustc is not managed by rustup; install rustup + "
+                    "cargo-zigbuild + zig for multi-architecture release cross-compilation."
+                )
+            elif not (has_cargo_zigbuild and has_zig):
+                print(
+                    "  [cross] Hint: Install zig and cargo-zigbuild to cross-compile all desktop "
+                    "architectures from this host."
+                )
+
+    if strict_cross:
+        required_platforms = {"linux-x86_64", "linux-aarch64", "windows-x86_64", "macos-x86_64", "macos-aarch64"}
+        covered_platforms: set[str] = set()
+        for built in built_targets:
+            if built == "x86_64-unknown-linux-gnu":
+                covered_platforms.add("linux-x86_64")
+            elif built == "aarch64-unknown-linux-gnu":
+                covered_platforms.add("linux-aarch64")
+            elif built in ("x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"):
+                covered_platforms.add("windows-x86_64")
+            elif built == "x86_64-apple-darwin":
+                covered_platforms.add("macos-x86_64")
+            elif built == "aarch64-apple-darwin":
+                covered_platforms.add("macos-aarch64")
+        missing_platforms = sorted(required_platforms - covered_platforms)
+        if missing_platforms and not forced_target_triple:
+            raise BuildError(
+                phase="Cross-Platform Release Gate",
+                message=(
+                    f"SOLIX_STRICT_CROSS=1 enabled, missing platforms for '{project_directory.name}': "
+                    f"{', '.join(missing_platforms)}"
+                ),
+                cwd=project_directory,
+                stderr=last_target_error_output,
+                hint="Install rustup cross targets, zig, cargo-zigbuild, and any required platform SDKs.",
+            )
 
     return emitted_libraries
 
@@ -883,11 +1060,23 @@ def stage_dependency_native_libraries(
         visited_archives.add(dependency_archive)
 
         with zipfile.ZipFile(dependency_archive) as archive_file:
-            for archive_entry in archive_file.infolist():
+            native_entries = [
+                archive_entry
+                for archive_entry in archive_file.infolist()
+                if archive_entry.filename.startswith("lib/")
+                and archive_entry.filename.endswith((".so", ".dll", ".dylib"))
+            ]
+            qualified_basenames = {
+                Path(archive_entry.filename).name
+                for archive_entry in native_entries
+                if "/" in archive_entry.filename[len("lib/"):]
+            }
+            for archive_entry in native_entries:
                 entry_name = archive_entry.filename
-                if not entry_name.startswith("lib/") or not entry_name.endswith((".so", ".dll", ".dylib")):
-                    continue
                 relative_subpath = entry_name[len("lib/"):]
+                is_qualified = "/" in relative_subpath
+                if not is_qualified and Path(entry_name).name in qualified_basenames:
+                    continue
                 destination_path = stage_lib_directory / relative_subpath
                 if destination_path.exists():
                     continue
@@ -1007,6 +1196,17 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
             f'"{key}" = "{digest}"' for key, digest in sorted(native_checksums.items())
         ) + "\n"
         staged_manifest_file.write_text(manifest_text + checksum_section, encoding="utf-8")
+
+    packaged_targets = sorted({
+        key.split("/")[1]
+        for key in native_checksums
+        if key.startswith("lib/") and key.count("/") >= 2
+    })
+    if packaged_targets:
+        print(
+            f"  [platforms] Packaged architectures ({len(packaged_targets)}): "
+            f"{', '.join(packaged_targets)}"
+        )
 
     # Package distributable .slxarc
     packaging_start_time = time.perf_counter()

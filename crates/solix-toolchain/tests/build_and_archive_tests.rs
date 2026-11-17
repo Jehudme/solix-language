@@ -1354,3 +1354,378 @@ public class TestRunner {
     .expect("parse run static_app test archive");
     assert_eq!(run(run_test).expect("run static_app test archive"), 13);
 }
+
+#[test]
+fn test_solix_build_scripts_remain_in_sync_across_repo() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .parent()
+        .and_then(|crates_dir| crates_dir.parent())
+        .expect("resolve repository root");
+
+    let canonical_path = manifest_dir
+        .join("assets")
+        .join("scripts")
+        .join("solix_build.py");
+    let canonical_bytes = fs::read(&canonical_path).expect("read canonical solix_build.py");
+
+    let synced_locations = [
+        manifest_dir
+            .join("assets")
+            .join("templates")
+            .join("untitled-rust")
+            .join("scripts")
+            .join("solix_build.py"),
+        repo_root
+            .join("examples")
+            .join("breakout")
+            .join("scripts")
+            .join("solix_build.py"),
+        repo_root
+            .join("libraries")
+            .join("raylib")
+            .join("scripts")
+            .join("solix_build.py"),
+        repo_root
+            .join("libraries")
+            .join("solixlib")
+            .join("scripts")
+            .join("solix_build.py"),
+    ];
+
+    for synced_path in synced_locations {
+        let copy_bytes = fs::read(&synced_path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", synced_path.display()));
+        assert_eq!(
+            copy_bytes,
+            canonical_bytes,
+            "solix_build.py at '{}' drifted from canonical '{}'",
+            synced_path.display(),
+            canonical_path.display()
+        );
+    }
+}
+
+#[test]
+fn test_solix_build_engine_target_strategy_and_cross_dependency_bundling() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scripts_dir = manifest_dir.join("assets").join("scripts");
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let python_exe = if cfg!(windows) { "python" } else { "python3" };
+
+    let test_script = r#"
+import sys
+import zipfile
+from pathlib import Path
+
+scripts_dir = Path(sys.argv[1])
+work_dir = Path(sys.argv[2])
+sys.path.insert(0, str(scripts_dir))
+import solix_build
+
+# 1. Verify zigbuild enables Linux GNU, Windows GNU, AND both macOS Darwin targets
+project_dir = work_dir / "native_proj"
+target_dir = work_dir / "target"
+env = {"PATH": ""}
+
+for target_triple in (
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+):
+    cmd, _, explicit_dir, label = solix_build._select_release_target_plan(
+        target_triple,
+        "x86_64-unknown-linux-gnu",
+        project_dir,
+        target_dir,
+        env,
+        has_cargo_zigbuild=True,
+        has_zig=True,
+        has_cargo_xwin=False,
+        forced_target=False,
+    )
+    assert cmd is not None, f"Expected zigbuild plan for {target_triple}, got {label}"
+    assert cmd[:2] == ["cargo", "zigbuild"] or (sys.platform == "darwin" and "apple-darwin" in target_triple), cmd
+    assert explicit_dir is True
+
+# 2. Verify cargo-xwin enables Windows MSVC on non-Windows hosts
+msvc_cmd, _, msvc_explicit, _ = solix_build._select_release_target_plan(
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    project_dir,
+    target_dir,
+    env,
+    has_cargo_zigbuild=False,
+    has_zig=False,
+    has_cargo_xwin=True,
+    forced_target=False,
+)
+if sys.platform != "win32":
+    assert msvc_cmd is not None and msvc_cmd[:3] == ["cargo", "xwin", "build"], msvc_cmd
+    assert msvc_explicit is True
+
+# 3. Verify stage_dependency_native_libraries preserves all 5 architectures and strips duplicate unqualified fallback
+store_dir = work_dir / "store"
+dep_archive_dir = store_dir / "raylib-release@5.5.0"
+dep_archive_dir.mkdir(parents=True, exist_ok=True)
+dep_archive = dep_archive_dir / "raylib.slxarc"
+dep_manifest = '[configuration]\nname = "raylib"\nversion = "5.5.0"\n[profiles.release]\nsources = ["src"]\n'
+
+with zipfile.ZipFile(dep_archive, "w") as archive_writer:
+    archive_writer.writestr("manifest.toml", dep_manifest)
+    archive_writer.writestr("lib/libraylib_native.so", b"dup_fallback")
+    archive_writer.writestr("lib/x86_64-unknown-linux-gnu/libraylib_native.so", b"lin64")
+    archive_writer.writestr("lib/aarch64-unknown-linux-gnu/libraylib_native.so", b"linarm64")
+    archive_writer.writestr("lib/x86_64-pc-windows-msvc/raylib_native.dll", b"win64")
+    archive_writer.writestr("lib/x86_64-apple-darwin/libraylib_native.dylib", b"mac64")
+    archive_writer.writestr("lib/aarch64-apple-darwin/libraylib_native.dylib", b"macarm64")
+
+consumer_manifest = {
+    "configuration": {"name": "breakout", "version": "0.1.0"},
+    "profiles": {
+        "release": {
+            "static": True,
+            "dependencies": {"raylib": {"version": "5.5.0", "profile": "release"}},
+        }
+    },
+}
+stage_lib_dir = work_dir / "stage_lib"
+stage_lib_dir.mkdir(parents=True, exist_ok=True)
+
+import os
+old_pkg_dir = os.environ.get("SOLIX_PKG_DIR")
+os.environ["SOLIX_PKG_DIR"] = str(store_dir)
+try:
+    solix_build.stage_dependency_native_libraries(consumer_manifest, "release", stage_lib_dir)
+finally:
+    if old_pkg_dir is None:
+        os.environ.pop("SOLIX_PKG_DIR", None)
+    else:
+        os.environ["SOLIX_PKG_DIR"] = old_pkg_dir
+
+assert (stage_lib_dir / "x86_64-unknown-linux-gnu" / "libraylib_native.so").read_bytes() == b"lin64"
+assert (stage_lib_dir / "aarch64-unknown-linux-gnu" / "libraylib_native.so").read_bytes() == b"linarm64"
+assert (stage_lib_dir / "x86_64-pc-windows-msvc" / "raylib_native.dll").read_bytes() == b"win64"
+assert (stage_lib_dir / "x86_64-apple-darwin" / "libraylib_native.dylib").read_bytes() == b"mac64"
+assert (stage_lib_dir / "aarch64-apple-darwin" / "libraylib_native.dylib").read_bytes() == b"macarm64"
+assert not (stage_lib_dir / "libraylib_native.so").exists(), "Duplicate unqualified fallback must be omitted"
+"#;
+
+    let status = std::process::Command::new(python_exe)
+        .arg("-c")
+        .arg(test_script)
+        .arg(&scripts_dir)
+        .arg(workspace.root_path())
+        .status()
+        .expect("execute python build engine check");
+    assert!(status.success(), "solix_build.py strategy check failed");
+}
+
+#[test]
+fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .parent()
+        .and_then(|crates_dir| crates_dir.parent())
+        .expect("resolve repository root");
+    let merge_script = repo_root.join("scripts").join("merge_bundled_packages.py");
+    assert!(
+        merge_script.is_file(),
+        "merge_bundled_packages.py must exist"
+    );
+
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let platform_targets = [
+        (
+            "x86_64-unknown-linux-gnu",
+            "libdemo_native.so",
+            b"linux_x64_payload".as_slice(),
+        ),
+        (
+            "aarch64-unknown-linux-gnu",
+            "libdemo_native.so",
+            b"linux_arm64_payload".as_slice(),
+        ),
+        (
+            "x86_64-pc-windows-msvc",
+            "demo_native.dll",
+            b"win_msvc_payload".as_slice(),
+        ),
+        (
+            "x86_64-apple-darwin",
+            "libdemo_native.dylib",
+            b"mac_x64_payload".as_slice(),
+        ),
+        (
+            "aarch64-apple-darwin",
+            "libdemo_native.dylib",
+            b"mac_arm64_payload".as_slice(),
+        ),
+    ];
+
+    let mut input_dirs: Vec<PathBuf> = Vec::new();
+    for (triple, lib_filename, lib_payload) in &platform_targets {
+        let input_root = workspace.root_path().join(format!("in_{triple}"));
+        let stage_dir = workspace.root_path().join(format!("stage_{triple}"));
+        let bin_dir = stage_dir.join("bin");
+        let target_lib_dir = stage_dir.join("lib").join(triple);
+        fs::create_dir_all(&bin_dir).expect("create bin dir");
+        fs::create_dir_all(&target_lib_dir).expect("create target lib dir");
+
+        fs::write(
+            stage_dir.join("manifest.toml"),
+            "[configuration]\nname = \"demo\"\nversion = \"1.0.0\"\n[profiles.release]\nsources = [\"src\"]\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            bin_dir.join("demo.slxb"),
+            solix_common::BinaryProgram::new().to_bytes(),
+        )
+        .expect("write bytecode");
+        fs::write(stage_dir.join("lib").join(lib_filename), b"unqualified_dup")
+            .expect("write unqualified dup");
+        fs::write(target_lib_dir.join(lib_filename), lib_payload).expect("write target lib");
+
+        let pkg_dir = input_root.join("demo-release@1.0.0");
+        fs::create_dir_all(&pkg_dir).expect("create pkg dir");
+        SlxarcArchive::pack_directory(&stage_dir, &pkg_dir.join("demo.slxarc"))
+            .expect("pack per-platform archive");
+        input_dirs.push(input_root);
+    }
+
+    let merged_output_dir = workspace.root_path().join("merged_packages");
+    let python_exe = if cfg!(windows) { "python" } else { "python3" };
+    let mut cmd = std::process::Command::new(python_exe);
+    cmd.arg(&merge_script).arg("--input-dirs");
+    for input_dir in &input_dirs {
+        cmd.arg(input_dir);
+    }
+    cmd.arg("--output-dir").arg(&merged_output_dir).arg("--require-targets").arg(
+        "x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin",
+    );
+    let merge_output = cmd.output().expect("run merge_bundled_packages.py");
+    assert!(
+        merge_output.status.success(),
+        "merge_bundled_packages.py failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&merge_output.stdout),
+        String::from_utf8_lossy(&merge_output.stderr)
+    );
+
+    let universal_archive = merged_output_dir
+        .join("demo-release@1.0.0")
+        .join("demo.slxarc");
+    assert!(universal_archive.is_file(), "Universal archive must exist");
+
+    let inspection = SlxarcArchive::inspect(&universal_archive).expect("inspect universal archive");
+    for (triple, lib_filename, _) in &platform_targets {
+        let expected_entry = format!("lib/{triple}/{lib_filename}");
+        assert!(
+            inspection
+                .native_libraries
+                .iter()
+                .any(|entry| entry == &expected_entry),
+            "Universal archive must contain '{expected_entry}', got {:?}",
+            inspection.native_libraries
+        );
+    }
+    assert!(
+        !inspection
+            .native_libraries
+            .iter()
+            .any(|entry| entry == "lib/libdemo_native.so"),
+        "Unqualified duplicate must be stripped when target-qualified entries exist"
+    );
+
+    let merged_manifest = inspection.manifest.expect("universal manifest");
+    assert_eq!(merged_manifest.native_library_checksums.len(), 5);
+
+    let json_info_path = workspace.file_path("universal_info.json");
+    let info_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        universal_archive.to_str().expect("valid utf8"),
+        "--json",
+        "-o",
+        json_info_path.to_str().expect("valid utf8"),
+    ])
+    .expect("parse info cli");
+    assert_eq!(run(info_cli).expect("solix info must succeed"), 0);
+
+    let parsed_info: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&json_info_path).expect("read json"))
+            .expect("parse info json");
+    let bundled_platforms: Vec<String> = parsed_info["bundled_platforms"]
+        .as_array()
+        .expect("bundled_platforms array")
+        .iter()
+        .map(|entry| entry.as_str().unwrap_or("").to_string())
+        .collect();
+    for (expected_platform, _, _) in &platform_targets {
+        assert!(
+            bundled_platforms.contains(&(*expected_platform).to_string()),
+            "Expected platform '{expected_platform}' in {bundled_platforms:?}"
+        );
+    }
+
+    assert!(merged_output_dir.join("bundled_manifest.json").is_file());
+
+    // Verify downstream consumer release build automatically inherits all 5 bundled platforms
+    let pkg_store = workspace.root_path().join("consumer_store");
+    let pkg_store_str = pkg_store.to_str().expect("valid utf8");
+    let install_merged = Cli::try_parse_from([
+        "solix",
+        "install",
+        universal_archive.to_str().expect("valid utf8"),
+        "--profile",
+        "release",
+        "--pkg-dir",
+        pkg_store_str,
+    ])
+    .expect("parse install universal dep");
+    assert_eq!(run(install_merged).expect("install universal dep"), 0);
+
+    let consumer_root = workspace.root_path().join("consumer_app");
+    let consumer_new = Cli::try_parse_from([
+        "solix",
+        "new",
+        consumer_root.to_str().expect("valid utf8"),
+        "--name",
+        "consumer_app",
+        "--no-native",
+        "--deps",
+        "demo@1.0.0",
+    ])
+    .expect("parse consumer new");
+    assert_eq!(run(consumer_new).expect("scaffold consumer_app"), 0);
+
+    let consumer_build = Cli::try_parse_from([
+        "solix",
+        "build",
+        consumer_root.to_str().expect("valid utf8"),
+        "--release",
+        "--pkg-dir",
+        pkg_store_str,
+    ])
+    .expect("parse consumer release build");
+    assert_eq!(run(consumer_build).expect("build consumer_app release"), 0);
+
+    let consumer_archive = consumer_root
+        .join("build")
+        .join("release")
+        .join("consumer_app.slxarc");
+    let consumer_inspection =
+        SlxarcArchive::inspect(&consumer_archive).expect("inspect consumer release");
+    for (triple, lib_filename, _) in &platform_targets {
+        let expected_entry = format!("lib/{triple}/{lib_filename}");
+        assert!(
+            consumer_inspection
+                .native_libraries
+                .iter()
+                .any(|entry| entry == &expected_entry),
+            "Static consumer release archive must inherit '{expected_entry}' from dependency, got {:?}",
+            consumer_inspection.native_libraries
+        );
+    }
+}

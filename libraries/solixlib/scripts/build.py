@@ -1,24 +1,38 @@
 #!/usr/bin/env python3
 """Build script for solixlib standard library."""
 
+import os
 import sys
-from pathlib import Path
 import solix_build as tb
 
 
 def main() -> None:
-    profile = "debug"
-    for argument_item in sys.argv[1:]:
+    profile = os.environ.get("SOLIX_PROFILE", "").strip() or "release"
+    arguments = sys.argv[1:]
+    index = 0
+    while index < len(arguments):
+        argument_item = arguments[index]
         if argument_item in ("debug", "release", "test"):
             profile = argument_item
         elif argument_item.startswith("--profile="):
             profile = argument_item.split("=", 1)[1]
+        elif argument_item == "--profile" and index + 1 < len(arguments):
+            profile = arguments[index + 1]
+            index += 1
+        elif argument_item.startswith("--target="):
+            os.environ["SOLIX_TARGET_TRIPLE"] = argument_item.split("=", 1)[1]
+        elif argument_item == "--target" and index + 1 < len(arguments):
+            os.environ["SOLIX_TARGET_TRIPLE"] = arguments[index + 1]
+            index += 1
+        elif argument_item == "--strict-cross":
+            os.environ["SOLIX_STRICT_CROSS"] = "1"
         elif argument_item == "--release":
             profile = "release"
         elif argument_item == "--test":
             profile = "test"
         elif argument_item == "--debug":
             profile = "debug"
+        index += 1
     tb.auto_build(profile)
 
 
