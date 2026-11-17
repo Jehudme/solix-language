@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jehudme/solix-language/actions/workflows/ci.yml/badge.svg)](https://github.com/jehudme/solix-language/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v1.3.0-green.svg)](https://github.com/jehudme/solix-language/releases)
+[![Version](https://img.shields.io/badge/version-v1.3.1-green.svg)](https://github.com/jehudme/solix-language/releases)
 
 Solix is a modern, statically typed programming language designed to be fast, memory-safe, and easy to learn. It combines the clean, expressive syntax of languages like C# and Java with the predictable performance and resource control of systems languages like C++ and Rust.
 

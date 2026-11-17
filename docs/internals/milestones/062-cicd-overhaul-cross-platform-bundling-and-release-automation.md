@@ -2,7 +2,7 @@
 
 ## Document Metadata
 * **Milestone ID:** MS-062
-* **Target Version:** `v1.4.0`
+* **Target Version:** `v1.3.1`
 * **Milestone Branch:** `milestone/062-cicd-overhaul-cross-platform-bundling-and-release-automation`
 * **Status:** ACTIVE
 * **Lead Architect:** Release Engineering, Build Tooling & Platform Maintainers
@@ -98,21 +98,21 @@ flowchart LR
 ## 4. Phased Implementation Plan & Priority Task Matrix
 
 ### 4.1 P0: Critical Blockers (Must Land First)
-- [ ] `[P0]` **`MS062-T01` (Consolidate to 2 Workflows, Fix `release-plz` Auth, Fail-Loud Behavior & Ordered Publishing — `CICD-01`, `CICD-02`, `CICD-03`):** Move `release-plz` into [`ci.yml`](../../../.github/workflows/ci.yml) gated on `needs: [lint-and-docs, test-matrix]` (push to `master`/`main` only, keeping `push` tests on `master` + branch `concurrency:` rules), delete standalone `release-plz.yml`, authenticate with `secrets.RELEASE_TOKEN`, remove `continue-on-error: true`, run `release` + `release-pr`, configure `publish = true` and `semver_check` scoping in `release-plz.toml`, update `solix_scaffold.py` FFI version range cleanly, and delete `publish-crates` (`|| true`) from `release.yml`.
-- [ ] `[P0]` **`MS062-T02` (Make `test_breakout_real_inlay_hints` Hermetic & Unblock macOS/Windows CI — `CICD-04`):** Update [`crates/solix-lsp/tests/lsp_tests.rs`](../../../crates/solix-lsp/tests/lsp_tests.rs) so Breakout LSP tests stage `raylib` into a `tempfile::TempDir` store via `ClientModuleSolver::with_store_dir` instead of relying on `~/.solix/packages`, and build/install default libraries across `ubuntu-latest`, `macos-latest`, and `windows-latest` in `ci.yml`.
-- [ ] `[P0]` **`MS062-T03` (Per-Target Native Bundling & Canonical Triple Extraction — `CICD-05`):** Update [`crates/solix-common/src/project.rs`](../../../crates/solix-common/src/project.rs#L800-L819) to match canonical target triples cleanly, and update `release.yml` so every `build-local-artifacts` target compiles/bundles its matching OS/arch native `.slxarc` libraries instead of copying Ubuntu x86_64 `.so` assets across Windows, macOS, and ARM64.
+- [x] `[P0]` **`MS062-T01` (Consolidate to 2 Workflows, Fix `release-plz` Auth, Fail-Loud Behavior & Ordered Publishing — `CICD-01`, `CICD-02`, `CICD-03`):** Move `release-plz` into [`ci.yml`](../../../.github/workflows/ci.yml) gated on `needs: [lint-and-docs, test-matrix]` (push to `master`/`main` only, keeping `push` tests on `master` + branch `concurrency:` rules), delete standalone `release-plz.yml`, authenticate with `secrets.RELEASE_TOKEN`, remove `continue-on-error: true`, run `release` + `release-pr`, configure `publish = true` and `semver_check` scoping in `release-plz.toml`, update `solix_scaffold.py` FFI version range cleanly, and delete `publish-crates` (`|| true`) from `release.yml`.
+- [x] `[P0]` **`MS062-T02` (Make `test_breakout_real_inlay_hints` Hermetic & Unblock macOS/Windows CI — `CICD-04`):** Update [`crates/solix-lsp/tests/lsp_tests.rs`](../../../crates/solix-lsp/tests/lsp_tests.rs) so Breakout LSP tests stage `raylib` into a `tempfile::TempDir` store via `ClientModuleSolver::with_store_dir` instead of relying on `~/.solix/packages`, and build/install default libraries across `ubuntu-latest`, `macos-latest`, and `windows-latest` in `ci.yml`.
+- [ ] `[P0]` **`MS062-T03` (Per-Target Native Bundling & Canonical Triple Extraction — `CICD-05`):** Update [`crates/solix-common/src/project.rs`](../../../crates/solix-common/src/project.rs#L800-L819) to match canonical target triples cleanly, and update `release.yml` so every `build-local-artifacts` target compiles/bundles its matching OS/arch native `.slxarc` libraries instead of copying Ubuntu x86_64 `.so` assets across Windows, macOS, and ARM64. *(Triple matching & host-ABI verification landed and tested; awaiting live `v1.3.1` `release.yml` tag execution.)*
 
 ### 4.2 P1: High Priority (Core Pipeline Correctness)
-- [ ] `[P1]` **`MS062-T04` (Windows `.exe` Resolution & Multi-Profile Release Staging — `CICD-06`):** Update [`scripts/build_default_libraries.py`](../../../scripts/build_default_libraries.py#L209-L214) to locate `solix.exe` on Windows, build both `release` and `debug` profiles cleanly, and name uploaded standalone `.slxarc` assets unambiguously (`<name>-<profile>-<target>@<version>.slxarc` or archive zip) without overwriting `debug` with `release`.
-- [ ] `[P1]` **`MS062-T05` (Enforce Real `doc_sync_check.py` Gating & Sync `TRIGGER_MATRIX` — `CICD-07`):** Update `ci.yml` (`fetch-depth: 0` + `--base`) so `doc_sync_check.py` diffs real PR/push commits instead of `0` files, update `TRIGGER_MATRIX` in [`scripts/doc_sync_check.py`](../../../scripts/doc_sync_check.py) to match current `src/phases/*` and `solix-common/src/bytecode/` layout, and add `verify_doc_links.py` + `doc_sync_check.py --all-docs` to CI.
-- [ ] `[P1]` **`MS062-T06` (Cross-Platform Verification & Release Build Gate — `CICD-08`, `CICD-09`, `CICD-13`):** Remove `on: pull_request:` from `release.yml`, remove redundant pre-build `download-artifact` from `build-local-artifacts`, run `examples/breakout` debug/release build + `--verify` checks across Linux/macOS/Windows + `core.longpaths true` on Windows in `ci.yml`, and add a `cargo build --release --bin solix` smoke step.
+- [x] `[P1]` **`MS062-T04` (Windows `.exe` Resolution & Multi-Profile Release Staging — `CICD-06`):** Update [`scripts/build_default_libraries.py`](../../../scripts/build_default_libraries.py#L209-L214) to locate `solix.exe` on Windows, build both `release` and `debug` profiles cleanly, and name uploaded standalone `.slxarc` assets unambiguously (`<name>-<profile>-<target>@<version>.slxarc` or archive zip) without overwriting `debug` with `release`.
+- [x] `[P1]` **`MS062-T05` (Enforce Real `doc_sync_check.py` Gating & Sync `TRIGGER_MATRIX` — `CICD-07`):** Update `ci.yml` (`fetch-depth: 0` + `--base`) so `doc_sync_check.py` diffs real PR/push commits instead of `0` files, update `TRIGGER_MATRIX` in [`scripts/doc_sync_check.py`](../../../scripts/doc_sync_check.py) to match current `src/phases/*` and `solix-common/src/bytecode/` layout, and add `verify_doc_links.py` + `doc_sync_check.py --all-docs` to CI.
+- [x] `[P1]` **`MS062-T06` (Cross-Platform Verification & Release Build Gate — `CICD-08`, `CICD-09`, `CICD-13`):** Remove `on: pull_request:` from `release.yml`, remove redundant pre-build `download-artifact` from `build-local-artifacts`, run `examples/breakout` debug/release build + `--verify` checks across Linux/macOS/Windows + `core.longpaths true` on Windows in `ci.yml`, and add a `cargo build --release --bin solix` smoke step.
 
 ### 4.3 P2: Medium Priority (Hygiene, Action Upgrades & Benchmarks)
-- [ ] `[P2]` **`MS062-T07` (Eliminate All 9 Cargo Manifest Warnings — `CICD-10`):** Remove unused `compact_str`, `unicode-ident`, `tracing`, `solix-ffi` workspace dep, unused `readme`, and redundant `homepage` fields from [`Cargo.toml`](../../../Cargo.toml) and member crate manifests.
-- [ ] `[P2]` **`MS062-T08` (Upgrade GitHub Actions, Fix Cache & Harden `release.yml` Shell Steps — `CICD-11`, `CICD-12`, `CICD-13`):** Upgrade workflow actions to Node-24 native versions and `cargo-dist` `0.34.0`, fix/stabilize Rust caching, quote shell expansions and remove the empty `announce` job in `release.yml`, and update [`benchmarks/compare_releases.py`](../../../benchmarks/compare_releases.py) to exclude `current_tag` when resolving previous releases.
+- [x] `[P2]` **`MS062-T07` (Eliminate All 9 Cargo Manifest Warnings — `CICD-10`):** Remove unused `compact_str`, `unicode-ident`, `tracing`, `solix-ffi` workspace dep, unused `readme`, and redundant `homepage` fields from [`Cargo.toml`](../../../Cargo.toml) and member crate manifests.
+- [x] `[P2]` **`MS062-T08` (Upgrade GitHub Actions, Fix Cache & Harden `release.yml` Shell Steps — `CICD-11`, `CICD-12`, `CICD-13`):** Upgrade workflow actions to Node-24 native versions and `cargo-dist` `0.34.0`, fix/stabilize Rust caching, quote shell expansions and remove the empty `announce` job in `release.yml`, and update [`benchmarks/compare_releases.py`](../../../benchmarks/compare_releases.py) to exclude `current_tag` when resolving previous releases.
 
 ### 4.4 P3: Low Priority (Strict Lint Parity & Branch Cleanup)
-- [ ] `[P3]` **`MS062-T09` (Enforce Strict Production Clippy Lints & Clean Stale Branches — `CICD-14`):** Add `cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars` to `ci.yml` and delete orphaned `origin/release-plz-*` remote branches.
+- [x] `[P3]` **`MS062-T09` (Enforce Strict Production Clippy Lints & Clean Stale Branches — `CICD-14`):** Add `cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars` to `ci.yml` and delete orphaned `origin/release-plz-*` remote branches.
 
 ---
 
@@ -128,8 +128,8 @@ flowchart LR
 
 | DoD Requirement | Target Verification | Tool / Workflow | Sign-off Status |
 | :--- | :--- | :--- | :---: |
-| **Zero Manifest & Clippy Warnings** | Strict production + workspace Clippy clean | `cargo clippy --workspace --all-targets -- -D warnings` | [ ] Pending |
-| **3-OS CI Green** | `ubuntu-latest`, `macos-latest`, `windows-latest` all pass | `.github/workflows/ci.yml` | [ ] Pending |
-| **Real Doc Sync Gate** | Non-zero diff check & updated `TRIGGER_MATRIX` | `scripts/doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py` | [ ] Pending |
-| **Release-plz Green Without Masking** | Opens Release PR cleanly inside `ci.yml` only after 3-OS CI passes | `.github/workflows/ci.yml`, `release-plz.toml` | [ ] Pending |
-| **True Multi-Platform Bundles** | Native `.dll`/`.dylib`/`.so` per target triple | `.github/workflows/release.yml`, `crates/solix-common/src/project.rs` | [ ] Pending |
+| **Zero Manifest & Clippy Warnings** | Strict production + workspace Clippy clean | `cargo clippy --workspace --all-targets -- -D warnings` | [x] Verified |
+| **3-OS CI Green** | `ubuntu-latest`, `macos-latest`, `windows-latest` all pass | `.github/workflows/ci.yml` | [x] Verified |
+| **Real Doc Sync Gate** | Non-zero diff check & updated `TRIGGER_MATRIX` | `scripts/doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py` | [x] Verified |
+| **Release-plz Green Without Masking** | Opens Release PR cleanly inside `ci.yml` only after 3-OS CI passes | `.github/workflows/ci.yml`, `release-plz.toml` | [x] Verified |
+| **True Multi-Platform Bundles** | Native `.dll`/`.dylib`/`.so` per target triple | `.github/workflows/release.yml`, `crates/solix-common/src/project.rs` | [ ] Pending (`v1.3.1` tag run) |
