@@ -739,6 +739,8 @@ impl SlxarcArchive {
         let mut secondary_binaries = Vec::new();
         let mut native_libraries = Vec::new();
         let mut extracted_files = Vec::new();
+        let mut qualified_native_names: std::collections::HashSet<std::ffi::OsString> =
+            std::collections::HashSet::new();
         let mut resource_files = Vec::new();
         let mut resource_total_bytes = 0u64;
 
@@ -803,13 +805,9 @@ impl SlxarcArchive {
                     .unwrap_or("")
                     .split('/')
                     .collect();
-                let matches_platform = if relative_parts.len() > 1 {
-                    let subdirectory = relative_parts[0];
-                    let host_triple =
-                        format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
-                    subdirectory == host_triple
-                        || subdirectory == std::env::consts::OS
-                        || subdirectory == "host"
+                let is_qualified_subdir = relative_parts.len() > 1;
+                let matches_platform = if is_qualified_subdir {
+                    matches_native_target_subdir(relative_parts[0])
                 } else {
                     true
                 };
@@ -818,10 +816,13 @@ impl SlxarcArchive {
                     continue;
                 }
 
-                // Extract host native library atomically to avoid truncating cached libraries under parallel runs
+                // Extract host native library atomically, preferring target-qualified paths over fallback `lib/<file>`.
                 let file_name_os = Path::new(&entry_name)
                     .file_name()
                     .unwrap_or(std::ffi::OsStr::new("native.so"));
+                if !is_qualified_subdir && qualified_native_names.contains(file_name_os) {
+                    continue;
+                }
                 let target_path = extract_cache_directory.join(file_name_os);
 
                 let mut library_bytes = Vec::new();
@@ -884,8 +885,15 @@ impl SlxarcArchive {
                     }
                 }
 
-                native_libraries.push(target_path.clone());
-                extracted_files.push(target_path);
+                if is_qualified_subdir {
+                    qualified_native_names.insert(file_name_os.to_os_string());
+                }
+                if !native_libraries.contains(&target_path) {
+                    native_libraries.push(target_path.clone());
+                }
+                if !extracted_files.contains(&target_path) {
+                    extracted_files.push(target_path);
+                }
             } else if entry_name.starts_with("resources/") {
                 let target_path = extract_cache_directory.join(&entry_name);
                 if let Some(parent_dir) = target_path.parent() {
@@ -1048,6 +1056,34 @@ fn collect_directory_entries(
     Ok(())
 }
 
+/// Checks whether a `lib/<subdirectory>/` archive directory matches the active host OS and CPU architecture.
+fn matches_native_target_subdir(subdirectory: &str) -> bool {
+    let host_os = std::env::consts::OS;
+    let host_arch = std::env::consts::ARCH;
+    let short_pair = format!("{host_os}-{host_arch}");
+
+    if subdirectory == short_pair || subdirectory == host_os || subdirectory == "host" {
+        return true;
+    }
+
+    let triple_matches_os = match host_os {
+        "linux" => subdirectory.contains("-linux-"),
+        "macos" => subdirectory.contains("-apple-darwin"),
+        "windows" => subdirectory.contains("-pc-windows-"),
+        _ => false,
+    };
+
+    if !triple_matches_os {
+        return false;
+    }
+
+    match host_arch {
+        "x86_64" => subdirectory.starts_with("x86_64-"),
+        "aarch64" => subdirectory.starts_with("aarch64-") || subdirectory.starts_with("arm64-"),
+        _ => subdirectory.starts_with(host_arch),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1181,5 +1217,107 @@ version = "0.1.0"
         assert_eq!(loaded.binaries.len(), 1);
         assert_eq!(loaded.native_libraries.len(), 1);
         assert!(loaded.native_libraries[0].exists());
+    }
+
+    #[test]
+    fn test_native_target_subdir_matching_prefers_host_arch() {
+        let host_triple = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+        assert!(matches_native_target_subdir(&host_triple));
+        assert!(matches_native_target_subdir("host"));
+        assert!(matches_native_target_subdir(std::env::consts::OS));
+        assert!(!matches_native_target_subdir("sparc-unknown-none"));
+
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            assert!(matches_native_target_subdir("x86_64-unknown-linux-gnu"));
+            assert!(matches_native_target_subdir("x86_64-unknown-linux-musl"));
+            assert!(!matches_native_target_subdir("aarch64-unknown-linux-gnu"));
+            assert!(!matches_native_target_subdir("x86_64-apple-darwin"));
+        }
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            assert!(matches_native_target_subdir("aarch64-apple-darwin"));
+            assert!(!matches_native_target_subdir("x86_64-apple-darwin"));
+        }
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        {
+            assert!(matches_native_target_subdir("x86_64-apple-darwin"));
+            assert!(!matches_native_target_subdir("aarch64-apple-darwin"));
+        }
+        #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+        {
+            assert!(matches_native_target_subdir("x86_64-pc-windows-msvc"));
+            assert!(matches_native_target_subdir("x86_64-pc-windows-gnu"));
+            assert!(!matches_native_target_subdir("aarch64-pc-windows-msvc"));
+        }
+    }
+
+    #[test]
+    fn test_slxarc_prefers_qualified_target_triple_over_unqualified_fallback() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let stage_dir = temp_dir.path().join("stage");
+        let bin_dir = stage_dir.join("bin");
+        let lib_dir = stage_dir.join("lib");
+
+        #[cfg(target_os = "windows")]
+        let (host_sub, wrong_sub, host_lib) = (
+            "x86_64-pc-windows-msvc",
+            "aarch64-pc-windows-msvc",
+            "test_lib.dll",
+        );
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        let (host_sub, wrong_sub, host_lib) = (
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin",
+            "libtest_lib.dylib",
+        );
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        let (host_sub, wrong_sub, host_lib) = (
+            "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
+            "libtest_lib.dylib",
+        );
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let (host_sub, wrong_sub, host_lib) = (
+            if cfg!(target_arch = "aarch64") {
+                "aarch64-unknown-linux-gnu"
+            } else {
+                "x86_64-unknown-linux-gnu"
+            },
+            if cfg!(target_arch = "aarch64") {
+                "x86_64-unknown-linux-gnu"
+            } else {
+                "aarch64-unknown-linux-gnu"
+            },
+            "libtest_lib.so",
+        );
+
+        fs::create_dir_all(&bin_dir).unwrap();
+        fs::create_dir_all(lib_dir.join(host_sub)).unwrap();
+        fs::create_dir_all(lib_dir.join(wrong_sub)).unwrap();
+        fs::write(
+            stage_dir.join("manifest.toml"),
+            "[configuration]\nname = \"multi_arch\"\nversion = \"0.1.0\"\n[profiles.release]\n",
+        )
+        .unwrap();
+        fs::write(
+            bin_dir.join("multi_arch.slxb"),
+            BinaryProgram::new().to_bytes(),
+        )
+        .unwrap();
+        fs::write(lib_dir.join(host_lib), b"fallback_bytes").unwrap();
+        fs::write(lib_dir.join(wrong_sub).join(host_lib), b"wrong_arch_bytes").unwrap();
+        fs::write(lib_dir.join(host_sub).join(host_lib), b"host_triple_bytes").unwrap();
+
+        let archive_path = temp_dir.path().join("multi.slxarc");
+        SlxarcArchive::pack_directory(&stage_dir, &archive_path).expect("pack");
+
+        let extract_cache = temp_dir.path().join("cache");
+        let loaded = SlxarcArchive::extract_and_load(&archive_path, &extract_cache).expect("load");
+        assert_eq!(loaded.native_libraries.len(), 1);
+        assert_eq!(
+            fs::read(&loaded.native_libraries[0]).unwrap(),
+            b"host_triple_bytes"
+        );
     }
 }
