@@ -122,11 +122,13 @@ fn test_fuse_comparison_and_jump_if_false_into_superinstruction() {
 
     let has_super_jump = main_func.instructions.iter().any(|inst| {
         let opcode = inst.raw_opcode();
-        opcode >= OpCode::JumpIfLtI32 as u8 && opcode <= OpCode::JumpIfNeqI32 as u8
+        (opcode >= OpCode::JumpIfLtI32 as u8 && opcode <= OpCode::JumpIfNeqI32 as u8)
+            || opcode == OpCode::ForLoopI32 as u8
+            || opcode == OpCode::JumpIfI32Imm as u8
     });
     assert!(
         has_super_jump,
-        "Expected fused JumpIf*I32 superinstruction in while loop header"
+        "Expected fused JumpIf*I32 / ForLoopI32 / JumpIfI32Imm superinstruction in while loop"
     );
 }
 
@@ -256,27 +258,32 @@ fn test_positive_peephole_fuses_with_reused_scratch_register() {
         .find(|func| func.symbol.contains("sum_filtered"))
         .expect("sum_filtered function must exist");
 
-    let add_imm_count = sum_func
+    let add_imm_or_loop_count = sum_func
         .instructions
         .iter()
-        .filter(|inst| inst.raw_opcode() == OpCode::AddI32Imm as u8)
+        .filter(|inst| {
+            let raw = inst.raw_opcode();
+            raw == OpCode::AddI32Imm as u8 || raw == OpCode::ForLoopI32 as u8
+        })
         .count();
     let super_jump_count = sum_func
         .instructions
         .iter()
         .filter(|inst| {
             let raw = inst.raw_opcode();
-            raw >= OpCode::JumpIfLtI32 as u8 && raw <= OpCode::JumpIfNeqI32 as u8
+            (raw >= OpCode::JumpIfLtI32 as u8 && raw <= OpCode::JumpIfNeqI32 as u8)
+                || raw == OpCode::ForLoopI32 as u8
+                || raw == OpCode::JumpIfI32Imm as u8
         })
         .count();
 
     assert!(
-        add_imm_count >= 3,
-        "Expected index + 1, total + 3, and total + 7 to all fuse into AddI32Imm, found {add_imm_count}"
+        add_imm_or_loop_count >= 3,
+        "Expected index + 1 (AddI32Imm/ForLoopI32), total + 3, and total + 7 to all fuse, found {add_imm_or_loop_count}"
     );
     assert!(
         super_jump_count >= 2,
-        "Expected both loop header and inner branch comparisons to fuse into JumpIf*I32, found {super_jump_count}"
+        "Expected both loop and inner branch comparisons to fuse into JumpIf*I32 / ForLoopI32 / JumpIfI32Imm, found {super_jump_count}"
     );
 }
 
@@ -1049,7 +1056,10 @@ fn find_loop_backedge(
             || raw == OpCode::JumpIfFalse as u8
         {
             inst.jump_offset()
-        } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+        } else if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+            || raw == OpCode::ForLoopI32 as u8
+            || raw == OpCode::JumpIfI32Imm as u8
+        {
             inst.src2() as i16 as i32
         } else {
             0

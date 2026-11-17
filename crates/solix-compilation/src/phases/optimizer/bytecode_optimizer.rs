@@ -39,34 +39,30 @@ impl CompilationPhase for BytecodeOptimizerPhase {
 
         let class_descriptors = emission_artifacts.program.classes.clone();
         let function_descriptors = emission_artifacts.program.functions.clone();
+        let allow_arith_inline = context.options.inline_threshold > 0;
 
-        // Optimize each compiled function individually first so leaf constructors shrink to minimal bodies.
+        // Optimize each compiled function individually first so leaf constructors and arithmetic
+        // leaf helpers shrink to minimal bodies.
         for compiled_function in &mut emission_artifacts.program.functions {
             optimize_function(compiled_function, &class_descriptors, &function_descriptors);
         }
 
-        // Inline small leaf constructors across callers (multiple rounds handle inheritance chains),
-        // then re-converge caller passes.
+        // Inline small leaf constructors and pure leaf arithmetic functions across callers
+        // (multiple rounds handle inheritance chains), then re-converge caller passes.
         for _inline_round in 0..3 {
             let optimized_snapshot = emission_artifacts.program.functions.clone();
             let mut round_changed = false;
             for (func_idx, compiled_function) in
                 emission_artifacts.program.functions.iter_mut().enumerate()
             {
-                if inline_leaf_constructors(compiled_function, func_idx, &optimized_snapshot) {
+                if inline_leaf_functions(
+                    compiled_function,
+                    func_idx,
+                    &optimized_snapshot,
+                    allow_arith_inline,
+                ) {
                     round_changed = true;
-                    super::escape_analysis::apply_scalar_replacement(
-                        compiled_function,
-                        &class_descriptors,
-                        &optimized_snapshot,
-                    );
-                    super::escape_analysis::apply_arc_elision(compiled_function);
-                    elide_redundant_arc_ops(compiled_function);
-                    optimize_peephole_passes(compiled_function, false);
-                    elide_borrowed_local_arc_ops(compiled_function);
-                    elide_fresh_null_set_fields(compiled_function);
-                    optimize_peephole_passes(compiled_function, false);
-                    hoist_loop_invariant_constants(compiled_function);
+                    optimize_function(compiled_function, &class_descriptors, &optimized_snapshot);
                 }
             }
             if !round_changed {
@@ -77,6 +73,10 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         for compiled_function in &mut emission_artifacts.program.functions {
             rotate_bottom_tested_loops(compiled_function);
             optimize_peephole_passes(compiled_function, true);
+            hoist_loop_invariant_constants(compiled_function);
+            eliminate_common_subexpressions(compiled_function);
+            optimize_peephole_passes(compiled_function, true);
+            propagate_entry_constants(compiled_function, true);
         }
 
         // Keep functions_by_source synchronized with optimized functions
@@ -107,8 +107,9 @@ struct IntermediateInstruction {
 }
 
 /// Optimizes a single compiled function by running scalar replacement, ARC elision,
+/// closure specialization, dead closure elimination, constant propagation, CSE,
 /// redundant ARC/null field elimination, convergent peephole fusion with liveness analysis,
-/// and loop-invariant constant hoisting.
+/// and loop-invariant constant/expression hoisting.
 fn optimize_function(
     function: &mut CompiledFunction,
     classes: &[solix_common::bytecode::CompiledClass],
@@ -120,9 +121,19 @@ fn optimize_function(
     optimize_peephole_passes(function, false);
     elide_borrowed_local_arc_ops(function);
     elide_fresh_null_set_fields(function);
-
+    propagate_entry_constants(function, false);
     optimize_peephole_passes(function, false);
     hoist_loop_invariant_constants(function);
+    eliminate_common_subexpressions(function);
+    if eliminate_dead_pack_closures(function) {
+        elide_redundant_arc_ops(function);
+    }
+    for _ in 0..4 {
+        if !specialize_diamond_pack_closure_calls(function) {
+            break;
+        }
+    }
+    optimize_peephole_passes(function, false);
 }
 
 /// Returns `true` if `reg` holds a guaranteed immortal/null/FnPtr value throughout an immutable local array
@@ -839,6 +850,696 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
     }
 }
 
+/// Eliminates `PackClosure` allocations whose result register is never used for anything except
+/// `IncRef` / `DecRef` (e.g. after closure call inlining in `AstInlinerPhase`).
+fn eliminate_dead_pack_closures(function: &mut CompiledFunction) -> bool {
+    let inst_count = function.instructions.len();
+    if inst_count < 2 {
+        return false;
+    }
+
+    let mut write_counts: HashMap<u16, usize> = HashMap::new();
+    let mut non_arc_read_counts: HashMap<u16, usize> = HashMap::new();
+    for inst in &function.instructions {
+        let raw = inst.raw_opcode();
+        if raw == OpCode::UnpackCaptures as u8 {
+            let base = inst.arg_base();
+            let count = inst.arg_count() as u16;
+            for reg in base..base + count {
+                *write_counts.entry(reg).or_insert(0) += 1;
+            }
+        } else if let Some(dst) = instruction_write_dst(inst) {
+            *write_counts.entry(dst).or_insert(0) += 1;
+        }
+        if raw != OpCode::IncRef as u8 && raw != OpCode::DecRef as u8 {
+            for reg in 0..function.num_registers {
+                if instruction_reads_register(inst, reg) {
+                    *non_arc_read_counts.entry(reg).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    let mut dead_closure_regs: HashSet<u16> = HashSet::new();
+    for inst in &function.instructions {
+        if inst.raw_opcode() == OpCode::PackClosure as u8 {
+            let closure_reg = inst.call_dst();
+            let is_catch_reg = function
+                .exception_handlers
+                .iter()
+                .any(|handler| handler.catch_reg == closure_reg);
+            if !is_catch_reg
+                && closure_reg >= function.param_count
+                && write_counts.get(&closure_reg).copied() == Some(1)
+                && non_arc_read_counts.get(&closure_reg).copied().unwrap_or(0) == 0
+            {
+                dead_closure_regs.insert(closure_reg);
+            }
+        }
+    }
+
+    if dead_closure_regs.is_empty() {
+        return false;
+    }
+
+    let mut removed_any = false;
+    for inst in &mut function.instructions {
+        let raw = inst.raw_opcode();
+        if raw == OpCode::PackClosure as u8 && dead_closure_regs.contains(&inst.call_dst()) {
+            *inst = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            removed_any = true;
+        } else if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
+            && dead_closure_regs.contains(&inst.dst())
+        {
+            *inst = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            removed_any = true;
+        }
+    }
+
+    if removed_any {
+        function
+            .reference_registers
+            .retain(|reg| !dead_closure_regs.contains(reg));
+        for handler in &mut function.exception_handlers {
+            handler
+                .try_ref_regs
+                .retain(|reg| !dead_closure_regs.contains(reg));
+        }
+    }
+    removed_any
+}
+
+/// Returns `true` if `inst` is a pure register-only argument setup operation safe to duplicate
+/// across arms of a zero-capture `PackClosure -> CallCallable` diamond.
+fn is_pure_diamond_setup_inst(inst: Instruction) -> bool {
+    let Some(opc) = OpCode::from_raw_u8(inst.raw_opcode()) else {
+        return false;
+    };
+    match opc {
+        OpCode::Nop
+        | OpCode::Mov
+        | OpCode::LoadI32
+        | OpCode::LoadI64
+        | OpCode::LoadF64
+        | OpCode::LoadBool
+        | OpCode::LoadNull
+        | OpCode::AddI32
+        | OpCode::AddI64
+        | OpCode::AddF64
+        | OpCode::SubI32
+        | OpCode::SubI64
+        | OpCode::SubF64
+        | OpCode::MulI32
+        | OpCode::MulI64
+        | OpCode::MulF64
+        | OpCode::Band
+        | OpCode::Bor
+        | OpCode::Bxor
+        | OpCode::Bnot
+        | OpCode::Shl
+        | OpCode::Shr
+        | OpCode::NegI32
+        | OpCode::NegI64
+        | OpCode::NegF64
+        | OpCode::Not
+        | OpCode::AddI32Imm
+        | OpCode::SubI32Imm
+        | OpCode::MulI32Imm
+        | OpCode::ConvIToF
+        | OpCode::ConvFToI => true,
+        OpCode::ModI32Imm => (inst.src2() as i16) > 0,
+        _ => false,
+    }
+}
+
+/// Specializes branch-diamond zero-capture `PackClosure` assignments feeding a single
+/// `CallCallable` at the diamond merge block into direct `CallDirect` calls inside each arm.
+fn specialize_diamond_pack_closure_calls(function: &mut CompiledFunction) -> bool {
+    if !function.exception_handlers.is_empty() {
+        return false;
+    }
+    let inst_count = function.instructions.len();
+    if inst_count < 5 {
+        return false;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut jump_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        jump_targets.push(decode_jump_target(*inst, pc_idx, inst_count));
+    }
+
+    for (call_pc, call_inst) in function.instructions.iter().enumerate() {
+        if call_inst.raw_opcode() != OpCode::CallCallable as u8 {
+            continue;
+        }
+        let r_callable = call_inst.call_target();
+        let arg_base = call_inst.arg_base();
+        let arg_count = call_inst.arg_count();
+        let call_dst = call_inst.call_dst();
+        if r_callable >= arg_base && r_callable < arg_base + arg_count as u16 {
+            continue;
+        }
+
+        // Require `r_callable` not to be read anywhere else in the function except at `call_pc`.
+        let only_read_at_call = function
+            .instructions
+            .iter()
+            .enumerate()
+            .all(|(pc, inst)| pc == call_pc || !instruction_reads_register(inst, r_callable));
+        if !only_read_at_call {
+            continue;
+        }
+
+        // Scan backward at most 6 instructions to locate the diamond merge point.
+        let min_merge = call_pc.saturating_sub(6);
+        let mut merge_pc_opt = None;
+        for candidate_merge in (min_merge..=call_pc).rev() {
+            let valid_setup = (candidate_merge..call_pc).all(|pc_idx| {
+                let inst = function.instructions[pc_idx];
+                is_pure_diamond_setup_inst(inst)
+                    && !instruction_writes_register(&inst, r_callable)
+                    && (pc_idx == candidate_merge || !critical_targets.contains(&pc_idx))
+            });
+            if !valid_setup {
+                break;
+            }
+            if critical_targets.contains(&candidate_merge) {
+                merge_pc_opt = Some(candidate_merge);
+                break;
+            }
+        }
+        let Some(merge_pc) = merge_pc_opt else {
+            continue;
+        };
+        if merge_pc == 0 {
+            continue;
+        }
+
+        let fall_pack_pc = merge_pc - 1;
+        let fall_pack = function.instructions[fall_pack_pc];
+        if fall_pack.raw_opcode() != OpCode::PackClosure as u8
+            || fall_pack.call_dst() != r_callable
+            || fall_pack.arg_count() != 0
+        {
+            continue;
+        }
+
+        let incoming_jumps: Vec<usize> = jump_targets
+            .iter()
+            .enumerate()
+            .filter_map(|(pc_idx, target_opt)| {
+                if *target_opt == Some(merge_pc) {
+                    Some(pc_idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if incoming_jumps.is_empty() {
+            continue;
+        }
+
+        let mut jump_arm_map: HashMap<usize, u16> = HashMap::new();
+        let mut all_arms_valid = true;
+        for &jump_pc in &incoming_jumps {
+            let jump_inst = function.instructions[jump_pc];
+            if jump_inst.raw_opcode() != OpCode::Jump as u8
+                || jump_pc == 0
+                || critical_targets.contains(&jump_pc)
+                || jump_pc + 1 == merge_pc
+            {
+                all_arms_valid = false;
+                break;
+            }
+            let pack_pc = jump_pc - 1;
+            let pack_inst = function.instructions[pack_pc];
+            if pack_inst.raw_opcode() != OpCode::PackClosure as u8
+                || pack_inst.call_dst() != r_callable
+                || pack_inst.arg_count() != 0
+            {
+                all_arms_valid = false;
+                break;
+            }
+            jump_arm_map.insert(pack_pc, pack_inst.call_target());
+        }
+        if !all_arms_valid {
+            continue;
+        }
+
+        let setup_slice: Vec<Instruction> = function.instructions[merge_pc..call_pc].to_vec();
+        let after_call_old_pc = call_pc + 1;
+        let mut rebuilt: Vec<(Instruction, Option<usize>)> = Vec::with_capacity(inst_count + 16);
+        let mut old_pc_to_new_pc = vec![u32::MAX; inst_count + 1];
+
+        let mut cursor = 0;
+        while cursor < inst_count {
+            old_pc_to_new_pc[cursor] = rebuilt.len() as u32;
+            if let Some(&fn_target) = jump_arm_map.get(&cursor) {
+                for &setup_inst in &setup_slice {
+                    rebuilt.push((setup_inst, None));
+                }
+                rebuilt.push((
+                    Instruction::format_call(
+                        OpCode::CallDirect,
+                        call_dst,
+                        fn_target,
+                        arg_base,
+                        arg_count,
+                    ),
+                    None,
+                ));
+                let jump_pc = cursor + 1;
+                old_pc_to_new_pc[jump_pc] = rebuilt.len() as u32;
+                rebuilt.push((
+                    Instruction::format_c(OpCode::Jump, 0, 0, 0),
+                    Some(after_call_old_pc),
+                ));
+                cursor += 2;
+                continue;
+            }
+            if cursor == fall_pack_pc {
+                for &setup_inst in &setup_slice {
+                    rebuilt.push((setup_inst, None));
+                }
+                rebuilt.push((
+                    Instruction::format_call(
+                        OpCode::CallDirect,
+                        call_dst,
+                        fall_pack.call_target(),
+                        arg_base,
+                        arg_count,
+                    ),
+                    None,
+                ));
+                for merge_old_pc in merge_pc..=call_pc {
+                    old_pc_to_new_pc[merge_old_pc] = rebuilt.len() as u32;
+                }
+                cursor = after_call_old_pc;
+                continue;
+            }
+            rebuilt.push((function.instructions[cursor], jump_targets[cursor]));
+            cursor += 1;
+        }
+        old_pc_to_new_pc[inst_count] = rebuilt.len() as u32;
+
+        let mut final_instructions = Vec::with_capacity(rebuilt.len());
+        for (new_pc, (inst, target_opt)) in rebuilt.into_iter().enumerate() {
+            let mut final_inst = inst;
+            if let Some(target_old_pc) = target_opt {
+                let target_new_pc = old_pc_to_new_pc
+                    .get(target_old_pc)
+                    .copied()
+                    .unwrap_or(old_pc_to_new_pc[inst_count]);
+                final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+            }
+            final_instructions.push(final_inst);
+        }
+        apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+        return true;
+    }
+
+    false
+}
+
+/// Propagates single-definition entry-block `LoadI32` constants into binary ALU instructions
+/// (and remaining standalone `JumpIf*I32` comparisons when `fold_branches` is `true`).
+fn propagate_entry_constants(function: &mut CompiledFunction, fold_branches: bool) -> bool {
+    let inst_count = function.instructions.len();
+    if inst_count < 2 {
+        return false;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut write_counts: HashMap<u16, usize> = HashMap::new();
+    for inst in &function.instructions {
+        if inst.raw_opcode() == OpCode::UnpackCaptures as u8 {
+            let base = inst.arg_base();
+            let count = inst.arg_count() as u16;
+            for reg in base..base + count {
+                *write_counts.entry(reg).or_insert(0) += 1;
+            }
+        } else if let Some(dst) = instruction_write_dst(inst) {
+            *write_counts.entry(dst).or_insert(0) += 1;
+        }
+    }
+
+    // Collect single-definition `LoadI32` constants in the entry basic block before any branch.
+    let mut entry_consts: HashMap<u16, i16> = HashMap::new();
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        if pc_idx > 0 && critical_targets.contains(&pc_idx) {
+            break;
+        }
+        let raw = inst.raw_opcode();
+        if is_control_flow_terminator(raw)
+            || is_conditional_branch(raw)
+            || raw == OpCode::Jump as u8
+            || raw == OpCode::Switch as u8
+        {
+            break;
+        }
+        if raw == OpCode::LoadI32 as u8 {
+            let dst = inst.dst();
+            let imm = inst.imm32_signed();
+            if dst >= function.param_count
+                && write_counts.get(&dst).copied() == Some(1)
+                && let Ok(imm16) = i16::try_from(imm)
+            {
+                entry_consts.insert(dst, imm16);
+            }
+        }
+    }
+
+    if entry_consts.is_empty() {
+        return false;
+    }
+
+    let mut changed = false;
+    for inst in &mut function.instructions {
+        let raw = inst.raw_opcode();
+        if raw == OpCode::AddI32 as u8 {
+            let dst = inst.dst();
+            let s1 = inst.src1();
+            let s2 = inst.src2();
+            if let Some(&imm16) = entry_consts.get(&s2)
+                && s1 != s2
+            {
+                *inst = Instruction::format_a(OpCode::AddI32Imm, 0, dst, s1, imm16 as u16);
+                changed = true;
+            } else if let Some(&imm16) = entry_consts.get(&s1)
+                && s1 != s2
+            {
+                *inst = Instruction::format_a(OpCode::AddI32Imm, 0, dst, s2, imm16 as u16);
+                changed = true;
+            }
+        } else if raw == OpCode::SubI32 as u8 {
+            let dst = inst.dst();
+            let s1 = inst.src1();
+            let s2 = inst.src2();
+            if let Some(&imm16) = entry_consts.get(&s2)
+                && s1 != s2
+            {
+                *inst = Instruction::format_a(OpCode::SubI32Imm, 0, dst, s1, imm16 as u16);
+                changed = true;
+            }
+        } else if raw == OpCode::MulI32 as u8 {
+            let dst = inst.dst();
+            let s1 = inst.src1();
+            let s2 = inst.src2();
+            if let Some(&imm16) = entry_consts.get(&s2)
+                && s1 != s2
+            {
+                *inst = Instruction::format_a(OpCode::MulI32Imm, 0, dst, s1, imm16 as u16);
+                changed = true;
+            } else if let Some(&imm16) = entry_consts.get(&s1)
+                && s1 != s2
+            {
+                *inst = Instruction::format_a(OpCode::MulI32Imm, 0, dst, s2, imm16 as u16);
+                changed = true;
+            }
+        } else if raw == OpCode::ModI32 as u8 {
+            let dst = inst.dst();
+            let s1 = inst.src1();
+            let s2 = inst.src2();
+            if let Some(&imm16) = entry_consts.get(&s2)
+                && s1 != s2
+                && imm16 > 0
+            {
+                *inst = Instruction::format_a(OpCode::ModI32Imm, 0, dst, s1, imm16 as u16);
+                changed = true;
+            }
+        } else if fold_branches
+            && (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+        {
+            let reg_a = inst.dst();
+            let reg_b = inst.src1();
+            let offset = inst.src2();
+            if let Some(&imm16) = entry_consts.get(&reg_b)
+                && reg_a != reg_b
+            {
+                let flag = match raw {
+                    v if v == OpCode::JumpIfEqI32 as u8 => 0u8,
+                    v if v == OpCode::JumpIfNeqI32 as u8 => 1u8,
+                    v if v == OpCode::JumpIfLtI32 as u8 => 2u8,
+                    v if v == OpCode::JumpIfLteI32 as u8 => 3u8,
+                    v if v == OpCode::JumpIfGtI32 as u8 => 4u8,
+                    _ => 5u8,
+                };
+                *inst =
+                    Instruction::format_a(OpCode::JumpIfI32Imm, flag, reg_a, imm16 as u16, offset);
+                changed = true;
+            } else if let Some(&imm16) = entry_consts.get(&reg_a)
+                && reg_a != reg_b
+            {
+                let flag = match raw {
+                    v if v == OpCode::JumpIfEqI32 as u8 => 0u8,
+                    v if v == OpCode::JumpIfNeqI32 as u8 => 1u8,
+                    v if v == OpCode::JumpIfLtI32 as u8 => 4u8,
+                    v if v == OpCode::JumpIfLteI32 as u8 => 5u8,
+                    v if v == OpCode::JumpIfGtI32 as u8 => 2u8,
+                    _ => 3u8,
+                };
+                *inst =
+                    Instruction::format_a(OpCode::JumpIfI32Imm, flag, reg_b, imm16 as u16, offset);
+                changed = true;
+            }
+        }
+    }
+
+    changed
+}
+
+/// Symbolic expression key used by extended-basic-block Local Common Subexpression Elimination.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum CseExprKey {
+    BinaryComm { raw: u8, v_low: u32, v_high: u32 },
+    BinaryOrd { raw: u8, v_lhs: u32, v_rhs: u32 },
+    ImmOp { raw: u8, v_src: u32, imm: u16 },
+}
+
+fn cse_expr_for_instruction(
+    inst: Instruction,
+    reg_to_val: &mut HashMap<u16, u32>,
+    val_holders: &mut HashMap<u32, Vec<u16>>,
+    next_val: &mut u32,
+) -> Option<CseExprKey> {
+    let mut get_val = |reg: u16| -> u32 {
+        if let Some(&vid) = reg_to_val.get(&reg) {
+            vid
+        } else {
+            let vid = *next_val;
+            *next_val += 1;
+            reg_to_val.insert(reg, vid);
+            val_holders.entry(vid).or_default().push(reg);
+            vid
+        }
+    };
+
+    let raw = inst.raw_opcode();
+    if raw == OpCode::AddI32 as u8
+        || raw == OpCode::MulI32 as u8
+        || raw == OpCode::AddF64 as u8
+        || raw == OpCode::MulF64 as u8
+        || raw == OpCode::Band as u8
+        || raw == OpCode::Bor as u8
+        || raw == OpCode::Bxor as u8
+    {
+        let va = get_val(inst.src1());
+        let vb = get_val(inst.src2());
+        return Some(CseExprKey::BinaryComm {
+            raw,
+            v_low: va.min(vb),
+            v_high: va.max(vb),
+        });
+    }
+    if raw == OpCode::SubI32 as u8
+        || raw == OpCode::SubF64 as u8
+        || raw == OpCode::DivF64 as u8
+        || raw == OpCode::Shl as u8
+        || raw == OpCode::Shr as u8
+    {
+        let va = get_val(inst.src1());
+        let vb = get_val(inst.src2());
+        return Some(CseExprKey::BinaryOrd {
+            raw,
+            v_lhs: va,
+            v_rhs: vb,
+        });
+    }
+    if raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+        || (raw == OpCode::ModI32Imm as u8 && (inst.src2() as i16) > 0)
+    {
+        let va = get_val(inst.src1());
+        return Some(CseExprKey::ImmOp {
+            raw,
+            v_src: va,
+            imm: inst.src2(),
+        });
+    }
+    None
+}
+
+fn invalidate_cse_reg(
+    reg: u16,
+    reg_to_val: &mut HashMap<u16, u32>,
+    val_holders: &mut HashMap<u32, Vec<u16>>,
+) {
+    if let Some(old_vid) = reg_to_val.remove(&reg)
+        && let Some(holders) = val_holders.get_mut(&old_vid)
+    {
+        holders.retain(|&holder_reg| holder_reg != reg);
+    }
+}
+
+/// Eliminates redundant pure computations across Extended Basic Blocks (including fallthrough
+/// segments past exit guards) while strictly invalidating call-clobbered windows (`>= arg_base`).
+fn eliminate_common_subexpressions(function: &mut CompiledFunction) -> bool {
+    let inst_count = function.instructions.len();
+    if inst_count < 2 {
+        return false;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut jump_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
+    for (pc_idx, inst) in function.instructions.iter().enumerate() {
+        jump_targets.push(decode_jump_target(*inst, pc_idx, inst_count));
+    }
+
+    let mut reg_to_val: HashMap<u16, u32> = HashMap::new();
+    let mut val_holders: HashMap<u32, Vec<u16>> = HashMap::new();
+    let mut expr_to_val: HashMap<CseExprKey, u32> = HashMap::new();
+    let mut next_val: u32 = 1;
+    let mut duplicate_expr_pcs: Vec<(usize, u16)> = Vec::new();
+    let mut any_changed = false;
+
+    for pc_idx in 0..inst_count {
+        if critical_targets.contains(&pc_idx) {
+            reg_to_val.clear();
+            val_holders.clear();
+            expr_to_val.clear();
+        }
+
+        let inst = function.instructions[pc_idx];
+        let raw = inst.raw_opcode();
+
+        if raw == OpCode::CallDirect as u8
+            || raw == OpCode::CallVirtual as u8
+            || raw == OpCode::CallInterface as u8
+            || raw == OpCode::CallCallable as u8
+            || raw == OpCode::CallNativeDirect as u8
+            || raw == OpCode::CallSymbol as u8
+            || raw == OpCode::CallExtern as u8
+        {
+            invalidate_cse_reg(inst.call_dst(), &mut reg_to_val, &mut val_holders);
+            if inst.arg_count() > 0 {
+                let clobber_base = inst.arg_base();
+                let clobbered: Vec<u16> = reg_to_val
+                    .keys()
+                    .copied()
+                    .filter(|&reg| reg >= clobber_base)
+                    .collect();
+                for reg in clobbered {
+                    invalidate_cse_reg(reg, &mut reg_to_val, &mut val_holders);
+                }
+            }
+            continue;
+        }
+
+        if raw == OpCode::Mov as u8 {
+            let dst = inst.dst();
+            let src = inst.src1();
+            let src_vid = if let Some(&vid) = reg_to_val.get(&src) {
+                vid
+            } else {
+                let vid = next_val;
+                next_val += 1;
+                reg_to_val.insert(src, vid);
+                val_holders.entry(vid).or_default().push(src);
+                vid
+            };
+            if reg_to_val.get(&dst) == Some(&src_vid) {
+                function.instructions[pc_idx] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                any_changed = true;
+            } else {
+                invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
+                reg_to_val.insert(dst, src_vid);
+                val_holders.entry(src_vid).or_default().push(dst);
+            }
+            continue;
+        }
+
+        if let Some(expr_key) =
+            cse_expr_for_instruction(inst, &mut reg_to_val, &mut val_holders, &mut next_val)
+        {
+            let dst = inst.dst();
+            if let Some(&existing_vid) = expr_to_val.get(&expr_key) {
+                let live_holder = val_holders.get(&existing_vid).and_then(|holders| {
+                    holders
+                        .iter()
+                        .copied()
+                        .find(|&r| reg_to_val.get(&r) == Some(&existing_vid))
+                });
+                if let Some(holder_reg) = live_holder {
+                    if holder_reg == dst {
+                        function.instructions[pc_idx] =
+                            Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                    } else {
+                        invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
+                        reg_to_val.insert(dst, existing_vid);
+                        val_holders.entry(existing_vid).or_default().push(dst);
+                        function.instructions[pc_idx] =
+                            Instruction::format_a(OpCode::Mov, 0, dst, holder_reg, 0);
+                    }
+                    any_changed = true;
+                } else {
+                    invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
+                    reg_to_val.insert(dst, existing_vid);
+                    val_holders.entry(existing_vid).or_default().push(dst);
+                    duplicate_expr_pcs.push((pc_idx, dst));
+                }
+            } else {
+                invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
+                let vid = next_val;
+                next_val += 1;
+                expr_to_val.insert(expr_key, vid);
+                reg_to_val.insert(dst, vid);
+                val_holders.entry(vid).or_default().push(dst);
+            }
+            continue;
+        }
+
+        if raw == OpCode::UnpackCaptures as u8 {
+            let base = inst.arg_base();
+            let count = inst.arg_count() as u16;
+            for reg in base..base + count {
+                invalidate_cse_reg(reg, &mut reg_to_val, &mut val_holders);
+            }
+        } else if let Some(dst) = instruction_write_dst(&inst) {
+            invalidate_cse_reg(dst, &mut reg_to_val, &mut val_holders);
+        }
+
+        if is_control_flow_terminator(raw)
+            || raw == OpCode::Jump as u8
+            || raw == OpCode::Switch as u8
+        {
+            reg_to_val.clear();
+            val_holders.clear();
+            expr_to_val.clear();
+        }
+    }
+
+    // Remove intermediate duplicate pure calculations whose downstream consumer became redundant.
+    for (dup_pc, dst_reg) in duplicate_expr_pcs.into_iter().rev() {
+        if is_dead_after_use_raw(function, &jump_targets, &critical_targets, dup_pc, dst_reg) {
+            function.instructions[dup_pc] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+            any_changed = true;
+        }
+    }
+
+    any_changed
+}
 /// Eliminates redundant `SetField null` on freshly `AllocObject`ed instances or at the start of leaf constructors.
 fn elide_fresh_null_set_fields(function: &mut CompiledFunction) {
     let inst_count = function.instructions.len();
@@ -903,16 +1604,159 @@ fn elide_fresh_null_set_fields(function: &mut CompiledFunction) {
     }
 }
 
-/// Inlines empty or pure field-initializing leaf constructors at `CallDirect` call sites.
-fn inline_leaf_constructors(
+/// Checks if an instruction is an eligible pure non-trapping leaf body operation.
+fn is_pure_leaf_arith_inst(inst: Instruction, param_count: u16) -> bool {
+    let raw = inst.raw_opcode();
+    let Some(opc) = OpCode::from_raw_u8(raw) else {
+        return false;
+    };
+    let written_ok = instruction_write_dst(&inst).is_none_or(|dst| dst >= param_count);
+    if !written_ok {
+        return false;
+    }
+    matches!(
+        opc,
+        OpCode::Nop
+            | OpCode::Mov
+            | OpCode::LoadI32
+            | OpCode::LoadI64
+            | OpCode::LoadF64
+            | OpCode::LoadBool
+            | OpCode::LoadNull
+            | OpCode::AddI32
+            | OpCode::AddI64
+            | OpCode::AddF64
+            | OpCode::SubI32
+            | OpCode::SubI64
+            | OpCode::SubF64
+            | OpCode::MulI32
+            | OpCode::MulI64
+            | OpCode::MulF64
+            | OpCode::Band
+            | OpCode::Bor
+            | OpCode::Bxor
+            | OpCode::Bnot
+            | OpCode::Shl
+            | OpCode::Shr
+            | OpCode::NegI32
+            | OpCode::NegI64
+            | OpCode::NegF64
+            | OpCode::EqI32
+            | OpCode::EqI64
+            | OpCode::EqF64
+            | OpCode::EqBool
+            | OpCode::NeqI32
+            | OpCode::NeqI64
+            | OpCode::NeqF64
+            | OpCode::NeqBool
+            | OpCode::LtI32
+            | OpCode::LtI64
+            | OpCode::LtF64
+            | OpCode::LteI32
+            | OpCode::LteI64
+            | OpCode::LteF64
+            | OpCode::GtI32
+            | OpCode::GtI64
+            | OpCode::GtF64
+            | OpCode::GteI32
+            | OpCode::GteI64
+            | OpCode::GteF64
+            | OpCode::Not
+            | OpCode::AddI32Imm
+            | OpCode::SubI32Imm
+            | OpCode::MulI32Imm
+            | OpCode::AddBandI32
+            | OpCode::ConvIToF
+            | OpCode::ConvFToI
+    )
+}
+
+/// Remaps registers in an inlined leaf constructor or pure arithmetic leaf function instruction.
+fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> Instruction {
+    let raw = inst.raw_opcode();
+    if raw == OpCode::SetField as u8 {
+        return Instruction::format_a(
+            OpCode::SetField,
+            inst.flags(),
+            remap_reg(inst.dst()),
+            remap_reg(inst.src1()),
+            inst.src2(),
+        );
+    }
+    if raw == OpCode::Mov as u8
+        || raw == OpCode::Not as u8
+        || raw == OpCode::Bnot as u8
+        || raw == OpCode::NegI32 as u8
+        || raw == OpCode::NegI64 as u8
+        || raw == OpCode::NegF64 as u8
+        || raw == OpCode::ConvIToF as u8
+        || raw == OpCode::ConvFToI as u8
+    {
+        if let Some(opcode) = OpCode::from_raw_u8(raw) {
+            return Instruction::format_a(
+                opcode,
+                0,
+                remap_reg(inst.dst()),
+                remap_reg(inst.src1()),
+                0,
+            );
+        }
+    }
+    if raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+    {
+        if let Some(opcode) = OpCode::from_raw_u8(raw) {
+            return Instruction::format_a(
+                opcode,
+                0,
+                remap_reg(inst.dst()),
+                remap_reg(inst.src1()),
+                inst.src2(),
+            );
+        }
+    }
+    if raw == OpCode::AddBandI32 as u8 {
+        return Instruction::format_a(
+            OpCode::AddBandI32,
+            remap_reg(inst.flags() as u16) as u8,
+            remap_reg(inst.dst()),
+            remap_reg(inst.src1()),
+            remap_reg(inst.src2()),
+        );
+    }
+    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw) {
+        if let Some(opcode) = OpCode::from_raw_u8(raw) {
+            return Instruction::format_a(
+                opcode,
+                inst.flags(),
+                remap_reg(inst.dst()),
+                remap_reg(inst.src1()),
+                remap_reg(inst.src2()),
+            );
+        }
+    }
+    rewrite_instruction_destination(&inst, remap_reg(inst.dst()))
+}
+
+/// Inlines empty/pure field-initializing leaf constructors and small pure arithmetic leaf helpers
+/// at `CallDirect` call sites.
+fn inline_leaf_functions(
     caller: &mut CompiledFunction,
     caller_index: usize,
     all_functions: &[CompiledFunction],
+    allow_arith_inline: bool,
 ) -> bool {
-    let mut is_leaf_ctor = vec![false; all_functions.len()];
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum LeafKind {
+        None,
+        Constructor,
+        PureArith,
+    }
+
+    let mut leaf_kinds = vec![LeafKind::None; all_functions.len()];
     for (func_idx, candidate) in all_functions.iter().enumerate() {
         if func_idx == caller_index
-            || !candidate.symbol.contains("::constructor")
             || !candidate.exception_handlers.is_empty()
             || candidate.param_count == 0
             || candidate.instructions.is_empty()
@@ -920,37 +1764,64 @@ fn inline_leaf_constructors(
         {
             continue;
         }
-        let body_ok = candidate
-            .instructions
-            .iter()
-            .enumerate()
-            .all(|(idx, inst)| {
-                let raw = inst.raw_opcode();
-                if idx + 1 == candidate.instructions.len() {
-                    return raw == OpCode::Return as u8;
-                }
-                if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
-                    return true;
-                }
-                if raw == OpCode::LoadI32 as u8
-                    || raw == OpCode::LoadI64 as u8
-                    || raw == OpCode::LoadF64 as u8
-                    || raw == OpCode::LoadBool as u8
-                    || raw == OpCode::LoadNull as u8
-                    || raw == OpCode::LoadConst as u8
-                {
-                    return true;
-                }
-                raw == OpCode::SetField as u8 && inst.src1() == 0
-            });
-        is_leaf_ctor[func_idx] = body_ok;
+        if candidate.symbol.contains("::constructor") {
+            let body_ok = candidate
+                .instructions
+                .iter()
+                .enumerate()
+                .all(|(idx, inst)| {
+                    let raw = inst.raw_opcode();
+                    if idx + 1 == candidate.instructions.len() {
+                        return raw == OpCode::Return as u8;
+                    }
+                    if raw == OpCode::Nop as u8 || raw == OpCode::Mov as u8 {
+                        return true;
+                    }
+                    if raw == OpCode::LoadI32 as u8
+                        || raw == OpCode::LoadI64 as u8
+                        || raw == OpCode::LoadF64 as u8
+                        || raw == OpCode::LoadBool as u8
+                        || raw == OpCode::LoadNull as u8
+                        || raw == OpCode::LoadConst as u8
+                    {
+                        return true;
+                    }
+                    raw == OpCode::SetField as u8 && inst.src1() == 0
+                });
+            if body_ok {
+                leaf_kinds[func_idx] = LeafKind::Constructor;
+            }
+        } else if allow_arith_inline
+            && candidate.reference_registers.is_empty()
+            && !candidate.symbol.starts_with('@')
+            && candidate.symbol != "main"
+            && !candidate.symbol.ends_with("::main")
+        {
+            let body_ok = candidate
+                .instructions
+                .iter()
+                .enumerate()
+                .all(|(idx, inst)| {
+                    if idx + 1 == candidate.instructions.len() {
+                        let raw = inst.raw_opcode();
+                        return raw == OpCode::Return as u8 || raw == OpCode::ReturnValue as u8;
+                    }
+                    is_pure_leaf_arith_inst(*inst, candidate.param_count)
+                })
+                && candidate.instructions.iter().all(|inst| {
+                    inst.raw_opcode() != OpCode::AddBandI32 as u8 || candidate.num_registers <= 200
+                });
+            if body_ok {
+                leaf_kinds[func_idx] = LeafKind::PureArith;
+            }
+        }
     }
 
     let inst_count = caller.instructions.len();
     let has_candidate = caller.instructions.iter().any(|inst| {
         inst.raw_opcode() == OpCode::CallDirect as u8
-            && (inst.call_target() as usize) < is_leaf_ctor.len()
-            && is_leaf_ctor[inst.call_target() as usize]
+            && (inst.call_target() as usize) < leaf_kinds.len()
+            && leaf_kinds[inst.call_target() as usize] != LeafKind::None
     });
     if !has_candidate {
         return false;
@@ -984,13 +1855,24 @@ fn inline_leaf_constructors(
             let target_idx = inst.call_target() as usize;
             let arg_base = inst.arg_base();
             let arg_count = inst.arg_count() as u16;
-            if target_idx < is_leaf_ctor.len()
-                && is_leaf_ctor[target_idx]
-                && arg_count == all_functions[target_idx].param_count
-            {
+            let call_dst = inst.call_dst();
+            let leaf_kind = leaf_kinds
+                .get(target_idx)
+                .copied()
+                .unwrap_or(LeafKind::None);
+            if leaf_kind != LeafKind::None && arg_count == all_functions[target_idx].param_count {
                 let callee = &all_functions[target_idx];
                 let scratch_needed = callee.num_registers.saturating_sub(arg_count);
-                if (caller.num_registers as usize) + (scratch_needed as usize) < u16::MAX as usize {
+                let limit_regs = if callee
+                    .instructions
+                    .iter()
+                    .any(|ci| ci.raw_opcode() == OpCode::AddBandI32 as u8)
+                {
+                    255usize
+                } else {
+                    u16::MAX as usize
+                };
+                if (caller.num_registers as usize) + (scratch_needed as usize) < limit_regs {
                     let scratch_base = caller.num_registers;
                     caller.num_registers += scratch_needed;
                     let remap_reg = |reg: u16| -> u16 {
@@ -1007,30 +1889,22 @@ fn inline_leaf_constructors(
                         if c_raw == OpCode::Nop as u8 {
                             continue;
                         }
-                        let remapped = match c_raw {
-                            raw if raw == OpCode::Mov as u8 => Instruction::format_a(
-                                OpCode::Mov,
-                                0,
-                                remap_reg(ctor_inst.dst()),
-                                remap_reg(ctor_inst.src1()),
-                                0,
-                            ),
-                            raw if raw == OpCode::SetField as u8 => Instruction::format_a(
-                                OpCode::SetField,
-                                ctor_inst.flags(),
-                                remap_reg(ctor_inst.dst()),
-                                remap_reg(ctor_inst.src1()),
-                                ctor_inst.src2(),
-                            ),
-                            _ => rewrite_instruction_destination(
-                                &ctor_inst,
-                                remap_reg(ctor_inst.dst()),
-                            ),
-                        };
+                        let remapped = remap_leaf_instruction(ctor_inst, &remap_reg);
                         rebuilt.push((remapped, None));
                         pushed_any = true;
                     }
-                    if !pushed_any {
+                    let tail_inst = callee.instructions[body_len];
+                    if tail_inst.raw_opcode() == OpCode::ReturnValue as u8 {
+                        let mapped_ret = remap_reg(tail_inst.dst());
+                        if mapped_ret != call_dst {
+                            rebuilt.push((
+                                Instruction::format_a(OpCode::Mov, 0, call_dst, mapped_ret, 0),
+                                None,
+                            ));
+                        }
+                        pushed_any = true;
+                    }
+                    if !pushed_any && leaf_kind == LeafKind::Constructor {
                         if let Some((prev_inst, None)) = rebuilt.last()
                             && !incoming_targets[old_pc]
                             && arg_count == 1
@@ -1884,8 +2758,60 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
 }
 
+/// Checks whether `inst` is a hoistable pure arithmetic operation (`MulI32`, `AddI32`, `SubI32`,
+/// `MulI32Imm`, `AddI32Imm`, `SubI32Imm`, `MulF64`, `AddF64`, `SubF64`).
+fn is_hoistable_pure_arith(raw: u8) -> bool {
+    raw == OpCode::AddI32 as u8
+        || raw == OpCode::SubI32 as u8
+        || raw == OpCode::MulI32 as u8
+        || raw == OpCode::AddF64 as u8
+        || raw == OpCode::SubF64 as u8
+        || raw == OpCode::MulF64 as u8
+        || raw == OpCode::AddI32Imm as u8
+        || raw == OpCode::SubI32Imm as u8
+        || raw == OpCode::MulI32Imm as u8
+}
+
+/// Checks whether all input operand registers read by a hoistable pure arithmetic instruction
+/// remain completely unmodified throughout `[loop_body_start ..= loop_end_pc]`.
+fn arith_inputs_loop_invariant(
+    inst: Instruction,
+    instructions: &[Instruction],
+    loop_body_start: usize,
+    loop_end_pc: usize,
+) -> bool {
+    let raw = inst.raw_opcode();
+    let s1 = inst.src1();
+    let check_s2 = raw == OpCode::AddI32 as u8
+        || raw == OpCode::SubI32 as u8
+        || raw == OpCode::MulI32 as u8
+        || raw == OpCode::AddF64 as u8
+        || raw == OpCode::SubF64 as u8
+        || raw == OpCode::MulF64 as u8;
+    let s2 = inst.src2();
+    for check_inst in &instructions[loop_body_start..=loop_end_pc] {
+        if instruction_writes_register(check_inst, s1) {
+            return false;
+        }
+        if check_s2 && instruction_writes_register(check_inst, s2) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Canonical deduplication key for hoisted constants and pure loop-invariant arithmetic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct HoistCacheKey {
+    header_pc: usize,
+    raw: u8,
+    flags: u8,
+    payload: u64,
+}
+
 /// Hoists loop-invariant constant loads (`LoadI32`, `LoadI64`, `LoadF64`, `LoadBool`,
-/// `LoadConst`) above loop headers into fresh registers and rewrites in-loop consumers.
+/// `LoadConst`) and pure loop-invariant arithmetic above loop bodies into fresh registers and
+/// rewrites in-loop consumers.
 fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     let inst_count = function.instructions.len();
     if inst_count < 3 {
@@ -1921,8 +2847,9 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
         return;
     }
 
+    // Process innermost loops first so inner loop invariants can hoist out cleanly.
     let mut ordered_headers: Vec<(usize, usize)> = loops_by_header.into_iter().collect();
-    ordered_headers.sort_by_key(|&(header_pc, _)| header_pc);
+    ordered_headers.sort_by_key(|&(header_pc, loop_end_pc)| (loop_end_pc - header_pc, header_pc));
 
     // Build initial CFG liveness helper table
     let mut old_pc_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
@@ -1930,8 +2857,33 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
         old_pc_targets.push(decode_jump_target(*instruction, pc_index, inst_count));
     }
 
+    // For a rotated bottom-tested loop (`header_pc > 0`, `header_pc - 1` is an entry guard branching
+    // to `loop_end + 1` and falling through to `header_pc`), placing the preheader right BEFORE
+    // `header_pc` (with backedges targeting the first body instruction AFTER the preheader!) ensures
+    // hoisted pure arithmetic never executes on 0-iteration loops!
+    let mut is_rotated_entry_guard: HashMap<usize, bool> = HashMap::new();
+    for &(header_pc, loop_end_pc) in &ordered_headers {
+        let rotated_ok = header_pc > 0
+            && old_pc_targets[header_pc - 1] == Some(loop_end_pc + 1)
+            && is_conditional_branch(function.instructions[header_pc - 1].raw_opcode());
+        // Only treat `header_pc - 1` as a dedicated entry guard when no forward jump outside the loop
+        // targets `header_pc` directly (only backedge jumps inside `[header_pc..=loop_end_pc]` do).
+        let only_backedges_target_header = old_pc_targets[..header_pc]
+            .iter()
+            .flatten()
+            .all(|&target| target != header_pc)
+            && old_pc_targets[(loop_end_pc + 1)..]
+                .iter()
+                .flatten()
+                .all(|&target| target != header_pc);
+        is_rotated_entry_guard.insert(
+            header_pc,
+            rotated_ok && only_backedges_target_header && !handler_pcs.contains(&header_pc),
+        );
+    }
+
     let mut preheaders: HashMap<usize, Vec<Instruction>> = HashMap::new();
-    let mut hoisted_cache: HashMap<(usize, u8, u8, u32), u16> = HashMap::new();
+    let mut hoisted_cache: HashMap<HoistCacheKey, u16> = HashMap::new();
     let mut hoisted_any = false;
 
     for (header_pc, loop_end_pc) in ordered_headers {
@@ -1943,17 +2895,47 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
             continue;
         }
 
+        let allow_arith_here = is_rotated_entry_guard
+            .get(&header_pc)
+            .copied()
+            .unwrap_or(false);
+        let mut saw_branch_in_body = false;
+
         let mut cursor = header_pc;
         while cursor <= loop_end_pc && cursor < function.instructions.len() {
             let inst = function.instructions[cursor];
             let raw = inst.raw_opcode();
+            if (cursor > header_pc && critical_targets.contains(&cursor))
+                || is_conditional_branch(raw)
+                || raw == OpCode::Jump as u8
+                || raw == OpCode::Switch as u8
+                || raw == OpCode::CallDirect as u8
+                || raw == OpCode::CallVirtual as u8
+                || raw == OpCode::CallInterface as u8
+                || raw == OpCode::CallCallable as u8
+                || raw == OpCode::CallSymbol as u8
+                || raw == OpCode::CallExtern as u8
+            {
+                saw_branch_in_body = true;
+            }
+
             let is_hoistable_load = raw == OpCode::LoadI32 as u8
                 || raw == OpCode::LoadI64 as u8
                 || raw == OpCode::LoadF64 as u8
                 || raw == OpCode::LoadBool as u8
                 || raw == OpCode::LoadConst as u8;
 
-            if !is_hoistable_load {
+            let is_hoistable_arith = allow_arith_here
+                && !saw_branch_in_body
+                && is_hoistable_pure_arith(raw)
+                && arith_inputs_loop_invariant(
+                    inst,
+                    &function.instructions,
+                    header_pc,
+                    loop_end_pc,
+                );
+
+            if !is_hoistable_load && !is_hoistable_arith {
                 cursor += 1;
                 continue;
             }
@@ -2024,7 +3006,17 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
                 continue;
             }
 
-            let cache_key = (header_pc, raw, inst.flags(), inst.imm32());
+            let payload = if is_hoistable_load {
+                inst.imm32() as u64
+            } else {
+                ((inst.src1() as u64) << 16) | (inst.src2() as u64)
+            };
+            let cache_key = HoistCacheKey {
+                header_pc,
+                raw,
+                flags: inst.flags(),
+                payload,
+            };
             let hoisted_reg = if let Some(&existing_reg) = hoisted_cache.get(&cache_key) {
                 existing_reg
             } else {
@@ -2157,9 +3149,10 @@ fn invert_loop_guard(instruction: Instruction, back_offset: i32) -> Option<Instr
     None
 }
 
-/// Converts single-entry top-tested `JumpIf* -> exit; ...; Jump -> header` loops in-place
-/// into bottom-tested `Jump -> tail; body; JumpIf<inv> -> body` loops, eliminating one
-/// unconditional `Jump` dispatch per loop iteration without shifting any instruction PCs.
+/// Converts single-entry top-tested `JumpIf* -> exit; ...; Jump -> header` loops and
+/// 2-instruction pure guard `(Alu + JumpIf* -> exit; ...; Jump -> header)` loops into bottom-tested
+/// loops, eliminating one unconditional `Jump` dispatch per iteration. When no internal `continue`
+/// jumps to `header`, preserves the top exit guard so `ForLoopI32` peephole fusion remains unblocked.
 fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
     let inst_count = function.instructions.len();
     if inst_count < 3
@@ -2171,7 +3164,9 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
         return;
     }
 
-    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    let critical_targets = collect_critical_targets(function);
+    let mut one_insn_candidates: Vec<(usize, usize)> = Vec::new();
+    let mut two_insn_candidates: Vec<(usize, usize)> = Vec::new();
     for (loop_end, inst) in function.instructions.iter().enumerate() {
         if inst.raw_opcode() == OpCode::Jump as u8 && inst.jump_offset() < 0 {
             let header_signed = (loop_end as i32) + inst.jump_offset();
@@ -2180,54 +3175,140 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
                 if decode_jump_target(function.instructions[header_pc], header_pc, inst_count)
                     == Some(loop_end + 1)
                 {
-                    candidates.push((header_pc, loop_end));
+                    one_insn_candidates.push((header_pc, loop_end));
+                } else if header_pc + 2 <= loop_end
+                    && !critical_targets.contains(&(header_pc + 1))
+                    && is_hoistable_pure_arith(function.instructions[header_pc].raw_opcode())
+                    && decode_jump_target(
+                        function.instructions[header_pc + 1],
+                        header_pc + 1,
+                        inst_count,
+                    ) == Some(loop_end + 1)
+                {
+                    two_insn_candidates.push((header_pc, loop_end));
                 }
             }
         }
     }
-    if candidates.is_empty() {
-        return;
+
+    // First handle 1-instruction guard loops in-place (preserving PCs cleanly).
+    if !one_insn_candidates.is_empty() {
+        one_insn_candidates.sort_by_key(|&(header_pc, loop_end)| (loop_end - header_pc, header_pc));
+        let mut used_endpoints = HashSet::new();
+        for (header_pc, loop_end) in one_insn_candidates {
+            if used_endpoints.contains(&header_pc) || used_endpoints.contains(&loop_end) {
+                continue;
+            }
+            let guard_inst = function.instructions[header_pc];
+            let body_pc = header_pc + 1;
+            let back_offset = (body_pc as i32) - (loop_end as i32);
+            let Some(inverted_guard) = invert_loop_guard(guard_inst, back_offset) else {
+                continue;
+            };
+
+            let exception_blocks_rotation = function.exception_handlers.iter().any(|handler| {
+                let start = handler.try_start_pc as usize;
+                let end = handler.try_end_pc as usize;
+                let catch_pc = handler.handler_pc as usize;
+                let finally_pc = handler.finally_pc.map(|pc_val| pc_val as usize);
+                if start == header_pc
+                    || end == header_pc
+                    || end == loop_end
+                    || catch_pc == header_pc
+                    || catch_pc == loop_end
+                    || finally_pc == Some(header_pc)
+                    || finally_pc == Some(loop_end)
+                {
+                    return true;
+                }
+                let catches_into_body = catch_pc > header_pc && catch_pc <= loop_end;
+                let finally_into_body =
+                    finally_pc.is_some_and(|pc_val| pc_val > header_pc && pc_val <= loop_end);
+                (catches_into_body || finally_into_body) && (start <= header_pc || end > loop_end)
+            });
+            if exception_blocks_rotation {
+                continue;
+            }
+
+            let has_external_entry =
+                function
+                    .instructions
+                    .iter()
+                    .enumerate()
+                    .any(|(pc_idx, inst)| {
+                        if pc_idx >= header_pc && pc_idx <= loop_end {
+                            return false;
+                        }
+                        decode_jump_target(*inst, pc_idx, inst_count)
+                            .is_some_and(|target| target > header_pc && target <= loop_end)
+                    });
+            if has_external_entry {
+                continue;
+            }
+
+            let has_internal_continue = (body_pc..loop_end).any(|pc_idx| {
+                decode_jump_target(function.instructions[pc_idx], pc_idx, inst_count)
+                    == Some(header_pc)
+            });
+
+            if !has_internal_continue {
+                // Keep top `header_pc` guard intact (exits directly to `loop_end + 1` on 0 iters);
+                // place inverted back-edge guard at `loop_end` so `loop_end` is NOT a critical target
+                // and `ADD_I32_IMM`/`ADD_I32` + `JUMP_IF_LT(E)_I32` fuses into `ForLoopI32`.
+                function.instructions[loop_end] = inverted_guard;
+            } else {
+                let entry_offset = (loop_end as i32) - (header_pc as i32);
+                function.instructions[header_pc] =
+                    Instruction::format_c(OpCode::Jump, 0, 0, entry_offset);
+                function.instructions[loop_end] = inverted_guard;
+
+                for pc_idx in body_pc..loop_end {
+                    let inst = function.instructions[pc_idx];
+                    if decode_jump_target(inst, pc_idx, inst_count) == Some(header_pc) {
+                        function.instructions[pc_idx] =
+                            relocate_jump_instruction(inst, pc_idx, loop_end as u32);
+                    }
+                }
+            }
+
+            used_endpoints.insert(header_pc);
+            used_endpoints.insert(loop_end);
+        }
     }
 
-    // Rotate innermost loops first so inner rotations preserve outer single-entry invariants.
-    candidates.sort_by_key(|&(header_pc, loop_end)| (loop_end - header_pc, header_pc));
-
-    let mut used_endpoints = HashSet::new();
-    for (header_pc, loop_end) in candidates {
-        if used_endpoints.contains(&header_pc) || used_endpoints.contains(&loop_end) {
+    // Rotate 2-instruction pure guard loops (e.g. `MUL_I32 + JUMP_IF_GT_I32 -> exit`).
+    for (header_pc, loop_end) in two_insn_candidates {
+        let cur_len = function.instructions.len();
+        if loop_end >= cur_len || header_pc + 2 > loop_end {
             continue;
         }
-        let guard_inst = function.instructions[header_pc];
-        let body_pc = header_pc + 1;
-        let back_offset = (body_pc as i32) - (loop_end as i32);
-        let Some(inverted_guard) = invert_loop_guard(guard_inst, back_offset) else {
+        let prep_inst = function.instructions[header_pc];
+        let guard_pc = header_pc + 1;
+        let guard_inst = function.instructions[guard_pc];
+        let body_pc = header_pc + 2;
+        if function.instructions[loop_end].raw_opcode() != OpCode::Jump as u8
+            || decode_jump_target(function.instructions[loop_end], loop_end, cur_len)
+                != Some(header_pc)
+            || decode_jump_target(guard_inst, guard_pc, cur_len) != Some(loop_end + 1)
+        {
+            continue;
+        }
+        let Some(inverted_guard) = invert_loop_guard(guard_inst, 0) else {
             continue;
         };
-
-        let exception_blocks_rotation = function.exception_handlers.iter().any(|handler| {
+        let exception_blocks = function.exception_handlers.iter().any(|handler| {
             let start = handler.try_start_pc as usize;
             let end = handler.try_end_pc as usize;
             let catch_pc = handler.handler_pc as usize;
             let finally_pc = handler.finally_pc.map(|pc_val| pc_val as usize);
-            if start == header_pc
-                || end == header_pc
-                || end == loop_end
-                || catch_pc == header_pc
-                || catch_pc == loop_end
-                || finally_pc == Some(header_pc)
-                || finally_pc == Some(loop_end)
-            {
-                return true;
-            }
-            let catches_into_body = catch_pc > header_pc && catch_pc <= loop_end;
-            let finally_into_body =
-                finally_pc.is_some_and(|pc_val| pc_val > header_pc && pc_val <= loop_end);
-            (catches_into_body || finally_into_body) && (start <= header_pc || end > loop_end)
+            (start >= header_pc && start <= loop_end)
+                || (end >= header_pc && end <= loop_end)
+                || (catch_pc >= header_pc && catch_pc <= loop_end)
+                || finally_pc.is_some_and(|p| p >= header_pc && p <= loop_end)
         });
-        if exception_blocks_rotation {
+        if exception_blocks {
             continue;
         }
-
         let has_external_entry = function
             .instructions
             .iter()
@@ -2236,28 +3317,51 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
                 if pc_idx >= header_pc && pc_idx <= loop_end {
                     return false;
                 }
-                decode_jump_target(*inst, pc_idx, inst_count)
+                decode_jump_target(*inst, pc_idx, cur_len)
                     .is_some_and(|target| target > header_pc && target <= loop_end)
             });
         if has_external_entry {
             continue;
         }
 
-        let entry_offset = (loop_end as i32) - (header_pc as i32);
-        function.instructions[header_pc] = Instruction::format_c(OpCode::Jump, 0, 0, entry_offset);
-        function.instructions[loop_end] = inverted_guard;
-
-        // Retarget internal backward `continue` edges targeting `header_pc` directly to `loop_end`.
-        for pc_idx in body_pc..loop_end {
-            let inst = function.instructions[pc_idx];
-            if decode_jump_target(inst, pc_idx, inst_count) == Some(header_pc) {
-                function.instructions[pc_idx] =
-                    relocate_jump_instruction(inst, pc_idx, loop_end as u32);
-            }
+        let mut old_targets: Vec<Option<usize>> = Vec::with_capacity(cur_len);
+        for (pc_idx, inst) in function.instructions.iter().enumerate() {
+            old_targets.push(decode_jump_target(*inst, pc_idx, cur_len));
         }
 
-        used_endpoints.insert(header_pc);
-        used_endpoints.insert(loop_end);
+        let mut rebuilt: Vec<(Instruction, Option<usize>)> = Vec::with_capacity(cur_len + 2);
+        let mut old_pc_to_new_pc = vec![u32::MAX; cur_len + 1];
+        for (pc_idx, &inst) in function.instructions.iter().enumerate() {
+            old_pc_to_new_pc[pc_idx] = rebuilt.len() as u32;
+            if pc_idx == loop_end {
+                rebuilt.push((prep_inst, None));
+                rebuilt.push((inverted_guard, Some(body_pc)));
+            } else if pc_idx > header_pc
+                && pc_idx < loop_end
+                && old_targets[pc_idx] == Some(header_pc)
+            {
+                // Retarget internal continue edges to the bottom `prep_inst` copy.
+                rebuilt.push((inst, Some(loop_end)));
+            } else {
+                rebuilt.push((inst, old_targets[pc_idx]));
+            }
+        }
+        old_pc_to_new_pc[cur_len] = rebuilt.len() as u32;
+
+        let mut final_instructions = Vec::with_capacity(rebuilt.len());
+        for (new_pc, (inst, target_opt)) in rebuilt.into_iter().enumerate() {
+            let mut final_inst = inst;
+            if let Some(target_old_pc) = target_opt {
+                let target_new_pc = old_pc_to_new_pc
+                    .get(target_old_pc)
+                    .copied()
+                    .unwrap_or(old_pc_to_new_pc[cur_len]);
+                final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+            }
+            final_instructions.push(final_inst);
+        }
+        apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+        break;
     }
 }
 
