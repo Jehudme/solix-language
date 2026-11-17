@@ -3,77 +3,31 @@
 
 name: Release
 permissions:
-  "contents": "write"
+  contents: write
 
 on:
-  pull_request:
   push:
     tags:
-      - '**[0-9]+.[0-9]+.[0-9]+*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release Git tag (e.g. v1.1.0)"
+        description: "Release Git tag (e.g. v1.3.1)"
         required: true
-        default: "v1.1.0"
+        default: "v1.3.1"
 
 jobs:
-  build-bundled-libraries:
-    name: Build & Package Default First-Party Libraries
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
-
-      - name: Install Zig compiler
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: "0.13.0"
-
-      - name: Build and stage default first-party libraries
-        run: python3 scripts/build_default_libraries.py
-
-      - name: Upload bundled packages artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bundled-packages
-          path: crates/solix-toolchain/assets/packages/
-
-      - name: Stage standalone slxarc for release
-        run: |
-          mkdir -p staging-packages
-          cp crates/solix-toolchain/assets/packages/*/*.slxarc staging-packages/
-
-      - name: Upload standalone slxarc for release
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifacts-bundled-packages
-          path: staging-packages/
-
   build-vscode-extension:
     name: Build & Package VS Code Extension
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install dependencies and compile extension
         working-directory: editors/vscode
@@ -83,29 +37,69 @@ jobs:
           npx @vscode/vsce package --no-dependencies -o solix-language.vsix
 
       - name: Upload VS Code Extension for release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-vscode-extension
           path: editors/vscode/solix-language.vsix
+
+  build-arm64-linux-bundled-libs:
+    name: Build Bundled Libraries (aarch64-unknown-linux-gnu)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux ARM64 system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
+
+      - name: Install Zig compiler
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.13.0"
+
+      - name: Build host solix toolchain and native ARM64 libraries
+        env:
+          SOLIX_TARGET_TRIPLE: aarch64-unknown-linux-gnu
+        run: |
+          cargo build --bin solix
+          python3 scripts/build_default_libraries.py --profiles release,debug
+
+      - name: Upload ARM64 bundled packages artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundled-packages-aarch64-unknown-linux-gnu
+          path: crates/solix-toolchain/assets/packages/
 
   benchmark-release:
     name: Run Benchmark Suite & Generate Release Notes Comparison
     runs-on: ubuntu-latest
     needs:
       - plan
-      - build-bundled-libraries
-    if: ${{ always() && needs.plan.outputs.publishing == 'true' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -119,11 +113,10 @@ jobs:
         with:
           version: "0.13.0"
 
-      - name: Build and stage default first-party libraries
-        run: python3 scripts/build_default_libraries.py --profiles release,debug --install
-
-      - name: Build optimized Solix release binary
-        run: cargo build --release --bin solix
+      - name: Build optimized Solix release binary and stage default libraries
+        run: |
+          cargo build --release --bin solix
+          python3 scripts/build_default_libraries.py --profiles release,debug --solix-binary target/release/solix
 
       - name: Execute benchmark suite and generate release baseline
         run: |
@@ -141,52 +134,54 @@ jobs:
             --markdown-output staging-benchmarks/benchmark_comparison.md
 
       - name: Upload benchmark artifacts for release ingestion
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-benchmarks
           path: staging-benchmarks/
 
-  # Run 'dist plan' to determine what tasks we need to do
   plan:
-    runs-on: "ubuntu-latest"
+    runs-on: ubuntu-latest
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
-      tag: ${{ github.event.inputs.tag_name || (!github.event.pull_request && github.ref_name) || '' }}
-      tag-flag: ${{ format('--tag={0}', github.event.inputs.tag_name || (!github.event.pull_request && github.ref_name) || '') }}
-      publishing: ${{ !github.event.pull_request }}
+      tag: ${{ github.event.inputs.tag_name || github.ref_name }}
+      tag-flag: ${{ format('--tag={0}', github.event.inputs.tag_name || github.ref_name) }}
+      publishing: "true"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
+
       - name: Install dist
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh"
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
+
       - name: Cache dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/dist
+
       - id: plan
         run: |
-          dist ${{ (!github.event.pull_request && format('host --steps=create {0}', (github.event.inputs.tag_name && format('--tag={0}', github.event.inputs.tag_name)) || format('--tag={0}', github.ref_name))) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          dist host --steps=create "${{ format('--tag={0}', github.event.inputs.tag_name || github.ref_name) }}" --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
-      - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v4
+
+      - name: Upload dist-manifest.json
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
 
-  # Build and packages all the platform-specific things
   build-local-artifacts:
     name: build-local-artifacts (${{ join(matrix.targets, ', ') }})
     needs:
       - plan
-      - build-bundled-libraries
-    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null && (needs.plan.outputs.publishing == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
+      - build-arm64-linux-bundled-libs
+    if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
@@ -196,143 +191,193 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
     steps:
-      - name: enable windows longpaths
-        run: |
-          git config --global core.longpaths true
-      - uses: actions/checkout@v4
+      - name: Enable long paths on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
+
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           targets: ${{ join(matrix.targets, ',') }}
-      - name: Download bundled packages artifact
-        uses: actions/download-artifact@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
         with:
-          name: bundled-packages
-          path: crates/solix-toolchain/assets/packages/
+          python-version: "3.12"
+
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
-      # Get the dist-manifest
-      - name: Fetch local artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: artifacts-*
-          path: target/distrib/
-          merge-multiple: true
+
       - name: Set up Zig compiler
         if: runner.os == 'Linux'
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: "0.13.0"
+
       - name: Install cargo-zigbuild
         if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64-unknown-linux-gnu')
         run: pipx install cargo-zigbuild
+
       - name: Install musl-tools
         if: runner.os == 'Linux' && contains(matrix.targets, 'x86_64-unknown-linux-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - name: Install dependencies
+
+      - name: Install Linux dependencies for bundled libraries
+        if: runner.os == 'Linux' && !contains(matrix.targets, 'aarch64-unknown-linux-gnu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
+
+      - name: Install macOS dependencies for bundled libraries
+        if: runner.os == 'macOS'
+        run: command -v cmake >/dev/null 2>&1 || brew install cmake
+
+      - name: Install dist target packages
         run: |
           ${{ matrix.packages_install }}
+
+      - name: Download ARM64 bundled packages artifact
+        if: contains(matrix.targets, 'aarch64-unknown-linux-gnu')
+        uses: actions/download-artifact@v8
+        with:
+          name: bundled-packages-aarch64-unknown-linux-gnu
+          path: crates/solix-toolchain/assets/packages/
+
+      - name: Build host-target bundled libraries natively
+        if: ${{ !contains(matrix.targets, 'aarch64-unknown-linux-gnu') }}
+        shell: bash
+        run: |
+          TARGET_TRIPLE="${{ join(matrix.targets, ',') }}"
+          if [ "$TARGET_TRIPLE" = "x86_64-unknown-linux-musl" ]; then
+            export SOLIX_TARGET_TRIPLE="x86_64-unknown-linux-gnu"
+          else
+            export SOLIX_TARGET_TRIPLE="$TARGET_TRIPLE"
+          fi
+          cargo build --bin solix
+          python3 scripts/build_default_libraries.py --profiles release,debug
+
+      - name: Stage non-colliding standalone bundled archives (Linux x86_64)
+        if: contains(matrix.targets, 'x86_64-unknown-linux-gnu')
+        shell: bash
+        run: |
+          mkdir -p target/distrib
+          for dir in crates/solix-toolchain/assets/packages/*@*; do
+            dir_name=$(basename "$dir")
+            pkg_id="${dir_name%%@*}"
+            for arc in "$dir"/*.slxarc; do
+              cp "$arc" "target/distrib/${pkg_id}.slxarc"
+            done
+          done
+
       - name: Build artifacts
         run: |
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+
       - id: cargo-dist
         name: Post-build
         shell: bash
         run: |
+          mkdir -p "$(dirname "$BUILD_MANIFEST_NAME")"
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
           dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
-
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
-      - name: "Upload artifacts"
-        uses: actions/upload-artifact@v4
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+            target/distrib/*.slxarc
 
-  # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
     needs:
       - plan
       - build-local-artifacts
-    runs-on: "ubuntu-latest"
+    runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
+
       - name: Install cached dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
+
       - run: chmod +x ~/.cargo/bin/dist
-      # Get all the local artifacts for the global tasks to use (for e.g. checksums)
+
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+
       - id: cargo-dist
         shell: bash
         run: |
           dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
           echo "dist ran successfully"
-
-          # Parse out what we just built and upload it to scratch storage
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
           jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
-
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
-      - name: "Upload artifacts"
-        uses: actions/upload-artifact@v4
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-build-global
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
 
-  # Determines if we should publish/announce
   host:
     needs:
       - plan
-      - build-bundled-libraries
       - build-vscode-extension
       - build-local-artifacts
       - build-global-artifacts
       - benchmark-release
-    if: ${{ always() && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && needs.build-vscode-extension.result == 'success' && needs.benchmark-release.result == 'success' }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: "ubuntu-latest"
+    runs-on: ubuntu-latest
     outputs:
       val: ${{ steps.host.outputs.manifest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
+
       - name: Install cached dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
+
       - run: chmod +x ~/.cargo/bin/dist
-      # Fetch artifacts from scratch-storage
+
       - name: Fetch artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+
       - id: host
         shell: bash
         run: |
@@ -340,72 +385,42 @@ jobs:
           echo "artifacts uploaded and released successfully"
           cat dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
-      - name: "Upload dist-manifest.json"
-        uses: actions/upload-artifact@v4
+
+      - name: Upload dist-manifest.json
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-dist-manifest
           path: dist-manifest.json
-      # Create a GitHub Release while uploading all files to it
-      - name: "Download GitHub Artifacts"
-        uses: actions/download-artifact@v4
+
+      - name: Download GitHub Artifacts
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: artifacts
           merge-multiple: true
-      - name: Cleanup
-        run: |
-          # Remove the granular manifests
-          rm -f artifacts/*-dist-manifest.json
-      - name: Create GitHub Release
+
+      - name: Finalize GitHub Release notes and extra assets
+        shell: bash
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
           ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
+          TAG_NAME: "${{ needs.plan.outputs.tag }}"
         run: |
-          echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+          rm -f artifacts/*-dist-manifest.json
+          printf '%s\n' "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
           if [ -f artifacts/benchmark_comparison.md ]; then
-            echo -e "\n\n" >> $RUNNER_TEMP/notes.txt
-            cat artifacts/benchmark_comparison.md >> $RUNNER_TEMP/notes.txt
+            printf '\n\n' >> "$RUNNER_TEMP/notes.txt"
+            cat artifacts/benchmark_comparison.md >> "$RUNNER_TEMP/notes.txt"
             rm -f artifacts/benchmark_comparison.md
           fi
-          RELEASE_FILES=$(find artifacts -maxdepth 1 -type f)
-          if gh release view "${{ needs.plan.outputs.tag }}" > /dev/null 2>&1; then
-            gh release upload "${{ needs.plan.outputs.tag }}" $RELEASE_FILES --clobber
+          mapfile -t release_files < <(find artifacts -maxdepth 1 -type f | sort)
+          if gh release view "$TAG_NAME" > /dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt"
+            if [ "${#release_files[@]}" -gt 0 ]; then
+              gh release upload "$TAG_NAME" "${release_files[@]}" --clobber
+            fi
           else
-            gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" $RELEASE_FILES
+            gh release create "$TAG_NAME" --target "$RELEASE_COMMIT" ${PRERELEASE_FLAG:+"$PRERELEASE_FLAG"} --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" "${release_files[@]}"
           fi
-
-  publish-crates:
-    name: Publish Public Crates to Crates.io
-    runs-on: ubuntu-latest
-    needs:
-      - plan
-      - host
-    if: ${{ always() && needs.plan.outputs.publishing == 'true' && needs.host.result == 'success' }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Publish solix-ffi
-        run: cargo publish -p solix-ffi --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
-      - name: Publish solix-common
-        run: cargo publish -p solix-common --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
-      - name: Publish solix-runtime
-        run: cargo publish -p solix-runtime --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
-      - name: Publish solix-compilation
-        run: cargo publish -p solix-compilation --token ${{ secrets.CARGO_REGISTRY_TOKEN }} || true
-
-  announce:
-    needs:
-      - plan
-      - host
-      - publish-crates
-    if: ${{ always() && needs.host.result == 'success' }}
-    runs-on: "ubuntu-latest"
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive

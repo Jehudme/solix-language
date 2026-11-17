@@ -9,6 +9,11 @@ on:
     branches:
       - master
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -19,25 +24,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Verify Rust code formatting
         run: cargo fmt --all -- --check
@@ -45,11 +53,26 @@ jobs:
       - name: Run Clippy static analysis
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Run strict production Clippy lints
+        run: cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars
+
       - name: Run documentation synchronization and quality gate
-        run: python3 scripts/doc_sync_check.py
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="origin/${{ github.base_ref }}"
+          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="${{ github.event.before }}"
+          else
+            BASE_REF="HEAD~1"
+          fi
+          python3 scripts/doc_sync_check.py --base "$BASE_REF"
+          python3 scripts/doc_sync_check.py --all-docs
 
       - name: Verify documentation drift and link integrity
-        run: python3 scripts/verify_docs.py
+        run: |
+          python3 scripts/verify_docs.py
+          python3 scripts/verify_doc_links.py
 
       - name: Validate VS Code extension manifest
         run: node -e "JSON.parse(require('fs').readFileSync('editors/vscode/package.json', 'utf8'))"
@@ -63,17 +86,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      - name: Enable long paths on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -81,35 +111,96 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev lua5.4 luajit gcc
+
+      - name: Install macOS system dependencies
+        if: runner.os == 'macOS'
+        run: |
+          command -v cmake >/dev/null 2>&1 || brew install cmake
+          command -v lua >/dev/null 2>&1 || brew install lua
 
       - name: Install Zig compiler
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: "0.13.0"
 
-      - name: Build and stage default first-party libraries
-        if: runner.os == 'Linux'
-        run: python3 scripts/build_default_libraries.py
-
       - name: Build solix toolchain binary
         run: cargo build --bin solix
 
+      - name: Build and stage default first-party libraries
+        run: python3 scripts/build_default_libraries.py
+
       - name: Run workspace tests
-        run: cargo test --workspace --all-targets
-        env:
-          SOLIX_BIN: ${{ runner.os == 'Windows' && format('{0}/target/debug/solix.exe', github.workspace) || format('{0}/target/debug/solix', github.workspace) }}
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            export SOLIX_BIN="$(pwd)/target/debug/solix.exe"
+          else
+            export SOLIX_BIN="$(pwd)/target/debug/solix"
+          fi
+          cargo test --workspace --all-targets
 
       - name: Run benchmark correctness verification gate
-        if: runner.os == 'Linux'
-        run: python3 benchmarks/runner.py --verify
-
-      - name: List installed packages
-        if: runner.os == 'Linux'
-        run: cargo run --bin solix -- list
-
-      - name: Verify example application compilation
-        if: runner.os == 'Linux'
+        shell: bash
         run: |
-          cargo run --bin solix -- build examples/breakout --profile debug
-          cargo run --bin solix -- build examples/breakout --profile release
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            export SOLIX_BIN="$(pwd)/target/debug/solix.exe"
+          else
+            export SOLIX_BIN="$(pwd)/target/debug/solix"
+          fi
+          python3 benchmarks/runner.py --verify
+
+      - name: List installed packages and verify example application compilation
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            SOLIX_EXE="./target/debug/solix.exe"
+          else
+            SOLIX_EXE="./target/debug/solix"
+          fi
+          "$SOLIX_EXE" list
+          "$SOLIX_EXE" build examples/breakout --profile debug
+          "$SOLIX_EXE" build examples/breakout --profile release
+
+      - name: Verify stripped release build
+        if: runner.os == 'Linux'
+        run: cargo build --release --bin solix
+
+  release-plz:
+    name: Release-plz Versioning & Publishing
+    needs: [lint-and-docs, test-matrix]
+    if: >-
+      github.event_name == 'push'
+      && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+      && (github.repository_owner == 'Jehudme' || github.repository_owner == 'jehudme')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run release-plz (publish & tag)
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Run release-plz (open/update release PR)
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
