@@ -249,11 +249,16 @@ jobs:
       - name: Run cargo-deny license, source & advisory policy
         uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2
 
-      - name: Run cargo-audit RustSec vulnerability scanner
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
-        with:
-          token: ${{ github.token }}
-          ignore: RUSTSEC-2025-0141
+      - name: Run cargo-audit RustSec vulnerability & unsoundness scanner
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-audit"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.23.0/cargo-audit-x86_64-unknown-linux-gnu-v0.23.0.tgz" \
+            -o "$RUNNER_TEMP/cargo-audit/cargo-audit.tgz"
+          printf 'b77993532b253fcbf550996d7716465ec3d734d4e74e7f87bfb65a19add0fb59  %s\n' \
+            "$RUNNER_TEMP/cargo-audit/cargo-audit.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/cargo-audit/cargo-audit.tgz" -C "$RUNNER_TEMP/cargo-audit" --strip-components=1
+          "$RUNNER_TEMP/cargo-audit/cargo-audit" audit --deny warnings --ignore RUSTSEC-2025-0141
 
   lint-and-docs:
     name: Lint, Formatting & Documentation Gate
