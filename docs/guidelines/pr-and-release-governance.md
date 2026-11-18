@@ -68,6 +68,6 @@ Every PR targeting `dev`, push to `dev`, and scheduled weekly security run execu
 
 ## 4. Documentation Source-of-Truth & Versioned `solix wiki`
 
-User documentation (`docs/guide/`, `docs/wiki/`, `docs/features/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository (`GL-0013`).
+User documentation (`docs/guide/`, `docs/wiki/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository (`GL-0013`).
 * Every `solix` release builds [`scripts/build_docs_site.py`](../../scripts/build_docs_site.py) to bundle static HTML + offline `search_index.js` directly inside `crates/solix-toolchain/assets/docs/` (serving `solix wiki` locally without internet or an HTTP daemon).
 * Optional one-way GitHub Wiki mirroring ([`scripts/sync_github_wiki.py`](../../scripts/sync_github_wiki.py)) runs during releases and injects a version header directing older-version users to their Git tag's `/docs` tree or local `solix wiki` command.

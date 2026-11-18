@@ -22,18 +22,16 @@ import tomllib
 from urllib.parse import quote
 
 
-USER_DOC_DIRS = ("guide", "wiki", "features", "spec", "architecture", "overview")
+USER_DOC_DIRS = ("guide", "wiki", "spec", "architecture")
 SECTION_TITLES = {
     "home": "Overview",
     "guide": "User Guides",
-    "features": "Features",
     "wiki": "Reference Wiki",
     "spec": "Language & CLI Specs",
     "architecture": "Architecture",
-    "overview": "System Overview",
     "api": "Library API Docs",
 }
-SECTION_ORDER = ["home", "guide", "wiki", "features", "spec", "architecture", "overview", "api"]
+SECTION_ORDER = ["home", "guide", "wiki", "spec", "architecture", "api"]
 ALERT_LABELS = {
     "NOTE": ("note", "Note"),
     "TIP": ("tip", "Tip"),
@@ -761,6 +759,23 @@ a:hover { text-decoration: underline; }
   border-radius: 999px;
 }
 .nav-group ul { list-style: none; margin: 4px 0 8px 8px; padding: 0; }
+.nav-subgroup {
+  margin: 4px 0 4px 6px;
+  border-left: 1px solid var(--border);
+  padding-left: 6px;
+}
+.nav-subgroup > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text);
+  padding: 3px 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.nav-subgroup ul { list-style: none; margin: 2px 0 4px 6px; padding: 0; }
+.nav-home-link { margin-bottom: 10px; font-weight: 600; }
 .nav-link {
   display: block;
   padding: 4px 8px;
@@ -1037,6 +1052,122 @@ SITE_JS = """\
     resultsBox.hidden = false;
   }
 
+  function formatFolderLabel(rawName) {
+    var overrides = {
+      guide: "User Guides",
+      wiki: "Reference Wiki",
+      spec: "Language & CLI Specs",
+      architecture: "Architecture",
+      api: "Library API Docs",
+      cli: "CLI Commands",
+      lsp: "LSP Protocol",
+      solixlib: "Standard Library (solixlib)",
+      control_flow: "Control Flow",
+      declarations: "Declarations",
+      expressions: "Expressions",
+      modifiers: "Modifiers",
+      modules: "Modules",
+      commands: "CLI Reference",
+      errors: "Error Codes",
+      keywords: "Keywords",
+      primitives: "Primitives",
+      statements: "Statements",
+      libraries: "Libraries",
+      tools: "Toolchain"
+    };
+    if (overrides[rawName]) {
+      return overrides[rawName];
+    }
+    return rawName.replace(/_/g, " ").replace(/\\b\\w/g, function (ch) {
+      return ch.toUpperCase();
+    });
+  }
+
+  function createTreeNode(label) {
+    return {
+      label: label,
+      indexEntry: null,
+      children: {},
+      leaves: []
+    };
+  }
+
+  function countTreeEntries(treeNode) {
+    var total = treeNode.indexEntry ? 1 : 0;
+    total += treeNode.leaves.length;
+    var childKeys = Object.keys(treeNode.children);
+    for (var childIdx = 0; childIdx < childKeys.length; childIdx += 1) {
+      total += countTreeEntries(treeNode.children[childKeys[childIdx]]);
+    }
+    return total;
+  }
+
+  function treeContainsPath(treeNode, targetPath) {
+    if (treeNode.indexEntry && treeNode.indexEntry.path === targetPath) {
+      return true;
+    }
+    for (var leafIdx = 0; leafIdx < treeNode.leaves.length; leafIdx += 1) {
+      if (treeNode.leaves[leafIdx].path === targetPath) {
+        return true;
+      }
+    }
+    var childKeys = Object.keys(treeNode.children);
+    for (var childIdx = 0; childIdx < childKeys.length; childIdx += 1) {
+      if (treeContainsPath(treeNode.children[childKeys[childIdx]], targetPath)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function renderTreeBranch(treeNode, currentPath, isTopLevel, defaultOpen) {
+    var totalCount = countTreeEntries(treeNode);
+    if (totalCount === 0) {
+      return "";
+    }
+    var hasActive = treeContainsPath(treeNode, currentPath);
+    var shouldOpen = hasActive || defaultOpen;
+    var openAttr = shouldOpen ? " open" : "";
+    var groupClass = isTopLevel ? "nav-group" : "nav-subgroup";
+    var bodyParts = [];
+
+    if (treeNode.indexEntry) {
+      var idxActive = treeNode.indexEntry.path === currentPath;
+      var idxCls = idxActive ? "nav-link active" : "nav-link";
+      bodyParts.push(
+        '<li><a class="' + idxCls + '" href="' + escapeHtml(rootPrefix + treeNode.indexEntry.path) + '">Overview</a></li>'
+      );
+    }
+
+    treeNode.leaves.sort(function (left, right) {
+      return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
+    });
+    for (var leafIdx = 0; leafIdx < treeNode.leaves.length; leafIdx += 1) {
+      var item = treeNode.leaves[leafIdx];
+      var leafActive = item.path === currentPath;
+      var leafCls = leafActive ? "nav-link active" : "nav-link";
+      bodyParts.push(
+        '<li><a class="' + leafCls + '" href="' + escapeHtml(rootPrefix + item.path) + '">' +
+        escapeHtml(item.title) + '</a></li>'
+      );
+    }
+
+    var childKeys = Object.keys(treeNode.children).sort();
+    for (var childIdx = 0; childIdx < childKeys.length; childIdx += 1) {
+      bodyParts.push(
+        renderTreeBranch(treeNode.children[childKeys[childIdx]], currentPath, false, false)
+      );
+    }
+
+    var listHtml = bodyParts.length ? "<ul>" + bodyParts.join("") + "</ul>" : "";
+    return (
+      '<details class="' + groupClass + '"' + openAttr + '>' +
+      '<summary>' + escapeHtml(treeNode.label) + ' <span class="count">' + totalCount + '</span></summary>' +
+      listHtml +
+      '</details>'
+    );
+  }
+
   function renderSidebar() {
     var sidebar = document.getElementById("sidebar");
     if (!sidebar) {
@@ -1044,52 +1175,56 @@ SITE_JS = """\
     }
     var currentPath = (document.body && document.body.getAttribute("data-current-path")) || "";
     var entries = Array.isArray(window.SOLIX_DOCS_INDEX) ? window.SOLIX_DOCS_INDEX : [];
-    var sectionOrder = ["home", "guide", "wiki", "features", "spec", "architecture", "overview", "api"];
-    var grouped = {};
+    var sectionOrder = ["guide", "wiki", "spec", "architecture", "api"];
+    var roots = {};
+    var homeEntry = null;
+
     for (var idx = 0; idx < entries.length; idx += 1) {
       var entry = entries[idx];
-      var secKey = entry.section || "other";
-      if (!grouped[secKey]) {
-        grouped[secKey] = { label: entry.sectionLabel || secKey, items: [] };
+      if (entry.path === "index.html") {
+        homeEntry = entry;
+        continue;
       }
-      grouped[secKey].items.push(entry);
+      var segments = (entry.path || "").split("/").filter(Boolean);
+      if (segments.length === 0) {
+        continue;
+      }
+      var topKey = segments[0];
+      if (!roots[topKey]) {
+        roots[topKey] = createTreeNode(entry.sectionLabel || formatFolderLabel(topKey));
+      }
+      var cursor = roots[topKey];
+      for (var segIdx = 1; segIdx < segments.length - 1; segIdx += 1) {
+        var folderKey = segments[segIdx];
+        if (!cursor.children[folderKey]) {
+          cursor.children[folderKey] = createTreeNode(formatFolderLabel(folderKey));
+        }
+        cursor = cursor.children[folderKey];
+      }
+      var fileName = segments[segments.length - 1];
+      if (fileName === "index.html") {
+        cursor.indexEntry = entry;
+      } else {
+        cursor.leaves.push(entry);
+      }
     }
 
     var navHtml = [];
+    if (homeEntry) {
+      var homeCls = currentPath === "index.html" ? "nav-link nav-home-link active" : "nav-link nav-home-link";
+      navHtml.push(
+        '<a class="' + homeCls + '" href="' + escapeHtml(rootPrefix + homeEntry.path) + '">Documentation Home</a>'
+      );
+    }
+
     for (var sIdx = 0; sIdx < sectionOrder.length; sIdx += 1) {
       var sec = sectionOrder[sIdx];
-      var bucket = grouped[sec];
-      if (!bucket || bucket.items.length === 0) {
+      var treeRoot = roots[sec];
+      if (!treeRoot) {
         continue;
       }
-      bucket.items.sort(function (left, right) {
-        var leftIdx = left.path.slice(-10) === "index.html" ? 0 : 1;
-        var rightIdx = right.path.slice(-10) === "index.html" ? 0 : 1;
-        if (leftIdx !== rightIdx) {
-          return leftIdx - rightIdx;
-        }
-        return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
-      });
-      var hasActive = false;
-      var liParts = [];
-      for (var itemIdx = 0; itemIdx < bucket.items.length; itemIdx += 1) {
-        var item = bucket.items[itemIdx];
-        var active = item.path === currentPath;
-        if (active) {
-          hasActive = true;
-        }
-        var cls = active ? "nav-link active" : "nav-link";
-        liParts.push(
-          '<li><a class="' + cls + '" href="' + escapeHtml(rootPrefix + item.path) + '">' +
-          escapeHtml(item.title) + '</a></li>'
-        );
-      }
-      var openAttr = (hasActive || sec === "home" || sec === "guide" || sec === "wiki") ? " open" : "";
-      navHtml.push(
-        '<details class="nav-group"' + openAttr + '>' +
-        '<summary>' + escapeHtml(bucket.label) + ' <span class="count">' + bucket.items.length + '</span></summary>' +
-        '<ul>' + liParts.join("") + '</ul></details>'
-      );
+      var openByDefault = (currentPath === "index.html" && (sec === "guide" || sec === "wiki"));
+      navHtml.push(renderTreeBranch(treeRoot, currentPath, true, openByDefault));
     }
     sidebar.innerHTML = navHtml.join("");
   }

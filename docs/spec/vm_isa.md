@@ -238,3 +238,20 @@ The production interpreter loop (`run_fast_trap::<false, TRACK_METRICS>`) implem
 - **Stateless Closure Encoding (`PackClosure`) & Inline Unpack**: Closures with `cap_count == 0` encode directly as `Value::FnPtr(target_lambda_id)` without heap allocation or `DecRef` cleanup, and 1–2 capture `UnpackCaptures` executes inline.
 - **`idiv`-Free Modulo (`ModI32Imm`) & Cold-Path Outlining**: `ModI32Imm` uses bitmasks for powers of two and compile-time `MOD_MAGIC_TABLE` reciprocal multiplies for positive constants, while `CallSymbol`, `CallExtern`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`, `Throw`, tuple/cast/heap-closure operations, native callback marshaling, and `release_reference_cold` execute out-of-line for L1 instruction cache locality.
 - **Scalar Loop Bulk Execution, Post-LICM Fusion & Self-Recursion Accumulator Lowering**: `RuntimeContext` post-verification analysis (`mark_scalar_for_loops`) flags pure unit-stride scalar `ForLoopI32` loops with bit `4` (`0x10`), routed alongside array-fill loops through `try_complete_special_for_loop` (`try_complete_scalar_for_loop` with pre-decoded unboxed straight-line `i32` execution). In the compiler, direct `solix run` sets `emit_export_metadata = false` to skip unused C/header export generation, emitter line-offset indexing caches offsets once per source file, `fuse_post_licm_add_load_band` fuses hoisted mask additions into `AddBandI32`, and `transform_binary_additive_self_recursion` lowers binary self-recursive loops into hybrid accumulator loops.
+
+---
+
+## 9. Modular Multi-Entrypoint Lifecycle & Symbol Hardening
+
+For host embeddings, game engines, and long-running interactive processes, the Solix Virtual Machine supports a reusable multi-entrypoint lifecycle:
+
+1. **Construction & One-Time Static Initialization (`VirtualMachine::new_initialized`):**
+   - Allocates interned string constants on the `VirtualHeap` and executes all module `@init` initializers once (`statics_initialized = true`), populating global/static slots without invoking `main()`.
+2. **Successive Entrypoint Invocations (`invoke_entry`):**
+   - Validates that the target entrypoint is `public` and uses primitive, `string`, or 1D primitive array parameter/return types, executing the entrypoint while preserving `static_slots` and `VirtualHeap` state across calls.
+3. **Deterministic Shutdown & Cleanup (`shutdown` & `Drop`):**
+   - Nullifies static reference slots, invokes class destructors (`~ClassName()`) on global singletons, and reclaims interned constant strings cleanly.
+4. **Load-Time Duplicate Symbol Rejection (`R0024`):**
+   - When loading multiple `BinaryProgram` modules into `RuntimeContext::new`, duplicate non-generic function, class, or static global symbols immediately raise `RuntimeError::DuplicateSymbolDefinition` (`R0024`).
+
+See [`.slxasm` Disassembly Format Specification](disassembly-format-slxasm.md) for reading emitted bytecode listings.

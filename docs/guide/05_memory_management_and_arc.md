@@ -318,4 +318,4 @@ This strategy minimizes fragmentation and keeps average allocation cost low for 
 ### Further Reading
 - [`weak` Modifier Reference](../wiki/keywords/modifiers/weak.md): Non-owning references that prevent cyclic dependency leaks.
 - [Destructors Specification](../spec/statements/declarations/destructors.md): RAII resource cleanup patterns.
-- [Memory Management Specification](../spec/memory-model-and-arc.md): Reference counting opcodes, virtual heap layout, and allocation mechanics.
+- [Memory Management Architecture](../architecture/memory_model.md): VirtualHeap layout, 8-byte block headers, and ARC allocation mechanics.

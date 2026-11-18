@@ -2,7 +2,7 @@
 
 This directory contains the authoritative, normative technical specifications for the Solix language compiler, 64-bit register-based virtual machine, memory runtime, standard library, and package toolchain.
 
-Per [`GL-0012`](../internals/guidelines/authoring-features-and-wiki.md), specifications serve as the normative source of truth for systems engineers and toolchain contributors.
+Per [`GL-0012`](../guidelines/authoring-features-and-wiki.md), specifications serve as the normative source of truth for systems engineers and toolchain contributors.
 
 ---
 
@@ -11,8 +11,12 @@ Per [`GL-0012`](../internals/guidelines/authoring-features-and-wiki.md), specifi
 * [**Lexical Grammar & Tokenization**](lexical.md): UTF-8 encoding, comments, string escapes, number literals (hex, binary, underscore separators), and complete token dictionary.
 * [**Type System, Hierarchy & Semantics**](types.md): Primitive types, reference classes, structural tuples, function pointers, nominal subtyping, and operator overloading rules.
 * [**Diagnostics & Error Reporting**](diagnostics.md): Canonical error formatting, line and column spans, diagnostic severity levels, and category codes.
-* [**64-Bit Register VM ISA & Opcode Matrix**](vm_isa.md): Register execution model, Instruction Formats A/B/C/Call, sliding register window ABI, and opcode taxonomy.
-* [**Native Interoperability & C-FFI ABI**](native_interop.md): C-ABI bridge, plugin loader, data layout conversions, and dynamic shared library integration.
+* [**64-Bit Register VM ISA & Opcode Matrix**](vm_isa.md): Register execution model, Instruction Formats A/B/C/Call, sliding register window ABI, opcode taxonomy, and modular multi-entrypoint lifecycle.
+* [**Disassembly Format (`.slxasm` / `.slxdasm`)**](disassembly-format-slxasm.md): Constant pools, vtables, `.function` headers, operand syntax, instruction flags, and exception tables.
+* [**Optimizer & AST Inliner**](optimizer-and-inliner.md): Dead-code elimination, leaf function inlining, LICM constant hoisting, and peephole superinstruction fusion.
+* [**Binary Formats (`.slxb` & `.slxarc`)**](binary-formats-slxb-and-slxarc.md): On-disk bytecode binary containers and cross-platform archive packaging layouts.
+* [**Package Solver & Dual-Mode Linking**](package-solver-and-linking.md): SemVer dependency resolution, profile fallback, dynamic quickening, and static linking.
+* [**Native Interoperability & C-FFI ABI**](native_interop.md): C-ABI bridge, `solix-ffi` SDK, plugin loader, data layout conversions, and dynamic shared library integration.
 
 ---
 
@@ -58,31 +62,13 @@ Detailed specifications defining the AST representations, binder type rules, and
 
 ---
 
-## 3. Standard Library Component Specifications ([`libraries/solixlib/`](libraries/solixlib/string.md))
+## 3. Standard Library Component Specifications ([`libraries/`](libraries/README.md))
 
-Normative contracts for all 17 components of the standard library:
-
-* [`string.md`](libraries/solixlib/string.md) — `String`, `StringBuilder`, UTF-8 manipulation, formatting
-* [`list.md`](libraries/solixlib/list.md) — Resizable `List<T>` dynamic array container
-* [`map.md`](libraries/solixlib/map.md) — Hash-bucket `Map<K, V>` associative container
-* [`set.md`](libraries/solixlib/set.md) — Hash-based `Set<T>` unique element set
-* [`streams.md`](libraries/solixlib/streams.md) — Abstract streams, byte streams, memory buffers
-* [`filesystem.md`](libraries/solixlib/filesystem.md) — `File`, `Directory`, `Path`, filesystem operations
-* [`crypto.md`](libraries/solixlib/crypto.md) — Cryptographic hashes (SHA-256, MD5) and secure random numbers
-* [`time.md`](libraries/solixlib/time.md) — Timestamps, duration, clock intervals, calendar dates
-* [`math.md`](libraries/solixlib/math.md) — Trigonometric functions, exponentials, roots, constants
-* [`console.md`](libraries/solixlib/console.md) — Console I/O, terminal styling, color formatting
-* [`environment.md`](libraries/solixlib/environment.md) — Environment variables, command-line arguments, process info
-* [`exceptions.md`](libraries/solixlib/exceptions.md) — Standard exception hierarchy, stack traces, unwinding
-* [`linear_collections.md`](libraries/solixlib/linear_collections.md) — Stack, Queue, Deque, linear buffers
-* [`collections_core.md`](libraries/solixlib/collections_core.md) — Collection interfaces, iterators, enumeration contracts
-* [`primitives.md`](libraries/solixlib/primitives.md) — Primitive boxing wrappers, parsing, bit-level inspection
-* [`resource.md`](libraries/solixlib/resource.md) — Embedded asset extraction from `.slxarc` containers
-* [`scaffolding.md`](libraries/solixlib/scaffolding.md) — Project templates, boilerplate scaffolding, test harnesses
+Normative contracts for the standard library modules live under [`libraries/solixlib/`](libraries/solixlib/README.md).
 
 ---
 
-## 4. CLI Toolchain & Language Server Specifications ([`tools/`](tools/cli/README.md))
+## 4. CLI Toolchain & Language Server Specifications ([`tools/`](tools/README.md))
 
-* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): [`build.md`](tools/cli/build.md), [`compile.md`](tools/cli/compile.md), [`info.md`](tools/cli/info.md), [`install.md`](tools/cli/install.md), [`list.md`](tools/cli/list.md), [`manifest.md`](tools/cli/manifest.md), [`new.md`](tools/cli/new.md), [`run.md`](tools/cli/run.md), [`uninstall.md`](tools/cli/uninstall.md)
-* [**Language Server Specifications (`tools/lsp/`)**](tools/lsp/protocol.md): [`protocol.md`](tools/lsp/protocol.md), [`navigation.md`](tools/lsp/navigation.md), [`intelligence.md`](tools/lsp/intelligence.md)
+* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): Subcommand specifications and [`manifest.toml`](tools/cli/manifest.md) contract.
+* [**Language Server Specifications (`tools/lsp/`)**](tools/lsp/README.md): [`protocol.md`](tools/lsp/protocol.md), [`navigation.md`](tools/lsp/navigation.md), [`intelligence.md`](tools/lsp/intelligence.md).

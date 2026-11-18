@@ -85,6 +85,9 @@ pub unsafe extern "C" fn solix_register_natives(
 );
 ```
 
+### 3.3. `solix-ffi` Native Extension SDK
+The official [`solix-ffi`](../../crates/solix-ffi/src/lib.rs) crate provides typed wrappers over `SolixCValue`, safe argument extraction helpers, and registration macros (`solix_export!`) so Rust `cdylib` plugins inside `natives/` can inspect arguments and report errors without manual raw union boilerplate.
+
 ---
 
 ## 4. Host Memory Operations via `SolixVmContext`

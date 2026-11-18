@@ -93,3 +93,4 @@ solix info bin/app.slxb --json -o target/manifest.json
 ## Related Specifications
 * Formal Spec: [`docs/spec/tools/cli/run.md`](../../spec/tools/cli/run.md)
 * Formal Spec: [`docs/spec/tools/cli/info.md`](../../spec/tools/cli/info.md)
+* Disassembly Guide: [`docs/spec/disassembly-format-slxasm.md`](../../spec/disassembly-format-slxasm.md)

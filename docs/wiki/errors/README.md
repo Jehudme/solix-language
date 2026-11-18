@@ -2,7 +2,7 @@
 
 This encyclopedia catalogs all diagnostic error codes emitted by the Solix compiler (`E0000`–`E0350`) and runtime execution faults (`R0001`–`R0024`).
 
-Per [`GL-0012`](../../internals/guidelines/authoring-features-and-wiki.md), each entry specifies the exact root cause, invariant violated, bad code example, and corrected code example.
+Per [`GL-0012`](../../guidelines/authoring-features-and-wiki.md), each entry specifies the exact root cause, invariant violated, bad code example, and corrected code example.
 
 ---
 
