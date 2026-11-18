@@ -62,6 +62,9 @@ pub enum Commands {
     /// Generates static HTML or Markdown API documentation from source doc comments
     Doc(DocArgs),
 
+    /// Opens the bundled offline Solix language documentation and wiki in your browser
+    Wiki(WikiArgs),
+
     /// Removes project build artifacts and intermediate caches
     Clean(CleanArgs),
 }
@@ -132,6 +135,30 @@ pub struct DocArgs {
     /// Target build profile (e.g. "release", "debug")
     #[arg(short, long)]
     pub profile: Option<String>,
+}
+
+/// Arguments for `solix wiki`.
+#[derive(Debug, Args, Clone)]
+pub struct WikiArgs {
+    /// Optional topic or search query to pre-filter in the documentation portal
+    #[arg(value_name = "TOPIC")]
+    pub query: Option<String>,
+
+    /// Explicit search query flag (alternative to positional TOPIC)
+    #[arg(long, alias = "topic", value_name = "QUERY")]
+    pub search: Option<String>,
+
+    /// Print the resolved local HTML entry point without launching a web browser
+    #[arg(long)]
+    pub no_open: bool,
+
+    /// Export a copy of the offline HTML documentation portal to a target directory
+    #[arg(short, long, value_name = "DIR")]
+    pub output: Option<PathBuf>,
+
+    /// Print only the resolved `index.html` filesystem path
+    #[arg(long)]
+    pub path: bool,
 }
 
 /// Arguments for `solix build`.
