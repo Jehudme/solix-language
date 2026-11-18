@@ -1,78 +1,317 @@
-name: Continuous Integration & Verification
+name: Solix Continuous Integration
 
 on:
   push:
     branches:
+      - dev
       - master
       - main
   pull_request:
     branches:
+      - dev
       - master
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+  schedule:
+    # Weekly Monday security re-scan for RustSec, workflows, and dependencies
+    - cron: "0 6 * * 1"
   workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    inputs:
+      release_bump:
+        description: "Optional manual release-train bump (auto, patch, minor, major, or X.Y.Z)"
+        required: false
+        default: "auto"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
+
 jobs:
-  lint-and-docs:
-    name: Lint, Formatting & Documentation Gate
+  validate-release-pr:
+    name: Validate Release PR Source
+    if: github.event_name == 'pull_request' && (github.base_ref == 'master' || github.base_ref == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted target trunk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.base_ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Enforce Two-Wave master source policy
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          if [ "$IS_FORK" = "true" ]; then
+            python3 scripts/check_release_pr_source.py \
+              --event-name pull_request \
+              --base-ref "$BASE_REF" \
+              --head-ref "$HEAD_REF" \
+              --base-repo "$BASE_REPO" \
+              --head-repo "$HEAD_REPO" \
+              --is-fork
+          else
+            python3 scripts/check_release_pr_source.py \
+              --event-name pull_request \
+              --base-ref "$BASE_REF" \
+              --head-ref "$HEAD_REF" \
+              --base-repo "$BASE_REPO" \
+              --head-repo "$HEAD_REPO"
+          fi
+
+  release-pr-check:
+    name: Release PR Verification
+    needs: validate-release-pr
+    if: >-
+      github.event_name == 'pull_request'
+      && (github.base_ref == 'master' || github.base_ref == 'main')
+      && github.head_ref == 'release-plz/dev-to-master'
+      && !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Verify release PR matches verified dev tree plus version metadata
+        run: |
+          git fetch origin dev
+          non_meta=$(git diff --name-only origin/dev...HEAD | grep -vE '^(Cargo\.toml|Cargo\.lock|crates/[^/]+/CHANGELOG\.md|CHANGELOG\.md)$' || true)
+          if [ -n "$non_meta" ]; then
+            echo "::error::Release PR contains unexpected non-metadata drift relative to dev:"
+            printf '%s\n' "$non_meta"
+            exit 1
+          fi
+          cargo check --workspace --locked
+
+  pr-risk-audit:
+    name: Sensitive-Path Risk Audit
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action != 'labeled'
+      && github.event.action != 'unlabeled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository for audit script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.repo.fork == false && github.sha || github.base_ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Collect changed PR files from GitHub API and run non-blocking audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/risk-audit"
+          gh api --paginate "repos/${REPO_NAME}/pulls/${PR_NUMBER}/files" > "$RUNNER_TEMP/risk-audit/changed_files.json"
+          python3 scripts/pr_risk_audit.py \
+            --files-json "$RUNNER_TEMP/risk-audit/changed_files.json" \
+            --json-out "$RUNNER_TEMP/risk-audit/report.json" \
+            --markdown-out "$RUNNER_TEMP/risk-audit/advisory.md" \
+            --emit-annotations
+          printf '%s\n' "$PR_NUMBER" > "$RUNNER_TEMP/risk-audit/pr_number.txt"
+
+      - name: Publish sticky advisory comment and labels for same-repo PRs
+        if: github.event.pull_request.head.repo.fork == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+
+          out_dir = Path(os.environ["RUNNER_TEMP"]) / "risk-audit"
+          report = json.loads((out_dir / "report.json").read_text(encoding="utf-8"))
+          advisory = (out_dir / "advisory.md").read_text(encoding="utf-8")
+          repo = os.environ["REPO_NAME"]
+          pr_num = os.environ["PR_NUMBER"]
+
+          for label in report.get("labels", []):
+              subprocess.run(
+                  ["gh", "pr", "edit", pr_num, "--repo", repo, "--add-label", label],
+                  check=False,
+              )
+
+          comments_raw = subprocess.check_output(
+              ["gh", "api", "--paginate", f"repos/{repo}/issues/{pr_num}/comments"],
+              text=True,
+          )
+          comments = json.loads(comments_raw)
+          existing_id = None
+          for comment in comments:
+              if "<!-- solix-pr-risk-audit -->" in (comment.get("body") or ""):
+                  existing_id = comment["id"]
+                  break
+
+          if report.get("has_sensitive_changes"):
+              if existing_id:
+                  subprocess.run(
+                      ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={advisory}"],
+                      check=True,
+                  )
+              else:
+                  subprocess.run(
+                      ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{pr_num}/comments", "-f", f"body={advisory}"],
+                      check=True,
+                  )
+          elif existing_id:
+              subprocess.run(
+                  ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={advisory}"],
+                  check=True,
+              )
+          PY
+
+      - name: Upload risk audit artifact for fork-safe workflow_run handoff
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pr-risk-audit
+          path: ${{ runner.temp }}/risk-audit/
+          retention-days: 3
+
+  security-audit:
+    name: Security & Supply-Chain Audit
+    if: >-
+      (github.event_name == 'schedule')
+      || (github.event_name == 'push')
+      || (github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'pull_request' && (github.base_ref == 'dev' || github.event.pull_request.head.repo.fork == true) && github.event.action != 'labeled' && github.event.action != 'unlabeled')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint with checksum-verified release binary
+        run: |
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" \
+            -o "$RUNNER_TEMP/actionlint/actionlint.tar.gz"
+          printf '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  %s\n' \
+            "$RUNNER_TEMP/actionlint/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint/actionlint.tar.gz" -C "$RUNNER_TEMP/actionlint" actionlint
+          "$RUNNER_TEMP/actionlint/actionlint" -color
+
+      - name: Run zizmor GitHub Actions security scanner
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
+          annotations: true
+          persona: regular
+
+      - name: Run cargo-deny license, source & advisory policy
+        uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2
+
+      - name: Run cargo-audit RustSec vulnerability scanner
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          token: ${{ github.token }}
+
+  lint-and-docs:
+    name: Lint, Formatting & Documentation Gate
+    if: >-
+      (github.event_name == 'push')
+      || (github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.action != 'labeled' && github.event.action != 'unlabeled')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2.9.3
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
 
-      - name: Verify Rust code formatting
+      - name: Enforce rustfmt formatting
         run: cargo fmt --all -- --check
 
-      - name: Run Clippy static analysis
+      - name: Enforce Clippy lints across workspace targets
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Run strict production Clippy lints
+      - name: Enforce strict production safety Clippy lints
         run: cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars
 
-      - name: Run documentation synchronization and quality gate
-        shell: bash
+      - name: Enforce GL-0011 and GL-0013 documentation sync
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF_INPUT: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_REF="origin/${{ github.base_ref }}"
-          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            BASE_REF="${{ github.event.before }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE_REF="origin/${BASE_REF_INPUT}"
+          elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="$BEFORE_SHA"
           else
             BASE_REF="HEAD~1"
           fi
           python3 scripts/doc_sync_check.py --base "$BASE_REF"
           python3 scripts/doc_sync_check.py --all-docs
 
-      - name: Verify documentation drift and link integrity
+      - name: Verify documentation drift, link integrity & build offline solix wiki portal
         run: |
           python3 scripts/verify_docs.py
           python3 scripts/verify_doc_links.py
+          python3 scripts/build_docs_site.py
+
+      - name: Run Python governance, wiki & security unit tests
+        run: python3 -m unittest discover -s scripts/tests -v
 
       - name: Validate VS Code extension manifest
         run: node -e "JSON.parse(require('fs').readFileSync('editors/vscode/package.json', 'utf8'))"
@@ -80,6 +319,10 @@ jobs:
   test-matrix:
     name: Test Matrix (${{ matrix.os }})
     needs: lint-and-docs
+    if: >-
+      (github.event_name == 'push')
+      || (github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.action != 'labeled' && github.event.action != 'unlabeled')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -92,18 +335,20 @@ jobs:
         run: git config --global core.longpaths true
 
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
       - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2.9.3
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
@@ -119,26 +364,51 @@ jobs:
           command -v cmake >/dev/null 2>&1 || brew install cmake
           command -v lua >/dev/null 2>&1 || brew install lua
 
+      - name: Stage offline solix wiki documentation portal
+        run: python3 scripts/build_docs_site.py
+
       - name: Build solix toolchain binary
         run: cargo build --bin solix
 
       - name: Build and stage default first-party libraries
         run: python3 scripts/build_default_libraries.py
 
-      - name: Run workspace tests
+      - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
         shell: bash
+        env:
+          CURRENT_OS: ${{ runner.os }}
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
+          if [ "$CURRENT_OS" = "Windows" ]; then
             export SOLIX_BIN="$(pwd)/target/debug/solix.exe"
           else
             export SOLIX_BIN="$(pwd)/target/debug/solix"
           fi
           cargo test --workspace --all-targets
 
+      - name: Verify embedded solix wiki standalone execution
+        shell: bash
+        env:
+          CURRENT_OS: ${{ runner.os }}
+        run: |
+          if [ "$CURRENT_OS" = "Windows" ]; then
+            SOLIX_EXE="./target/debug/solix.exe"
+          else
+            SOLIX_EXE="./target/debug/solix"
+          fi
+          ISOLATED_HOME="$RUNNER_TEMP/isolated_wiki_home"
+          mkdir -p "$ISOLATED_HOME"
+          SOLIX_HOME="$ISOLATED_HOME" SOLIX_FORCE_EMBEDDED_ASSETS=1 "$SOLIX_EXE" wiki --no-open --path
+          SOLIX_HOME="$ISOLATED_HOME" SOLIX_FORCE_EMBEDDED_ASSETS=1 "$SOLIX_EXE" wiki --no-open --output "$RUNNER_TEMP/exported_wiki"
+          test -f "$RUNNER_TEMP/exported_wiki/index.html"
+          test -f "$RUNNER_TEMP/exported_wiki/assets/search_index.js"
+          test ! -d "$RUNNER_TEMP/exported_wiki/internals"
+
       - name: Run benchmark correctness verification gate
         shell: bash
+        env:
+          CURRENT_OS: ${{ runner.os }}
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
+          if [ "$CURRENT_OS" = "Windows" ]; then
             export SOLIX_BIN="$(pwd)/target/debug/solix.exe"
           else
             export SOLIX_BIN="$(pwd)/target/debug/solix"
@@ -147,8 +417,10 @@ jobs:
 
       - name: List installed packages and verify example application compilation
         shell: bash
+        env:
+          CURRENT_OS: ${{ runner.os }}
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
+          if [ "$CURRENT_OS" = "Windows" ]; then
             SOLIX_EXE="./target/debug/solix.exe"
           else
             SOLIX_EXE="./target/debug/solix"
@@ -163,9 +435,87 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo build --release --bin solix
 
-  release-plz:
-    name: Release-plz Versioning & Publishing
-    needs: [lint-and-docs, test-matrix]
+  sync-release-train:
+    name: Sync Two-Wave Release Train (dev -> master)
+    needs: [lint-and-docs, security-audit, test-matrix]
+    if: >-
+      always()
+      && (github.repository_owner == 'Jehudme' || github.repository_owner == 'jehudme')
+      && (
+        (github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.lint-and-docs.result == 'success' && needs.security-audit.result == 'success' && needs.test-matrix.result == 'success')
+        || (github.event_name == 'pull_request' && (github.base_ref == 'master' || github.base_ref == 'main') && github.head_ref == 'release-plz/dev-to-master' && !github.event.pull_request.head.repo.fork && (github.event.action == 'labeled' || github.event.action == 'unlabeled'))
+        || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev' && needs.lint-and-docs.result == 'success' && needs.test-matrix.result == 'success')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout integration trunk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Prepare or update release-plz/dev-to-master Release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          BUMP_OVERRIDE: ${{ github.event.inputs.release_bump || 'auto' }}
+        run: |
+          git config user.name "solix-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git fetch origin master dev
+          AHEAD_COUNT=$(git rev-list --count origin/master..origin/dev)
+          if [ "$AHEAD_COUNT" -eq 0 ]; then
+            echo "Integration branch dev has zero commits ahead of master; skipping release PR update."
+            exit 0
+          fi
+
+          EXISTING_LABELS=$(gh pr list --base master --head release-plz/dev-to-master --state open --json labels --jq '.[0].labels | map(.name) | join(",")' 2>/dev/null || true)
+          git checkout -B release-plz/dev-to-master origin/dev
+          python3 scripts/prepare_release_train.py \
+            --base-ref origin/master \
+            --head-ref origin/dev \
+            --override "$BUMP_OVERRIDE" \
+            --pr-labels "$EXISTING_LABELS" \
+            --write \
+            --json-out "$RUNNER_TEMP/release_meta.json" \
+            --pr-body-out "$RUNNER_TEMP/release_pr_body.md"
+
+          NEXT_VERSION=$(python3 -c 'import json, os; print(json.load(open(os.environ["RUNNER_TEMP"] + "/release_meta.json"))["next_version"])')
+          git add Cargo.toml Cargo.lock crates/*/CHANGELOG.md
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): release ${NEXT_VERSION}"
+          fi
+          git push --force-with-lease origin release-plz/dev-to-master
+
+          OPEN_PR_NUM=$(gh pr list --base master --head release-plz/dev-to-master --state open --json number --jq '.[0].number // empty')
+          if [ -n "$OPEN_PR_NUM" ]; then
+            gh pr edit "$OPEN_PR_NUM" \
+              --title "chore(release): release ${NEXT_VERSION}" \
+              --body-file "$RUNNER_TEMP/release_pr_body.md"
+          else
+            gh pr create \
+              --base master \
+              --head release-plz/dev-to-master \
+              --title "chore(release): release ${NEXT_VERSION}" \
+              --body-file "$RUNNER_TEMP/release_pr_body.md"
+          fi
+
+  release-publish-and-backsync:
+    name: Release Publish & Back-Sync to Dev
+    needs: [lint-and-docs, security-audit, test-matrix]
     if: >-
       github.event_name == 'push'
       && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
@@ -173,31 +523,35 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
-      - name: Run release-plz (publish & tag)
-        uses: release-plz/action@v0.5
+      - name: Publish workspace crates & push vX.Y.Z tag via release-plz
+        uses: release-plz/action@66b324fd6c72d05d2a08568492ecdd62bfb8a62b # v0.5
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Run release-plz (open/update release PR)
-        uses: release-plz/action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Sync master release commit back into dev
+        run: |
+          git config user.name "solix-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git fetch origin dev master
+          if git merge-base --is-ancestor origin/master origin/dev; then
+            echo "Branch dev already includes master commit."
+            exit 0
+          fi
+          git checkout -B dev origin/dev
+          git merge --no-ff origin/master -X theirs -m "chore(release): sync master release state back to dev"
+          git push origin dev

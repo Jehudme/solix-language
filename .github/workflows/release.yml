@@ -2,8 +2,9 @@
 # Builds and publishes across Windows, macOS (Intel & Apple Silicon), and Universal Linux (GNU & MUSL)
 
 name: Release
+
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -12,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release Git tag (e.g. v1.3.1)"
+        description: "Release Git tag (e.g. v1.5.0)"
         required: true
-        default: "v1.3.1"
+        default: "v1.5.0"
 
 jobs:
   build-vscode-extension:
@@ -22,10 +23,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
 
@@ -37,7 +40,7 @@ jobs:
           npx @vscode/vsce package --no-dependencies -o solix-language.vsix
 
       - name: Upload VS Code Extension for release
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifacts-vscode-extension
           path: editors/vscode/solix-language.vsix
@@ -66,16 +69,18 @@ jobs:
         run: git config --global core.longpaths true
 
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
@@ -98,7 +103,7 @@ jobs:
           python3 scripts/build_default_libraries.py --profiles release,debug
 
       - name: Upload bundled packages artifact (${{ matrix.target }})
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bundled-packages-${{ matrix.target }}
           path: crates/solix-toolchain/assets/packages/
@@ -110,15 +115,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
       - name: Download per-target bundled packages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: bundled-packages-*
           path: staging-bundled-libs
@@ -131,7 +138,7 @@ jobs:
             --require-targets x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Upload universal cross-platform bundled packages artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: bundled-packages-universal
           path: crates/solix-toolchain/assets/packages/
@@ -143,17 +150,18 @@ jobs:
       - plan
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
@@ -175,15 +183,16 @@ jobs:
       - name: Generate release notes comparison table against previous release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ needs.plan.outputs.tag }}
         run: |
           python3 benchmarks/compare_releases.py \
             --current staging-benchmarks/release_baseline.json \
             --download-previous \
-            --current-tag "${{ needs.plan.outputs.tag }}" \
+            --current-tag "$CURRENT_TAG" \
             --markdown-output staging-benchmarks/benchmark_comparison.md
 
       - name: Upload benchmark artifacts for release ingestion
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifacts-benchmarks
           path: staging-benchmarks/
@@ -198,29 +207,33 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install dist
         shell: bash
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.28.0/cargo-dist-installer.sh | sh
 
       - name: Cache dist
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/dist
 
       - id: plan
+        env:
+          TAG_VALUE: ${{ github.event.inputs.tag_name || github.ref_name }}
         run: |
-          dist host --steps=create "${{ format('--tag={0}', github.event.inputs.tag_name || github.ref_name) }}" --output-format=json > plan-dist-manifest.json
+          dist host --steps=create "--tag=${TAG_VALUE}" --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload dist-manifest.json
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
@@ -246,27 +259,31 @@ jobs:
         shell: bash
         run: git config --global core.longpaths true
 
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
           targets: ${{ join(matrix.targets, ',') }}
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
       - name: Install dist
-        run: ${{ matrix.install_dist.run }}
+        env:
+          INSTALL_DIST_CMD: ${{ matrix.install_dist.run }}
+        run: eval "$INSTALL_DIST_CMD"
 
       - name: Set up Zig compiler
         if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64-unknown-linux-gnu')
-        uses: mlugg/setup-zig@v2.2.1
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: "0.13.0"
 
@@ -289,11 +306,12 @@ jobs:
         run: command -v cmake >/dev/null 2>&1 || brew install cmake
 
       - name: Install dist target packages
-        run: |
-          ${{ matrix.packages_install }}
+        env:
+          PKG_INSTALL_CMD: ${{ matrix.packages_install }}
+        run: eval "$PKG_INSTALL_CMD"
 
       - name: Download universal cross-platform bundled packages artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: bundled-packages-universal
           path: crates/solix-toolchain/assets/packages/
@@ -312,14 +330,21 @@ jobs:
           done
 
       - name: Download bundled VS Code extension artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: artifacts-vscode-extension
           path: crates/solix-toolchain/assets/vscode/
 
+      - name: Stage versioned offline solix wiki documentation portal
+        shell: bash
+        run: python3 scripts/build_docs_site.py
+
       - name: Build artifacts
+        env:
+          TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
+          DIST_ARGS: ${{ matrix.dist_args }}
         run: |
-          dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
+          dist build "$TAG_FLAG" --print=linkage --output-format=json $DIST_ARGS > dist-manifest.json
           echo "dist ran successfully"
 
       - id: cargo-dist
@@ -333,7 +358,7 @@ jobs:
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
           path: |
@@ -350,12 +375,14 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install cached dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
@@ -363,7 +390,7 @@ jobs:
       - run: chmod +x ~/.cargo/bin/dist
 
       - name: Fetch local artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -371,8 +398,10 @@ jobs:
 
       - id: cargo-dist
         shell: bash
+        env:
+          TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
         run: |
-          dist build ${{ needs.plan.outputs.tag-flag }} --output-format=json "--artifacts=global" > dist-manifest.json
+          dist build "$TAG_FLAG" --output-format=json "--artifacts=global" > dist-manifest.json
           echo "dist ran successfully"
           echo "paths<<EOF" >> "$GITHUB_OUTPUT"
           jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
@@ -380,7 +409,7 @@ jobs:
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifacts-build-global
           path: |
@@ -396,18 +425,22 @@ jobs:
       - build-global-artifacts
       - benchmark-release
     if: ${{ always() && needs.merge-universal-bundled-packages.result == 'success' && needs.build-local-artifacts.result == 'success' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && needs.build-vscode-extension.result == 'success' && needs.benchmark-release.result == 'success' }}
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: ubuntu-latest
     outputs:
       val: ${{ steps.host.outputs.manifest }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install cached dist
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: cargo-dist-cache
           path: ~/.cargo/bin/
@@ -415,7 +448,7 @@ jobs:
       - run: chmod +x ~/.cargo/bin/dist
 
       - name: Fetch artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: artifacts-*
           path: target/distrib/
@@ -423,20 +456,22 @@ jobs:
 
       - id: host
         shell: bash
+        env:
+          TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
         run: |
-          dist host ${{ needs.plan.outputs.tag-flag }} --steps=upload --steps=release --output-format=json > dist-manifest.json
+          dist host "$TAG_FLAG" --steps=upload --steps=release --output-format=json > dist-manifest.json
           echo "artifacts uploaded and released successfully"
           cat dist-manifest.json
           echo "manifest=$(jq -c "." dist-manifest.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload dist-manifest.json
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: artifacts-dist-manifest
           path: dist-manifest.json
 
       - name: Download GitHub Artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: artifacts-*
           path: artifacts
@@ -466,4 +501,47 @@ jobs:
             fi
           else
             gh release create "$TAG_NAME" --target "$RELEASE_COMMIT" ${PRERELEASE_FLAG:+"$PRERELEASE_FLAG"} --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" "${release_files[@]}"
+          fi
+
+  sync-wiki:
+    name: Mirror Versioned Docs to GitHub Wiki
+    needs:
+      - plan
+      - host
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Stage and push read-only GitHub Wiki snapshot
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          REPO_SLUG: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          VERSION_CLEAN="${RELEASE_TAG#v}"
+          WIKI_DIR="$RUNNER_TEMP/github_wiki"
+          BASIC_AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${BASIC_AUTH}" clone "https://github.com/${REPO_SLUG}.wiki.git" "$WIKI_DIR"; then
+            echo "GitHub Wiki git remote is not initialized yet; skipping wiki mirror."
+            exit 0
+          fi
+          python3 scripts/sync_github_wiki.py --output "$WIKI_DIR" --version "$VERSION_CLEAN"
+          cd "$WIKI_DIR"
+          git config user.name "solix-release-bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "docs(wiki): sync documentation for Solix ${RELEASE_TAG}"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${BASIC_AUTH}" push origin HEAD
           fi

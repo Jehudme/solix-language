@@ -1,0 +1,56 @@
+name: Milestone Task / Feature Proposal
+description: Plan a tracked engineering task or language feature linked to a GitHub Milestone (GL-0008).
+title: "[Task]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Active Solix milestones are tracked via **GitHub Milestones** and structured issues rather than manually edited milestone markdown files (`GL-0008`). Link your PR with `Closes #<issue-number>` targeting `dev`.
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Tier
+      description: Classify criticality using P0 (Release Blocker) through P3 (Nice to Have).
+      options:
+        - P0 - Release Blocker
+        - P1 - Core Milestone Deliverable
+        - P2 - Tooling, Docs, or Ergonomics
+        - P3 - Cleanup / Stretch Goal
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: affected_crates
+    attributes:
+      label: Affected Subsystems / Crates
+      options:
+        - label: crates/solix-common (ISA, AST, project/archive, diagnostics)
+        - label: crates/solix-compilation (lexer, parser, binder, optimizer, emitter)
+        - label: crates/solix-runtime (VM, ARC, exceptions, native interop)
+        - label: crates/solix-toolchain (CLI, assets, package manager, wiki)
+        - label: crates/solix-lsp / crates/solix-dbg / editors/vscode
+        - label: libraries/ (solixlib, raylib)
+        - label: docs/ & scripts/ / .github/workflows/
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective & Architectural Summary
+      description: Explain what problem this solves, affected invariants, and proposed design.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria & Verification Matrix (GL-0009)
+      description: List positive tests, negative error tests (`E/R` codes), and doc updates required.
+      value: |
+        - [ ] Specification / user docs updated (`GL-0013`)
+        - [ ] Positive unit/integration tests added (`GL-0009`)
+        - [ ] Negative/edge-case tests verified
+        - [ ] Strict Clippy (`min_ident_chars`, no `unwrap`/`expect`/`panic`) and `rustfmt` pass
+    validations:
+      required: true

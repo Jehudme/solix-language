@@ -1,0 +1,83 @@
+name: Pull Request Risk Advisory (Fork-Safe)
+
+on:
+  workflow_run:
+    workflows:
+      - Solix Continuous Integration
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  publish-fork-advisory:
+    name: Publish Sensitive-Path PR Comment & Labels
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Download non-blocking risk audit artifact (no untrusted code checkout)
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: pr-risk-audit
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/risk-audit
+
+      - name: Update sticky PR advisory comment & labels
+        if: steps.download.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_NAME: ${{ github.repository }}
+          FALLBACK_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          out_dir = Path(os.environ["RUNNER_TEMP"]) / "risk-audit"
+          report_path = out_dir / "report.json"
+          advisory_path = out_dir / "advisory.md"
+          if not report_path.is_file() or not advisory_path.is_file():
+              raise SystemExit(0)
+
+          pr_file = out_dir / "pr_number.txt"
+          pr_num = pr_file.read_text(encoding="utf-8").strip() if pr_file.is_file() else os.environ["FALLBACK_PR"]
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          advisory = advisory_path.read_text(encoding="utf-8")
+          repo = os.environ["REPO_NAME"]
+
+          for label in report.get("labels", []):
+              subprocess.run(
+                  ["gh", "pr", "edit", pr_num, "--repo", repo, "--add-label", label],
+                  check=False,
+              )
+
+          comments_raw = subprocess.check_output(
+              ["gh", "api", "--paginate", f"repos/{repo}/issues/{pr_num}/comments"],
+              text=True,
+          )
+          comments = json.loads(comments_raw)
+          existing_id = None
+          for comment in comments:
+              if "<!-- solix-pr-risk-audit -->" in (comment.get("body") or ""):
+                  existing_id = comment["id"]
+                  break
+
+          if report.get("has_sensitive_changes") or existing_id:
+              if existing_id:
+                  subprocess.run(
+                      ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={advisory}"],
+                      check=True,
+                  )
+              else:
+                  subprocess.run(
+                      ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{pr_num}/comments", "-f", f"body={advisory}"],
+                      check=True,
+                  )
+          PY

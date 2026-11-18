@@ -68,13 +68,16 @@ Generated release packages distribute the following directory hierarchy:
 
 ---
 
-## 4. Automated CI/CD Release Pipeline
+## 4. Automated Two-Wave CI/CD Release Pipeline (`dev -> master`)
 
-The two-workflow CI/CD pipeline separates continuous verification from binary distribution:
+The CI/CD pipeline separates continuous integration (`dev`) from release cutting and multi-architecture binary distribution (`master`):
 
-1. **Continuous Verification & `release-plz` ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))**:
-   - Enforces formatting, strict production Clippy lints, documentation synchronization (`doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py`), hermetic workspace tests, `--verify` correctness checks, and `examples/breakout` debug/release compilation across `ubuntu-latest`, `macos-latest`, and `windows-latest`.
-   - On green `master` pushes, runs `release-plz` (`release` + `release-pr`) via `RELEASE_TOKEN` to publish crates in topological order, tag releases, and open/update changelog PRs.
-2. **Multi-Platform Distribution ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))**:
+1. **Wave 1 — Continuous Integration, Security & Sensitive-Path Audits ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))**:
+   - Triggered on pull requests and pushes targeting `dev` (and validates every PR safely before landing).
+   - Enforces `rustfmt`, strict production Clippy lints, documentation synchronization (`doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py`), offline `solix wiki` portal compilation (`scripts/build_docs_site.py`), security checks (`cargo-deny`, `cargo-audit`, `actionlint`, `zizmor`), non-blocking sensitive-path risk advisories (`scripts/pr_risk_audit.py`), and 3-OS test matrices (`ubuntu-latest`, `macos-latest`, `windows-latest`).
+2. **Wave 2 — Release Train & Publication (`dev -> master`)**:
+   - Direct contributor PRs into `master` are rejected by **`Validate Release PR Source`** (`scripts/check_release_pr_source.py`). Only the curated `dev -> master` release train merges into `master`.
+   - When the maintainer merges the release PR to `master`, `release-plz` tags `vX.Y.Z`, updates changelogs, publishes workspace crates, and syncs the version bump back into `dev`.
+3. **Multi-Platform Distribution ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))**:
    - Triggered on `v*.*.*` tag pushes and manual `workflow_dispatch`.
-   - Compiles target-native `solix` and `raylib` archives across `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`, merges all architectures via `scripts/merge_bundled_packages.py` into universal cross-platform `solix` and `raylib` `.slxarc` containers (`release` and `debug` profiles), embeds those universal packages plus `solix-language.vsix` into every `cargo-dist` installer, generates release-to-release benchmark comparisons, and finalizes the GitHub Release.
+   - Builds the static offline `solix wiki` portal via `scripts/build_docs_site.py`, compiles universal cross-platform `solix` and `raylib` `.slxarc` archives via `scripts/merge_bundled_packages.py`, embeds both together with `solix-language.vsix` into every `cargo-dist` installer, publishes GitHub Releases, and mirrors updated user docs to GitHub Wiki with version links.

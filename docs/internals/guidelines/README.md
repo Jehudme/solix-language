@@ -31,6 +31,7 @@ All contributors **MUST** adhere to these guidelines across all crates (`crates/
 | **GL-0011** | [Rust Language & Security Conventions Specification](language-conventions.md) | No Single-Letter Names, Military Safety, Errors | `FINAL` |
 | **GL-0012** | [Tripartite Documentation Architecture Specification](authoring-features-and-wiki.md) | Guides vs Specs vs Atomic Wiki Architecture | `FINAL` |
 | **GL-0013** | [Mandatory Pre-Merge Git-Diff Documentation Audit Protocol](documentation-update-protocol.md) | Pre-Merge Cross-Update Trigger Matrix & Anti-Drift | `FINAL` |
+| **GL-0014** | [Release Train, Sensitive-Path Governance & Reviewer Security Protocol](pr-and-release-governance.md) | Two-Wave `dev -> master` Release, `CODEOWNERS`, Risk Audits & Security CI | `FINAL` |
 
 ---
 
@@ -40,5 +41,5 @@ All contributors **MUST** adhere to these guidelines across all crates (`crates/
 2. **Descriptive Naming:** Absolute prohibition of single-letter variable names (`i`, `x`, `t`) and single-letter generic types (`T`, `E`); self-documenting code with clear types and multi-letter abbreviations.
 3. **Structured Error Chaining:** Exhaustive error categorization with `thiserror` using `#[source]` error chaining, and rich compiler diagnostics with `miette`.
 4. **Co-Located Unit Tests:** All unit tests placed at the bottom of the source file in `#[cfg(test)] mod tests` with dual positive/negative coverage.
-5. **Milestone Branch Isolation:** Every milestone executes in its own dedicated `milestone/<XXX>-<slug>` branch prior to merging into protected `master`.
+5. **Two-Wave Release Isolation:** Milestones and contributor PRs integrate into protected `dev` with strict up-to-date checks before the curated `dev -> master` Release PR publishes a release to `master` ([GL-0002](branching-conventions.md), [GL-0014](pr-and-release-governance.md)).
 6. **Zero Documentation Drift:** Code, compiler specifications, and user documentation are co-committed and kept in lockstep.

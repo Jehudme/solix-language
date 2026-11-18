@@ -115,6 +115,25 @@ TRIGGER_MATRIX = [
             "docs/spec/tools/lsp/protocol.md",
         ],
     },
+    {
+        "name": "CI Workflows & Release Governance",
+        "pattern": r"^\.github/workflows/",
+        "required_docs": [
+            "docs/internals/guidelines/pr-and-release-governance.md",
+            "docs/internals/guidelines/branching-conventions.md",
+            "CONTRIBUTING.md",
+            "docs/guide/release.md",
+        ],
+    },
+    {
+        "name": "Governance & Offline Docs Scripts",
+        "pattern": r"^scripts/(pr_risk_audit|check_release_pr_source|build_docs_site|sync_github_wiki)\.py$",
+        "required_docs": [
+            "docs/internals/guidelines/pr-and-release-governance.md",
+            "CONTRIBUTING.md",
+            "docs/spec/tools/cli/wiki.md",
+        ],
+    },
 ]
 
 # Regex for detecting single-letter variable declarations in Solix/Rust code blocks

@@ -21,19 +21,18 @@ This specification formalizes the authoring, priority taxonomy, execution lifecy
 
 All milestone plans and contributors **MUST** comply with the following binding invariants:
 
-1. **Version-Controlled Milestone Plans:** All engineering milestones **MUST** be defined as Git-tracked Markdown files located in `docs/internals/milestones/` using three-digit zero-padded prefixes (e.g., `002-lexer-parser-implementation.md`). Tracking milestones exclusively in external, transient tools without Git backing is strictly prohibited.
-2. **Dedicated Milestone Branch Invariant:** Every active milestone **MUST** possess its own dedicated Git branch formatted as:
-   $$\text{milestone/}\text{<XXX>}-\text{<milestone-slug>}$$
-   (e.g., `milestone/001-preparation`, `milestone/002-lexer-parser`). All PRs implementing tasks scoped for that milestone **MUST** target and merge into this dedicated milestone branch. Only when the milestone achieves `VALIDATED` status and satisfies the complete Definition of Done **SHALL** the milestone branch be merged into `master` via a non-fast-forward (`--no-ff`) merge commit.
-3. **Deterministic Blocker Classification:** Every work item, bug, or feature within a milestone **MUST** be tagged with an explicit priority level: `P0`, `P1`, `P2`, or `P3`. Unprioritized tasks **SHALL NOT** be merged into milestone plans.
-4. **The P0/P1 Zero-Tolerance Rule:** A milestone **MUST NOT** transition to `CLOSED` or be merged into `master` if a single `P0` or `P1` task remains unresolved or incomplete. Unresolved `P2` or `P3` tasks **MAY** be formally deferred to a subsequent milestone by explicit maintainer consensus.
-5. **Non-Negotiable Rust Definition of Done (DoD):** A task or milestone cannot be marked complete until all five DoD pillars are satisfied:
-   * **Clean Compilation:** The entire workspace compiles with zero warnings: `cargo build --workspace --all-targets`.
-   * **100% Automated Test Pass:** All unit, integration, and doctests pass: `cargo test --workspace --all-targets`.
-   * **Zero Clippy Defects:** Passes strict static analysis without warnings: `cargo clippy --workspace --all-targets -- -D warnings -D clippy::unwrap_used -D clippy::expect_used`.
-   * **Formatting Invariant:** Fully compliant with rustfmt: `cargo fmt --check`.
-   * **Living Documentation:** Specifications in `docs/internals/specs/` and guides in `docs/guides/` updated in accordance with GL-0010.
-6. **Milestone State Progression:** Milestones **MUST** strictly follow the five-stage finite state machine (`DRAFT` $\to$ `ACTIVE` $\to$ `FEATURE_COMPLETE` $\to$ `VALIDATED` $\to$ `CLOSED`). Regressions discovered during validation **MUST** transition the milestone back to `ACTIVE`.
+1. **GitHub Milestones & Issue Forms for Active Planning (`MS-064+`):** Beginning after `MS-063`, active milestones and delivery checklists **SHALL** be authored and tracked natively as **GitHub Milestones** (`v1.5.0`, etc.) backed by structured `.github/ISSUE_TEMPLATE/` YAML forms (`milestone_task.yml`, `bug_report.yml`, `feature_request.yml`). Pull requests link issues (`Closes #<number>`) targeting **`dev`**, updating milestone progress automatically.
+   * **Historical Archive & Architectural RFCs:** Existing milestone files `001` through `063` in `docs/internals/milestones/` remain preserved as a read-only historical architecture archive. Multi-crate architectural proposals (`ADR` / design specifications) live in `docs/architecture/`.
+2. **Two-Wave Integration (`dev` -> `master`):** All PRs implementing milestone issues **MUST** target and merge into protected **`dev`**. Once a release milestone is ready, the curated `dev -> master` Release PR cuts the versioned release on `master`.
+3. **Deterministic Blocker Classification:** Every work item, bug, or feature within a milestone **MUST** be labeled with an explicit priority tier: `P0`, `P1`, `P2`, or `P3`.
+4. **The P0/P1 Zero-Tolerance Rule:** A GitHub Milestone release **MUST NOT** ship on `master` if a single `P0` or `P1` issue remains open. Open `P2` or `P3` issues **MAY** be deferred to the next GitHub Milestone.
+5. **Non-Negotiable Rust Definition of Done (DoD):** A milestone issue cannot close until all five DoD pillars pass on `dev` CI:
+   * **Clean Compilation:** `cargo build --workspace --all-targets`.
+   * **100% Automated Test Pass:** `cargo test --workspace --all-targets`.
+   * **Zero Clippy Defects:** `cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars`.
+   * **Formatting & Security:** `cargo fmt --check`, `cargo-deny`, `cargo-audit`, `actionlint`, and `zizmor`.
+   * **Living Documentation:** User docs in `docs/guide/`, `docs/spec/`, `docs/wiki/` synchronized cleanly (`GL-0013`) and compiled cleanly by `scripts/build_docs_site.py`.
+6. **Milestone State Progression:** Issues and milestones follow `DRAFT` $\to$ `ACTIVE` $\to$ `FEATURE_COMPLETE` $\to$ `VALIDATED` $\to$ `CLOSED`.
 
 ---
 

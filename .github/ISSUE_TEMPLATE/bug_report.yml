@@ -1,0 +1,40 @@
+name: Bug Report
+description: Report a compiler, VM runtime, LSP, or CLI bug with reproducible steps.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Severity / Priority
+      options:
+        - P0 - Crash / Memory Safety / Data Loss
+        - P1 - Incorrect Compilation or VM Result
+        - P2 - CLI / LSP / Diagnostic Bug
+        - P3 - Minor UX or Cosmetic Issue
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Solix Version & Operating System
+      placeholder: "solix 1.5.0 / Ubuntu 24.04 x86_64 (or Windows 11 / macOS 15)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem Description
+      description: Describe what happened versus what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal Reproduction (`.slx` or CLI command)
+      render: text
+    validations:
+      required: true
