@@ -2,6 +2,29 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [1.5.0] - 2026-11-18
+
+### Bug Fixes
+
+- *(security)* Update rustix to 1.1.6 and harden cargo-audit CI step
+- *(security)* Upgrade zip to 9.7.0 and resolve cargo-deny wildcard and advisory gates
+- *(common)* Harden slxarc extraction and staging against Zip-Slip traversal
+
+### Continuous Integration
+
+- *(governance)* Add bootstrap fallback to Validate Release PR Source
+- *(security)* Resolve all zizmor findings, add dependabot cooldown, and drop workflow_run
+- *(governance)* Fix shellcheck actionlint rules and remove PyYAML test dependency
+- *(governance)* Add two-wave dev-to-master train, security checks, and risk audits
+
+### Documentation
+
+- *(milestone)* Mark MS-063 tasks and verification sign-off completed
+
+### Features
+
+- *(toolchain)* Add offline versioned solix wiki portal and static docs builder
+
 ## [1.4.0] - 2026-11-17
 
 ### Bug Fixes
