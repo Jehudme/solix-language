@@ -456,7 +456,8 @@ jobs:
       - name: Run cargo-llvm-cov coverage gate (>= 55% workspace lines)
         run: |
           export PATH="$HOME/.cache/solix-ci-tools/cargo-llvm-cov:$PATH"
-          export SOLIX_BIN="$(pwd)/target/debug/solix"
+          SOLIX_BIN="$(pwd)/target/debug/solix"
+          export SOLIX_BIN
           cargo llvm-cov --workspace --all-targets --ignore-filename-regex '(/rustc/|/tests/)' --fail-under-lines 55 --summary-only | tee "$RUNNER_TEMP/coverage_summary.txt"
           {
             echo "## Workspace Code Coverage Report"
