@@ -58,7 +58,7 @@ Editing CI workflows, engineering guidelines, build scripts, or runtime security
 
 Every PR targeting `dev` and scheduled weekly cron run executes:
 1. **`cargo-deny`** ([`deny.toml`](../../../deny.toml)): Validates compatible open-source licenses, blocks unapproved registries/git sources, and checks RustSec advisories.
-2. **`cargo-audit`**: Scans `Cargo.lock` against known security vulnerabilities.
+2. **`cargo-audit` (`--deny warnings`):** Scans `Cargo.lock` using checksum-verified `cargo-audit` against RustSec vulnerability, yanked-crate, and soundness advisories cleanly without requiring elevated GitHub Checks API permissions.
 3. **`actionlint` & `zizmor`**: Statically analyzes `.github/workflows/*.yml` for YAML mistakes, command injection (`${{ github.event.* }}`), overly permissive tokens, and unpinned actions.
 4. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` **MUST** pin full 40-character commit SHAs alongside version comments, with top-level `permissions: contents: read`.
 
