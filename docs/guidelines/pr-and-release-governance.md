@@ -1,0 +1,72 @@
+# CI, Sensitive-Path Governance & On-Demand Release Protocol
+
+## Document Metadata
+* **Guideline ID:** GL-0014
+* **Scope:** Repository Governance, CI/CD Workflows, Sensitive-Path Audits & On-Demand Release (`dev -> master`)
+* **Status:** Final Implementation Standard
+* **Audience:** All Contributors, Core Maintainers & Release Admins (`@Jehudme`)
+* **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
+
+---
+
+## 1. Two-Workflow Architecture (`ci.yml` + `release.yml`)
+
+Solix separates daily development integration (`dev`) from production releases (`master`) using two dedicated GitHub Actions workflows:
+
+```mermaid
+flowchart LR
+    TopicBranch["Contributor Topic Branch (feat / fix / docs)"] -->|"PR targeting dev"| IntegrationCI["ci.yml: Lint, Docs, Security, Risk Notice, 3-OS Tests"]
+    IntegrationCI -->|"Pass + Up-to-Date + Admin Approval"| DevBranch["Protected Integration Trunk: dev"]
+    DevBranch -->|"Manual workflow_dispatch (release.yml)"| ReleaseGate["Bump Version + Post-Bump Tests + cargo package dry-run"]
+    ReleaseGate -->|"Fast-Forward dev -> master + Tag vX.Y.Z"| MasterBranch["Protected Release Trunk: master"]
+    MasterBranch -->|"crates.io + Installers + Same-Host Benchmarks + Wiki"| Published["Published Release + Sync master -> dev"]
+```
+
+### 1.1 Integration Workflow ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))
+All feature work, bug fixes, dependency bumps (`.github/dependabot.yml`), and documentation PRs **MUST** target **`dev`**.
+* **Zero Merge-Skew Rule:** The `dev` Repository Ruleset enables strict up-to-date status checks (**"Require branches to be up to date before merging"**). If another PR merges into `dev` first, GitHub blocks stale PRs until they merge or rebase `dev` and re-pass checks.
+* **Admin-Only Approval Gate:** Pull requests merging into `dev` **MUST** pass all required status checks and receive maintainer approval (`@Jehudme`).
+
+### 1.2 On-Demand Release Workflow ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))
+Direct contributor pushes and topic PRs into **`master`** are **STRICTLY PROHIBITED**.
+* Releases are triggered explicitly on demand via `workflow_dispatch` on [`release.yml`](../../.github/workflows/release.yml) with selectable bump strategy (`auto`, `patch`, `minor`, `major`) or an explicit SemVer override (`X.Y.Z`), plus an optional `dry_run` mode for workflow validation.
+* [`scripts/prepare_release_train.py`](../../scripts/prepare_release_train.py) computes the version bump from commits ahead of `master`, updates workspace manifests and changelogs (`Cargo.toml`, `Cargo.lock`, root & crate `CHANGELOG.md` files), runs post-bump workspace tests and `cargo package --no-verify` publishability checks, promotes `dev -> master` via `RELEASE_TOKEN`, tags `vX.Y.Z`, publishes crates in dependency order, builds cross-platform binaries/installers + bundled packages + offline `solix wiki`, runs same-host release benchmarks, publishes clean emoji-free release notes, mirrors GitHub Wiki, and syncs `master -> dev`.
+
+---
+
+## 2. Sensitive-Path Governance & Concise Notices
+
+Editing CI workflows, engineering guidelines, build scripts, or runtime security paths **IS NOT banned** — contributors are welcome to improve CI, docs, or tooling. Such edits trigger a concise automated notice and require `@Jehudme` CODEOWNER approval.
+
+### 2.1 Protected Path Matrix (`.github/CODEOWNERS`)
+
+All sensitive categories emit a single **`sensitive`** label via [`scripts/pr_risk_audit.py`](../../scripts/pr_risk_audit.py):
+
+| Category | Protected Paths | Security Rationale |
+| :--- | :--- | :--- |
+| **CI Workflows & Automation** | `.github/**` | Protects secrets (`RELEASE_TOKEN`, `CARGO_REGISTRY_TOKEN`) and workflow triggers. |
+| **Engineering Guidelines & Scripts** | `docs/guidelines/**`, `CONTRIBUTING.md`, governance Python scripts | Protects `GL-0011`, test gates, and doc invariants. |
+| **Supply Chain & Build Scripts** | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `cliff.toml`, `scripts/**`, `**/build.rs`, `libraries/*/scripts/**`, `crates/solix-toolchain/assets/**` | `build.rs` and Python build helpers execute during builds and packaging. |
+| **Runtime Security, Archives & FFI** | `crates/solix-common/src/project.rs`, `crates/solix-common/src/hash.rs`, `crates/solix-runtime/src/native/**`, `crates/solix-ffi/**` | Safeguards Zip-Slip archive checks, SHA-256 verification, and `unsafe` C-ABI boundaries. |
+
+### 2.2 Non-Blocking Auditor (`scripts/pr_risk_audit.py`)
+* [`scripts/pr_risk_audit.py`](../../scripts/pr_risk_audit.py) **MUST ALWAYS** exit `0` so valid improvements never fail CI solely for touching protected files.
+* When sensitive files change, the job attaches the single `sensitive` label, writes a concise `## Sensitive Paths Modified` table to `$GITHUB_STEP_SUMMARY` and PR comments, and avoids checking out untrusted fork code in privileged `pull_request_target` jobs.
+
+---
+
+## 3. Automated Security Gates
+
+Every PR targeting `dev`, push to `dev`, and scheduled weekly security run executes:
+1. **`cargo-deny`** ([`deny.toml`](../../deny.toml)): Validates compatible open-source licenses, blocks unapproved registries/git sources, and checks RustSec advisories.
+2. **`cargo-audit` (`--deny warnings`):** Scans `Cargo.lock` against RustSec vulnerability, yanked-crate, and soundness advisories.
+3. **`actionlint` & `zizmor`**: Statically analyzes `.github/workflows/*.yml` for YAML issues, script injection, overly permissive tokens, and unpinned actions.
+4. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` **MUST** pin full 40-character commit SHAs alongside version comments, with top-level `permissions: contents: read`.
+
+---
+
+## 4. Documentation Source-of-Truth & Versioned `solix wiki`
+
+User documentation (`docs/guide/`, `docs/wiki/`, `docs/features/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository (`GL-0013`).
+* Every `solix` release builds [`scripts/build_docs_site.py`](../../scripts/build_docs_site.py) to bundle static HTML + offline `search_index.js` directly inside `crates/solix-toolchain/assets/docs/` (serving `solix wiki` locally without internet or an HTTP daemon).
+* Optional one-way GitHub Wiki mirroring ([`scripts/sync_github_wiki.py`](../../scripts/sync_github_wiki.py)) runs during releases and injects a version header directing older-version users to their Git tag's `/docs` tree or local `solix wiki` command.

@@ -31,9 +31,11 @@ INTERNAL_DEP_VERSION_RE = re.compile(
 )
 
 CHANGELOG_FILES = (
+    "CHANGELOG.md",
     "crates/solix-common/CHANGELOG.md",
     "crates/solix-compilation/CHANGELOG.md",
     "crates/solix-runtime/CHANGELOG.md",
+    "crates/solix-ffi/CHANGELOG.md",
 )
 
 
@@ -239,8 +241,13 @@ def prepend_changelog_section(changelog_path: Path, new_version: str, section_md
     if f"## [{new_version}]" in existing:
         return
 
+    divider = "\n---\n"
     marker = "documented in this file."
-    if marker in existing:
+    if divider in existing:
+        head_part, _, tail_part = existing.partition(divider)
+        cleaned_tail = tail_part.lstrip("\r\n")
+        updated = f"{head_part}{divider}\n{section_md}\n{cleaned_tail}"
+    elif marker in existing:
         head_part, _, tail_part = existing.partition(marker)
         cleaned_tail = tail_part.lstrip("\r\n")
         updated = f"{head_part}{marker}\n\n{section_md}\n{cleaned_tail}"
@@ -321,6 +328,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-lock-sync", action="store_true", help="Skip running cargo lockfile sync")
     parser.add_argument("--json-out", type=Path, default=None, help="Optional JSON metadata output")
     parser.add_argument("--pr-body-out", type=Path, default=None, help="Optional Markdown PR body file")
+    parser.add_argument(
+        "--changelog-out",
+        type=Path,
+        default=None,
+        help="Optional Markdown file containing only the new version's changelog section",
+    )
     return parser.parse_args(argv)
 
 
@@ -374,6 +387,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.pr_body_out is not None:
         args.pr_body_out.parent.mkdir(parents=True, exist_ok=True)
         args.pr_body_out.write_text(pr_body, encoding="utf-8")
+
+    if args.changelog_out is not None:
+        args.changelog_out.parent.mkdir(parents=True, exist_ok=True)
+        args.changelog_out.write_text(section_md, encoding="utf-8")
 
     print(
         f"[prepare_release_train] {current_version} -> {next_version} "

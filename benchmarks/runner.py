@@ -118,11 +118,19 @@ def get_peak_rss_kb(pid: Optional[int] = None) -> int:
 
 
 class BenchmarkRunner:
-    def __init__(self, root_dir: Path, config_file: Optional[Path] = None):
+    def __init__(
+        self,
+        root_dir: Path,
+        config_file: Optional[Path] = None,
+        solix_bin_override: Optional[str] = None,
+        pin_cpu: bool = False,
+    ):
         self.root_dir = root_dir
         self.workloads_dir = root_dir / "benchmarks" / "workloads"
         self.baselines_dir = root_dir / "benchmarks" / "baselines"
         self.config = self._load_config(config_file or (root_dir / "benchmarks" / "config.json"))
+        self.solix_bin_override = solix_bin_override
+        self.taskset_bin = shutil.which("taskset") if (pin_cpu and OS_NAME == "Linux") else None
         self.c_bins_cache: Dict[str, Path] = {}
 
     def _load_config(self, config_path: Path) -> dict:
@@ -137,11 +145,13 @@ class BenchmarkRunner:
                 "luajit": "luajit",
                 "gcc": "gcc",
             },
-            "defaults": {"warmup": 2, "iterations": 5},
+            "defaults": {"warmup": 3, "iterations": 11},
         }
 
     def resolve_engine(self, engine_name: str) -> Optional[str]:
         if engine_name == "solix":
+            if self.solix_bin_override and Path(self.solix_bin_override).exists():
+                return str(Path(self.solix_bin_override).resolve())
             candidate_binary = os.environ.get("SOLIX_BIN")
             if candidate_binary and Path(candidate_binary).exists():
                 return str(Path(candidate_binary).resolve())
@@ -203,9 +213,10 @@ class BenchmarkRunner:
         """
         Executes a command and returns (exit_code, stdout, duration_ms, peak_rss_kb).
         """
+        actual_cmd = [self.taskset_bin, "-c", "0"] + cmd if self.taskset_bin else cmd
         start_time = time.perf_counter()
         process = subprocess.Popen(
-            cmd,
+            actual_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -467,16 +478,18 @@ def main():
     parser = argparse.ArgumentParser(description="Solix Universal Cross-Platform Benchmark Suite")
     parser.add_argument("--verify", action="store_true", help="Run correctness verification gate across all engines")
     parser.add_argument("--mode", choices=["fast", "safe", "parity"], default="fast", help="Execution mode")
-    parser.add_argument("--warmup", type=int, default=2, help="Number of warmup iterations")
-    parser.add_argument("--iterations", type=int, default=5, help="Number of timed benchmark iterations")
+    parser.add_argument("--warmup", type=int, default=3, help="Number of warmup iterations")
+    parser.add_argument("--iterations", type=int, default=11, help="Number of timed benchmark iterations")
     parser.add_argument("--workload", type=str, default=None, help="Filter to specific workload name")
+    parser.add_argument("--solix-bin", type=str, default=None, help="Explicit path to solix binary to benchmark")
+    parser.add_argument("--pin-cpu", action="store_true", help="Pin benchmark processes to CPU core 0 via taskset on Linux")
     parser.add_argument("--markdown", action="store_true", help="Output benchmark results table as Markdown")
     parser.add_argument("--save-baseline", type=str, default=None, help="Save benchmark results to JSON baseline file")
     parser.add_argument("--compare", type=str, default=None, help="Compare current run against baseline JSON")
 
     args = parser.parse_args()
     root_dir = Path(__file__).resolve().parent.parent
-    runner = BenchmarkRunner(root_dir)
+    runner = BenchmarkRunner(root_dir, solix_bin_override=args.solix_bin, pin_cpu=args.pin_cpu)
 
     if args.verify:
         print(f"=== Running Solix Benchmark Correctness Verification Gate ({OS_NAME}) ===")
@@ -491,10 +504,10 @@ def main():
                 for eng, csum in results.items():
                     print(f"       -> {eng}: {csum}")
         if not all_passed:
-            print("\n❌ Verification gate failed: output checksum mismatch detected!")
+            print("\n[FAIL] Verification gate failed: output checksum mismatch detected!")
             sys.exit(1)
         else:
-            print("\n✅ Verification gate passed: all workloads produced identical results across engines.")
+            print("\n[PASS] Verification gate passed: all workloads produced identical results across engines.")
             return
 
     # Benchmark Execution

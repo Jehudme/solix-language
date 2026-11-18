@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0005
 * **Scope:** AST Inlining & Bytecode Peephole Optimization (`crates/solix-compilation/src/phases/optimizer/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 
 ---
 

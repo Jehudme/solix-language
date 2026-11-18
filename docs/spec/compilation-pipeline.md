@@ -5,7 +5,7 @@ verify that all feature wiki keword a# Formal Specification: Compilation Pipelin
 * **Specification ID:** SPEC-0003
 * **Scope:** Compiler Architecture & Pipeline Stages (`crates/solix-compilation/src/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 * **Rust Implementation:** [`crates/solix-compilation/src/pipeline.rs`](../../crates/solix-compilation/src/pipeline.rs)
 
 ---

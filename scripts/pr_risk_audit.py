@@ -34,46 +34,43 @@ class RiskTier:
     checklist: tuple[str, ...]
 
 
+SENSITIVE_LABEL = "sensitive"
+
 RISK_TIERS: tuple[RiskTier, ...] = (
     RiskTier(
         tier_id="ci-workflow",
-        label="risk:ci-workflow",
-        title="CI Workflows, Actions & Repository Automation",
+        label=SENSITIVE_LABEL,
+        title="CI Workflows & Automation",
         severity="HIGH",
-        description="May execute privileged jobs or access CI tokens (`RELEASE_TOKEN`, `CARGO_REGISTRY_TOKEN`, `GITHUB_TOKEN`).",
+        description="Modifies CI workflows or repository automation.",
         patterns=(
             re.compile(r"^\.github/"),
         ),
         checklist=(
-            "Verify NO untrusted PR head checkout occurs inside `pull_request_target`.",
-            "Confirm top-level `permissions:` remain least-privilege (`contents: read` by default).",
-            "Ensure all third-party Actions remain pinned to full 40-char commit SHAs.",
-            "Audit shell `run:` blocks for `${{ github.event.* }}` script injection vectors.",
+            "Verify least-privilege permissions, 40-char SHA action pinning, and safe event triggers.",
         ),
     ),
     RiskTier(
         tier_id="guidelines",
-        label="risk:guidelines",
-        title="Engineering Guidelines & Pre-Merge Guardrails",
+        label=SENSITIVE_LABEL,
+        title="Engineering Guidelines & Governance Scripts",
         severity="HIGH",
-        description="Alters normative engineering rules (`GL-*`), contributor docs, or automated CI/doc enforcement scripts.",
+        description="Modifies repository guidelines, contributor policy, or doc/release automation scripts.",
         patterns=(
-            re.compile(r"^docs/internals/guidelines/"),
+            re.compile(r"^docs/guidelines/"),
             re.compile(r"^CONTRIBUTING\.md$"),
-            re.compile(r"^scripts/(doc_sync_check|verify_docs|verify_doc_links|pr_risk_audit|check_release_pr_source)\.py$"),
+            re.compile(r"^scripts/(doc_sync_check|verify_docs|verify_doc_links|pr_risk_audit|prepare_release_train|build_docs_site|sync_github_wiki)\.py$"),
         ),
         checklist=(
-            "Confirm `GL-0011` (`#![forbid(unsafe_code)]`, zero single-letter variables) and test gates are not silently weakened.",
-            "Verify `dev -> master` two-wave branch rules and CODEOWNERS protections remain intact.",
-            "Check whether `TRIGGER_MATRIX` or reviewer guidance updates are consistent across `CONTRIBUTING.md` and `GL-0014`.",
+            "Confirm governance and test gates remain consistent.",
         ),
     ),
     RiskTier(
         tier_id="supply-chain",
-        label="risk:supply-chain",
-        title="Supply Chain, Build Scripts & Packaged Assets",
+        label=SENSITIVE_LABEL,
+        title="Supply Chain, Dependencies & Build Scripts",
         severity="ELEVATED",
-        description="Executes build-time code (`build.rs`, `.py`) or changes crate dependencies and binary release assets.",
+        description="Modifies dependencies, build scripts, or packaged release assets.",
         patterns=(
             re.compile(r"^Cargo\.(toml|lock)$"),
             re.compile(r"^deny\.toml$"),
@@ -85,26 +82,22 @@ RISK_TIERS: tuple[RiskTier, ...] = (
             re.compile(r"^crates/solix-toolchain/assets/"),
         ),
         checklist=(
-            "Review newly added or bumped crates in `Cargo.toml`/`Cargo.lock` (`cargo-deny` & `cargo-audit` clean).",
-            "Inspect `build.rs` and `.py` build scripts for arbitrary network fetches or unsafe path traversal.",
-            "Confirm staged assets in `crates/solix-toolchain/assets/` exclude secret tokens and unintended binaries.",
+            "Review dependency updates and build-script changes.",
         ),
     ),
     RiskTier(
         tier_id="runtime-security",
-        label="risk:runtime-security",
-        title="Runtime Security, Archive Extraction & FFI Boundaries",
+        label=SENSITIVE_LABEL,
+        title="Runtime Security, Archives & FFI",
         severity="HIGH",
-        description="Touches `.slxarc` extraction path safety, SHA-256 checksum enforcement, native plugins, or `solix-ffi`.",
+        description="Touches archive extraction safety, SHA-256 verification, native plugins, or FFI.",
         patterns=(
             re.compile(r"^crates/solix-common/src/(project|hash)\.rs$"),
             re.compile(r"^crates/solix-runtime/src/native/"),
             re.compile(r"^crates/solix-ffi/"),
         ),
         checklist=(
-            "Verify `.slxarc` archive extraction rejects `..`, absolute paths, and backslash traversal (`Zip-Slip`).",
-            "Confirm native shared library SHA-256 verification cannot be skipped in release mode.",
-            "Audit every `unsafe` block inside `crates/solix-ffi/` for null-pointer checks and ABI lifetime safety.",
+            "Verify path safety, checksum verification, and FFI bounds.",
         ),
     ),
 )
@@ -155,7 +148,6 @@ def audit_paths(changed_paths: list[str]) -> dict[str, object]:
     """Classifies changed file paths across governance risk tiers."""
     normalized = sorted({normalize_rel_path(item) for item in changed_paths if item.strip()})
     findings: list[dict[str, object]] = []
-    labels: list[str] = []
 
     for tier in RISK_TIERS:
         matched_files = [
@@ -164,7 +156,6 @@ def audit_paths(changed_paths: list[str]) -> dict[str, object]:
             if any(pattern.search(file_path) for pattern in tier.patterns)
         ]
         if matched_files:
-            labels.append(tier.label)
             findings.append(
                 {
                     "tier_id": tier.tier_id,
@@ -177,6 +168,7 @@ def audit_paths(changed_paths: list[str]) -> dict[str, object]:
                 }
             )
 
+    labels = sorted({finding["label"] for finding in findings})
     return {
         "has_sensitive_changes": bool(findings),
         "total_changed_files": len(normalized),
@@ -186,55 +178,38 @@ def audit_paths(changed_paths: list[str]) -> dict[str, object]:
 
 
 def render_markdown_report(report: dict[str, object]) -> str:
-    """Renders a GitHub-flavored Markdown advisory for PR comments and job summaries."""
+    """Renders a concise Markdown notice for PR comments and job summaries."""
     findings = report["findings"]
     if not findings:
         return (
             f"{MARKER_COMMENT}\n"
-            "## Solix Sensitive-Path Risk Audit\n\n"
-            f"Scanned **{report['total_changed_files']}** changed file(s). "
-            "No CI, guideline, supply-chain, or runtime security paths were modified.\n"
+            f"No sensitive paths modified across {report['total_changed_files']} file(s).\n"
         )
 
     lines: list[str] = [
         MARKER_COMMENT,
-        "## Solix Sensitive-Path Reviewer Advisory (Non-Blocking)",
+        "## Sensitive Paths Modified",
         "",
-        "> [!CAUTION]",
-        "> This PR modifies sensitive repository infrastructure, governance rules, build scripts, or security-critical runtime boundaries. **This notice does not automatically fail or block valid contributions** — it highlights areas requiring careful human maintainer (`@Jehudme`) inspection.",
-        "",
-        "| Risk Tier | Label | Severity | Modified Sensitive Files |",
-        "| :--- | :--- | :---: | :--- |",
+        "| Area | Files |",
+        "| :--- | :--- |",
     ]
 
     for finding in findings:
-        file_list = "<br>".join(f"`{path}`" for path in finding["files"])
-        lines.append(
-            f"| **{finding['title']}** | `{finding['label']}` | **{finding['severity']}** | {file_list} |"
-        )
+        file_list = ", ".join(f"`{path}`" for path in finding["files"])
+        lines.append(f"| **{finding['title']}** | {file_list} |")
 
     lines.append("")
-    lines.append("### Maintainer Review Checklist")
-    lines.append("")
-    for finding in findings:
-        lines.append(f"**{finding['title']} (`{finding['label']}`)** — {finding['description']}")
-        for item in finding["checklist"]:
-            lines.append(f"- [ ] {item}")
-        lines.append("")
-
-    return "\n".join(lines).rstrip() + "\n"
+    return "\n".join(lines)
 
 
 def emit_github_annotations(report: dict[str, object]) -> None:
     """Emits non-blocking GitHub Actions warning annotations for each sensitive file."""
     for finding in report["findings"]:
-        label = finding["label"]
         title = finding["title"]
         for file_path in finding["files"]:
             print(
-                f"::warning file={file_path},title={title} ({label})::"
-                f"Sensitive file modified ({finding['severity']} review tier). "
-                "Verify maintainer CODEOWNER approval and security checklist."
+                f"::warning file={file_path},title=Sensitive Path ({title})::"
+                "Modified sensitive path; confirm maintainer review."
             )
 
 

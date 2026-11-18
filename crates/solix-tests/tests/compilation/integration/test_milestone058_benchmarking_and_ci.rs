@@ -96,12 +96,18 @@ fn test_compare_releases_table_generation() {
         "Markdown must include 01_fib_recursive workload row"
     );
     assert!(
-        rendered_markdown.contains("🚀 FASTER"),
-        "01_fib_recursive should be flagged as FASTER"
+        rendered_markdown.contains("| FASTER |"),
+        "01_fib_recursive should be flagged as FASTER without emojis"
     );
     assert!(
-        rendered_markdown.contains("⚖️ STABLE"),
-        "02_tight_loop_int should be flagged as STABLE"
+        rendered_markdown.contains("| STABLE |"),
+        "02_tight_loop_int should be flagged as STABLE without emojis"
+    );
+    assert!(
+        !rendered_markdown.contains('🚀')
+            && !rendered_markdown.contains('⚠')
+            && !rendered_markdown.contains('⚖'),
+        "Release comparison markdown must not contain emojis"
     );
 
     let rendered_json =
@@ -266,7 +272,61 @@ fn test_compare_releases_initial_baseline_mode() {
         .expect("Reading initial markdown output must succeed");
 
     assert!(rendered_markdown.contains("### Performance Baseline (v2.0.0)"));
-    assert!(rendered_markdown.contains("📌 BASELINE"));
+    assert!(rendered_markdown.contains("| BASELINE |"));
+}
+
+#[test]
+fn test_compare_releases_ignores_submillisecond_noise() {
+    let workspace_root = get_workspace_root();
+    let compare_script = workspace_root.join("benchmarks/compare_releases.py");
+    let temporary_directory =
+        tempfile::tempdir().expect("Temporary directory creation must succeed");
+    let current_baseline_path = temporary_directory.path().join("current.json");
+    let previous_baseline_path = temporary_directory.path().join("previous.json");
+
+    // 1.50 ms -> 1.70 ms is +13.3% but only +0.20 ms (below default 0.5 ms noise floor)
+    let current_json_content = r#"{
+        "metadata": {"mode": "fast"},
+        "workloads": {
+            "03_nbody_float64": {
+                "solix_fast": {"median_ms": 1.70, "rss_kb": 30000}
+            }
+        }
+    }"#;
+    let previous_json_content = r#"{
+        "metadata": {"mode": "fast"},
+        "workloads": {
+            "03_nbody_float64": {
+                "solix_fast": {"median_ms": 1.50, "rss_kb": 30000}
+            }
+        }
+    }"#;
+
+    fs::write(&current_baseline_path, current_json_content)
+        .expect("Writing current baseline JSON must succeed");
+    fs::write(&previous_baseline_path, previous_json_content)
+        .expect("Writing previous baseline JSON must succeed");
+
+    let command_status = Command::new("python3")
+        .arg(&compare_script)
+        .arg("--current")
+        .arg(&current_baseline_path)
+        .arg("--previous")
+        .arg(&previous_baseline_path)
+        .arg("--threshold-pct")
+        .arg("5.0")
+        .arg("--min-delta-ms")
+        .arg("0.5")
+        .arg("--fail-on-regression")
+        .arg("--quiet")
+        .current_dir(&workspace_root)
+        .status()
+        .expect("Executing compare_releases.py must succeed");
+
+    assert!(
+        command_status.success(),
+        "Sub-threshold micro-benchmark jitter below min-delta-ms must not trip regression gate"
+    );
 }
 
 #[test]

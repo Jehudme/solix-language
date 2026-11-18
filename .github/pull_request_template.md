@@ -4,7 +4,6 @@
 
 - **Target Branch Check:**
   - [ ] This PR targets `dev` (required for all features, bug fixes, docs, and dependency bumps).
-  - [ ] *(Maintainer release train only)* This is the official `dev -> master` Release PR.
 
 ## Verification Checklist
 
@@ -16,7 +15,7 @@
 
 ## Sensitive-Path Disclosure (GL-0014)
 
-If this PR modifies `.github/`, `docs/internals/guidelines/`, `scripts/`, `Cargo.toml`/`Cargo.lock`, `deny.toml`, `**/build.rs`, `crates/solix-toolchain/assets/`, or runtime security/FFI files, check below and briefly explain why the change is safe:
+If this PR modifies `.github/`, `docs/guidelines/`, `scripts/`, `Cargo.toml`/`Cargo.lock`, `deny.toml`, `**/build.rs`, `crates/solix-toolchain/assets/`, or runtime security/FFI files, check below and briefly explain why the change is safe:
 
 - [ ] Touches sensitive CI, governance, supply-chain, or security files (maintainer `@Jehudme` review required)
 - **Safety Rationale:**
