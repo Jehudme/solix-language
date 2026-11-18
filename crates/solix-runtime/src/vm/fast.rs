@@ -2534,7 +2534,13 @@ impl VirtualMachine {
                 self.invoke_native_callback_fast(native_fn, caller_arg_start, arg_count)?;
             let target_base = self.current_frame()?.register_base as usize;
             self.register_stack[target_base + caller_dst as usize] = call_result;
-            if let Some(&global_id) = self.context.symbol_to_function_id.get(&sym_str) {
+            if let Some(&global_id) = self.context.symbol_to_function_id.get(&sym_str)
+                && self
+                    .context
+                    .function_meta
+                    .get(global_id as usize)
+                    .is_some_and(|meta| meta.native_fn.is_some())
+            {
                 let quickened = Instruction::format_call(
                     OpCode::CallNativeDirect,
                     caller_dst,

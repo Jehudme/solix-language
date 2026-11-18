@@ -16,9 +16,13 @@ import { fileURLToPath } from 'url';
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 function locateSolixBinary() {
+    if (process.env.SOLIX_BIN && fs.existsSync(process.env.SOLIX_BIN)) {
+        return process.env.SOLIX_BIN;
+    }
+    const exeSuffix = process.platform === 'win32' ? '.exe' : '';
     const candidates = [
-        path.resolve(currentDir, '../../../target/release/solix'),
-        path.resolve(currentDir, '../../../target/debug/solix'),
+        path.resolve(currentDir, `../../../target/debug/solix${exeSuffix}`),
+        path.resolve(currentDir, `../../../target/release/solix${exeSuffix}`),
     ];
 
     for (const candidate of candidates) {
@@ -150,13 +154,11 @@ class DapClient {
     }
 }
 
-async function executeDapSession(targetProgramPath, testLabel) {
+async function executeDapSession(targetProgramPath, mainSourcePath, workspaceRoot, testLabel) {
     console.log(`\n--- Running Session: ${testLabel} ---`);
     console.log(`Target Program: ${targetProgramPath}`);
 
     const solixBinary = locateSolixBinary();
-    const workspaceRoot = path.resolve(currentDir, '../sample_workspace');
-    const mainSourcePath = path.resolve(workspaceRoot, 'src/main.slx');
 
     const dapProcess = childProcess.spawn(solixBinary, ['dap', '--stdio'], {
         stdio: ['pipe', 'pipe', 'inherit'],
@@ -305,16 +307,100 @@ async function executeDapSession(targetProgramPath, testLabel) {
 async function runFullDapSuite() {
     console.log('=== Running Solix Headless Industrial DAP E2E Conformance Suite ===');
 
-    const workspaceRoot = path.resolve(currentDir, '../sample_workspace');
-    const sourceFilePath = path.resolve(workspaceRoot, 'src/main.slx');
-    const archiveFilePath = path.resolve(workspaceRoot, 'build/debug/sample_workspace.slxarc');
+    const os = await import('os');
+    const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'solix-dap-rpc-'));
+    const srcDir = path.join(tempWorkspace, 'src');
+    const buildDir = path.join(tempWorkspace, 'build', 'debug');
+    fs.mkdirSync(srcDir, { recursive: true });
+    fs.mkdirSync(buildDir, { recursive: true });
 
-    // Run Suite A: Direct .slx Single Source File Session
-    await executeDapSession(sourceFilePath, 'Direct Source File (.slx) DAP Session');
+    const mainSourceContent = [
+        'package dap_test_workspace;',
+        '',
+        'native void println(string msg);',
+        '',
+        '',
+        '/// Represents a 2D coordinate point with reference-counted heap allocation.',
+        'class Point {',
+        '    public int32 coordinate_x;',
+        '    public int32 coordinate_y;',
+        '',
+        '    public Point(int32 initial_x, int32 initial_y) {',
+        '        this.coordinate_x = initial_x;',
+        '        this.coordinate_y = initial_y;',
+        '    }',
+        '',
+        '    /// Returns the Manhattan distance from origin.',
+        '    public int32 distance_from_origin() {',
+        '        return this.coordinate_x + this.coordinate_y;',
+        '    }',
+        '',
+        '    /// Deterministic destructor invoked upon scope exit.',
+        '    ~Point() {',
+        '        // Resource cleanup upon destruction',
+        '    }',
+        '}',
+        '',
+        '/// Static mathematical utilities class.',
+        'class MathHelper {',
+        '    /// Computes the sum of two integers.',
+        '    public static int32 add(int32 operand_first, int32 operand_second) {',
+        '        return operand_first + operand_second;',
+        '    }',
+        '}',
+        '',
+        '/// Unit test recognized by the Run Test CodeLens button.',
+        'void test_addition() {',
+        '    int32 computed_sum = MathHelper::add(15, 25);',
+        '    assert(computed_sum == 40, "Sum calculation mismatch");',
+        '}',
+        '',
+        '/// Application entry point recognized by the Run Main CodeLens button.',
+        'void main() {',
+        '    Point origin_point = new Point(10, 20);',
+        '    int32 calculated_distance = origin_point.distance_from_origin();',
+        '    println("Calculated distance from origin: 30");',
+        '',
+        '    int32 static_result = MathHelper::add(50, 50);',
+        '    println("Static addition result: 100");',
+        '}',
+        '',
+    ].join('\n');
 
-    // Run Suite B: Precompiled Archive Container (.slxarc) Session
-    if (fs.existsSync(archiveFilePath)) {
-        await executeDapSession(archiveFilePath, 'Precompiled Archive Container (.slxarc) DAP Session');
+    const sourceFilePath = path.join(srcDir, 'main.slx');
+    fs.writeFileSync(sourceFilePath, mainSourceContent, 'utf8');
+
+    const solixBinary = locateSolixBinary();
+    const compiledBinaryPath = path.join(buildDir, 'dap_test_workspace.slxb');
+    const compileResult = childProcess.spawnSync(
+        solixBinary,
+        ['compile', sourceFilePath, '--profile', 'debug', '-o', compiledBinaryPath],
+        { encoding: 'utf8' }
+    );
+    assert.strictEqual(
+        compileResult.status,
+        0,
+        `solix compile for DAP fixture failed: ${compileResult.stderr}`
+    );
+
+    try {
+        // Run Suite A: Direct .slx Single Source File Session
+        await executeDapSession(
+            sourceFilePath,
+            sourceFilePath,
+            tempWorkspace,
+            'Direct Source File (.slx) DAP Session'
+        );
+
+        // Run Suite B: Precompiled Binary (.slxb) Session
+        await executeDapSession(
+            compiledBinaryPath,
+            sourceFilePath,
+            tempWorkspace,
+            'Precompiled Binary (.slxb) DAP Session'
+        );
+    } finally {
+        fs.rmSync(tempWorkspace, { recursive: true, force: true });
     }
 
     console.log('\n=== ALL INDUSTRIAL DAP E2E CONFORMANCE TESTS PASSED CLEANLY! ===\n');

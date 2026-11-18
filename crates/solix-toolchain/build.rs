@@ -374,8 +374,10 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
         .join("..")
         .join("editors")
         .join("vscode");
-    let discovered_vsix =
-        find_vsix_in_dir(&vscode_dir).or_else(|| find_vsix_in_dir(&fallback_editors_vscode));
+    let fallback_editors_vscode_build = fallback_editors_vscode.join("build");
+    let discovered_vsix = find_vsix_in_dir(&vscode_dir)
+        .or_else(|| find_vsix_in_dir(&fallback_editors_vscode_build))
+        .or_else(|| find_vsix_in_dir(&fallback_editors_vscode));
     if let Some((_, ref vsix_path)) = discovered_vsix {
         println!("cargo:rerun-if-changed={}", vsix_path.display());
     }

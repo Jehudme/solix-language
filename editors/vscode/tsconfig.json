@@ -2,7 +2,7 @@
     "compilerOptions": {
         "module": "commonjs",
         "target": "ES2022",
-        "outDir": "out",
+        "outDir": "build/out",
         "lib": [
             "ES2022"
         ],
@@ -26,6 +26,8 @@
     "exclude": [
         "node_modules",
         ".vscode-test",
+        "build",
+        "dist",
         "out"
     ]
 }

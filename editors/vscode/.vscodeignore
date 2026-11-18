@@ -2,8 +2,10 @@
 .vscode-test/**
 src/**
 test/**
-tsconfig.json
+build/out/**
+build/test-out/**
+build/*.vsix
+tsconfig*.json
 .vscodeignore
 **/*.map
 node_modules/**
-sample_workspace/**

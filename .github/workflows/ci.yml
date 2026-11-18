@@ -247,12 +247,17 @@ jobs:
       - name: Run Python governance, wiki & security unit tests
         run: python3 -m unittest discover -s scripts/tests -v
 
-      - name: Validate and type-check VS Code extension
+      - name: Validate, compile, and run static VS Code extension checks
         working-directory: editors/vscode
         run: |
           node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8'))"
           npm ci
           npm run compile
+          npm run test:unit
+          npm run test:contract
+          npm run test:grammar
+          npm run package
+          test -f build/solix-language.vsix
 
   test-matrix:
     name: Test Matrix (${{ matrix.os }})
@@ -385,6 +390,14 @@ jobs:
         if: runner.os == 'Linux' && github.event_name == 'push'
         run: cargo build --release --bin solix
 
+      - name: Run headless VS Code LSP & DAP JSON-RPC harness (Linux)
+        if: runner.os == 'Linux'
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run compile
+          npm test
+
   pr-benchmark:
     name: PR Performance & Cross-Language Benchmark
     if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.fork == false
@@ -412,6 +425,14 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
+
+      - name: Set up Node.js for headless VS Code / LSP / DAP tests
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: editors/vscode/package-lock.json
 
       - name: Install Linux benchmark dependencies
         run: |

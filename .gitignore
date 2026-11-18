@@ -15,6 +15,11 @@ __pycache__/
 *.pyc
 cache/
 build/
+editors/vscode/node_modules/
+editors/vscode/build/
+editors/vscode/dist/
+editors/vscode/out/
+editors/vscode/*.vsix
 crates/solix-toolchain/assets/docs/
 benchmarks/workloads/*/*
 !benchmarks/workloads/*/*.slx

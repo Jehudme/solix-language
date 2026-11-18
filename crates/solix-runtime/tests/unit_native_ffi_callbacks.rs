@@ -412,3 +412,58 @@ fn test_ffi_get_vm_metric_telemetry() {
     let parallelism = unsafe { (context_wrapper.get_vm_metric)(context_ptr, 52) };
     assert!(parallelism >= 1);
 }
+
+#[test]
+fn test_call_symbol_does_not_quicken_native_wrapper_stub_into_self_recursion() {
+    use solix_common::bytecode::{
+        BinaryProgram, CompiledFunction, ConstantPoolValue, Instruction, OpCode,
+    };
+
+    // Build a binary containing a package-scoped native stub wrapper `demo_pkg::println`
+    // that delegates via CallSymbol("demo_pkg::println"), plus `demo_pkg::main` calling it twice.
+    let mut program = BinaryProgram::new();
+    program.package_name = "demo_pkg".to_string();
+    program
+        .constant_pool
+        .values
+        .push(ConstantPoolValue::String("demo_pkg::println".to_string()));
+    program
+        .constant_pool
+        .values
+        .push(ConstantPoolValue::String("hello_once".to_string()));
+    program
+        .constant_pool
+        .values
+        .push(ConstantPoolValue::String("hello_twice".to_string()));
+    program.entry_point = Some("demo_pkg::main".to_string());
+    program.entry_point_id = Some(1);
+
+    let mut stub_func = CompiledFunction::new("demo_pkg::println", 0, 1, 2);
+    stub_func.instructions = vec![
+        Instruction::format_call(OpCode::CallSymbol, 1, 0, 0, 1),
+        Instruction::format_a(OpCode::Return, 0, 0, 0, 0),
+    ];
+    program.functions.push(stub_func);
+
+    let mut main_func = CompiledFunction::new("demo_pkg::main", 0, 0, 2);
+    main_func.is_public = true;
+    main_func.instructions = vec![
+        Instruction::format_b(OpCode::LoadConst, 0, 0, 1),
+        Instruction::format_call(OpCode::CallDirect, 1, 0, 0, 1),
+        Instruction::format_b(OpCode::LoadConst, 0, 0, 2),
+        Instruction::format_call(OpCode::CallDirect, 1, 0, 0, 1),
+        Instruction::format_a(OpCode::Return, 0, 0, 0, 0),
+    ];
+    program.functions.push(main_func);
+
+    let options = RuntimeOptions::new().with_binary(program);
+    let context = RuntimeContext::new(options).expect("construct runtime context");
+    let mut vm_instance = VirtualMachine::new(context);
+    vm_instance
+        .run()
+        .expect("repeated calls to package-scoped native stub must not stack overflow");
+    assert_eq!(
+        vm_instance.stdout,
+        vec!["hello_once".to_string(), "hello_twice".to_string()]
+    );
+}
