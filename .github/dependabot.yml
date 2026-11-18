@@ -3,6 +3,8 @@ updates:
   - package-ecosystem: "cargo"
     directory: "/"
     target-branch: "dev"
+    cooldown:
+      default-days: 7
     schedule:
       interval: "weekly"
       day: "monday"
@@ -17,6 +19,8 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "dev"
+    cooldown:
+      default-days: 7
     schedule:
       interval: "weekly"
       day: "monday"
@@ -31,6 +35,8 @@ updates:
   - package-ecosystem: "npm"
     directory: "/editors/vscode"
     target-branch: "dev"
+    cooldown:
+      default-days: 7
     schedule:
       interval: "weekly"
       day: "monday"

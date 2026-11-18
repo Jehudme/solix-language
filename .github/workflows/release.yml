@@ -31,6 +31,7 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
+          package-manager-cache: false
 
       - name: Install dependencies and compile extension
         working-directory: editors/vscode
@@ -249,7 +250,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix }}
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.container && matrix.container.image || null }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/${{ join(matrix.targets, '-') }}-dist-manifest.json
@@ -286,6 +286,7 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: "0.13.0"
+          use-cache: false
 
       - name: Install cargo-zigbuild
         if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64-unknown-linux-gnu')
