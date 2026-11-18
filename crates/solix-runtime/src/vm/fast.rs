@@ -606,6 +606,64 @@ fn try_complete_array_fill_loop(
     Some(((count_minus_1 + 1) as u64) * 2)
 }
 
+#[cold]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn try_complete_special_for_loop<const TRACK_METRICS: bool>(
+    heap_buffer: &mut [u8],
+    reg_base: *mut Value,
+    inst_ptr: *const Instruction,
+    pc: usize,
+    inst: Instruction,
+    next_idx: i32,
+    bound: i32,
+) -> Result<Option<u64>, VmTrap> {
+    let flags = inst.flags();
+    if (flags & 0x20) != 0 && pc >= 2 {
+        let set_inst = unsafe { *inst_ptr.add(pc - 2) };
+        if set_inst.raw_opcode() == OpCode::SetArray as u8 {
+            let step = if (flags & 0x80) == 0 {
+                1
+            } else {
+                read_i32_fast(unsafe { &*reg_base.add((flags & 0x1F) as usize) })?
+            };
+            if let Some(done_steps) = try_complete_array_fill_loop(
+                heap_buffer,
+                reg_base,
+                set_inst,
+                inst.dst() as usize,
+                next_idx,
+                bound,
+                step,
+                (flags & 0x40) != 0,
+            ) {
+                return Ok(Some(done_steps));
+            }
+        }
+        return Ok(None);
+    }
+
+    if (flags & 0x90) == 0x10 {
+        let offset = inst.src2() as i16 as i32;
+        let loop_end_pc = pc - 1;
+        let loop_start_pc = ((loop_end_pc as i32) + offset) as usize;
+        let done_steps = try_complete_scalar_for_loop::<TRACK_METRICS>(
+            reg_base,
+            inst_ptr,
+            loop_start_pc,
+            loop_end_pc,
+            inst.dst() as usize,
+            inst.src1() as usize,
+            next_idx,
+            bound,
+            (flags & 0x40) != 0,
+        )?;
+        return Ok(Some(done_steps));
+    }
+
+    Ok(None)
+}
+
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
@@ -835,165 +893,459 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
         if all_i32 {
             regs[idx_reg] = initial_next_idx;
             let mut steps: u64 = 0;
+            let body_len = loop_end_pc.saturating_sub(start_pc);
 
-            loop {
-                let mut local_pc = start_pc;
-                while local_pc < loop_end_pc {
-                    // SAFETY: `local_pc < loop_end_pc` verified in `context::mark_scalar_for_loops`.
-                    let inst = unsafe { *inst_ptr.add(local_pc) };
-                    local_pc += 1;
+            if straight_line && body_len > 0 && body_len <= 16 {
+                #[derive(Clone, Copy)]
+                enum ScalarFastOp {
+                    ModPow2 {
+                        dst: u8,
+                        src1: u8,
+                        mask: i32,
+                    },
+                    ModMagic {
+                        dst: u8,
+                        src1: u8,
+                        imm: i32,
+                        magic: u64,
+                        shift: u32,
+                    },
+                    ModSlow {
+                        dst: u8,
+                        src1: u8,
+                        imm: i32,
+                    },
+                    Bxor {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    AddBand {
+                        dst: u8,
+                        acc: u8,
+                        src1: u8,
+                        mask_reg: u8,
+                    },
+                    Add {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    Sub {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    Mul {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    Band {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    Bor {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    Shl {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    Shr {
+                        dst: u8,
+                        src1: u8,
+                        src2: u8,
+                    },
+                    AddImm {
+                        dst: u8,
+                        src1: u8,
+                        imm: i32,
+                    },
+                    SubImm {
+                        dst: u8,
+                        src1: u8,
+                        imm: i32,
+                    },
+                    MulImm {
+                        dst: u8,
+                        src1: u8,
+                        imm: i32,
+                    },
+                    Neg {
+                        dst: u8,
+                        src1: u8,
+                    },
+                    Bnot {
+                        dst: u8,
+                        src1: u8,
+                    },
+                    Mov {
+                        dst: u8,
+                        src1: u8,
+                    },
+                    LoadI32 {
+                        dst: u8,
+                        imm: i32,
+                    },
+                }
+
+                let mut decoded = [ScalarFastOp::Mov { dst: 0, src1: 0 }; 16];
+                for (slot_idx, slot) in decoded[..body_len].iter_mut().enumerate() {
+                    let inst = unsafe { *inst_ptr.add(start_pc + slot_idx) };
+                    let dst = inst.dst() as u8;
+                    let src1 = inst.src1() as u8;
+                    let src2 = inst.src2() as u8;
+                    *slot = match inst.raw_opcode() {
+                        OP_MOD_I32_IMM => {
+                            let imm_val = inst.src2() as i16 as i32;
+                            if imm_val > 0 && imm_val < 1024 {
+                                if (imm_val & (imm_val - 1)) == 0 {
+                                    ScalarFastOp::ModPow2 {
+                                        dst,
+                                        src1,
+                                        mask: imm_val - 1,
+                                    }
+                                } else {
+                                    let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
+                                    ScalarFastOp::ModMagic {
+                                        dst,
+                                        src1,
+                                        imm: imm_val,
+                                        magic,
+                                        shift,
+                                    }
+                                }
+                            } else {
+                                ScalarFastOp::ModSlow {
+                                    dst,
+                                    src1,
+                                    imm: imm_val,
+                                }
+                            }
+                        }
+                        OP_BXOR => ScalarFastOp::Bxor { dst, src1, src2 },
+                        OP_ADD_BAND_I32 => ScalarFastOp::AddBand {
+                            dst,
+                            acc: inst.flags(),
+                            src1,
+                            mask_reg: src2,
+                        },
+                        OP_ADD_I32 => ScalarFastOp::Add { dst, src1, src2 },
+                        OP_SUB_I32 => ScalarFastOp::Sub { dst, src1, src2 },
+                        OP_MUL_I32 => ScalarFastOp::Mul { dst, src1, src2 },
+                        OP_BAND => ScalarFastOp::Band { dst, src1, src2 },
+                        OP_BOR => ScalarFastOp::Bor { dst, src1, src2 },
+                        OP_SHL => ScalarFastOp::Shl { dst, src1, src2 },
+                        OP_SHR => ScalarFastOp::Shr { dst, src1, src2 },
+                        OP_ADD_I32_IMM => ScalarFastOp::AddImm {
+                            dst,
+                            src1,
+                            imm: inst.src2() as i16 as i32,
+                        },
+                        OP_SUB_I32_IMM => ScalarFastOp::SubImm {
+                            dst,
+                            src1,
+                            imm: inst.src2() as i16 as i32,
+                        },
+                        OP_MUL_I32_IMM => ScalarFastOp::MulImm {
+                            dst,
+                            src1,
+                            imm: inst.src2() as i16 as i32,
+                        },
+                        OP_NEG_I32 => ScalarFastOp::Neg { dst, src1 },
+                        OP_BNOT => ScalarFastOp::Bnot { dst, src1 },
+                        OP_MOV => ScalarFastOp::Mov { dst, src1 },
+                        _ => ScalarFastOp::LoadI32 {
+                            dst,
+                            imm: inst.imm32_signed(),
+                        },
+                    };
+                }
+
+                let decoded_slice = &decoded[..body_len];
+                loop {
+                    for &scalar_op in decoded_slice {
+                        match scalar_op {
+                            ScalarFastOp::ModPow2 { dst, src1, mask } => {
+                                let val_a = regs[(src1 as usize) & 31];
+                                let rem_val = if val_a >= 0 {
+                                    val_a & mask
+                                } else {
+                                    rem_i32_cold(val_a, mask + 1)?
+                                };
+                                regs[(dst as usize) & 31] = rem_val;
+                            }
+                            ScalarFastOp::ModMagic {
+                                dst,
+                                src1,
+                                imm,
+                                magic,
+                                shift,
+                            } => {
+                                let val_a = regs[(src1 as usize) & 31];
+                                let rem_val = if val_a >= 0 {
+                                    let quotient =
+                                        (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
+                                    val_a - quotient.wrapping_mul(imm)
+                                } else {
+                                    rem_i32_cold(val_a, imm)?
+                                };
+                                regs[(dst as usize) & 31] = rem_val;
+                            }
+                            ScalarFastOp::ModSlow { dst, src1, imm } => {
+                                regs[(dst as usize) & 31] =
+                                    rem_i32_cold(regs[(src1 as usize) & 31], imm)?;
+                            }
+                            ScalarFastOp::Bxor { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31] ^ regs[(src2 as usize) & 31];
+                            }
+                            ScalarFastOp::AddBand {
+                                dst,
+                                acc,
+                                src1,
+                                mask_reg,
+                            } => {
+                                regs[(dst as usize) & 31] = regs[(acc as usize) & 31]
+                                    .wrapping_add(regs[(src1 as usize) & 31])
+                                    & regs[(mask_reg as usize) & 31];
+                            }
+                            ScalarFastOp::Add { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] = regs[(src1 as usize) & 31]
+                                    .wrapping_add(regs[(src2 as usize) & 31]);
+                            }
+                            ScalarFastOp::Sub { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] = regs[(src1 as usize) & 31]
+                                    .wrapping_sub(regs[(src2 as usize) & 31]);
+                            }
+                            ScalarFastOp::Mul { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] = regs[(src1 as usize) & 31]
+                                    .wrapping_mul(regs[(src2 as usize) & 31]);
+                            }
+                            ScalarFastOp::Band { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31] & regs[(src2 as usize) & 31];
+                            }
+                            ScalarFastOp::Bor { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31] | regs[(src2 as usize) & 31];
+                            }
+                            ScalarFastOp::Shl { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] = regs[(src1 as usize) & 31]
+                                    .wrapping_shl((regs[(src2 as usize) & 31] & 31) as u32);
+                            }
+                            ScalarFastOp::Shr { dst, src1, src2 } => {
+                                regs[(dst as usize) & 31] = regs[(src1 as usize) & 31]
+                                    .wrapping_shr((regs[(src2 as usize) & 31] & 31) as u32);
+                            }
+                            ScalarFastOp::AddImm { dst, src1, imm } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31].wrapping_add(imm);
+                            }
+                            ScalarFastOp::SubImm { dst, src1, imm } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31].wrapping_sub(imm);
+                            }
+                            ScalarFastOp::MulImm { dst, src1, imm } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31].wrapping_mul(imm);
+                            }
+                            ScalarFastOp::Neg { dst, src1 } => {
+                                regs[(dst as usize) & 31] =
+                                    regs[(src1 as usize) & 31].wrapping_neg();
+                            }
+                            ScalarFastOp::Bnot { dst, src1 } => {
+                                regs[(dst as usize) & 31] = !regs[(src1 as usize) & 31];
+                            }
+                            ScalarFastOp::Mov { dst, src1 } => {
+                                regs[(dst as usize) & 31] = regs[(src1 as usize) & 31];
+                            }
+                            ScalarFastOp::LoadI32 { dst, imm } => {
+                                regs[(dst as usize) & 31] = imm;
+                            }
+                        }
+                    }
+
+                    if TRACK_METRICS {
+                        steps += (body_len as u64) + 1;
+                    }
+                    let next_idx = regs[idx_reg].wrapping_add(1);
+                    regs[idx_reg] = next_idx;
+                    let keep_going = if is_lte {
+                        next_idx <= bound
+                    } else {
+                        next_idx < bound
+                    };
+                    if !keep_going {
+                        break;
+                    }
+                }
+            } else {
+                loop {
+                    let mut local_pc = start_pc;
+                    while local_pc < loop_end_pc {
+                        // SAFETY: `local_pc < loop_end_pc` verified in `context::mark_scalar_for_loops`.
+                        let inst = unsafe { *inst_ptr.add(local_pc) };
+                        local_pc += 1;
+                        if TRACK_METRICS {
+                            steps += 1;
+                        }
+                        match inst.raw_opcode() {
+                            OP_MOD_I32_IMM => {
+                                let imm_val = inst.src2() as i16 as i32;
+                                let val_a = regs[inst.src1() as usize];
+                                let rem_val = if val_a >= 0 && imm_val > 0 && imm_val < 1024 {
+                                    if (imm_val & (imm_val - 1)) == 0 {
+                                        val_a & (imm_val - 1)
+                                    } else {
+                                        let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
+                                        let quotient =
+                                            (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
+                                        val_a - quotient.wrapping_mul(imm_val)
+                                    }
+                                } else {
+                                    rem_i32_cold(val_a, imm_val)?
+                                };
+                                regs[inst.dst() as usize] = rem_val;
+                            }
+                            OP_BXOR => {
+                                regs[inst.dst() as usize] =
+                                    regs[inst.src1() as usize] ^ regs[inst.src2() as usize];
+                            }
+                            OP_ADD_BAND_I32 => {
+                                regs[inst.dst() as usize] = regs[inst.flags() as usize]
+                                    .wrapping_add(regs[inst.src1() as usize])
+                                    & regs[inst.src2() as usize];
+                            }
+                            OP_ADD_I32 => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_add(regs[inst.src2() as usize]);
+                            }
+                            OP_SUB_I32 => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_sub(regs[inst.src2() as usize]);
+                            }
+                            OP_MUL_I32 => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_mul(regs[inst.src2() as usize]);
+                            }
+                            OP_ADD_I32_IMM => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_add(inst.src2() as i16 as i32);
+                            }
+                            OP_SUB_I32_IMM => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_sub(inst.src2() as i16 as i32);
+                            }
+                            OP_MUL_I32_IMM => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_mul(inst.src2() as i16 as i32);
+                            }
+                            OP_MOV => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize];
+                            }
+                            OP_LOAD_I32 => {
+                                regs[inst.dst() as usize] = inst.imm32_signed();
+                            }
+                            OP_BAND => {
+                                regs[inst.dst() as usize] =
+                                    regs[inst.src1() as usize] & regs[inst.src2() as usize];
+                            }
+                            OP_BOR => {
+                                regs[inst.dst() as usize] =
+                                    regs[inst.src1() as usize] | regs[inst.src2() as usize];
+                            }
+                            OP_SHL => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_shl((regs[inst.src2() as usize] & 31) as u32);
+                            }
+                            OP_SHR => {
+                                regs[inst.dst() as usize] = regs[inst.src1() as usize]
+                                    .wrapping_shr((regs[inst.src2() as usize] & 31) as u32);
+                            }
+                            OP_NEG_I32 => {
+                                regs[inst.dst() as usize] =
+                                    regs[inst.src1() as usize].wrapping_neg();
+                            }
+                            OP_BNOT => {
+                                regs[inst.dst() as usize] = !regs[inst.src1() as usize];
+                            }
+                            OP_JUMP => {
+                                local_pc = ((local_pc as i32 - 1) + inst.jump_offset()) as usize;
+                            }
+                            OP_JUMP_I32_IMM => {
+                                let val_a = regs[inst.dst() as usize];
+                                let imm_val = inst.src1() as i16 as i32;
+                                let take = match inst.flags() {
+                                    0 => val_a == imm_val,
+                                    1 => val_a != imm_val,
+                                    2 => val_a < imm_val,
+                                    3 => val_a <= imm_val,
+                                    4 => val_a > imm_val,
+                                    _ => val_a >= imm_val,
+                                };
+                                if take {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                            OP_JUMP_LT_I32 => {
+                                if regs[inst.dst() as usize] < regs[inst.src1() as usize] {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                            OP_JUMP_LTE_I32 => {
+                                if regs[inst.dst() as usize] <= regs[inst.src1() as usize] {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                            OP_JUMP_GT_I32 => {
+                                if regs[inst.dst() as usize] > regs[inst.src1() as usize] {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                            OP_JUMP_GTE_I32 => {
+                                if regs[inst.dst() as usize] >= regs[inst.src1() as usize] {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                            OP_JUMP_EQ_I32 => {
+                                if regs[inst.dst() as usize] == regs[inst.src1() as usize] {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                            _ => {
+                                if regs[inst.dst() as usize] != regs[inst.src1() as usize] {
+                                    local_pc = ((local_pc as i32 - 1) + (inst.src2() as i16 as i32))
+                                        as usize;
+                                }
+                            }
+                        }
+                    }
+
+                    let next_idx = regs[idx_reg].wrapping_add(1);
+                    regs[idx_reg] = next_idx;
                     if TRACK_METRICS {
                         steps += 1;
                     }
-                    match inst.raw_opcode() {
-                        OP_MOD_I32_IMM => {
-                            let imm_val = inst.src2() as i16 as i32;
-                            let val_a = regs[inst.src1() as usize];
-                            let rem_val = if val_a >= 0 && imm_val > 0 && imm_val < 1024 {
-                                if (imm_val & (imm_val - 1)) == 0 {
-                                    val_a & (imm_val - 1)
-                                } else {
-                                    let (magic, shift) = MOD_MAGIC_TABLE[imm_val as usize];
-                                    let quotient =
-                                        (((val_a as u64).wrapping_mul(magic)) >> shift) as i32;
-                                    val_a - quotient.wrapping_mul(imm_val)
-                                }
-                            } else {
-                                rem_i32_cold(val_a, imm_val)?
-                            };
-                            regs[inst.dst() as usize] = rem_val;
-                        }
-                        OP_BXOR => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize] ^ regs[inst.src2() as usize];
-                        }
-                        OP_ADD_BAND_I32 => {
-                            regs[inst.dst() as usize] = regs[inst.flags() as usize]
-                                .wrapping_add(regs[inst.src1() as usize])
-                                & regs[inst.src2() as usize];
-                        }
-                        OP_ADD_I32 => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize].wrapping_add(regs[inst.src2() as usize]);
-                        }
-                        OP_SUB_I32 => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize].wrapping_sub(regs[inst.src2() as usize]);
-                        }
-                        OP_MUL_I32 => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize].wrapping_mul(regs[inst.src2() as usize]);
-                        }
-                        OP_ADD_I32_IMM => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize].wrapping_add(inst.src2() as i16 as i32);
-                        }
-                        OP_SUB_I32_IMM => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize].wrapping_sub(inst.src2() as i16 as i32);
-                        }
-                        OP_MUL_I32_IMM => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize].wrapping_mul(inst.src2() as i16 as i32);
-                        }
-                        OP_MOV => {
-                            regs[inst.dst() as usize] = regs[inst.src1() as usize];
-                        }
-                        OP_LOAD_I32 => {
-                            regs[inst.dst() as usize] = inst.imm32_signed();
-                        }
-                        OP_BAND => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize] & regs[inst.src2() as usize];
-                        }
-                        OP_BOR => {
-                            regs[inst.dst() as usize] =
-                                regs[inst.src1() as usize] | regs[inst.src2() as usize];
-                        }
-                        OP_SHL => {
-                            regs[inst.dst() as usize] = regs[inst.src1() as usize]
-                                .wrapping_shl((regs[inst.src2() as usize] & 31) as u32);
-                        }
-                        OP_SHR => {
-                            regs[inst.dst() as usize] = regs[inst.src1() as usize]
-                                .wrapping_shr((regs[inst.src2() as usize] & 31) as u32);
-                        }
-                        OP_NEG_I32 => {
-                            regs[inst.dst() as usize] = regs[inst.src1() as usize].wrapping_neg();
-                        }
-                        OP_BNOT => {
-                            regs[inst.dst() as usize] = !regs[inst.src1() as usize];
-                        }
-                        OP_JUMP => {
-                            local_pc = ((local_pc as i32 - 1) + inst.jump_offset()) as usize;
-                        }
-                        OP_JUMP_I32_IMM => {
-                            let val_a = regs[inst.dst() as usize];
-                            let imm_val = inst.src1() as i16 as i32;
-                            let take = match inst.flags() {
-                                0 => val_a == imm_val,
-                                1 => val_a != imm_val,
-                                2 => val_a < imm_val,
-                                3 => val_a <= imm_val,
-                                4 => val_a > imm_val,
-                                _ => val_a >= imm_val,
-                            };
-                            if take {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
-                        OP_JUMP_LT_I32 => {
-                            if regs[inst.dst() as usize] < regs[inst.src1() as usize] {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
-                        OP_JUMP_LTE_I32 => {
-                            if regs[inst.dst() as usize] <= regs[inst.src1() as usize] {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
-                        OP_JUMP_GT_I32 => {
-                            if regs[inst.dst() as usize] > regs[inst.src1() as usize] {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
-                        OP_JUMP_GTE_I32 => {
-                            if regs[inst.dst() as usize] >= regs[inst.src1() as usize] {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
-                        OP_JUMP_EQ_I32 => {
-                            if regs[inst.dst() as usize] == regs[inst.src1() as usize] {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
-                        _ => {
-                            if regs[inst.dst() as usize] != regs[inst.src1() as usize] {
-                                local_pc =
-                                    ((local_pc as i32 - 1) + (inst.src2() as i16 as i32)) as usize;
-                            }
-                        }
+                    let keep_going = if is_lte {
+                        next_idx <= bound
+                    } else {
+                        next_idx < bound
+                    };
+                    if !keep_going {
+                        break;
                     }
-                }
-
-                let next_idx = regs[idx_reg].wrapping_add(1);
-                regs[idx_reg] = next_idx;
-                if TRACK_METRICS {
-                    steps += 1;
-                }
-                let keep_going = if is_lte {
-                    next_idx <= bound
-                } else {
-                    next_idx < bound
-                };
-                if !keep_going {
-                    break;
                 }
             }
 
@@ -1027,11 +1379,11 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
                     let acc_ref = unsafe { &*reg_base.add(inst.flags() as usize) };
-                    if let (Value::F64(l), Value::F64(r), Value::F64(a)) =
+                    if let (Value::F64(lhs), Value::F64(rhs), Value::F64(acc)) =
                         (*left_ref, *right_ref, *acc_ref)
                     {
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(l * r + a);
+                            *reg_base.add(inst.dst() as usize) = Value::F64(lhs * rhs + acc);
                         }
                     } else {
                         return Err(mul_add_f64_type_mismatch_cold(left_ref, right_ref, acc_ref));
@@ -1040,9 +1392,9 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                 OP_ADD_F64 => {
                     let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(l), Value::F64(r)) = (*left_ref, *right_ref) {
+                    if let (Value::F64(lhs), Value::F64(rhs)) = (*left_ref, *right_ref) {
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(l + r);
+                            *reg_base.add(inst.dst() as usize) = Value::F64(lhs + rhs);
                         }
                     } else {
                         return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
@@ -1051,9 +1403,9 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                 OP_SUB_F64 => {
                     let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(l), Value::F64(r)) = (*left_ref, *right_ref) {
+                    if let (Value::F64(lhs), Value::F64(rhs)) = (*left_ref, *right_ref) {
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(l - r);
+                            *reg_base.add(inst.dst() as usize) = Value::F64(lhs - rhs);
                         }
                     } else {
                         return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
@@ -1062,9 +1414,9 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                 OP_MUL_F64 => {
                     let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(l), Value::F64(r)) = (*left_ref, *right_ref) {
+                    if let (Value::F64(lhs), Value::F64(rhs)) = (*left_ref, *right_ref) {
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(l * r);
+                            *reg_base.add(inst.dst() as usize) = Value::F64(lhs * rhs);
                         }
                     } else {
                         return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
@@ -1073,9 +1425,9 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                 OP_DIV_F64 => {
                     let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    if let (Value::F64(l), Value::F64(r)) = (*left_ref, *right_ref) {
+                    if let (Value::F64(lhs), Value::F64(rhs)) = (*left_ref, *right_ref) {
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(l / r);
+                            *reg_base.add(inst.dst() as usize) = Value::F64(lhs / rhs);
                         }
                     } else {
                         return Err(f64_pair_type_mismatch_error(left_ref, right_ref));
@@ -1083,9 +1435,9 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                 }
                 OP_NEG_F64 => {
                     let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    if let Value::F64(f) = *val_ref {
+                    if let Value::F64(float_val) = *val_ref {
                         unsafe {
-                            *reg_base.add(inst.dst() as usize) = Value::F64(-f);
+                            *reg_base.add(inst.dst() as usize) = Value::F64(-float_val);
                         }
                     } else {
                         return Err(f64_type_mismatch_error(val_ref));
@@ -1147,111 +1499,119 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     }
                 }
                 OP_ADD_I32 => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let (a, b) = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        (x, y)
-                    } else {
-                        read_i32_pair_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let (lhs, rhs) =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            (val_a, val_b)
+                        } else {
+                            read_i32_pair_slow(left_ref, right_ref)?
+                        };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_add(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(lhs.wrapping_add(rhs));
                     }
                 }
                 OP_SUB_I32 => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let (a, b) = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        (x, y)
-                    } else {
-                        read_i32_pair_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let (lhs, rhs) =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            (val_a, val_b)
+                        } else {
+                            read_i32_pair_slow(left_ref, right_ref)?
+                        };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_sub(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(lhs.wrapping_sub(rhs));
                     }
                 }
                 OP_MUL_I32 => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let (a, b) = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        (x, y)
-                    } else {
-                        read_i32_pair_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let (lhs, rhs) =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            (val_a, val_b)
+                        } else {
+                            read_i32_pair_slow(left_ref, right_ref)?
+                        };
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(a.wrapping_mul(b));
+                        *reg_base.add(inst.dst() as usize) = Value::I32(lhs.wrapping_mul(rhs));
                     }
                 }
                 OP_BAND => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let res = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        Value::I32(x & y)
-                    } else {
-                        band_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let res =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            Value::I32(val_a & val_b)
+                        } else {
+                            band_slow(left_ref, right_ref)?
+                        };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = res;
                     }
                 }
                 OP_BOR => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let res = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        Value::I32(x | y)
-                    } else {
-                        bor_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let res =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            Value::I32(val_a | val_b)
+                        } else {
+                            bor_slow(left_ref, right_ref)?
+                        };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = res;
                     }
                 }
                 OP_BXOR => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let res = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        Value::I32(x ^ y)
-                    } else {
-                        bxor_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let res =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            Value::I32(val_a ^ val_b)
+                        } else {
+                            bxor_slow(left_ref, right_ref)?
+                        };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = res;
                     }
                 }
                 OP_SHL => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let res = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        Value::I32(x.wrapping_shl((y & 31) as u32))
-                    } else {
-                        shl_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let res =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            Value::I32(val_a.wrapping_shl((val_b & 31) as u32))
+                        } else {
+                            shl_slow(left_ref, right_ref)?
+                        };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = res;
                     }
                 }
                 OP_SHR => {
-                    let l = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let r = unsafe { &*reg_base.add(inst.src2() as usize) };
-                    let res = if let (Value::I32(x), Value::I32(y)) = (*l, *r) {
-                        Value::I32(x.wrapping_shr((y & 31) as u32))
-                    } else {
-                        shr_slow(l, r)?
-                    };
+                    let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                    let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
+                    let res =
+                        if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            Value::I32(val_a.wrapping_shr((val_b & 31) as u32))
+                        } else {
+                            shr_slow(left_ref, right_ref)?
+                        };
                     unsafe {
                         *reg_base.add(inst.dst() as usize) = res;
                     }
                 }
                 OP_NEG_I32 => {
-                    let v = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                    let val = read_i32_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
                     unsafe {
-                        *reg_base.add(inst.dst() as usize) = Value::I32(v.wrapping_neg());
+                        *reg_base.add(inst.dst() as usize) = Value::I32(val.wrapping_neg());
                     }
                 }
                 OP_BNOT => {
                     let val_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
-                    let res = if let Value::I32(v) = *val_ref {
-                        Value::I32(!v)
+                    let res = if let Value::I32(int_val) = *val_ref {
+                        Value::I32(!int_val)
                     } else {
                         bnot_slow(val_ref)?
                     };
@@ -1260,8 +1620,8 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     }
                 }
                 OP_MOV => unsafe {
-                    let v = *reg_base.add(inst.src1() as usize);
-                    *reg_base.add(inst.dst() as usize) = v;
+                    let moved_val = *reg_base.add(inst.src1() as usize);
+                    *reg_base.add(inst.dst() as usize) = moved_val;
                 },
                 OP_LOAD_I32 => unsafe {
                     *reg_base.add(inst.dst() as usize) = Value::I32(inst.imm32_signed());
@@ -1288,8 +1648,8 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     let first_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
                     let second_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                     let (val_a, val_b) =
-                        if let (Value::I32(l), Value::I32(r)) = (*first_ref, *second_ref) {
-                            (l, r)
+                        if let (Value::I32(lhs), Value::I32(rhs)) = (*first_ref, *second_ref) {
+                            (lhs, rhs)
                         } else if raw == OP_JUMP_EQ_I32 || raw == OP_JUMP_NEQ_I32 {
                             let eq = values_equal_slow(first_ref, second_ref);
                             let take = if raw == OP_JUMP_EQ_I32 { eq } else { !eq };
@@ -4784,42 +5144,19 @@ impl VirtualMachine {
                             next_idx <= bound
                         };
                         if keep_going {
-                            if !SINGLE_STEP && (flags & 0x20) != 0 && pc >= 2 {
-                                let set_inst = unsafe { *inst_ptr.add(pc - 2) };
-                                if set_inst.raw_opcode() == OpCode::SetArray as u8
-                                    && let Some(done_steps) = try_complete_array_fill_loop(
+                            if !SINGLE_STEP
+                                && (flags & 0x30) != 0
+                                && let Some(done_steps) =
+                                    try_complete_special_for_loop::<TRACK_METRICS>(
                                         &mut self.heap.buffer,
                                         reg_base,
-                                        set_inst,
-                                        inst.dst() as usize,
+                                        inst_ptr,
+                                        pc,
+                                        inst,
                                         next_idx,
                                         bound,
-                                        step,
-                                        (flags & 0x40) != 0,
-                                    )
-                                {
-                                    if TRACK_METRICS {
-                                        local_inst_count += done_steps;
-                                    }
-                                } else {
-                                    let offset = inst.src2() as i16 as i32;
-                                    pc = ((pc as i32 - 1) + offset) as usize;
-                                }
-                            } else if !SINGLE_STEP && (flags & 0x90) == 0x10 {
-                                let offset = inst.src2() as i16 as i32;
-                                let loop_end_pc = pc - 1;
-                                let loop_start_pc = ((loop_end_pc as i32) + offset) as usize;
-                                let done_steps = try_complete_scalar_for_loop::<TRACK_METRICS>(
-                                    reg_base,
-                                    inst_ptr,
-                                    loop_start_pc,
-                                    loop_end_pc,
-                                    inst.dst() as usize,
-                                    inst.src1() as usize,
-                                    next_idx,
-                                    bound,
-                                    (flags & 0x40) != 0,
-                                )?;
+                                    )?
+                            {
                                 if TRACK_METRICS {
                                     local_inst_count += done_steps;
                                 }

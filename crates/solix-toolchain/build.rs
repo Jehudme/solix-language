@@ -228,7 +228,9 @@ fn filter_slxarc_for_target(
             let name = name_cow.as_ref();
             if let Some(after_lib) = name.strip_prefix("lib/")
                 && !after_lib.contains('/')
-                && qualified_host_files.iter().any(|f| f == after_lib)
+                && qualified_host_files
+                    .iter()
+                    .any(|qualified_name| qualified_name == after_lib)
             {
                 has_duplicate_unqualified = true;
                 break;
@@ -257,7 +259,11 @@ fn filter_slxarc_for_target(
                 {
                     continue;
                 }
-                if !after_lib.contains('/') && qualified_host_files.iter().any(|f| f == after_lib) {
+                if !after_lib.contains('/')
+                    && qualified_host_files
+                        .iter()
+                        .any(|qualified_name| qualified_name == after_lib)
+                {
                     continue;
                 }
             }
@@ -292,6 +298,28 @@ fn write_packed_blob(out_path: &Path, entries: &[(String, Vec<u8>)]) {
     let unchanged = fs::read(out_path).ok().as_deref() == Some(packed.as_slice());
     if !unchanged && let Ok(mut file) = File::create(out_path) {
         let _ = file.write_all(&packed);
+    }
+}
+
+fn write_zip_blob(out_path: &Path, entries: &[(String, Vec<u8>)]) {
+    let mut compressed: Vec<u8> = Vec::new();
+    if !entries.is_empty() {
+        let mut out_buf = std::io::Cursor::new(&mut compressed);
+        let mut zip_out = zip::ZipWriter::new(&mut out_buf);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .compression_level(Some(9))
+            .last_modified_time(zip::DateTime::default());
+        for (rel_path, payload) in entries {
+            if zip_out.start_file(rel_path, options).is_ok() {
+                let _ = zip_out.write_all(payload);
+            }
+        }
+        let _ = zip_out.finish();
+    }
+    let unchanged = fs::read(out_path).ok().as_deref() == Some(compressed.as_slice());
+    if !unchanged && let Ok(mut file) = File::create(out_path) {
+        let _ = file.write_all(&compressed);
     }
 }
 
@@ -339,7 +367,7 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
         }
     }
     let wiki_pack_path = out_dir.join("embedded_wiki.pack");
-    write_packed_blob(&wiki_pack_path, &packed_wiki);
+    write_zip_blob(&wiki_pack_path, &packed_wiki);
 
     let fallback_editors_vscode = manifest_dir
         .join("..")

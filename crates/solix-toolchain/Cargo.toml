@@ -33,6 +33,7 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+zip.workspace = true
 
 [build-dependencies]
 zip.workspace = true

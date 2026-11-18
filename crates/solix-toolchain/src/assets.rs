@@ -324,16 +324,72 @@ pub fn materialize_embedded_vscode_extension() -> Result<Option<PathBuf>> {
 ///
 /// # Errors
 /// Returns an error if any embedded path is malformed or filesystem writes fail.
+fn materialize_relative_file(
+    cache_directory: &Path,
+    relative_path: &str,
+    file_bytes: &[u8],
+) -> Result<()> {
+    let mut target_path = cache_directory.to_path_buf();
+    for segment in relative_path.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." || segment.contains('\\') || segment.contains('\0') {
+            bail!("Unsafe embedded wiki asset path: '{relative_path}'");
+        }
+        target_path.push(segment);
+    }
+    write_bytes_if_changed(&target_path, file_bytes)
+}
+
+/// Materializes all embedded offline HTML wiki pages into cache if compiled in.
+///
+/// # Errors
+/// Returns an error if filesystem creation or asset writes fail.
 pub fn materialize_embedded_wiki_docs() -> Result<Option<PathBuf>> {
     if EMBEDDED_WIKI_DOCS_PACK.is_empty() {
         return Ok(None);
     }
+
+    let cache_directory = resolve_wiki_cache_dir();
+
+    if EMBEDDED_WIKI_DOCS_PACK.starts_with(b"PK\x03\x04") {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(EMBEDDED_WIKI_DOCS_PACK))
+            .context("Failed to open embedded compressed wiki documentation archive")?;
+        if archive.is_empty() {
+            return Ok(None);
+        }
+        fs::create_dir_all(&cache_directory).with_context(|| {
+            format!(
+                "Failed to create wiki cache directory at '{}'",
+                cache_directory.display()
+            )
+        })?;
+        let mut file_bytes = Vec::new();
+        for entry_idx in 0..archive.len() {
+            let mut entry = archive
+                .by_index(entry_idx)
+                .context("Failed to read embedded wiki entry")?;
+            if entry.is_dir() {
+                continue;
+            }
+            let relative_path = entry
+                .name()
+                .context("Invalid UTF-8 path in embedded wiki archive")?
+                .into_owned();
+            file_bytes.clear();
+            std::io::Read::read_to_end(&mut entry, &mut file_bytes)
+                .with_context(|| format!("Failed to decompress wiki page '{relative_path}'"))?;
+            materialize_relative_file(&cache_directory, &relative_path, &file_bytes)?;
+        }
+        return Ok(Some(cache_directory));
+    }
+
     let embedded_wiki_docs = decode_packed_assets(EMBEDDED_WIKI_DOCS_PACK)?;
     if embedded_wiki_docs.is_empty() {
         return Ok(None);
     }
 
-    let cache_directory = resolve_wiki_cache_dir();
     fs::create_dir_all(&cache_directory).with_context(|| {
         format!(
             "Failed to create wiki cache directory at '{}'",
@@ -342,17 +398,7 @@ pub fn materialize_embedded_wiki_docs() -> Result<Option<PathBuf>> {
     })?;
 
     for (relative_path, file_bytes) in embedded_wiki_docs {
-        let mut target_path = cache_directory.clone();
-        for segment in relative_path.split('/') {
-            if segment.is_empty() || segment == "." {
-                continue;
-            }
-            if segment == ".." || segment.contains('\\') || segment.contains('\0') {
-                bail!("Unsafe embedded wiki asset path: '{relative_path}'");
-            }
-            target_path.push(segment);
-        }
-        write_bytes_if_changed(&target_path, file_bytes)?;
+        materialize_relative_file(&cache_directory, relative_path, file_bytes)?;
     }
 
     Ok(Some(cache_directory))
