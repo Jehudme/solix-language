@@ -67,29 +67,33 @@ When `git diff main...HEAD` reveals modifications in any left-hand subsystem, th
 | **Native Interop & FFI**<br>`crates/solix-runtime/src/native/` | N/A | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
 | **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/solix_scaffold.py`<br>`crates/solix-toolchain/assets/scripts/solix_build.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
+| **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(pr_risk_audit\|check_release_pr_source\|build_docs_site\|sync_github_wiki).py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/internals/guidelines/pr-and-release-governance.md`<br>`docs/internals/guidelines/branching-conventions.md` |
+
+> [!NOTE]
+> User-facing documentation (`docs/guide/`, `docs/wiki/`, `docs/features/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository. [`scripts/build_docs_site.py`](../../../scripts/build_docs_site.py) compiles these files into the offline `solix wiki` bundle matching every binary release version, and optional one-way GitHub Wiki mirroring reads from this Git Single Source of Truth.
 
 ---
 
 ## 4. Post-Milestone Synchronization Workflow
 
-At the conclusion of each milestone:
+At the conclusion of each milestone or Wave 1 integration PR (`feature/* -> dev`):
 
 ```mermaid
 flowchart TD
-    A["git diff main...HEAD --name-only"] --> B["Identify Modified Subsystems"]
-    B --> C["Lookup in Trigger Matrix"]
-    C --> D["Update Affected Docs (Guide, Spec, Wiki, Architecture)"]
-    D --> E["Run python3 scripts/doc_sync_check.py --base main"]
-    E --> F["Run python3 scripts/verify_doc_links.py"]
-    F --> G["Run cargo test & cargo clippy (Double Clean Pass)"]
-    G --> H["Commit & Submit Milestone PR"]
+    DiffStep["git diff origin/dev...HEAD --name-only"] --> IdentifyStep["Identify Modified Subsystems"]
+    IdentifyStep --> MatrixStep["Lookup in Trigger Matrix"]
+    MatrixStep --> UpdateDocs["Update Affected Docs (Guide, Spec, Wiki, Architecture)"]
+    UpdateDocs --> RunSync["Run python3 scripts/doc_sync_check.py --base origin/dev"]
+    RunSync --> RunLinks["Run python3 scripts/verify_doc_links.py"]
+    RunLinks --> DoublePass["Run cargo test & strict cargo clippy"]
+    DoublePass --> SubmitPr["Commit & Submit PR Targeting dev"]
 ```
 
 ### Step 1: Git-Diff Inventory
 ```bash
-git diff main...HEAD --name-only
+git diff origin/dev...HEAD --name-only
 ```
-Review the list of changed files in `crates/` and `libraries/`.
+Review the list of changed files in `crates/`, `libraries/`, `scripts/`, and `.github/workflows/`.
 
 ### Step 2: Trigger Evaluation
 Match each modified file against Section 3's Trigger Matrix. For example, if `crates/solix-toolchain/src/cli.rs` was modified:
@@ -99,7 +103,8 @@ Match each modified file against Section 3's Trigger Matrix. For example, if `cr
 
 ### Step 3: Run Automated Sync Checker
 ```bash
-python3 scripts/doc_sync_check.py --base main
+python3 scripts/doc_sync_check.py --base origin/dev
+python3 scripts/doc_sync_check.py --all-docs
 ```
 
 ### Step 4: Verify Markdown Links

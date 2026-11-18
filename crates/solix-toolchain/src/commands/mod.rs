@@ -13,6 +13,7 @@ pub mod lsp;
 pub mod new;
 pub mod pkg;
 pub mod run;
+pub mod wiki;
 
 pub use build::execute_build;
 pub use clean::execute_clean;
@@ -28,3 +29,4 @@ pub use pkg::{
     install_package_artifact,
 };
 pub use run::execute_run;
+pub use wiki::execute_wiki;

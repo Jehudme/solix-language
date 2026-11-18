@@ -1,0 +1,35 @@
+# Code Owners for Solix Programming Language
+#
+# Sensitive workflow, governance, build-time, and security-critical files require
+# maintainer (@Jehudme) approval before merging into `dev` or `master`.
+# Note: Contributors are encouraged to improve docs, guidelines, and automation —
+# CODEOWNERS ensures high-impact changes receive explicit maintainer review.
+
+# Tier 1: CI/CD Workflows, Templates, Actions & Repository Automation
+/.github/                               @Jehudme
+
+# Tier 2: Engineering Guidelines, Guardrails & Contributor Protocol
+/docs/internals/guidelines/             @Jehudme
+/CONTRIBUTING.md                        @Jehudme
+/scripts/doc_sync_check.py              @Jehudme
+/scripts/verify_docs.py                 @Jehudme
+/scripts/verify_doc_links.py            @Jehudme
+/scripts/pr_risk_audit.py               @Jehudme
+/scripts/check_release_pr_source.py     @Jehudme
+
+# Tier 3: Supply Chain, Build Scripts & Packaged Toolchain Assets
+/Cargo.toml                             @Jehudme
+/Cargo.lock                             @Jehudme
+/deny.toml                              @Jehudme
+/release-plz.toml                       @Jehudme
+/cliff.toml                             @Jehudme
+/scripts/                               @Jehudme
+/**/build.rs                            @Jehudme
+/libraries/*/scripts/                   @Jehudme
+/crates/solix-toolchain/assets/         @Jehudme
+
+# Tier 4: Archive Extraction, Hashing, Native Bridge & C-FFI Boundaries
+/crates/solix-common/src/project.rs     @Jehudme
+/crates/solix-common/src/hash.rs        @Jehudme
+/crates/solix-runtime/src/native/       @Jehudme
+/crates/solix-ffi/                      @Jehudme

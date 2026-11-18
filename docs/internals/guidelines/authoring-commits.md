@@ -19,7 +19,12 @@ This specification mandates adherence to the **Conventional Commits v1.0.0** sta
 3. Automated drafting and publication of tagged GitHub Releases and binary toolchain artifacts.
 4. Complete elimination of ambiguous, unsearchable, or monolithic commits that obfuscate regressions in compiler passes or runtime dispatch.
 
-Any commit that violates this grammar halts the automated integration pipeline and **MUST NOT** be merged into the protected trunk branch (`master`).
+Any commit that violates this grammar halts the automated integration pipeline and **MUST NOT** be merged into protected integration (`dev`) or release (`master`) branches.
+
+### 1.1 Two-Wave Release Versioning & Explicit Bump Overrides (`GL-0014`)
+Under the Two-Wave Release Train (`feature/* -> dev -> master`), merged Conventional Commits accumulated on `dev` automatically calculate the next SemVer release candidate in the active `dev -> master` Release PR:
+* **Workspace + CLI Synchronization:** Even crates marked `publish = false` on crates.io (such as `crates/solix-toolchain`) participate in release version planning and `CHANGELOG.md` generation so CLI additions (like `solix wiki`), packaging scripts, and compiler/runtime updates release in lockstep.
+* **Maintainer Release Overrides:** When an upcoming release on `dev` needs an explicit bump beyond commit prefixes (e.g., promoting a `Minor` batch to a `Major` release), maintainers MAY apply a release override label (`release:patch`, `release:minor`, `release:major`) or invoke the release preparation workflow manually with an explicit SemVer override before merging into `master`.
 
 ---
 

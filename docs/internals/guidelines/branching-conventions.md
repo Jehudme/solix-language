@@ -13,7 +13,7 @@
 
 In a programming language repository comprising multiple tightly-coupled Rust crates (`solix-compilation`, `solix-runtime`, `solix-common`, `solix-toolchain`, `solix-lsp`, `solix-dbg`), branch mismanagement is a primary cause of compiler instability, syntax regressions, and release gridlock. Long-lived feature branches foster overwhelming merge conflicts, break incremental type checking assumptions, and obscure Git bisect investigations.
 
-This specification formalizes the **Trunk-Based and Milestone-Bounded Branching Model** for the Solix project. It establishes `master` as the sole protected trunk of truth, mandates dedicated milestone integration branches, dictates strict branch taxonomy and naming rules, enforces short-lived topic branches, and mandates non-fast-forward (`--no-ff`) merges to guarantee a fully auditable, bisectable Git history.
+This specification formalizes the **Two-Wave Release Train & Milestone Branching Model (`dev -> master`)** for the Solix project. It establishes **`dev`** as the protected contributor integration trunk, **`master`** as the release-only production trunk fed exclusively by the authorized release PR from `dev` ([GL-0014](pr-and-release-governance.md)), strict up-to-date branch checks to eliminate merge skew, and auditable Git history.
 
 ---
 
@@ -21,17 +21,15 @@ This specification formalizes the **Trunk-Based and Milestone-Bounded Branching 
 
 All contributors and repository administrators **MUST** comply with the following normative rules:
 
-1. **Protected Trunk Invariant:** The `master` branch **MUST** remain continuously production-ready, deployable, and protected by branch protection rules. Direct commits and non-reviewed pushes to `master` are strictly prohibited for all users, including maintainers.
-2. **Dedicated Milestone Branch Invariant:** Every active engineering milestone **MUST** operate within its own dedicated integration branch:
-   $$\text{milestone/}\text{<XXX>}-\text{<milestone-slug>}$$
-   (e.g., `milestone/001-preparation`, `milestone/002-lexer-parser`). Tasks scoped for a milestone **MUST** target and merge into that milestone's branch. Merging a milestone branch into `master` requires that all milestone tasks are complete and verified against the full Definition of Done (GL-0008).
-3. **Short-Lived Topic Branches:** Individual feature and bugfix branches **MUST** be short-lived, with a target lifecycle not exceeding **3 business days** from branching to merge. Long-lived branches spanning weeks **SHALL NOT** be maintained without explicit maintainer variance.
-4. **Canonical Branch Naming Grammar:** Topic branch names **MUST** adhere to the formal syntax:
-   $$\text{<category>}/\text{<scope>}-\text{<short-description>}$$
-   where `<category>` is one of the approved prefixes (`feat`, `fix`, `spec`, `refactor`, `docs`, `chore`, `test`), and `<scope>` matches the registered component scopes from GL-0001.
-5. **Mandatory Non-Fast-Forward Merging (`--no-ff`):** Merges into `master` and milestone branches **MUST** execute using the `--no-ff` (non-fast-forward) flag. This creates a dedicated merge commit that preserves the cohesive identity of the branch, records the associated PR number, and enables atomic rollbacks.
-6. **Immediate Post-Merge Branch Deletion:** Topic branches **MUST** be deleted from the remote repository immediately upon successful merge. Stale remote branches **MUST NOT** be retained.
-7. **No Rewriting Public or Shared History:** Force-pushing (`git push --force`) to `master`, milestone branches, or shared branches is strictly prohibited. Force-pushing with lease (`--force-with-lease`) is permitted *only* on private, unmerged topic branches to rebase onto fresh commits prior to review.
+1. **Two-Wave Trunk Invariant (`dev` -> `master`):**
+   * **`dev` (Wave 1 Integration Trunk):** All contributor topic branches, bug fixes, Dependabot PRs, and documentation updates **MUST** target `dev` via pull request. Direct unreviewed pushes to `dev` are prohibited.
+   * **`master` (Wave 2 Production Release Trunk):** Direct pushes and direct feature/bugfix PRs targeting `master` are **STRICTLY PROHIBITED**. Only same-repository PRs originating from `dev` (or sanctioned `release-plz/*` / `release/vX.Y.Z` release branches) pass `Validate Release PR Source`. Merging into `master` cuts a new SemVer release, tags `vX.Y.Z`, publishes crates and release binaries, and back-syncs the version bump commit to `dev`.
+2. **Strict Up-to-Date Branch Protection (Zero Merge-Skew):** Repository rulesets on `dev` **MUST** enable *"Require branches to be up to date before merging"* so concurrent PRs are re-tested against the latest `dev` commit before landing.
+3. **Short-Lived Topic Branches:** Individual feature and bugfix branches **MUST** branch from `origin/dev` and stay short-lived (target lifecycle 1–3 business days).
+4. **Canonical Branch Naming Grammar:** Topic branch names **MUST** adhere to `<category>/<scope>-<short-description>` (`feat`, `fix`, `spec`, `refactor`, `docs`, `chore`, `test`, `milestone`).
+5. **Admin & CODEOWNER Approval:** Pull requests touching protected paths in `.github/CODEOWNERS` trigger a non-blocking risk advisory (`scripts/pr_risk_audit.py`) and require maintainer (`@Jehudme`) approval before merging.
+6. **Immediate Post-Merge Branch Deletion:** Topic branches **MUST** be deleted after PR merge. Stale remote topic branches **MUST NOT** be retained.
+7. **No Rewriting Shared Trunk History:** Force-pushing (`git push --force`) to `master`, `dev`, or shared milestone branches is strictly prohibited. Force-pushing with lease (`--force-with-lease`) is allowed *only* on private unmerged topic branches during rebase.
 
 ---
 
@@ -50,27 +48,23 @@ All contributors and repository administrators **MUST** comply with the followin
 | `chore/` | Cargo.toml dependency updates, CI workflows, tooling configs| None | < 24 hours |
 | `test/` | Adding test fixtures, benchmarks, or verification suites | None | 1–2 days |
 
-### 3.2 Branch Topology Diagram
+### 3.2 Two-Wave Branch Topology Diagram
 
 ```
-master ──────────●──────────────────────────────────────────────────────●──────► (Always Deployable)
-                  \                                                    /
-                   \ (Cut milestone branch)                           / (Merge milestone: --no-ff)
-milestone/002-      ●───────────●───────────●────────────────────────●
-lexer-parser         \         /             \                      /
-                      \       / (Merge PR)    \                    / (Merge PR)
-feat/compiler-         ●─────●                 ●──────────────────●
-lexer-tokens          (Topic Branch 1)         feat/compiler-ast-parser (Topic Branch 2)
+master ──●────────────────────────────────────────────────────────●──► (Production Releases Only)
+          \                                                      /  ^
+           \ (Protected release train via dev -> master PR)     /   (Back-sync release tag/bump)
+dev    ─────●─────────●──────────●────────────●────────────────●─────────► (Wave 1 Integration)
+                       \        / \          /
+                        ●──────●   ●────────●
+                      feat/topic-a  fix/topic-b
 ```
 
 ### 3.3 Protected Branch Configuration Rules
 
-The following GitHub branch protection rules **MUST** be permanently active on `master` and all active `milestone/*` branches:
-* **Require a pull request before merging:** Enabled (Minimum 1-2 core maintainer approvals).
-* **Require status checks to pass before merging:** Enabled (`cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`).
-* **Require branches to be up to date before merging:** Enabled.
-* **Require linear history:** Disabled (to allow explicit `--no-ff` merge commits).
-* **Do not allow bypassing the above settings:** Enabled.
+Repository Rulesets **MUST** remain active on both **`dev`** and **`master`** ([GL-0014](pr-and-release-governance.md)):
+* **`dev` Ruleset:** Require pull request before merging, require CODEOWNER (`@Jehudme`) approval on sensitive files, dismiss stale approvals, **require branches to be up to date before merging** (`strict`), require all Wave 1 CI + security status checks, and block force pushes.
+* **`master` Ruleset:** Require pull request before merging, require **`Validate Release PR Source`** (`head == dev` or sanctioned internal release branch, non-fork), restrict direct pushes/merges to admin/release train only, and block force pushes.
 
 ---
 

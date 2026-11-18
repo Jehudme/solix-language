@@ -20,4 +20,4 @@ bincode.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-solix-runtime = { path = "../solix-runtime" }
+solix-runtime.workspace = true

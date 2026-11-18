@@ -101,6 +101,8 @@ solix <subcommand> [options] [arguments...]
 | `install` | Installs `.slxb` binaries or `.slxarc` archives into the local package store | [docs/spec/tools/cli/install.md](../spec/tools/cli/install.md) |
 | `uninstall` | Removes installed packages or specific versions from the local store | [docs/spec/tools/cli/uninstall.md](../spec/tools/cli/uninstall.md) |
 | `list` | Lists all installed packages and versions | [docs/spec/tools/cli/list.md](../spec/tools/cli/list.md) |
+| `doc` | Generates static HTML or Markdown API documentation from source doc comments | [docs/spec/tools/cli/doc.md](../spec/tools/cli/doc.md) |
+| `wiki` | Opens the bundled offline HTML documentation portal matching your `solix` version | [docs/spec/tools/cli/wiki.md](../spec/tools/cli/wiki.md) |
 
 ---
 

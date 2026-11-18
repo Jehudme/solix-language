@@ -25,3 +25,18 @@ name = "solix-runtime"
 version_group = "solix"
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
+
+[[package]]
+name = "solix-toolchain"
+publish = false
+version_group = "solix"
+
+[[package]]
+name = "solix-lsp"
+publish = false
+version_group = "solix"
+
+[[package]]
+name = "solix-dap"
+publish = false
+version_group = "solix"

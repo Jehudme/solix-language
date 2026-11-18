@@ -4,7 +4,7 @@
 * **Milestone ID:** MS-063
 * **Target Version:** `v1.5.0`
 * **Milestone Branch:** `milestone/063-two-wave-release-train-governance-and-security-gates`
-* **Status:** DRAFT
+* **Status:** COMPLETED
 * **Lead Architect:** Release Engineering, Security Governance & Toolchain Maintainers
 * **Normative Conformance:** RFC 2119 / RFC 8174 (`MUST`, `MUST NOT`, `REQUIRED`, `SHALL`, `SHALL NOT`, `SHOULD`, `SHOULD NOT`, `RECOMMENDED`, `MAY`, `OPTIONAL`)
 * **Related Specifications:**
@@ -122,32 +122,32 @@ High-risk files are **not banned** from community PRs (legitimate bug fixes and 
 ## 4. Phased Implementation Plan & Task Matrix
 
 ### 4.1 P0: Critical Governance & Workflow Blockers
-- [ ] `[P0]` **`MS063-T01` (Provision Protected `dev` Branch & Ruleset Policies):** Create `dev` from `master`, document and apply GitHub Rulesets on both `dev` (require PR, strict up-to-date branch checks, admin/code-owner approval, no force-push) and `master` (require PR from `dev` / sanctioned release train, admin-only merge, require `Validate Release PR Source`, no direct pushes).
-- [ ] `[P0]` **`MS063-T02` (Implement Two-Wave CI & Release-Train Workflows):** Refactor [ci.yml](../../../.github/workflows/ci.yml) so full test/lint/security gates run on PRs targeting `dev`, add **`Validate Release PR Source`** on PRs targeting `master`, wire `dev -> master` Release PR version preview and post-merge tag/`crates.io`/back-sync flow, and ensure `crates/solix-toolchain` changes participate in version bumps cleanly.
-- [ ] `[P0]` **`MS063-T03` (Add `.github/CODEOWNERS` & Enforce Restricted Approval):** Create `.github/CODEOWNERS` covering `.github/`, `docs/internals/guidelines/`, `scripts/`, `Cargo.toml`, `Cargo.lock`, `deny.toml`, `**/build.rs`, `crates/solix-common/src/project.rs`, `hash.rs`, `crates/solix-runtime/src/native/`, and `crates/solix-ffi/`.
+- [x] `[P0]` **`MS063-T01` (Provision Protected `dev` Branch & Ruleset Policies):** Create `dev` from `master`, document and apply GitHub Rulesets on both `dev` (require PR, strict up-to-date branch checks, admin/code-owner approval, no force-push) and `master` (require PR from `dev` / sanctioned release train, admin-only merge, require `Validate Release PR Source`, no direct pushes).
+- [x] `[P0]` **`MS063-T02` (Implement Two-Wave CI & Release-Train Workflows):** Refactor [ci.yml](../../../.github/workflows/ci.yml) so full test/lint/security gates run on PRs targeting `dev`, add **`Validate Release PR Source`** on PRs targeting `master`, wire `dev -> master` Release PR version preview and post-merge tag/`crates.io`/back-sync flow, and ensure `crates/solix-toolchain` changes participate in version bumps cleanly.
+- [x] `[P0]` **`MS063-T03` (Add `.github/CODEOWNERS` & Enforce Restricted Approval):** Create `.github/CODEOWNERS` covering `.github/`, `docs/internals/guidelines/`, `scripts/`, `Cargo.toml`, `Cargo.lock`, `deny.toml`, `**/build.rs`, `crates/solix-common/src/project.rs`, `hash.rs`, `crates/solix-runtime/src/native/`, and `crates/solix-ffi/`.
 
 ### 4.2 P1: Security Scanners, Risk Advisories & Test Suite
-- [ ] `[P1]` **`MS063-T04` (Build Non-Blocking Sensitive-Path Reviewer Advisory — `scripts/pr_risk_audit.py`):** Implement `scripts/pr_risk_audit.py` and fork-safe CI integration emitting `$GITHUB_STEP_SUMMARY`, file annotations, risk labels, and a single sticky PR review checklist whenever sensitive files are touched—without disqualifying valid PRs.
-- [ ] `[P1]` **`MS063-T05` (Add `cargo-deny`, `cargo-audit`, `zizmor`, `actionlint` & SHA-Pin Workflows):** Add `deny.toml` and `.github/dependabot.yml` (targeting `dev`), pin all GitHub Actions in `.github/workflows/*.yml` to full commit SHAs with top-level read-only permissions, and run `actionlint`, `zizmor`, `cargo-deny`, and `cargo-audit` in CI (plus optional CodeQL analysis).
-- [ ] `[P1]` **`MS063-T06` (Comprehensive Script, Security & Archive Path-Safety Test Suite):**
+- [x] `[P1]` **`MS063-T04` (Build Non-Blocking Sensitive-Path Reviewer Advisory — `scripts/pr_risk_audit.py`):** Implement `scripts/pr_risk_audit.py` and fork-safe CI integration emitting `$GITHUB_STEP_SUMMARY`, file annotations, risk labels, and a single sticky PR review checklist whenever sensitive files are touched—without disqualifying valid PRs.
+- [x] `[P1]` **`MS063-T05` (Add `cargo-deny`, `cargo-audit`, `zizmor`, `actionlint` & SHA-Pin Workflows):** Add `deny.toml` and `.github/dependabot.yml` (targeting `dev`), pin all GitHub Actions in `.github/workflows/*.yml` to full commit SHAs with top-level read-only permissions, and run `actionlint`, `zizmor`, `cargo-deny`, and `cargo-audit` in CI (plus optional CodeQL analysis).
+- [x] `[P1]` **`MS063-T06` (Comprehensive Script, Security & Archive Path-Safety Test Suite):**
   * Add Python automated tests (`scripts/tests/` or CI unittest suite) testing `pr_risk_audit.py` (all 4 risk tiers + clean zero-exit non-blocking guarantee), release source-branch gate validation (rejecting forks and direct topic PRs to `master`, accepting `dev`), `doc_sync_check.py`, `verify_docs.py`, and `merge_bundled_packages.py`.
   * Add Rust tests in [project.rs](../../../crates/solix-common/src/project.rs) verifying `.slxarc` extraction rejects path traversal entries (`../`, absolute archive member paths) and tampered checksums cleanly, plus full regression coverage across `crates/`.
 
 ### 4.3 P2: Guidelines, Trigger Matrix & Contributor Onboarding Docs
-- [ ] `[P2]` **`MS063-T07` (Update Existing Guidelines for `dev -> master` & Author `GL-0014`):**
+- [x] `[P2]` **`MS063-T07` (Update Existing Guidelines for `dev -> master` & Author `GL-0014`):**
   * Author **`GL-0014`: Release Train, Sensitive-Path Governance & Reviewer Security Protocol** (`docs/internals/guidelines/pr-and-release-governance.md`) and register it in [guidelines README](../guidelines/README.md).
   * Update [GL-0001](../guidelines/authoring-commits.md) (Conventional Commit version impact & release overrides), [GL-0002](../guidelines/branching-conventions.md) (`dev` integration + `master` release trunk topology, up-to-date branch rule), [GL-0008](../guidelines/authoring-milestones.md) (deprecate file-only milestone authoring in favor of GitHub Milestones + Issue Forms while preserving historical archive + ADRs), and [GL-0013](../guidelines/documentation-update-protocol.md) (`--base dev` diff target + governance doc triggers).
   * Update [`scripts/doc_sync_check.py`](../../../scripts/doc_sync_check.py) `TRIGGER_MATRIX` to cover `.github/workflows/` and `scripts/` governance/workflow updates.
-- [ ] `[P2]` **`MS063-T08` (Author Root `CONTRIBUTING.md` & PR Template):** Add root `CONTRIBUTING.md` and `.github/pull_request_template.md` explaining step-by-step how contributors fork/branch from `dev`, run local formatting/Clippy/doc/test checks, follow Conventional Commits, open PRs targeting `dev` (not `master`), and handle review feedback on sensitive files.
-- [ ] `[P2]` **`MS063-T09` (GitHub Milestones & Issue Forms Standardization):** Author structured `.github/ISSUE_TEMPLATE/` YAML forms (`milestone_task.yml`, `bug_report.yml`, `feature_request.yml`, `config.yml`), standardize priority/tier labels (`P0`–`P3`, `release:*`, `risk:*`), and configure the active GitHub Milestone workflow (`gh` CLI / issue linking) to replace manual `XXX-*.md` milestone file authoring.
-- [ ] `[P3]` **`MS063-T10` (One-Way `docs/` -> GitHub Wiki Sync Workflow with Version Banner — Keeping Git as Single Source of Truth):** Keep `docs/wiki/`, `docs/features/`, `docs/guide/`, and `docs/spec/` inside the main Git repository (`doc_sync_check.py`-enforced) so every `vX.Y.Z` tag preserves exact versioned docs; add an optional read-only sync workflow triggered on `master` releases that mirrors `docs/wiki/`, `docs/features/`, and `docs/guide/` into GitHub Wiki with a release-version header linking older versions to `tree/<tag>/docs` (or future versioned `gh-pages` / `solix-lang.org/docs/<version>/` builds).
+- [x] `[P2]` **`MS063-T08` (Author Root `CONTRIBUTING.md` & PR Template):** Add root `CONTRIBUTING.md` and `.github/pull_request_template.md` explaining step-by-step how contributors fork/branch from `dev`, run local formatting/Clippy/doc/test checks, follow Conventional Commits, open PRs targeting `dev` (not `master`), and handle review feedback on sensitive files.
+- [x] `[P2]` **`MS063-T09` (GitHub Milestones & Issue Forms Standardization):** Author structured `.github/ISSUE_TEMPLATE/` YAML forms (`milestone_task.yml`, `bug_report.yml`, `feature_request.yml`, `config.yml`), standardize priority/tier labels (`P0`–`P3`, `release:*`, `risk:*`), and configure the active GitHub Milestone workflow (`gh` CLI / issue linking) to replace manual `XXX-*.md` milestone file authoring.
+- [x] `[P3]` **`MS063-T10` (One-Way `docs/` -> GitHub Wiki Sync Workflow with Version Banner — Keeping Git as Single Source of Truth):** Keep `docs/wiki/`, `docs/features/`, `docs/guide/`, and `docs/spec/` inside the main Git repository (`doc_sync_check.py`-enforced) so every `vX.Y.Z` tag preserves exact versioned docs; add an optional read-only sync workflow triggered on `master` releases that mirrors `docs/wiki/`, `docs/features/`, and `docs/guide/` into GitHub Wiki with a release-version header linking older versions to `tree/<tag>/docs` (or future versioned `gh-pages` / `solix-lang.org/docs/<version>/` builds).
 
 ### 4.4 P2: Versioned Offline `solix wiki` Documentation Portal
-- [ ] `[P2]` **`MS063-T11` (Static Docs Generator & Toolchain Asset Embedding):**
+- [x] `[P2]` **`MS063-T11` (Static Docs Generator & Toolchain Asset Embedding):**
   * Implement `scripts/build_docs_site.py` converting `docs/README.md`, `docs/guide/`, `docs/wiki/`, `docs/features/`, and `docs/spec/` (excluding `docs/internals/`) into a self-contained static HTML portal + offline `search_index.js` inside `crates/solix-toolchain/assets/docs/`.
   * Update `crates/solix-toolchain/build.rs` and `crates/solix-toolchain/src/assets.rs` to embed staged `assets/docs/**` (`EMBEDDED_WIKI_DOCS`) and materialize versioned files into `$SOLIX_HOME/cache/wiki/v<version>/`.
   * Wire `scripts/build_docs_site.py` into [ci.yml](../../../.github/workflows/ci.yml) and [release.yml](../../../.github/workflows/release.yml) prior to toolchain compilation/packaging so every distributed `solix` binary embeds its matching documentation snapshot.
-- [ ] `[P2]` **`MS063-T12` (`solix wiki` CLI Command, Specs & End-to-End Tests):**
+- [x] `[P2]` **`MS063-T12` (`solix wiki` CLI Command, Specs & End-to-End Tests):**
   * Add `Commands::Wiki(WikiArgs)` (`--no-open`, `--output`, `--topic` / `--search`) in `crates/solix-toolchain/src/cli.rs` and `crates/solix-toolchain/src/commands/wiki.rs`, reusing `open_in_browser`.
   * Author `docs/spec/tools/cli/wiki.md` and update `docs/spec/tools/cli/README.md` + `docs/guide/01_getting_started.md` so `scripts/verify_docs.py` covers `wiki`.
   * Add Python tests validating HTML generation, internal link rewriting, `search_index.js` generation, and exclusion of `docs/internals/`, plus Rust integration tests verifying `solix wiki --no-open`, `--output`, and standalone embedded asset extraction.
@@ -171,10 +171,10 @@ High-risk files are **not banned** from community PRs (legitimate bug fixes and 
 
 | DoD Requirement | Target Verification | Tool / Workflow | Sign-off Status |
 | :--- | :--- | :--- | :---: |
-| **Strict `dev` + `master` Rulesets Active** | Up-to-date checks required on `dev`; `master` accepts only release PR | GitHub Rulesets & `Validate Release PR Source` | [ ] Pending |
-| **Non-Blocking Sensitive-Path Advisories** | PR comment/summary warns reviewer on `.github/`, guidelines, `Cargo.*`, `build.rs`, security paths | `scripts/pr_risk_audit.py` + `.github/CODEOWNERS` | [ ] Pending |
-| **Supply-Chain & Action Security Gates** | Zero unresolved advisories, license issues, or workflow injection findings | `cargo-deny`, `cargo-audit`, `actionlint`, `zizmor`, Dependabot | [ ] Pending |
-| **100% Pipeline, Security & Zip-Slip Tests** | All Rust and Python workflow/governance/archive tests pass cleanly | `cargo test --workspace --all-targets` + Python suite | [ ] Pending |
-| **Versioned Offline `solix wiki` Bundled** | `scripts/build_docs_site.py` + `build.rs` embed static HTML + `search_index.js`; `solix wiki` extracts & opens offline | `scripts/build_docs_site.py` + `solix wiki --no-open` | [ ] Pending |
-| **GitHub Milestones & Issue Forms Active** | `.github/ISSUE_TEMPLATE/` live and `GL-0008` updated from static file authoring | `.github/ISSUE_TEMPLATE/`, `GL-0008` | [ ] Pending |
-| **Guidelines, `CONTRIBUTING.md` & Docs Source-of-Truth Synced** | `GL-0001`, `GL-0002`, `GL-0008`, `GL-0013`, `GL-0014`, `CONTRIBUTING.md` audited; `docs/` preserved in Git | `scripts/doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py` | [ ] Pending |
+| **Strict `dev` + `master` Rulesets Active** | Up-to-date checks required on `dev`; `master` accepts only release PR | GitHub Rulesets & `Validate Release PR Source` | [x] Verified |
+| **Non-Blocking Sensitive-Path Advisories** | PR comment/summary warns reviewer on `.github/`, guidelines, `Cargo.*`, `build.rs`, security paths | `scripts/pr_risk_audit.py` + `.github/CODEOWNERS` | [x] Verified |
+| **Supply-Chain & Action Security Gates** | Zero unresolved advisories, license issues, or workflow injection findings | `cargo-deny`, `cargo-audit`, `actionlint`, `zizmor`, Dependabot | [x] Verified |
+| **100% Pipeline, Security & Zip-Slip Tests** | All Rust and Python workflow/governance/archive tests pass cleanly | `cargo test --workspace --all-targets` + Python suite | [x] Verified |
+| **Versioned Offline `solix wiki` Bundled** | `scripts/build_docs_site.py` + `build.rs` embed static HTML + `search_index.js`; `solix wiki` extracts & opens offline | `scripts/build_docs_site.py` + `solix wiki --no-open` | [x] Verified |
+| **GitHub Milestones & Issue Forms Active** | `.github/ISSUE_TEMPLATE/` live and `GL-0008` updated from static file authoring | `.github/ISSUE_TEMPLATE/`, `GL-0008` | [x] Verified |
+| **Guidelines, `CONTRIBUTING.md` & Docs Source-of-Truth Synced** | `GL-0001`, `GL-0002`, `GL-0008`, `GL-0013`, `GL-0014`, `CONTRIBUTING.md` audited; `docs/` preserved in Git | `scripts/doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py` | [x] Verified |
