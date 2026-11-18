@@ -344,7 +344,8 @@ jobs:
           TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
           DIST_ARGS: ${{ matrix.dist_args }}
         run: |
-          dist build "$TAG_FLAG" --print=linkage --output-format=json $DIST_ARGS > dist-manifest.json
+          read -r -a dist_args_array <<< "$DIST_ARGS"
+          dist build "$TAG_FLAG" --print=linkage --output-format=json "${dist_args_array[@]}" > dist-manifest.json
           echo "dist ran successfully"
 
       - id: cargo-dist
@@ -352,9 +353,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$(dirname "$BUILD_MANIFEST_NAME")"
-          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          dist print-upload-files-from-manifest --manifest dist-manifest.json >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "paths<<EOF"
+            dist print-upload-files-from-manifest --manifest dist-manifest.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
 
       - name: Upload artifacts
@@ -403,9 +406,11 @@ jobs:
         run: |
           dist build "$TAG_FLAG" --output-format=json "--artifacts=global" > dist-manifest.json
           echo "dist ran successfully"
-          echo "paths<<EOF" >> "$GITHUB_OUTPUT"
-          jq --raw-output ".upload_files[]" dist-manifest.json >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "paths<<EOF"
+            jq --raw-output ".upload_files[]" dist-manifest.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
 
       - name: Upload artifacts

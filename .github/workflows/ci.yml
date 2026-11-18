@@ -379,10 +379,11 @@ jobs:
           CURRENT_OS: ${{ runner.os }}
         run: |
           if [ "$CURRENT_OS" = "Windows" ]; then
-            export SOLIX_BIN="$(pwd)/target/debug/solix.exe"
+            SOLIX_BIN="$(pwd)/target/debug/solix.exe"
           else
-            export SOLIX_BIN="$(pwd)/target/debug/solix"
+            SOLIX_BIN="$(pwd)/target/debug/solix"
           fi
+          export SOLIX_BIN
           cargo test --workspace --all-targets
 
       - name: Verify embedded solix wiki standalone execution
@@ -409,10 +410,11 @@ jobs:
           CURRENT_OS: ${{ runner.os }}
         run: |
           if [ "$CURRENT_OS" = "Windows" ]; then
-            export SOLIX_BIN="$(pwd)/target/debug/solix.exe"
+            SOLIX_BIN="$(pwd)/target/debug/solix.exe"
           else
-            export SOLIX_BIN="$(pwd)/target/debug/solix"
+            SOLIX_BIN="$(pwd)/target/debug/solix"
           fi
+          export SOLIX_BIN
           python3 benchmarks/runner.py --verify
 
       - name: List installed packages and verify example application compilation

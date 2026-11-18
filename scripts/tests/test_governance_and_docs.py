@@ -12,7 +12,10 @@ import tempfile
 import unittest
 import zipfile
 
-import yaml
+try:
+    import yaml  # type: ignore[import-not-found]
+except ImportError:
+    yaml = None
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
@@ -293,28 +296,44 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
     def test_issue_templates_and_workflows_parse_as_valid_yaml(self) -> None:
         template_dir = REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
         for yml_file in sorted(template_dir.glob("*.yml")):
-            parsed = yaml.safe_load(yml_file.read_text(encoding="utf-8"))
-            self.assertIsInstance(parsed, dict, f"{yml_file} must parse as YAML mapping")
+            raw_text = yml_file.read_text(encoding="utf-8")
+            self.assertNotIn("\t", raw_text, f"{yml_file.name} must not contain tabs")
+            if yaml is not None:
+                parsed = yaml.safe_load(raw_text)
+                self.assertIsInstance(parsed, dict, f"{yml_file} must parse as YAML mapping")
+            else:
+                self.assertTrue(raw_text.strip(), f"{yml_file.name} must not be empty")
 
         self.assertTrue((REPO_ROOT / ".github" / "CODEOWNERS").is_file())
         self.assertTrue((REPO_ROOT / ".github" / "dependabot.yml").is_file())
-        dependabot = yaml.safe_load(
-            (REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
-        )
-        for update in dependabot.get("updates", []):
-            self.assertEqual(update.get("target-branch"), "dev")
+        dependabot_raw = (REPO_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        if yaml is not None:
+            dependabot = yaml.safe_load(dependabot_raw)
+            for update in dependabot.get("updates", []):
+                self.assertEqual(update.get("target-branch"), "dev")
+        else:
+            self.assertIn('target-branch: "dev"', dependabot_raw)
+            self.assertNotIn('target-branch: "master"', dependabot_raw)
 
         sha_pin_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
         for workflow_file in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
-            parsed_wf = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
-            self.assertIsInstance(parsed_wf, dict, f"{workflow_file} invalid YAML")
-            self.assertIn(
-                "permissions",
-                parsed_wf,
-                f"{workflow_file} MUST declare top-level permissions",
-            )
-            self.assertEqual(parsed_wf["permissions"].get("contents"), "read")
-            for raw_line in workflow_file.read_text(encoding="utf-8").splitlines():
+            wf_text = workflow_file.read_text(encoding="utf-8")
+            if yaml is not None:
+                parsed_wf = yaml.safe_load(wf_text)
+                self.assertIsInstance(parsed_wf, dict, f"{workflow_file} invalid YAML")
+                self.assertIn(
+                    "permissions",
+                    parsed_wf,
+                    f"{workflow_file} MUST declare top-level permissions",
+                )
+                self.assertEqual(parsed_wf["permissions"].get("contents"), "read")
+            else:
+                self.assertRegex(
+                    wf_text,
+                    r"(?m)^permissions:\s*\n\s+contents:\s*read\s*$",
+                    f"{workflow_file.name} MUST declare top-level permissions: contents: read",
+                )
+            for raw_line in wf_text.splitlines():
                 stripped = raw_line.strip()
                 if stripped.startswith(("uses:", "- uses:")):
                     action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
