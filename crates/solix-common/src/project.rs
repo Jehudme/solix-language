@@ -681,7 +681,7 @@ impl SlxarcArchive {
                 }
             })?;
 
-            let entry_name = file_entry.name().to_string();
+            let entry_name = read_zip_entry_name(&file_entry, index)?;
             let is_directory = file_entry.is_dir();
             let uncompressed_size = file_entry.size();
             let compressed_size = file_entry.compressed_size();
@@ -725,6 +725,19 @@ impl SlxarcArchive {
             native_libraries,
         })
     }
+}
+
+/// Extracts validated UTF-8 archive entry name in `zip` v9+ safely.
+fn read_zip_entry_name(
+    file_entry: &zip::read::ZipFile<'_, File>,
+    index: usize,
+) -> Result<String, EmissionError> {
+    file_entry
+        .name()
+        .map(std::borrow::Cow::into_owned)
+        .map_err(|zip_error| EmissionError::ContainerSerializationFailed {
+            reason: format!("invalid archive entry filename at index {index}: {zip_error}"),
+        })
 }
 
 /// Validates and sanitizes a `.slxarc` ZIP archive member path against Zip-Slip traversal.
@@ -786,6 +799,14 @@ impl SlxarcArchive {
                 ),
             }
         })?;
+        zip_reader
+            .validate_header_consistency()
+            .map_err(|zip_error| EmissionError::ContainerSerializationFailed {
+                reason: format!(
+                    "archive header consistency check failed for '{}': {zip_error}",
+                    archive_path.display()
+                ),
+            })?;
 
         fs::create_dir_all(extract_cache_directory).map_err(|io_error| {
             EmissionError::ContainerSerializationFailed {
@@ -822,7 +843,7 @@ impl SlxarcArchive {
                 }
             })?;
 
-            let entry_name = file_entry.name().to_string();
+            let entry_name = read_zip_entry_name(&file_entry, index)?;
             let safe_entry_rel_path = validate_archive_relative_path(&entry_name)?;
             if file_entry.is_dir() {
                 continue;
@@ -1074,7 +1095,7 @@ impl SlxarcArchive {
                         reason: format!("failed to read entry at index {index}: {zip_err}"),
                     }
                 })?;
-                let entry_name = file_entry.name().to_string();
+                let entry_name = read_zip_entry_name(&file_entry, index)?;
                 if entry_name.ends_with(".slxb") && !entry_name.starts_with("lib/") {
                     let mut binary_bytes = Vec::new();
                     file_entry

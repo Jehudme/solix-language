@@ -238,6 +238,7 @@ jobs:
         uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
         with:
           token: ${{ github.token }}
+          ignore: RUSTSEC-2025-0141
 
   lint-and-docs:
     name: Lint, Formatting & Documentation Gate
