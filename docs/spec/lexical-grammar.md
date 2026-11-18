@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0001
 * **Scope:** Lexical Analysis & Token Streaming (`crates/solix-compilation/src/phases/lexing/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 * **Rust Implementation:** [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../crates/solix-compilation/src/phases/lexing/lexer.rs)
 
 ---

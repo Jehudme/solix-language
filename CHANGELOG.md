@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   * Eliminated production `unwrap`, `expect`, `panic`, and `unreachable` calls across non-test workspace crates and standardized identifier hygiene (`GL-0011`).
 * **Superinstructions, Zero-Spill Dispatch, Typed Arrays & Local CSE (MS-061):**
   * Packed typed `Bool`/`I32` arrays, added `ForLoopI32`, `AddBandI32`, `JumpIfI32Imm`, `FLAG_MOVE` ARC store fusion, tail-call / mul-add / array-fill superinstructions, EBB CSE, leaf-call inlining, and cached frame instruction pointers.
-  * Published benchmark results in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+  * Published historical Milestone 061 benchmark baselines.
 * **Cross-Platform CI/CD Overhaul, Hermetic Tests & Release Automation (MS-062):**
   * Consolidated CI/CD into two workflows (`ci.yml` + tag-triggered `release.yml`), removed standalone `release-plz.yml`, fixed `release-plz` authentication with `RELEASE_TOKEN`, enabled ordered crates.io publishing without `continue-on-error` masking, and removed duplicate `|| true` publishing steps.
   * Made `solix-lsp` breakout tests hermetic across Linux, macOS, and Windows, normalized Windows verbatim (`\\?\`) paths and UTF-8 benchmark streams, linked required macOS Apple frameworks for `raylib`, added ABI-aware host checksum matching (`msvc` vs `gnu`), and built host-native bundled `.slxarc` archives per release target.

@@ -23,7 +23,6 @@ REPO_ROOT = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_docs_site  # noqa: E402
-import check_release_pr_source  # noqa: E402
 import doc_sync_check  # noqa: E402
 import merge_bundled_packages  # noqa: E402
 import pr_risk_audit  # noqa: E402
@@ -50,24 +49,18 @@ class PrRiskAuditTests(unittest.TestCase):
         report = pr_risk_audit.audit_paths(
             [
                 ".github/workflows/ci.yml",
-                "docs/internals/guidelines/pr-and-release-governance.md",
+                "docs/guidelines/pr-and-release-governance.md",
                 "crates/solix-common/build.rs",
                 "crates/solix-runtime/src/native/bridge.rs",
             ]
         )
         self.assertTrue(report["has_sensitive_changes"])
-        self.assertEqual(
-            report["labels"],
-            [
-                "risk:ci-workflow",
-                "risk:guidelines",
-                "risk:supply-chain",
-                "risk:runtime-security",
-            ],
-        )
+        self.assertEqual(report["labels"], ["sensitive"])
         markdown = pr_risk_audit.render_markdown_report(report)
         self.assertIn(pr_risk_audit.MARKER_COMMENT, markdown)
-        self.assertIn("Maintainer Review Checklist", markdown)
+        self.assertIn("## Sensitive Paths Modified", markdown)
+        self.assertNotIn("Maintainer Review Checklist", markdown)
+        self.assertNotIn("[!CAUTION]", markdown)
         self.assertIn("ci.yml", markdown)
 
     def test_cli_invocation_always_exits_zero_even_with_sensitive_files(self) -> None:
@@ -88,60 +81,8 @@ class PrRiskAuditTests(unittest.TestCase):
             )
             self.assertEqual(exit_code, 0)
             payload = json.loads(json_out.read_text(encoding="utf-8"))
-            self.assertEqual(payload["labels"], ["risk:ci-workflow", "risk:supply-chain"])
-            self.assertIn("risk:ci-workflow", md_out.read_text(encoding="utf-8"))
-
-
-class ReleasePrSourceGateTests(unittest.TestCase):
-    """Tests Wave 2 `Validate Release PR Source` branch and fork restrictions."""
-
-    def test_rejects_external_fork_targeting_master(self) -> None:
-        allowed, message = check_release_pr_source.validate_release_pr_source(
-            event_name="pull_request",
-            base_ref="master",
-            head_ref="dev",
-            base_repo="Jehudme/solix-language",
-            head_repo="contributor/solix-language",
-            is_fork=True,
-        )
-        self.assertFalse(allowed)
-        self.assertIn("external fork", message)
-
-    def test_rejects_same_repo_feature_branch_targeting_master(self) -> None:
-        for branch_name in ("feat/fast-vm", "fix/parser-bug", "milestone/063-test"):
-            allowed, message = check_release_pr_source.validate_release_pr_source(
-                event_name="pull_request",
-                base_ref="master",
-                head_ref=branch_name,
-                base_repo="Jehudme/solix-language",
-                head_repo="Jehudme/solix-language",
-                is_fork=False,
-            )
-            self.assertFalse(allowed, f"Branch {branch_name} should be blocked from master")
-            self.assertIn("dev", message)
-
-    def test_allows_dev_and_release_plz_pr_to_master(self) -> None:
-        for head_branch in ("dev", "release-plz/dev-to-master", "release/v1.5.0"):
-            allowed, _ = check_release_pr_source.validate_release_pr_source(
-                event_name="pull_request",
-                base_ref="master",
-                head_ref=head_branch,
-                base_repo="Jehudme/solix-language",
-                head_repo="Jehudme/solix-language",
-                is_fork=False,
-            )
-            self.assertTrue(allowed, f"Authorized release branch {head_branch} should pass")
-
-    def test_allows_any_contributor_branch_targeting_dev(self) -> None:
-        allowed, _ = check_release_pr_source.validate_release_pr_source(
-            event_name="pull_request",
-            base_ref="dev",
-            head_ref="feat/contributor-feature",
-            base_repo="Jehudme/solix-language",
-            head_repo="contributor/solix-language",
-            is_fork=True,
-        )
-        self.assertTrue(allowed)
+            self.assertEqual(payload["labels"], ["sensitive"])
+            self.assertIn("Sensitive Paths Modified", md_out.read_text(encoding="utf-8"))
 
 
 class StaticDocsAndWikiPortalTests(unittest.TestCase):
@@ -161,6 +102,7 @@ class StaticDocsAndWikiPortalTests(unittest.TestCase):
             self.assertTrue((out_dir / "guide" / "01_getting_started.html").is_file())
             self.assertTrue((out_dir / "spec" / "tools" / "cli" / "wiki.html").is_file())
             self.assertFalse((out_dir / "internals").exists())
+            self.assertFalse((out_dir / "guidelines").exists())
 
             index_html = (out_dir / "index.html").read_text(encoding="utf-8")
             self.assertIn("v9.9.9-test", index_html)
@@ -172,8 +114,8 @@ class StaticDocsAndWikiPortalTests(unittest.TestCase):
             raw_json = search_js[len("window.SOLIX_DOCS_INDEX = ") :].rstrip().rstrip(";")
             indexed_entries = json.loads(raw_json)
             self.assertTrue(
-                all(not entry["path"].startswith("internals") for entry in indexed_entries),
-                "docs/internals/ files must never be indexed into solix wiki search_index.js",
+                all(not entry["path"].startswith(("internals", "guidelines")) for entry in indexed_entries),
+                "docs/guidelines/ files must never be indexed into solix wiki search_index.js",
             )
 
             node_bin = shutil.which("node")
@@ -418,6 +360,41 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
                 updated_log.index("## [1.5.0]"),
                 updated_log.index("## [1.4.0]"),
             )
+
+            root_log = tmp / "ROOT_CHANGELOG.md"
+            root_log.write_text(
+                "# Changelog\n\nAll notable changes...\n\n---\n\n## [1.4.0] - 2026-11-17\n\n- Old\n",
+                encoding="utf-8",
+            )
+            prepare_release_train.prepend_changelog_section(root_log, "1.5.0", section)
+            updated_root = root_log.read_text(encoding="utf-8")
+            self.assertLess(updated_root.index("---"), updated_root.index("## [1.5.0]"))
+            self.assertLess(updated_root.index("## [1.5.0]"), updated_root.index("## [1.4.0]"))
+            self.assertIn("crates/solix-ffi/CHANGELOG.md", prepare_release_train.CHANGELOG_FILES)
+            self.assertIn("CHANGELOG.md", prepare_release_train.CHANGELOG_FILES)
+
+    def test_doc_sync_ignores_lsp_cargo_toml_and_scripts_are_emoji_free(self) -> None:
+        self.assertEqual(doc_sync_check.check_trigger_matrix(["crates/solix-lsp/Cargo.toml"]), [])
+        lsp_src_violations = doc_sync_check.check_trigger_matrix(["crates/solix-lsp/src/server.rs"])
+        self.assertEqual(len(lsp_src_violations), 1)
+        self.assertEqual(
+            doc_sync_check.check_trigger_matrix(
+                ["crates/solix-lsp/src/server.rs", "docs/wiki/commands/lsp.md"]
+            ),
+            [],
+        )
+
+        forbidden_emojis = ("❌", "✅", "🎉", "🚀", "⚠", "🔴", "🟢", "📉")
+        for script_name in (
+            "doc_sync_check.py",
+            "verify_docs.py",
+            "verify_doc_links.py",
+            "pr_risk_audit.py",
+            "prepare_release_train.py",
+        ):
+            content = (SCRIPTS_DIR / script_name).read_text(encoding="utf-8")
+            for emoji in forbidden_emojis:
+                self.assertNotIn(emoji, content, f"{script_name} should remain emoji-free")
 
     def test_cli_subcommands_are_documented_and_all_docs_pass_gl0011(self) -> None:
         subcommands = verify_docs.extract_active_subcommands(

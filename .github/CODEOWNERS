@@ -9,19 +9,18 @@
 /.github/                               @Jehudme
 
 # Tier 2: Engineering Guidelines, Guardrails & Contributor Protocol
-/docs/internals/guidelines/             @Jehudme
+/docs/guidelines/                       @Jehudme
 /CONTRIBUTING.md                        @Jehudme
 /scripts/doc_sync_check.py              @Jehudme
 /scripts/verify_docs.py                 @Jehudme
 /scripts/verify_doc_links.py            @Jehudme
 /scripts/pr_risk_audit.py               @Jehudme
-/scripts/check_release_pr_source.py     @Jehudme
+/scripts/prepare_release_train.py       @Jehudme
 
 # Tier 3: Supply Chain, Build Scripts & Packaged Toolchain Assets
 /Cargo.toml                             @Jehudme
 /Cargo.lock                             @Jehudme
 /deny.toml                              @Jehudme
-/release-plz.toml                       @Jehudme
 /cliff.toml                             @Jehudme
 /scripts/                               @Jehudme
 /**/build.rs                            @Jehudme

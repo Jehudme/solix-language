@@ -7,7 +7,7 @@
     "gcc": "gcc"
   },
   "defaults": {
-    "warmup": 2,
-    "iterations": 5
+    "warmup": 3,
+    "iterations": 11
   }
 }

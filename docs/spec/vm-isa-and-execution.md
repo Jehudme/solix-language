@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0006
 * **Scope:** Virtual Machine Instruction Set Architecture (`crates/solix-runtime/src/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 * **Rust Implementation:** [`crates/solix-common/src/bytecode/instruction.rs`](../../crates/solix-common/src/bytecode/instruction.rs)
 
 ---

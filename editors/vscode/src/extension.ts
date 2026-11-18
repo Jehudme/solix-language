@@ -19,7 +19,7 @@ import {
 
 let languageClient: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
-let outputChannel: vscode.OutputChannel | undefined;
+let outputChannel: vscode.LogOutputChannel | undefined;
 
 interface DiscoveredBinaries {
     readonly lspBinaryPath: string;
@@ -196,7 +196,7 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
  * Extension activation callback.
  */
 export async function activate(extensionContext: vscode.ExtensionContext): Promise<void> {
-    outputChannel = vscode.window.createOutputChannel('Solix Language Server');
+    outputChannel = vscode.window.createOutputChannel('Solix Language Server', { log: true });
     extensionContext.subscriptions.push(outputChannel);
     outputChannel.appendLine('Activating Solix Language Extension...');
 
