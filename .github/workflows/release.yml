@@ -169,7 +169,7 @@ jobs:
           cargo package -p solix-ffi --locked --allow-dirty
           git checkout -- crates/solix-toolchain/assets/docs 2>/dev/null || true
 
-      - id: promote
+      - id: promote # zizmor: ignore[use-trusted-publishing]
         name: Promote dev to master, tag release, and publish crates
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
