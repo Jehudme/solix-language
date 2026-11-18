@@ -6,6 +6,9 @@ export async function runSuite(): Promise<void> {
 
     const extension = vscode.extensions.getExtension('solix.solix');
     assert.ok(extension, 'Expected solix extension to be discovered by VS Code');
+    if (!extension) {
+        return;
+    }
 
     if (!extension.isActive) {
         await extension.activate();
