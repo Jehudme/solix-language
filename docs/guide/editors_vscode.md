@@ -91,7 +91,7 @@ This command inspects your environment, detects any installed editor command-lin
 You can also install the `.vsix` package manually using your editor's CLI:
 
 ```bash
-code --install-extension editors/vscode/solix-language.vsix --force
+code --install-extension editors/vscode/build/solix-language.vsix --force
 ```
 
 > [!TIP]
@@ -101,7 +101,7 @@ Alternatively, inside Visual Studio Code:
 1. Open the Extensions view (`Ctrl+Shift+X` or `Cmd+Shift+X`).
 2. Click the `...` (Views and More Actions) menu in the top-right corner.
 3. Select **Install from VSIX...**.
-4. Browse to `solix-language.vsix` and click **Install**.
+4. Browse to `editors/vscode/build/solix-language.vsix` and click **Install**.
 5. Run `Developer: Reload Window` via the Command Palette.
 
 ### Option C: Development Mode (Run from Source)
@@ -139,19 +139,22 @@ The extension can be configured in your user or workspace `settings.json`:
 
 ## 6. Automated Verification Suite
 
-The extension features a 3-layer headless automated verification suite:
+All compiled bundles, TypeScript build artifacts, and `.vsix` packages are emitted under `editors/vscode/build/` (ignored by Git). The extension features a deterministic headless automated verification suite:
 
 ```bash
 cd editors/vscode
 
-# Layer 1: TextMate grammar assertions (Runs in pure Node.js in < 1 second)
-npm run test:grammar
+# Layer 1: Mock VS Code API unit tests (activates commands, task providers, DAP providers)
+npm run test:unit
 
-# Layer 2: Headless JSON-RPC integration test suite (Runs against real solix lsp server)
+# Layer 2: Headless JSON-RPC LSP & DAP sessions (runs against real solix lsp / solix dap)
 npm run test:client-rpc
-
-# Layer 3: Headless DAP integration test suite (Runs against real solix dap server)
 npm run test:dap-rpc
+
+# Layer 3: Package manifest & TextMate grammar contract checks
+npm run test:contract
+npm run test:grammar
+```
 
 # Combined verification
 npm test

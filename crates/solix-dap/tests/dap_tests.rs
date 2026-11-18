@@ -2,7 +2,6 @@
 
 #![forbid(unsafe_code)]
 
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -155,10 +154,57 @@ fn test_controller_stepping_state_transitions() {
 
 #[test]
 fn test_exact_breakpoint_resolution_and_locals_inspection() {
-    let source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../editors/vscode/sample_workspace/src/main.slx");
-    let source_content =
-        fs::read_to_string(&source_path).expect("Read sample_workspace/src/main.slx");
+    let source_path = PathBuf::from("tests/fixtures/dap_main.slx");
+    let source_content = r#"package sample_workspace;
+
+native void println(string msg);
+
+
+/// Represents a 2D coordinate point with reference-counted heap allocation.
+class Point {
+    public int32 coordinate_x;
+    public int32 coordinate_y;
+
+    public Point(int32 initial_x, int32 initial_y) {
+        this.coordinate_x = initial_x;
+        this.coordinate_y = initial_y;
+    }
+
+    /// Returns the Manhattan distance from origin.
+    public int32 distance_from_origin() {
+        return this.coordinate_x + this.coordinate_y;
+    }
+
+    /// Deterministic destructor invoked upon scope exit.
+    ~Point() {
+        // Resource cleanup upon destruction
+    }
+}
+
+/// Static mathematical utilities class.
+class MathHelper {
+    /// Computes the sum of two integers.
+    public static int32 add(int32 operand_first, int32 operand_second) {
+        return operand_first + operand_second;
+    }
+}
+
+/// Unit test recognized by the Run Test CodeLens button.
+void test_addition() {
+    int32 computed_sum = MathHelper::add(15, 25);
+    assert(computed_sum == 40, "Sum calculation mismatch");
+}
+
+/// Application entry point recognized by the Run Main CodeLens button.
+void main() {
+    Point origin_point = new Point(10, 20);
+    int32 calculated_distance = origin_point.distance_from_origin();
+    println("Calculated distance from origin: 30");
+
+    int32 static_result = MathHelper::add(50, 50);
+    println("Static addition result: 100");
+}"#
+    .to_string();
 
     let compilation_options = CompilationOptions::new()
         .with_profile(solix_compilation::BuildProfile::Debug)

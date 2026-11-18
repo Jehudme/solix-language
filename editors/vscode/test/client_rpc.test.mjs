@@ -9,7 +9,7 @@ import * as childProcess from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
-import * as rpc from 'vscode-jsonrpc/node.js';
+import * as rpc from 'vscode-jsonrpc/node';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,6 +52,48 @@ async function runClientRpcSuite() {
     );
 
     connection.listen();
+
+    const diagWaiters = [];
+    const latestDiagnostics = new Map();
+    connection.onNotification('textDocument/publishDiagnostics', (params) => {
+        latestDiagnostics.set(params.uri, params);
+        for (let idx = diagWaiters.length - 1; idx >= 0; idx -= 1) {
+            const waiter = diagWaiters[idx];
+            if (waiter.uri === params.uri && (params.version ?? 0) >= waiter.minVersion) {
+                diagWaiters.splice(idx, 1);
+                waiter.resolve(params);
+            }
+        }
+    });
+
+    function waitForDiagnostics(uri, minVersion, timeoutMs = 4000) {
+        const cached = latestDiagnostics.get(uri);
+        if (cached && (cached.version ?? 0) >= minVersion) {
+            return Promise.resolve(cached);
+        }
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error(`Timeout waiting for publishDiagnostics v${minVersion} on ${uri}`));
+            }, timeoutMs);
+            diagWaiters.push({
+                uri,
+                minVersion,
+                resolve: (params) => {
+                    clearTimeout(timer);
+                    resolve(params);
+                },
+            });
+        });
+    }
+
+    async function sendDidChangeAndSync(uri, version, text) {
+        const diagPromise = waitForDiagnostics(uri, version);
+        connection.sendNotification('textDocument/didChange', {
+            textDocument: { uri, version },
+            contentChanges: [{ text }],
+        });
+        return diagPromise;
+    }
 
     try {
         // Step 1: Initialize
@@ -103,6 +145,7 @@ async function runClientRpcSuite() {
             '',
         ].join('\n');
 
+        const diagInitPromise = waitForDiagnostics(documentUri, 1);
         connection.sendNotification('textDocument/didOpen', {
             textDocument: {
                 uri: documentUri,
@@ -111,9 +154,7 @@ async function runClientRpcSuite() {
                 text: sourceText,
             },
         });
-
-        // Small pause to allow server indexing
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await diagInitPromise;
 
         // Step 4: Hover
         console.log('Step 3: Requesting textDocument/hover...');
@@ -139,12 +180,7 @@ async function runClientRpcSuite() {
             '',
         ].join('\n');
 
-        connection.sendNotification('textDocument/didChange', {
-            textDocument: { uri: documentUri, version: 2 },
-            contentChanges: [{ text: completionSource }],
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await sendDidChangeAndSync(documentUri, 2, completionSource);
 
         const completionResult = await connection.sendRequest('textDocument/completion', {
             textDocument: { uri: documentUri },
@@ -161,11 +197,7 @@ async function runClientRpcSuite() {
         // Step 6: Formatting
         console.log('Step 5: Requesting textDocument/formatting on unformatted source...');
         const unformattedSource = 'class Unformatted{\nint32   x=10;\n}\n';
-        connection.sendNotification('textDocument/didChange', {
-            textDocument: { uri: documentUri, version: 3 },
-            contentChanges: [{ text: unformattedSource }],
-        });
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await sendDidChangeAndSync(documentUri, 3, unformattedSource);
 
         const formatEdits = await connection.sendRequest('textDocument/formatting', {
             textDocument: { uri: documentUri },
@@ -192,11 +224,7 @@ async function runClientRpcSuite() {
             '',
         ].join('\n');
 
-        connection.sendNotification('textDocument/didChange', {
-            textDocument: { uri: documentUri, version: 4 },
-            contentChanges: [{ text: localVarSource }],
-        });
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        await sendDidChangeAndSync(documentUri, 4, localVarSource);
 
         const localDotResult = await connection.sendRequest('textDocument/completion', {
             textDocument: { uri: documentUri },
@@ -224,6 +252,82 @@ async function runClientRpcSuite() {
             throw new Error(`Expected 'solix.runMain' CodeLens, got: ${JSON.stringify(codeLensResult)}`);
         }
         console.log('  ✓ CodeLens correctly emitted solix.runMain action.');
+
+        // Step 8b: Goto Definition, References, Prepare Rename, Rename, SignatureHelp
+        console.log('Step 7b: Testing definition, references, rename, and signatureHelp...');
+        const navSource = [
+            'class Calculator {',
+            '    public static int32 add(int32 left, int32 right) {',
+            '        return left + right;',
+            '    }',
+            '}',
+            'void main() {',
+            '    int32 total = Calculator::add(3, 4);',
+            '}',
+            '',
+        ].join('\n');
+        await sendDidChangeAndSync(documentUri, 5, navSource);
+
+        const defResult = await connection.sendRequest('textDocument/definition', {
+            textDocument: { uri: documentUri },
+            position: { line: 6, character: 30 }, // add in Calculator::add
+        });
+        if (!defResult) {
+            throw new Error('Expected non-null definition location for Calculator::add');
+        }
+
+        const refsResult = await connection.sendRequest('textDocument/references', {
+            textDocument: { uri: documentUri },
+            position: { line: 1, character: 25 },
+            context: { includeDeclaration: true },
+        });
+        if (!Array.isArray(refsResult) || refsResult.length < 2) {
+            throw new Error(`Expected >= 2 references to Calculator::add, got: ${JSON.stringify(refsResult)}`);
+        }
+
+        const sigHelp = await connection.sendRequest('textDocument/signatureHelp', {
+            textDocument: { uri: documentUri },
+            position: { line: 6, character: 35 },
+        });
+        if (!sigHelp || !Array.isArray(sigHelp.signatures) || sigHelp.signatures.length === 0) {
+            throw new Error(`Expected signatureHelp for Calculator::add, got: ${JSON.stringify(sigHelp)}`);
+        }
+
+        const prepRename = await connection.sendRequest('textDocument/prepareRename', {
+            textDocument: { uri: documentUri },
+            position: { line: 1, character: 25 },
+        });
+        if (!prepRename) {
+            throw new Error('Expected prepareRename to allow renaming Calculator::add');
+        }
+        const renameEdit = await connection.sendRequest('textDocument/rename', {
+            textDocument: { uri: documentUri },
+            position: { line: 1, character: 25 },
+            newName: 'sum_pair',
+        });
+        if (!renameEdit || !renameEdit.changes || !renameEdit.changes[documentUri]) {
+            throw new Error(`Expected workspace edits from textDocument/rename, got: ${JSON.stringify(renameEdit)}`);
+        }
+        console.log('  ✓ Definition, references, signatureHelp, and rename verified.');
+
+        // Step 8c: Diagnostics emission & recovery check
+        const errDiag = await sendDidChangeAndSync(
+            documentUri,
+            6,
+            'void main() {\n    int32 bad = "not_an_int";\n}\n'
+        );
+        if (!errDiag.diagnostics || errDiag.diagnostics.length === 0) {
+            throw new Error('Expected publishDiagnostics on type mismatch');
+        }
+        const clearedDiag = await sendDidChangeAndSync(
+            documentUri,
+            7,
+            'void main() {\n    int32 good = 10;\n}\n'
+        );
+        if (clearedDiag.diagnostics && clearedDiag.diagnostics.length > 0) {
+            throw new Error(`Expected diagnostics to clear after fix, got: ${JSON.stringify(clearedDiag.diagnostics)}`);
+        }
+        console.log('  ✓ publishDiagnostics emitted and cleared deterministically.');
 
         // Step 9: Clean Shutdown
         console.log('Step 8: Sending shutdown request...');

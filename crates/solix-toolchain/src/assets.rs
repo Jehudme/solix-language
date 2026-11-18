@@ -664,6 +664,10 @@ pub fn resolve_bundled_vscode_extension_path() -> Option<PathBuf> {
         }
 
         if let Ok(current_dir) = std::env::current_dir() {
+            let editors_build_directory = current_dir.join("editors").join("vscode").join("build");
+            if let Some(extension_path) = find_vsix_in_directory(&editors_build_directory) {
+                return Some(extension_path);
+            }
             let editors_directory = current_dir.join("editors").join("vscode");
             if let Some(extension_path) = find_vsix_in_directory(&editors_directory) {
                 return Some(extension_path);

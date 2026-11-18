@@ -10,7 +10,7 @@
         "url": "https://github.com/jehudme/solix-language"
     },
     "engines": {
-        "vscode": "^1.85.0"
+        "vscode": "^1.146.0"
     },
     "categories": [
         "Programming Languages",
@@ -39,7 +39,7 @@
         "onCommand:solix.restartServer",
         "onDebug"
     ],
-    "main": "./dist/extension.js",
+    "main": "./build/dist/extension.js",
     "contributes": {
         "languages": [
             {
@@ -279,14 +279,17 @@
     },
     "scripts": {
         "vscode:prepublish": "npm run package-ext",
-        "package-ext": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
-        "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
-        "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+        "package-ext": "esbuild src/extension.ts --bundle --outfile=build/dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+        "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --outfile=build/dist/extension.js --external:vscode --format=cjs --platform=node",
+        "compile:unit": "tsc -p tsconfig.unit.json",
+        "watch": "esbuild src/extension.ts --bundle --outfile=build/dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+        "test:unit": "npm run compile:unit && node --test test/unit/*.test.mjs",
+        "test:contract": "node --test test/contract/*.test.mjs",
         "test:grammar": "vscode-tmgrammar-test -g syntaxes/solix.tmLanguage.json 'test/grammar/*.slx'",
         "test:client-rpc": "node test/client_rpc.test.mjs",
         "test:dap-rpc": "node test/dap_rpc.test.mjs",
-        "test": "npm run test:grammar && npm run test:client-rpc && npm run test:dap-rpc",
-        "package": "vsce package --no-dependencies"
+        "test": "npm run test:unit && npm run test:contract && npm run test:grammar && npm run test:client-rpc && npm run test:dap-rpc",
+        "package": "node -e \"require('fs').mkdirSync('build',{recursive:true})\" && vsce package --no-dependencies -o build/solix-language.vsix"
     },
     "dependencies": {
         "vscode-languageclient": "^11.0.0"
