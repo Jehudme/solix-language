@@ -295,7 +295,7 @@
         "@types/node": "^26.6.6",
         "@types/vscode": "^1.85.0",
         "@vscode/test-electron": "^2.4.1",
-        "@vscode/vsce": "^3.2.1",
+        "@vscode/vsce": "^4.1.0",
         "esbuild": "^0.28.2",
         "typescript": "^7.0.2",
         "vscode-tmgrammar-test": "^0.1.2"
