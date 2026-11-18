@@ -7,8 +7,11 @@
 
 use std::env;
 use std::fmt::Write as _;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
+use zip::write::SimpleFileOptions;
+use zip::{ZipArchive, ZipWriter};
 
 fn copy_dir_all(source: &Path, destination: &Path) -> std::io::Result<()> {
     fs::create_dir_all(destination)?;
@@ -144,6 +147,127 @@ fn collect_wiki_docs(docs_dir: &Path) -> Vec<(String, PathBuf)> {
     wiki_docs
 }
 
+fn target_matches_native_subdir(
+    subdirectory: &str,
+    target_os: &str,
+    target_arch: &str,
+    target_env: &str,
+) -> bool {
+    let short_pair = format!("{target_os}-{target_arch}");
+    if subdirectory == short_pair || subdirectory == target_os || subdirectory == "host" {
+        return true;
+    }
+
+    let triple_matches_os = match target_os {
+        "linux" => subdirectory.contains("-linux-"),
+        "macos" => subdirectory.contains("-apple-darwin"),
+        "windows" => {
+            if target_env == "msvc" {
+                subdirectory.contains("-pc-windows-msvc") || subdirectory.contains("-pc-windows-")
+            } else if target_env == "gnu" {
+                subdirectory.contains("-pc-windows-gnu") || subdirectory.contains("-pc-windows-")
+            } else {
+                subdirectory.contains("-pc-windows-")
+            }
+        }
+        _ => false,
+    };
+
+    if !triple_matches_os {
+        return false;
+    }
+
+    match target_arch {
+        "x86_64" => subdirectory.starts_with("x86_64-"),
+        "aarch64" => subdirectory.starts_with("aarch64-") || subdirectory.starts_with("arm64-"),
+        _ => subdirectory.starts_with(target_arch),
+    }
+}
+
+/// Filters foreign-OS/architecture native shared libraries (`lib/<other-target>/...`) out of a
+/// `.slxarc` ZIP payload so each platform's binary only embeds native libraries for its own target.
+fn filter_slxarc_for_target(
+    archive_bytes: &[u8],
+    target_os: &str,
+    target_arch: &str,
+    target_env: &str,
+) -> Option<Vec<u8>> {
+    let reader = Cursor::new(archive_bytes);
+    let mut zip_in = ZipArchive::new(reader).ok()?;
+
+    let mut has_foreign_entries = false;
+    for idx in 0..zip_in.len() {
+        let entry = zip_in.by_index(idx).ok()?;
+        let Ok(name_cow) = entry.name() else {
+            continue;
+        };
+        let name = name_cow.as_ref();
+        if let Some(after_lib) = name.strip_prefix("lib/")
+            && let Some((subdir, rest)) = after_lib.split_once('/')
+            && !subdir.is_empty()
+            && (!rest.is_empty() || entry.is_dir())
+            && !target_matches_native_subdir(subdir, target_os, target_arch, target_env)
+        {
+            has_foreign_entries = true;
+            break;
+        }
+    }
+
+    if !has_foreign_entries {
+        return None;
+    }
+
+    let mut out_buf = Cursor::new(Vec::with_capacity(archive_bytes.len() / 2));
+    {
+        let mut zip_out = ZipWriter::new(&mut out_buf);
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .unix_permissions(0o755);
+
+        for idx in 0..zip_in.len() {
+            let mut entry = zip_in.by_index(idx).ok()?;
+            let name = entry.name().ok()?.into_owned();
+            if let Some(after_lib) = name.strip_prefix("lib/")
+                && let Some((subdir, _)) = after_lib.split_once('/')
+                && !subdir.is_empty()
+                && !target_matches_native_subdir(subdir, target_os, target_arch, target_env)
+            {
+                continue;
+            }
+
+            if entry.is_dir() {
+                zip_out.add_directory(&name, options).ok()?;
+            } else {
+                let mut payload = Vec::with_capacity(entry.size() as usize);
+                entry.read_to_end(&mut payload).ok()?;
+                zip_out.start_file(&name, options).ok()?;
+                zip_out.write_all(&payload).ok()?;
+            }
+        }
+        zip_out.finish().ok()?;
+    }
+
+    Some(out_buf.into_inner())
+}
+
+fn write_packed_blob(out_path: &Path, entries: &[(String, Vec<u8>)]) {
+    let mut packed: Vec<u8> = Vec::new();
+    if !entries.is_empty() {
+        packed.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        for (rel_path, payload) in entries {
+            let path_bytes = rel_path.as_bytes();
+            packed.extend_from_slice(&(path_bytes.len() as u32).to_le_bytes());
+            packed.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            packed.extend_from_slice(path_bytes);
+            packed.extend_from_slice(payload);
+        }
+    }
+    let unchanged = fs::read(out_path).ok().as_deref() == Some(packed.as_slice());
+    if !unchanged && let Ok(mut file) = File::create(out_path) {
+        let _ = file.write_all(&packed);
+    }
+}
+
 fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     let source_assets = manifest_dir.join("assets");
     let packages_dir = source_assets.join("packages");
@@ -164,6 +288,32 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     let packages = collect_bundled_packages(&packages_dir);
     let wiki_docs = collect_wiki_docs(&wiki_docs_dir);
 
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_else(|_| env::consts::OS.to_string());
+    let target_arch =
+        env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| env::consts::ARCH.to_string());
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    let mut packed_packages: Vec<(String, Vec<u8>)> = Vec::with_capacity(packages.len());
+    for (rel_path, archive_path) in &packages {
+        if let Ok(raw_bytes) = fs::read(archive_path) {
+            let filtered =
+                filter_slxarc_for_target(&raw_bytes, &target_os, &target_arch, &target_env)
+                    .unwrap_or(raw_bytes);
+            packed_packages.push((rel_path.clone(), filtered));
+        }
+    }
+    let packages_pack_path = out_dir.join("embedded_packages.pack");
+    write_packed_blob(&packages_pack_path, &packed_packages);
+
+    let mut packed_wiki: Vec<(String, Vec<u8>)> = Vec::with_capacity(wiki_docs.len());
+    for (rel_path, doc_file_path) in &wiki_docs {
+        if let Ok(raw_bytes) = fs::read(doc_file_path) {
+            packed_wiki.push((rel_path.clone(), raw_bytes));
+        }
+    }
+    let wiki_pack_path = out_dir.join("embedded_wiki.pack");
+    write_packed_blob(&wiki_pack_path, &packed_wiki);
+
     let fallback_editors_vscode = manifest_dir
         .join("..")
         .join("..")
@@ -180,7 +330,7 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     generated.push_str(
         "/// Compile-time embedded `bundled_manifest.json` when default archives are present.\n",
     );
-    if !packages.is_empty() && manifest_json_path.is_file() {
+    if !packed_packages.is_empty() && manifest_json_path.is_file() {
         let escaped_manifest = escape_rust_string(&manifest_json_path.to_string_lossy());
         let _ = writeln!(
             generated,
@@ -190,19 +340,14 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
         generated.push_str("pub const EMBEDDED_BUNDLED_MANIFEST: Option<&[u8]> = None;\n");
     }
 
+    let escaped_packages_pack = escape_rust_string(&packages_pack_path.to_string_lossy());
     generated.push_str(
-        "\n/// Compile-time embedded bundled `.slxarc` archives as `(archive_rel_path, bytes)`.\n",
+        "\n/// Compile-time packed binary blob of target-filtered bundled `.slxarc` archives.\n",
     );
-    generated.push_str("pub const EMBEDDED_BUNDLED_PACKAGES: &[(&str, &[u8])] = &[\n");
-    for (rel_path, archive_path) in &packages {
-        let escaped_rel = escape_rust_string(rel_path);
-        let escaped_archive = escape_rust_string(&archive_path.to_string_lossy());
-        let _ = writeln!(
-            generated,
-            "    (\"{escaped_rel}\", include_bytes!(\"{escaped_archive}\")),"
-        );
-    }
-    generated.push_str("];\n\n");
+    let _ = writeln!(
+        generated,
+        "pub const EMBEDDED_BUNDLED_PACKAGES_PACK: &[u8] = include_bytes!(\"{escaped_packages_pack}\");\n"
+    );
 
     generated.push_str(
         "/// Compile-time embedded Solix VS Code extension archive as `(filename, bytes)`.\n",
@@ -218,19 +363,13 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
         generated.push_str("pub const EMBEDDED_VSCODE_VSIX: Option<(&str, &[u8])> = None;\n");
     }
 
-    generated.push_str(
-        "\n/// Compile-time embedded offline documentation portal files as `(rel_path, bytes)`.\n",
+    let escaped_wiki_pack = escape_rust_string(&wiki_pack_path.to_string_lossy());
+    generated
+        .push_str("\n/// Compile-time packed binary blob of offline documentation portal files.\n");
+    let _ = writeln!(
+        generated,
+        "pub const EMBEDDED_WIKI_DOCS_PACK: &[u8] = include_bytes!(\"{escaped_wiki_pack}\");"
     );
-    generated.push_str("pub const EMBEDDED_WIKI_DOCS: &[(&str, &[u8])] = &[\n");
-    for (rel_path, doc_file_path) in &wiki_docs {
-        let escaped_rel = escape_rust_string(rel_path);
-        let escaped_doc_path = escape_rust_string(&doc_file_path.to_string_lossy());
-        let _ = writeln!(
-            generated,
-            "    (\"{escaped_rel}\", include_bytes!(\"{escaped_doc_path}\")),"
-        );
-    }
-    generated.push_str("];\n");
 
     let generated_file_path = out_dir.join("embedded_assets.rs");
     let needs_write = fs::read_to_string(&generated_file_path).ok().as_deref() != Some(&generated);

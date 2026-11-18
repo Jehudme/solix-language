@@ -90,16 +90,18 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             lower_tail_calls(compiled_function, &func_has_refs);
         }
 
-        // Keep functions_by_source synchronized with optimized functions
-        for source_functions in &mut emission_artifacts.functions_by_source {
-            for function in source_functions {
-                if let Some(optimized) = emission_artifacts
-                    .program
-                    .functions
-                    .iter()
-                    .find(|func| func.symbol == function.symbol)
-                {
-                    *function = optimized.clone();
+        // Keep functions_by_source synchronized with optimized functions when emitting build artifacts
+        if context.options.emit_export_metadata {
+            for source_functions in &mut emission_artifacts.functions_by_source {
+                for function in source_functions {
+                    if let Some(optimized) = emission_artifacts
+                        .program
+                        .functions
+                        .iter()
+                        .find(|func| func.symbol == function.symbol)
+                    {
+                        *function = optimized.clone();
+                    }
                 }
             }
         }

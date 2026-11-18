@@ -906,17 +906,25 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
 
     // Pre-calculate exact 1-based line and column coordinates for local functions before
     // static linking merges pre-compiled dependency functions with separate source tables.
-    for compiled_function in &mut program.functions {
-        let source_index = compiled_function.source_id as usize;
-        if let Some(source_content) = context.sources.get(source_index) {
-            let mut line_starting_offsets = Vec::new();
-            line_starting_offsets.push(0);
+    // Compute line_starting_offsets once per source file rather than once per function.
+    let line_offsets_by_source: Vec<Vec<usize>> = context
+        .sources
+        .iter()
+        .map(|source_content| {
+            let mut offsets = Vec::with_capacity(source_content.len() / 32 + 2);
+            offsets.push(0);
             for (byte_offset, character_byte) in source_content.bytes().enumerate() {
                 if character_byte == b'\n' {
-                    line_starting_offsets.push(byte_offset + 1);
+                    offsets.push(byte_offset + 1);
                 }
             }
+            offsets
+        })
+        .collect();
 
+    for compiled_function in &mut program.functions {
+        let source_index = compiled_function.source_id as usize;
+        if let Some(line_starting_offsets) = line_offsets_by_source.get(source_index) {
             for source_entry in &mut compiled_function.source_map {
                 let token_start_offset = source_entry.span.start as usize;
                 let found_line_index =
@@ -959,8 +967,11 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         dynamic_dependencies
     };
 
-    let (api_header, exported_ast_bytes) =
-        crate::phases::export_api::generate_api_header_and_ast(context);
+    let (api_header, exported_ast_bytes) = if context.options.emit_export_metadata {
+        crate::phases::export_api::generate_api_header_and_ast(context)
+    } else {
+        (String::new(), Vec::new())
+    };
 
     program.build_profile = context.options.profile.to_string();
     program.exported_ast_bytes = exported_ast_bytes.clone();

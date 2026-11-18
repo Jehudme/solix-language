@@ -386,6 +386,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         let mut compilation_options = CompilationOptions::new()
             .with_package_metadata(first_stem, "0.1.0", "")
             .with_inline_threshold(args.inline_threshold)
+            .with_emit_export_metadata(false)
             .with_solver(solver.clone());
 
         let mut read_sources = Vec::with_capacity(source_paths.len());

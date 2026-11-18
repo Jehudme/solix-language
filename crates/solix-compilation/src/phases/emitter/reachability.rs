@@ -799,6 +799,9 @@ impl<'program> StaticLinker<'program> {
     }
 
     fn rewrite_external_instructions(&mut self) {
+        if self.call_extern_rewrites.is_empty() && self.alloc_extern_rewrites.is_empty() {
+            return;
+        }
         let mut class_info_by_vtable: HashMap<u32, (usize, bool)> = HashMap::new();
         for class_item in &self.program.classes {
             class_info_by_vtable.insert(
@@ -839,7 +842,9 @@ impl<'program> StaticLinker<'program> {
     }
 
     fn prune_and_remap(self) {
-        if self.reachable_indices.is_empty() {
+        if self.reachable_indices.is_empty()
+            || self.reachable_indices.len() == self.program.functions.len()
+        {
             return;
         }
 
