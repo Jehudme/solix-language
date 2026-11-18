@@ -216,7 +216,7 @@ def check_manifest_sections_documented(manifest_doc_path: Path) -> list[str]:
 
 
 def main():
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     docs_directory = repo_root / "docs"
     cli_source_file = repo_root / "crates" / "solix-toolchain" / "src" / "cli.rs"
     manifest_doc_file = docs_directory / "spec" / "tools" / "cli" / "manifest.md"

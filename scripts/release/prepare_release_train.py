@@ -340,7 +340,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint."""
     args = parse_args(argv)
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
 
     current_version = read_base_version(repo_root, args.base_ref)
     commits = collect_commits(repo_root, args.base_ref, args.head_ref)

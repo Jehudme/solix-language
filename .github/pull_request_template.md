@@ -10,8 +10,8 @@
 - [ ] `cargo fmt --all -- --check` passes cleanly
 - [ ] `cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars` passes cleanly
 - [ ] `cargo test --workspace --all-targets` passes cleanly
-- [ ] `python3 scripts/doc_sync_check.py --base origin/dev` and `--all-docs` pass (`GL-0011` / `GL-0013`)
-- [ ] `python3 scripts/verify_docs.py` passes cleanly
+- [ ] `python3 scripts/ci/doc_sync_check.py --base origin/dev` and `--all-docs` pass (`GL-0011` / `GL-0013`)
+- [ ] `python3 scripts/ci/verify_docs.py` passes cleanly
 
 ## Sensitive-Path Disclosure (GL-0014)
 

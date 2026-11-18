@@ -17,8 +17,8 @@ Thank you for contributing to the **Solix Programming Language**! We welcome bug
    cargo fmt --all -- --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test --workspace --all-targets
-   python3 scripts/doc_sync_check.py --base origin/dev
-   python3 scripts/verify_docs.py
+   python3 scripts/ci/doc_sync_check.py --base origin/dev
+   python3 scripts/ci/verify_docs.py
    python3 -m unittest discover -s scripts/tests -v
    ```
 4. **Link Issues & Sensitive Files:** Reference tracked issues (`Closes #<issue-number>`) in [`.github/pull_request_template.md`](.github/pull_request_template.md). Changes to [`.github/CODEOWNERS`](.github/CODEOWNERS)-protected paths are welcome and automatically flag maintainer (`@Jehudme`) review.

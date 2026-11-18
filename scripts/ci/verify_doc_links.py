@@ -50,7 +50,7 @@ def check_link(source_file: Path, target_url: str, repo_root: Path) -> str | Non
 
 
 def main():
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     docs_dir = repo_root / "docs"
     
     if not docs_dir.exists():

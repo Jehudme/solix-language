@@ -127,7 +127,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Governance & Offline Docs Scripts",
-        "pattern": r"^scripts/(pr_risk_audit|prepare_release_train|build_docs_site|sync_github_wiki)\.py$",
+        "pattern": r"^scripts/(ci|docs|release|bench)/.*\.py$",
         "required_docs": [
             "docs/guidelines/pr-and-release-governance.md",
             "CONTRIBUTING.md",
@@ -249,7 +249,7 @@ def main():
     parser.add_argument("--all-docs", action="store_true", help="Audit all documentation files for GL-0011")
     args = parser.parse_args()
 
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     os.chdir(repo_root)
 
     print("=== Solix Documentation Synchronization & Quality Gate ===")

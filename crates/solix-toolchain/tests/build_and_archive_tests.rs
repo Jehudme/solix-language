@@ -1530,7 +1530,10 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
         .parent()
         .and_then(|crates_dir| crates_dir.parent())
         .expect("resolve repository root");
-    let merge_script = repo_root.join("scripts").join("merge_bundled_packages.py");
+    let merge_script = repo_root
+        .join("scripts")
+        .join("release")
+        .join("merge_bundled_packages.py");
     assert!(
         merge_script.is_file(),
         "merge_bundled_packages.py must exist"

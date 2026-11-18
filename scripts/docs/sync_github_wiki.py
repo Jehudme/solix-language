@@ -182,7 +182,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint."""
     args = parse_args(argv)
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     result = stage_github_wiki(repo_root, args.output, version_override=args.version)
     print(f"[sync_github_wiki] Staged {result['pages']} wiki page(s) for v{result['version']} into '{args.output}'.")
     return 0
