@@ -260,27 +260,70 @@ impl RuntimeContext {
             }
 
             // Register and relocate classes
-            let mut max_vtable_id = 0;
+            const MAX_TABLE_ID: u32 = 65_536;
+            let mut max_vtable_id: u32 = 0;
             for class in &binary.classes {
+                if class.vtable_id >= MAX_TABLE_ID {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "Class '{}' vtable_id {} exceeds safety limit {MAX_TABLE_ID}",
+                            class.symbol, class.vtable_id
+                        ),
+                    });
+                }
                 if class.vtable_id >= max_vtable_id {
                     max_vtable_id = class.vtable_id + 1;
                 }
                 let mut relocated_class = class.clone();
-                relocated_class.vtable_id += vtable_offset;
+                relocated_class.vtable_id = relocated_class
+                    .vtable_id
+                    .checked_add(vtable_offset)
+                    .ok_or_else(|| RuntimeError::BinaryLoadError {
+                        reason: "Class vtable_id relocation overflow".to_string(),
+                    })?;
                 if let Some(base_id) = relocated_class.base_vtable_id {
-                    relocated_class.base_vtable_id = Some(base_id + vtable_offset);
+                    relocated_class.base_vtable_id =
+                        Some(base_id.checked_add(vtable_offset).ok_or_else(|| {
+                            RuntimeError::BinaryLoadError {
+                                reason: "Class base_vtable_id relocation overflow".to_string(),
+                            }
+                        })?);
                 }
                 for slot_func in &mut relocated_class.vtable {
-                    *slot_func += func_offset;
+                    *slot_func = slot_func.checked_add(func_offset).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: "Class vtable slot relocation overflow".to_string(),
+                        }
+                    })?;
                 }
                 for (iface_id, iface_methods) in &mut relocated_class.itable {
-                    *iface_id += vtable_offset;
+                    if *iface_id >= MAX_TABLE_ID {
+                        return Err(RuntimeError::BinaryLoadError {
+                            reason: format!(
+                                "Class '{}' interface id {} exceeds safety limit {MAX_TABLE_ID}",
+                                class.symbol, *iface_id
+                            ),
+                        });
+                    }
+                    *iface_id = iface_id.checked_add(vtable_offset).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: "Interface ID relocation overflow".to_string(),
+                        }
+                    })?;
                     for slot_func in iface_methods {
-                        *slot_func += func_offset;
+                        *slot_func = slot_func.checked_add(func_offset).ok_or_else(|| {
+                            RuntimeError::BinaryLoadError {
+                                reason: "Interface method slot relocation overflow".to_string(),
+                            }
+                        })?;
                     }
                 }
                 if let Some(dtor_id) = &mut relocated_class.destructor_id {
-                    *dtor_id += func_offset;
+                    *dtor_id = dtor_id.checked_add(func_offset).ok_or_else(|| {
+                        RuntimeError::BinaryLoadError {
+                            reason: "Class destructor ID relocation overflow".to_string(),
+                        }
+                    })?;
                 }
 
                 symbol_to_vtable_id.insert(
@@ -480,18 +523,26 @@ impl RuntimeContext {
             .unwrap_or(0)
             .max(max_relocated_vtable_id);
 
-        let mut vtable_lookup = vec![None; (max_relocated_vtable_id + 1) as usize];
-        let mut flat_vtables: Vec<Box<[u32]>> =
-            vec![Box::default(); (max_relocated_vtable_id + 1) as usize];
-        let mut flat_itables: Vec<Box<[Box<[u32]>]>> =
-            vec![Box::default(); (max_relocated_vtable_id + 1) as usize];
+        if max_relocated_vtable_id > 131_072 || max_iface_id > 131_072 {
+            return Err(RuntimeError::BinaryLoadError {
+                reason: format!(
+                    "Relocated class/interface table dimensions ({max_relocated_vtable_id}, {max_iface_id}) exceed runtime limits"
+                ),
+            });
+        }
+
+        let table_len = (max_relocated_vtable_id as usize) + 1;
+        let iface_table_len = (max_iface_id as usize) + 1;
+        let mut vtable_lookup = vec![None; table_len];
+        let mut flat_vtables: Vec<Box<[u32]>> = vec![Box::default(); table_len];
+        let mut flat_itables: Vec<Box<[Box<[u32]>]>> = vec![Box::default(); table_len];
 
         for class_entry in &all_classes {
             let class_idx = class_entry.vtable_id as usize;
             vtable_lookup[class_idx] = Some(class_entry.clone());
             flat_vtables[class_idx] = class_entry.vtable.clone().into_boxed_slice();
             if !class_entry.itable.is_empty() {
-                let mut iface_rows = vec![Box::<[u32]>::default(); (max_iface_id + 1) as usize];
+                let mut iface_rows = vec![Box::<[u32]>::default(); iface_table_len];
                 for (iface_id, method_slots) in &class_entry.itable {
                     iface_rows[*iface_id as usize] = method_slots.clone().into_boxed_slice();
                 }

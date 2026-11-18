@@ -208,7 +208,7 @@ Bytes 4..8 (32 bits): [ BlockTag (4 bits) | ref_count (28 bits)   ]
 
 ## 6. Zero-Cost Table-Driven Exception Handling
 
-Exceptions use static metadata tables (`ExceptionHandlerEntry`) rather than inline setup instructions. When `Throw(reg)` executes, the runtime searches the static handler table in reverse, checks class inheritance via `instanceof`, decrements intermediate reference registers, and jumps directly to `catch_pc`.
+Exceptions use static metadata tables (`ExceptionHandlerEntry`) rather than inline setup instructions. When `Throw(reg)` executes, ownership of owned/temp reference exceptions transfers cleanly into the unwinder (while borrowed parameter throws retain an in-flight reference) without double-running `finally` blocks when `catch` handles or rethrows. The runtime selects the innermost (narrowest `try_start_pc..try_end_pc` span) matching handler first (preferring explicit typed `catch` handlers over `<any>` `finally` unwinders within the same span), cleans intermediate reference registers, and jumps directly to `handler_pc`. Both `.slxb` deserialization (`ByteReader::checked_capacity`) and the AOT bytecode verifier (`verify_program`) enforce strict container, register, jump, constant pool, call target, exception-table, and vtable/interface table limits prior to execution.
 
 ---
 

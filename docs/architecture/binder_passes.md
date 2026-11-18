@@ -47,6 +47,7 @@ flowchart TD
 - **Operations**:
   - Validates expression types, binary operations, method argument matching, and explicit type casts.
   - Manages lexical scopes (`Scope` stack) for local variables, tracking register lifetimes and variable shadowing rules.
+  - Records inferred lambda expression types (`node_types`) for both variable declarations and assignments so member/array closure assignments emit balanced ARC cleanup.
   - Enforces `const` variable immutability.
   - Distinguishes instance method calls (`receiver.method()`) from static method invocations using scope resolution (`ClassName::method()`).
   - Analyzes control flow exits (`break`, `continue`, `return`, `throw`) and registers required reference count decrements (`DecRef`) for variables leaving scope.

@@ -2996,16 +2996,57 @@ impl VirtualMachine {
 
     #[cold]
     #[inline(never)]
-    fn execute_throw(&mut self, exc_val: Value, target_depth: usize) -> Result<(), VmTrap> {
+    fn execute_throw(
+        &mut self,
+        exc_val: Value,
+        exc_reg: Option<u16>,
+        target_depth: usize,
+    ) -> Result<(), VmTrap> {
         if exc_val.is_null() {
             return Err(VmTrap::null_reference());
         }
 
+        // Determine whether the throwing frame already holds an independent owned reference for `exc_val`:
+        // - Owned local register (`exc_reg` in `func.reference_registers`) or freshly allocated temporary
+        //   (`exc_reg >= func.param_count`): transfer ownership out of `exc_reg` by clearing it to `Null`.
+        // - Borrowed parameter (`exc_reg < func.param_count` and not in `reference_registers`) or unknown:
+        //   retain an in-flight reference so caller/unwind cleanup cannot free `exc_val` while unwinding.
+        let mut retained_flight_ref = false;
+        if let Value::Ref(exc_addr) = exc_val
+            && exc_addr > 0
+        {
+            let mut need_retain = true;
+            if let (Some(reg_idx), Ok(frame)) = (exc_reg, self.current_frame_fast())
+                && let Some(throwing_func) = self.context.get_function(frame.function_id)
+            {
+                let is_owned_local = throwing_func.reference_registers.contains(&reg_idx);
+                let is_owned_temp = reg_idx >= throwing_func.param_count;
+                if is_owned_local || is_owned_temp {
+                    let abs_idx = frame.register_base as usize + reg_idx as usize;
+                    if let Some(slot) = self.register_stack.get_mut(abs_idx) {
+                        *slot = Value::Null;
+                        need_retain = false;
+                    }
+                }
+            }
+            if need_retain {
+                let _ = crate::memory::arc::inc_ref(&mut self.heap, exc_addr);
+                retained_flight_ref = true;
+            }
+        }
+        let exc_flight_addr = if retained_flight_ref {
+            exc_val.as_ref().ok().filter(|addr| *addr > 0)
+        } else {
+            exc_val.as_ref().ok().filter(|addr| *addr > 0)
+        };
+
         loop {
             if self.call_frames.is_empty() {
-                return Err(VmTrap::from_error(RuntimeError::UserException {
-                    message: format!("{exc_val}"),
-                }));
+                let message = format!("{exc_val}");
+                if let Some(exc_addr) = exc_flight_addr {
+                    let _ = self.release_reference(exc_addr);
+                }
+                return Err(VmTrap::from_error(RuntimeError::UserException { message }));
             }
 
             let (func_id, cur_pc) = {
@@ -3018,18 +3059,17 @@ impl VirtualMachine {
                 .get_function(func_id)
                 .ok_or_else(|| function_not_found_error(func_id))?;
 
-            let mut matched_handler = None;
-            let mut fallback_handler = None;
+            let mut matched_handler: Option<solix_common::bytecode::ExceptionHandlerEntry> = None;
+            let mut matched_span_len: u32 = u32::MAX;
+            let mut matched_is_typed = false;
+
             for handler in &func.exception_handlers {
                 if cur_pc >= handler.try_start_pc && cur_pc < handler.try_end_pc {
-                    match &handler.catch_type_symbol {
-                        None => {
-                            if fallback_handler.is_none() {
-                                fallback_handler = Some(handler.clone());
-                            }
-                        }
+                    let span_len = handler.try_end_pc.saturating_sub(handler.try_start_pc);
+                    let (is_match, is_typed) = match &handler.catch_type_symbol {
+                        None => (true, false),
                         Some(type_sym) => {
-                            let is_match = if let Value::Ref(obj_addr) = exc_val
+                            let typed_match = if let Value::Ref(obj_addr) = exc_val
                                 && obj_addr > 0
                             {
                                 let obj_vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
@@ -3046,17 +3086,22 @@ impl VirtualMachine {
                             } else {
                                 true
                             };
-                            if is_match {
-                                matched_handler = Some(handler.clone());
-                                break;
-                            }
+                            (typed_match, true)
+                        }
+                    };
+                    if is_match {
+                        // Always pick the innermost (narrowest) enclosing handler scope first;
+                        // within the same scope span, prefer an explicit typed `catch` over `<any>` finally.
+                        let is_better = matched_handler.is_none()
+                            || span_len < matched_span_len
+                            || (span_len == matched_span_len && is_typed && !matched_is_typed);
+                        if is_better {
+                            matched_handler = Some(handler.clone());
+                            matched_span_len = span_len;
+                            matched_is_typed = is_typed;
                         }
                     }
                 }
-            }
-
-            if matched_handler.is_none() {
-                matched_handler = fallback_handler;
             }
 
             if let Some(handler) = matched_handler {
@@ -3102,9 +3147,11 @@ impl VirtualMachine {
             let _frame = self.call_frames.pop().ok_or_else(VmTrap::null_reference)?;
 
             if self.call_frames.len() <= target_depth {
-                return Err(VmTrap::from_error(RuntimeError::UserException {
-                    message: format!("{exc_val}"),
-                }));
+                let message = format!("{exc_val}");
+                if let Some(exc_addr) = exc_flight_addr {
+                    let _ = self.release_reference(exc_addr);
+                }
+                return Err(VmTrap::from_error(RuntimeError::UserException { message }));
             }
         }
     }
@@ -5301,8 +5348,9 @@ impl VirtualMachine {
                         flush_inst_count!();
                         let caller_frame = self.current_frame_mut_fast()?;
                         caller_frame.pc = pc as u32;
-                        let exc_val = unsafe { *reg_base.add(inst.dst() as usize) };
-                        self.execute_throw(exc_val, target_depth)?;
+                        let exc_reg = inst.dst();
+                        let exc_val = unsafe { *reg_base.add(exc_reg as usize) };
+                        self.execute_throw(exc_val, Some(exc_reg), target_depth)?;
                         reload_frame!();
                         finish_instruction!();
                         continue 'dispatch_loop;
