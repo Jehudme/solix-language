@@ -1183,6 +1183,18 @@ fn test_positive_jump_if_i32_imm_fusion() {
         "Expected JumpIfI32Imm superinstruction in fib: {:?}",
         fib_fn.instructions
     );
+    assert_eq!(
+        fib_fn.instructions.len(),
+        10,
+        "Expected hybrid loop in fib, got len={}, idx={:?}, code={:?}",
+        fib_fn.instructions.len(),
+        artifacts
+            .program
+            .functions
+            .iter()
+            .position(|f| f.symbol.contains("fib")),
+        fib_fn.instructions
+    );
 }
 
 #[test]

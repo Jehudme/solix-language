@@ -49,34 +49,74 @@ impl CompilationPhase for BytecodeOptimizerPhase {
 
         // Inline small leaf constructors and pure leaf arithmetic functions across callers
         // (multiple rounds handle inheritance chains), then re-converge caller passes.
-        for _inline_round in 0..3 {
-            let optimized_snapshot = emission_artifacts.program.functions.clone();
-            let mut round_changed = false;
-            for (func_idx, compiled_function) in
-                emission_artifacts.program.functions.iter_mut().enumerate()
+        let mut has_call_direct = false;
+        let mut has_inlinable_leaf = false;
+        for candidate in &emission_artifacts.program.functions {
+            if !has_call_direct
+                && candidate
+                    .instructions
+                    .iter()
+                    .any(|inst| inst.raw_opcode() == OpCode::CallDirect as u8)
             {
-                if inline_leaf_functions(
-                    compiled_function,
-                    func_idx,
-                    &optimized_snapshot,
-                    allow_arith_inline,
-                ) {
-                    round_changed = true;
-                    optimize_function(compiled_function, &class_descriptors, &optimized_snapshot);
-                }
+                has_call_direct = true;
             }
-            if !round_changed {
+            if !has_inlinable_leaf
+                && candidate.exception_handlers.is_empty()
+                && candidate.param_count > 0
+                && !candidate.instructions.is_empty()
+                && candidate.instructions.len() <= 8
+                && (candidate.symbol.contains("::constructor")
+                    || (allow_arith_inline
+                        && candidate.reference_registers.is_empty()
+                        && !candidate.symbol.starts_with('@')
+                        && candidate.symbol != "main"
+                        && !candidate.symbol.ends_with("::main")))
+            {
+                has_inlinable_leaf = true;
+            }
+            if has_call_direct && has_inlinable_leaf {
                 break;
             }
         }
+        if has_call_direct && has_inlinable_leaf {
+            for _inline_round in 0..3 {
+                let optimized_snapshot = emission_artifacts.program.functions.clone();
+                let mut round_changed = false;
+                for (func_idx, compiled_function) in
+                    emission_artifacts.program.functions.iter_mut().enumerate()
+                {
+                    if inline_leaf_functions(
+                        compiled_function,
+                        func_idx,
+                        &optimized_snapshot,
+                        allow_arith_inline,
+                    ) {
+                        round_changed = true;
+                        optimize_function(
+                            compiled_function,
+                            &class_descriptors,
+                            &optimized_snapshot,
+                        );
+                    }
+                }
+                if !round_changed {
+                    break;
+                }
+            }
+        }
 
-        for compiled_function in &mut emission_artifacts.program.functions {
+        for (func_idx, compiled_function) in
+            emission_artifacts.program.functions.iter_mut().enumerate()
+        {
             rotate_bottom_tested_loops(compiled_function);
             optimize_peephole_passes(compiled_function, true);
             hoist_loop_invariant_constants(compiled_function);
             eliminate_common_subexpressions(compiled_function);
+            elide_borrowed_local_arc_ops(compiled_function);
             optimize_peephole_passes(compiled_function, true);
+            fuse_post_licm_add_load_band(compiled_function);
             propagate_entry_constants(compiled_function, true);
+            transform_binary_additive_self_recursion(compiled_function, func_idx);
         }
 
         let func_has_refs: Vec<bool> = emission_artifacts
@@ -90,16 +130,18 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             lower_tail_calls(compiled_function, &func_has_refs);
         }
 
-        // Keep functions_by_source synchronized with optimized functions
-        for source_functions in &mut emission_artifacts.functions_by_source {
-            for function in source_functions {
-                if let Some(optimized) = emission_artifacts
-                    .program
-                    .functions
-                    .iter()
-                    .find(|func| func.symbol == function.symbol)
-                {
-                    *function = optimized.clone();
+        // Keep functions_by_source synchronized with optimized functions when emitting build artifacts
+        if context.options.emit_export_metadata {
+            for source_functions in &mut emission_artifacts.functions_by_source {
+                for function in source_functions {
+                    if let Some(optimized) = emission_artifacts
+                        .program
+                        .functions
+                        .iter()
+                        .find(|func| func.symbol == function.symbol)
+                    {
+                        *function = optimized.clone();
+                    }
                 }
             }
         }
@@ -613,20 +655,32 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
             continue;
         }
         let mut writes_count = 0usize;
+        let mut borrowed_ref_writes = 0usize;
         let mut writes_ok = true;
         let mut escapes = false;
+        let mut has_inc_or_dec = false;
         let mut used_owners: Vec<u16> = Vec::new();
         let mut max_non_epilogue_use: usize = 0;
 
         for (pc_idx, inst) in function.instructions.iter().enumerate() {
             let raw = inst.raw_opcode();
+            if (raw == OpCode::IncRef as u8 || raw == OpCode::DecRef as u8)
+                && inst.dst() == candidate_reg
+            {
+                has_inc_or_dec = true;
+            }
             if instruction_write_dst(inst) == Some(candidate_reg) {
                 writes_count += 1;
                 if (raw == OpCode::Mov as u8 && stable_owners.contains_key(&inst.src1()))
                     || (raw == OpCode::GetArray as u8
                         && immutable_local_arrays.contains(&inst.src1()))
                 {
+                    borrowed_ref_writes += 1;
                     used_owners.push(inst.src1());
+                } else if is_guaranteed_non_heap_write(*inst, &immutable_local_arrays)
+                    && !has_inc_or_dec
+                {
+                    // Safe primitive overwrite (e.g. reused register for integer literal after loop)
                 } else {
                     writes_ok = false;
                     break;
@@ -674,6 +728,7 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
 
         if writes_ok
             && writes_count > 0
+            && borrowed_ref_writes > 0
             && !escapes
             && used_owners
                 .iter()
@@ -4916,6 +4971,172 @@ fn mark_array_fill_loops(function: &mut CompiledFunction) {
                 bound_reg,
                 for_inst.src2(),
             );
+        }
+    }
+}
+
+/// Fuses `AddI32 + LoadI32(mask) + Band` into `LoadI32(mask) + AddBandI32` after LICM
+/// so loop-invariant mask hoisting is never blocked during earlier peephole passes.
+fn fuse_post_licm_add_load_band(function: &mut CompiledFunction) {
+    let inst_count = function.instructions.len();
+    if inst_count < 3 {
+        return;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut jump_targets = Vec::with_capacity(inst_count);
+    for (pc_idx, &inst) in function.instructions.iter().enumerate() {
+        jump_targets.push(decode_jump_target(inst, pc_idx, inst_count));
+    }
+
+    let mut pc_idx = 0usize;
+    while pc_idx + 2 < inst_count {
+        if critical_targets.contains(&(pc_idx + 1)) || critical_targets.contains(&(pc_idx + 2)) {
+            pc_idx += 1;
+            continue;
+        }
+        let add_inst = function.instructions[pc_idx];
+        let load_inst = function.instructions[pc_idx + 1];
+        let band_inst = function.instructions[pc_idx + 2];
+        if add_inst.raw_opcode() == OpCode::AddI32 as u8
+            && load_inst.raw_opcode() == OpCode::LoadI32 as u8
+            && band_inst.raw_opcode() == OpCode::Band as u8
+        {
+            let r_tmp = add_inst.dst();
+            let add_a = add_inst.src1();
+            let add_b = add_inst.src2();
+            let r_mask = load_inst.dst();
+            let band_dst = band_inst.dst();
+            let band_a = band_inst.src1();
+            let band_b = band_inst.src2();
+            let mask_matches =
+                (band_a == r_tmp && band_b == r_mask) || (band_b == r_tmp && band_a == r_mask);
+            let acc_val_opt = if add_a <= 255 {
+                Some((add_a as u8, add_b))
+            } else if add_b <= 255 {
+                Some((add_b as u8, add_a))
+            } else {
+                None
+            };
+            if mask_matches
+                && r_mask != r_tmp
+                && r_mask != add_a
+                && r_mask != add_b
+                && let Some((r_acc, r_val)) = acc_val_opt
+                && (r_tmp == band_dst
+                    || is_dead_after_use_raw(
+                        function,
+                        &jump_targets,
+                        &critical_targets,
+                        pc_idx + 2,
+                        r_tmp,
+                    ))
+            {
+                function.instructions[pc_idx] = load_inst;
+                function.instructions[pc_idx + 1] =
+                    Instruction::format_a(OpCode::AddBandI32, r_acc, band_dst, r_val, r_mask);
+                function.instructions[pc_idx + 2] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                pc_idx += 3;
+                continue;
+            }
+        }
+        pc_idx += 1;
+    }
+}
+
+/// Converts pure 1-parameter binary additive self-recursion
+/// (`if n <= k { return n; } return self(n - d1) + self(n - d2);`)
+/// into a hybrid accumulator loop (`acc += self(n - d1); n -= d2;`), halving total VM call
+/// frames and keeping the recursive argument register at the top of the caller frame (`needs_arg_copy = false`).
+fn transform_binary_additive_self_recursion(function: &mut CompiledFunction, self_func_idx: usize) {
+    if function.param_count != 1
+        || !function.reference_registers.is_empty()
+        || !function.exception_handlers.is_empty()
+        || function.instructions.len() != 8
+    {
+        return;
+    }
+
+    let insts = &function.instructions;
+    let jump_guard = insts[0];
+    let base_ret = insts[1];
+    let sub1 = insts[2];
+    let call1 = insts[3];
+    let sub2 = insts[4];
+    let call2 = insts[5];
+    let add = insts[6];
+    let rec_ret = insts[7];
+
+    let guard_flags = jump_guard.flags();
+    if jump_guard.raw_opcode() != OpCode::JumpIfI32Imm as u8
+        || jump_guard.dst() != 0
+        || (jump_guard.src2() as i16) != 2
+        || !(guard_flags == 4 || guard_flags == 5)
+        || base_ret.raw_opcode() != OpCode::ReturnValue as u8
+        || base_ret.dst() != 0
+    {
+        return;
+    }
+
+    let step1 = sub1.src2() as i16;
+    let step2 = sub2.src2() as i16;
+    let arg1 = sub1.dst();
+    let arg2 = sub2.dst();
+    let res1 = call1.call_dst();
+    let res2 = call2.call_dst();
+
+    if sub1.raw_opcode() != OpCode::SubI32Imm as u8
+        || sub1.src1() != 0
+        || step1 <= 0
+        || call1.raw_opcode() != OpCode::CallDirect as u8
+        || call1.call_target() as usize != self_func_idx
+        || call1.arg_base() != arg1
+        || call1.arg_count() != 1
+        || res1 == 0
+        || sub2.raw_opcode() != OpCode::SubI32Imm as u8
+        || sub2.src1() != 0
+        || step2 <= 0
+        || arg2 == res1
+        || call2.raw_opcode() != OpCode::CallDirect as u8
+        || call2.call_target() as usize != self_func_idx
+        || call2.arg_base() != arg2
+        || call2.arg_count() != 1
+        || res2 == 0
+        || add.raw_opcode() != OpCode::AddI32 as u8
+        || !((add.src1() == res1 && add.src2() == res2)
+            || (add.src1() == res2 && add.src2() == res1))
+        || rec_ret.raw_opcode() != OpCode::ReturnValue as u8
+        || rec_ret.dst() != add.dst()
+    {
+        return;
+    }
+
+    let target_u16 = self_func_idx as u16;
+    let rewritten = vec![
+        Instruction::format_a(OpCode::JumpIfI32Imm, guard_flags, 0, jump_guard.src1(), 2),
+        Instruction::format_a(OpCode::ReturnValue, 0, 0, 0, 0),
+        Instruction::format_b_signed(OpCode::LoadI32, 0, 1, 0),
+        Instruction::format_a(OpCode::SubI32Imm, 0, 3, 0, step1 as u16),
+        Instruction::format_call(OpCode::CallDirect, 2, target_u16, 3, 1),
+        Instruction::format_a(OpCode::AddI32, 0, 1, 1, 2),
+        Instruction::format_a(OpCode::SubI32Imm, 0, 0, 0, step2 as u16),
+        Instruction::format_a(
+            OpCode::JumpIfI32Imm,
+            guard_flags,
+            0,
+            jump_guard.src1(),
+            (-4i16) as u16,
+        ),
+        Instruction::format_a(OpCode::AddI32, 0, 1, 1, 0),
+        Instruction::format_a(OpCode::ReturnValue, 0, 1, 0, 0),
+    ];
+
+    function.instructions = rewritten;
+    function.num_registers = 4;
+    function.source_map.clear();
+    for local in &mut function.local_variables {
+        if local.end_pc > 10 {
+            local.end_pc = 10;
         }
     }
 }

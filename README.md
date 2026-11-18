@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jehudme/solix-language/actions/workflows/ci.yml/badge.svg)](https://github.com/jehudme/solix-language/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v1.5.0-green.svg)](https://github.com/jehudme/solix-language/releases)
+[![Version](https://img.shields.io/github/v/release/Jehudme/solix-language?color=green&label=version)](https://github.com/Jehudme/solix-language/releases)
 
 Solix is a modern, statically typed programming language designed to be fast, memory-safe, and easy to learn. It combines the clean, expressive syntax of languages like C# and Java with the predictable performance and resource control of systems languages like C++ and Rust.
 
@@ -42,11 +42,6 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Jehudme/solix-language/
 irm https://github.com/Jehudme/solix-language/releases/latest/download/solix-toolchain-installer.ps1 | iex
 ```
 
-### Homebrew (macOS & Linux)
-```bash
-brew install solix-lang/tap/solix
-```
-
 ### Build from Source (Cargo)
 ```bash
 git clone https://github.com/jehudme/solix-language.git
@@ -70,7 +65,7 @@ To install the official Solix Language extension in Visual Studio Code, VSCodium
 ```bash
 solix install --vscode
 ```
-Alternatively, search for **Solix** in the Visual Studio Code Extensions marketplace or download the `.vsix` bundle from the [latest GitHub release](https://github.com/Jehudme/solix-language/releases/latest).
+Alternatively, download the `.vsix` bundle from the [latest GitHub release](https://github.com/Jehudme/solix-language/releases/latest) and install it with `code --install-extension solix-language.vsix`.
 
 ---
 

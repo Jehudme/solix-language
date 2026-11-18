@@ -21,7 +21,7 @@ license = "Apache-2.0"
 authors = ["Jehud Metellus"]
 description = "The Solix Programming Language Toolchain"
 repository = "https://github.com/Jehudme/solix-language"
-documentation = "https://solix-lang.org/docs"
+documentation = "https://github.com/Jehudme/solix-language/tree/master/docs"
 
 [workspace.dependencies]
 # Internal workspace crates
@@ -66,7 +66,7 @@ zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 cargo-dist-version = "0.28.0"
 ci = "github"
 allow-dirty = ["ci"]
-installers = ["shell", "powershell", "homebrew"]
+installers = ["shell", "powershell"]
 github-custom-runners = { "aarch64-unknown-linux-gnu" = "ubuntu-latest", "x86_64-unknown-linux-gnu" = "ubuntu-latest", "x86_64-unknown-linux-musl" = "ubuntu-latest", "x86_64-pc-windows-msvc" = "windows-latest", "aarch64-apple-darwin" = "macos-latest", "x86_64-apple-darwin" = "macos-latest", "global" = "ubuntu-latest" }
 targets = [
     "x86_64-unknown-linux-gnu",

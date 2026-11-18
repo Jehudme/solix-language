@@ -103,6 +103,8 @@ pub struct CompilationOptions {
     pub link_mode: LinkMode,
     /// Whether to enforce cryptographic SHA-256 checksum verification on dependencies (default true; false when --no-verify).
     pub verify_checksums: bool,
+    /// Whether to generate and serialize exported API header AST bytes and per-source disassembly snapshots (default true; false for direct `solix run`).
+    pub emit_export_metadata: bool,
 }
 
 impl Default for CompilationOptions {
@@ -130,7 +132,15 @@ impl CompilationOptions {
             entry_point: None,
             link_mode: LinkMode::Dynamic,
             verify_checksums: true,
+            emit_export_metadata: true,
         }
+    }
+
+    /// Sets whether to generate and serialize exported API header AST bytes and per-source snapshots.
+    #[must_use]
+    pub fn with_emit_export_metadata(mut self, emit: bool) -> Self {
+        self.emit_export_metadata = emit;
+        self
     }
 
     /// Sets the explicit entry point symbol for the output binary.

@@ -637,11 +637,13 @@ impl RuntimeContext {
 
         // Append a sentinel `OpCode::Return` to functions whose execution can reach `instructions.len()`
         // so `run_fast_trap::<false, _>` never needs a per-instruction `pc >= inst_len` bounds check.
+        // Also tag verified pure-scalar unit-stride backward `ForLoopI32` instructions with bit `0x10`.
         for func in &mut all_functions {
             if needs_sentinel_return(func) {
                 func.instructions
                     .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
             }
+            mark_scalar_for_loops(&mut func.instructions);
         }
 
         Ok(Self {
@@ -1193,6 +1195,98 @@ fn compute_class_acyclicity(vtable_lookup: &[Option<CompiledClass>]) -> Vec<bool
         }
     }
     acyclic
+}
+
+/// Tags unit-stride backward `ForLoopI32` instructions (`flags & 0xA0 == 0`) with bit `0x10`
+/// when their loop body contains strictly non-call, non-heap scalar opcodes and forward-only
+/// internal branches within `[loop_start_pc..=loop_end_pc]`.
+fn mark_scalar_for_loops(instructions: &mut [Instruction]) {
+    for loop_end_pc in 0..instructions.len() {
+        let inst = instructions[loop_end_pc];
+        if inst.raw_opcode() != OpCode::ForLoopI32 as u8 {
+            continue;
+        }
+        let flags = inst.flags();
+        if (flags & 0xB0) != 0 {
+            continue;
+        }
+        let offset = inst.src2() as i16 as i32;
+        let signed_start = (loop_end_pc as i32) + offset;
+        if offset >= 0 || signed_start < 0 {
+            continue;
+        }
+        let start_pc = signed_start as usize;
+        if start_pc >= loop_end_pc || (loop_end_pc - start_pc) > 24 {
+            continue;
+        }
+        let idx_reg = inst.dst();
+        let bound_reg = inst.src1();
+        if idx_reg == bound_reg {
+            continue;
+        }
+
+        let mut all_scalar = true;
+        for (check_pc, &body_inst) in instructions
+            .iter()
+            .enumerate()
+            .take(loop_end_pc)
+            .skip(start_pc)
+        {
+            let raw = body_inst.raw_opcode();
+            let is_pure_alu = raw == OpCode::Mov as u8
+                || raw == OpCode::LoadI32 as u8
+                || raw == OpCode::AddI32 as u8
+                || raw == OpCode::SubI32 as u8
+                || raw == OpCode::MulI32 as u8
+                || raw == OpCode::Band as u8
+                || raw == OpCode::Bor as u8
+                || raw == OpCode::Bxor as u8
+                || raw == OpCode::Bnot as u8
+                || raw == OpCode::Shl as u8
+                || raw == OpCode::Shr as u8
+                || raw == OpCode::NegI32 as u8
+                || raw == OpCode::AddI32Imm as u8
+                || raw == OpCode::SubI32Imm as u8
+                || raw == OpCode::MulI32Imm as u8
+                || raw == OpCode::ModI32Imm as u8
+                || raw == OpCode::AddBandI32 as u8
+                || raw == OpCode::AddF64 as u8
+                || raw == OpCode::SubF64 as u8
+                || raw == OpCode::MulF64 as u8
+                || raw == OpCode::DivF64 as u8
+                || raw == OpCode::NegF64 as u8
+                || raw == OpCode::MulAddF64 as u8;
+            if is_pure_alu {
+                let dst = body_inst.dst();
+                if dst == idx_reg || dst == bound_reg {
+                    all_scalar = false;
+                    break;
+                }
+                continue;
+            }
+            let target_opt = if raw == OpCode::Jump as u8 {
+                Some((check_pc as i32) + body_inst.jump_offset())
+            } else if raw == OpCode::JumpIfI32Imm as u8
+                || (raw >= OpCode::JumpIfLtI32 as u8 && raw <= OpCode::JumpIfNeqI32 as u8)
+            {
+                Some((check_pc as i32) + (body_inst.src2() as i16 as i32))
+            } else {
+                None
+            };
+            let Some(target) = target_opt else {
+                all_scalar = false;
+                break;
+            };
+            if target <= (check_pc as i32) || (target as usize) > loop_end_pc {
+                all_scalar = false;
+                break;
+            }
+        }
+
+        if all_scalar {
+            instructions[loop_end_pc] = inst.with_flags(flags | 0x10);
+        }
+    }
 }
 
 /// Classifies 1- and 2-instruction pure leaf functions eligible for inline frame-free evaluation.
