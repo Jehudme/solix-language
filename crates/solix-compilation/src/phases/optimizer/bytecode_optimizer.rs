@@ -114,6 +114,7 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             eliminate_common_subexpressions(compiled_function);
             elide_borrowed_local_arc_ops(compiled_function);
             optimize_peephole_passes(compiled_function, true);
+            fuse_post_licm_add_load_band(compiled_function);
             propagate_entry_constants(compiled_function, true);
             transform_binary_additive_self_recursion(compiled_function, func_idx);
         }
@@ -2584,79 +2585,6 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                 }
 
                 // ---------------------------------------------------------
-                // Pattern 2b-ext: AddI32 + LoadI32 + Band -> LoadI32 + AddBandI32
-                // ---------------------------------------------------------
-                if cursor + 2 < stream.len()
-                    && !next_is_critical
-                    && !stream_critical[cursor + 2]
-                    && current_raw == OpCode::AddI32 as u8
-                    && next_raw == OpCode::LoadI32 as u8
-                    && stream[cursor + 2].instruction.raw_opcode() == OpCode::Band as u8
-                {
-                    let third_entry = &stream[cursor + 2];
-                    let r_tmp = current_entry.instruction.dst();
-                    let add_a = current_entry.instruction.src1();
-                    let add_b = current_entry.instruction.src2();
-                    let r_mask = next_entry.instruction.dst();
-                    let band_dst = third_entry.instruction.dst();
-                    let band_a = third_entry.instruction.src1();
-                    let band_b = third_entry.instruction.src2();
-
-                    let mask_matches = (band_a == r_tmp && band_b == r_mask)
-                        || (band_b == r_tmp && band_a == r_mask);
-                    let acc_val_opt = if add_a <= 255 {
-                        Some((add_a as u8, add_b))
-                    } else if add_b <= 255 {
-                        Some((add_b as u8, add_a))
-                    } else {
-                        None
-                    };
-
-                    if mask_matches
-                        && r_mask != r_tmp
-                        && r_mask != add_a
-                        && r_mask != add_b
-                        && let Some((r_acc, r_val)) = acc_val_opt
-                        && (r_tmp == band_dst
-                            || is_dead_after_use(
-                                &stream,
-                                cursor + 2,
-                                r_tmp,
-                                function,
-                                &old_pc_to_stream_idx,
-                                &stream_critical,
-                            ))
-                    {
-                        let mut load_pcs = std::mem::take(&mut pending_orphaned_pcs);
-                        load_pcs.extend_from_slice(&current_entry.covered_original_pcs);
-                        load_pcs.extend_from_slice(&next_entry.covered_original_pcs);
-
-                        next_stream.push(IntermediateInstruction {
-                            instruction: next_entry.instruction,
-                            original_pc: current_entry.original_pc,
-                            covered_original_pcs: load_pcs,
-                            jump_target_old_pc: None,
-                        });
-                        next_stream.push(IntermediateInstruction {
-                            instruction: Instruction::format_a(
-                                OpCode::AddBandI32,
-                                r_acc,
-                                band_dst,
-                                r_val,
-                                r_mask,
-                            ),
-                            original_pc: third_entry.original_pc,
-                            covered_original_pcs: third_entry.covered_original_pcs.clone(),
-                            jump_target_old_pc: None,
-                        });
-
-                        changed = true;
-                        cursor += 3;
-                        continue;
-                    }
-                }
-
-                // ---------------------------------------------------------
                 // Pattern 2b-2: MulF64 + AddF64 Fusion -> MulAddF64
                 // ---------------------------------------------------------
                 if allow_imm_branch_fusion
@@ -5044,6 +4972,75 @@ fn mark_array_fill_loops(function: &mut CompiledFunction) {
                 for_inst.src2(),
             );
         }
+    }
+}
+
+/// Fuses `AddI32 + LoadI32(mask) + Band` into `LoadI32(mask) + AddBandI32` after LICM
+/// so loop-invariant mask hoisting is never blocked during earlier peephole passes.
+fn fuse_post_licm_add_load_band(function: &mut CompiledFunction) {
+    let inst_count = function.instructions.len();
+    if inst_count < 3 {
+        return;
+    }
+
+    let critical_targets = collect_critical_targets(function);
+    let mut jump_targets = Vec::with_capacity(inst_count);
+    for (pc_idx, &inst) in function.instructions.iter().enumerate() {
+        jump_targets.push(decode_jump_target(inst, pc_idx, inst_count));
+    }
+
+    let mut pc_idx = 0usize;
+    while pc_idx + 2 < inst_count {
+        if critical_targets.contains(&(pc_idx + 1)) || critical_targets.contains(&(pc_idx + 2)) {
+            pc_idx += 1;
+            continue;
+        }
+        let add_inst = function.instructions[pc_idx];
+        let load_inst = function.instructions[pc_idx + 1];
+        let band_inst = function.instructions[pc_idx + 2];
+        if add_inst.raw_opcode() == OpCode::AddI32 as u8
+            && load_inst.raw_opcode() == OpCode::LoadI32 as u8
+            && band_inst.raw_opcode() == OpCode::Band as u8
+        {
+            let r_tmp = add_inst.dst();
+            let add_a = add_inst.src1();
+            let add_b = add_inst.src2();
+            let r_mask = load_inst.dst();
+            let band_dst = band_inst.dst();
+            let band_a = band_inst.src1();
+            let band_b = band_inst.src2();
+            let mask_matches =
+                (band_a == r_tmp && band_b == r_mask) || (band_b == r_tmp && band_a == r_mask);
+            let acc_val_opt = if add_a <= 255 {
+                Some((add_a as u8, add_b))
+            } else if add_b <= 255 {
+                Some((add_b as u8, add_a))
+            } else {
+                None
+            };
+            if mask_matches
+                && r_mask != r_tmp
+                && r_mask != add_a
+                && r_mask != add_b
+                && let Some((r_acc, r_val)) = acc_val_opt
+                && (r_tmp == band_dst
+                    || is_dead_after_use_raw(
+                        function,
+                        &jump_targets,
+                        &critical_targets,
+                        pc_idx + 2,
+                        r_tmp,
+                    ))
+            {
+                function.instructions[pc_idx] = load_inst;
+                function.instructions[pc_idx + 1] =
+                    Instruction::format_a(OpCode::AddBandI32, r_acc, band_dst, r_val, r_mask);
+                function.instructions[pc_idx + 2] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
+                pc_idx += 3;
+                continue;
+            }
+        }
+        pc_idx += 1;
     }
 }
 
