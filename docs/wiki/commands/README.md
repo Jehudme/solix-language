@@ -21,6 +21,8 @@ The Solix toolchain provides a unified command-line executable (`solix`) for pro
 | `lsp` | Starts the 32-feature Solix Language Server | [LSP Reference](lsp.md) | [`docs/spec/tools/lsp/protocol.md`](../../spec/tools/lsp/protocol.md) |
 | `dap` | Starts the Solix Debug Adapter Protocol service | [DAP Reference](dap.md) | [`docs/wiki/commands/dap.md`](dap.md) |
 | `fmt` | Formats Solix source code to specification | [Formatter Reference](fmt.md) | [`docs/spec/tools/lsp/protocol.md`](../../spec/tools/lsp/protocol.md) |
+| `doc` | Generates HTML or Markdown API docs from source | [Doc Generator Spec](../../spec/tools/cli/doc.md) | [`docs/spec/tools/cli/doc.md`](../../spec/tools/cli/doc.md) |
+| `wiki` | Opens the bundled versioned offline docs portal | [Offline Wiki Spec](../../spec/tools/cli/wiki.md) | [`docs/spec/tools/cli/wiki.md`](../../spec/tools/cli/wiki.md) |
 
 ---
 

@@ -1074,10 +1074,27 @@ def stage_dependency_native_libraries(
             for archive_entry in native_entries:
                 entry_name = archive_entry.filename
                 relative_subpath = entry_name[len("lib/"):]
+                if (
+                    not relative_subpath
+                    or relative_subpath.startswith("/")
+                    or "\\" in relative_subpath
+                    or "\0" in relative_subpath
+                    or any(part in ("..", "") or ":" in part for part in relative_subpath.split("/"))
+                ):
+                    raise BuildError(
+                        phase="native-staging",
+                        message=f"Unsafe dependency archive path rejected: '{entry_name}' in '{dependency_archive}'.",
+                    )
                 is_qualified = "/" in relative_subpath
                 if not is_qualified and Path(entry_name).name in qualified_basenames:
                     continue
-                destination_path = stage_lib_directory / relative_subpath
+                destination_path = (stage_lib_directory / relative_subpath).resolve()
+                stage_root_resolved = stage_lib_directory.resolve()
+                if stage_root_resolved not in destination_path.parents:
+                    raise BuildError(
+                        phase="native-staging",
+                        message=f"Path traversal escaped staging directory: '{entry_name}'.",
+                    )
                 if destination_path.exists():
                     continue
                 destination_path.parent.mkdir(parents=True, exist_ok=True)

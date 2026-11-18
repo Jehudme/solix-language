@@ -1228,21 +1228,23 @@ fn capitalize(text: &str) -> String {
     }
 }
 
-fn open_in_browser(file_path: &Path) {
+pub(crate) fn open_in_browser(file_path: &Path) {
+    open_target_in_browser(&file_path.to_string_lossy());
+}
+
+pub(crate) fn open_target_in_browser(target: &str) {
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(file_path)
-            .spawn();
+        let _ = std::process::Command::new("xdg-open").arg(target).spawn();
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg(file_path).spawn();
+        let _ = std::process::Command::new("open").arg(target).spawn();
     }
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", &file_path.to_string_lossy()])
+            .args(["/C", "start", "", target])
             .spawn();
     }
 }

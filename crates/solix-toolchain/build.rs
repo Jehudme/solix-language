@@ -100,10 +100,55 @@ fn collect_bundled_packages(packages_dir: &Path) -> Vec<(String, PathBuf)> {
     packages
 }
 
+fn collect_wiki_docs_recursive(
+    base_dir: &Path,
+    current_dir: &Path,
+    collected: &mut Vec<(String, PathBuf)>,
+) {
+    let Ok(entries) = fs::read_dir(current_dir) else {
+        return;
+    };
+
+    for entry_result in entries.flatten() {
+        let entry_path = entry_result.path();
+        if entry_path.is_dir() {
+            println!("cargo:rerun-if-changed={}", entry_path.display());
+            collect_wiki_docs_recursive(base_dir, &entry_path, collected);
+        } else if entry_path.is_file()
+            && let Ok(relative) = entry_path.strip_prefix(base_dir)
+        {
+            println!("cargo:rerun-if-changed={}", entry_path.display());
+            let rel_posix = relative
+                .components()
+                .filter_map(|component| match component {
+                    std::path::Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect::<Vec<String>>()
+                .join("/");
+            if !rel_posix.is_empty() {
+                collected.push((rel_posix, entry_path));
+            }
+        }
+    }
+}
+
+fn collect_wiki_docs(docs_dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut wiki_docs: Vec<(String, PathBuf)> = Vec::new();
+    if !docs_dir.is_dir() {
+        return wiki_docs;
+    }
+    println!("cargo:rerun-if-changed={}", docs_dir.display());
+    collect_wiki_docs_recursive(docs_dir, docs_dir, &mut wiki_docs);
+    wiki_docs.sort_by(|left, right| left.0.cmp(&right.0));
+    wiki_docs
+}
+
 fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     let source_assets = manifest_dir.join("assets");
     let packages_dir = source_assets.join("packages");
     let vscode_dir = source_assets.join("vscode");
+    let wiki_docs_dir = source_assets.join("docs");
 
     if packages_dir.exists() {
         println!("cargo:rerun-if-changed={}", packages_dir.display());
@@ -117,6 +162,7 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     }
 
     let packages = collect_bundled_packages(&packages_dir);
+    let wiki_docs = collect_wiki_docs(&wiki_docs_dir);
 
     let fallback_editors_vscode = manifest_dir
         .join("..")
@@ -171,6 +217,20 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     } else {
         generated.push_str("pub const EMBEDDED_VSCODE_VSIX: Option<(&str, &[u8])> = None;\n");
     }
+
+    generated.push_str(
+        "\n/// Compile-time embedded offline documentation portal files as `(rel_path, bytes)`.\n",
+    );
+    generated.push_str("pub const EMBEDDED_WIKI_DOCS: &[(&str, &[u8])] = &[\n");
+    for (rel_path, doc_file_path) in &wiki_docs {
+        let escaped_rel = escape_rust_string(rel_path);
+        let escaped_doc_path = escape_rust_string(&doc_file_path.to_string_lossy());
+        let _ = writeln!(
+            generated,
+            "    (\"{escaped_rel}\", include_bytes!(\"{escaped_doc_path}\")),"
+        );
+    }
+    generated.push_str("];\n");
 
     let generated_file_path = out_dir.join("embedded_assets.rs");
     let needs_write = fs::read_to_string(&generated_file_path).ok().as_deref() != Some(&generated);

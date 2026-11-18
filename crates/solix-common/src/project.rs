@@ -681,7 +681,7 @@ impl SlxarcArchive {
                 }
             })?;
 
-            let entry_name = file_entry.name().to_string();
+            let entry_name = read_zip_entry_name(&file_entry, index)?;
             let is_directory = file_entry.is_dir();
             let uncompressed_size = file_entry.size();
             let compressed_size = file_entry.compressed_size();
@@ -725,7 +725,58 @@ impl SlxarcArchive {
             native_libraries,
         })
     }
+}
 
+/// Extracts validated UTF-8 archive entry name in `zip` v9+ safely.
+fn read_zip_entry_name(
+    file_entry: &zip::read::ZipFile<'_, File>,
+    index: usize,
+) -> Result<String, EmissionError> {
+    file_entry
+        .name()
+        .map(std::borrow::Cow::into_owned)
+        .map_err(|zip_error| EmissionError::ContainerSerializationFailed {
+            reason: format!("invalid archive entry filename at index {index}: {zip_error}"),
+        })
+}
+
+/// Validates and sanitizes a `.slxarc` ZIP archive member path against Zip-Slip traversal.
+fn validate_archive_relative_path(entry_name: &str) -> Result<PathBuf, EmissionError> {
+    if entry_name.is_empty()
+        || entry_name.starts_with('/')
+        || entry_name.contains('\\')
+        || entry_name.contains('\0')
+    {
+        return Err(EmissionError::ContainerSerializationFailed {
+            reason: format!("unsafe archive entry path rejected (path traversal): '{entry_name}'"),
+        });
+    }
+
+    let mut sanitized = PathBuf::new();
+    for segment in entry_name.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." || segment.contains(':') {
+            return Err(EmissionError::ContainerSerializationFailed {
+                reason: format!(
+                    "unsafe archive entry path rejected (parent/drive traversal): '{entry_name}'"
+                ),
+            });
+        }
+        sanitized.push(segment);
+    }
+
+    if sanitized.as_os_str().is_empty() {
+        return Err(EmissionError::ContainerSerializationFailed {
+            reason: format!("empty archive entry path rejected: '{entry_name}'"),
+        });
+    }
+
+    Ok(sanitized)
+}
+
+impl SlxarcArchive {
     /// Extracts host native shared libraries and loads bytecode binaries for VM execution.
     pub fn extract_and_load(
         archive_path: &Path,
@@ -748,6 +799,14 @@ impl SlxarcArchive {
                 ),
             }
         })?;
+        zip_reader
+            .validate_header_consistency()
+            .map_err(|zip_error| EmissionError::ContainerSerializationFailed {
+                reason: format!(
+                    "archive header consistency check failed for '{}': {zip_error}",
+                    archive_path.display()
+                ),
+            })?;
 
         fs::create_dir_all(extract_cache_directory).map_err(|io_error| {
             EmissionError::ContainerSerializationFailed {
@@ -784,7 +843,8 @@ impl SlxarcArchive {
                 }
             })?;
 
-            let entry_name = file_entry.name().to_string();
+            let entry_name = read_zip_entry_name(&file_entry, index)?;
+            let safe_entry_rel_path = validate_archive_relative_path(&entry_name)?;
             if file_entry.is_dir() {
                 continue;
             }
@@ -936,7 +996,7 @@ impl SlxarcArchive {
                     extracted_files.push(target_path);
                 }
             } else if entry_name.starts_with("resources/") {
-                let target_path = extract_cache_directory.join(&entry_name);
+                let target_path = extract_cache_directory.join(&safe_entry_rel_path);
                 if let Some(parent_dir) = target_path.parent() {
                     let _ = fs::create_dir_all(parent_dir);
                 }
@@ -1035,7 +1095,7 @@ impl SlxarcArchive {
                         reason: format!("failed to read entry at index {index}: {zip_err}"),
                     }
                 })?;
-                let entry_name = file_entry.name().to_string();
+                let entry_name = read_zip_entry_name(&file_entry, index)?;
                 if entry_name.ends_with(".slxb") && !entry_name.starts_with("lib/") {
                     let mut binary_bytes = Vec::new();
                     file_entry
@@ -1539,5 +1599,104 @@ version = "0.1.0"
             Some(PathBuf::from(r"\\server\share\solix"))
         );
         assert_eq!(strip_verbatim_prefix_text("/home/jehud/solix"), None);
+    }
+
+    fn build_raw_zip_archive(archive_path: &Path, entries: &[(&str, &[u8])]) {
+        let out_file = File::create(archive_path).expect("create test zip archive");
+        let mut zip_writer = zip::ZipWriter::new(out_file);
+        let options = zip::write::SimpleFileOptions::default();
+        for (member_name, member_bytes) in entries {
+            zip_writer
+                .start_file(*member_name, options)
+                .expect("start zip entry");
+            zip_writer.write_all(member_bytes).expect("write zip entry");
+        }
+        zip_writer.finish().expect("finish zip archive");
+    }
+
+    #[test]
+    fn test_slxarc_extract_rejects_zip_slip_resource_traversal() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let archive_path = temp_dir.path().join("malicious_resource.slxarc");
+        let escaped_file = temp_dir.path().join("escaped_secret.txt");
+        let manifest_bytes =
+            b"[configuration]\nname = \"evil\"\nversion = \"0.1.0\"\n[profiles.release]\n";
+        let binary_bytes = BinaryProgram::new().to_bytes();
+
+        build_raw_zip_archive(
+            &archive_path,
+            &[
+                ("manifest.toml", manifest_bytes),
+                ("bin/evil.slxb", &binary_bytes),
+                ("resources/../../escaped_secret.txt", b"pwned"),
+            ],
+        );
+
+        let extract_cache = temp_dir.path().join("nested").join("cache");
+        let extract_result = SlxarcArchive::extract_and_load(&archive_path, &extract_cache);
+        assert!(
+            extract_result.is_err(),
+            "Zip-Slip entry inside resources/ MUST be rejected cleanly"
+        );
+        assert!(
+            !escaped_file.exists(),
+            "Traversal payload must never be written outside extract cache"
+        );
+    }
+
+    #[test]
+    fn test_slxarc_extract_rejects_zip_slip_native_lib_and_absolute_paths() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        for dangerous_path in [
+            "lib/../../evil.so",
+            "lib\\..\\evil.dll",
+            "/etc/passwd",
+            "C:\\Windows\\System32\\evil.dll",
+        ] {
+            let validation = validate_archive_relative_path(dangerous_path);
+            assert!(
+                validation.is_err(),
+                "Expected dangerous archive member '{dangerous_path}' to be rejected"
+            );
+        }
+        let clean = validate_archive_relative_path("resources/textures/hero.png");
+        assert_eq!(
+            clean.expect("valid relative archive path"),
+            PathBuf::from("resources").join("textures").join("hero.png")
+        );
+        let _ = temp_dir;
+    }
+
+    #[test]
+    fn test_slxarc_extract_rejects_tampered_native_checksum() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let archive_path = temp_dir.path().join("tampered_native.slxarc");
+        #[cfg(target_os = "windows")]
+        let native_rel = "lib/demo_native.dll";
+        #[cfg(target_os = "macos")]
+        let native_rel = "lib/libdemo_native.dylib";
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let native_rel = "lib/libdemo_native.so";
+
+        let manifest_toml = format!(
+            "[configuration]\nname = \"tamper_check\"\nversion = \"0.1.0\"\n[native_library_checksums]\n\"{native_rel}\" = \"0000000000000000000000000000000000000000000000000000000000000000\"\n"
+        );
+        let binary_bytes = BinaryProgram::new().to_bytes();
+
+        build_raw_zip_archive(
+            &archive_path,
+            &[
+                ("manifest.toml", manifest_toml.as_bytes()),
+                ("bin/tamper_check.slxb", &binary_bytes),
+                (native_rel, b"tampered_native_binary_bytes"),
+            ],
+        );
+
+        let extract_cache = temp_dir.path().join("cache");
+        let extract_result = SlxarcArchive::extract_and_load(&archive_path, &extract_cache);
+        assert!(
+            extract_result.is_err(),
+            "Mismatched native library SHA-256 checksum MUST abort archive loading"
+        );
     }
 }

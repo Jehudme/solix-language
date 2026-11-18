@@ -172,6 +172,12 @@ fn resolve_vscode_cache_dir() -> PathBuf {
     resolve_solix_cache_subdir("vscode", "solix_cache_vscode")
 }
 
+/// Resolves the version-isolated cache directory where materialized offline wiki docs reside.
+fn resolve_wiki_cache_dir() -> PathBuf {
+    let version_folder = format!("v{}", env!("CARGO_PKG_VERSION"));
+    resolve_solix_cache_subdir("wiki", "solix_cache_wiki").join(version_folder)
+}
+
 /// Returns `true` when `SOLIX_FORCE_EMBEDDED_ASSETS` forces skipping workspace/exe disk probes.
 fn should_force_embedded_assets() -> bool {
     std::env::var("SOLIX_FORCE_EMBEDDED_ASSETS")
@@ -206,6 +212,12 @@ pub const fn has_embedded_bundled_packages() -> bool {
 #[must_use]
 pub const fn has_embedded_vscode_extension() -> bool {
     EMBEDDED_VSCODE_VSIX.is_some()
+}
+
+/// Returns `true` when `EMBEDDED_WIKI_DOCS` contains embedded offline documentation pages.
+#[must_use]
+pub const fn has_embedded_wiki_docs() -> bool {
+    !EMBEDDED_WIKI_DOCS.is_empty()
 }
 
 /// Materializes compile-time embedded bundled `.slxarc` archives and manifest into cache.
@@ -259,6 +271,158 @@ pub fn materialize_embedded_vscode_extension() -> Result<Option<PathBuf>> {
     write_bytes_if_changed(&target_path, extension_bytes)?;
 
     Ok(Some(target_path))
+}
+
+/// Materializes the compile-time embedded offline documentation portal into versioned cache.
+///
+/// # Errors
+/// Returns an error if any embedded path is malformed or filesystem writes fail.
+pub fn materialize_embedded_wiki_docs() -> Result<Option<PathBuf>> {
+    if EMBEDDED_WIKI_DOCS.is_empty() {
+        return Ok(None);
+    }
+
+    let cache_directory = resolve_wiki_cache_dir();
+    fs::create_dir_all(&cache_directory).with_context(|| {
+        format!(
+            "Failed to create wiki cache directory at '{}'",
+            cache_directory.display()
+        )
+    })?;
+
+    for (relative_path, file_bytes) in EMBEDDED_WIKI_DOCS {
+        let mut target_path = cache_directory.clone();
+        for segment in relative_path.split('/') {
+            if segment.is_empty() || segment == "." {
+                continue;
+            }
+            if segment == ".." || segment.contains('\\') || segment.contains('\0') {
+                bail!("Unsafe embedded wiki asset path: '{relative_path}'");
+            }
+            target_path.push(segment);
+        }
+        write_bytes_if_changed(&target_path, file_bytes)?;
+    }
+
+    Ok(Some(cache_directory))
+}
+
+/// Checks whether `directory` contains a rendered `index.html` offline wiki portal.
+fn directory_has_wiki_index(directory: &Path) -> bool {
+    directory.is_dir() && directory.join("index.html").is_file()
+}
+
+/// Resolves the directory containing the offline HTML documentation portal for this toolchain version.
+///
+/// Priority:
+/// 1. `SOLIX_WIKI_DIR` environment variable override.
+/// 2. Sibling `<exe_dir>/assets/docs/` containing `index.html`.
+/// 3. Sibling `<exe_dir>/../assets/docs/` containing `index.html`.
+/// 4. Compile-time `CARGO_MANIFEST_DIR/assets/docs/` containing `index.html`.
+/// 5. Workspace fallback `<current_dir>/crates/solix-toolchain/assets/docs/`.
+/// 6. Materialized fallback from compile-time embedded HTML portal into `$SOLIX_HOME/cache/wiki/v<version>/`.
+///
+/// # Errors
+/// Returns an error if no offline wiki portal was staged or embedded and cache materialization yields nothing.
+pub fn resolve_wiki_docs_dir() -> Result<PathBuf> {
+    if let Ok(custom_dir) = std::env::var("SOLIX_WIKI_DIR") {
+        let trimmed = custom_dir.trim();
+        if !trimmed.is_empty() {
+            let candidate = PathBuf::from(trimmed);
+            if directory_has_wiki_index(&candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    if !should_force_embedded_assets() {
+        if let Some(executable_directory) = std::env::current_exe()
+            .ok()
+            .and_then(|current_executable| current_executable.parent().map(Path::to_path_buf))
+        {
+            let candidate = executable_directory.join("assets").join("docs");
+            if directory_has_wiki_index(&candidate) {
+                return Ok(candidate);
+            }
+
+            if let Some(parent_directory) = executable_directory.parent() {
+                let alt_candidate = parent_directory.join("assets").join("docs");
+                if directory_has_wiki_index(&alt_candidate) {
+                    return Ok(alt_candidate);
+                }
+            }
+        }
+
+        let manifest_assets = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("docs");
+        if directory_has_wiki_index(&manifest_assets) {
+            return Ok(manifest_assets);
+        }
+
+        if let Ok(current_dir) = std::env::current_dir() {
+            let repo_candidate = current_dir
+                .join("crates")
+                .join("solix-toolchain")
+                .join("assets")
+                .join("docs");
+            if directory_has_wiki_index(&repo_candidate) {
+                return Ok(repo_candidate);
+            }
+        }
+    }
+
+    if let Some(materialized) = materialize_embedded_wiki_docs()?
+        && directory_has_wiki_index(&materialized)
+    {
+        return Ok(materialized);
+    }
+
+    bail!(
+        "No offline wiki HTML documentation found for Solix v{}. \
+Run `python3 scripts/build_docs_site.py` before building or set SOLIX_WIKI_DIR.",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+/// Recursively exports offline documentation files from `source_dir` into `destination_dir`.
+///
+/// # Errors
+/// Returns an error if reading or copying files fails.
+pub fn export_wiki_docs_to_dir(source_dir: &Path, destination_dir: &Path) -> Result<usize> {
+    copy_directory_recursive(source_dir, destination_dir)
+}
+
+fn copy_directory_recursive(source: &Path, destination: &Path) -> Result<usize> {
+    fs::create_dir_all(destination).with_context(|| {
+        format!(
+            "Failed to create documentation export directory '{}'",
+            destination.display()
+        )
+    })?;
+    let mut copied_files = 0usize;
+    let entries = fs::read_dir(source).with_context(|| {
+        format!(
+            "Failed to read wiki source directory '{}'",
+            source.display()
+        )
+    })?;
+
+    for entry_result in entries {
+        let entry = entry_result?;
+        let entry_path = entry.path();
+        let target_path = destination.join(entry.file_name());
+        if entry_path.is_dir() {
+            copied_files += copy_directory_recursive(&entry_path, &target_path)?;
+        } else if entry_path.is_file() {
+            let bytes = fs::read(&entry_path)
+                .with_context(|| format!("Failed to read wiki asset '{}'", entry_path.display()))?;
+            write_bytes_if_changed(&target_path, &bytes)?;
+            copied_files += 1;
+        }
+    }
+
+    Ok(copied_files)
 }
 
 /// Checks whether a candidate `packages/` directory actually contains at least one `.slxarc` archive.

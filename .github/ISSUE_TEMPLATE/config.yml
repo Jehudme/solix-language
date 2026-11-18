@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Solix Documentation & Specifications
+    url: https://github.com/Jehudme/solix-language/tree/dev/docs
+    about: Browse language guides, CLI specs, diagnostics wiki, and architecture docs (or run `solix wiki`).
+  - name: Engineering Guidelines & Contributing Guide
+    url: https://github.com/Jehudme/solix-language/blob/dev/CONTRIBUTING.md
+    about: Learn how the dev -> master two-wave release train and PR checks work.
