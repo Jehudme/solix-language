@@ -535,8 +535,8 @@ jobs:
 
           if [ -n "$PREV_TAG" ]; then
             echo "Downloading previous release Linux binary (${PREV_TAG}) for same-host A/B comparison..."
-            if gh release download "$PREV_TAG" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.*" --dir "$RUNNER_TEMP/prev_release"; then
-              ARCHIVE=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f -name 'solix-toolchain-x86_64-unknown-linux-gnu.tar.*' | head -n 1)
+            if gh release download "$PREV_TAG" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.xz" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.gz" --dir "$RUNNER_TEMP/prev_release"; then
+              ARCHIVE=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f \( -name '*.tar.xz' -o -name '*.tar.gz' \) | head -n 1)
               if [ -n "$ARCHIVE" ]; then
                 tar -xf "$ARCHIVE" -C "$RUNNER_TEMP/prev_release"
                 PREV_BIN=$(find "$RUNNER_TEMP/prev_release" -type f -name 'solix' | head -n 1 || true)
