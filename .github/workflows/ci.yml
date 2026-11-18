@@ -60,21 +60,36 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
-          if [ "$IS_FORK" = "true" ]; then
-            python3 scripts/check_release_pr_source.py \
-              --event-name pull_request \
-              --base-ref "$BASE_REF" \
-              --head-ref "$HEAD_REF" \
-              --base-repo "$BASE_REPO" \
-              --head-repo "$HEAD_REPO" \
-              --is-fork
+          if [ -f scripts/check_release_pr_source.py ]; then
+            if [ "$IS_FORK" = "true" ]; then
+              python3 scripts/check_release_pr_source.py \
+                --event-name pull_request \
+                --base-ref "$BASE_REF" \
+                --head-ref "$HEAD_REF" \
+                --base-repo "$BASE_REPO" \
+                --head-repo "$HEAD_REPO" \
+                --is-fork
+            else
+              python3 scripts/check_release_pr_source.py \
+                --event-name pull_request \
+                --base-ref "$BASE_REF" \
+                --head-ref "$HEAD_REF" \
+                --base-repo "$BASE_REPO" \
+                --head-repo "$HEAD_REPO"
+            fi
           else
-            python3 scripts/check_release_pr_source.py \
-              --event-name pull_request \
-              --base-ref "$BASE_REF" \
-              --head-ref "$HEAD_REF" \
-              --base-repo "$BASE_REPO" \
-              --head-repo "$HEAD_REPO"
+            python3 - <<'PY'
+          import os, re, sys
+          is_fork = os.environ.get("IS_FORK") == "true"
+          head_repo = os.environ.get("HEAD_REPO", "")
+          base_repo = os.environ.get("BASE_REPO", "")
+          head_ref = os.environ.get("HEAD_REF", "")
+          allowed = re.compile(r"^(dev|release-plz/[^/]+|release-plz-.*|release/v\d+\.\d+\.\d+.*)$")
+          if is_fork or head_repo.lower() != base_repo.lower() or not allowed.match(head_ref):
+              print(f"::error::Blocked unauthorized PR '{head_repo}:{head_ref}' targeting master. Target 'dev' instead.", file=sys.stderr)
+              sys.exit(1)
+          print(f"Authorized bootstrap release PR: {head_ref} -> {os.environ.get('BASE_REF')}")
+          PY
           fi
 
   release-pr-check:
