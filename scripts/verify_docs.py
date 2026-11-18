@@ -244,7 +244,7 @@ def main():
     if subcommand_errors:
         all_verification_failures.extend(subcommand_errors)
     else:
-        print("   ✅ All active CLI subcommands are documented.")
+        print("   [PASS] All active CLI subcommands are documented.")
 
     # 2. Verify deprecated terms
     print("2. Checking for deprecated terminology...")
@@ -252,7 +252,7 @@ def main():
     if deprecated_term_errors:
         all_verification_failures.extend(deprecated_term_errors)
     else:
-        print("   ✅ Zero deprecated terms found in active documentation.")
+        print("   [PASS] Zero deprecated terms found in active documentation.")
 
     # 3. Verify markdown links
     print(f"3. Checking link integrity across {len(all_markdown_files)} file(s)...")
@@ -260,7 +260,7 @@ def main():
     if broken_link_errors:
         all_verification_failures.extend(broken_link_errors)
     else:
-        print("   ✅ Zero broken links found.")
+        print("   [PASS] Zero broken links found.")
 
     # 4. Verify manifest.toml sections
     print("4. Checking top-level manifest.toml section coverage...")
@@ -268,18 +268,18 @@ def main():
     if manifest_section_errors:
         all_verification_failures.extend(manifest_section_errors)
     else:
-        print("   ✅ All top-level manifest sections are documented.")
+        print("   [PASS] All top-level manifest sections are documented.")
 
     # Summary
     if all_verification_failures:
         print(
-            f"\n❌ Documentation Verification FAILED with {len(all_verification_failures)} defect(s):"
+            f"\n[FAIL] Documentation Verification FAILED with {len(all_verification_failures)} defect(s):"
         )
         for defect in all_verification_failures:
-            print(f"  • {defect}")
+            print(f"  - {defect}")
         sys.exit(1)
 
-    print("\n🎉 Documentation Verification PASSED successfully with 0 defects.")
+    print("\n[PASS] Documentation Verification PASSED with 0 defects.")
     sys.exit(0)
 
 
