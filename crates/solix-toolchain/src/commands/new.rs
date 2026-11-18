@@ -52,6 +52,7 @@ pub fn execute_new(args: NewArgs) -> Result<()> {
     if args.force {
         command.arg("--force");
     }
+    command.arg("--script-lang").arg(&args.script_lang);
 
     let status = command.status().context("failed to execute python3")?;
     if !status.success() {

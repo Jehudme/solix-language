@@ -361,6 +361,10 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
             force: args.force,
             check_env: false,
             target: None,
+            script: None,
+            inspect_manifest_json: false,
+            stage_deps_only: false,
+            pack_archive: false,
         })?;
 
         let candidate_archive = resolved_path

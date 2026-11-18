@@ -43,6 +43,7 @@ def generate_project(
     no_native: bool = False,
     dependencies: list[str] | None = None,
     force: bool = False,
+    script_lang: str = "solix",
 ) -> Path:
     """Programmatically creates a complete, ready-to-build Solix project."""
     target_path = Path(target_path).resolve()
@@ -144,8 +145,33 @@ sources = ["tests"]
     lib_dir.mkdir(parents=True, exist_ok=True)
     natives_dir.mkdir(parents=True, exist_ok=True)
 
-    # 5. Write scripts/build.py
-    build_py_content = """#!/usr/bin/env python3
+    # 5. Write scripts/build.slx (default) or scripts/build.py + scripts/solix_build.py
+    normalized_script_lang = (script_lang or "solix").strip().lower()
+    if normalized_script_lang not in ("solix", "python"):
+        raise ValueError(f"Unsupported script language '{script_lang}'; expected 'solix' or 'python'")
+
+    if normalized_script_lang == "solix":
+        build_slx_content = """import solix.build.BuildContext;
+import solix.build.BuildToolbox;
+
+class BuildScript {
+    // Pre-flight verification hook executed before native or Solix compilation.
+    public static void verify(BuildContext ctx) {
+        // Register additional project-specific checks below, e.g.:
+        // BuildToolbox::require_tool("cmake", "3.20.0");
+        BuildToolbox::verify_environment(ctx);
+    }
+
+    public static int32 main() {
+        BuildContext ctx = BuildContext::from_env();
+        BuildScript::verify(ctx);
+        return BuildToolbox::auto_build(ctx);
+    }
+}
+"""
+        (scripts_dir / "build.slx").write_text(build_slx_content, encoding="utf-8")
+    else:
+        build_py_content = """#!/usr/bin/env python3
 import os
 import sys
 import solix_build as tb
@@ -198,19 +224,19 @@ def main() -> None:
 if __name__ == "__main__":
     tb.run_cli(main)
 """
-    build_py_path = scripts_dir / "build.py"
-    build_py_path.write_text(build_py_content, encoding="utf-8")
-    build_py_path.chmod(0o755)
+        build_py_path = scripts_dir / "build.py"
+        build_py_path.write_text(build_py_content, encoding="utf-8")
+        build_py_path.chmod(0o755)
 
-    # 6. Copy or write scripts/solix_build.py
-    current_toolbox = Path(__file__).resolve().parent / "solix_build.py"
-    if current_toolbox.exists():
-        shutil.copy2(current_toolbox, scripts_dir / "solix_build.py")
-    else:
-        # Fallback to templates/untitled-rust/scripts/solix_build.py if available
-        template_toolbox = Path(__file__).resolve().parent.parent / "templates" / "untitled-rust" / "scripts" / "solix_build.py"
-        if template_toolbox.exists():
-            shutil.copy2(template_toolbox, scripts_dir / "solix_build.py")
+        # 6. Copy or write scripts/solix_build.py
+        current_toolbox = Path(__file__).resolve().parent / "solix_build.py"
+        if current_toolbox.exists():
+            shutil.copy2(current_toolbox, scripts_dir / "solix_build.py")
+        else:
+            # Fallback to templates/untitled-rust/scripts/solix_build.py if available
+            template_toolbox = Path(__file__).resolve().parent.parent / "templates" / "untitled-rust" / "scripts" / "solix_build.py"
+            if template_toolbox.exists():
+                shutil.copy2(template_toolbox, scripts_dir / "solix_build.py")
 
     # 7. Write src/main.slx or src/lib.slx
     pascal_name = to_pascal_case(project_name)
@@ -331,6 +357,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Dependency specification in pkg@ver format (can be repeated)",
     )
     parser.add_argument("--force", action="store_true", help="Overwrite existing manifest.toml")
+    parser.add_argument(
+        "--script-lang",
+        choices=["solix", "python"],
+        default="solix",
+        help="Build script language for scripts/build.* (default: solix)",
+    )
     return parser.parse_args()
 
 
@@ -350,6 +382,7 @@ def main() -> None:
             no_native=arguments.no_native,
             dependencies=arguments.deps,
             force=arguments.force,
+            script_lang=arguments.script_lang,
         )
     except Exception as runtime_error:
         print(f"Error: {runtime_error}", file=sys.stderr)

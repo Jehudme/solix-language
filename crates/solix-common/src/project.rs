@@ -887,7 +887,8 @@ fn read_zip_entry_name(
 }
 
 /// Validates and sanitizes a `.slxarc` ZIP archive member path against Zip-Slip traversal.
-fn validate_archive_relative_path(entry_name: &str) -> Result<PathBuf, EmissionError> {
+/// Validates that an archive entry name is a safe relative path without traversal or drive components.
+pub fn validate_archive_relative_path(entry_name: &str) -> Result<PathBuf, EmissionError> {
     if entry_name.is_empty()
         || entry_name.starts_with('/')
         || entry_name.contains('\\')
