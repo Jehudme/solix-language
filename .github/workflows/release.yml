@@ -161,9 +161,30 @@ jobs:
             echo "previous_tag=${PREV_TAG}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Restore cached bundled first-party libraries
+        id: bundled-libs-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: crates/solix-toolchain/assets/packages
+          key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/build_default_libraries.py') }}
+
+      - name: Install Linux system dependencies for post-bump check
+        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev gcc
+
       - name: Run post-bump workspace verification and packaging dry-run
+        env:
+          BUNDLED_CACHE_HIT: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
         run: |
           python3 scripts/build_docs_site.py
+          cargo build --bin solix
+          if [ "$BUNDLED_CACHE_HIT" != "true" ]; then
+            python3 scripts/build_default_libraries.py
+          fi
+          SOLIX_BIN="$(pwd)/target/debug/solix"
+          export SOLIX_BIN
           cargo test --workspace --locked
           cargo package -p solix-common --locked --allow-dirty
           cargo package -p solix-ffi --locked --allow-dirty
