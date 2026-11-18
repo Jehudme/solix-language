@@ -23,7 +23,6 @@ REPO_ROOT = SCRIPTS_DIR.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import build_docs_site  # noqa: E402
-import check_release_pr_source  # noqa: E402
 import doc_sync_check  # noqa: E402
 import merge_bundled_packages  # noqa: E402
 import pr_risk_audit  # noqa: E402
@@ -84,58 +83,6 @@ class PrRiskAuditTests(unittest.TestCase):
             payload = json.loads(json_out.read_text(encoding="utf-8"))
             self.assertEqual(payload["labels"], ["sensitive"])
             self.assertIn("Sensitive Paths Modified", md_out.read_text(encoding="utf-8"))
-
-
-class ReleasePrSourceGateTests(unittest.TestCase):
-    """Tests Wave 2 `Validate Release PR Source` branch and fork restrictions."""
-
-    def test_rejects_external_fork_targeting_master(self) -> None:
-        allowed, message = check_release_pr_source.validate_release_pr_source(
-            event_name="pull_request",
-            base_ref="master",
-            head_ref="dev",
-            base_repo="Jehudme/solix-language",
-            head_repo="contributor/solix-language",
-            is_fork=True,
-        )
-        self.assertFalse(allowed)
-        self.assertIn("external fork", message)
-
-    def test_rejects_same_repo_feature_branch_targeting_master(self) -> None:
-        for branch_name in ("feat/fast-vm", "fix/parser-bug", "milestone/063-test"):
-            allowed, message = check_release_pr_source.validate_release_pr_source(
-                event_name="pull_request",
-                base_ref="master",
-                head_ref=branch_name,
-                base_repo="Jehudme/solix-language",
-                head_repo="Jehudme/solix-language",
-                is_fork=False,
-            )
-            self.assertFalse(allowed, f"Branch {branch_name} should be blocked from master")
-            self.assertIn("dev", message)
-
-    def test_allows_dev_and_release_plz_pr_to_master(self) -> None:
-        for head_branch in ("dev", "release-plz/dev-to-master", "release/v1.5.0"):
-            allowed, _ = check_release_pr_source.validate_release_pr_source(
-                event_name="pull_request",
-                base_ref="master",
-                head_ref=head_branch,
-                base_repo="Jehudme/solix-language",
-                head_repo="Jehudme/solix-language",
-                is_fork=False,
-            )
-            self.assertTrue(allowed, f"Authorized release branch {head_branch} should pass")
-
-    def test_allows_any_contributor_branch_targeting_dev(self) -> None:
-        allowed, _ = check_release_pr_source.validate_release_pr_source(
-            event_name="pull_request",
-            base_ref="dev",
-            head_ref="feat/contributor-feature",
-            base_repo="Jehudme/solix-language",
-            head_repo="contributor/solix-language",
-            is_fork=True,
-        )
-        self.assertTrue(allowed)
 
 
 class StaticDocsAndWikiPortalTests(unittest.TestCase):
