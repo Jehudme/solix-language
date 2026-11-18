@@ -980,7 +980,17 @@ jobs:
             echo "Branch dev already includes master commit."
             exit 0
           fi
-          git checkout -B dev origin/dev
-          git merge --no-ff origin/master -X theirs -m "chore(release): sync master release state back to dev"
+          SYNC_BRANCH="chore/sync-master-to-dev-$(git rev-parse --short origin/master)"
+          git checkout -B "$SYNC_BRANCH" origin/dev
+          git merge --no-ff origin/master -X theirs -m "chore(release): sync master release state back to dev [skip ci]"
           BASIC_AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${BASIC_AUTH}" push origin dev
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${BASIC_AUTH}" push -f origin "HEAD:${SYNC_BRANCH}"
+          PR_URL=$(gh pr list --base dev --head "$SYNC_BRANCH" --state open --json url --jq '.[0].url // empty')
+          if [ -z "$PR_URL" ]; then
+            PR_URL=$(gh pr create \
+              --base dev \
+              --head "$SYNC_BRANCH" \
+              --title "chore(release): sync master release state back to dev [skip ci]" \
+              --body "Automated post-release sync bringing release metadata from \`master\` back into \`dev\` without re-running CI.")
+          fi
+          gh pr merge "$PR_URL" --merge --delete-branch --admin --subject "chore(release): sync master release state back to dev [skip ci]"
