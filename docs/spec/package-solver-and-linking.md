@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0010
 * **Scope:** Package Manager, Dependency Resolution & SemVer Laws (`crates/solix-common/src/solver.rs`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 * **Rust Implementation:** [`crates/solix-common/src/solver.rs`](../../crates/solix-common/src/solver.rs)
 
 ---

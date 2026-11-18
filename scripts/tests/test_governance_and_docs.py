@@ -155,6 +155,7 @@ class StaticDocsAndWikiPortalTests(unittest.TestCase):
             self.assertTrue((out_dir / "guide" / "01_getting_started.html").is_file())
             self.assertTrue((out_dir / "spec" / "tools" / "cli" / "wiki.html").is_file())
             self.assertFalse((out_dir / "internals").exists())
+            self.assertFalse((out_dir / "guidelines").exists())
 
             index_html = (out_dir / "index.html").read_text(encoding="utf-8")
             self.assertIn("v9.9.9-test", index_html)
@@ -166,8 +167,8 @@ class StaticDocsAndWikiPortalTests(unittest.TestCase):
             raw_json = search_js[len("window.SOLIX_DOCS_INDEX = ") :].rstrip().rstrip(";")
             indexed_entries = json.loads(raw_json)
             self.assertTrue(
-                all(not entry["path"].startswith("internals") for entry in indexed_entries),
-                "docs/internals/ files must never be indexed into solix wiki search_index.js",
+                all(not entry["path"].startswith(("internals", "guidelines")) for entry in indexed_entries),
+                "docs/guidelines/ files must never be indexed into solix wiki search_index.js",
             )
 
             node_bin = shutil.which("node")

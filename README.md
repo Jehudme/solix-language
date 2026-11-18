@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/jehudme/solix-language/actions/workflows/ci.yml/badge.svg)](https://github.com/jehudme/solix-language/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v1.3.1-green.svg)](https://github.com/jehudme/solix-language/releases)
+[![Version](https://img.shields.io/badge/version-v1.5.0-green.svg)](https://github.com/jehudme/solix-language/releases)
 
 Solix is a modern, statically typed programming language designed to be fast, memory-safe, and easy to learn. It combines the clean, expressive syntax of languages like C# and Java with the predictable performance and resource control of systems languages like C++ and Rust.
 
@@ -24,7 +24,7 @@ Solix enforces clear visual separation between namespaces, types, and instance m
 * **Member Access (`.`)**: Used strictly for instance fields, object properties, and instance method invocations (e.g. `player.health`, `particle.update(delta_time)`).
 
 ### All-in-One Unified Toolchain
-Developing with Solix requires no external build tools, Makefiles, or complicated configuration. The single, consolidated `solix` executable manages the entire development lifecycle: project creation (`solix new`), compilation (`solix compile`), project builds (`solix build`), execution (`solix run`), code formatting (`solix fmt`), documentation generation (`solix doc`), package management (`solix install`, `solix list`), and editor language intelligence (`solix lsp`, `solix dap`).
+Developing with Solix requires no external build tools, Makefiles, or complicated configuration. The single, consolidated `solix` executable manages the entire development lifecycle: project creation (`solix new`), compilation (`solix compile`), project builds (`solix build`), execution (`solix run`), code formatting (`solix fmt`), API documentation generation (`solix doc`), bundled offline documentation (`solix wiki`), package management (`solix install`, `solix list`), and editor language intelligence (`solix lsp`, `solix dap`).
 
 ---
 
@@ -135,6 +135,8 @@ The single `solix` executable manages all phases of project development, compila
 | `solix lsp` | Starts the standard Language Server Protocol (LSP 3.17) | `solix lsp --stdio` |
 | `solix dap` | Starts the Debug Adapter Protocol (DAP) service | `solix dap --port 45678` |
 | `solix fmt` | Formats Solix source files according to official style | `solix fmt src/` |
+| `solix doc` | Generates Markdown API documentation from source comments | `solix doc src/ --out docs/api` |
+| `solix wiki` | Opens the bundled offline HTML documentation and search portal | `solix wiki --print-path` |
 
 ---
 
@@ -157,7 +159,7 @@ Comprehensive guides, specifications, and architecture deep dives are available 
 * [**Hermetic Build System & Native Bridge**](docs/features/build-system.md) — Architecture of `solix_build.py`, `.cache/` isolation, and Zig/CMake pipelines.
 * [**VS Code Extension & Debugging**](docs/guide/editors_vscode.md) — Editor setup, CodeLens execution, and interactive DAP debugging.
 * [**CLI Toolchain Reference**](docs/spec/tools/cli/README.md) — Detailed option flags and execution contracts for all `solix` subcommands.
-* [**Engineering Milestones Archive**](docs/internals/milestones/README.md) — Roadmap delivery logs and audit sign-off matrices (`MS-001` through `MS-050`).
+* [**Contributing & Engineering Guidelines**](CONTRIBUTING.md) — Contributor workflow and normative [engineering standards](docs/guidelines/README.md).
 
 ---
 

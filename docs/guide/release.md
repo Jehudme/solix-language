@@ -68,16 +68,13 @@ Generated release packages distribute the following directory hierarchy:
 
 ---
 
-## 4. Automated Two-Wave CI/CD Release Pipeline (`dev -> master`)
+## 4. Automated Two-Workflow CI/CD Pipeline (`ci.yml` + `release.yml`)
 
-The CI/CD pipeline separates continuous integration (`dev`) from release cutting and multi-architecture binary distribution (`master`):
+Solix separates continuous integration (`dev`) from on-demand release promotion and multi-architecture packaging (`master`):
 
-1. **Wave 1 — Continuous Integration, Security & Sensitive-Path Audits ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))**:
-   - Triggered on pull requests and pushes targeting `dev` (and validates every PR safely before landing).
-   - Enforces `rustfmt`, strict production Clippy lints, documentation synchronization (`doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py`), offline `solix wiki` portal compilation (`scripts/build_docs_site.py`), security checks (`cargo-deny`, `cargo-audit`, `actionlint`, `zizmor`), non-blocking sensitive-path risk advisories (`scripts/pr_risk_audit.py`), and 3-OS test matrices (`ubuntu-latest`, `macos-latest`, `windows-latest`).
-2. **Wave 2 — Release Train & Publication (`dev -> master`)**:
-   - Direct contributor PRs into `master` are rejected by **`Validate Release PR Source`** (`scripts/check_release_pr_source.py`). Only the curated `dev -> master` release train merges into `master`.
-   - When the maintainer merges the release PR to `master`, `release-plz` tags `vX.Y.Z`, updates changelogs, publishes workspace crates, and syncs the version bump back into `dev`.
-3. **Multi-Platform Distribution ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))**:
-   - Triggered on `v*.*.*` tag pushes and manual `workflow_dispatch`.
-   - Builds the static offline `solix wiki` portal via `scripts/build_docs_site.py`, compiles universal cross-platform `solix` and `raylib` `.slxarc` archives via `scripts/merge_bundled_packages.py`, embeds both together with `solix-language.vsix` into every `cargo-dist` installer (using `pwsh` for Windows installer setup and `bash` for `dist build`), publishes GitHub Releases, and mirrors updated user docs to GitHub Wiki with version links.
+1. **Continuous Integration ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))**:
+   - Triggered on pull requests and pushes targeting **`dev`**.
+   - Enforces `rustfmt`, strict production Clippy lints, documentation synchronization (`doc_sync_check.py`, `verify_docs.py`, `verify_doc_links.py`), offline `solix wiki` portal compilation (`scripts/build_docs_site.py`), cached VS Code extension compilation, security checks (`cargo-deny`, `cargo-audit`, `actionlint`, `zizmor`), concise sensitive-path notices (`scripts/pr_risk_audit.py`), and 3-OS test matrices (`ubuntu-latest`, `macos-latest`, `windows-latest`).
+2. **Unified On-Demand Release Pipeline ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))**:
+   - Triggered explicitly via **`workflow_dispatch`** with selectable version bump (`auto`, `patch`, `minor`, `major`), optional exact `X.Y.Z` override, and optional `dry_run` verification mode.
+   - Verifies that `dev` HEAD passed CI, computes and applies version/changelog updates via `scripts/prepare_release_train.py`, runs post-bump workspace tests and `cargo package --no-verify` publishability dry-runs, fast-forwards `dev -> master` via `RELEASE_TOKEN`, tags `vX.Y.Z`, publishes crates to `crates.io`, compiles cached cross-platform `cargo-dist` installers + universal bundled `solixlib` / `raylib` packages + `solix-language.vsix`, runs same-host release benchmarks, publishes clean emoji-free release notes, mirrors docs to GitHub Wiki, and syncs `master -> dev`.

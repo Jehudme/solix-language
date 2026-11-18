@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0011
 * **Scope:** Native Interoperability, C-ABI Bridge & Dynamic Extensions (`crates/solix-runtime/src/native/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 
 ---
 

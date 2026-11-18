@@ -17,7 +17,7 @@ docs/
 │   ├── libraries/  # 17 component-level specifications for the standard library (solixlib)
 │   └── tools/      # CLI toolchain and Language Server Protocol specifications
 ├── wiki/           # Atomic Reference Wiki (41 keywords, diagnostics encyclopedia, primitives, CLI)
-└── internals/      # Development milestones, engineering guidelines, and protocols
+└── guidelines/     # Engineering guidelines and anti-drift governance standards
 ```
 
 | Documentation Tier | Target Audience | Primary Focus | Content Style |
@@ -26,7 +26,7 @@ docs/
 | [**User Guides** (`docs/guide/`)](guide/README.md) | Software engineers building Solix applications | Practical usage, task tutorials, idioms, standard library recipes | Narrative tutorials, code snippets, links to specs & wiki |
 | [**Formal Specifications** (`docs/spec/`)](spec/README.md) | Compiler engineers, language contributors, systems architects | Normative grammar, AST nodes, type binding, 64-bit Register ISA, ARC layout | Deep technical precision, EBNF, instruction formats, memory blocks |
 | [**Atomic Wiki** (`docs/wiki/`)](wiki/README.md) | Developers looking up specific errors, keywords, or CLI flags | Error codes (`E0000`–`R0023`), 41 keywords, primitives, CLI commands | Concise dictionary lookups, minimal reproduction code, cheat sheets |
-| [**Engineering Guidelines** (`docs/internals/guidelines/`)](internals/guidelines/README.md) | Core repository developers & contributors | Commit format, GL-0011 zero single-letter variables, anti-drift protocols | Normative engineering standards & verification protocols |
+| [**Engineering Guidelines** (`docs/guidelines/`)](guidelines/README.md) | Core repository developers & contributors | Commit format, GL-0011 zero single-letter variables, anti-drift protocols | Normative engineering standards & verification protocols |
 
 ---
 
@@ -80,16 +80,16 @@ Solix v2.0 represents a modern, ground-up rewrite in safe Rust under `#![forbid(
 * [CLI & Language Server Protocol Tooling](spec/tools/cli/README.md)
 
 ### 3.4 Atomic Wiki References ([Wiki](wiki/README.md))
+* [Lexical Grammar Cheat Sheet](wiki/lexical.md)
 * [Language Keywords Dictionary (41 keywords)](wiki/keywords/README.md)
 * [Diagnostic Error Codes (`E0000`–`E0350`, `R0001`–`R0023`)](wiki/errors/README.md)
 * [Built-in Primitive Types & Aliases](wiki/primitives/README.md)
 * [CLI Commands Reference](wiki/commands/README.md)
 
-### 3.5 Internal Engineering Standards ([Guidelines](internals/guidelines/README.md))
-* [Commit Conventions (`GL-0001`)](internals/guidelines/authoring-commits.md)
-* [Branching Conventions (`GL-0002`)](internals/guidelines/branching-conventions.md)
-* [Rust Military Safety Standards (`GL-0011`)](internals/guidelines/language-conventions.md)
-* [Tripartite Documentation Guidelines (`GL-0012`)](internals/guidelines/authoring-features-and-wiki.md)
-* [Documentation Update Protocol (`GL-0013`)](internals/guidelines/documentation-update-protocol.md)
-* [Engineering Milestones Index (`MS-001` to `MS-062`)](internals/milestones/README.md)
-* [Milestone 061 Cross-Language Benchmarks](BENCHMARKS.md)
+### 3.5 Engineering Standards ([Guidelines](guidelines/README.md))
+* [Commit Conventions (`GL-0001`)](guidelines/authoring-commits.md)
+* [Branching Conventions (`GL-0002`)](guidelines/branching-conventions.md)
+* [Rust Military Safety Standards (`GL-0011`)](guidelines/language-conventions.md)
+* [Tripartite Documentation Guidelines (`GL-0012`)](guidelines/authoring-features-and-wiki.md)
+* [Documentation Update Protocol (`GL-0013`)](guidelines/documentation-update-protocol.md)
+* [CI & Release Governance (`GL-0014`)](guidelines/pr-and-release-governance.md)

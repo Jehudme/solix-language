@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0007
 * **Scope:** Memory Allocator, Automatic Reference Counting & Object Lifecycle (`crates/solix-runtime/src/memory/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 * **Rust Implementation:** [`crates/solix-runtime/src/memory/heap.rs`](../../crates/solix-runtime/src/memory/heap.rs)
 
 ---

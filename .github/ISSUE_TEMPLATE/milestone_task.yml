@@ -1,7 +1,7 @@
 name: Milestone Task / Feature Proposal
 description: Plan a tracked engineering task or language feature linked to a GitHub Milestone (GL-0008).
 title: "[Task]: "
-labels: ["enhancement"]
+labels: ["feature"]
 body:
   - type: markdown
     attributes:

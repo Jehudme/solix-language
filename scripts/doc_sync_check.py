@@ -119,17 +119,17 @@ TRIGGER_MATRIX = [
         "name": "CI Workflows & Release Governance",
         "pattern": r"^\.github/workflows/",
         "required_docs": [
-            "docs/internals/guidelines/pr-and-release-governance.md",
-            "docs/internals/guidelines/branching-conventions.md",
+            "docs/guidelines/pr-and-release-governance.md",
+            "docs/guidelines/branching-conventions.md",
             "CONTRIBUTING.md",
             "docs/guide/release.md",
         ],
     },
     {
         "name": "Governance & Offline Docs Scripts",
-        "pattern": r"^scripts/(pr_risk_audit|check_release_pr_source|build_docs_site|sync_github_wiki)\.py$",
+        "pattern": r"^scripts/(pr_risk_audit|prepare_release_train|build_docs_site|sync_github_wiki)\.py$",
         "required_docs": [
-            "docs/internals/guidelines/pr-and-release-governance.md",
+            "docs/guidelines/pr-and-release-governance.md",
             "CONTRIBUTING.md",
             "docs/spec/tools/cli/wiki.md",
         ],

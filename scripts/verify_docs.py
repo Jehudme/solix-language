@@ -103,7 +103,7 @@ def check_deprecated_terms(markdown_files: list[Path]) -> list[str]:
     errors: list[str] = []
 
     for file_path in markdown_files:
-        # Exclude historical milestone tracking files in docs/internals/milestones/
+        # Exclude historical milestone tracking files if present
         if "milestones" in file_path.parts:
             continue
 

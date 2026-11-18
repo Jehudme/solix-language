@@ -57,9 +57,9 @@ RISK_TIERS: tuple[RiskTier, ...] = (
         severity="HIGH",
         description="Modifies repository guidelines, contributor policy, or doc/release automation scripts.",
         patterns=(
-            re.compile(r"^docs/(?:internals/)?guidelines/"),
+            re.compile(r"^docs/guidelines/"),
             re.compile(r"^CONTRIBUTING\.md$"),
-            re.compile(r"^scripts/(doc_sync_check|verify_docs|verify_doc_links|pr_risk_audit|prepare_release_train|build_docs_site|sync_github_wiki|check_release_pr_source)\.py$"),
+            re.compile(r"^scripts/(doc_sync_check|verify_docs|verify_doc_links|pr_risk_audit|prepare_release_train|build_docs_site|sync_github_wiki)\.py$"),
         ),
         checklist=(
             "Confirm governance and test gates remain consistent.",
