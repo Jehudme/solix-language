@@ -277,9 +277,17 @@ jobs:
           python-version: "3.12"
 
       - name: Install dist
+        if: runner.os != 'Windows'
         env:
           INSTALL_DIST_CMD: ${{ matrix.install_dist.run }}
         run: eval "$INSTALL_DIST_CMD"
+
+      - name: Install dist (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          INSTALL_DIST_CMD: ${{ matrix.install_dist.run }}
+        run: Invoke-Expression $env:INSTALL_DIST_CMD
 
       - name: Set up Zig compiler
         if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64-unknown-linux-gnu')
@@ -307,9 +315,20 @@ jobs:
         run: command -v cmake >/dev/null 2>&1 || brew install cmake
 
       - name: Install dist target packages
+        if: runner.os != 'Windows'
         env:
           PKG_INSTALL_CMD: ${{ matrix.packages_install }}
         run: eval "$PKG_INSTALL_CMD"
+
+      - name: Install dist target packages (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PKG_INSTALL_CMD: ${{ matrix.packages_install }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:PKG_INSTALL_CMD)) {
+            Invoke-Expression $env:PKG_INSTALL_CMD
+          }
 
       - name: Download universal cross-platform bundled packages artifact
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
