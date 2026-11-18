@@ -1,7 +1,7 @@
 name: Feature Request
 description: Propose a new language capability, standard library API, or tooling enhancement.
 title: "[Feature]: "
-labels: ["enhancement"]
+labels: ["feature"]
 body:
   - type: textarea
     id: summary

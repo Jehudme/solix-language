@@ -2,7 +2,7 @@
 
 The Solix Wiki serves as a fast, atomic dictionary and cheat sheet for software engineers, IDE tooling, and compiler developers.
 
-Per [`GL-0012`](../internals/guidelines/authoring-features-and-wiki.md), articles in the wiki are strictly modular, each providing direct root-cause explanations and minimal reproducible examples without deep architectural expositions.
+Per [`GL-0012`](../guidelines/authoring-features-and-wiki.md), articles in the wiki are strictly modular, each providing direct root-cause explanations and minimal reproducible examples without deep architectural expositions.
 
 ---
 
@@ -33,3 +33,6 @@ Comprehensive flag descriptions, usage syntax, and output options:
 
 ### 4. [Language Keywords Dictionary (`keywords/`)](keywords/README.md)
 Alphabetical reference for all 45+ reserved language keywords across control flow, declarations, modifiers, and expressions.
+
+### 5. [Lexical Cheat Sheet](lexical.md)
+Tokenization, numeric literals, escape sequences, operators, and comment rules.

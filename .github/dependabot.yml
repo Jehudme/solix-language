@@ -9,9 +9,12 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "bincode"
+        versions: [">= 2.0.0"]
     labels:
       - "dependencies"
-      - "risk:supply-chain"
+      - "sensitive"
       - "P2"
     commit-message:
       prefix: "chore(deps)"
@@ -27,7 +30,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
-      - "risk:ci-workflow"
+      - "sensitive"
       - "P2"
     commit-message:
       prefix: "ci(deps)"

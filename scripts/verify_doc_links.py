@@ -85,12 +85,12 @@ def main():
                     broken_links.append(f"{md_path}:{line_number}: [{link_text}]({link_target}) -> {error}")
 
     if broken_links:
-        print(f"\n❌ Found {len(broken_links)} broken link(s):")
+        print(f"\n[FAIL] Found {len(broken_links)} broken link(s):")
         for b in broken_links:
-            print(f"  • {b}")
+            print(f"  - {b}")
         sys.exit(1)
     else:
-        print(f"✅ Verified {len(all_markdown_files)} files: Zero broken links found.")
+        print(f"[PASS] Verified {len(all_markdown_files)} files: Zero broken links found.")
         sys.exit(0)
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static Offline Documentation Portal Builder for `solix wiki`.
 
-Converts user-facing Markdown files under `docs/` (excluding `docs/internals/`)
+Converts user-facing Markdown files under `docs/` (excluding `docs/guidelines/`)
 into a self-contained static HTML documentation site staged into
 `crates/solix-toolchain/assets/docs/` with relative navigation, syntax
 styling, and an offline `search_index.js` script compatible with `file://`.
@@ -106,7 +106,7 @@ def markdown_rel_to_html_rel(docs_rel_path: Path) -> str:
 
 
 def collect_user_doc_sources(docs_root: Path) -> list[tuple[Path, str]]:
-    """Collects user-facing Markdown files from `docs/`, excluding `docs/internals/`."""
+    """Collects user-facing Markdown files from `docs/`, excluding `docs/guidelines/`."""
     discovered: list[tuple[Path, str]] = []
     root_readme = docs_root / "README.md"
     if root_readme.is_file():
@@ -117,7 +117,8 @@ def collect_user_doc_sources(docs_root: Path) -> list[tuple[Path, str]]:
         if not subdir.is_dir():
             continue
         for md_file in sorted(subdir.rglob("*.md")):
-            if "internals" in md_file.relative_to(docs_root).parts:
+            parts = set(md_file.relative_to(docs_root).parts)
+            if parts & {"internals", "guidelines"}:
                 continue
             discovered.append((md_file, dirname))
 

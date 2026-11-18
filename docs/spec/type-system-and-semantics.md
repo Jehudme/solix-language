@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0002
 * **Scope:** Type Checking & Semantic Type Hierarchy (`crates/solix-compilation/src/phases/binder/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 * **Rust Implementation:** [`crates/solix-common/src/types.rs`](../../crates/solix-common/src/types.rs)
 
 ---

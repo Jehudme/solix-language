@@ -5,7 +5,7 @@
 * **Specification ID:** SPEC-0008
 * **Scope:** Exception Runtime, Unwinding & Try/Catch/Finally Tables (`crates/solix-runtime/src/`)
 * **Status:** Final Normative Standard
-* **Governing Guideline:** `docs/internals/guidelines/authoring-specs.md` (GL-0005)
+* **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
 
 ---
 
