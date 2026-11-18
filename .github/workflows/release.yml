@@ -360,6 +360,7 @@ jobs:
         run: python3 scripts/build_docs_site.py
 
       - name: Build artifacts
+        shell: bash
         env:
           TAG_FLAG: ${{ needs.plan.outputs.tag-flag }}
           DIST_ARGS: ${{ matrix.dist_args }}
