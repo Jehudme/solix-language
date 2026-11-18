@@ -292,7 +292,7 @@
         "vscode-languageclient": "^9.0.1"
     },
     "devDependencies": {
-        "@types/node": "^20.11.0",
+        "@types/node": "^26.6.6",
         "@types/vscode": "^1.85.0",
         "@vscode/test-electron": "^2.4.1",
         "@vscode/vsce": "^3.2.1",
