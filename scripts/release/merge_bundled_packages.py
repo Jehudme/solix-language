@@ -229,8 +229,10 @@ def merge_bundled_directories(
     input_directories: list[Path],
     output_directory: Path,
     required_targets: list[str] | None = None,
+    allowed_profiles: set[str] | None = None,
 ) -> dict[str, Any]:
     """Discovers and merges all per-platform `.slxarc` archives across `input_directories`."""
+    effective_profiles = allowed_profiles if allowed_profiles is not None else {"all"}
     grouped_archives: dict[tuple[str, str], list[Path]] = {}
     for input_dir in input_directories:
         resolved_input = input_dir.resolve()
@@ -241,6 +243,9 @@ def merge_bundled_directories(
                 continue
             for file_entry in sorted(folder_entry.iterdir()):
                 if file_entry.is_file() and file_entry.suffix.lower() == ".slxarc":
+                    _pkg_name, build_profile, _pkg_ver = parse_folder_identity(folder_entry.name, "")
+                    if "all" not in effective_profiles and build_profile not in effective_profiles:
+                        continue
                     key = (folder_entry.name, file_entry.name)
                     grouped_archives.setdefault(key, []).append(file_entry)
 
@@ -300,6 +305,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Comma-separated list of target triples that must be present in each merged archive.",
     )
+    parser.add_argument(
+        "--profiles",
+        type=str,
+        default="all",
+        help="Comma-separated profiles to merge (default: all, or e.g. 'release').",
+    )
     return parser.parse_args()
 
 
@@ -310,11 +321,17 @@ def main() -> None:
         for item in arguments.require_targets.split(",")
         if item.strip()
     ]
+    allowed_profiles = {
+        item.strip()
+        for item in arguments.profiles.split(",")
+        if item.strip()
+    } or {"all"}
     try:
         merge_bundled_directories(
             input_directories=arguments.input_dirs,
             output_directory=arguments.output_dir.resolve(),
             required_targets=required_targets,
+            allowed_profiles=allowed_profiles,
         )
     except Exception as error_details:
         print(f"Error: {error_details}", file=sys.stderr)
