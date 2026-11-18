@@ -238,7 +238,10 @@ fn test_feature_08_error_wiki_links() {
     assert_eq!(diag.code, Some(NumberOrString::String("E0101".to_string())));
     assert!(diag.code_description.is_some());
     let href = diag.code_description.unwrap().href;
-    assert_eq!(href.as_str(), "https://solix-lang.org/wiki/errors/E0101");
+    assert_eq!(
+        href.as_str(),
+        "https://github.com/Jehudme/solix-language/blob/master/docs/wiki/errors/parser-errors.md#e0101"
+    );
 }
 
 // -----------------------------------------------------------------------------

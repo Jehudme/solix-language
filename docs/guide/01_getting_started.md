@@ -33,17 +33,12 @@ Install the official prebuilt Solix binary toolchain directly on Linux, macOS, o
 
 #### Linux & macOS (Universal Shell Script)
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/solix-language/solix/main/install.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Jehudme/solix-language/releases/latest/download/solix-toolchain-installer.sh | sh
 ```
 
 #### Windows (PowerShell)
 ```powershell
-irm https://raw.githubusercontent.com/solix-language/solix/main/install.ps1 | iex
-```
-
-#### macOS Homebrew
-```bash
-brew install solix-language/tap/solix
+irm https://github.com/Jehudme/solix-language/releases/latest/download/solix-toolchain-installer.ps1 | iex
 ```
 
 > [!NOTE]
@@ -62,7 +57,7 @@ brew install solix-language/tap/solix
 ### Clone and Build the Toolchain
 
 ```bash
-git clone https://github.com/yourorg/solix-language.git
+git clone https://github.com/Jehudme/solix-language.git
 cd solix-language
 cargo build --release
 ```

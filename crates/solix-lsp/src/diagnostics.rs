@@ -11,8 +11,9 @@ use tower_lsp::lsp_types::{
     Range, Url,
 };
 
-/// Base URL for canonical documentation wiki error codes.
-pub const ERROR_WIKI_BASE_URL: &str = "https://solix-lang.org/wiki/errors/";
+/// Base URL for canonical repository documentation of error codes.
+pub const ERROR_WIKI_BASE_URL: &str =
+    "https://github.com/Jehudme/solix-language/blob/master/docs/wiki/errors/";
 
 /// Converts a 0-based byte offset within a source string into an LSP 0-based [`Position`].
 ///
@@ -82,7 +83,21 @@ pub fn span_to_range(source_text: &str, span: Span) -> Range {
 /// Generates a canonical documentation [`CodeDescription`] for an error code if valid.
 #[must_use]
 pub fn make_code_description(error_code: &str) -> Option<CodeDescription> {
-    let target_url = format!("{ERROR_WIKI_BASE_URL}{error_code}");
+    let page = if error_code.starts_with("E00") {
+        "lexer-errors.md"
+    } else if error_code.starts_with("E01") {
+        "parser-errors.md"
+    } else if error_code.starts_with("E02") {
+        "binder-errors.md"
+    } else if error_code.starts_with("E03") {
+        "runtime-errors.md"
+    } else if error_code.starts_with("E04") {
+        "emission-errors.md"
+    } else {
+        "README.md"
+    };
+    let anchor = error_code.to_ascii_lowercase();
+    let target_url = format!("{ERROR_WIKI_BASE_URL}{page}#{anchor}");
     Url::parse(&target_url)
         .ok()
         .map(|parsed_url| CodeDescription { href: parsed_url })

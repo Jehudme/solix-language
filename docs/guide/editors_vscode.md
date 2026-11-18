@@ -7,7 +7,7 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 ## 1. Features
 
 ### Language Server Protocol (LSP 3.17) Intelligence
-- **Live Push Diagnostics**: Real-time error and warning squiggles updated on buffer edits, including clickable links to online error documentation (`https://solix-lang.org/wiki/errors/E0XXX`).
+- **Live Push Diagnostics**: Real-time error and warning squiggles updated on buffer edits, linked to error reference documentation in `docs/wiki/errors/` (also bundled offline via `solix wiki`).
 - **Code Navigation**:
   - **Go-to-Definition** (`F12`): Jump directly to local variables, methods, fields, and classes across the project and dependencies.
   - **Go-to-Type-Definition**: Jump to declaring class or interface of variable instances.

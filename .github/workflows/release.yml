@@ -886,8 +886,10 @@ jobs:
           rm -f artifacts/*-dist-manifest.json
           : > "$RUNNER_TEMP/notes.txt"
           if [ -f artifacts/release_changelog.md ]; then
-            cat artifacts/release_changelog.md >> "$RUNNER_TEMP/notes.txt"
-            printf '\n\n' >> "$RUNNER_TEMP/notes.txt"
+            if ! printf '%s\n' "$ANNOUNCEMENT_BODY" | grep -q "^## Release Notes"; then
+              cat artifacts/release_changelog.md >> "$RUNNER_TEMP/notes.txt"
+              printf '\n\n' >> "$RUNNER_TEMP/notes.txt"
+            fi
             rm -f artifacts/release_changelog.md
           fi
           printf '%s\n' "$ANNOUNCEMENT_BODY" >> "$RUNNER_TEMP/notes.txt"
