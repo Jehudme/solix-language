@@ -421,7 +421,7 @@ jobs:
       - name: Build release Solix binary and stage bundled libraries
         run: |
           cargo build --release --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release,debug --solix-binary target/release/solix
+          python3 scripts/release/build_default_libraries.py --profiles release --solix-binary target/release/solix
 
       - name: Benchmark PR head vs latest GitHub release on same host
         env:

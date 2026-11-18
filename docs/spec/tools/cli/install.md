@@ -82,7 +82,7 @@ solix install build/release/raylib.slxarc --force
 
 ### 5. Bundled Standard Libraries Installation (`--bundled`)
 
-When invoked with `--bundled`, Solix locates bundled first-party `.slxarc` archives (checking `SOLIX_BUNDLED_PACKAGES_DIR`, sibling `<exe_dir>/assets/packages/`, workspace assets, or materializing the compile-time embedded archives into `~/.solix/cache/bundled_packages/`) and installs both `release` and `debug` profiles of `solix` and `raylib` into `$SOLIX_PKG_DIR`.
+When invoked with `--bundled`, Solix locates bundled first-party `.slxarc` archives (checking `SOLIX_BUNDLED_PACKAGES_DIR`, sibling `<exe_dir>/assets/packages/`, workspace assets, or materializing the compile-time embedded archives into `~/.solix/cache/bundled_packages/`) and installs the `release` profile packages of `solix` and `raylib` into `$SOLIX_PKG_DIR`.
 
 ```bash
 # Re-extract bundled standard libraries

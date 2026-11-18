@@ -230,6 +230,7 @@ def main() -> None:
     print(f"Topological build order: {' -> '.join(sorted_library_names)}")
 
     output_directory.mkdir(parents=True, exist_ok=True)
+    expected_folders: set[str] = set()
     manifest_records: list[dict[str, Any]] = []
 
     for library_name in sorted_library_names:
@@ -251,6 +252,7 @@ def main() -> None:
 
             # Stage archive into output_dir/<name>-<profile>@<version>/<name>.slxarc
             staged_folder_name = f"{library_name}-{target_profile}@{package_version}"
+            expected_folders.add(staged_folder_name)
             staged_directory = output_directory / staged_folder_name
             staged_directory.mkdir(parents=True, exist_ok=True)
             staged_archive_path = staged_directory / f"{library_name}.slxarc"
@@ -274,6 +276,11 @@ def main() -> None:
 
             if arguments.install:
                 install_library_archive(solix_executable, staged_archive_path, target_profile, environment_variables)
+
+    for existing_entry in output_directory.iterdir():
+        if existing_entry.is_dir() and existing_entry.name not in expected_folders:
+            shutil.rmtree(existing_entry)
+            print(f"Removed unrequested stale bundled directory '{existing_entry.name}'")
 
     manifest_file_path = output_directory / "bundled_manifest.json"
     bundled_manifest_payload = {

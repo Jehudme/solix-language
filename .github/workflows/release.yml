@@ -362,7 +362,7 @@ jobs:
           SOLIX_TARGET_TRIPLE: ${{ matrix.target }}
         run: |
           cargo build --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release,debug
+          python3 scripts/release/build_default_libraries.py --profiles release
 
       - name: Upload bundled packages artifact (${{ matrix.target }})
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -406,6 +406,7 @@ jobs:
           python3 scripts/release/merge_bundled_packages.py \
             --input-dirs staging-bundled-libs/bundled-packages-* \
             --output-dir crates/solix-toolchain/assets/packages \
+            --profiles release \
             --require-targets x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Upload universal cross-platform bundled packages artifact
@@ -521,7 +522,7 @@ jobs:
       - name: Build optimized Solix release binary and stage default libraries
         run: |
           cargo build --release --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release,debug --solix-binary target/release/solix
+          python3 scripts/release/build_default_libraries.py --profiles release --solix-binary target/release/solix
 
       - name: Run same-host A/B benchmark suite against previous release binary
         env:

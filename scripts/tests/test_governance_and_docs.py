@@ -252,6 +252,31 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                     merged_manifest,
                 )
 
+            debug_dir = tmp / "bundled-packages-x86_64-unknown-linux-gnu" / "demo-debug@1.0.0"
+            debug_dir.mkdir(parents=True)
+            with zipfile.ZipFile(debug_dir / "demo.slxarc", "w") as zip_handle:
+                zip_handle.writestr("manifest.toml", base_manifest)
+            out_release_only = tmp / "universal_release_only"
+            proc_rel = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "release" / "merge_bundled_packages.py"),
+                    "--input-dirs",
+                    str(linux_dir.parent),
+                    str(mac_dir.parent),
+                    "--output-dir",
+                    str(out_release_only),
+                    "--profiles",
+                    "release",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc_rel.returncode, 0, proc_rel.stderr)
+            self.assertFalse((out_release_only / "demo-debug@1.0.0").exists())
+            self.assertTrue((out_release_only / "demo-release@1.0.0").exists())
+
     def test_issue_templates_and_workflows_parse_as_valid_yaml(self) -> None:
         template_dir = REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
         for yml_file in sorted(template_dir.glob("*.yml")):
