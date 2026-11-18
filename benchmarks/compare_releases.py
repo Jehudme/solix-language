@@ -147,6 +147,7 @@ def compare_benchmarks(
     current_data: Dict[str, Any],
     previous_data: Optional[Dict[str, Any]],
     regression_threshold_pct: float = 5.0,
+    min_delta_ms: float = 0.5,
     preferred_engine: str = "solix_fast",
 ) -> Dict[str, Any]:
     """Compares benchmark metrics between current and previous datasets."""
@@ -189,17 +190,17 @@ def compare_benchmarks(
             "speedup_pct": 0.0,
             "memory_diff_mb": 0.0,
             "status": "UNKNOWN",
-            "badge": "➖",
+            "badge": "UNKNOWN",
             "is_regression": False,
         }
 
         if previous_median_ms <= 0.0 and current_median_ms > 0.0:
             row_metric["status"] = "NEW"
-            row_metric["badge"] = "🆕 NEW"
+            row_metric["badge"] = "NEW"
             row_metric["memory_diff_mb"] = round(current_rss_kb / 1024.0, 2)
         elif current_median_ms <= 0.0 and previous_median_ms > 0.0:
             row_metric["status"] = "REMOVED"
-            row_metric["badge"] = "🗑️ REMOVED"
+            row_metric["badge"] = "REMOVED"
             row_metric["memory_diff_mb"] = round(-previous_rss_kb / 1024.0, 2)
         elif current_median_ms > 0.0 and previous_median_ms > 0.0:
             speedup_ratio = previous_median_ms / current_median_ms
@@ -210,6 +211,7 @@ def compare_benchmarks(
             speedup_percentage = (
                 (previous_median_ms - current_median_ms) / previous_median_ms
             ) * 100.0
+            abs_delta_ms = abs(current_median_ms - previous_median_ms)
 
             memory_diff_kb = current_rss_kb - previous_rss_kb
             total_memory_diff_kb += memory_diff_kb
@@ -219,19 +221,19 @@ def compare_benchmarks(
             row_metric["speedup_pct"] = round(speedup_percentage, 1)
             row_metric["memory_diff_mb"] = memory_diff_mb
 
-            # Threshold classification
-            if speedup_percentage > regression_threshold_pct:
+            # Require both percentage and absolute ms delta to exceed noise floor
+            if speedup_percentage > regression_threshold_pct and abs_delta_ms >= min_delta_ms:
                 row_metric["status"] = "FASTER"
-                row_metric["badge"] = "🚀 FASTER"
+                row_metric["badge"] = "FASTER"
                 faster_workloads_count += 1
-            elif speedup_percentage < -regression_threshold_pct:
+            elif speedup_percentage < -regression_threshold_pct and abs_delta_ms >= min_delta_ms:
                 row_metric["status"] = "REGRESSION"
-                row_metric["badge"] = "⚠️ SLOWER"
+                row_metric["badge"] = "SLOWER"
                 row_metric["is_regression"] = True
                 regressed_workloads_count += 1
             else:
                 row_metric["status"] = "STABLE"
-                row_metric["badge"] = "⚖️ STABLE"
+                row_metric["badge"] = "STABLE"
                 stable_workloads_count += 1
 
         comparison_rows.append(row_metric)
@@ -250,6 +252,7 @@ def compare_benchmarks(
             "geometric_mean_speedup": round(geometric_mean_speedup, 2),
             "total_memory_diff_mb": round(total_memory_diff_kb / 1024.0, 2),
             "regression_threshold_pct": regression_threshold_pct,
+            "min_delta_ms": min_delta_ms,
         },
     }
 
@@ -258,6 +261,7 @@ def render_markdown_comparison_table(
     comparison_results: Dict[str, Any],
     previous_tag_label: str = "Previous Release",
     current_tag_label: str = "Current Release",
+    same_host: bool = False,
 ) -> str:
     """Renders formatted GitHub Flavored Markdown table for release notes."""
     workload_rows: List[Dict[str, Any]] = comparison_results.get("workloads", [])
@@ -313,6 +317,11 @@ def render_markdown_comparison_table(
         faster = summary_data.get("faster_count", 0)
         stable = summary_data.get("stable_count", 0)
         regressed = summary_data.get("regressed_count", 0)
+        host_note = (
+            " Measured back-to-back on the same CI runner."
+            if same_host
+            else ""
+        )
 
         mem_sign = "+" if total_mem >= 0.0 else ""
         markdown_lines.append("")
@@ -321,7 +330,7 @@ def render_markdown_comparison_table(
             f"> **Benchmark Summary:** Geometric mean speedup: **{geomean:.2f}x** "
             f"across {len(workload_rows)} suites. "
             f"Total memory delta: **{mem_sign}{total_mem:.1f} MB**. "
-            f"Distribution: {faster} faster, {stable} stable, {regressed} regressed."
+            f"Distribution: {faster} faster, {stable} stable, {regressed} regressed.{host_note}"
         )
     else:
         # Initial baseline recording format
@@ -338,7 +347,7 @@ def render_markdown_comparison_table(
             current_ms = row["current_ms"]
             current_rss_kb = row["current_rss_kb"]
             markdown_lines.append(
-                f"| `{workload_name}` | {current_ms:.2f} ms | {current_rss_kb} KB | 📌 BASELINE |"
+                f"| `{workload_name}` | {current_ms:.2f} ms | {current_rss_kb} KB | BASELINE |"
             )
 
     return "\n".join(markdown_lines) + "\n"
@@ -393,6 +402,17 @@ def parse_arguments() -> argparse.Namespace:
         type=float,
         default=5.0,
         help="Performance regression tolerance percentage threshold (default: 5.0)",
+    )
+    parser.add_argument(
+        "--min-delta-ms",
+        type=float,
+        default=0.5,
+        help="Minimum absolute millisecond change required before flagging FASTER/SLOWER (default: 0.5)",
+    )
+    parser.add_argument(
+        "--same-host",
+        action="store_true",
+        help="Annotate summary as back-to-back comparison on the same runner",
     )
     parser.add_argument(
         "--current-tag",
@@ -476,12 +496,14 @@ def main() -> int:
         current_data=current_benchmark_data,
         previous_data=previous_benchmark_data,
         regression_threshold_pct=parsed_args.threshold_pct,
+        min_delta_ms=parsed_args.min_delta_ms,
     )
 
     markdown_table = render_markdown_comparison_table(
         comparison_results=comparison_results,
         previous_tag_label=parsed_args.previous_tag,
         current_tag_label=parsed_args.current_tag,
+        same_host=parsed_args.same_host,
     )
 
     if not parsed_args.quiet:
@@ -513,7 +535,7 @@ def main() -> int:
             "regressed_count", 0
         )
         sys.stderr.write(
-            f"\n❌ Quality Gate Failed: {regressed_count} workload(s) regressed beyond "
+            f"\n[FAIL] Quality Gate Failed: {regressed_count} workload(s) regressed beyond "
             f"{parsed_args.threshold_pct}% threshold!\n"
         )
         return 1
