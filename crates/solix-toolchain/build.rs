@@ -195,6 +195,7 @@ fn filter_slxarc_for_target(
     let reader = Cursor::new(archive_bytes);
     let mut zip_in = ZipArchive::new(reader).ok()?;
 
+    let mut qualified_host_files: Vec<String> = Vec::new();
     let mut has_foreign_entries = false;
     for idx in 0..zip_in.len() {
         let entry = zip_in.by_index(idx).ok()?;
@@ -206,14 +207,36 @@ fn filter_slxarc_for_target(
             && let Some((subdir, rest)) = after_lib.split_once('/')
             && !subdir.is_empty()
             && (!rest.is_empty() || entry.is_dir())
-            && !target_matches_native_subdir(subdir, target_os, target_arch, target_env)
         {
-            has_foreign_entries = true;
-            break;
+            if target_matches_native_subdir(subdir, target_os, target_arch, target_env) {
+                if !rest.is_empty() {
+                    qualified_host_files.push(rest.to_string());
+                }
+            } else {
+                has_foreign_entries = true;
+            }
         }
     }
 
-    if !has_foreign_entries {
+    let mut has_duplicate_unqualified = false;
+    if !qualified_host_files.is_empty() {
+        for idx in 0..zip_in.len() {
+            let entry = zip_in.by_index(idx).ok()?;
+            let Ok(name_cow) = entry.name() else {
+                continue;
+            };
+            let name = name_cow.as_ref();
+            if let Some(after_lib) = name.strip_prefix("lib/")
+                && !after_lib.contains('/')
+                && qualified_host_files.iter().any(|f| f == after_lib)
+            {
+                has_duplicate_unqualified = true;
+                break;
+            }
+        }
+    }
+
+    if !has_foreign_entries && !has_duplicate_unqualified {
         return None;
     }
 
@@ -227,12 +250,16 @@ fn filter_slxarc_for_target(
         for idx in 0..zip_in.len() {
             let mut entry = zip_in.by_index(idx).ok()?;
             let name = entry.name().ok()?.into_owned();
-            if let Some(after_lib) = name.strip_prefix("lib/")
-                && let Some((subdir, _)) = after_lib.split_once('/')
-                && !subdir.is_empty()
-                && !target_matches_native_subdir(subdir, target_os, target_arch, target_env)
-            {
-                continue;
+            if let Some(after_lib) = name.strip_prefix("lib/") {
+                if let Some((subdir, _)) = after_lib.split_once('/')
+                    && !subdir.is_empty()
+                    && !target_matches_native_subdir(subdir, target_os, target_arch, target_env)
+                {
+                    continue;
+                }
+                if !after_lib.contains('/') && qualified_host_files.iter().any(|f| f == after_lib) {
+                    continue;
+                }
             }
 
             if entry.is_dir() {
