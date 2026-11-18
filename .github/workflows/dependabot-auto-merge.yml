@@ -1,0 +1,41 @@
+name: Dependabot Auto-Merge
+
+run-name: "Dependabot Auto-Merge | PR #${{ github.event.pull_request.number }}"
+
+on:
+  # zizmor: ignore[dangerous-triggers]
+  pull_request_target:
+    branches:
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  approve-and-arm-automerge:
+    name: Approve and Arm Auto-Merge for Passing Dependabot PRs
+    # Server-enforced PR author check (never checks out untrusted PR code)
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]'
+      && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Approve and enable auto-merge (waits for all required CI checks)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::RELEASE_TOKEN secret is unavailable; skipping auto-merge."
+            exit 0
+          fi
+          gh pr review "$PR_URL" --approve --body "Automated approval for Dependabot update; auto-merge armed pending all required CI checks."
+          gh pr merge "$PR_URL" --auto --squash --delete-branch
