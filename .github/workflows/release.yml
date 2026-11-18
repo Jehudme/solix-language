@@ -205,6 +205,7 @@ jobs:
 
           echo "Waiting for crates.io index to serve solix-common ${NEXT_VER}..."
           for attempt in $(seq 1 12); do
+            echo "Checking crates.io index (attempt ${attempt}/12)..."
             if cargo search solix-common --limit 1 | grep -q "solix-common = \"${NEXT_VER}\""; then
               break
             fi
@@ -226,10 +227,17 @@ jobs:
       - prepare-release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           persist-credentials: false
 
       - name: Set up Node.js
@@ -277,10 +285,17 @@ jobs:
         shell: bash
         run: git config --global core.longpaths true
 
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           persist-credentials: false
 
       - name: Restore cached bundled first-party libraries
@@ -341,10 +356,17 @@ jobs:
       - build-bundled-libs
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           persist-credentials: false
 
       - name: Set up Python
@@ -385,10 +407,18 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           submodules: recursive
           persist-credentials: false
 
@@ -432,10 +462,18 @@ jobs:
       - plan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           fetch-depth: 0
           persist-credentials: false
 
@@ -534,10 +572,18 @@ jobs:
         shell: bash
         run: git config --global core.longpaths true
 
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           submodules: recursive
           persist-credentials: false
 
@@ -682,10 +728,18 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
     steps:
-      - name: Checkout repository
+      - name: Checkout branch for dry-run
+        if: inputs.dry_run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Checkout master release commit
+        if: (!inputs.dry_run)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: master
           submodules: recursive
           persist-credentials: false
 
@@ -754,10 +808,10 @@ jobs:
     outputs:
       val: ${{ steps.host.outputs.manifest }}
     steps:
-      - name: Checkout repository
+      - name: Checkout master release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          ref: master
           submodules: recursive
           persist-credentials: false
 
@@ -842,10 +896,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
+      - name: Checkout master release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare-release.outputs.release_sha }}
+          ref: master
           persist-credentials: false
 
       - name: Set up Python
