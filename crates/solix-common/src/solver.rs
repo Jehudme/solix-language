@@ -821,6 +821,21 @@ impl ClientModuleSolver {
                 };
 
                 if cache_valid {
+                    if let Ok(inspection) =
+                        crate::project::SlxarcArchive::inspect(&slxarc_candidate)
+                        && let Some(ref manifest) = inspection.manifest
+                    {
+                        crate::project::validate_archive_host_compatibility(
+                            manifest,
+                            &slxarc_candidate.display().to_string(),
+                        )
+                        .map_err(|error| SolverError::ExtractionError {
+                            reason: format!(
+                                "Archive compatibility check failed for '{}': {error}",
+                                slxarc_candidate.display()
+                            ),
+                        })?;
+                    }
                     let mut solved_package =
                         SolvedPackage::new(package_name, version, cached_program);
                     for lib_path in discovered_libs {

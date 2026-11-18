@@ -117,9 +117,12 @@ def build_library(
     library_directory: Path,
     target_profile: str,
     environment_variables: dict[str, str],
+    target_override: str | None = None,
 ) -> None:
     """Runs solix build on a library for a given profile."""
     build_command = [*solix_executable, "build", str(library_directory), "--profile", target_profile]
+    if target_override:
+        build_command.extend(["--target", target_override])
     print(f"Building library at '{library_directory}' for profile '{target_profile}'...")
     subprocess_result = subprocess.run(
         build_command,
@@ -195,6 +198,12 @@ def main() -> None:
         default=None,
         help="Path or command to invoke solix CLI",
     )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default=None,
+        help="Optional target triple or 'host' forwarded to solix build",
+    )
 
     arguments = parser.parse_args()
 
@@ -239,7 +248,13 @@ def main() -> None:
         package_version = library_info["version"]
 
         for target_profile in target_profiles:
-            build_library(solix_executable, library_dir, target_profile, environment_variables)
+            build_library(
+                solix_executable,
+                library_dir,
+                target_profile,
+                environment_variables,
+                target_override=arguments.target,
+            )
 
             candidate_archive = library_dir / "build" / target_profile / f"{library_name}.slxarc"
             if not candidate_archive.exists():

@@ -184,6 +184,7 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
                 "build_profile": detected_profile,
                 "source_directory": source_directory,
                 "bundled_platforms": bundled_platforms,
+                "supported_platforms": inspection.manifest.as_ref().map(|manifest| manifest.supported_platforms.clone()).unwrap_or_default(),
                 "exported_symbols_count": total_exported_symbols,
                 "sha256": computed_sha256,
                 "cache_status": cache_status,
@@ -384,6 +385,13 @@ fn format_slxarc_info_summary(
                 out,
                 "Authors:          {}",
                 manifest.configuration.authors.join(", ")
+            );
+        }
+        if !manifest.supported_platforms.is_empty() {
+            let _ = writeln!(
+                out,
+                "Supported Targets: {}",
+                manifest.supported_platforms.join(", ")
             );
         }
         let _ = writeln!(out, "\n--- Entry Points ---");

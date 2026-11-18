@@ -68,6 +68,8 @@ solix build [path] [options]
 * `--link <dynamic|static>`: Linking mode for dependencies and emission [default: `dynamic`].
 * `--static`: Shorthand for static linking mode (`--link static`).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
+* `--check-env` / `--verify-only`: Runs only Phase 0 pre-flight environment & toolchain verification without compiling.
+* `--target <triple>`: Compiles native crates for a single Rust target triple or `"host"`.
 
 ### Practical Examples
 ```bash

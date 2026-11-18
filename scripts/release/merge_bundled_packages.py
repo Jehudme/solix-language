@@ -29,13 +29,25 @@ def compute_sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+TRIPLE_TO_PLATFORM = {
+    "x86_64-unknown-linux-gnu": "linux-x86_64",
+    "aarch64-unknown-linux-gnu": "linux-aarch64",
+    "x86_64-pc-windows-msvc": "windows-x86_64",
+    "x86_64-pc-windows-gnu": "windows-x86_64",
+    "x86_64-apple-darwin": "macos-x86_64",
+    "aarch64-apple-darwin": "macos-aarch64",
+}
+
+
 def strip_native_checksum_section(manifest_text: str) -> str:
-    """Removes any existing `[native_library_checksums]` TOML table cleanly."""
+    """Removes any existing `[native_library_checksums]` table and `supported_platforms` line."""
     output_lines: list[str] = []
     skipping_checksum_table = False
 
     for raw_line in manifest_text.splitlines():
         stripped = raw_line.strip()
+        if stripped.startswith("supported_platforms") and not skipping_checksum_table:
+            continue
         if stripped.startswith("[") and not stripped.startswith("[["):
             if stripped == "[native_library_checksums]":
                 skipping_checksum_table = True
@@ -167,18 +179,26 @@ def merge_package_group(
     }
 
     cleaned_manifest = strip_native_checksum_section(base_manifest_text)
+    merged_platforms = sorted({
+        TRIPLE_TO_PLATFORM[target_name]
+        for target_name in present_targets
+        if target_name in TRIPLE_TO_PLATFORM
+    }) or ["universal"]
+    formatted_platforms = ", ".join(f'"{plat}"' for plat in merged_platforms)
+    header_line = f"supported_platforms = [{formatted_platforms}]\n\n"
     if native_checksums:
         checksum_lines = [
             f'"{key}" = "{digest}"'
             for key, digest in sorted(native_checksums.items())
         ]
         unified_manifest = (
-            f"{cleaned_manifest}\n[native_library_checksums]\n"
+            header_line
+            + f"{cleaned_manifest}\n[native_library_checksums]\n"
             + "\n".join(checksum_lines)
             + "\n"
         )
     else:
-        unified_manifest = cleaned_manifest
+        unified_manifest = header_line + cleaned_manifest
 
     all_entries: dict[str, bytes] = {
         "manifest.toml": unified_manifest.encode("utf-8"),

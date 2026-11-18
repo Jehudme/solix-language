@@ -153,7 +153,7 @@ Omits the Rust `Cargo.toml` and native bridge crate inside `natives/`, creating 
 
 ## Release Cross-Platform Defaults
 
-Every scaffolded project includes `scripts/build.py` and `scripts/solix_build.py`, which default to `release` multi-target packaging (`static = true`) across all available desktop architectures (`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-gnu`, `x86_64-pc-windows-msvc`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`) while bundling all target binaries from statically linked dependencies (`--strict-cross` enforces every desktop architecture, and `--target <triple>` / `SOLIX_TARGET_TRIPLE` isolates a single target-qualified directory under `lib/<triple>/` for both `debug` and `release` profiles).
+Every scaffolded project includes `scripts/build.py` (with a `verify(ctx)` pre-flight hook) and `scripts/solix_build.py`. Native projects default `[profiles.release]` to `platforms = ["all"]` (`["universal"]` when `--no-native` is passed) and `[profiles.debug]`/`[profiles.test]` to `platforms = ["host"]`. Release builds require every desktop architecture (`linux-x86_64`, `linux-aarch64`, `windows-x86_64`, `macos-x86_64`, `macos-aarch64`) to compile unless overridden via `platforms` in `manifest.toml` or `--target <triple>` / `--target host`.
 
 ---
 

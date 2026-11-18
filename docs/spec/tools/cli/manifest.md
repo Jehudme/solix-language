@@ -93,6 +93,7 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 | `debug_symbols` | Boolean | `false` (release) / `true` (debug) | Emits source line mappings and debug symbols in `.slxb`. |
 | `static` | Boolean | `true` (release) / `false` (debug) | Static linking mode (relocates dependency bytecode). Alias: `is_static`. |
 | `sources` | Array of Strings | `["src"]` | Recursive directory paths to discover `.slx` source files. |
+| `platforms` | Array of Strings | `["all"]` (release) / `["host"]` (debug/test) | Target platform constraints: `linux-x86_64`, `linux-aarch64`, `windows-x86_64`, `macos-x86_64`, `macos-aarch64`, or shorthands `"all"`, `"host"`, `"universal"`. |
 | `emit_disassembly` | Boolean | `false` | Emits human-readable register VM disassembly files during compilation. |
 | `warnings_as_errors`| Boolean | `false` | Treats compiler warnings as fatal errors. |
 | `verify_checksum` | Boolean | `true` | Validates dependency cryptographic SHA-256 hashes against pinned manifests. |
@@ -106,6 +107,7 @@ optimization_level = 3
 inline_threshold = 16
 debug_symbols = false
 static = true
+platforms = ["all"]
 sources = ["src"]
 
 [profiles.debug]
@@ -114,10 +116,12 @@ optimization_level = 0
 inline_threshold = 8
 debug_symbols = true
 static = false
+platforms = ["host"]
 
 [profiles.test]
 inherits = "debug"
 entrypoint = "TestRunner::test"
+platforms = ["host"]
 sources = ["tests"]
 ```
 
@@ -140,17 +144,18 @@ Child profiles inherit parent dependencies and can override version or build pro
 
 ---
 
-### 4. `[native_library_checksums]` Table (Generated / Optional)
+### 4. `supported_platforms` & `[native_library_checksums]` Metadata (Generated)
 
-Defines cryptographic FIPS 180-4 SHA-256 hex digests for native shared libraries bundled inside `.slxarc` archives. Automatically staged by `scripts/solix_build.py` during packaging (including native libraries carried transitively from statically linked dependencies when `static = true`) to ensure binary tamper resistance across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
+During `.slxarc` packaging, `scripts/solix_build.py` (and `scripts/release/merge_bundled_packages.py`) embeds top-level `supported_platforms` and cryptographic FIPS 180-4 SHA-256 digests (`[native_library_checksums]`) inside the packaged `manifest.toml` across host and cross-compiled desktop target directories (`lib/<target_triple>/`):
 
 ```toml
+supported_platforms = ["linux-x86_64", "linux-aarch64", "windows-x86_64", "macos-x86_64", "macos-aarch64"]
+
 [native_library_checksums]
-"lib/libsolixlib_native.so" = "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
 "lib/x86_64-unknown-linux-gnu/libsolixlib_native.so" = "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
 ```
 
-When loading native dynamic libraries into the virtual machine (`RuntimeContext::new` or `SlxarcArchive::extract_and_load`), the runtime validates that the extracted library's SHA-256 digest matches this pin. Any mismatch halts execution unless `--no-verify` (`--ignore-checksum`) is passed.
+When installing or loading an `.slxarc` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxarcArchive::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`).
 
 ---
 

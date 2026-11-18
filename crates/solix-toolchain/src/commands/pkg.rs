@@ -194,6 +194,12 @@ pub(crate) fn install_package_artifact_with_options(
             )
         })?;
 
+        solix_common::project::validate_archive_host_compatibility(
+            &manifest,
+            &resolved_artifact.display().to_string(),
+        )
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
         let package_name = manifest.configuration.name.trim();
         if package_name.is_empty() {
             bail!("Cannot install archive with empty package name in manifest.toml");
@@ -353,6 +359,8 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
             pkg_dir: args.pkg_dir.clone(),
             install: false,
             force: args.force,
+            check_env: false,
+            target: None,
         })?;
 
         let candidate_archive = resolved_path

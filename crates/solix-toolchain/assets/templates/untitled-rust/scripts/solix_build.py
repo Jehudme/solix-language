@@ -7,9 +7,11 @@ Tier 2: High-level turnkey auto_build orchestrator with timing metrics and decla
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -19,6 +21,22 @@ from typing import Any, Callable
 import zipfile
 
 
+ALL_DESKTOP_PLATFORMS: list[str] = [
+    "linux-x86_64",
+    "linux-aarch64",
+    "windows-x86_64",
+    "macos-x86_64",
+    "macos-aarch64",
+]
+
+PLATFORM_TO_EXTENSION: dict[str, str] = {
+    "linux-x86_64": ".so",
+    "linux-aarch64": ".so",
+    "windows-x86_64": ".dll",
+    "macos-x86_64": ".dylib",
+    "macos-aarch64": ".dylib",
+}
+
 SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
     ("x86_64-unknown-linux-gnu", ".so"),
     ("aarch64-unknown-linux-gnu", ".so"),
@@ -27,6 +45,74 @@ SUPPORTED_RELEASE_TARGETS: list[tuple[str, str]] = [
     ("x86_64-apple-darwin", ".dylib"),
     ("aarch64-apple-darwin", ".dylib"),
 ]
+
+
+def get_host_platform() -> str:
+    """Returns canonical `<os>-<arch>` platform identifier for the running host."""
+    import platform as py_platform
+
+    sys_name = py_platform.system().lower()
+    machine = py_platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        arch = "x86_64"
+    elif machine in ("aarch64", "arm64"):
+        arch = "aarch64"
+    else:
+        arch = machine
+
+    if sys_name.startswith("linux"):
+        return f"linux-{arch}"
+    if sys_name == "darwin":
+        return f"macos-{arch}"
+    if sys_name.startswith("windows") or os.name == "nt":
+        return f"windows-{arch}"
+    return f"{sys_name}-{arch}"
+
+
+def triple_to_platform(triple: str) -> str | None:
+    """Maps a Rust target triple (or platform ID) to its canonical platform ID."""
+    cleaned = triple.strip().lower()
+    mapping = {
+        "x86_64-unknown-linux-gnu": "linux-x86_64",
+        "x86_64-unknown-linux-musl": "linux-x86_64",
+        "linux-x86_64": "linux-x86_64",
+        "aarch64-unknown-linux-gnu": "linux-aarch64",
+        "aarch64-unknown-linux-musl": "linux-aarch64",
+        "linux-aarch64": "linux-aarch64",
+        "x86_64-pc-windows-msvc": "windows-x86_64",
+        "x86_64-pc-windows-gnu": "windows-x86_64",
+        "windows-x86_64": "windows-x86_64",
+        "x86_64-apple-darwin": "macos-x86_64",
+        "macos-x86_64": "macos-x86_64",
+        "aarch64-apple-darwin": "macos-aarch64",
+        "macos-aarch64": "macos-aarch64",
+    }
+    return mapping.get(cleaned)
+
+
+def normalize_platform_list(platforms: list[str]) -> list[str]:
+    """Expands shorthands (`all`, `host`, `universal`) and deduplicates canonical IDs."""
+    expanded: list[str] = []
+    for raw_entry in platforms:
+        token = raw_entry.strip().lower()
+        if not token:
+            continue
+        if token == "all":
+            for desktop_platform in ALL_DESKTOP_PLATFORMS:
+                if desktop_platform not in expanded:
+                    expanded.append(desktop_platform)
+        elif token == "host":
+            host_id = get_host_platform()
+            if host_id not in expanded:
+                expanded.append(host_id)
+        elif token == "universal":
+            if "universal" not in expanded:
+                expanded.append("universal")
+        else:
+            canonical = triple_to_platform(token) or token
+            if canonical not in expanded:
+                expanded.append(canonical)
+    return expanded
 
 
 def normalize_host_path(path: Path) -> Path:
@@ -409,6 +495,7 @@ def compile_rust_project(
     cache_directory: Path,
     stage_lib_directory: Path,
     profile: str,
+    required_platforms: list[str] | None = None,
 ) -> list[Path]:
     """Compiles a Rust cdylib project with strict CARGO_TARGET_DIR isolation."""
     project_directory = normalize_host_path(project_directory)
@@ -427,8 +514,18 @@ def compile_rust_project(
     forced_target_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
     installed_targets = _resolve_rustup_installed_targets(cargo_environment)
 
-    if profile != "release":
-        # Debug/Test: Compile only for the active host (or explicitly requested cross target)
+    target_platforms = normalize_platform_list(
+        required_platforms
+        if required_platforms is not None
+        else (ALL_DESKTOP_PLATFORMS if profile == "release" else [get_host_platform()])
+    )
+    host_only_build = (
+        not forced_target_triple
+        and target_platforms == [get_host_platform()]
+    )
+
+    if (profile != "release" and required_platforms is None) or host_only_build:
+        # Debug/Test (or platforms = ["host"]): Compile strictly for active host or forced triple
         active_target_triple = forced_target_triple or host_target_triple
         is_cross_target = active_target_triple != host_target_triple
         target_cargo_env = cargo_environment.copy()
@@ -442,7 +539,14 @@ def compile_rust_project(
             and "-pc-windows-msvc" not in active_target_triple
         )
         if is_cross_target:
-            _ensure_rustup_target(active_target_triple, installed_targets, cargo_environment)
+            ready, reason = _ensure_rustup_target(active_target_triple, installed_targets, cargo_environment)
+            if not ready and reason:
+                raise BuildError(
+                    phase="Native Rust Target Build",
+                    message=f"Target '{active_target_triple}' unavailable: {reason}",
+                    cwd=project_directory,
+                    hint=f"Run `rustup target add {active_target_triple}`.",
+                )
 
         cargo_command = [
             "cargo",
@@ -452,7 +556,9 @@ def compile_rust_project(
             "--target-dir",
             str(cargo_target_directory),
         ]
-        if is_cross_target:
+        if profile == "release":
+            cargo_command.append("--release")
+        if is_cross_target or forced_target_triple:
             cargo_command.extend(["--target", active_target_triple])
 
         print(f"  [cargo] Building native Rust project '{project_directory.name}' ({profile}, {active_target_triple})...")
@@ -465,10 +571,11 @@ def compile_rust_project(
             capture_output=False,
         )
 
+        profile_subdir = "release" if profile == "release" else "debug"
         artifact_directory = (
-            cargo_target_directory / active_target_triple / "debug"
-            if is_cross_target
-            else cargo_target_directory / "debug"
+            cargo_target_directory / active_target_triple / profile_subdir
+            if (is_cross_target or forced_target_triple)
+            else cargo_target_directory / profile_subdir
         )
         if active_target_triple.endswith("-windows-msvc") or active_target_triple.endswith("-windows-gnu") or (not is_cross_target and sys.platform == "win32"):
             allowed_extensions = [".dll"]
@@ -480,7 +587,7 @@ def compile_rust_project(
         if artifact_directory.exists():
             for file_path in artifact_directory.iterdir():
                 if file_path.is_file() and any(file_path.name.endswith(extension) for extension in allowed_extensions):
-                    if is_cross_target or forced_target_triple:
+                    if is_cross_target or forced_target_triple or profile == "release":
                         target_stage_dir = stage_lib_directory / active_target_triple
                         target_stage_dir.mkdir(parents=True, exist_ok=True)
                         destination_path = target_stage_dir / file_path.name
@@ -490,17 +597,16 @@ def compile_rust_project(
                     emitted_libraries.append(destination_path)
         return emitted_libraries
 
-    # Release mode: Build forced target (when SOLIX_TARGET_TRIPLE is set) or all supported platforms
+    # Multi-target / Release mode (or forced SOLIX_TARGET_TRIPLE)
     has_cargo_zigbuild = bool(shutil.which("cargo-zigbuild", path=cargo_environment["PATH"]))
     has_zig = bool(shutil.which("zig", path=cargo_environment["PATH"]))
     has_cargo_xwin = bool(shutil.which("cargo-xwin", path=cargo_environment["PATH"]))
-    strict_cross = os.environ.get("SOLIX_STRICT_CROSS", "").strip().lower() in ("1", "true", "yes")
 
     built_targets: list[str] = []
     skipped_targets: list[tuple[str, str]] = []
     last_target_error_output: str | None = None
-    candidate_targets = (
-        [
+    if forced_target_triple:
+        candidate_targets = [
             (
                 forced_target_triple,
                 ".dll"
@@ -508,9 +614,13 @@ def compile_rust_project(
                 else (".dylib" if "apple-darwin" in forced_target_triple else ".so"),
             )
         ]
-        if forced_target_triple
-        else SUPPORTED_RELEASE_TARGETS
-    )
+    else:
+        required_set = set(target_platforms)
+        candidate_targets = [
+            (triple_name, extension)
+            for triple_name, extension in SUPPORTED_RELEASE_TARGETS
+            if (triple_to_platform(triple_name) in required_set) or ("universal" in required_set)
+        ]
 
     for target_triple, target_extension in candidate_targets:
         cargo_command, target_cargo_env, uses_explicit_target_dir, strategy_label = (
@@ -528,7 +638,6 @@ def compile_rust_project(
         )
         if cargo_command is None:
             skipped_targets.append((target_triple, strategy_label))
-            print(f"  [warning] Skipping cross-target '{target_triple}': {strategy_label}")
             continue
 
         if installed_targets is not None:
@@ -539,7 +648,6 @@ def compile_rust_project(
             )
             if not target_ready:
                 skipped_targets.append((target_triple, rustup_reason or "target not installed"))
-                print(f"  [warning] Skipping cross-target '{target_triple}': {rustup_reason}")
                 continue
 
         target_stage_directory = stage_lib_directory / target_triple
@@ -556,22 +664,10 @@ def compile_rust_project(
             )
         except BuildError as target_error:
             error_output = target_error.stderr or ""
-            if "can't find crate for `std`" in error_output or "can't find crate for std" in error_output:
-                reason = (
-                    "rust stdlib target not installed (install rustup or add target sysroot)"
-                    if installed_targets is None
-                    else "rustup stdlib target not installed"
-                )
-                skipped_targets.append((target_triple, reason))
-                print(f"  [warning] Cross-compilation skipped for '{target_triple}': {reason}")
-            else:
-                trimmed_output = error_output.strip()
-                last_target_error_output = trimmed_output or None
-                first_line = trimmed_output.splitlines()[-1] if trimmed_output else "compilation error"
-                skipped_targets.append((target_triple, first_line))
-                print(f"  [warning] Target '{target_triple}' compilation failed:")
-                if trimmed_output:
-                    print(trimmed_output)
+            trimmed_output = error_output.strip()
+            last_target_error_output = trimmed_output or None
+            first_line = trimmed_output.splitlines()[-1] if trimmed_output else "compilation error"
+            skipped_targets.append((target_triple, first_line))
             try:
                 if target_stage_directory.exists() and not any(target_stage_directory.iterdir()):
                     target_stage_directory.rmdir()
@@ -605,53 +701,44 @@ def compile_rust_project(
             message=f"All target builds failed for native project '{project_directory.name}'",
             cwd=project_directory,
             stderr=last_target_error_output,
-            hint="Ensure host build dependencies and headers are available.",
+            hint="Ensure host build dependencies, rustup targets, zig, and cargo-zigbuild are installed.",
         )
 
     if not forced_target_triple:
-        print(
-            f"  [cross] Built native targets ({len(built_targets)}/{len(candidate_targets)}) "
-            f"for '{project_directory.name}': {', '.join(built_targets)}"
-        )
-        if skipped_targets:
-            if installed_targets is None:
-                print(
-                    "  [cross] Hint: Active rustc is not managed by rustup; install rustup + "
-                    "cargo-zigbuild + zig for multi-architecture release cross-compilation."
-                )
-            elif not (has_cargo_zigbuild and has_zig):
-                print(
-                    "  [cross] Hint: Install zig and cargo-zigbuild to cross-compile all desktop "
-                    "architectures from this host."
-                )
-
-    if strict_cross:
-        required_platforms = {"linux-x86_64", "linux-aarch64", "windows-x86_64", "macos-x86_64", "macos-aarch64"}
-        covered_platforms: set[str] = set()
-        for built in built_targets:
-            if built == "x86_64-unknown-linux-gnu":
-                covered_platforms.add("linux-x86_64")
-            elif built == "aarch64-unknown-linux-gnu":
-                covered_platforms.add("linux-aarch64")
-            elif built in ("x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"):
-                covered_platforms.add("windows-x86_64")
-            elif built == "x86_64-apple-darwin":
-                covered_platforms.add("macos-x86_64")
-            elif built == "aarch64-apple-darwin":
-                covered_platforms.add("macos-aarch64")
-        missing_platforms = sorted(required_platforms - covered_platforms)
-        if missing_platforms and not forced_target_triple:
+        expected_platforms = {
+            plat for plat in target_platforms if plat != "universal"
+        }
+        covered_platforms = {
+            triple_to_platform(built)
+            for built in built_targets
+            if triple_to_platform(built) is not None
+        }
+        missing_platforms = sorted(expected_non_empty := (expected_platforms - covered_platforms))
+        if missing_platforms:
+            failure_details = "\n".join(
+                f"  - {target_name}: {reason}" for target_name, reason in skipped_targets
+            )
+            combined_stderr = "\n".join(
+                part for part in (failure_details, last_target_error_output or "") if part
+            )
             raise BuildError(
                 phase="Cross-Platform Release Gate",
                 message=(
-                    f"SOLIX_STRICT_CROSS=1 enabled, missing platforms for '{project_directory.name}': "
+                    f"Missing required platform native builds for '{project_directory.name}' [{profile}]: "
                     f"{', '.join(missing_platforms)}"
                 ),
                 cwd=project_directory,
-                stderr=last_target_error_output,
-                hint="Install rustup cross targets, zig, cargo-zigbuild, and any required platform SDKs.",
+                stderr=combined_stderr or None,
+                hint=(
+                    "Install missing cross-compilation toolchains (zig >= 0.11, cargo-zigbuild, "
+                    f"rustup targets) or configure `[profiles.{profile}].platforms` / pass `--target host`."
+                ),
             )
 
+    print(
+        f"  [cross] Built native targets ({len(built_targets)}/{len(candidate_targets)}) "
+        f"for '{project_directory.name}': {', '.join(built_targets)}"
+    )
     return emitted_libraries
 
 
@@ -748,6 +835,8 @@ def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> di
         "verify_checksum": True,
         "link": "static",
         "sources": ["src"],
+        "platforms": ["all"],
+        "platforms_explicit": False,
         "dependencies": {},
     }
 
@@ -761,11 +850,15 @@ def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> di
                 resolved_options["debug_symbols"] = True
                 resolved_options["static"] = False
                 resolved_options["link"] = "dynamic"
+                resolved_options["platforms"] = ["host"]
+                resolved_options["platforms_explicit"] = False
             elif step_profile == "test":
                 resolved_options["opt_level"] = 0
                 resolved_options["inline_threshold"] = 8
                 resolved_options["debug_symbols"] = True
                 resolved_options["entrypoint"] = "TestRunner::test"
+                resolved_options["platforms"] = ["host"]
+                resolved_options["platforms_explicit"] = False
                 if "tests" not in resolved_options["sources"] and "test" not in resolved_options["sources"]:
                     resolved_options["sources"].append("tests")
             continue
@@ -793,6 +886,13 @@ def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> di
         if "verify_checksum" in step_config:
             resolved_options["verify_checksum"] = step_config["verify_checksum"]
 
+        if "platforms" in step_config and isinstance(step_config["platforms"], list):
+            resolved_options["platforms"] = [str(item) for item in step_config["platforms"]]
+            resolved_options["platforms_explicit"] = True
+        elif step_profile in ("debug", "test"):
+            resolved_options["platforms"] = ["host"]
+            resolved_options["platforms_explicit"] = False
+
         if "sources" in step_config:
             if step_profile == "release":
                 resolved_options["sources"] = list(step_config["sources"])
@@ -806,6 +906,101 @@ def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> di
                 resolved_options["dependencies"][raw_dep_key] = raw_dep_spec
 
     return resolved_options
+
+
+def _project_has_native_code(
+    project_root: Path,
+    manifest: dict[str, Any],
+    profile: str,
+) -> bool:
+    """Checks whether `project_root` builds `natives/` or links static dependencies with natives."""
+    if detect_native_projects(project_root / "natives"):
+        return True
+    lib_dir = project_root / "lib"
+    if lib_dir.exists() and any(
+        entry.suffix.lower() in (".so", ".dll", ".dylib")
+        for entry in lib_dir.rglob("*")
+        if entry.is_file()
+    ):
+        return True
+    resolved_opts = resolve_profile_options(manifest, profile)
+    if resolved_opts.get("link") == "static" and resolved_opts.get("dependencies"):
+        package_store = resolve_package_store_directory(resolved_opts)
+        if package_store.exists():
+            for dep_name, dep_spec in resolved_opts["dependencies"].items():
+                if not isinstance(dep_spec, dict):
+                    continue
+                archive = _find_dependency_archive(
+                    package_store,
+                    dep_name,
+                    str(dep_spec.get("version", "*")),
+                    dep_spec.get("profile"),
+                )
+                if archive is not None:
+                    with zipfile.ZipFile(archive) as archive_file:
+                        if any(
+                            name.startswith("lib/") and name.endswith((".so", ".dll", ".dylib"))
+                            for name in archive_file.namelist()
+                        ):
+                            return True
+    return False
+
+
+def get_required_platforms(
+    manifest: dict[str, Any],
+    profile: str,
+    project_root: Path | None = None,
+) -> list[str]:
+    """Returns canonical platform IDs required when building `profile`."""
+    forced_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
+    if forced_triple:
+        mapped = triple_to_platform(forced_triple) or forced_triple.lower()
+        return [mapped]
+
+    resolved = resolve_profile_options(manifest, profile)
+    raw_platforms = list(resolved.get("platforms", ["all"]))
+    if (
+        project_root is not None
+        and not resolved.get("platforms_explicit", False)
+        and profile == "release"
+        and not _project_has_native_code(project_root, manifest, profile)
+    ):
+        return ["universal"]
+    return normalize_platform_list(raw_platforms)
+
+
+def resolve_target_triples(
+    manifest: dict[str, Any],
+    profile: str,
+    project_root: Path | None = None,
+) -> list[str]:
+    """Maps required platforms for `profile` to concrete Rust compilation target triples."""
+    forced_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
+    if forced_triple:
+        return [forced_triple]
+
+    required_platforms = get_required_platforms(manifest, profile, project_root=project_root)
+    has_cargo_xwin = bool(shutil.which("cargo-xwin"))
+    is_win_host = sys.platform == "win32"
+    triples: list[str] = []
+    for platform_id in required_platforms:
+        if platform_id == "universal":
+            continue
+        if platform_id == "linux-x86_64":
+            triples.append("x86_64-unknown-linux-gnu")
+        elif platform_id == "linux-aarch64":
+            triples.append("aarch64-unknown-linux-gnu")
+        elif platform_id == "windows-x86_64":
+            triples.append(
+                "x86_64-pc-windows-msvc"
+                if (is_win_host or has_cargo_xwin)
+                else "x86_64-pc-windows-gnu"
+            )
+        elif platform_id == "macos-x86_64":
+            triples.append("x86_64-apple-darwin")
+        elif platform_id == "macos-aarch64":
+            triples.append("aarch64-apple-darwin")
+    return triples
 
 
 def compile_solix_sources(
@@ -1126,18 +1321,219 @@ def stage_dependency_native_libraries(
 
 
 # ============================================================================
+# Pre-Flight Environment Verification Primitives
+# ============================================================================
+
+@dataclass
+class BuildContext:
+    """Context passed to user `verify(ctx)` pre-flight hooks."""
+
+    project_root: Path
+    manifest: dict[str, Any]
+    profile: str
+    required_platforms: list[str]
+    required_triples: list[str]
+    forced_target: str | None = None
+    checks: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _parse_version_tuple(raw_output: str) -> tuple[int, ...] | None:
+    """Extracts first `major.minor[.patch]` semantic version tuple from tool output."""
+    match = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", raw_output)
+    if not match:
+        return None
+    major = int(match.group(1))
+    minor = int(match.group(2))
+    patch = int(match.group(3) or 0)
+    return (major, minor, patch)
+
+
+def require_tool(
+    name: str,
+    min_version: str | None = None,
+    version_arg: str = "--version",
+    hint: str | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Verifies that `name` is available on PATH and satisfies optional `min_version`."""
+    search_env = env or os.environ.copy()
+    home_cargo_bin = str(Path.home() / ".cargo" / "bin")
+    path_str = search_env.get("PATH", "")
+    if home_cargo_bin not in path_str.split(os.pathsep):
+        path_str = f"{home_cargo_bin}{os.pathsep}{path_str}"
+
+    executable = shutil.which(name, path=path_str)
+    if not executable:
+        raise BuildError(
+            phase="Pre-Flight Verification",
+            message=f"Required tool '{name}' was not found in PATH.",
+            hint=hint or f"Install '{name}' and ensure it is available on your PATH.",
+        )
+
+    proc = subprocess.run(
+        [executable, version_arg],
+        capture_output=True,
+        text=True,
+        env=search_env,
+        check=False,
+    )
+    combined_output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+    detected_tuple = _parse_version_tuple(combined_output)
+    version_str = ".".join(str(part) for part in detected_tuple) if detected_tuple else "unknown"
+
+    if min_version is not None:
+        required_tuple = _parse_version_tuple(min_version)
+        if required_tuple is None:
+            raise BuildError(
+                phase="Pre-Flight Verification",
+                message=f"Invalid minimum version specifier '{min_version}' for tool '{name}'.",
+            )
+        if detected_tuple is None or detected_tuple < required_tuple:
+            raise BuildError(
+                phase="Pre-Flight Verification",
+                message=(
+                    f"Tool '{name}' version {version_str} does not meet minimum requirement >= {min_version}."
+                ),
+                command=[executable, version_arg],
+                stderr=combined_output,
+                hint=hint or f"Upgrade '{name}' to >= {min_version}.",
+            )
+
+    return {
+        "name": name,
+        "path": executable,
+        "version": version_str,
+        "ok": True,
+    }
+
+
+def require_env(var_name: str, hint: str | None = None) -> str:
+    """Verifies that environment variable `var_name` is set and non-empty."""
+    value = os.environ.get(var_name, "").strip()
+    if not value:
+        raise BuildError(
+            phase="Pre-Flight Verification",
+            message=f"Required environment variable '{var_name}' is not set or is empty.",
+            hint=hint or f"Set '{var_name}' in your environment before running `solix build`.",
+        )
+    return value
+
+
+def require_rust_targets(
+    targets: list[str],
+    env: dict[str, str] | None = None,
+) -> list[str]:
+    """Verifies that all required Rust target triples are installed via rustup or host rustc."""
+    if not targets:
+        return []
+    search_env = env or os.environ.copy()
+    installed = _resolve_rustup_installed_targets(search_env)
+    host_triple = get_host_target_triple()
+
+    if installed is None:
+        non_host = [target for target in targets if target != host_triple]
+        if non_host:
+            raise BuildError(
+                phase="Pre-Flight Verification",
+                message=(
+                    f"`rustup` is not installed to manage cross-compilation targets: {', '.join(non_host)}"
+                ),
+                hint="Install `rustup` and add the required targets via `rustup target add <triple>`.",
+            )
+        return [host_triple]
+
+    missing = [target for target in targets if target not in installed]
+    if missing:
+        raise BuildError(
+            phase="Pre-Flight Verification",
+            message=f"Missing required Rust target(s): {', '.join(missing)}",
+            hint=f"Run: rustup target add {' '.join(missing)}",
+        )
+    return list(targets)
+
+
+def verify_environment(
+    project_root: Path,
+    manifest: dict[str, Any],
+    profile: str,
+    verify_fn: Callable[[BuildContext], Any] | None = None,
+) -> BuildContext:
+    """Executes Phase 0 pre-flight toolchain and target verification checks."""
+    forced_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip() or None
+    required_platforms = get_required_platforms(manifest, profile, project_root=project_root)
+    required_triples = resolve_target_triples(manifest, profile, project_root=project_root)
+    ctx = BuildContext(
+        project_root=project_root,
+        manifest=manifest,
+        profile=profile,
+        required_platforms=required_platforms,
+        required_triples=required_triples,
+        forced_target=forced_triple,
+    )
+
+    print(f"=== [Phase 0] Pre-Flight Environment Verification [{profile}] ===")
+    print(f"  [platforms] Required targets: {', '.join(required_platforms)}")
+
+    has_natives = bool(detect_native_projects(project_root / "natives"))
+    if has_natives:
+        cargo_info = require_tool("cargo", hint="Install Rust & Cargo via https://rustup.rs/")
+        rustc_info = require_tool("rustc", hint="Install Rust compiler via https://rustup.rs/")
+        ctx.checks.extend([cargo_info, rustc_info])
+        print(f"  [check] cargo {cargo_info['version']} ({cargo_info['path']})")
+        print(f"  [check] rustc {rustc_info['version']} ({rustc_info['path']})")
+
+        host_id = get_host_platform()
+        needs_cross = any(plat not in (host_id, "universal") for plat in required_platforms)
+        if needs_cross and not forced_triple:
+            has_xwin = bool(shutil.which("cargo-xwin"))
+            has_zigbuild = bool(shutil.which("cargo-zigbuild"))
+            if has_zigbuild or any(plat != "windows-x86_64" for plat in required_platforms if plat != host_id):
+                zig_info = require_tool(
+                    "zig",
+                    min_version="0.11.0",
+                    version_arg="version",
+                    hint="Install Zig >= 0.11.0 for cross-platform release builds.",
+                )
+                zigbuild_info = require_tool(
+                    "cargo-zigbuild",
+                    hint="Install cargo-zigbuild (`cargo install cargo-zigbuild`).",
+                )
+                ctx.checks.extend([zig_info, zigbuild_info])
+                print(f"  [check] zig {zig_info['version']} ({zig_info['path']})")
+                print(f"  [check] cargo-zigbuild {zigbuild_info['version']}")
+            elif has_xwin and "windows-x86_64" in required_platforms:
+                xwin_info = require_tool("cargo-xwin")
+                ctx.checks.append(xwin_info)
+                print(f"  [check] cargo-xwin {xwin_info['version']}")
+            require_rust_targets(required_triples)
+            print(f"  [check] rustup targets ready ({len(required_triples)})")
+
+    if verify_fn is not None:
+        verify_fn(ctx)
+
+    print("  [check] Pre-flight environment verification passed.")
+    return ctx
+
+
+# ============================================================================
 # Tier 2: Turnkey Orchestrator
 # ============================================================================
 
-def auto_build(profile: str | None = None, project_root: Path | None = None) -> Path:
+def auto_build(
+    profile: str | None = None,
+    project_root: Path | None = None,
+    verify_fn: Callable[[BuildContext], Any] | None = None,
+    verify_only: bool | None = None,
+) -> Path:
     """One-call automatic project build orchestrator.
 
+    0. Runs Phase 0 pre-flight verification (`verify_environment`)
     1. Loads manifest.toml and resolves effective build configuration
     2. Prepares build/.cache/stage/<profile>/
     3. Auto-detects & compiles all Rust cdylib projects in natives/
     4. Copies lib/ and resources/
     5. Compiles Solix sources into build/.cache/stage/<profile>/bin/<name>.slxb
-    6. Records cryptographic checksums in staged manifest.toml
+    6. Enforces required platform native library coverage and writes supported_platforms + checksums
     7. Packages build/<profile>/<name>.slxarc
     8. Optionally auto-installs into local package store
     """
@@ -1159,10 +1555,20 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
             hint="Set profile to 'debug', 'release', 'test', or a custom profile defined in manifest.toml via CLI or build command.",
         )
 
+    should_verify_only = (
+        verify_only
+        if verify_only is not None
+        else os.environ.get("SOLIX_VERIFY_ONLY", "").strip().lower() in ("1", "true", "yes")
+    )
+    verify_ctx = verify_environment(project_root, manifest, effective_profile, verify_fn=verify_fn)
+    if should_verify_only:
+        return project_root
+
     print(f"=== Building Solix Project: {project_root.name} [{effective_profile}] ===")
 
     package_name = manifest["configuration"]["name"]
     staging = prepare_staging_dirs(project_root, effective_profile)
+    required_platforms = verify_ctx.required_platforms
 
     # Compile native Rust subprojects
     native_start_time = time.perf_counter()
@@ -1173,6 +1579,7 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
             staging["natives_cache"],
             staging["stage_lib"],
             effective_profile,
+            required_platforms=required_platforms,
         )
     native_duration_ms = (time.perf_counter() - native_start_time) * 1000.0
 
@@ -1194,7 +1601,7 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
     # Bundle native shared libraries from dependencies for statically linked archives
     stage_dependency_native_libraries(manifest, effective_profile, staging["stage_lib"])
 
-    # Record cryptographic checksums for native shared libraries
+    # Record cryptographic checksums and verified supported_platforms for native shared libraries
     staged_manifest_file = staging["stage"] / "manifest.toml"
     native_checksums: dict[str, str] = {}
     if staging["stage_lib"].exists():
@@ -1207,18 +1614,74 @@ def auto_build(profile: str | None = None, project_root: Path | None = None) -> 
                     hasher.update(lib_file.read_bytes())
                     native_checksums[relative_path] = hasher.hexdigest()
 
-    if native_checksums and staged_manifest_file.exists():
-        manifest_text = staged_manifest_file.read_text(encoding="utf-8")
-        checksum_section = "\n[native_library_checksums]\n" + "\n".join(
-            f'"{key}" = "{digest}"' for key, digest in sorted(native_checksums.items())
-        ) + "\n"
-        staged_manifest_file.write_text(manifest_text + checksum_section, encoding="utf-8")
-
     packaged_targets = sorted({
         key.split("/")[1]
         for key in native_checksums
         if key.startswith("lib/") and key.count("/") >= 2
     })
+    covered_native_platforms = sorted({
+        triple_to_platform(triple_name)
+        for triple_name in packaged_targets
+        if triple_to_platform(triple_name) is not None
+    })
+    if any(
+        key.startswith("lib/") and key.count("/") == 1
+        for key in native_checksums
+    ) and get_host_platform() not in covered_native_platforms:
+        covered_native_platforms.append(get_host_platform())
+        covered_native_platforms.sort()
+
+    forced_triple = os.environ.get("SOLIX_TARGET_TRIPLE", "").strip()
+    if native_checksums and not forced_triple:
+        expected_non_universal = {plat for plat in required_platforms if plat != "universal"}
+        missing_native = sorted(expected_non_universal - set(covered_native_platforms))
+        if missing_native:
+            raise BuildError(
+                phase="Cross-Platform Release Gate",
+                message=(
+                    f"Required platform native libraries missing from staged package '{package_name}' [{effective_profile}]: "
+                    f"{', '.join(missing_native)}"
+                ),
+                cwd=project_root,
+                hint=(
+                    "Ensure all dependency packages contain native binaries for the required platforms "
+                    f"or configure `[profiles.{effective_profile}].platforms` / pass `--target host`."
+                ),
+            )
+
+    if forced_triple:
+        supported_platforms_to_record = [triple_to_platform(forced_triple) or forced_triple.lower()]
+    elif native_checksums:
+        supported_platforms_to_record = covered_native_platforms
+    else:
+        resolved_opts = resolve_profile_options(manifest, effective_profile)
+        supported_platforms_to_record = (
+            required_platforms if resolved_opts.get("platforms_explicit") else ["universal"]
+        )
+
+    if staged_manifest_file.exists():
+        manifest_text = staged_manifest_file.read_text(encoding="utf-8")
+        cleaned_lines = [
+            line
+            for line in manifest_text.splitlines()
+            if not line.strip().startswith("supported_platforms")
+        ]
+        manifest_body = "\n".join(cleaned_lines).strip()
+        formatted_platforms = ", ".join(f'"{plat}"' for plat in supported_platforms_to_record)
+        checksum_block = (
+            "\n\n[native_library_checksums]\n"
+            + "\n".join(
+                f'"{key}" = "{digest}"' for key, digest in sorted(native_checksums.items())
+            )
+            + "\n"
+            if native_checksums
+            else "\n"
+        )
+        staged_manifest_file.write_text(
+            f"supported_platforms = [{formatted_platforms}]\n\n" + manifest_body + checksum_block,
+            encoding="utf-8",
+        )
+
     if packaged_targets:
         print(
             f"  [platforms] Packaged architectures ({len(packaged_targets)}): "

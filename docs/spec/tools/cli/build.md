@@ -31,6 +31,8 @@ solix build [path] [options]
 | `--link <mode>` | | String | `"dynamic"` | Linking mode for dependencies and emission: `dynamic` (default) or `static`. |
 | `--static` | | Flag | `false` | Shorthand for static linking mode (`--link static`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
+| `--check-env` | `--verify-only` | Flag | `false` | Run Phase 0 pre-flight environment and toolchain verification without compiling or packaging. |
+| `--target <triple>` | | String | `None` | Compile native crates for a single Rust target triple or `"host"`. |
 
 ---
 
@@ -41,14 +43,20 @@ When `solix build` is invoked:
 ```mermaid
 flowchart TD
     A["solix build [path]"] --> B["Validate manifest.toml & scripts/build.py"]
-    B --> C["Resolve Profile (debug / release / test) & Link Mode"]
-    C --> D["Invoke python3 scripts/build.py --profile <profile>"]
+    B --> C["Resolve Profile & platforms constraint"]
+    C --> V["Phase 0: verify_environment()<br>(tools, versions, rustup targets, verify hook)"]
+    V --> D["Invoke python3 scripts/build.py --profile <profile>"]
     D --> E["tb.prepare_staging_dirs()<br>(build/.cache/stage/<profile>/)"]
-    E --> F["tb.compile_rust_project()<br>(natives/ cdylib -> stage/lib/)"]
+    E --> F["tb.compile_rust_project()<br>(enforce required platforms -> stage/lib/)"]
     F --> G["tb.stage_resources()<br>(resources/ -> stage/resources/)"]
     G --> H["tb.compile_solix_sources()<br>(solix compile src/ -> stage/bin/<name>.slxb)"]
-    H --> I["tb.package_slxarc()<br>(stage/ -> build/<profile>/<name>.slxarc)"]
+    H --> I["tb.package_slxarc()<br>(embed supported_platforms + checksums)"]
 ```
+
+### Pre-Flight Verification & Cross-Platform Release Gate
+1. **Phase 0 (`verify_environment`):** Checks host toolchain dependencies (`cargo`, `rustc`, `zig >= 0.11.0`, `cargo-zigbuild`, required `rustup` targets) and invokes custom `verify(ctx)` hooks using `require_tool`, `require_rust_targets`, and `require_env`.
+2. **Toolbox Helpers:** Custom `scripts/build.py` scripts can query `solix_build.get_required_platforms(manifest, profile)` and `solix_build.resolve_target_triples(manifest, profile)`.
+3. **Hard Release Failure:** When any platform required by `[profiles.<name>].platforms` (defaulting `[profiles.release]` to all 5 desktop architectures for native projects, and `["universal"]` for pure-Solix projects) fails or is missing unless `--target` is passed, `solix_build.py` raises a fatal `BuildError` and halts compilation.
 
 ### Staged Artifact Directory Structure
 

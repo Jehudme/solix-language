@@ -120,6 +120,21 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
             resolved_profile.verify_checksum.to_string(),
         );
 
+    if args.check_env {
+        command.arg("--check-env");
+        command.env("SOLIX_VERIFY_ONLY", "1");
+    }
+
+    if let Some(ref target_override) = args.target {
+        let resolved_triple = if target_override.eq_ignore_ascii_case("host") {
+            solix_common::project::host_target_triple().to_string()
+        } else {
+            target_override.clone()
+        };
+        command.arg("--target").arg(&resolved_triple);
+        command.env("SOLIX_TARGET_TRIPLE", resolved_triple);
+    }
+
     if let Some(ref package_store_directory) = effective_pkg_dir {
         command.env("SOLIX_PKG_DIR", package_store_directory);
     }
@@ -149,6 +164,10 @@ pub fn execute_build(args: BuildArgs) -> Result<()> {
         bail!(
             "Build script terminated with non-zero exit code: {exit_code}\n[stdout]:\n{stdout_text}\n[stderr]:\n{stderr_text}"
         );
+    }
+
+    if args.check_env {
+        return Ok(());
     }
 
     let should_install = args.install;

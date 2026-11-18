@@ -318,7 +318,7 @@ jobs:
 
       - name: Build and stage default first-party libraries
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
-        run: python3 scripts/release/build_default_libraries.py
+        run: python3 scripts/release/build_default_libraries.py --target host
 
       - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
         shell: bash
@@ -377,7 +377,7 @@ jobs:
           fi
           "$SOLIX_EXE" list
           "$SOLIX_EXE" build examples/breakout --profile debug
-          "$SOLIX_EXE" build examples/breakout --profile release
+          "$SOLIX_EXE" build examples/breakout --profile release --target host
           "$SOLIX_EXE" build examples/breakout --profile test
           "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxarc
 
@@ -421,7 +421,7 @@ jobs:
       - name: Build release Solix binary and stage bundled libraries
         run: |
           cargo build --release --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release --solix-binary target/release/solix
+          python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
 
       - name: Benchmark PR head vs latest GitHub release on same host
         env:
