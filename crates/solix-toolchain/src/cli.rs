@@ -195,6 +195,14 @@ pub struct BuildArgs {
     /// Force overwrite if package is already installed
     #[arg(short, long, hide = true)]
     pub force: bool,
+
+    /// Run only pre-flight environment and toolchain verification without building
+    #[arg(long, visible_alias = "verify-only")]
+    pub check_env: bool,
+
+    /// Compile native artifacts for a single Rust target triple or 'host'
+    #[arg(long)]
+    pub target: Option<String>,
 }
 
 impl BuildArgs {

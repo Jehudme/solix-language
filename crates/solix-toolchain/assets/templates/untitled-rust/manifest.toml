@@ -11,6 +11,7 @@ optimization_level = 3
 inline_threshold = 16
 debug_symbols = false
 static = true
+platforms = ["all"]
 sources = ["src"]
 
 [profiles.release.dependencies]
@@ -22,8 +23,10 @@ optimization_level = 0
 inline_threshold = 8
 debug_symbols = true
 static = false
+platforms = ["host"]
 
 [profiles.test]
 inherits = "debug"
 entrypoint = "TestRunner::test"
+platforms = ["host"]
 sources = ["tests"]

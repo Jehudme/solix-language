@@ -105,6 +105,8 @@ fn test_solix_new_default_application() {
         pkg_dir: None,
         install: false,
         force: false,
+        check_env: false,
+        target: None,
     };
     let build_result = execute_build(build_arguments);
     assert!(

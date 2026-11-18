@@ -46,6 +46,135 @@ fn default_project_version() -> String {
     "0.1.0".to_string()
 }
 
+/// Canonical desktop platform identifiers supported by cross-platform `.slxarc` archives.
+pub const ALL_DESKTOP_PLATFORMS: [&str; 5] = [
+    "linux-x86_64",
+    "linux-aarch64",
+    "windows-x86_64",
+    "macos-x86_64",
+    "macos-aarch64",
+];
+
+/// Returns the canonical `<os>-<arch>` platform identifier for the running host.
+#[must_use]
+pub fn host_platform_id() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "linux-x86_64",
+        ("linux", "aarch64") => "linux-aarch64",
+        ("windows", "x86_64") => "windows-x86_64",
+        ("windows", "aarch64") => "windows-aarch64",
+        ("macos", "x86_64") => "macos-x86_64",
+        ("macos", "aarch64") => "macos-aarch64",
+        _ => "unknown",
+    }
+}
+
+/// Returns the default Rust target triple for the running host.
+#[must_use]
+pub fn host_target_triple() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        _ => "x86_64-unknown-linux-gnu",
+    }
+}
+
+/// Maps a Rust target triple (e.g. `"x86_64-unknown-linux-gnu"`) to a canonical platform identifier.
+#[must_use]
+pub fn triple_to_platform_id(triple: &str) -> Option<&'static str> {
+    match triple.trim() {
+        "x86_64-unknown-linux-gnu" | "x86_64-unknown-linux-musl" | "linux-x86_64" => {
+            Some("linux-x86_64")
+        }
+        "aarch64-unknown-linux-gnu" | "aarch64-unknown-linux-musl" | "linux-aarch64" => {
+            Some("linux-aarch64")
+        }
+        "x86_64-pc-windows-msvc" | "x86_64-pc-windows-gnu" | "windows-x86_64" => {
+            Some("windows-x86_64")
+        }
+        "x86_64-apple-darwin" | "macos-x86_64" => Some("macos-x86_64"),
+        "aarch64-apple-darwin" | "macos-aarch64" => Some("macos-aarch64"),
+        _ => None,
+    }
+}
+
+/// Normalizes a platform specifier token or Rust triple to its canonical platform ID.
+#[must_use]
+pub fn normalize_platform_token(token: &str) -> String {
+    let trimmed = token.trim().to_ascii_lowercase();
+    if let Some(canonical) = triple_to_platform_id(&trimmed) {
+        return canonical.to_string();
+    }
+    trimmed
+}
+
+/// Expands shorthand platform tokens (`"all"`, `"host"`, `"universal"`) into canonical identifiers.
+#[must_use]
+pub fn expand_platform_list(platforms: &[String]) -> Vec<String> {
+    let mut expanded: Vec<String> = Vec::new();
+    for entry in platforms {
+        let normalized = normalize_platform_token(entry);
+        match normalized.as_str() {
+            "all" => {
+                for desktop_platform in ALL_DESKTOP_PLATFORMS {
+                    let owned = desktop_platform.to_string();
+                    if !expanded.contains(&owned) {
+                        expanded.push(owned);
+                    }
+                }
+            }
+            "host" => {
+                let host = host_platform_id().to_string();
+                if !expanded.contains(&host) {
+                    expanded.push(host);
+                }
+            }
+            _ if !normalized.is_empty() && !expanded.contains(&normalized) => {
+                expanded.push(normalized);
+            }
+            _ => {}
+        }
+    }
+    expanded
+}
+
+/// Validates that an archive manifest's `supported_platforms` permits execution on the current host.
+///
+/// Archives without explicit `supported_platforms` or marked `"universal"` / `"all"` are permitted.
+pub fn validate_archive_host_compatibility(
+    manifest: &ProjectManifest,
+    archive_display: &str,
+) -> Result<(), EmissionError> {
+    if manifest.supported_platforms.is_empty() {
+        return Ok(());
+    }
+
+    let expanded = expand_platform_list(&manifest.supported_platforms);
+    if expanded.is_empty() {
+        return Ok(());
+    }
+
+    let host = host_platform_id();
+    let is_compatible = expanded
+        .iter()
+        .any(|platform| platform == "universal" || platform == "all" || platform == host);
+    if !is_compatible {
+        return Err(EmissionError::ContainerSerializationFailed {
+            reason: format!(
+                "Archive '{}' only supports platform(s) [{}], which is incompatible with current host '{}'.",
+                archive_display,
+                expanded.join(", "),
+                host
+            ),
+        });
+    }
+
+    Ok(())
+}
+
 /// User-editable project identity metadata declared in the `[configuration]` table of `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectConfiguration {
@@ -107,6 +236,9 @@ pub struct ProfileConfig {
     /// List of directory paths (recursive) relative to project root containing `.slx` sources.
     #[serde(default)]
     pub sources: Option<Vec<String>>,
+    /// Target platform constraints for this profile (e.g. `["all"]`, `["host"]`, `["universal"]`, or explicit IDs).
+    #[serde(default)]
+    pub platforms: Option<Vec<String>>,
     /// Profile-scoped dependencies mapped as `name => specification`.
     #[serde(default)]
     pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
@@ -139,6 +271,8 @@ pub struct ResolvedProfile {
     pub memory_limit_mb: Option<usize>,
     /// Recursive source directories to compile.
     pub sources: Vec<String>,
+    /// Resolved target platform specifiers for this profile.
+    pub platforms: Vec<String>,
     /// Profile-scoped resolved dependencies.
     pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
 }
@@ -160,6 +294,7 @@ impl ResolvedProfile {
             link: "static".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
+            platforms: vec!["all".to_string()],
             dependencies: std::collections::BTreeMap::new(),
         }
     }
@@ -234,6 +369,9 @@ pub struct ProjectManifest {
     pub configuration: ProjectConfiguration,
     /// First-class profiles table mapped as `[profiles.<name>]`.
     pub profiles: std::collections::BTreeMap<String, ProfileConfig>,
+    /// Verified target platforms embedded into `.slxarc` archives during packaging.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supported_platforms: Vec<String>,
     /// Cryptographic SHA-256 digests of bundled native shared libraries.
     #[serde(default)]
     pub native_library_checksums: std::collections::HashMap<String, String>,
@@ -445,6 +583,12 @@ impl ProjectManifest {
                     resolved.memory_limit_mb = Some(memory_limit_mb);
                 }
 
+                if let Some(ref step_platforms) = user_config.platforms {
+                    resolved.platforms = step_platforms.clone();
+                } else if step_profile == "debug" || step_profile == "test" {
+                    resolved.platforms = vec!["host".to_string()];
+                }
+
                 if let Some(ref step_sources) = user_config.sources {
                     if step_profile == "release" {
                         resolved.sources = step_sources.clone();
@@ -468,11 +612,13 @@ impl ProjectManifest {
                 resolved.debug_symbols = true;
                 resolved.is_static = false;
                 resolved.link = "dynamic".to_string();
+                resolved.platforms = vec!["host".to_string()];
             } else if step_profile == "test" {
                 resolved.opt_level = 0;
                 resolved.inline_threshold = 8;
                 resolved.debug_symbols = true;
                 resolved.entrypoint = Some("TestRunner::test".to_string());
+                resolved.platforms = vec!["host".to_string()];
                 if !resolved.sources.contains(&"tests".to_string())
                     && !resolved.sources.contains(&"test".to_string())
                 {
@@ -1026,6 +1172,11 @@ impl SlxarcArchive {
                 resource_files.push(target_path.clone());
                 extracted_files.push(target_path);
             }
+        }
+
+        // Enforce recorded archive platform compatibility before loading or trusting binaries
+        if let Some(ref manifest) = manifest_option {
+            validate_archive_host_compatibility(manifest, &archive_path.display().to_string())?;
         }
 
         // Verify native library checksums against manifest and binary metadata

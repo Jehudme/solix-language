@@ -181,7 +181,7 @@ jobs:
           python3 scripts/docs/build_docs_site.py
           cargo build --bin solix
           if [ "$BUNDLED_CACHE_HIT" != "true" ]; then
-            python3 scripts/release/build_default_libraries.py
+            python3 scripts/release/build_default_libraries.py --target host
           fi
           SOLIX_BIN="$(pwd)/target/debug/solix"
           export SOLIX_BIN
@@ -522,7 +522,7 @@ jobs:
       - name: Build optimized Solix release binary and stage default libraries
         run: |
           cargo build --release --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release --solix-binary target/release/solix
+          python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
 
       - name: Run same-host A/B benchmark suite against previous release binary
         env:

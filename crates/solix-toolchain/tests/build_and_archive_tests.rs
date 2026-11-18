@@ -337,12 +337,14 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
         run(run_debug_cli).expect("Executing debug .slxarc archive must succeed");
     assert_eq!(run_debug_exit_code, 0);
 
-    // 2. Build --release
+    // 2. Build --release (host target on single-OS CI runner)
     let build_release_cli = Cli::try_parse_from([
         "solix",
         "build",
         project_root.to_str().expect("valid path"),
         "--release",
+        "--target",
+        "host",
     ])
     .expect("Failed to parse build release CLI");
     let build_release_code = run(build_release_cli).expect("solix build --release must succeed");
@@ -1184,6 +1186,8 @@ public class Widget {
         "build",
         dep_root.to_str().expect("valid path"),
         "--release",
+        "--target",
+        "host",
         "--install",
         "--force",
         "--pkg-dir",
@@ -1285,6 +1289,8 @@ public class TestRunner {
         "build",
         app_root.to_str().expect("valid path"),
         "--release",
+        "--target",
+        "host",
         "--pkg-dir",
         store_str,
     ])
@@ -1778,5 +1784,209 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
         inferred_out.status.success(),
         "Inferred debug merge failed: stderr={}",
         String::from_utf8_lossy(&inferred_out.stderr)
+    );
+}
+
+// ============================================================================
+// Tests B.13-B.16: Per-Profile Platforms, Release Cross-Platform Gate & Preflight
+// ============================================================================
+
+#[test]
+fn test_manifest_per_profile_platforms_and_release_defaults() {
+    let manifest_toml = r#"
+[configuration]
+name = "platform_spec_test"
+version = "0.2.0"
+
+[profiles.release]
+sources = ["src"]
+
+[profiles.debug]
+inherits = "release"
+
+[profiles.test]
+inherits = "debug"
+sources = ["tests"]
+
+[profiles.win_only]
+inherits = "release"
+platforms = ["windows-x86_64"]
+
+[profiles.pure]
+inherits = "release"
+platforms = ["universal"]
+"#;
+
+    let manifest = ProjectManifest::from_toml_str(manifest_toml).expect("parse manifest");
+    let release_profile = manifest.resolve_profile("release").expect("release");
+    assert_eq!(release_profile.platforms, vec!["all".to_string()]);
+    let expanded_release = solix_common::project::expand_platform_list(&release_profile.platforms);
+    assert_eq!(expanded_release.len(), 5);
+    assert!(expanded_release.contains(&"linux-x86_64".to_string()));
+    assert!(expanded_release.contains(&"windows-x86_64".to_string()));
+    assert!(expanded_release.contains(&"macos-aarch64".to_string()));
+
+    let debug_profile = manifest.resolve_profile("debug").expect("debug");
+    assert_eq!(debug_profile.platforms, vec!["host".to_string()]);
+    let test_profile = manifest.resolve_profile("test").expect("test");
+    assert_eq!(test_profile.platforms, vec!["host".to_string()]);
+
+    let win_profile = manifest.resolve_profile("win_only").expect("win_only");
+    assert_eq!(win_profile.platforms, vec!["windows-x86_64".to_string()]);
+
+    let pure_profile = manifest.resolve_profile("pure").expect("pure");
+    assert_eq!(pure_profile.platforms, vec!["universal".to_string()]);
+}
+
+#[test]
+fn test_solix_build_release_fails_when_required_cross_targets_missing() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scripts_dir = manifest_dir.join("assets").join("scripts");
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let python_exe = if cfg!(windows) { "python" } else { "python3" };
+
+    // Copy template with natives/ (requires all 5 desktop platforms on release)
+    let template_source = locate_template_source();
+    let project_root = workspace.root_path().join("native_cross_gate");
+    copy_project_tree(&template_source, &project_root).expect("copy template");
+
+    // Attempt compile_rust_project with impossible custom tool-free PATH (cross targets cannot build)
+    let check_script = r#"
+import os, sys
+from pathlib import Path
+
+scripts_dir = Path(sys.argv[1])
+project_root = Path(sys.argv[2])
+sys.path.insert(0, str(scripts_dir))
+import solix_build as tb
+
+manifest = tb.load_manifest(project_root)
+platforms = tb.get_required_platforms(manifest, "release", project_root=project_root)
+assert len(platforms) == 5, f"Expected all 5 release platforms, got {platforms}"
+triples = tb.resolve_target_triples(manifest, "release", project_root=project_root)
+assert len(triples) == 5, f"Expected 5 target triples, got {triples}"
+
+# Confirm verify_environment / require_tool raises BuildError on missing tool / version mismatch
+try:
+    tb.require_tool("solix_nonexistent_tool_xyz", min_version="1.0.0")
+    raise AssertionError("Expected BuildError for missing tool")
+except tb.BuildError as err:
+    assert "solix_nonexistent_tool_xyz" in err.message
+
+# Confirm require_tool fails on unsatisfied minimum version
+try:
+    tb.require_tool(sys.executable, min_version="999.0.0")
+    raise AssertionError("Expected BuildError for unsatisfied min_version")
+except tb.BuildError as err:
+    assert "999.0.0" in err.message
+
+# Confirm auto_build hard-fails when a non-host target is required and unavailable
+manifest["profiles"]["release"]["platforms"] = ["linux-x86_64", "macos-aarch64"]
+old_path = os.environ.get("PATH", "")
+os.environ["PATH"] = ""
+try:
+    tb.auto_build("release", project_root=project_root)
+    raise AssertionError("Expected fatal BuildError when cross-platform target unavailable")
+except tb.BuildError as err:
+    assert err.phase in ("Pre-Flight Verification", "Cross-Platform Release Gate", "Native Rust Build"), err.phase
+finally:
+    os.environ["PATH"] = old_path
+"#;
+
+    let status = std::process::Command::new(python_exe)
+        .arg("-c")
+        .arg(check_script)
+        .arg(&scripts_dir)
+        .arg(&project_root)
+        .status()
+        .expect("execute python release gate check");
+    assert!(status.success(), "Cross-platform release gate test failed");
+}
+
+#[test]
+fn test_solix_build_check_env_flag_executes_preflight_only() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let template_source = locate_template_source();
+    let project_root = workspace.root_path().join("preflight_proj");
+    copy_project_tree(&template_source, &project_root).expect("copy template");
+
+    let check_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid path"),
+        "--debug",
+        "--check-env",
+    ])
+    .expect("parse build --check-env");
+    assert_eq!(run(check_cli).expect("build --check-env must pass"), 0);
+
+    // Must NOT have produced build/debug/*.slxarc since --check-env only runs Phase 0
+    assert!(
+        !project_root
+            .join("build")
+            .join("debug")
+            .join("untitled.slxarc")
+            .exists(),
+        "--check-env must skip compilation and packaging"
+    );
+}
+
+#[test]
+fn test_slxarc_runtime_and_install_reject_incompatible_host_platform() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let stage_dir = workspace.root_path().join("incompat_stage");
+    let bin_dir = stage_dir.join("bin");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    let incompatible_manifest = r#"
+supported_platforms = ["solix-nonexistent-os-arm99"]
+
+[configuration]
+name = "incompat_pkg"
+version = "0.1.0"
+
+[profiles.release]
+sources = ["src"]
+"#;
+    fs::write(stage_dir.join("manifest.toml"), incompatible_manifest).expect("write manifest");
+    let program = solix_common::BinaryProgram::new();
+    fs::write(bin_dir.join("incompat_pkg.slxb"), program.to_bytes()).expect("write bytecode");
+
+    let archive_path = workspace.file_path("incompat_pkg.slxarc");
+    SlxarcArchive::pack_directory(&stage_dir, &archive_path).expect("pack incompatible archive");
+
+    // 1. SlxarcArchive::extract_and_load must reject incompatible host
+    let extract_cache = workspace.root_path().join("extract_cache");
+    let extract_err = SlxarcArchive::extract_and_load(&archive_path, &extract_cache)
+        .expect_err("extract_and_load must reject incompatible host platform");
+    let extract_msg = extract_err.to_string();
+    assert!(
+        extract_msg.contains("solix-nonexistent-os-arm99") && extract_msg.contains("incompatible"),
+        "Expected clear platform incompatibility message, got: {extract_msg}"
+    );
+
+    // 2. solix install must reject incompatible host
+    let store_dir = workspace.root_path().join("store");
+    let install_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        archive_path.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_dir.to_str().expect("valid path"),
+    ])
+    .expect("parse solix install");
+    let install_result = run(install_cli);
+    assert!(
+        install_result.is_err(),
+        "solix install must reject archive built for an incompatible platform"
+    );
+
+    // 3. solix run must reject incompatible host
+    let run_cli = Cli::try_parse_from(["solix", "run", archive_path.to_str().expect("valid path")])
+        .expect("parse solix run");
+    let run_result = run(run_cli);
+    assert!(
+        run_result.is_err(),
+        "solix run must reject archive built for an incompatible platform"
     );
 }

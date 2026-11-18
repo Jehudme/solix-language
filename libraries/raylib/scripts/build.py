@@ -92,9 +92,31 @@ def step_2_codegen(root_path: Path, api_schema_path: Path) -> None:
     print("  [step 2] Codegen completed successfully.")
 
 
-def run_pipeline(build_profile: str = "debug", root_path: Path | None = None) -> Path:
+def verify(ctx: solix_build.BuildContext) -> None:
+    """Pre-flight verification hook checking CMake 3.20+ and host C compiler for rlparser."""
+    _ = ctx
+    cmake_info = solix_build.require_tool(
+        "cmake",
+        min_version="3.20.0",
+        hint="Install CMake >= 3.20.0 to extract Raylib API headers.",
+    )
+    print(f"  [check] cmake {cmake_info['version']} ({cmake_info['path']})")
+
+
+def run_pipeline(
+    build_profile: str = "debug",
+    root_path: Path | None = None,
+    verify_only: bool = False,
+) -> Path:
     """Executes the complete 3-step pipeline."""
     target_root = solix_build.normalize_host_path(root_path if root_path is not None else project_root)
+    manifest = solix_build.load_manifest(target_root)
+
+    if verify_only:
+        solix_build.verify_environment(target_root, manifest, build_profile, verify_fn=verify)
+        return target_root
+
+    solix_build.verify_environment(target_root, manifest, build_profile, verify_fn=verify)
 
     # Step 1: Host rlparser & API extraction
     api_schema = step_1_extract_api(target_root)
@@ -109,6 +131,7 @@ def run_pipeline(build_profile: str = "debug", root_path: Path | None = None) ->
 
 def main() -> None:
     build_profile = os.environ.get("SOLIX_PROFILE", "").strip() or "release"
+    verify_only = os.environ.get("SOLIX_VERIFY_ONLY", "").strip().lower() in ("1", "true", "yes")
     arguments = sys.argv[1:]
     index = 0
     while index < len(arguments):
@@ -121,12 +144,18 @@ def main() -> None:
             build_profile = arguments[index + 1]
             index += 1
         elif argument_item.startswith("--target="):
-            os.environ["SOLIX_TARGET_TRIPLE"] = argument_item.split("=", 1)[1]
+            raw_target = argument_item.split("=", 1)[1]
+            os.environ["SOLIX_TARGET_TRIPLE"] = (
+                solix_build.get_host_target_triple() if raw_target.lower() == "host" else raw_target
+            )
         elif argument_item == "--target" and index + 1 < len(arguments):
-            os.environ["SOLIX_TARGET_TRIPLE"] = arguments[index + 1]
+            raw_target = arguments[index + 1]
+            os.environ["SOLIX_TARGET_TRIPLE"] = (
+                solix_build.get_host_target_triple() if raw_target.lower() == "host" else raw_target
+            )
             index += 1
-        elif argument_item == "--strict-cross":
-            os.environ["SOLIX_STRICT_CROSS"] = "1"
+        elif argument_item in ("--check-env", "--verify-only"):
+            verify_only = True
         elif argument_item == "--release":
             build_profile = "release"
         elif argument_item == "--test":
@@ -135,7 +164,7 @@ def main() -> None:
             build_profile = "debug"
         index += 1
 
-    run_pipeline(build_profile=build_profile, root_path=project_root)
+    run_pipeline(build_profile=build_profile, root_path=project_root, verify_only=verify_only)
 
 
 if __name__ == "__main__":
