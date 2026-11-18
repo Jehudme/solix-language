@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """One-Way GitHub Wiki Staging Generator from Solix `docs/` Source of Truth (MS063-T10).
 
-Reads user documentation (`docs/README.md`, `docs/guide/`, `docs/features/`,
-`docs/wiki/`, and `docs/spec/tools/cli/`) directly inside the repository without
+Reads user documentation (`docs/README.md`, `docs/guide/`, `docs/wiki/`,
+`docs/spec/`, and `docs/architecture/`) directly inside the repository without
 moving or deleting source files, flattens filenames cleanly for GitHub Wiki,
 rewrites internal relative links, builds `Home.md` and `_Sidebar.md`, and injects
 a release-version banner guiding older-version users to their Git tag's `/docs`
@@ -18,7 +18,7 @@ import shutil
 import tomllib
 
 
-MIRROR_DIRS = ("guide", "features", "wiki", "spec/tools/cli")
+MIRROR_DIRS = ("guide", "wiki", "spec", "architecture")
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
@@ -162,7 +162,10 @@ def stage_github_wiki(
         (output_dir / f"{page_name}.md").write_text(banner + body, encoding="utf-8")
         written_count += 1
         if page_name != "Home":
-            sidebar_entries.append(f"* [{page_name.replace('--', ' / ')}]({page_name})")
+            parts = page_name.split("--")
+            indent = "  " * max(0, len(parts) - 2)
+            label = parts[-1].replace("_", " ").replace("-", " ")
+            sidebar_entries.append(f"{indent}* [{label}]({page_name})")
 
     (output_dir / "_Sidebar.md").write_text("\n".join(sidebar_entries) + "\n", encoding="utf-8")
     return {"version": version, "pages": written_count}

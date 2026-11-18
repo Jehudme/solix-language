@@ -131,3 +131,16 @@ public class TreeNode {
 1. Bidirectional data structures (such as `LinkedList` doubly-linked nodes and `TreeMap` parent/child nodes) define explicit destructors (`~LinkedList()`, `~TreeMap()`, `~TreeSet()`).
 2. Upon collection deallocation, the destructor walks the structure to sever internal cyclical references (`previous_node = null`, `parent_node = null`), allowing standard ARC cascade drops to reclaim all nodes deterministically.
 3. Primitive strings (`BlockTag::String`) allocated via runtime builtins (`__builtin_str_concat`) or FFI (`solix_vm_alloc_string`) are tracked in `interned_string_addrs`, ensuring complete heap reclamation during VM shutdown and zero-leak verification.
+
+---
+
+## 5. Synchronous Four-Color Cycle Collector (Bacon & Rajan)
+
+To reclaim residual reference cycles alongside deterministic ARC for acyclic graphs, the VM integrates a synchronous four-color cycle collector (`Black`, `Gray`, `White`, `Purple`):
+
+1. **Trial Deletion (`MarkGray`) & Confirmation (`Scan`):** Buffers decremented non-zero candidates (`Purple`), performs trial subtraction along outgoing child pointers (`Gray`), restores externally reachable subgraphs (`Black`), and collects confirmed unreachable cycles (`White`).
+2. **CLI & Guest Controls:**
+   - `--cycle-collector <on|off>`: Enables or disables purple root buffering (pure ARC zero-overhead opt-out).
+   - `--cycle-threshold <count>`: Candidate buffer size triggering automatic collection (default `1024`; `0` triggers `[E0341]`).
+   - `--cycle-budget-us <microseconds>`: Bounded per-collection time budget (`[W0340]` when exceeded).
+   - Guest API (`solix.system.Vm`): `Vm::collect_cycles() -> int64` and `Vm::set_cycle_threshold(int32 threshold)`.

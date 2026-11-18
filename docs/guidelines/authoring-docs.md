@@ -56,19 +56,19 @@ docs/
 │   └── 10-standard-library-tour.md
 ├── spec/                   # Formal & Internal Specifications ("How It Works Under the Hood")
 │   ├── README.md           # Master Specifications Index
-│   ├── lexical-grammar.md
-│   ├── type-system-and-semantics.md
-│   ├── compilation-pipeline.md
-│   ├── binder-and-monomorphization.md
+│   ├── lexical.md
+│   ├── types.md
+│   ├── diagnostics.md
 │   ├── optimizer-and-inliner.md
-│   ├── vm-isa-and-execution.md
-│   ├── memory-model-and-arc.md
-│   ├── exception-unwinding.md
+│   ├── vm_isa.md
+│   ├── disassembly-format-slxasm.md
 │   ├── binary-formats-slxb-and-slxarc.md
 │   ├── package-solver-and-linking.md
-│   ├── native-ffi-abi.md
+│   ├── native_interop.md
 │   ├── statements/         # Statement & Expression Compilation Mechanics with Bytecode
-│   └── solixlib/           # Standard Library v2.0.0 Formal Specifications
+│   ├── libraries/          # Standard Library v2.0.0 Formal Specifications
+│   └── tools/              # CLI and LSP Tooling Specifications
+├── architecture/           # Compiler Pipeline, Binder Passes, VirtualHeap, ARC & Exceptions
 ├── wiki/                   # Atomic Reference Wiki ("Fast Dictionary Reference")
 │   ├── README.md           # Master Wiki Index
 │   ├── errors/             # E0000..E0350 compiler errors & R0001..R0023 runtime traps

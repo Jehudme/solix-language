@@ -151,7 +151,8 @@ Comprehensive guides, specifications, and architecture deep dives are available 
 
 * [**Master Documentation Hub**](docs/README.md) — Complete taxonomy and architecture guide.
 * [**Getting Started Tutorial**](docs/guide/01_getting_started.md) — First steps with Solix, installation, and project layout.
-* [**Hermetic Build System & Native Bridge**](docs/features/build-system.md) — Architecture of `solix_build.py`, `.cache/` isolation, and Zig/CMake pipelines.
+* [**Hermetic Build System & Native Bridge**](docs/guide/build_system.md) — Architecture of `solix_build.py`, `.cache/` isolation, and Zig/CMake pipelines.
+* [**Disassembly Format Reference (`.slxasm`)**](docs/spec/disassembly-format-slxasm.md) — Guide to reading `.slxasm` / `.slxdasm` 64-bit Register VM output.
 * [**VS Code Extension & Debugging**](docs/guide/editors_vscode.md) — Editor setup, CodeLens execution, and interactive DAP debugging.
 * [**CLI Toolchain Reference**](docs/spec/tools/cli/README.md) — Detailed option flags and execution contracts for all `solix` subcommands.
 * [**Contributing & Engineering Guidelines**](CONTRIBUTING.md) — Contributor workflow and normative [engineering standards](docs/guidelines/README.md).

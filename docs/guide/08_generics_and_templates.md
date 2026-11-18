@@ -226,7 +226,7 @@ The [instanceof](../wiki/keywords/expressions/instanceof.md) operator inspects t
 - **Previous Guide**: Review function pointers and closures in [07 - Functions & Lambdas](07_functions_and_lambdas.md).
 - **Further Reading**:
   - [Generics Specification](../spec/statements/declarations/generic_declaration.md)
-  - [Monomorphization Specification](../spec/binder-and-monomorphization.md)
+  - [Binder & Monomorphization Architecture](../architecture/binder_passes.md)
   - [instanceof Expression](../wiki/keywords/expressions/instanceof.md)
   - [Tuples Primitive Reference](../wiki/primitives/tuples.md)
 

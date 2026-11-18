@@ -100,14 +100,25 @@ class StaticDocsAndWikiPortalTests(unittest.TestCase):
             self.assertGreater(summary["page_count"], 50)
             self.assertTrue((out_dir / "index.html").is_file())
             self.assertTrue((out_dir / "guide" / "01_getting_started.html").is_file())
+            self.assertTrue((out_dir / "guide" / "build_system.html").is_file())
+            self.assertTrue((out_dir / "spec" / "disassembly-format-slxasm.html").is_file())
             self.assertTrue((out_dir / "spec" / "tools" / "cli" / "wiki.html").is_file())
+            self.assertFalse((out_dir / "features").exists())
+            self.assertFalse((out_dir / "overview").exists())
             self.assertFalse((out_dir / "internals").exists())
             self.assertFalse((out_dir / "guidelines").exists())
 
+            app_js = (out_dir / "assets" / "app.js").read_text(encoding="utf-8")
+            self.assertIn("nav-subgroup", app_js)
+            self.assertIn("renderTreeBranch", app_js)
+
             index_html = (out_dir / "index.html").read_text(encoding="utf-8")
             self.assertIn("v9.9.9-test", index_html)
-            self.assertIn("guide/01_getting_started.html", index_html)
-            self.assertNotIn("guide/01_getting_started.md", index_html)
+            self.assertIn('href="guide/index.html"', index_html)
+            self.assertNotIn('href="guide/README.md"', index_html)
+            guide_index_html = (out_dir / "guide" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('href="01_getting_started.html"', guide_index_html)
+            self.assertNotIn('href="01_getting_started.md"', guide_index_html)
 
             search_js = (out_dir / "assets" / "search_index.js").read_text(encoding="utf-8")
             self.assertTrue(search_js.startswith("window.SOLIX_DOCS_INDEX = "))
@@ -131,12 +142,16 @@ class StaticDocsAndWikiPortalTests(unittest.TestCase):
     def test_sync_github_wiki_stages_versioned_banner_without_touching_source_docs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir) / "wiki_checkout"
+            out_dir.mkdir(parents=True)
+            stale_page = out_dir / "Stale--Obsolete-Page.md"
+            stale_page.write_text("# Old Stale Page\n", encoding="utf-8")
             result = sync_github_wiki.stage_github_wiki(
                 REPO_ROOT,
                 out_dir,
                 version_override="1.5.0",
             )
             self.assertGreater(result["pages"], 10)
+            self.assertFalse(stale_page.exists())
             home_text = (out_dir / "Home.md").read_text(encoding="utf-8")
             self.assertIn("Solix v1.5.0", home_text)
             self.assertIn("solix wiki", home_text)

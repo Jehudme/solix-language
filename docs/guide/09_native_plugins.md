@@ -127,6 +127,6 @@ During `solix build`, the build orchestrator (`scripts/build.py`) builds all nat
 - **Tooling Guide**: Configure your development environment in [VS Code Extension Setup](editors_vscode.md).
 - **Previous Guide**: Review generics and monomorphization in [08 - Generics & Templates](08_generics_and_templates.md).
 - **Further Reading**:
-  - [Native FFI & ABI Specification](../spec/native-ffi-abi.md)
+  - [Native FFI & ABI Specification](../spec/native_interop.md)
   - [native Keyword Modifier Reference](../wiki/keywords/modifiers/native.md)
   - [Binary Packaging Specification](../spec/binary-formats-slxb-and-slxarc.md)

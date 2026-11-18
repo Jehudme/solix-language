@@ -5224,7 +5224,7 @@ public class BadGeneric {
 
 ## Native Interoperability & Dynamic Shared Library Loader
 
-*Specification Reference*: [Native Interoperability Specification](../../docs/spec/runtime/native_interop.md)
+*Specification Reference*: [Native Interoperability Specification](../../docs/spec/native_interop.md)
 
 ### Positive Test Scenarios (Valid Variations)
 

@@ -62,7 +62,7 @@ When `git diff origin/dev...HEAD` reveals modifications in any left-hand subsyst
 | **Lexer & Tokens**<br>`crates/solix-compilation/src/phases/lexing/` | `docs/wiki/keywords/`<br>`docs/wiki/primitives/`<br>`docs/wiki/errors/lexer-errors.md` | `docs/spec/lexical.md` | `docs/guide/02_variables_and_types.md` |
 | **Parser & AST Nodes**<br>`crates/solix-compilation/src/phases/parser/` | `docs/wiki/errors/parser-errors.md` (`E0101`–`E0200`) | `docs/spec/statements/*.md` | Relevant guides in `docs/guide/02..07` |
 | **Type Binder & Semantics**<br>`crates/solix-compilation/src/phases/binder/` | `docs/wiki/errors/binder-errors.md` (`E0201`–`E0290`) | `docs/spec/types.md` | `docs/architecture/binder_passes.md`<br>`docs/guide/04_classes_and_oop.md` |
-| **Emitter & Bytecode Codegen**<br>`crates/solix-compilation/src/phases/emitter/` | N/A | `docs/spec/vm_isa.md`<br>`docs/spec/statements/*.md` (Register VM lowering listings) | `docs/architecture/pipeline.md` |
+| **Emitter & Bytecode Codegen**<br>`crates/solix-compilation/src/phases/emitter/` | N/A | `docs/spec/vm_isa.md`<br>`docs/spec/disassembly-format-slxasm.md`<br>`docs/spec/statements/*.md` (Register VM lowering listings) | `docs/architecture/pipeline.md` |
 | **Register VM & Opcodes**<br>`crates/solix-runtime/src/vm/`<br>`crates/solix-common/src/bytecode/` | `docs/wiki/errors/runtime-errors.md` (`R0001`–`R0023`) | `docs/spec/vm_isa.md` | `docs/architecture/memory_model.md`<br>`docs/architecture/arc_internals.md`<br>`docs/architecture/exception_unwinding.md`<br>`docs/guide/05_memory_management_and_arc.md` |
 | **Native Interop & FFI**<br>`crates/solix-runtime/src/native/` | N/A | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
@@ -71,7 +71,7 @@ When `git diff origin/dev...HEAD` reveals modifications in any left-hand subsyst
 | **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(pr_risk_audit\|prepare_release_train\|build_docs_site\|sync_github_wiki).py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/guidelines/pr-and-release-governance.md`<br>`docs/guidelines/branching-conventions.md`<br>`docs/guide/release.md` |
 
 > [!NOTE]
-> User-facing documentation (`docs/guide/`, `docs/wiki/`, `docs/features/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository. [`scripts/build_docs_site.py`](../../../scripts/build_docs_site.py) compiles these files into the offline `solix wiki` bundle matching every binary release version, and optional one-way GitHub Wiki mirroring reads from this Git Single Source of Truth.
+> User-facing documentation (`docs/guide/`, `docs/wiki/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository. [`scripts/build_docs_site.py`](../../../scripts/build_docs_site.py) compiles these files into the offline `solix wiki` bundle matching every binary release version, and optional one-way GitHub Wiki mirroring reads from this Git Single Source of Truth.
 
 ---
 
