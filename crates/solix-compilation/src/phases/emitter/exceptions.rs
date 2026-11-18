@@ -60,6 +60,7 @@ impl<'ctx> Emitter<'ctx> {
         );
 
         let mut catch_jumps = Vec::new();
+        let mut catch_finally_ranges: Vec<(u32, u32, Vec<u16>)> = Vec::new();
 
         // Prevent catch clauses from reusing try_ref_regs while references are still live
         self.allocator.exclude_from_free(&try_ref_regs);
@@ -69,6 +70,7 @@ impl<'ctx> Emitter<'ctx> {
             let handler_pc = self.function.instructions.len() as u32;
 
             self.allocator.enter_scope();
+            let catch_ref_regs_before = self.function.reference_registers.clone();
             let var_name = self.get_lexeme(catch.variable_name).to_string();
             let catch_reg = self.allocator.alloc_local(var_name)?;
             self.track_reference_register(catch_reg);
@@ -102,6 +104,21 @@ impl<'ctx> Emitter<'ctx> {
                 self.finally_stack.pop();
             }
 
+            let catch_end_pc = self.function.instructions.len() as u32;
+            let mut catch_cleanup_regs: Vec<u16> = self
+                .function
+                .reference_registers
+                .iter()
+                .filter(|reg| !catch_ref_regs_before.contains(reg) || *reg == &catch_reg)
+                .copied()
+                .collect();
+            for &try_reg in &try_ref_regs {
+                if !catch_cleanup_regs.contains(&try_reg) {
+                    catch_cleanup_regs.push(try_reg);
+                }
+            }
+            catch_finally_ranges.push((handler_pc, catch_end_pc, catch_cleanup_regs));
+
             self.emit_block_exit_arc_cleanup();
             self.allocator.exit_scope();
 
@@ -125,7 +142,7 @@ impl<'ctx> Emitter<'ctx> {
                 }
             }
 
-            // Also register an unwinding handler for unhandled exceptions
+            // Also register an unwinding handler for unhandled exceptions in `try`
             let unwinding_catch_reg = maybe_pending_exception_register.unwrap_or(0);
             self.function
                 .exception_handlers
@@ -138,6 +155,24 @@ impl<'ctx> Emitter<'ctx> {
                     finally_pc: Some(finally_pc),
                     try_ref_regs: try_ref_regs.clone(),
                 });
+
+            // And register unwinding handlers so exceptions thrown/propagated inside `catch`
+            // also execute `finally` exactly once before unwinding to the enclosing caller.
+            for (catch_start, catch_end, catch_cleanup_regs) in catch_finally_ranges {
+                if catch_end > catch_start {
+                    self.function
+                        .exception_handlers
+                        .push(ExceptionHandlerEntry {
+                            try_start_pc: catch_start,
+                            try_end_pc: catch_end,
+                            catch_type_symbol: None,
+                            catch_reg: unwinding_catch_reg,
+                            handler_pc: finally_pc,
+                            finally_pc: Some(finally_pc),
+                            try_ref_regs: catch_cleanup_regs,
+                        });
+                }
+            }
 
             // Patch normal jumps to point to the normal finally execution
             let normal_target = self.function.instructions.len() as i32;
@@ -190,7 +225,6 @@ impl<'ctx> Emitter<'ctx> {
         throw_stmt: &ThrowStatement,
     ) -> Result<(), EmissionError> {
         let r_val = self.emit_expression(&throw_stmt.expression, None)?;
-        self.emit_active_finally_blocks()?;
         self.emit_instruction(
             Instruction::format_a(OpCode::Throw, 0, r_val, 0, 0),
             Some(throw_stmt.span),

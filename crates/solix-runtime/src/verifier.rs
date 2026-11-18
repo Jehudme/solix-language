@@ -21,6 +21,7 @@ pub fn verify_program(
     all_functions: &[CompiledFunction],
     total_static_space: u32,
 ) -> Result<(), RuntimeError> {
+    let total_functions = all_functions.len();
     for (global_function_index, func) in all_functions.iter().enumerate() {
         let register_count = func.num_registers;
         let instruction_count = func.instructions.len();
@@ -41,6 +42,55 @@ pub fn verify_program(
             })
             .map_or(0, |binary_unit| binary_unit.constant_pool.values.len());
 
+        for handler in &func.exception_handlers {
+            let try_start = handler.try_start_pc as usize;
+            let try_end = handler.try_end_pc as usize;
+            if try_start > try_end || try_end > instruction_count {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{}': invalid exception range [{try_start}..{try_end}) for instruction count {instruction_count}",
+                        func.symbol
+                    ),
+                });
+            }
+            if (handler.handler_pc as usize) >= instruction_count {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{}': exception handler_pc {} exceeds instruction count {instruction_count}",
+                        func.symbol, handler.handler_pc
+                    ),
+                });
+            }
+            if let Some(finally_pc) = handler.finally_pc
+                && (finally_pc as usize) >= instruction_count
+            {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{}': exception finally_pc {finally_pc} exceeds instruction count {instruction_count}",
+                        func.symbol
+                    ),
+                });
+            }
+            if handler.catch_reg >= register_count {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{}': exception catch_reg {} exceeds allocated register count {register_count}",
+                        func.symbol, handler.catch_reg
+                    ),
+                });
+            }
+            for &try_ref_reg in &handler.try_ref_regs {
+                if try_ref_reg >= register_count {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{}': exception try_ref_reg {try_ref_reg} exceeds allocated register count {register_count}",
+                            func.symbol
+                        ),
+                    });
+                }
+            }
+        }
+
         for (instruction_index, &instruction) in func.instructions.iter().enumerate() {
             verify_instruction(
                 instruction,
@@ -49,6 +99,7 @@ pub fn verify_program(
                 register_count,
                 total_static_space,
                 owning_binary_pool_len,
+                total_functions,
                 &func.symbol,
             )?;
         }
@@ -58,6 +109,7 @@ pub fn verify_program(
 }
 
 /// Validates a single instruction word against function and binary resource limits.
+#[allow(clippy::too_many_arguments)]
 fn verify_instruction(
     instruction: Instruction,
     instruction_index: usize,
@@ -65,6 +117,7 @@ fn verify_instruction(
     register_count: u16,
     total_static_space: u32,
     constant_pool_len: usize,
+    total_functions: usize,
     function_symbol: &str,
 ) -> Result<(), RuntimeError> {
     let raw_opcode = instruction.raw_opcode();
@@ -123,7 +176,7 @@ fn verify_instruction(
         OpCode::LoadConst => {
             check_reg(instruction.dst(), "dst")?;
             let pool_index = instruction.imm32() as usize;
-            if pool_index >= constant_pool_len && constant_pool_len > 0 {
+            if pool_index >= constant_pool_len {
                 return Err(RuntimeError::BinaryLoadError {
                     reason: format!(
                         "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: constant pool index {pool_index} exceeds constant pool size {constant_pool_len}"
@@ -204,9 +257,31 @@ fn verify_instruction(
         }
 
         // Windowed Function Invocations
-        OpCode::CallDirect
-        | OpCode::TailCallDirect
-        | OpCode::CallVirtual
+        OpCode::CallDirect | OpCode::TailCallDirect => {
+            check_reg(instruction.call_dst(), "call_dst")?;
+            let target_id = instruction.call_target() as usize;
+            if target_id >= total_functions {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: call target function ID {target_id} exceeds total function count {total_functions}"
+                    ),
+                });
+            }
+            let argument_count = instruction.arg_count() as u16;
+            if argument_count > 0 {
+                let argument_base = instruction.arg_base();
+                let argument_limit = argument_base.saturating_add(argument_count);
+                if argument_limit > register_count {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: call argument window [{argument_base}..{argument_limit}] exceeds allocated register count {register_count}"
+                        ),
+                    });
+                }
+            }
+        }
+
+        OpCode::CallVirtual
         | OpCode::CallInterface
         | OpCode::CallSymbol
         | OpCode::CallCallable

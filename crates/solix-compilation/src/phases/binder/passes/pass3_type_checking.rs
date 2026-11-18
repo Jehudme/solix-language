@@ -1713,7 +1713,13 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         ..
                     } => {
                         self.validate_lambda_captures(captures);
-                        self.evaluate_lambda_with_expected(parameters, body, Some(&target_type))
+                        let lambda_type = self.evaluate_lambda_with_expected(
+                            parameters,
+                            body,
+                            Some(&target_type),
+                        );
+                        self.node_types.insert(value.span(), lambda_type.clone());
+                        lambda_type
                     }
                     _ => self.evaluate_expression_with_expected(value, Some(&target_type)),
                 };
@@ -2961,7 +2967,11 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                     ..
                 } => {
                     self.validate_lambda_captures(captures);
-                    self.evaluate_lambda_with_expected(parameters, body, Some(&declared_type))
+                    let lambda_type =
+                        self.evaluate_lambda_with_expected(parameters, body, Some(&declared_type));
+                    self.node_types
+                        .insert(initializer.span(), lambda_type.clone());
+                    lambda_type
                 }
                 _ => self.evaluate_expression_with_expected(initializer, Some(&declared_type)),
             };

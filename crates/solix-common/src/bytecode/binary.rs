@@ -490,7 +490,8 @@ impl BinaryProgram {
 
         // 2. Static Symbols Map
         let static_sym_count = reader.read_u32("StaticSymbols")? as usize;
-        let mut static_symbols_map = Vec::with_capacity(static_sym_count);
+        let mut static_symbols_map =
+            Vec::with_capacity(reader.checked_capacity(static_sym_count, 8, "StaticSymbols")?);
         for _ in 0..static_sym_count {
             let sym = reader.read_string("StaticSymbols")?;
             let slot = reader.read_u32("StaticSymbols")?;
@@ -499,6 +500,7 @@ impl BinaryProgram {
 
         // 3. Constant Pool
         let pool_count = reader.read_u32("ConstantPool")? as usize;
+        let _ = reader.checked_capacity(pool_count, 1, "ConstantPool")?;
         let mut constant_pool = ConstantPool::new();
         for _ in 0..pool_count {
             let tag = reader.read_u8("ConstantPool")?;
@@ -518,7 +520,8 @@ impl BinaryProgram {
 
         // 4. Classes
         let class_count = reader.read_u32("Classes")? as usize;
-        let mut classes = Vec::with_capacity(class_count);
+        let mut classes =
+            Vec::with_capacity(reader.checked_capacity(class_count, 32, "Classes")?);
         for _ in 0..class_count {
             let symbol = reader.read_string("Classes")?;
             let vtable_id = reader.read_u32("Classes")?;
@@ -531,29 +534,32 @@ impl BinaryProgram {
             let instance_size = reader.read_u64("Classes")? as usize;
 
             let ref_count = reader.read_u32("Classes")? as usize;
-            let mut reference_field_offsets = Vec::with_capacity(ref_count);
+            let mut reference_field_offsets =
+                Vec::with_capacity(reader.checked_capacity(ref_count, 8, "Classes")?);
             for _ in 0..ref_count {
                 reference_field_offsets.push(reader.read_u64("Classes")? as usize);
             }
 
             let weak_count = reader.read_u32("Classes")? as usize;
-            let mut weak_field_offsets = Vec::with_capacity(weak_count);
+            let mut weak_field_offsets =
+                Vec::with_capacity(reader.checked_capacity(weak_count, 8, "Classes")?);
             for _ in 0..weak_count {
                 weak_field_offsets.push(reader.read_u64("Classes")? as usize);
             }
 
             let vtable_len = reader.read_u32("Classes")? as usize;
-            let mut vtable = Vec::with_capacity(vtable_len);
+            let mut vtable = Vec::with_capacity(reader.checked_capacity(vtable_len, 4, "Classes")?);
             for _ in 0..vtable_len {
                 vtable.push(reader.read_u32("Classes")?);
             }
 
             let itable_len = reader.read_u32("Classes")? as usize;
-            let mut itable = Vec::with_capacity(itable_len);
+            let mut itable = Vec::with_capacity(reader.checked_capacity(itable_len, 8, "Classes")?);
             for _ in 0..itable_len {
                 let iface_id = reader.read_u32("Classes")?;
                 let method_len = reader.read_u32("Classes")? as usize;
-                let mut methods = Vec::with_capacity(method_len);
+                let mut methods =
+                    Vec::with_capacity(reader.checked_capacity(method_len, 4, "Classes")?);
                 for _ in 0..method_len {
                     methods.push(reader.read_u32("Classes")?);
                 }
@@ -575,7 +581,8 @@ impl BinaryProgram {
             class.destructor_id = destructor_id;
 
             let field_types_len = reader.read_u32("Classes")? as usize;
-            let mut field_types = Vec::with_capacity(field_types_len);
+            let mut field_types =
+                Vec::with_capacity(reader.checked_capacity(field_types_len, 9, "Classes")?);
             for _ in 0..field_types_len {
                 let offset = reader.read_u64("Classes")? as usize;
                 let tag = reader.read_u8("Classes")?;
@@ -584,7 +591,8 @@ impl BinaryProgram {
             class.field_types = field_types;
 
             let field_names_len = reader.read_u32("Classes")? as usize;
-            let mut field_names = Vec::with_capacity(field_names_len);
+            let mut field_names =
+                Vec::with_capacity(reader.checked_capacity(field_names_len, 16, "Classes")?);
             for _ in 0..field_names_len {
                 let offset = reader.read_u64("Classes")? as usize;
                 let name = reader.read_string("Classes")?;
@@ -598,7 +606,8 @@ impl BinaryProgram {
 
         // 5. Functions
         let func_count = reader.read_u32("Functions")? as usize;
-        let mut functions = Vec::with_capacity(func_count);
+        let mut functions =
+            Vec::with_capacity(reader.checked_capacity(func_count, 32, "Functions")?);
         for _ in 0..func_count {
             let symbol = reader.read_string("Functions")?;
             let source_id = reader.read_u16("Functions")?;
@@ -607,7 +616,8 @@ impl BinaryProgram {
             let static_base_offset = reader.read_u32("Functions")?;
 
             let inst_count = reader.read_u32("Functions")? as usize;
-            let mut instructions = Vec::with_capacity(inst_count);
+            let mut instructions =
+                Vec::with_capacity(reader.checked_capacity(inst_count, 8, "Functions")?);
             for _ in 0..inst_count {
                 let bytes = reader.read_bytes(8, "Functions")?;
                 let mut inst_bytes = [0u8; 8];
@@ -616,13 +626,15 @@ impl BinaryProgram {
             }
 
             let ref_reg_count = reader.read_u32("Functions")? as usize;
-            let mut reference_registers = Vec::with_capacity(ref_reg_count);
+            let mut reference_registers =
+                Vec::with_capacity(reader.checked_capacity(ref_reg_count, 2, "Functions")?);
             for _ in 0..ref_reg_count {
                 reference_registers.push(reader.read_u16("Functions")?);
             }
 
             let handler_count = reader.read_u32("Functions")? as usize;
-            let mut exception_handlers = Vec::with_capacity(handler_count);
+            let mut exception_handlers =
+                Vec::with_capacity(reader.checked_capacity(handler_count, 20, "Functions")?);
             for _ in 0..handler_count {
                 let try_start_pc = reader.read_u32("Functions")?;
                 let try_end_pc = reader.read_u32("Functions")?;
@@ -642,7 +654,8 @@ impl BinaryProgram {
                 };
 
                 let try_ref_count = reader.read_u32("Functions")? as usize;
-                let mut try_ref_regs = Vec::with_capacity(try_ref_count);
+                let mut try_ref_regs =
+                    Vec::with_capacity(reader.checked_capacity(try_ref_count, 2, "Functions")?);
                 for _ in 0..try_ref_count {
                     try_ref_regs.push(reader.read_u16("Functions")?);
                 }
@@ -659,7 +672,8 @@ impl BinaryProgram {
             }
 
             let span_count = reader.read_u32("Functions")? as usize;
-            let mut source_map = Vec::with_capacity(span_count);
+            let mut source_map =
+                Vec::with_capacity(reader.checked_capacity(span_count, 22, "Functions")?);
             for _ in 0..span_count {
                 let instruction_pc = reader.read_u32("Functions")?;
                 let id = reader.read_u16("Functions")?;
@@ -676,7 +690,8 @@ impl BinaryProgram {
             }
 
             let local_vars_len = reader.read_u32("Functions")? as usize;
-            let mut local_variables = Vec::with_capacity(local_vars_len);
+            let mut local_variables =
+                Vec::with_capacity(reader.checked_capacity(local_vars_len, 19, "Functions")?);
             for _ in 0..local_vars_len {
                 let register = reader.read_u16("Functions")?;
                 let name = reader.read_string("Functions")?;
@@ -699,7 +714,8 @@ impl BinaryProgram {
             let return_type_str = reader.read_string("Functions")?;
             let return_type = serde_json::from_str(&return_type_str).unwrap_or_default();
             let parameter_types_len = reader.read_u32("Functions")? as usize;
-            let mut parameter_types = Vec::with_capacity(parameter_types_len);
+            let mut parameter_types =
+                Vec::with_capacity(reader.checked_capacity(parameter_types_len, 4, "Functions")?);
             for _ in 0..parameter_types_len {
                 let param_type_str = reader.read_string("Functions")?;
                 let param_type = serde_json::from_str(&param_type_str).unwrap_or_default();
@@ -805,12 +821,35 @@ impl<'buf> ByteReader<'buf> {
         self.offset < self.data.len()
     }
 
+    fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.offset)
+    }
+
+    fn checked_capacity(
+        &self,
+        count: usize,
+        min_bytes_per_elem: usize,
+        section: &str,
+    ) -> Result<usize, EmissionError> {
+        let available = self.remaining();
+        let required_min = count.saturating_mul(min_bytes_per_elem);
+        if required_min > available {
+            return Err(EmissionError::UnexpectedEof {
+                section: section.to_string(),
+                required: required_min,
+                available,
+            });
+        }
+        Ok(count.min(4096))
+    }
+
     fn read_bytes(&mut self, count: usize, section: &str) -> Result<&'buf [u8], EmissionError> {
-        if self.offset + count > self.data.len() {
+        let available = self.remaining();
+        if count > available {
             return Err(EmissionError::UnexpectedEof {
                 section: section.to_string(),
                 required: count,
-                available: self.data.len().saturating_sub(self.offset),
+                available,
             });
         }
         let slice = &self.data[self.offset..self.offset + count];

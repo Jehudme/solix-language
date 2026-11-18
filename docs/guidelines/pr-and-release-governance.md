@@ -62,7 +62,8 @@ Every PR targeting `dev`, push to `dev`, and scheduled weekly security run execu
 1. **`cargo-deny`** ([`deny.toml`](../../deny.toml)): Validates compatible open-source licenses, blocks unapproved registries/git sources, and checks RustSec advisories.
 2. **`cargo-audit` (`--deny warnings`):** Scans `Cargo.lock` against RustSec vulnerability, yanked-crate, and soundness advisories.
 3. **`actionlint` & `zizmor`**: Statically analyzes `.github/workflows/*.yml` for YAML issues, script injection, overly permissive tokens, and unpinned actions.
-4. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` **MUST** pin full 40-character commit SHAs alongside version comments, with top-level `permissions: contents: read`.
+4. **`cargo-llvm-cov` Coverage Gate**: Enforces a minimum workspace line coverage floor (`55%`) in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) using `llvm-tools-preview`.
+5. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` **MUST** pin full 40-character commit SHAs alongside version comments, with top-level `permissions: contents: read`.
 
 ---
 
