@@ -59,7 +59,7 @@ RISK_TIERS: tuple[RiskTier, ...] = (
         patterns=(
             re.compile(r"^docs/guidelines/"),
             re.compile(r"^CONTRIBUTING\.md$"),
-            re.compile(r"^scripts/(doc_sync_check|verify_docs|verify_doc_links|pr_risk_audit|prepare_release_train|build_docs_site|sync_github_wiki)\.py$"),
+            re.compile(r"^scripts/(ci|docs|release|bench)/.*\.py$"),
         ),
         checklist=(
             "Confirm governance and test gates remain consistent.",

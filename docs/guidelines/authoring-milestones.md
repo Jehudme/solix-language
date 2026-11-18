@@ -30,7 +30,7 @@ All milestone plans and contributors **MUST** comply with the following binding 
    * **100% Automated Test Pass:** `cargo test --workspace --all-targets`.
    * **Zero Clippy Defects:** `cargo clippy --workspace --exclude solix-tests --lib --bins --no-deps -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic -D clippy::min_ident_chars`.
    * **Formatting & Security:** `cargo fmt --check`, `cargo-deny`, `cargo-audit`, `actionlint`, and `zizmor`.
-   * **Living Documentation:** User docs in `docs/guide/`, `docs/spec/`, `docs/wiki/` synchronized (`GL-0013`), verified by `scripts/verify_docs.py`, and compiled by `scripts/build_docs_site.py`.
+   * **Living Documentation:** User docs in `docs/guide/`, `docs/spec/`, `docs/wiki/` synchronized (`GL-0013`), verified by `scripts/ci/verify_docs.py`, and compiled by `scripts/docs/build_docs_site.py`.
 6. **Milestone State Progression:** Issues and milestones follow `DRAFT` -> `ACTIVE` -> `FEATURE_COMPLETE` -> `VALIDATED` -> `CLOSED`.
 
 ---

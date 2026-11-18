@@ -20,7 +20,8 @@ except ImportError:
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = SCRIPTS_DIR.parent
-sys.path.insert(0, str(SCRIPTS_DIR))
+for _subdir in ("ci", "docs", "release", "bench"):
+    sys.path.insert(0, str(SCRIPTS_DIR / _subdir))
 
 import build_docs_site  # noqa: E402
 import doc_sync_check  # noqa: E402
@@ -28,6 +29,7 @@ import merge_bundled_packages  # noqa: E402
 import pr_risk_audit  # noqa: E402
 import prepare_release_train  # noqa: E402
 import re  # noqa: E402
+import solix_bench  # noqa: E402
 import sync_github_wiki  # noqa: E402
 import verify_docs  # noqa: E402
 
@@ -225,7 +227,7 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
             proc = subprocess.run(
                 [
                     sys.executable,
-                    str(SCRIPTS_DIR / "merge_bundled_packages.py"),
+                    str(SCRIPTS_DIR / "release" / "merge_bundled_packages.py"),
                     "--input-dirs",
                     str(linux_dir.parent),
                     str(mac_dir.parent),
@@ -400,16 +402,21 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
         )
 
         forbidden_emojis = ("❌", "✅", "🎉", "🚀", "⚠", "🔴", "🟢", "📉")
-        for script_name in (
-            "doc_sync_check.py",
-            "verify_docs.py",
-            "verify_doc_links.py",
-            "pr_risk_audit.py",
-            "prepare_release_train.py",
+        for script_rel_path in (
+            "ci/doc_sync_check.py",
+            "ci/verify_docs.py",
+            "ci/verify_doc_links.py",
+            "ci/pr_risk_audit.py",
+            "release/prepare_release_train.py",
+            "release/build_default_libraries.py",
+            "release/merge_bundled_packages.py",
+            "docs/build_docs_site.py",
+            "docs/sync_github_wiki.py",
+            "bench/solix_bench.py",
         ):
-            content = (SCRIPTS_DIR / script_name).read_text(encoding="utf-8")
+            content = (SCRIPTS_DIR / script_rel_path).read_text(encoding="utf-8")
             for emoji in forbidden_emojis:
-                self.assertNotIn(emoji, content, f"{script_name} should remain emoji-free")
+                self.assertNotIn(emoji, content, f"{script_rel_path} should remain emoji-free")
 
     def test_cli_subcommands_are_documented_and_all_docs_pass_gl0011(self) -> None:
         subcommands = verify_docs.extract_active_subcommands(
@@ -423,6 +430,94 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
         all_markdown = sorted((REPO_ROOT / "docs").rglob("*.md"))
         gl0011_errors = doc_sync_check.check_single_letter_variables(all_markdown)
         self.assertEqual(gl0011_errors, [])
+
+
+class SolixBenchCliTests(unittest.TestCase):
+    """Tests multi-baseline comparison and cross-language reporting in `scripts/bench/solix_bench.py`."""
+
+    def test_multi_baseline_compare_and_cross_language_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            b1 = tmp / "v1_4_0.json"
+            b2 = tmp / "v1_5_0.json"
+            b3 = tmp / "v1_6_0.json"
+            md_out = tmp / "multi.md"
+            json_out = tmp / "multi.json"
+
+            b1.write_text(
+                json.dumps(
+                    {
+                        "metadata": {"label": "v1.4.0"},
+                        "workloads": {
+                            "01_fib": {"solix_fast": {"median_ms": 200.0, "rss_kb": 12000}}
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            b2.write_text(
+                json.dumps(
+                    {
+                        "metadata": {"label": "v1.5.0"},
+                        "workloads": {
+                            "01_fib": {"solix_fast": {"median_ms": 150.0, "rss_kb": 11000}}
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            b3.write_text(
+                json.dumps(
+                    {
+                        "metadata": {"label": "v1.6.0"},
+                        "workloads": {
+                            "01_fib": {
+                                "solix_fast": {"median_ms": 100.0, "rss_kb": 10000},
+                                "python3": {"median_ms": 400.0, "rss_kb": 20000},
+                                "lua": {"median_ms": 120.0, "rss_kb": 4000},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bench" / "solix_bench.py"),
+                    "compare",
+                    str(b1),
+                    str(b2),
+                    str(b3),
+                    "--cross-language",
+                    "--markdown-output",
+                    str(md_out),
+                    "--json-output",
+                    str(json_out),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+            self.assertIn("v1.4.0", proc.stdout)
+            self.assertIn("2.00x", proc.stdout)
+
+            rendered_md = md_out.read_text(encoding="utf-8")
+            self.assertIn("### Multi-Baseline Benchmark Comparison", rendered_md)
+            self.assertIn("### Cross-Language Comparison", rendered_md)
+            self.assertIn("4.00x", rendered_md)
+
+            parsed_json = json.loads(json_out.read_text(encoding="utf-8"))
+            self.assertEqual(parsed_json["labels"], ["v1.4.0", "v1.5.0", "v1.6.0"])
+            self.assertEqual(parsed_json["summary"]["geomean_vs_first"], [1.0, 1.33, 2.0])
+
+    def test_ci_workflow_removes_sensitive_label_and_includes_pr_benchmark(self) -> None:
+        ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("--remove-label", ci_text)
+        self.assertIn("pr-benchmark:", ci_text)
+        self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
 
 
 if __name__ == "__main__":

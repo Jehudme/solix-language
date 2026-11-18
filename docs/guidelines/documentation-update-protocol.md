@@ -34,12 +34,12 @@ All contributors and CI verification pipelines **MUST** enforce the following ru
 3. **Automated Documentation Sync Check:**
    Every pull request **MUST** pass the automated documentation synchronization verification script:
    ```bash
-   python3 scripts/doc_sync_check.py --base origin/dev
+   python3 scripts/ci/doc_sync_check.py --base origin/dev
    ```
 4. **Link Integrity & Automated Drift Verification Mandate:**
    All markdown links across `docs/` and `README.md` **MUST** resolve to valid files, all active CLI subcommands and manifest sections must be fully documented, and zero deprecated terms may be present. This is strictly verified via:
    ```bash
-   python3 scripts/verify_docs.py
+   python3 scripts/ci/verify_docs.py
    ```
 5. **No Single-Letter Variables Mandate (GL-0011):**
    All code snippets in updated documentation **MUST NOT** use single-letter variable names (`x`, `y`, `i`, `n`, `s`, `v`, `e`). Every identifier must be descriptive (`coord_x`, `coord_y`, `index`, `item_count`, `error_val`).
@@ -68,10 +68,10 @@ When `git diff origin/dev...HEAD` reveals modifications in any left-hand subsyst
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
 | **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/solix_scaffold.py`<br>`crates/solix-toolchain/assets/scripts/solix_build.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
 | **LSP & Formatting Subsystem**<br>`crates/solix-lsp/src/`<br>`crates/solix-toolchain/src/commands/(lsp\|fmt).rs` | `docs/wiki/commands/lsp.md`<br>`docs/wiki/commands/fmt.md` | `docs/spec/tools/lsp/protocol.md` | `docs/guide/editors_vscode.md` |
-| **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(pr_risk_audit\|prepare_release_train\|build_docs_site\|sync_github_wiki).py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/guidelines/pr-and-release-governance.md`<br>`docs/guidelines/branching-conventions.md`<br>`docs/guide/release.md` |
+| **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(ci\|docs\|release\|bench)/*.py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/guidelines/pr-and-release-governance.md`<br>`docs/guidelines/branching-conventions.md`<br>`docs/guide/release.md` |
 
 > [!NOTE]
-> User-facing documentation (`docs/guide/`, `docs/wiki/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository. [`scripts/build_docs_site.py`](../../../scripts/build_docs_site.py) compiles these files into the offline `solix wiki` bundle matching every binary release version, and optional one-way GitHub Wiki mirroring reads from this Git Single Source of Truth.
+> User-facing documentation (`docs/guide/`, `docs/wiki/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository. [`scripts/docs/build_docs_site.py`](../../../scripts/docs/build_docs_site.py) compiles these files into the offline `solix wiki` bundle matching every binary release version, and optional one-way GitHub Wiki mirroring reads from this Git Single Source of Truth.
 
 ---
 
@@ -84,8 +84,8 @@ flowchart TD
     DiffStep["git diff origin/dev...HEAD --name-only"] --> IdentifyStep["Identify Modified Subsystems"]
     IdentifyStep --> MatrixStep["Lookup in Trigger Matrix"]
     MatrixStep --> UpdateDocs["Update Affected Docs (Guide, Spec, Wiki, Architecture)"]
-    UpdateDocs --> RunSync["Run python3 scripts/doc_sync_check.py --base origin/dev"]
-    RunSync --> RunLinks["Run python3 scripts/verify_doc_links.py"]
+    UpdateDocs --> RunSync["Run python3 scripts/ci/doc_sync_check.py --base origin/dev"]
+    RunSync --> RunLinks["Run python3 scripts/ci/verify_doc_links.py"]
     RunLinks --> DoublePass["Run cargo test & strict cargo clippy"]
     DoublePass --> SubmitPr["Commit & Submit PR Targeting dev"]
 ```
@@ -104,13 +104,13 @@ Match each modified file against Section 3's Trigger Matrix. For example, if `cr
 
 ### Step 3: Run Automated Sync Checker
 ```bash
-python3 scripts/doc_sync_check.py --base origin/dev
-python3 scripts/doc_sync_check.py --all-docs
+python3 scripts/ci/doc_sync_check.py --base origin/dev
+python3 scripts/ci/doc_sync_check.py --all-docs
 ```
 
 ### Step 4: Verify Markdown Links
 ```bash
-python3 scripts/verify_doc_links.py
+python3 scripts/ci/verify_doc_links.py
 ```
 
 ### Step 5: Double Verification Pass

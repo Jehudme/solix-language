@@ -22,7 +22,7 @@ This specification mandates adherence to the **Conventional Commits v1.0.0** sta
 Any commit that violates this grammar halts the automated integration pipeline and **MUST NOT** be merged into protected integration (`dev`) or release (`master`) branches.
 
 ### 1.1 On-Demand Release Versioning & Bump Selection (`GL-0014`)
-Merged Conventional Commits accumulated on `dev` ahead of `master` determine the default SemVer bump calculated by [`scripts/prepare_release_train.py`](../../scripts/prepare_release_train.py) when [`release.yml`](../../.github/workflows/release.yml) runs:
+Merged Conventional Commits accumulated on `dev` ahead of `master` determine the default SemVer bump calculated by [`scripts/release/prepare_release_train.py`](../../scripts/release/prepare_release_train.py) when [`release.yml`](../../.github/workflows/release.yml) runs:
 * **Workspace + CLI Synchronization:** Even crates marked `publish = false` on crates.io (such as `crates/solix-toolchain`) participate in release version planning and `CHANGELOG.md` generation so CLI additions (like `solix wiki`), packaging scripts, and compiler/runtime updates release in lockstep.
 * **Manual Bump Selection:** Maintainers running [`release.yml`](../../.github/workflows/release.yml) via `workflow_dispatch` may select `auto` (derived from commits), `patch`, `minor`, `major`, or supply an exact `X.Y.Z` SemVer override.
 

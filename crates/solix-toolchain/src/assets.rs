@@ -477,7 +477,7 @@ pub fn resolve_wiki_docs_dir() -> Result<PathBuf> {
 
     bail!(
         "No offline wiki HTML documentation found for Solix v{}. \
-Run `python3 scripts/build_docs_site.py` before building or set SOLIX_WIKI_DIR.",
+Run `python3 scripts/docs/build_docs_site.py` before building or set SOLIX_WIKI_DIR.",
         env!("CARGO_PKG_VERSION")
     )
 }

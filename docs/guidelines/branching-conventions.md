@@ -27,7 +27,7 @@ All contributors and repository administrators **MUST** comply with the followin
 2. **Strict Up-to-Date Branch Protection (Zero Merge-Skew):** Repository rulesets on `dev` **MUST** enable *"Require branches to be up to date before merging"* so concurrent PRs are re-tested against the latest `dev` commit before landing.
 3. **Short-Lived Topic Branches:** Individual feature and bugfix branches **MUST** branch from `origin/dev` and stay short-lived (target lifecycle 1–3 business days).
 4. **Canonical Branch Naming Grammar:** Topic branch names **MUST** adhere to `<category>/<scope>-<short-description>` (`feat`, `fix`, `spec`, `refactor`, `docs`, `chore`, `test`, `milestone`).
-5. **Admin & CODEOWNER Approval:** Pull requests touching protected paths in `.github/CODEOWNERS` display a concise sensitive-paths notice (`scripts/pr_risk_audit.py`) and require maintainer (`@Jehudme`) approval before merging.
+5. **Admin & CODEOWNER Approval:** Pull requests touching protected paths in `.github/CODEOWNERS` display a concise sensitive-paths notice (`scripts/ci/pr_risk_audit.py`) and require maintainer (`@Jehudme`) approval before merging.
 6. **Immediate Post-Merge Branch Deletion:** Topic branches **MUST** be deleted after PR merge. Stale remote topic branches **MUST NOT** be retained.
 7. **No Rewriting Shared Trunk History:** Force-pushing (`git push --force`) to `master`, `dev`, or shared milestone branches is strictly prohibited. Force-pushing with lease (`--force-with-lease`) is allowed *only* on private unmerged topic branches during rebase.
 

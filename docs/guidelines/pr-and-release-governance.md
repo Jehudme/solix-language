@@ -31,7 +31,7 @@ All feature work, bug fixes, dependency bumps (`.github/dependabot.yml`), and do
 ### 1.2 On-Demand Release Workflow ([`.github/workflows/release.yml`](../../.github/workflows/release.yml))
 Direct contributor pushes and topic PRs into **`master`** are **STRICTLY PROHIBITED**.
 * Releases are triggered explicitly on demand via `workflow_dispatch` on [`release.yml`](../../.github/workflows/release.yml) with selectable bump strategy (`auto`, `patch`, `minor`, `major`) or an explicit SemVer override (`X.Y.Z`), plus an optional `dry_run` mode for workflow validation.
-* [`scripts/prepare_release_train.py`](../../scripts/prepare_release_train.py) computes the version bump from commits ahead of `master`, updates workspace manifests and changelogs (`Cargo.toml`, `Cargo.lock`, root & crate `CHANGELOG.md` files), runs post-bump workspace tests and `cargo package --no-verify` publishability checks, promotes `dev -> master` via `RELEASE_TOKEN`, tags `vX.Y.Z`, publishes crates in dependency order, builds cross-platform binaries/installers + bundled packages + offline `solix wiki`, runs same-host release benchmarks, publishes clean emoji-free release notes (skipping duplicate `artifacts/release_changelog.md` prepending in [`release.yml`](../../.github/workflows/release.yml) when `## Release Notes` is already present), mirrors GitHub Wiki, and syncs `master -> dev` via a `[skip ci]` pull request without re-running CI.
+* [`scripts/release/prepare_release_train.py`](../../scripts/release/prepare_release_train.py) computes the version bump from commits ahead of `master`, updates workspace manifests and changelogs (`Cargo.toml`, `Cargo.lock`, root & crate `CHANGELOG.md` files), runs post-bump workspace tests and `cargo package --no-verify` publishability checks, promotes `dev -> master` via `RELEASE_TOKEN`, tags `vX.Y.Z`, publishes crates in dependency order, builds cross-platform binaries/installers + bundled packages + offline `solix wiki`, runs same-host release and cross-language benchmarks via [`scripts/bench/solix_bench.py`](../../scripts/bench/solix_bench.py), publishes clean emoji-free release notes (skipping duplicate `artifacts/release_changelog.md` prepending in [`release.yml`](../../.github/workflows/release.yml) when `## Release Notes` is already present), mirrors GitHub Wiki, and syncs `master -> dev` via a `[skip ci]` pull request without re-running CI.
 
 ---
 
@@ -41,7 +41,7 @@ Editing CI workflows, engineering guidelines, build scripts, or runtime security
 
 ### 2.1 Protected Path Matrix (`.github/CODEOWNERS`)
 
-All sensitive categories emit a single **`sensitive`** label via [`scripts/pr_risk_audit.py`](../../scripts/pr_risk_audit.py):
+All sensitive categories emit a single **`sensitive`** label via [`scripts/ci/pr_risk_audit.py`](../../scripts/ci/pr_risk_audit.py):
 
 | Category | Protected Paths | Security Rationale |
 | :--- | :--- | :--- |
@@ -50,9 +50,9 @@ All sensitive categories emit a single **`sensitive`** label via [`scripts/pr_ri
 | **Supply Chain & Build Scripts** | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `cliff.toml`, `scripts/**`, `**/build.rs`, `libraries/*/scripts/**`, `crates/solix-toolchain/assets/**` | `build.rs` and Python build helpers execute during builds and packaging. |
 | **Runtime Security, Archives & FFI** | `crates/solix-common/src/project.rs`, `crates/solix-common/src/hash.rs`, `crates/solix-runtime/src/native/**`, `crates/solix-ffi/**` | Safeguards Zip-Slip archive checks, SHA-256 verification, and `unsafe` C-ABI boundaries. |
 
-### 2.2 Non-Blocking Auditor (`scripts/pr_risk_audit.py`)
-* [`scripts/pr_risk_audit.py`](../../scripts/pr_risk_audit.py) **MUST ALWAYS** exit `0` so valid improvements never fail CI solely for touching protected files.
-* When sensitive files change, the job attaches the single `sensitive` label, writes a concise `## Sensitive Paths Modified` table to `$GITHUB_STEP_SUMMARY` and PR comments, and avoids checking out untrusted fork code in privileged `pull_request_target` jobs.
+### 2.2 Non-Blocking Auditor (`scripts/ci/pr_risk_audit.py`)
+* [`scripts/ci/pr_risk_audit.py`](../../scripts/ci/pr_risk_audit.py) **MUST ALWAYS** exit `0` so valid improvements never fail CI solely for touching protected files.
+* When sensitive files change, the job attaches the single `sensitive` label and upserts a concise `## Sensitive Paths Modified` table; when subsequent PR commits revert all sensitive changes, CI automatically removes the `sensitive` label and deletes the sticky notice. Both `pr-risk-audit` and `pr-benchmark` avoid checking out untrusted fork code in privileged `pull_request_target` jobs.
 
 ---
 
@@ -69,5 +69,5 @@ Every PR targeting `dev`, push to `dev`, and scheduled weekly security run execu
 ## 4. Documentation Source-of-Truth & Versioned `solix wiki`
 
 User documentation (`docs/guide/`, `docs/wiki/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository (`GL-0013`).
-* Every `solix` release builds [`scripts/build_docs_site.py`](../../scripts/build_docs_site.py) to bundle static HTML + offline `search_index.js` directly inside `crates/solix-toolchain/assets/docs/` (serving `solix wiki` locally without internet or an HTTP daemon).
-* Optional one-way GitHub Wiki mirroring ([`scripts/sync_github_wiki.py`](../../scripts/sync_github_wiki.py)) runs during releases and injects a version header directing older-version users to their Git tag's `/docs` tree or local `solix wiki` command.
+* Every `solix` release builds [`scripts/docs/build_docs_site.py`](../../scripts/docs/build_docs_site.py) to bundle static HTML + offline `search_index.js` directly inside `crates/solix-toolchain/assets/docs/` (serving `solix wiki` locally without internet or an HTTP daemon).
+* Optional one-way GitHub Wiki mirroring ([`scripts/docs/sync_github_wiki.py`](../../scripts/docs/sync_github_wiki.py)) runs during releases and injects a version header directing older-version users to their Git tag's `/docs` tree or local `solix wiki` command.

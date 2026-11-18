@@ -233,6 +233,6 @@ Reviewers and documentation maintainers **MUST** enforce the following checklist
 - [ ] **Rustdoc Coverage:** All new or updated public items in Rust crates contain `///` doc comments with `# Examples` passing `cargo test --doc`.
 - [ ] **Clap Option Synchronization:** CLI option names, short aliases, types, and defaults match `clap` source definitions byte-for-byte.
 - [ ] **Diagnostic Code Match:** Error codes and messages match `miette` definitions in compiler crates.
-- [ ] **Automated Drift & Link Verification (`scripts/verify_docs.py`):** Passes `python3 scripts/verify_docs.py` with zero defects, verifying complete subcommand coverage, deprecated term absence, link integrity, and `manifest.toml` section completeness.
+- [ ] **Automated Drift & Link Verification (`scripts/ci/verify_docs.py`):** Passes `python3 scripts/ci/verify_docs.py` with zero defects, verifying complete subcommand coverage, deprecated term absence, link integrity, and `manifest.toml` section completeness.
 - [ ] **No Aspirational Claims:** Unimplemented syntax is strictly excluded from active guides and wiki pages.
 - [ ] **Archival Discipline:** Deprecated specifications are moved to `docs/archive/` with the mandatory `[!CAUTION]` alert banner.

@@ -135,7 +135,7 @@ jobs:
           fi
 
           mkdir -p staging-release-notes
-          python3 scripts/prepare_release_train.py \
+          python3 scripts/release/prepare_release_train.py \
             --base-ref origin/master \
             --head-ref origin/dev \
             --override "$OVERRIDE" \
@@ -166,7 +166,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: crates/solix-toolchain/assets/packages
-          key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/build_default_libraries.py') }}
+          key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
 
       - name: Install Linux system dependencies for post-bump check
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
@@ -178,10 +178,10 @@ jobs:
         env:
           BUNDLED_CACHE_HIT: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
         run: |
-          python3 scripts/build_docs_site.py
+          python3 scripts/docs/build_docs_site.py
           cargo build --bin solix
           if [ "$BUNDLED_CACHE_HIT" != "true" ]; then
-            python3 scripts/build_default_libraries.py
+            python3 scripts/release/build_default_libraries.py
           fi
           SOLIX_BIN="$(pwd)/target/debug/solix"
           export SOLIX_BIN
@@ -324,7 +324,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: crates/solix-toolchain/assets/packages
-          key: solix-bundled-release-${{ matrix.target }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/build_default_libraries.py') }}
+          key: solix-bundled-release-${{ matrix.target }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
 
       - name: Install Rust toolchain
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
@@ -362,7 +362,7 @@ jobs:
           SOLIX_TARGET_TRIPLE: ${{ matrix.target }}
         run: |
           cargo build --bin solix
-          python3 scripts/build_default_libraries.py --profiles release,debug
+          python3 scripts/release/build_default_libraries.py --profiles release,debug
 
       - name: Upload bundled packages artifact (${{ matrix.target }})
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -403,7 +403,7 @@ jobs:
 
       - name: Merge per-platform libraries into universal cross-platform archives
         run: |
-          python3 scripts/merge_bundled_packages.py \
+          python3 scripts/release/merge_bundled_packages.py \
             --input-dirs staging-bundled-libs/bundled-packages-* \
             --output-dir crates/solix-toolchain/assets/packages \
             --require-targets x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-msvc,x86_64-apple-darwin,aarch64-apple-darwin
@@ -521,7 +521,7 @@ jobs:
       - name: Build optimized Solix release binary and stage default libraries
         run: |
           cargo build --release --bin solix
-          python3 scripts/build_default_libraries.py --profiles release,debug --solix-binary target/release/solix
+          python3 scripts/release/build_default_libraries.py --profiles release,debug --solix-binary target/release/solix
 
       - name: Run same-host A/B benchmark suite against previous release binary
         env:
@@ -545,23 +545,25 @@ jobs:
           fi
 
           if [ -n "$PREV_BIN" ] && [ -x "$PREV_BIN" ]; then
-            python3 benchmarks/runner.py --pin-cpu --solix-bin "$PREV_BIN" --save-baseline staging-benchmarks/prev_baseline.json
-            python3 benchmarks/runner.py --pin-cpu --solix-bin target/release/solix --save-baseline staging-benchmarks/release_baseline.json
-            python3 benchmarks/compare_releases.py \
+            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin "$PREV_BIN" --solix-only --label "$PREV_TAG" --save-baseline staging-benchmarks/prev_baseline.json
+            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin target/release/solix --label "$CURRENT_TAG" --save-baseline staging-benchmarks/release_baseline.json
+            python3 scripts/bench/solix_bench.py compare \
               --previous staging-benchmarks/prev_baseline.json \
               --current staging-benchmarks/release_baseline.json \
               --current-tag "$CURRENT_TAG" \
               --previous-tag "$PREV_TAG" \
               --same-host \
+              --cross-language \
               --min-delta-ms 0.5 \
               --markdown-output staging-benchmarks/benchmark_comparison.md
           else
             echo "Previous Linux binary unavailable; running single-host baseline and historical comparison."
-            python3 benchmarks/runner.py --pin-cpu --solix-bin target/release/solix --save-baseline staging-benchmarks/release_baseline.json
-            python3 benchmarks/compare_releases.py \
+            python3 scripts/bench/solix_bench.py run --pin-cpu --solix-bin target/release/solix --label "$CURRENT_TAG" --save-baseline staging-benchmarks/release_baseline.json
+            python3 scripts/bench/solix_bench.py compare \
               --current staging-benchmarks/release_baseline.json \
               --download-previous \
               --current-tag "$CURRENT_TAG" \
+              --cross-language \
               --min-delta-ms 0.5 \
               --markdown-output staging-benchmarks/benchmark_comparison.md
           fi
@@ -705,7 +707,7 @@ jobs:
 
       - name: Stage versioned offline solix wiki documentation portal
         shell: bash
-        run: python3 scripts/build_docs_site.py
+        run: python3 scripts/docs/build_docs_site.py
 
       - name: Build artifacts
         shell: bash
@@ -943,7 +945,7 @@ jobs:
             echo "GitHub Wiki git remote is not initialized yet; skipping wiki mirror."
             exit 0
           fi
-          python3 scripts/sync_github_wiki.py --output "$WIKI_DIR" --version "$VERSION_CLEAN"
+          python3 scripts/docs/sync_github_wiki.py --output "$WIKI_DIR" --version "$VERSION_CLEAN"
           cd "$WIKI_DIR"
           git config user.name "solix-release-bot"
           git config user.email "release-bot@users.noreply.github.com"

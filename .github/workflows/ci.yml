@@ -55,7 +55,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/risk-audit"
           gh api --paginate "repos/${REPO_NAME}/pulls/${PR_NUMBER}/files" > "$RUNNER_TEMP/risk-audit/changed_files.json"
-          python3 scripts/pr_risk_audit.py \
+          python3 scripts/ci/pr_risk_audit.py \
             --files-json "$RUNNER_TEMP/risk-audit/changed_files.json" \
             --json-out "$RUNNER_TEMP/risk-audit/report.json" \
             --markdown-out "$RUNNER_TEMP/risk-audit/advisory.md" \
@@ -78,12 +78,7 @@ jobs:
           advisory = (out_dir / "advisory.md").read_text(encoding="utf-8")
           repo = os.environ["REPO_NAME"]
           pr_num = os.environ["PR_NUMBER"]
-
-          for label in report.get("labels", []):
-              subprocess.run(
-                  ["gh", "pr", "edit", pr_num, "--repo", repo, "--add-label", label],
-                  check=False,
-              )
+          has_sensitive = bool(report.get("has_sensitive_changes"))
 
           comments_raw = subprocess.check_output(
               ["gh", "api", "--paginate", f"repos/{repo}/issues/{pr_num}/comments"],
@@ -96,7 +91,12 @@ jobs:
                   existing_id = comment["id"]
                   break
 
-          if report.get("has_sensitive_changes"):
+          if has_sensitive:
+              for label in report.get("labels", []):
+                  subprocess.run(
+                      ["gh", "pr", "edit", pr_num, "--repo", repo, "--add-label", label],
+                      check=False,
+                  )
               if existing_id:
                   subprocess.run(
                       ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={advisory}"],
@@ -107,11 +107,16 @@ jobs:
                       ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{pr_num}/comments", "-f", f"body={advisory}"],
                       check=True,
                   )
-          elif existing_id:
+          else:
               subprocess.run(
-                  ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={advisory}"],
-                  check=True,
+                  ["gh", "pr", "edit", pr_num, "--repo", repo, "--remove-label", "sensitive"],
+                  check=False,
               )
+              if existing_id:
+                  subprocess.run(
+                      ["gh", "api", "--method", "DELETE", f"repos/{repo}/issues/comments/{existing_id}"],
+                      check=False,
+                  )
           PY
 
   security-audit:
@@ -230,14 +235,14 @@ jobs:
           else
             BASE_REF="HEAD~1"
           fi
-          python3 scripts/doc_sync_check.py --base "$BASE_REF"
-          python3 scripts/doc_sync_check.py --all-docs
+          python3 scripts/ci/doc_sync_check.py --base "$BASE_REF"
+          python3 scripts/ci/doc_sync_check.py --all-docs
 
       - name: Verify documentation drift, link integrity & build offline solix wiki portal
         run: |
-          python3 scripts/verify_docs.py
-          python3 scripts/verify_doc_links.py
-          python3 scripts/build_docs_site.py
+          python3 scripts/ci/verify_docs.py
+          python3 scripts/ci/verify_doc_links.py
+          python3 scripts/docs/build_docs_site.py
 
       - name: Run Python governance, wiki & security unit tests
         run: python3 -m unittest discover -s scripts/tests -v
@@ -299,21 +304,21 @@ jobs:
           command -v lua >/dev/null 2>&1 || brew install lua
 
       - name: Stage offline solix wiki documentation portal
-        run: python3 scripts/build_docs_site.py
+        run: python3 scripts/docs/build_docs_site.py
 
       - name: Restore cached bundled first-party libraries
         id: bundled-libs-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: crates/solix-toolchain/assets/packages
-          key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/build_default_libraries.py') }}
+          key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
 
       - name: Build solix toolchain binary
         run: cargo build --bin solix
 
       - name: Build and stage default first-party libraries
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
-        run: python3 scripts/build_default_libraries.py
+        run: python3 scripts/release/build_default_libraries.py
 
       - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
         shell: bash
@@ -358,7 +363,7 @@ jobs:
             SOLIX_BIN="$(pwd)/target/debug/solix"
           fi
           export SOLIX_BIN
-          python3 benchmarks/runner.py --verify
+          python3 scripts/bench/solix_bench.py verify
 
       - name: List installed packages and verify example application compilation
         shell: bash
@@ -379,3 +384,134 @@ jobs:
       - name: Verify stripped release build on dev push
         if: runner.os == 'Linux' && github.event_name == 'push'
         run: cargo build --release --bin solix
+
+  pr-benchmark:
+    name: PR Performance & Cross-Language Benchmark
+    if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: pr-bench
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev lua5.4 luajit gcc
+
+      - name: Build release Solix binary and stage bundled libraries
+        run: |
+          cargo build --release --bin solix
+          python3 scripts/release/build_default_libraries.py --profiles release,debug --solix-binary target/release/solix
+
+      - name: Benchmark PR head vs latest GitHub release on same host
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr-bench" "$RUNNER_TEMP/prev_release"
+          LATEST_TAG=$(gh release list --exclude-drafts --limit 5 --json tagName --jq '.[0].tagName // empty')
+          PREV_BIN=""
+
+          if [ -n "$LATEST_TAG" ]; then
+            if gh release download "$LATEST_TAG" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.xz" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.gz" --dir "$RUNNER_TEMP/prev_release"; then
+              ARCHIVE=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f \( -name '*.tar.xz' -o -name '*.tar.gz' \) | head -n 1 || true)
+              if [ -n "$ARCHIVE" ]; then
+                tar -xf "$ARCHIVE" -C "$RUNNER_TEMP/prev_release"
+                PREV_BIN=$(find "$RUNNER_TEMP/prev_release" -type f -name 'solix' | head -n 1 || true)
+              fi
+            fi
+          fi
+
+          python3 scripts/bench/solix_bench.py run \
+            --pin-cpu \
+            --warmup 2 \
+            --iterations 5 \
+            --solix-bin target/release/solix \
+            --label "PR #${PR_NUMBER}" \
+            --save-baseline "$RUNNER_TEMP/pr-bench/pr_baseline.json"
+
+          if [ -n "$PREV_BIN" ] && [ -x "$PREV_BIN" ]; then
+            python3 scripts/bench/solix_bench.py run \
+              --pin-cpu \
+              --warmup 2 \
+              --iterations 5 \
+              --solix-bin "$PREV_BIN" \
+              --solix-only \
+              --label "$LATEST_TAG" \
+              --save-baseline "$RUNNER_TEMP/pr-bench/prev_baseline.json"
+
+            python3 scripts/bench/solix_bench.py compare \
+              --previous "$RUNNER_TEMP/pr-bench/prev_baseline.json" \
+              --current "$RUNNER_TEMP/pr-bench/pr_baseline.json" \
+              --previous-tag "$LATEST_TAG" \
+              --current-tag "PR #${PR_NUMBER}" \
+              --same-host \
+              --cross-language \
+              --min-delta-ms 0.5 \
+              --markdown-output "$RUNNER_TEMP/pr-bench/report.md"
+          else
+            python3 scripts/bench/solix_bench.py compare \
+              --current "$RUNNER_TEMP/pr-bench/pr_baseline.json" \
+              --current-tag "PR #${PR_NUMBER}" \
+              --no-fallback \
+              --cross-language \
+              --markdown-output "$RUNNER_TEMP/pr-bench/report.md"
+          fi
+
+      - name: Post or update sticky PR benchmark comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          report_md = (Path(os.environ["RUNNER_TEMP"]) / "pr-bench" / "report.md").read_text(encoding="utf-8")
+          body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report\n\n{report_md}"
+          repo = os.environ["REPO_NAME"]
+          pr_num = os.environ["PR_NUMBER"]
+
+          comments_raw = subprocess.check_output(
+              ["gh", "api", "--paginate", f"repos/{repo}/issues/{pr_num}/comments"],
+              text=True,
+          )
+          comments = json.loads(comments_raw)
+          existing_id = None
+          for comment in comments:
+              if "<!-- solix-pr-benchmark -->" in (comment.get("body") or ""):
+                  existing_id = comment["id"]
+                  break
+
+          if existing_id:
+              subprocess.run(
+                  ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={body}"],
+                  check=True,
+              )
+          else:
+              subprocess.run(
+                  ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{pr_num}/comments", "-f", f"body={body}"],
+                  check=True,
+              )
+          PY

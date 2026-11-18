@@ -18,7 +18,7 @@ fn get_workspace_root() -> PathBuf {
 #[test]
 fn test_compare_releases_table_generation() {
     let workspace_root = get_workspace_root();
-    let compare_script = workspace_root.join("benchmarks/compare_releases.py");
+    let compare_script = workspace_root.join("scripts/bench/solix_bench.py");
     let temporary_directory =
         tempfile::tempdir().expect("Temporary directory creation must succeed");
     let current_baseline_path = temporary_directory.path().join("current_baseline.json");
@@ -57,6 +57,7 @@ fn test_compare_releases_table_generation() {
 
     let command_status = Command::new("python3")
         .arg(&compare_script)
+        .arg("compare")
         .arg("--current")
         .arg(&current_baseline_path)
         .arg("--previous")
@@ -120,7 +121,7 @@ fn test_compare_releases_table_generation() {
 #[test]
 fn test_compare_releases_regression_detection() {
     let workspace_root = get_workspace_root();
-    let compare_script = workspace_root.join("benchmarks/compare_releases.py");
+    let compare_script = workspace_root.join("scripts/bench/solix_bench.py");
     let temporary_directory =
         tempfile::tempdir().expect("Temporary directory creation must succeed");
     let current_baseline_path = temporary_directory.path().join("regressed_current.json");
@@ -152,6 +153,7 @@ fn test_compare_releases_regression_detection() {
 
     let command_status = Command::new("python3")
         .arg(&compare_script)
+        .arg("compare")
         .arg("--current")
         .arg(&current_baseline_path)
         .arg("--previous")
@@ -173,7 +175,7 @@ fn test_compare_releases_regression_detection() {
 #[test]
 fn test_compare_releases_inject_notes() {
     let workspace_root = get_workspace_root();
-    let compare_script = workspace_root.join("benchmarks/compare_releases.py");
+    let compare_script = workspace_root.join("scripts/bench/solix_bench.py");
     let temporary_directory =
         tempfile::tempdir().expect("Temporary directory creation must succeed");
     let current_baseline_path = temporary_directory.path().join("current.json");
@@ -208,6 +210,7 @@ fn test_compare_releases_inject_notes() {
 
     let command_status = Command::new("python3")
         .arg(&compare_script)
+        .arg("compare")
         .arg("--current")
         .arg(&current_baseline_path)
         .arg("--previous")
@@ -232,7 +235,7 @@ fn test_compare_releases_inject_notes() {
 #[test]
 fn test_compare_releases_initial_baseline_mode() {
     let workspace_root = get_workspace_root();
-    let compare_script = workspace_root.join("benchmarks/compare_releases.py");
+    let compare_script = workspace_root.join("scripts/bench/solix_bench.py");
     let temporary_directory =
         tempfile::tempdir().expect("Temporary directory creation must succeed");
     let current_baseline_path = temporary_directory.path().join("current.json");
@@ -254,6 +257,7 @@ fn test_compare_releases_initial_baseline_mode() {
 
     let command_status = Command::new("python3")
         .arg(&compare_script)
+        .arg("compare")
         .arg("--current")
         .arg(&current_baseline_path)
         .arg("--current-tag")
@@ -278,7 +282,7 @@ fn test_compare_releases_initial_baseline_mode() {
 #[test]
 fn test_compare_releases_ignores_submillisecond_noise() {
     let workspace_root = get_workspace_root();
-    let compare_script = workspace_root.join("benchmarks/compare_releases.py");
+    let compare_script = workspace_root.join("scripts/bench/solix_bench.py");
     let temporary_directory =
         tempfile::tempdir().expect("Temporary directory creation must succeed");
     let current_baseline_path = temporary_directory.path().join("current.json");
@@ -309,6 +313,7 @@ fn test_compare_releases_ignores_submillisecond_noise() {
 
     let command_status = Command::new("python3")
         .arg(&compare_script)
+        .arg("compare")
         .arg("--current")
         .arg(&current_baseline_path)
         .arg("--previous")
@@ -332,14 +337,14 @@ fn test_compare_releases_ignores_submillisecond_noise() {
 #[test]
 fn test_benchmark_runner_verify_command() {
     let workspace_root = get_workspace_root();
-    let runner_script = workspace_root.join("benchmarks/runner.py");
+    let runner_script = workspace_root.join("scripts/bench/solix_bench.py");
 
     let command_output = Command::new("python3")
         .arg(&runner_script)
-        .arg("--verify")
+        .arg("verify")
         .current_dir(&workspace_root)
         .output()
-        .expect("Executing benchmarks/runner.py --verify must succeed");
+        .expect("Executing scripts/bench/solix_bench.py verify must succeed");
 
     assert!(
         command_output.status.success(),

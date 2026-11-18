@@ -160,7 +160,7 @@ def install_library_archive(
 
 
 def main() -> None:
-    workspace_root = Path(__file__).resolve().parent.parent
+    workspace_root = Path(__file__).resolve().parent.parent.parent
     default_libraries_dir = workspace_root / "libraries"
     default_output_dir = workspace_root / "crates" / "solix-toolchain" / "assets" / "packages"
 
