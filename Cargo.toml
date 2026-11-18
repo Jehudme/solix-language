@@ -51,7 +51,7 @@ tower-lsp = "0.20"
 tokio = { version = "1.54.1", features = ["full"] }
 
 # Compiler & Lexer utilities
-compact_str = { version = "0.8", features = ["serde"] }
+compact_str = { version = "0.10", features = ["serde"] }
 unicode-ident = "1.0"
 
 # Testing utilities
