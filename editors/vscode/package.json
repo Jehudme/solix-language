@@ -289,15 +289,15 @@
         "package": "vsce package --no-dependencies"
     },
     "dependencies": {
-        "vscode-languageclient": "^9.0.1"
+        "vscode-languageclient": "^11.0.0"
     },
     "devDependencies": {
-        "@types/node": "^20.11.0",
+        "@types/node": "^26.6.6",
         "@types/vscode": "^1.85.0",
-        "@vscode/test-electron": "^2.4.1",
-        "@vscode/vsce": "^3.2.1",
+        "@vscode/test-electron": "^3.1.0",
+        "@vscode/vsce": "^4.1.0",
         "esbuild": "^0.28.2",
-        "typescript": "^5.3.3",
+        "typescript": "^7.0.2",
         "vscode-tmgrammar-test": "^0.1.2"
     }
 }
