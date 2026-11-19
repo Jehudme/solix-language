@@ -53,6 +53,7 @@ impl CompilationPhase for AstInlinerPhase {
         let mut inlinable_functions: HashMap<String, InlinableFunctionInfo> = HashMap::new();
 
         let mut free_func_counts: HashMap<&str, usize> = HashMap::new();
+        let mut class_name_counts: HashMap<String, usize> = HashMap::new();
         for (source_index, ast_option) in context.ast.iter().enumerate() {
             let source_id = source_index as u16;
             if context.is_external_source(source_id) {
@@ -70,6 +71,13 @@ impl CompilationPhase for AstInlinerPhase {
                         [method.name_span.start as usize..method.name_span.end as usize];
                     *free_func_counts.entry(name).or_insert(0) += 1;
                 }
+                if let Declaration::Class(class_decl) = declaration
+                    && source_index < context.sources.len()
+                {
+                    let class_name = &context.sources[source_index]
+                        [class_decl.name_span.start as usize..class_decl.name_span.end as usize];
+                    *class_name_counts.entry(class_name.to_string()).or_insert(0) += 1;
+                }
             }
         }
 
@@ -82,11 +90,12 @@ impl CompilationPhase for AstInlinerPhase {
                 Some(ast_ref) => ast_ref,
                 None => continue,
             };
+            let source_code = &context.sources[source_index];
             for declaration in &ast.declarations {
                 match declaration {
                     Declaration::Method(method) => {
                         let method_name = if source_index < context.sources.len() {
-                            &context.sources[source_index]
+                            &source_code
                                 [method.name_span.start as usize..method.name_span.end as usize]
                         } else {
                             ""
@@ -97,6 +106,7 @@ impl CompilationPhase for AstInlinerPhase {
                         try_register_inlinable_method(
                             method,
                             None,
+                            None,
                             inline_threshold,
                             &context.sources,
                             &mut inlinable_functions,
@@ -105,11 +115,72 @@ impl CompilationPhase for AstInlinerPhase {
                     Declaration::Class(class_decl) => {
                         let is_generic_class = !class_decl.generic_params.is_empty();
                         let class_name = if source_index < context.sources.len() {
-                            let source = &context.sources[source_index];
-                            &source[class_decl.name_span.start as usize
+                            &source_code[class_decl.name_span.start as usize
                                 ..class_decl.name_span.end as usize]
                         } else {
                             ""
+                        };
+
+                        let fully_qualified_class = context
+                            .binding_artifacts
+                            .as_ref()
+                            .and_then(|artifacts| {
+                                artifacts
+                                    .symbol_table
+                                    .symbols
+                                    .iter()
+                                    .find(|entry| {
+                                        entry.span == class_decl.span
+                                            || (entry.source_id == source_id
+                                                && entry.name == class_name)
+                                    })
+                                    .map(|entry| entry.fully_qualified_name.clone())
+                            })
+                            .unwrap_or_else(|| {
+                                let file_package = ast
+                                    .package
+                                    .as_ref()
+                                    .map(|package_decl| {
+                                        package_decl
+                                            .path
+                                            .iter()
+                                            .map(|span| {
+                                                &source_code[span.start as usize..span.end as usize]
+                                            })
+                                            .filter(|segment| !segment.is_empty())
+                                            .collect::<Vec<_>>()
+                                            .join("::")
+                                    })
+                                    .unwrap_or_default();
+                                let decl_namespace = class_decl
+                                    .namespace_path
+                                    .iter()
+                                    .map(|span| {
+                                        &source_code[span.start as usize..span.end as usize]
+                                    })
+                                    .filter(|segment| !segment.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("::");
+                                let effective_package = if file_package.is_empty() {
+                                    decl_namespace
+                                } else if decl_namespace.is_empty() {
+                                    file_package
+                                } else {
+                                    format!("{file_package}::{decl_namespace}")
+                                };
+                                if effective_package.is_empty() {
+                                    class_name.to_string()
+                                } else {
+                                    format!("{effective_package}::{class_name}")
+                                }
+                            });
+
+                        let is_unique_class_name =
+                            class_name_counts.get(class_name).copied().unwrap_or(0) <= 1;
+                        let simple_fallback = if is_unique_class_name {
+                            Some(class_name)
+                        } else {
+                            None
                         };
 
                         let mut method_counts: HashMap<&str, usize> = HashMap::new();
@@ -117,8 +188,7 @@ impl CompilationPhase for AstInlinerPhase {
                             if let ClassMember::Method(method) = member
                                 && source_index < context.sources.len()
                             {
-                                let name = &context.sources[source_index][method.name_span.start
-                                    as usize
+                                let name = &source_code[method.name_span.start as usize
                                     ..method.name_span.end as usize];
                                 *method_counts.entry(name).or_insert(0) += 1;
                             }
@@ -127,7 +197,7 @@ impl CompilationPhase for AstInlinerPhase {
                         for member in &class_decl.members {
                             if let ClassMember::Method(method) = member {
                                 let method_name = if source_index < context.sources.len() {
-                                    &context.sources[source_index][method.name_span.start as usize
+                                    &source_code[method.name_span.start as usize
                                         ..method.name_span.end as usize]
                                 } else {
                                     ""
@@ -143,7 +213,8 @@ impl CompilationPhase for AstInlinerPhase {
                                 }
                                 try_register_inlinable_method(
                                     method,
-                                    Some(class_name),
+                                    Some(&fully_qualified_class),
+                                    simple_fallback,
                                     inline_threshold,
                                     &context.sources,
                                     &mut inlinable_functions,
@@ -283,6 +354,7 @@ fn try_flatten_guard_returns(statements: &[Statement]) -> Option<Expression> {
 fn try_register_inlinable_method(
     method: &MethodDeclaration,
     enclosing_class: Option<&str>,
+    simple_class_fallback: Option<&str>,
     inline_threshold: usize,
     sources: &[String],
     inlinable_functions: &mut HashMap<String, InlinableFunctionInfo>,
@@ -402,9 +474,15 @@ fn try_register_inlinable_method(
     };
 
     if let Some(class_name) = enclosing_class {
-        let qualified_name = format!("{class_name}::{method_name}");
+        let qualified_colon = format!("{class_name}::{method_name}");
+        let qualified_dot = qualified_colon.replace("::", ".");
         if method.modifiers.contains(&Modifier::Static) {
-            inlinable_functions.insert(qualified_name, info);
+            inlinable_functions.insert(qualified_colon.clone(), info.clone());
+            inlinable_functions.insert(qualified_dot, info.clone());
+            if let Some(simple_class) = simple_class_fallback {
+                let simple_qualified = format!("{simple_class}::{method_name}");
+                inlinable_functions.insert(simple_qualified, info);
+            }
         } else {
             // Non-virtual non-override instance method: bind "this" as parameter 0
             // Only inline if return type is primitive non-void and body accesses "this"
@@ -432,7 +510,12 @@ fn try_register_inlinable_method(
                 instance_info
                     .parameter_types
                     .insert(0, method.return_type.clone());
-                inlinable_functions.insert(qualified_name, instance_info);
+                inlinable_functions.insert(qualified_colon.clone(), instance_info.clone());
+                inlinable_functions.insert(qualified_dot, instance_info.clone());
+                if let Some(simple_class) = simple_class_fallback {
+                    let simple_qualified = format!("{simple_class}::{method_name}");
+                    inlinable_functions.insert(simple_qualified, instance_info);
+                }
             }
         }
     } else {
@@ -1884,42 +1967,108 @@ fn transform_expression(
                     let member_name = &context.sources[member_source_index]
                         [member_span.start as usize..member_span.end as usize];
 
-                    let obj_source_index = object.span().id as usize;
-                    let obj_name = if obj_source_index < context.sources.len() {
-                        &context.sources[obj_source_index]
-                            [object.span().start as usize..object.span().end as usize]
+                    // Priority 1: Check resolved_symbols from binder
+                    let resolved_target =
+                        context.binding_artifacts.as_ref().and_then(|artifacts| {
+                            artifacts
+                                .resolved_symbols
+                                .get(member_span)
+                                .or_else(|| artifacts.resolved_symbols.get(&callee.span()))
+                                .and_then(|&symbol_id| artifacts.symbol_table.get_symbol(symbol_id))
+                                .and_then(|method_symbol| {
+                                    let parent_id = method_symbol.parent_symbol?;
+                                    let parent_class =
+                                        artifacts.symbol_table.get_symbol(parent_id)?;
+                                    let fully_qualified = format!(
+                                        "{}::{}",
+                                        parent_class.fully_qualified_name, method_symbol.name
+                                    );
+                                    let colon_target = fully_qualified.replace('.', "::");
+                                    let dot_target = fully_qualified.replace("::", ".");
+                                    if inlinable_functions.contains_key(&colon_target) {
+                                        Some(colon_target)
+                                    } else if inlinable_functions.contains_key(&dot_target) {
+                                        Some(dot_target)
+                                    } else if inlinable_functions.contains_key(&fully_qualified) {
+                                        Some(fully_qualified)
+                                    } else {
+                                        None
+                                    }
+                                })
+                        });
+
+                    if let Some(target_key) = resolved_target {
+                        let has_receiver = inlinable_functions
+                            .get(&target_key)
+                            .map(|info| info.has_this_receiver)
+                            .unwrap_or(false);
+                        if has_receiver {
+                            (Some(target_key), Some((**object).clone()))
+                        } else {
+                            (Some(target_key), None)
+                        }
                     } else {
-                        ""
-                    };
+                        let obj_source_index = object.span().id as usize;
+                        let obj_name = if obj_source_index < context.sources.len() {
+                            &context.sources[obj_source_index]
+                                [object.span().start as usize..object.span().end as usize]
+                        } else {
+                            ""
+                        };
 
-                    let static_qualified = format!("{obj_name}::{member_name}");
-                    if let Some(target_info) = inlinable_functions.get(&static_qualified)
-                        && !target_info.has_this_receiver
-                    {
-                        (Some(static_qualified), None)
-                    } else {
-                        // Check if object is an instance with a known Class type
-                        let obj_type = context
-                            .binding_artifacts
-                            .as_ref()
-                            .and_then(|artifacts| artifacts.node_types.get(&object.span()))
-                            .cloned();
+                        let static_qualified = format!("{obj_name}::{member_name}");
+                        let colon_static = static_qualified.replace('.', "::");
+                        if let Some(target_info) = inlinable_functions
+                            .get(&colon_static)
+                            .or_else(|| inlinable_functions.get(&static_qualified))
+                            && !target_info.has_this_receiver
+                        {
+                            let matched_key = if inlinable_functions.contains_key(&colon_static) {
+                                colon_static
+                            } else {
+                                static_qualified
+                            };
+                            (Some(matched_key), None)
+                        } else {
+                            // Check if object is an instance with a known Class type
+                            let obj_type = context
+                                .binding_artifacts
+                                .as_ref()
+                                .and_then(|artifacts| artifacts.node_types.get(&object.span()))
+                                .cloned();
 
-                        if let Some(Type::Class { symbol_name, .. }) = obj_type {
-                            let base_class = symbol_name.split('<').next().unwrap_or(&symbol_name);
-                            let simple_class =
-                                base_class.rsplit(['.', ':']).next().unwrap_or(base_class);
+                            if let Some(Type::Class { symbol_name, .. }) = obj_type {
+                                let base_class =
+                                    symbol_name.split('<').next().unwrap_or(&symbol_name);
+                                let colon_base = base_class.replace('.', "::");
+                                let simple_class =
+                                    base_class.rsplit(['.', ':']).next().unwrap_or(base_class);
 
-                            let instance_qualified = format!("{simple_class}::{member_name}");
-                            if let Some(target_info) = inlinable_functions.get(&instance_qualified)
-                                && target_info.has_this_receiver
-                            {
-                                (Some(instance_qualified), Some((**object).clone()))
+                                let colon_instance = format!("{colon_base}::{member_name}");
+                                let fqn_instance = format!("{base_class}::{member_name}");
+                                let simple_instance = format!("{simple_class}::{member_name}");
+
+                                if let Some(target_info) = inlinable_functions
+                                    .get(&colon_instance)
+                                    .or_else(|| inlinable_functions.get(&fqn_instance))
+                                    .or_else(|| inlinable_functions.get(&simple_instance))
+                                    && target_info.has_this_receiver
+                                {
+                                    let matched_key =
+                                        if inlinable_functions.contains_key(&colon_instance) {
+                                            colon_instance
+                                        } else if inlinable_functions.contains_key(&fqn_instance) {
+                                            fqn_instance
+                                        } else {
+                                            simple_instance
+                                        };
+                                    (Some(matched_key), Some((**object).clone()))
+                                } else {
+                                    (None, None)
+                                }
                             } else {
                                 (None, None)
                             }
-                        } else {
-                            (None, None)
                         }
                     }
                 } else {
