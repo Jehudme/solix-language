@@ -22,5 +22,5 @@ Solix documentation is organized into four user-facing pillars plus contributor 
 
 - **Deterministic Memory Safety Without GC Pauses:** Compile-time ARC tracking, immediate segregated free-list recycling, RAII destructors (`~ClassName()`), `weak` cycle breaking, and a synchronous Bacon & Rajan cycle collector.
 - **64-Bit Register Virtual Machine:** Fixed-width 8-byte instructions with sliding register windows, superinstructions, dynamic quickening, and zero-cost table-driven exception unwinding.
-- **Native Rust & C Interoperability:** Safe `solix-ffi` C-ABI bridges packaged cleanly inside multi-platform `.slxarc` archives.
-- **Integrated Toolchain:** A single `solix` CLI handles project scaffolding, compilation, builds, execution, packaging, LSP 3.17 IDE intelligence, DAP debugging, and this offline documentation portal (`solix wiki`).
+- **Native C/C++ & Rust Interoperability:** Safe C-ABI FFI SDKs (`ffi/c` `solix::ffi` and `ffi/rust` `solix-ffi`) with dual-mode CMake/Cargo builds packaged cleanly inside multi-platform `.slxarc` archives ([FFI Wiki](wiki/ffi/README.md)).
+- **Integrated Toolchain:** A single `solix` CLI handles project scaffolding (`solix new`, `solix new native`), pure-Rust declarative builds (`manifest.yaml`), execution, packaging, LSP 3.17 IDE intelligence, DAP debugging, and this offline documentation portal (`solix wiki`).

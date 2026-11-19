@@ -28,9 +28,11 @@ The Solix toolchain provides a unified command-line executable (`solix`) for pro
 
 ## Command Reference Sections
 
-* [**`compile` & `build`**](compile-and-build.md): Standalone file compilation, optimization profiles, and project archive build orchestration (`manifest.toml`).
+* [**`compile` & `build`**](compile-and-build.md): Standalone file compilation, optimization profiles, and declarative `manifest.yaml` build orchestration.
 * [**`run` & `info`**](run-and-info.md): Executing bytecode containers, instant source execution, guest argument passing, and container inspection/disassembly.
-* [**Package Management Commands**](package-commands.md): `solix new`, `solix install`, `solix reinstall`, `solix uninstall`, and `solix list`.
+* [**Package & Scaffolding Commands**](package-commands.md): `solix new`, `solix new native`, `solix install`, `solix uninstall`, and `solix list`.
+* [**`manifest.yaml` Wiki**](../manifest.md): Complete guide to YAML anchors, self-contained profiles, `platforms`, hooks, and `natives`.
+* [**FFI SDK Wiki**](../ffi/README.md): C/C++ (`solix::ffi`) and Rust (`solix-ffi`) native bridge APIs.
 * [**`clean` Command**](../../spec/tools/cli/clean.md): Cleaning project build artifacts (`build/`) and intermediate caches (`build/.cache/`).
 * [**Language Server (`lsp`)**](lsp.md): Official LSP 3.17 stdio server integration with editor engines.
 * [**Debug Adapter (`dap`)**](dap.md): Official Debug Adapter Protocol integration for interactive debugging.

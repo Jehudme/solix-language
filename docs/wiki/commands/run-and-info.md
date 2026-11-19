@@ -14,7 +14,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 * `<binaries...>`: One or more target binary files (`.slxb`), project archives (`.slxarc`), or raw source files (`.slx`).
 * `-l, --lib <path>`: External library binary or native shared object (`.so`, `.dll`, `.dylib`) to link (can be repeated).
 * `-e, --entry <symbol>`: Overrides application entry point method [default: `Main::main`].
-* `--test`: Executes test entry point defined in archive `manifest.toml` (`[entrypoints].test`).
+* `--test`: Executes test entry point defined in archive `manifest.yaml` (`profiles.test.entrypoint`, or legacy `[entrypoints].test`).
 * `-p, --profile <profile>`: Target build profile to execute (`release`, `debug`, `test`).
 * `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
 * `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`].

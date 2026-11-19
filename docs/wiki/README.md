@@ -27,12 +27,21 @@ All built-in primitive scalar and structural types, memory layouts, ranges, and 
 
 ### 3. [CLI Commands & Tooling (`commands/`)](commands/README.md)
 Comprehensive flag descriptions, usage syntax, and output options:
-* [**`compile` & `build`**](commands/compile-and-build.md): Compiling standalone files and orchestrating multi-language projects into `.slxb` and `.slxarc`.
+* [**`compile` & `build`**](commands/compile-and-build.md): Compiling standalone files and orchestrating multi-language `manifest.yaml` projects into `.slxb` and `.slxarc`.
 * [**`run` & `info`**](commands/run-and-info.md): Executing bytecode containers and inspecting binary sections, disassemblies, and metadata.
-* [**Package Management Commands**](commands/package-commands.md): `solix new`, `solix install`, `solix uninstall`, and `solix list`.
+* [**Package & Scaffolding Commands**](commands/package-commands.md): `solix new`, `solix new native`, `solix install`, `solix uninstall`, and `solix list`.
 
 ### 4. [Language Keywords Dictionary (`keywords/`)](keywords/README.md)
 Alphabetical reference for all 45+ reserved language keywords across control flow, declarations, modifiers, and expressions.
 
 ### 5. [Lexical Cheat Sheet](lexical.md)
 Tokenization, numeric literals, escape sequences, operators, and comment rules.
+
+### 6. [`manifest.yaml` Project Manifest Reference](manifest.md)
+Declarative `manifest.yaml` schema, reusable `vars:` YAML anchors/merge keys, zero-inheritance profiles, OS-to-all-architectures `platforms` expansion, `pre_compile`/`post_compile` hooks, and auto-detected `natives`.
+
+### 7. [Foreign Function Interface (FFI) SDKs (`ffi/`)](ffi/README.md)
+Complete C-ABI, struct, macro, and dual-mode native library wiki:
+* [**FFI Overview & ABI Types**](ffi/README.md): `SolixCValue`, type tags, array element tags, `SolixVmContext` magic, and dual-mode compilation flags.
+* [**C & C++ SDK Reference (`ffi/c`, `solix::ffi`)**](ffi/c-cpp-sdk.md): `solix_ffi.h`, `solix_cvalue_*`, `solix_vm_*`, `solix_vm_set_error`, `SOLIX_REGISTER_MODULE`, and `SOLIX_EXPORT_NATIVES_*`.
+* [**Rust SDK Reference (`ffi/rust`, `solix-ffi`)**](ffi/rust-sdk.md): `SolixCValue`, `SolixVmContext`, `NativeRegistry`, and `solix_export!`.

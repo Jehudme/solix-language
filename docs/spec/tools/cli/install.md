@@ -16,7 +16,7 @@ solix install [<path>] [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `[path]` | Path | Optional | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.toml`. Required unless `--bundled` or `--vscode` is specified. |
+| `[path]` | Path | Optional | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.yaml` (or legacy `manifest.toml`). Required unless `--bundled` or `--vscode` is specified. |
 
 ---
 
@@ -57,7 +57,7 @@ solix install ../libraries/solixlib --profile release --force
 
 ### 3. Project Directory Installation
 
-When `<path>` points to a project directory containing `manifest.toml`:
+When `<path>` points to a project directory containing `manifest.yaml` (or legacy `manifest.toml`):
 1. Solix builds the project with the requested profile (`solix build <dir> --profile <profile>`).
 2. Locates the emitted `.slxarc` archive in `build/<profile>/<name>.slxarc`.
 3. Validates native library SHA-256 checksums and warms the authenticated extract cache at `~/.solix/cache/packages/`.
@@ -72,7 +72,7 @@ solix install ./libraries/solixlib --profile release
 
 When installing a `.slxb` or `.slxarc` file directly:
 1. Solix verifies the container header, computes the artifact's SHA-256 digest, and parses metadata.
-2. If `.slxarc`, extracts and validates bundled native library checksums against `manifest.toml` and warms `~/.solix/cache/packages/`.
+2. If `.slxarc`, extracts and validates bundled native library checksums against `manifest.yaml` (`manifest.toml` for legacy archives) and warms `~/.solix/cache/packages/`.
 3. Copies the container artifact into `<pkg_dir>/<name>-<profile>@<version>/<name>.<ext>`.
 4. Registers the package entry in `registry.json`.
 

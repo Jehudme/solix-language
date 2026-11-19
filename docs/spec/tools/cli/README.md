@@ -80,7 +80,7 @@ solix <subcommand> --help
 
 ## Detailed Subcommand Specifications
 
-- [**`new` Subcommand**](new.md): Project scaffolding, applications, libraries (`--lib`), and pure Solix projects (`--no-native`).
+- [**`new` Subcommand**](new.md): Project scaffolding, applications, libraries (`--lib`), dual-mode C/C++/Rust native bridges (`--native`, `new native`), and pure Solix projects (`--no-native`).
 - [**`compile` Subcommand**](compile.md): Multi-file compilation, static linking (`--static`), syntax checking (`--check`), and performance telemetry.
 - [**`build` Subcommand**](build.md): Profile-driven (`--release`, `--debug`, `--test`) build orchestration and `.slxarc` archive generation.
 - [**`run` Subcommand**](run.md): VM runtime execution, direct `.slx` execution, `.slxarc` bundle ingestion, and guest argument passing.
@@ -91,4 +91,4 @@ solix <subcommand> --help
 - [**`list` Subcommand**](list.md): Listing installed packages with tabular and `--json` formatting.
 - [**`doc` Subcommand**](doc.md): Generating static HTML and Markdown API documentation with doc comment parsing.
 - [**`wiki` Subcommand**](wiki.md): Launching or exporting the bundled versioned offline documentation portal.
-- [**Project Manifest (`manifest.toml`) Specification**](manifest.md): Complete schema documentation for project manifests.
+- [**Project Manifest (`manifest.yaml`) Specification**](manifest.md): Complete schema documentation for project manifests.

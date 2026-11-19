@@ -47,29 +47,29 @@ solix compile src/main.slx -d math_utils@0.2.0 --static --metrics
 ```
 
 ### Upward Manifest Auto-Discovery
-If `solix compile` is executed on files inside a project tree without explicit `--deps`, `--entry`, or `--name` parameters, it automatically traverses parent directories (up to 12 levels) to discover `manifest.toml`. Dependencies and entry points from `[profiles]`, and project metadata from `[configuration]` are inherited automatically.
+If `solix compile` is executed on files inside a project tree without explicit `--deps`, `--entry`, or `--name` parameters, it automatically traverses parent directories (up to 12 levels) to discover `manifest.yaml` (or legacy `manifest.toml`). Dependencies and entry points from `profiles`, and project metadata from `configuration` are inherited automatically.
 
 ---
 
 ## 2. `solix build`
 
-Orchestrates multi-file, multi-language projects governed by `manifest.toml`:
+Orchestrates multi-file, multi-language projects governed by `manifest.yaml` (pure Rust build pipeline):
 
 ```bash
 solix build [path] [options]
 ```
 
 ### Key Options & Flags
-* `[path]`: Project root directory containing `manifest.toml` and `scripts/build.py` [default: `.`].
-* `--profile <debug|release|test>`: Target build profile [default: `debug`].
+* `[path]`: Project root directory containing `manifest.yaml` (or legacy `manifest.toml`) [default: `.`].
+* `--profile <name>`: Target self-contained build profile (e.g., `release`, `debug`, `test`, or custom declared profile) [default: `release`].
 * `--debug`: Shorthand for `--profile debug`.
 * `--release`: Shorthand for `--profile release` (optimizations enabled).
 * `--test`: Shorthand for `--profile test` (includes `tests/` sources and fixtures).
-* `--link <dynamic|static>`: Linking mode for dependencies and emission [default: `dynamic`].
-* `--static`: Shorthand for static linking mode (`--link static`).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
+* `--install`: Automatically installs the built `.slxarc` into `~/.solix/packages`.
+* `--force`: Overwrites existing installed package when paired with `--install`.
 * `--check-env` / `--verify-only`: Runs only Phase 0 pre-flight environment & toolchain verification without compiling.
-* `--target <triple>`: Compiles native crates for a single Rust target triple or `"host"`.
+* `--target <triple>`: Compiles native subprojects for a single target triple or `"host"`.
 
 ### Practical Examples
 ```bash

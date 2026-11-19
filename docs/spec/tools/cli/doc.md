@@ -16,7 +16,7 @@ solix doc [path] [options]
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `[path]` | Path | `.` (Current Directory) | Project root containing `manifest.toml` or directory containing `.slx` source files. |
+| `[path]` | Path | `.` (Current Directory) | Project root containing `manifest.yaml` (or legacy `manifest.toml`) or directory containing `.slx` source files. |
 
 ---
 

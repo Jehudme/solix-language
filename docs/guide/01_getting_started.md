@@ -50,8 +50,8 @@ irm https://github.com/Jehudme/solix-language/releases/latest/download/solix-too
 
 | Tool | Minimum Version | Purpose |
 |---|---|---|
-| Rust / Cargo | 1.80+ (Edition 2021/2024) | Compiler workspace and CLI build toolchain |
-| Python | 3.10+ | Project build automation (`scripts/build.py`) |
+| Rust / Cargo | 1.80+ (Edition 2021/2024) | Compiler workspace, CLI toolchain, and Rust `solix-ffi` extensions |
+| CMake + C11/C++17 Compiler | 3.20+ (Optional) | Dual-mode C/C++ native extensions using `solix::ffi` |
 | Git | Recent version | Source version control |
 
 ### Clone and Build the Toolchain
@@ -88,7 +88,7 @@ solix <subcommand> [options] [arguments...]
 
 | Subcommand | Function | Reference |
 |---|---|---|
-| `new` | Scaffolds a project workspace with `manifest.toml`, build automation, and tests | [docs/spec/tools/cli/new.md](../spec/tools/cli/new.md) |
+| `new` | Scaffolds a project workspace (`manifest.yaml`, tests, optional `c`/`cpp`/`rust` native) or adds a native library via `solix new native` | [docs/spec/tools/cli/new.md](../spec/tools/cli/new.md) |
 | `compile` | Directly compiles source files into executable bytecode (`.slxb`) | [docs/spec/tools/cli/compile.md](../spec/tools/cli/compile.md) |
 | `build` | Builds multi-file projects into distribution archive packages (`.slxarc`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
 | `run` | Executes bytecode containers, archive packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](../spec/tools/cli/run.md) |
@@ -112,11 +112,11 @@ cd hello_solix
 
 ### Application Project Layout
 
-By default, `solix new` generates a fully featured project structure:
+By default, `solix new` generates a fully featured project structure with pure-Rust `manifest.yaml` configuration:
 
 ```text
 hello_solix/
-├── manifest.toml             # Project metadata, entry points, and dependencies
+├── manifest.yaml             # Project metadata, YAML vars/profiles, natives & hooks
 ├── .gitignore                # Build and cache exclusion patterns
 ├── src/
 │   └── main.slx              # Application entry point source
@@ -124,13 +124,10 @@ hello_solix/
 │   └── test_main.slx         # Automated test suite
 ├── resources/                # Static application assets
 ├── lib/                      # Directory for precompiled native shared objects
-├── natives/
-│   └── hello_solix_bridge/   # Rust cdylib extension crate for native interop
-│       ├── Cargo.toml
-│       └── src/lib.rs
-└── scripts/
-    ├── build.py              # Build orchestration script
-    └── solix_build.py        # Build engine helper module
+└── natives/
+    └── hello_solix_bridge/   # Dual-mode Rust (`solix-ffi`) or C/C++ (`solix::ffi`) bridge
+        ├── Cargo.toml        # (or CMakeLists.txt when using `--native c` / `--native cpp`)
+        └── src/lib.rs
 ```
 
 #### The Starter Source (`src/main.slx`)
@@ -145,36 +142,63 @@ class Main {
 
 In Solix, executable programs define a `main` method (by default `Main::main`). The integer return value (`0` for success) is returned directly to the host operating system shell.
 
-#### The Project Manifest (`manifest.toml`)
+#### The Project Manifest (`manifest.yaml`)
 
-```toml
-[configuration]
-name = "hello_solix"
-version = "0.1.0"
-description = "A Solix project"
-license = "Apache-2.0"
-authors = []
+```yaml
+vars:
+  project_version: &app_version "0.1.0"
+  default_sources: &src_dirs
+    - src
 
-[profiles.release]
-entrypoint = "Main::main"
-optimization_level = 3
-inline_threshold = 16
-debug_symbols = false
-static = true
-sources = ["src"]
+configuration:
+  name: hello_solix
+  version: *app_version
+  description: A Solix project
+  license: Apache-2.0
+  authors: []
 
-[profiles.debug]
-inherits = "release"
-optimization_level = 0
-inline_threshold = 8
-debug_symbols = true
-static = false
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources: *src_dirs
+    platforms:
+      - host
+    natives:
+      hello_solix_bridge:
+        profile: release
 
-[profiles.test]
-inherits = "debug"
-entrypoint = "TestRunner::test"
-sources = ["src", "tests"]
+  debug:
+    entrypoint: Main::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources: *src_dirs
+    platforms:
+      - host
+    natives:
+      hello_solix_bridge:
+        profile: debug
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+      - tests
+    platforms:
+      - host
 ```
+
+> [!TIP]
+> Pass `--native c` or `--native cpp` to `solix new` to generate a dual-mode CMake project instead of Rust, or add a native library to an existing project later using `solix new native <name> --project . --lang <rust|c|cpp>`. See the [`manifest.yaml` Wiki](../wiki/manifest.md).
 
 ### Scaffolding Libraries (`--lib`)
 
@@ -255,7 +279,7 @@ solix run bin/hello_solix.slxb
 
 ## Building Projects (`solix build`)
 
-For projects with `manifest.toml`, use `solix build` to build all native extensions, stage resources, compile Solix source code, and assemble a single distributable archive container (`.slxarc`):
+For projects with `manifest.yaml` (or legacy `manifest.toml`), use `solix build` to execute `pre_compile` hooks, auto-detect and build CMake/Cargo native extensions, stage resources, compile Solix source code, and assemble a single distributable archive container (`.slxarc`):
 
 ### 1. Debug Build (Default)
 ```bash

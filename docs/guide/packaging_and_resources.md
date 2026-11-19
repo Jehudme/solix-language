@@ -90,7 +90,7 @@ solix pack /path/to/project -o /dist/app.slxarc
 
 | Option | Short Flag | Description | Default |
 |---|---|---|---|
-| `[target]` | - | Target project directory containing `manifest.json` or `manifest.toml` | `.` (current directory) |
+| `[target]` | - | Target project directory containing `manifest.yaml` (or legacy `manifest.toml`) | `.` (current directory) |
 | `--profile` | `-p` | Build profile defined in the manifest | `debug` |
 | `--output` | `-o` | Destination path for the generated `.slxarc` archive | `<target>/<project>.slxarc` |
 
@@ -249,14 +249,14 @@ When packaging an application with `solix pack`:
 
 ---
 
-## Compiling Native Companion Libraries with Lifecycle Hooks
+## Compiling Native Companion Libraries declaratively (`natives` & Lifecycle Hooks)
 
-When a Solix project or library relies on native companion libraries (authored in Rust or C), you can automate the native compilation directly within `solix build` and `solix pack` using the declarative `pre_compile` lifecycle hook.
+When a Solix project or library relies on native companion libraries authored in Rust, C, or C++, declare them under `profiles.<name>.natives` (with optional `pre_compile` hooks for custom code generation) in `manifest.yaml`:
 
-### 1. Project Directory Layout with Cargo
+### 1. Project Directory Layout with Cargo or CMake
 ```text
 my_native_app/
-├── manifest.toml
+├── manifest.yaml
 ├── natives/
 │   └── rust_bridge/
 │       ├── Cargo.toml
@@ -264,31 +264,39 @@ my_native_app/
 ├── src/
 │   └── main.slx
 ├── lib/
-│   └── librust_bridge.so
 └── resources/
     └── config.txt
 ```
 
 ### 2. Manifest Configuration
 
-In `manifest.toml`, declare `pre_compile` commands to build the native crate before Solix emits bytecode:
+In `manifest.yaml`, declare `natives` (auto-detected from `Cargo.toml` or `CMakeLists.txt`) and any optional `pre_compile` commands:
 
-```toml
-[package]
-name = "my_native_app"
-version = "0.1.0"
-entry = "src/main.slx"
+```yaml
+configuration:
+  name: my_native_app
+  version: "0.1.0"
 
-[lifecycle]
-pre_compile = [
-    "cargo build --release --manifest-path natives/rust_bridge/Cargo.toml"
-]
-
-[dependencies]
-solixlib = { version = "2.0.0", profile = "release" }
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    sources:
+      - src
+    platforms:
+      - host
+    pre_compile:
+      - cmake --version
+    natives:
+      rust_bridge:
+        profile: release
+    dependencies:
+      solix:
+        version: "2.0.0"
+        profile: release
 ```
 
-In `natives/rust_bridge/Cargo.toml`, set crate type to dynamic library (`cdylib`):
+In `natives/rust_bridge/Cargo.toml`, configure dual-mode `crate-type` and the optional `solix-native` feature:
 
 ```toml
 [package]
@@ -297,10 +305,14 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+solix-native = ["dep:solix-ffi"]
 ```
 
-The build runner deposits the compiled `.so`, `.dll`, or `.dylib` directly into `lib/`.
+`solix build` compiles native subprojects under `natives/` across expanded target architectures and packages the resulting shared libraries cleanly into `lib/<target_triple>/` inside `.slxarc`.
 
 ### 3. Topological Dependency Pre-Compile Ordering
 If your application depends on a library package that also provides native companion libraries:
