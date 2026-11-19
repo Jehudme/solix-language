@@ -2,6 +2,12 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [1.6.3] - 2026-11-19
+
+### Build System
+
+- *(manifests)* Target all desktop platforms in release profiles (#85)
+
 ## [1.6.2] - 2026-11-19
 
 ### Bug Fixes
