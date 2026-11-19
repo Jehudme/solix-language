@@ -2,7 +2,9 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::bytecode::{BinaryProgram, CompiledFunction, Instruction, OpCode};
+use solix_common::bytecode::{
+    BinaryProgram, CompiledFunction, ConstantPoolValue, Instruction, OpCode,
+};
 use solix_common::types::{PrimitiveKind, Type};
 use solix_runtime::context::RuntimeContext;
 use solix_runtime::exceptions::RuntimeError;
@@ -184,4 +186,80 @@ fn test_load_time_duplicate_symbol_definition_rejected() {
             && first_module == "pkg_alpha@1.0.0"
             && second_module == "pkg_beta@2.0.0"
     ));
+}
+
+#[test]
+fn test_constant_pool_string_interning_propagates_out_of_memory_error() {
+    let mut binary = BinaryProgram::new();
+    binary.package_name = "oom_test".to_string();
+    binary.package_version = "1.0.0".to_string();
+
+    // Add a string constant that exceeds the tiny heap capacity
+    let string_payload = "A".repeat(512);
+    binary
+        .constant_pool
+        .values
+        .push(ConstantPoolValue::String(string_payload));
+
+    let mut main_func = CompiledFunction::new("oom_test::main", 0, 0, 1);
+    main_func.is_public = true;
+    main_func
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    binary.functions.push(main_func);
+
+    // Configure a heap size of only 128 bytes, which cannot accommodate the 512-byte string
+    let options = RuntimeOptions::new()
+        .with_binary(binary)
+        .with_heap_size(128);
+
+    let context = RuntimeContext::new(options).expect("RuntimeContext creation succeeds");
+    let vm_result = VirtualMachine::try_new(context);
+
+    assert!(
+        matches!(vm_result, Err(RuntimeError::OutOfMemory { .. })),
+        "Expected RuntimeError::OutOfMemory when heap is exhausted during constant pool interning, got {vm_result:?}"
+    );
+}
+
+#[test]
+fn test_constant_pool_string_interning_succeeds_with_adequate_heap() {
+    let mut binary = BinaryProgram::new();
+    binary.package_name = "intern_test".to_string();
+    binary.package_version = "1.0.0".to_string();
+
+    let string_payload = "Hello, Solix!".to_string();
+    binary
+        .constant_pool
+        .values
+        .push(ConstantPoolValue::String(string_payload));
+
+    let mut main_func = CompiledFunction::new("intern_test::main", 0, 0, 1);
+    main_func.is_public = true;
+    main_func
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    binary.functions.push(main_func);
+
+    let options = RuntimeOptions::new()
+        .with_binary(binary)
+        .with_heap_size(16384);
+
+    let context = RuntimeContext::new(options).expect("RuntimeContext creation succeeds");
+    let vm_result = VirtualMachine::try_new(context);
+
+    assert!(
+        vm_result.is_ok(),
+        "Expected VirtualMachine::try_new to succeed with adequate heap"
+    );
+    let virtual_machine = vm_result.expect("VM instance");
+    assert_eq!(virtual_machine.const_pool_cache.len(), 1);
+    assert_eq!(virtual_machine.const_pool_cache[0].len(), 1);
+    assert!(
+        matches!(
+            virtual_machine.const_pool_cache[0][0],
+            Value::Ref(address) if address > 0
+        ),
+        "Interned string must be a non-null heap reference"
+    );
 }

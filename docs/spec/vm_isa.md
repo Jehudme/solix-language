@@ -245,8 +245,8 @@ The production interpreter loop (`run_fast_trap::<false, TRACK_METRICS>`) implem
 
 For host embeddings, game engines, and long-running interactive processes, the Solix Virtual Machine supports a reusable multi-entrypoint lifecycle:
 
-1. **Construction & One-Time Static Initialization (`VirtualMachine::new_initialized`):**
-   - Allocates interned string constants on the `VirtualHeap` and executes all module `@init` initializers once (`statics_initialized = true`), populating global/static slots without invoking `main()`.
+1. **Construction & One-Time Static Initialization (`VirtualMachine::new_initialized` / `VirtualMachine::try_new`):**
+   - Allocates interned string constants on the `VirtualHeap`, propagating `RuntimeError::OutOfMemory` or memory-write failures immediately rather than substituting null pointers, and executes all module `@init` initializers once (`statics_initialized = true`), populating global/static slots without invoking `main()`.
 2. **Successive Entrypoint Invocations (`invoke_entry`):**
    - Validates that the target entrypoint is `public` and uses primitive, `string`, or 1D primitive array parameter/return types, executing the entrypoint while preserving `static_slots` and `VirtualHeap` state across calls.
 3. **Deterministic Shutdown & Cleanup (`shutdown` & `Drop`):**
