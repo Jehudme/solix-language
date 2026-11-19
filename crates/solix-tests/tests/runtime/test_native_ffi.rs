@@ -633,3 +633,63 @@ fn test_case_49_10_ffi_sdk_abi_layout_and_magic_parity() {
         std::mem::offset_of!(rt_ffi::SolixVmContext, set_cycle_threshold)
     );
 }
+
+#[test]
+fn test_case_49_11_native_out_error_and_fnptr_vm_execution() {
+    let solix_code = r#"
+public class FailBridge {
+    native public static int32 boom();
+}
+
+public class Main {
+    public static int32 main() {
+        return FailBridge::boom();
+    }
+}
+"#;
+    let binary = compile_solix_source(solix_code);
+
+    let rust_bridge = r#"
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SolixCValue {
+    pub tag: u32,
+    pub flags: u32,
+    pub payload: u64,
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn FailBridge_boom(
+    _vm: *mut std::ffi::c_void,
+    _args: *const SolixCValue,
+    _argc: u32,
+    out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if !out_error.is_null() {
+        unsafe {
+            *out_error = SolixCValue {
+                tag: 1,
+                flags: 0,
+                payload: 0,
+            };
+        }
+    }
+    SolixCValue {
+        tag: 0,
+        flags: 0,
+        payload: 0,
+    }
+}
+"#;
+    let lib_path = compile_rust_cdylib(rust_bridge, "test_out_error_49_11");
+    let options = RuntimeOptions::new()
+        .with_binary(binary)
+        .with_native_library(&lib_path);
+    let context = RuntimeContext::new(options).expect("create context");
+    let mut vm = VirtualMachine::new(context);
+    let run_result = vm.run();
+    assert!(
+        matches!(run_result, Err(RuntimeError::NativeFunctionError { .. })),
+        "Expected NativeFunctionError when out_error is set, got: {run_result:?}"
+    );
+}

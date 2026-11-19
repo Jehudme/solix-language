@@ -1,0 +1,50 @@
+package ffi_dual_backend;
+
+public class MatrixBox {
+    public int32 tag_id;
+    public int64 weight;
+    public string label;
+
+    public MatrixBox(int32 initial_tag, int64 initial_weight, string initial_label) {
+        this.tag_id = initial_tag;
+        this.weight = initial_weight;
+        this.label = initial_label;
+    }
+}
+
+public class FfiMatrix {
+    native public static string echo_null(string maybe_missing);
+    native public static bool invert_bool(bool input_flag);
+    native public static int32 add_i32(int32 left_val, int32 right_val);
+    native public static int64 mul_i64(int64 left_val, int64 right_val);
+    native public static float64 fma_f64(float64 factor_a, float64 factor_b, float64 offset_c);
+
+    native public static string reverse_string(string input_text);
+    native public static char[] upper_chars(char[] input_chars);
+    native public static int8[] xor_bytes(int8[] input_bytes, int32 xor_mask);
+
+    native public static int64[] scale_i64_array(int64[] input_values, int64 scale_factor);
+    native public static float64 sum_f64_array(float64[] input_values);
+    native public static string[] make_pair_strings(string first_label, string second_label);
+
+    native public static MatrixBox create_box(int32 tag_id, int64 weight, string label);
+    native public static int64 mutate_box(MatrixBox target_box, int32 delta_tag);
+
+    native public static int64 exercise_gc_and_metrics();
+    native public static int32 checked_div(int32 numerator, int32 denominator);
+}
+
+public class Main {
+    public static int32 main() {
+        int32 sum_val = FfiMatrix::add_i32(20, 22);
+        if (sum_val != 42) {
+            return 1;
+        }
+        MatrixBox created = FfiMatrix::create_box(7, 9000L, "showcase");
+        int64 mutated = FfiMatrix::mutate_box(created, 5);
+        if (mutated != 9012L) {
+            return 2;
+        }
+        return 0;
+    }
+}

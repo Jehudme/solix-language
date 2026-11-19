@@ -15,7 +15,7 @@ Solix separates daily development integration (`dev`) from production releases (
 
 ```mermaid
 flowchart LR
-    TopicBranch["Contributor Topic Branch (feat / fix / docs)"] -->|"PR targeting dev"| IntegrationCI["ci.yml: Lint, Docs, Security, Risk Notice, 3-OS Tests"]
+    TopicBranch["Contributor Topic Branch (feat / fix / docs)"] -->|"PR targeting dev"| IntegrationCI["ci.yml: Lint, Docs, Security, Risk Notice, 3-OS Tests & FFI Suite"]
     IntegrationCI -->|"Pass + Up-to-Date + Admin Approval"| DevBranch["Protected Integration Trunk: dev"]
     DevBranch -->|"Manual workflow_dispatch (release.yml)"| ReleaseGate["Bump Version + Post-Bump Tests + cargo package dry-run"]
     ReleaseGate -->|"Fast-Forward dev -> master + Tag vX.Y.Z"| MasterBranch["Protected Release Trunk: master"]

@@ -1,0 +1,6 @@
+/build/
+*.slxb
+*.slxarc
+/natives/*/target/
+/natives/*/build/
+Cargo.lock

@@ -1,0 +1,17 @@
+[package]
+name = "rust_backend"
+version = "1.0.0"
+edition = "2024"
+description = "Dual-mode Rust backend for ffi_dual_backend showcase and test matrix"
+license = "Apache-2.0"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+solix-native = ["dep:solix-ffi"]
+
+[dependencies]
+solix-ffi = { git = "https://github.com/Jehudme/solix-language.git", branch = "dev", optional = true }
