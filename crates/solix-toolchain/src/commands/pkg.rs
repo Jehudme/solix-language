@@ -337,13 +337,13 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
     }
 
     if resolved_path.is_dir() {
-        let manifest_path = resolved_path.join("manifest.toml");
-        if !manifest_path.exists() {
-            bail!(
-                "Cannot install project at '{}': manifest.toml not found",
-                resolved_path.display()
-            );
-        }
+        let manifest_path =
+            solix_common::project::find_manifest_path(&resolved_path).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Cannot install project at '{}': manifest.yaml (or manifest.toml) not found",
+                    resolved_path.display()
+                )
+            })?;
 
         let manifest = ProjectManifest::from_file(&manifest_path)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -457,8 +457,7 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
         }
     } else {
         let current_directory = std::env::current_dir()?;
-        let manifest_path = current_directory.join("manifest.toml");
-        if manifest_path.exists() {
+        if let Some(manifest_path) = solix_common::project::find_manifest_path(&current_directory) {
             let manifest = ProjectManifest::from_file(&manifest_path)
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
             let matching_records = registry.find_all(&manifest.configuration.name);
@@ -500,17 +499,17 @@ pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
             continue;
         }
 
-        let manifest_path = project_directory.join("manifest.toml");
-        if !manifest_path.exists() {
+        let Some(manifest_path) = solix_common::project::find_manifest_path(project_directory)
+        else {
             eprintln!(
                 "warning: Source manifest for '{}-{}@{}' at '{}' no longer exists; skipping.",
                 record.name,
                 record.build_profile,
                 record.version,
-                manifest_path.display()
+                project_directory.display()
             );
             continue;
-        }
+        };
 
         let source_manifest = ProjectManifest::from_file(&manifest_path)
             .map_err(|error| anyhow::anyhow!("{error}"))?;

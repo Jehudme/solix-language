@@ -943,12 +943,12 @@ struct InstalledCandidate {
     pub dir_path: PathBuf,
 }
 
-impl ModuleSolver for ClientModuleSolver {
-    fn resolve_compatible(
+impl ClientModuleSolver {
+    fn resolve_compatible_entry(
         &self,
         package_name: &str,
         min_version: PackageVersion,
-    ) -> Result<SolvedPackage, SolverError> {
+    ) -> Result<(String, PackageVersion, PathBuf), SolverError> {
         let (base_name, req_profile) = if let Some(stripped) = package_name.strip_suffix("-debug") {
             (stripped, Some("debug"))
         } else if let Some(stripped) = package_name.strip_suffix("-release") {
@@ -991,7 +991,57 @@ impl ModuleSolver for ClientModuleSolver {
             });
         };
 
-        self.load_package_from_dir(base_name, *winning_version, winning_dir)
+        Ok((base_name.to_string(), *winning_version, winning_dir.clone()))
+    }
+
+    /// Resolves the `.slxarc` or `.slxb` container path for a compatible installed package.
+    pub fn resolve_container_path(
+        &self,
+        package_name: &str,
+        min_version: PackageVersion,
+    ) -> Result<PathBuf, SolverError> {
+        let (base_name, _, winning_dir) =
+            self.resolve_compatible_entry(package_name, min_version)?;
+        let exact_arc = winning_dir.join(format!("{base_name}.slxarc"));
+        if exact_arc.exists() {
+            return Ok(exact_arc);
+        }
+        let exact_slxb = winning_dir.join(format!("{base_name}.slxb"));
+        if exact_slxb.exists() {
+            return Ok(exact_slxb);
+        }
+        if let Ok(entries) = fs::read_dir(&winning_dir) {
+            for entry in entries.flatten() {
+                let candidate = entry.path();
+                if candidate.is_file()
+                    && candidate
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext_str| {
+                            ext_str.eq_ignore_ascii_case("slxarc")
+                                || ext_str.eq_ignore_ascii_case("slxb")
+                        })
+                {
+                    return Ok(candidate);
+                }
+            }
+        }
+        Err(SolverError::PackageNotFound {
+            name: package_name.to_string(),
+        })
+    }
+}
+
+impl ModuleSolver for ClientModuleSolver {
+    fn resolve_compatible(
+        &self,
+        package_name: &str,
+        min_version: PackageVersion,
+    ) -> Result<SolvedPackage, SolverError> {
+        let (base_name, winning_version, winning_dir) =
+            self.resolve_compatible_entry(package_name, min_version)?;
+
+        self.load_package_from_dir(&base_name, winning_version, &winning_dir)
     }
 
     fn resolve_latest(&self, package_name: &str) -> Result<SolvedPackage, SolverError> {

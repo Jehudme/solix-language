@@ -273,21 +273,27 @@ fn test_export_manifest_serialization_with_dependencies() {
 
 #[test]
 fn test_project_manifest_dependencies_parsing() {
-    let manifest_toml = r#"
-[configuration]
-name = "game_project"
-version = "0.5.0"
+    let manifest_yaml = r#"
+vars:
+  shared_deps: &release_deps
+    raylib: { version: "1.2.0", profile: release }
 
-[profiles.release]
-dependencies = { raylib = { version = "1.2.0", profile = "release" } }
+configuration:
+  name: game_project
+  version: "0.1.0"
 
-[profiles.debug]
-inherits = "release"
-dependencies = { math_utils = { version = "2.0.0", profile = "debug" } }
+profiles:
+  release:
+    dependencies: *release_deps
+
+  debug:
+    dependencies:
+      <<: *release_deps
+      math_utils: { version: "2.0.0", profile: debug }
 "#;
 
     let project_manifest =
-        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+        ProjectManifest::from_yaml_str(manifest_yaml).expect("Parsing manifest.yaml must succeed");
     assert_eq!(project_manifest.name(), "game_project");
 
     let release_deps = project_manifest
@@ -310,22 +316,23 @@ dependencies = { math_utils = { version = "2.0.0", profile = "debug" } }
 
 #[test]
 fn test_project_manifest_build_config_parsing() {
-    let manifest_toml = r#"
-[configuration]
-name = "breakout"
-version = "0.1.0"
+    let manifest_yaml = r#"
+configuration:
+  name: breakout
+  version: "0.1.0"
 
-[profiles.release]
-entrypoint = "Breakout::main"
-optimization_level = 3
-inline_threshold = 12
-static = true
-verify_checksum = false
-sources = ["src"]
+profiles:
+  release:
+    entrypoint: Breakout::main
+    optimization_level: 3
+    inline_threshold: 12
+    static: true
+    verify_checksum: false
+    sources: [src]
 "#;
 
     let project_manifest =
-        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+        ProjectManifest::from_yaml_str(manifest_yaml).expect("Parsing manifest.yaml must succeed");
     let resolved_profile = project_manifest
         .resolve_profile("release")
         .expect("resolve profile");
@@ -337,34 +344,42 @@ sources = ["src"]
 }
 
 #[test]
-fn test_hierarchical_profile_inheritance_and_overrides() {
-    let manifest_toml = r#"
-[configuration]
-name = "engine_demo"
-version = "1.0.0"
+fn test_independent_profiles_with_yaml_anchors() {
+    let manifest_yaml = r#"
+vars:
+  base_entry: &main_entry "Main::main"
+  base_sources: &base_src [src]
 
-[profiles.release]
-entrypoint = "Main::main"
-optimization_level = 3
-inline_threshold = 16
-debug_symbols = false
-static = true
-sources = ["src"]
+configuration:
+  name: engine_demo
+  version: "1.0.0"
 
-[profiles.bench]
-inherits = "release"
-optimization_level = 3
-inline_threshold = 32
-memory_limit_mb = 1024
+profiles:
+  release:
+    entrypoint: *main_entry
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources: *base_src
+    platforms: [all]
 
-[profiles.ci]
-inherits = "bench"
-warnings_as_errors = true
-sources = ["ci_tests"]
+  bench:
+    entrypoint: *main_entry
+    optimization_level: 3
+    inline_threshold: 32
+    memory_limit_mb: 1024
+    sources: *base_src
+
+  ci:
+    entrypoint: *main_entry
+    optimization_level: 0
+    warnings_as_errors: true
+    sources: [src, ci_tests]
 "#;
 
     let project_manifest =
-        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+        ProjectManifest::from_yaml_str(manifest_yaml).expect("Parsing manifest.yaml must succeed");
 
     // 1. Resolve release profile
     let release_profile = project_manifest
@@ -376,7 +391,7 @@ sources = ["ci_tests"]
     assert!(!release_profile.debug_symbols);
     assert_eq!(release_profile.sources, vec!["src"]);
 
-    // 2. Resolve bench profile (inherits from release)
+    // 2. Resolve bench profile independently (does not leak warnings_as_errors or ci_tests)
     let bench_profile = project_manifest
         .resolve_profile("bench")
         .expect("Bench profile resolution must succeed");
@@ -386,66 +401,72 @@ sources = ["ci_tests"]
     assert_eq!(bench_profile.memory_limit_mb, Some(1024));
     assert_eq!(bench_profile.sources, vec!["src"]);
 
-    // 3. Resolve ci profile (inherits from bench -> release, accumulates sources)
+    // 3. Resolve ci profile independently
     let ci_profile = project_manifest
         .resolve_profile("ci")
         .expect("CI profile resolution must succeed");
     assert_eq!(ci_profile.name, "ci");
-    assert_eq!(ci_profile.opt_level, 3);
-    assert_eq!(ci_profile.inline_threshold, 32);
+    assert_eq!(ci_profile.opt_level, 0);
     assert!(ci_profile.warnings_as_errors);
     assert_eq!(ci_profile.sources, vec!["src", "ci_tests"]);
 }
 
 #[test]
-fn test_cyclic_profile_inheritance_detection() {
-    let cyclic_manifest_toml = r#"
-[configuration]
-name = "broken_project"
-version = "0.1.0"
+fn test_inherits_keyword_rejected_in_yaml() {
+    let invalid_yaml = r#"
+configuration:
+  name: broken_project
+  version: "0.1.0"
 
-[profiles.release]
-
-[profiles.alpha]
-inherits = "beta"
-
-[profiles.beta]
-inherits = "gamma"
-
-[profiles.gamma]
-inherits = "alpha"
+profiles:
+  release: {}
+  debug:
+    inherits: release
 "#;
 
-    let project_manifest = ProjectManifest::from_toml_str(cyclic_manifest_toml)
-        .expect("Parsing manifest syntax must succeed");
-    let resolution_result = project_manifest.resolve_profile("alpha");
+    let parse_result = ProjectManifest::from_yaml_str(invalid_yaml);
     assert!(
-        resolution_result.is_err(),
-        "Cyclic profile inheritance must be detected and rejected"
+        parse_result.is_err(),
+        "Profile inheritance via inherits MUST be rejected in manifest.yaml"
     );
 }
 
 #[test]
 fn test_profile_aware_dependency_specifications() {
-    let manifest_toml = r#"
-[configuration]
-name = "full_stack_app"
-version = "2.0.0"
+    let manifest_yaml = r#"
+configuration:
+  name: full_stack_app
+  version: "2.0.0"
 
-[profiles.release]
-dependencies = { math = { version = "1.0.0", profile = "release" }, solixlib = { version = "2.0.0" } }
+profiles:
+  release:
+    dependencies:
+      math: { version: "1.0.0", profile: release }
+      solixlib: { version: "2.0.0" }
 
-[profiles.debug]
-inherits = "release"
-dependencies = { raylib = { version = "5.5.0", profile = "debug" } }
+  debug:
+    dependencies:
+      raylib: { version: "5.5.0", profile: debug }
 
-[profiles.test]
-inherits = "debug"
-dependencies = { crypto = { version = "0.4.0", profile = "test" } }
+  test:
+    dependencies:
+      math: { version: "1.0.0", profile: release }
+      solixlib: { version: "2.0.0" }
+      raylib: { version: "5.5.0", profile: debug }
+      crypto: { version: "0.4.0", profile: test }
 "#;
 
     let project_manifest =
-        ProjectManifest::from_toml_str(manifest_toml).expect("Parsing manifest.toml must succeed");
+        ProjectManifest::from_yaml_str(manifest_yaml).expect("Parsing manifest.yaml must succeed");
+    let debug_dependencies = project_manifest
+        .resolved_dependencies_for_profile("debug")
+        .expect("resolve debug dependencies");
+    assert_eq!(
+        debug_dependencies.len(),
+        1,
+        "debug profile must NOT inherit release dependencies"
+    );
+
     let resolved_dependencies = project_manifest
         .resolved_dependencies_for_profile("test")
         .expect("resolve test dependencies");

@@ -784,7 +784,7 @@ impl WorkspaceManager {
         Some(self.analyze_document(uri, document.version, &document.content))
     }
 
-    /// Searches upward from the target file path for an enclosing `manifest.toml`.
+    /// Searches upward from the target file path for an enclosing `manifest.yaml` (or `manifest.toml`).
     #[must_use]
     pub fn find_project_manifest(file_path: &Path) -> Option<PathBuf> {
         let mut current_dir = if file_path.is_file() {
@@ -794,9 +794,8 @@ impl WorkspaceManager {
         };
 
         loop {
-            let candidate = current_dir.join("manifest.toml");
-            if candidate.is_file() {
-                return Some(candidate);
+            if let Some(found_manifest) = solix_common::project::find_manifest_path(current_dir) {
+                return Some(found_manifest);
             }
             current_dir = current_dir.parent()?;
         }

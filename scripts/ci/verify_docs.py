@@ -190,7 +190,7 @@ def verify_all_links(markdown_files: list[Path], repo_root: Path) -> list[str]:
 
 
 def check_manifest_sections_documented(manifest_doc_path: Path) -> list[str]:
-    """Verifies that all required top-level manifest.toml sections are documented."""
+    """Verifies that all required top-level manifest.yaml (or legacy manifest.toml) sections are documented."""
     errors: list[str] = []
     if not manifest_doc_path.exists():
         return [f"Manifest documentation file not found at '{manifest_doc_path}'"]
@@ -198,9 +198,12 @@ def check_manifest_sections_documented(manifest_doc_path: Path) -> list[str]:
     manifest_doc_text = manifest_doc_path.read_text(encoding="utf-8")
 
     required_sections = [
-        ("[configuration]", "[configuration]"),
-        ("[profiles]", "[profiles]"),
-        ("[native_library_checksums]", "[native_libraries]"),
+        ("configuration:", "[configuration]"),
+        ("profiles:", "[profiles]"),
+        ("native_library_checksums:", "[native_library_checksums]"),
+        ("pre_compile:", "`pre_compile`"),
+        ("post_compile:", "`post_compile`"),
+        ("natives:", "`natives`"),
     ]
 
     for primary_section, alternate_section in required_sections:

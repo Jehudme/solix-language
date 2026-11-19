@@ -75,27 +75,20 @@ pub struct DocumentedType {
 /// Returns an error if source parsing or file writing fails.
 pub fn execute_doc(args: DocArgs) -> Result<()> {
     let workspace_path = args.path.canonicalize().unwrap_or(args.path.clone());
-    let manifest_path = workspace_path.join("manifest.toml");
+    let manifest_path_opt = solix_common::project::find_manifest_path(&workspace_path);
 
     let mut source_paths = Vec::new();
     let mut project_name = "Untitled Project".to_string();
     let mut project_version = "1.0.0".to_string();
     let mut project_description = "Solix Application".to_string();
 
-    if manifest_path.exists() {
-        let manifest_content = fs::read_to_string(&manifest_path).with_context(|| {
+    if let Some(ref manifest_path) = manifest_path_opt {
+        let project_manifest = ProjectManifest::from_file(manifest_path).with_context(|| {
             format!(
-                "[E0303] Failed to read project manifest at '{}'",
+                "[E0303] Failed to parse project manifest at '{}'",
                 manifest_path.display()
             )
         })?;
-        let project_manifest =
-            ProjectManifest::from_toml_str(&manifest_content).with_context(|| {
-                format!(
-                    "[E0303] Failed to parse project manifest at '{}'",
-                    manifest_path.display()
-                )
-            })?;
 
         project_name = project_manifest.configuration.name.clone();
         project_version = project_manifest.configuration.version.clone();

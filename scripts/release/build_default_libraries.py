@@ -34,14 +34,78 @@ def compute_sha256(file_path: Path) -> str:
     return hasher.hexdigest()
 
 
+def _strip_yaml_scalar(raw_val: str) -> str:
+    """Strips surrounding quotes and inline comments from a simple YAML scalar value."""
+    cleaned = raw_val.strip()
+    if not cleaned:
+        return ""
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (
+        cleaned.startswith("'") and cleaned.endswith("'")
+    ):
+        return cleaned[1:-1]
+    if " #" in cleaned:
+        cleaned = cleaned.split(" #", 1)[0].strip()
+    return cleaned.strip("'\"")
+
+
+def _parse_yaml_manifest_summary(manifest_path: Path) -> dict[str, Any]:
+    """Parses configuration.{name,version} and profiles.release.dependencies from manifest.yaml using stdlib."""
+    text = manifest_path.read_text(encoding="utf-8")
+    section_stack: list[tuple[int, str]] = []
+    config_table: dict[str, str] = {}
+    release_dependencies: dict[str, Any] = {}
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        while section_stack and section_stack[-1][0] >= indent:
+            section_stack.pop()
+
+        if ":" not in stripped:
+            continue
+        key_part, val_part = stripped.split(":", 1)
+        key = key_part.strip().strip("'\"")
+        val = val_part.strip()
+
+        parent_path = [item[1] for item in section_stack]
+        if not val or val.startswith("#"):
+            section_stack.append((indent, key))
+            if parent_path == ["profiles", "release", "dependencies"]:
+                release_dependencies.setdefault(key, {})
+            continue
+
+        if parent_path == ["configuration"] and key in ("name", "version"):
+            config_table[key] = _strip_yaml_scalar(val)
+        elif parent_path == ["profiles", "release", "dependencies"]:
+            release_dependencies.setdefault(key, _strip_yaml_scalar(val))
+
+    return {
+        "configuration": config_table,
+        "profiles": {"release": {"dependencies": release_dependencies}},
+    }
+
+
 def parse_manifest(manifest_path: Path) -> dict[str, Any]:
-    """Parses manifest.toml and returns its data dictionary."""
+    """Parses manifest.yaml (or legacy manifest.toml) and returns its summary data dictionary."""
+    if manifest_path.suffix.lower() in (".yaml", ".yml"):
+        return _parse_yaml_manifest_summary(manifest_path)
     with open(manifest_path, "rb") as manifest_file:
         return tomllib.load(manifest_file)
 
 
+def find_manifest_file(directory: Path) -> Path | None:
+    """Returns manifest.yaml, manifest.yml, or manifest.toml if present in directory."""
+    for candidate_name in ("manifest.yaml", "manifest.yml", "manifest.toml"):
+        candidate_path = directory / candidate_name
+        if candidate_path.is_file():
+            return candidate_path
+    return None
+
+
 def discover_libraries(libraries_directory: Path) -> dict[str, dict[str, Any]]:
-    """Scans libraries_directory for folders containing manifest.toml."""
+    """Scans libraries_directory for folders containing manifest.yaml or manifest.toml."""
     libraries_map: dict[str, dict[str, Any]] = {}
     if not libraries_directory.exists():
         return libraries_map
@@ -49,8 +113,8 @@ def discover_libraries(libraries_directory: Path) -> dict[str, dict[str, Any]]:
     for candidate_entry in sorted(libraries_directory.iterdir()):
         if not candidate_entry.is_dir():
             continue
-        manifest_path = candidate_entry / "manifest.toml"
-        if not manifest_path.exists():
+        manifest_path = find_manifest_file(candidate_entry)
+        if manifest_path is None:
             continue
 
         manifest_data = parse_manifest(manifest_path)
@@ -232,7 +296,7 @@ def main() -> None:
     print(f"Discovering libraries in '{libraries_directory}'...")
     libraries_map = discover_libraries(libraries_directory)
     if not libraries_map:
-        print(f"No libraries with manifest.toml found in '{libraries_directory}'.")
+        print(f"No libraries with manifest.yaml or manifest.toml found in '{libraries_directory}'.")
         sys.exit(0)
 
     sorted_library_names = topological_sort(libraries_map)
