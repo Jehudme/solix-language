@@ -1,10 +1,17 @@
 #include "solix_ffi.h"
 
-#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define TEST_CHECK(condition)                                                        \
+    do {                                                                             \
+        if (!(condition)) {                                                          \
+            fprintf(stderr, "Test check failed: %s (%s:%d)\n", #condition, __FILE__, __LINE__); \
+            abort();                                                                 \
+        }                                                                            \
+    } while (0)
 
 typedef struct MockCollector {
     const char* symbols[8];
@@ -16,9 +23,9 @@ static void mock_register_callback(
     const char* symbol_name,
     SolixNativeFunctionPtr function_pointer
 ) {
-    assert(function_pointer != NULL);
+    TEST_CHECK(function_pointer != NULL);
     MockCollector* collector = (MockCollector*)collector_context;
-    assert(collector->count < 8U);
+    TEST_CHECK(collector->count < 8U);
     collector->symbols[collector->count++] = symbol_name;
 }
 
@@ -182,17 +189,17 @@ SOLIX_REGISTER_MODULE(TEST_ENTRIES)
 
 int main(void) {
     /* 1. Verify SolixCValue encodings */
-    assert(solix_cvalue_is_null(solix_cvalue_null()));
-    assert(solix_cvalue_as_bool(solix_cvalue_bool(true)) == true);
-    assert(solix_cvalue_as_bool(solix_cvalue_bool(false)) == false);
-    assert(solix_cvalue_as_i32(solix_cvalue_i32(-42)) == -42);
-    assert(solix_cvalue_as_i64(solix_cvalue_i64(900000000000LL)) == 900000000000LL);
-    assert(fabs(solix_cvalue_as_f64(solix_cvalue_f64(3.1415926)) - 3.1415926) < 1e-12);
-    assert(solix_cvalue_as_ref(solix_cvalue_ref(4096U)) == 4096U);
-    assert(solix_cvalue_as_fnptr(solix_cvalue_fnptr(17U)) == 17U);
+    TEST_CHECK(solix_cvalue_is_null(solix_cvalue_null()));
+    TEST_CHECK(solix_cvalue_as_bool(solix_cvalue_bool(true)) == true);
+    TEST_CHECK(solix_cvalue_as_bool(solix_cvalue_bool(false)) == false);
+    TEST_CHECK(solix_cvalue_as_i32(solix_cvalue_i32(-42)) == -42);
+    TEST_CHECK(solix_cvalue_as_i64(solix_cvalue_i64(900000000000LL)) == 900000000000LL);
+    TEST_CHECK(fabs(solix_cvalue_as_f64(solix_cvalue_f64(3.1415926)) - 3.1415926) < 1e-12);
+    TEST_CHECK(solix_cvalue_as_ref(solix_cvalue_ref(4096U)) == 4096U);
+    TEST_CHECK(solix_cvalue_as_fnptr(solix_cvalue_fnptr(17U)) == 17U);
 
     /* 2. Verify SolixVmContext C-ABI layout size (19 pointers/u64 fields = 152 bytes on 64-bit) */
-    assert(sizeof(SolixVmContext) == sizeof(void*) * 19U);
+    TEST_CHECK(sizeof(SolixVmContext) == sizeof(void*) * 19U);
 
     /* 3. Verify SolixVmContext helpers end-to-end */
     MockVmState state;
@@ -220,51 +227,51 @@ int main(void) {
     };
 
     const SolixVmContext* verified = solix_vm_context_from_ptr(&vm_ctx);
-    assert(verified != NULL);
+    TEST_CHECK(verified != NULL);
 
     uint32_t str_addr = solix_vm_alloc_string(verified, "hello-c-ffi");
-    assert(str_addr == 1024U);
+    TEST_CHECK(str_addr == 1024U);
     size_t read_len = 0;
     char* text = solix_vm_read_string_alloc(verified, str_addr, &read_len);
-    assert(text != NULL && read_len == 11U && strcmp(text, "hello-c-ffi") == 0);
+    TEST_CHECK(text != NULL && read_len == 11U && strcmp(text, "hello-c-ffi") == 0);
     free(text);
 
-    assert(solix_vm_alloc_chars(verified, "abc", 3U) == 2051U);
-    assert(solix_vm_alloc_byte_array(verified, (const uint8_t*)"xy", 2U) == 3074U);
+    TEST_CHECK(solix_vm_alloc_chars(verified, "abc", 3U) == 2051U);
+    TEST_CHECK(solix_vm_alloc_byte_array(verified, (const uint8_t*)"xy", 2U) == 3074U);
 
     uint32_t arr_addr = solix_vm_alloc_array(verified, 4U, SOLIX_ARRAY_TAG_I64);
-    assert(solix_vm_array_len(verified, arr_addr) == 4U);
+    TEST_CHECK(solix_vm_array_len(verified, arr_addr) == 4U);
     solix_vm_array_set_u64(verified, arr_addr, 2U, UINT64_C(98765));
-    assert(solix_vm_array_get_u64(verified, arr_addr, 2U) == UINT64_C(98765));
+    TEST_CHECK(solix_vm_array_get_u64(verified, arr_addr, 2U) == UINT64_C(98765));
 
     uint32_t vtable_id = solix_vm_get_class_vtable_id(verified, "Point");
     uint32_t obj_addr = solix_vm_alloc_object(verified, vtable_id, 2U);
-    assert(obj_addr == 8192U);
+    TEST_CHECK(obj_addr == 8192U);
     solix_vm_set_field_i32(verified, obj_addr, 0U, -123);
-    assert(solix_vm_get_field_i32(verified, obj_addr, 0U) == -123);
+    TEST_CHECK(solix_vm_get_field_i32(verified, obj_addr, 0U) == -123);
     solix_vm_write_field_u64(verified, obj_addr, 16U, UINT64_C(555666));
-    assert(solix_vm_read_field_u64(verified, obj_addr, 16U) == UINT64_C(555666));
+    TEST_CHECK(solix_vm_read_field_u64(verified, obj_addr, 16U) == UINT64_C(555666));
 
-    assert(solix_vm_get_metric(verified, 3U) == UINT64_C(300));
+    TEST_CHECK(solix_vm_get_metric(verified, 3U) == UINT64_C(300));
     solix_vm_set_cycle_threshold(verified, 512U);
-    assert(state.last_threshold == 512U);
-    assert(solix_vm_collect_cycles(verified) == 1U);
+    TEST_CHECK(state.last_threshold == 512U);
+    TEST_CHECK(solix_vm_collect_cycles(verified) == 1U);
 
     /* 4. Verify registration + callback error signaling */
     MockCollector collector = { { NULL }, 0U };
     solix_register_natives(&collector, mock_register_callback);
-    assert(collector.count == 1U);
-    assert(strcmp(collector.symbols[0], "CTestBridge::add") == 0);
+    TEST_CHECK(collector.count == 1U);
+    TEST_CHECK(strcmp(collector.symbols[0], "CTestBridge::add") == 0);
 
     SolixCValue err = solix_cvalue_null();
     SolixCValue args[2] = { solix_cvalue_i32(20), solix_cvalue_i32(22) };
     SolixCValue sum = native_sample_add(&vm_ctx, args, 2U, &err);
-    assert(solix_cvalue_as_i32(sum) == 42);
-    assert(solix_cvalue_is_null(err));
+    TEST_CHECK(solix_cvalue_as_i32(sum) == 42);
+    TEST_CHECK(solix_cvalue_is_null(err));
 
     SolixCValue missing_err = solix_cvalue_null();
     (void)native_sample_add(&vm_ctx, args, 1U, &missing_err);
-    assert(!solix_cvalue_is_null(missing_err));
+    TEST_CHECK(!solix_cvalue_is_null(missing_err));
 
     printf("C11 solix_ffi tests passed.\n");
     return 0;
