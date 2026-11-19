@@ -1081,7 +1081,7 @@ fn compile_cmake_native(
                 archive_cache_dir.display()
             ));
 
-        if ninja_available {
+        if ninja_available && (!cfg!(windows) || is_cross) {
             cfg_cmd.args(["-G", "Ninja"]);
         }
         if let Some(ref toolchain_path) = toolchain_option {

@@ -1375,14 +1375,12 @@ fn test_solix_build_scripts_remain_in_sync_across_repo() {
         .join("solix_build.py");
     let canonical_bytes = fs::read(&canonical_path).expect("read canonical solix_build.py");
 
-    let synced_locations = [
-        manifest_dir
-            .join("assets")
-            .join("templates")
-            .join("untitled-rust")
-            .join("scripts")
-            .join("solix_build.py"),
-    ];
+    let synced_locations = [manifest_dir
+        .join("assets")
+        .join("templates")
+        .join("untitled-rust")
+        .join("scripts")
+        .join("solix_build.py")];
 
     for synced_path in synced_locations {
         let copy_bytes = fs::read(&synced_path)

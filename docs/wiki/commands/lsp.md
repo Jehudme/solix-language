@@ -44,7 +44,7 @@ if not configs.solix then
         default_config = {
             cmd = { "solix", "lsp", "--stdio" },
             filetypes = { "solix" },
-            root_dir = lspconfig.util.root_pattern("manifest.toml", ".git"),
+            root_dir = lspconfig.util.root_pattern("manifest.yaml", "manifest.yml", "manifest.toml", ".git"),
             settings = {},
         },
     }

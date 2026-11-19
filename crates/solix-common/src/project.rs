@@ -185,12 +185,19 @@ pub fn expand_platform_list(platforms: &[String]) -> Vec<String> {
 #[must_use]
 pub fn expand_platforms_to_triples(platforms: &[String]) -> Vec<String> {
     let mut triples = Vec::new();
+    let host_plat = host_platform_id();
+    let host_triple = host_target_triple();
     let expanded_platforms = expand_platform_list(platforms);
     for platform_id in expanded_platforms {
         if platform_id == "universal" {
             continue;
         }
-        if let Some(triple) = platform_id_to_target_triple(&platform_id) {
+        if platform_id == host_plat {
+            let owned_host = host_triple.to_string();
+            if !triples.contains(&owned_host) {
+                triples.push(owned_host);
+            }
+        } else if let Some(triple) = platform_id_to_target_triple(&platform_id) {
             let owned_triple = triple.to_string();
             if !triples.contains(&owned_triple) {
                 triples.push(owned_triple);
@@ -200,7 +207,7 @@ pub fn expand_platforms_to_triples(platforms: &[String]) -> Vec<String> {
         }
     }
     if triples.is_empty() {
-        triples.push(host_target_triple().to_string());
+        triples.push(host_triple.to_string());
     }
     triples
 }
@@ -578,45 +585,43 @@ impl ProjectManifest {
     /// top-level `vars:` section ignored by schema deserialization. Profile inheritance via
     /// `inherits` is explicitly rejected.
     pub fn from_yaml_str(yaml_content: &str) -> Result<Self, EmissionError> {
-        let mut yaml_value: serde_yaml_ng::Value =
-            serde_yaml_ng::from_str(yaml_content).map_err(|parse_error| {
+        let mut yaml_value: serde_json::Value =
+            serde_saphyr::from_str(yaml_content).map_err(|parse_error| {
                 EmissionError::ContainerSerializationFailed {
                     reason: format!("failed to parse manifest.yaml: {parse_error}"),
                 }
             })?;
 
-        yaml_value.apply_merge().map_err(|merge_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!(
-                    "failed to resolve YAML anchors/merges in manifest.yaml: {merge_error}"
-                ),
-            }
-        })?;
-
-        if let serde_yaml_ng::Value::Mapping(ref mut root_map) = yaml_value {
-            let profiles_key = serde_yaml_ng::Value::String("profiles".to_string());
-            if let Some(serde_yaml_ng::Value::Mapping(profiles_map)) = root_map.get(&profiles_key) {
-                for (profile_name_val, profile_body_val) in profiles_map {
-                    if let serde_yaml_ng::Value::Mapping(profile_map) = profile_body_val
-                        && profile_map
-                            .contains_key(serde_yaml_ng::Value::String("inherits".to_string()))
-                    {
-                        let profile_name = profile_name_val.as_str().unwrap_or("<profile>");
-                        return Err(EmissionError::ContainerSerializationFailed {
-                            reason: format!(
-                                "manifest.yaml profile '{profile_name}' uses 'inherits', which has been removed; configure each profile explicitly or use YAML anchors (& / *)"
-                            ),
-                        });
+        if let serde_json::Value::Object(ref mut root_map) = yaml_value {
+            if let Some(serde_json::Value::Object(profiles_map)) = root_map.get_mut("profiles") {
+                for (profile_name, profile_body_val) in profiles_map.iter_mut() {
+                    if profile_body_val.is_null() {
+                        *profile_body_val = serde_json::Value::Object(serde_json::Map::new());
+                    }
+                    if let serde_json::Value::Object(profile_map) = profile_body_val {
+                        if profile_map.contains_key("inherits") {
+                            return Err(EmissionError::ContainerSerializationFailed {
+                                reason: format!(
+                                    "manifest.yaml profile '{profile_name}' uses 'inherits', which has been removed; configure each profile explicitly or use YAML anchors (& / *)"
+                                ),
+                            });
+                        }
+                        if let Some(serde_json::Value::Object(natives_map)) =
+                            profile_map.get_mut("natives")
+                        {
+                            for (_native_name, native_val) in natives_map.iter_mut() {
+                                if native_val.is_null() {
+                                    *native_val = serde_json::Value::Object(serde_json::Map::new());
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            let retained_keys: Vec<serde_yaml_ng::Value> = root_map
+            let retained_keys: Vec<String> = root_map
                 .keys()
-                .filter(|key| {
-                    key.as_str()
-                        .is_some_and(|key_str| key_str == "vars" || key_str.starts_with("x-"))
-                })
+                .filter(|key_str| *key_str == "vars" || key_str.starts_with("x-"))
                 .cloned()
                 .collect();
             for ignored_key in retained_keys {
@@ -624,7 +629,7 @@ impl ProjectManifest {
             }
         }
 
-        let manifest: Self = serde_yaml_ng::from_value(yaml_value).map_err(|parse_error| {
+        let manifest: Self = serde_json::from_value(yaml_value).map_err(|parse_error| {
             EmissionError::ContainerSerializationFailed {
                 reason: format!("failed to parse manifest.yaml: {parse_error}"),
             }
@@ -711,7 +716,7 @@ impl ProjectManifest {
 
     /// Serializes this manifest to a clean YAML string (`manifest.yaml`).
     pub fn to_yaml_string(&self) -> Result<String, EmissionError> {
-        serde_yaml_ng::to_string(self).map_err(|serialize_error| {
+        serde_saphyr::to_string(self).map_err(|serialize_error| {
             EmissionError::ContainerSerializationFailed {
                 reason: format!("failed to serialize manifest to yaml: {serialize_error}"),
             }
