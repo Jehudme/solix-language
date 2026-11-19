@@ -320,6 +320,25 @@ fn build_hook_environment(
     env_pairs
 }
 
+#[cfg(windows)]
+fn build_shell_hook_command(raw_command: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new("cmd");
+    // Use /S /C with raw_arg so Windows cmd.exe strips only the single outer quote pair
+    // instead of having Rust's standard arg escaper backslash-escape embedded quotes.
+    cmd.raw_arg("/S")
+        .raw_arg("/C")
+        .raw_arg(format!("\"{raw_command}\""));
+    cmd
+}
+
+#[cfg(not(windows))]
+fn build_shell_hook_command(raw_command: &str) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", raw_command]);
+    cmd
+}
+
 fn run_hook_commands(
     commands: &[String],
     hook_name: &str,
@@ -332,15 +351,7 @@ fn run_hook_commands(
             continue;
         }
         println!("  [{hook_name}] {trimmed}");
-        let mut command = if cfg!(windows) {
-            let mut cmd = Command::new("cmd");
-            cmd.args(["/C", trimmed]);
-            cmd
-        } else {
-            let mut cmd = Command::new("sh");
-            cmd.args(["-c", trimmed]);
-            cmd
-        };
+        let mut command = build_shell_hook_command(trimmed);
         command.current_dir(project_root);
         for (key, value) in env_pairs {
             command.env(key, value);
