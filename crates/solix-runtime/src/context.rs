@@ -1003,10 +1003,11 @@ impl RuntimeContext {
                 return Some(found_id);
             }
             let simple_base = base_symbol.rsplit(['.', ':']).next().unwrap_or(base_symbol);
-            if simple_base != "constructor" && !simple_base.starts_with('~') {
-                if let Some(&found_id) = self.symbol_to_function_id.get(simple_base) {
-                    return Some(found_id);
-                }
+            if simple_base != "constructor"
+                && !simple_base.starts_with('~')
+                && let Some(&found_id) = self.symbol_to_function_id.get(simple_base)
+            {
+                return Some(found_id);
             }
         }
         let clean_symbol = symbol.split(['(', '/']).next().unwrap_or(symbol);
@@ -1017,10 +1018,11 @@ impl RuntimeContext {
             .rsplit(['.', ':'])
             .next()
             .unwrap_or(clean_symbol);
-        if simple_clean != "constructor" && !simple_clean.starts_with('~') {
-            if let Some(&found_id) = self.symbol_to_function_id.get(simple_clean) {
-                return Some(found_id);
-            }
+        if simple_clean != "constructor"
+            && !simple_clean.starts_with('~')
+            && let Some(&found_id) = self.symbol_to_function_id.get(simple_clean)
+        {
+            return Some(found_id);
         }
         for (candidate_symbol, &found_id) in &self.symbol_to_function_id {
             let candidate_clean = candidate_symbol
