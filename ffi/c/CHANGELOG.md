@@ -2,6 +2,16 @@
 
 All notable changes to the Solix C/C++ FFI SDK (`solix::ffi`) will be documented in this file.
 
+## [1.6.1] - 2026-11-19
+
+### Bug Fixes
+
+- *(release)* Skip incompatible host install during cross-target library staging
+
+### Documentation
+
+- *(ffi)* Note SDK 1.6.0+ scope in native_interop spec
+
 ## [1.6.0] - 2026-11-19
 
 ### Bug Fixes
