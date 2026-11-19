@@ -6,7 +6,7 @@ mod common;
 
 use common::LanguageFixture;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
-use solix_compilation::phases::lexing::{TokenKind, lex, lex_source};
+use solix_compilation::phases::lexing::{LexingError, TokenKind, lex, lex_source};
 use std::path::Path;
 
 #[test]
@@ -211,5 +211,102 @@ fn test_numeric_radixes_and_suffixes() {
     assert_eq!(tokens.len(), 10); // 9 numbers + 1 EOF
     for token in &tokens[0..9] {
         assert_eq!(token.kind, TokenKind::Number);
+    }
+}
+
+#[test]
+fn test_trailing_decimal_point_float_literal() {
+    let source = "1. 0. 42. 10.f 3.14";
+    let tokens = lex_source(0, source).expect("Trailing decimal point floats must lex cleanly");
+    assert_eq!(tokens.len(), 6); // 5 numbers + EOF
+    for token in &tokens[0..5] {
+        assert_eq!(token.kind, TokenKind::Number);
+    }
+
+    // Verify '..' range is not absorbed as float
+    let range_source = "1..10";
+    let range_tokens =
+        lex_source(0, range_source).expect("Range dots must not be consumed into float");
+    let range_kinds: Vec<TokenKind> = range_tokens.iter().map(|token| token.kind).collect();
+    assert_eq!(
+        range_kinds,
+        vec![
+            TokenKind::Number,
+            TokenKind::PunctuationDot,
+            TokenKind::PunctuationDot,
+            TokenKind::Number,
+            TokenKind::Eof,
+        ]
+    );
+
+    // Verify member call '1.toString()' leaves dot as punctuation
+    let member_source = "1.toString()";
+    let member_tokens = lex_source(0, member_source)
+        .expect("Member call on number must not consume dot into float");
+    let member_kinds: Vec<TokenKind> = member_tokens.iter().map(|token| token.kind).collect();
+    assert_eq!(
+        member_kinds,
+        vec![
+            TokenKind::Number,
+            TokenKind::PunctuationDot,
+            TokenKind::Identifier,
+            TokenKind::PunctuationOpenParen,
+            TokenKind::PunctuationCloseParen,
+            TokenKind::Eof,
+        ]
+    );
+}
+
+#[test]
+fn test_raw_newline_in_string_literal_rejected() {
+    let unescaped_newline_source = "\"hello\nworld\"";
+    let lex_result = lex_source(0, unescaped_newline_source);
+    assert!(
+        lex_result.is_err(),
+        "Raw newline in string literal must produce lexing error"
+    );
+    let errors = lex_result.expect_err("Lexing errors");
+    assert!(
+        errors
+            .iter()
+            .any(|error| matches!(error, LexingError::UnterminatedStringLiteral { .. })),
+        "Expected UnterminatedStringLiteral diagnostic for raw newline in string literal"
+    );
+
+    // Escaped newline must continue to succeed
+    let escaped_source = "\"hello\\nworld\"";
+    let escaped_result = lex_source(0, escaped_source);
+    assert!(
+        escaped_result.is_ok(),
+        "Escaped newline in string literal must lex successfully"
+    );
+}
+
+#[test]
+fn test_decimal_integer_with_leading_zeros_rejected() {
+    let invalid_inputs = ["0123", "007", "00", "0_123"];
+    for invalid_input in invalid_inputs {
+        let lex_result = lex_source(0, invalid_input);
+        assert!(
+            lex_result.is_err(),
+            "Leading zero integer literal '{invalid_input}' must be rejected by lexer"
+        );
+        let errors = lex_result.expect_err("Lexing errors");
+        assert!(
+            errors
+                .iter()
+                .any(|error| matches!(error, LexingError::LeadingZeroIntegerLiteral { .. })),
+            "Expected LeadingZeroIntegerLiteral diagnostic for '{invalid_input}', got {errors:?}"
+        );
+    }
+
+    // Single 0, hex, binary, and floats starting with 0 must succeed
+    let valid_inputs = ["0", "0L", "0x12", "0XFF", "0b101", "0B0", "0.5", "0."];
+    for valid_input in valid_inputs {
+        let lex_result = lex_source(0, valid_input);
+        assert!(
+            lex_result.is_ok(),
+            "Valid literal '{valid_input}' must lex successfully, got {lex_result:?}"
+        );
     }
 }
