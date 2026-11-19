@@ -338,6 +338,14 @@ jobs:
           export SOLIX_BIN
           cargo test --workspace --all-targets
 
+      - name: Run C/C++ FFI SDK CTest suite (ffi/c)
+        shell: bash
+        run: |
+          cmake -S ffi/c -B build-ffi-c -DSOLIX_FFI_BUILD_TESTS=ON
+          cmake --build build-ffi-c --config Release
+          ctest --test-dir build-ffi-c --build-config Release --output-on-failure
+          rm -rf build-ffi-c
+
       - name: Verify embedded solix wiki standalone execution
         shell: bash
         env:

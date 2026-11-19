@@ -7,7 +7,7 @@ members = [
     "crates/solix-toolchain",
     "crates/solix-lsp",
     "crates/solix-dap",
-    "crates/solix-ffi",
+    "ffi/rust",
     "crates/solix-tests",
 ]
 exclude = [

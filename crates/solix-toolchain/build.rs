@@ -435,8 +435,27 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     }
 }
 
+fn emit_ffi_git_tag() {
+    println!("cargo:rerun-if-env-changed=SOLIX_RELEASE_CHANNEL");
+    println!("cargo:rerun-if-env-changed=SOLIX_FFI_GIT_TAG");
+    let explicit_tag = env::var("SOLIX_FFI_GIT_TAG")
+        .ok()
+        .filter(|val| !val.trim().is_empty());
+    let release_channel = env::var("SOLIX_RELEASE_CHANNEL").unwrap_or_default();
+    let resolved_tag = if let Some(custom_tag) = explicit_tag {
+        custom_tag
+    } else if release_channel.eq_ignore_ascii_case("release") {
+        let pkg_version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.0".to_string());
+        format!("v{pkg_version}")
+    } else {
+        "dev".to_string()
+    };
+    println!("cargo:rustc-env=SOLIX_FFI_GIT_TAG={resolved_tag}");
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=assets");
+    emit_ffi_git_tag();
 
     let out_dir = match env::var("OUT_DIR") {
         Ok(dir) => PathBuf::from(dir),

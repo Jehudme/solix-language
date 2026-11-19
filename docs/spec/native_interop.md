@@ -85,8 +85,9 @@ pub unsafe extern "C" fn solix_register_natives(
 );
 ```
 
-### 3.3. `solix-ffi` Native Extension SDK
-The official [`solix-ffi`](../../crates/solix-ffi/src/lib.rs) crate provides typed wrappers over `SolixCValue`, safe argument extraction helpers, and registration macros (`solix_export!`) so Rust `cdylib` plugins inside `natives/` can inspect arguments and report errors without manual raw union boilerplate.
+### 3.3. `ffi/rust` (`solix-ffi`) & `ffi/c` (`solix::ffi`) Native Extension SDKs
+- **Rust SDK ([`ffi/rust/`](../../ffi/rust/src/lib.rs)):** The `solix-ffi` crate provides typed wrappers over `SolixCValue`, full `SolixVmContext` accessors (`alloc_string`, `alloc_chars`, `alloc_byte_array`, `alloc_array`, `alloc_object`, `read_field_u64`/`write_field_u64`, `get_vm_metric`, `collect_cycles`), and registration macros (`solix_export!`).
+- **C11 / C++17 CMake SDK ([`ffi/c/`](../../ffi/c/include/solix_ffi.h)):** Exports interface target `solix::ffi` (`CMakeLists.txt` with `SOURCE_SUBDIR ffi/c`) and [`solix_ffi.h`](../../ffi/c/include/solix_ffi.h) providing exact ABI-matched `SolixCValue`, `SolixVmContext` (verified with `SOLIX_VM_CONTEXT_MAGIC == 0x534F4C4958564D43`), inline value constructors/unwrappers, `solix_vm_*` host heap helpers, `solix_vm_set_error`, and cross-platform export macros (`SOLIX_REGISTER_MODULE` / `SOLIX_EXPORT_NATIVES_BEGIN`).
 
 ---
 

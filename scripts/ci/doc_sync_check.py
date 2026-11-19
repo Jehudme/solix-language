@@ -84,7 +84,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "Native Interop & FFI",
-        "pattern": r"^crates/solix-runtime/src/native/",
+        "pattern": r"^(crates/solix-runtime/src/native/|ffi/)",
         "required_docs": [
             "docs/spec/native_interop.md",
             "docs/guide/09_native_plugins.md",

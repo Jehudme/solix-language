@@ -412,8 +412,28 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
             updated_root = root_log.read_text(encoding="utf-8")
             self.assertLess(updated_root.index("---"), updated_root.index("## [1.5.0]"))
             self.assertLess(updated_root.index("## [1.5.0]"), updated_root.index("## [1.4.0]"))
-            self.assertIn("crates/solix-ffi/CHANGELOG.md", prepare_release_train.CHANGELOG_FILES)
+            self.assertIn("ffi/rust/CHANGELOG.md", prepare_release_train.CHANGELOG_FILES)
+            self.assertIn("ffi/c/CHANGELOG.md", prepare_release_train.CHANGELOG_FILES)
             self.assertIn("CHANGELOG.md", prepare_release_train.CHANGELOG_FILES)
+
+            ffi_c_dir = tmp / "ffi" / "c" / "include"
+            ffi_c_dir.mkdir(parents=True, exist_ok=True)
+            (tmp / "ffi" / "c" / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.20)\nproject(solix_ffi VERSION 1.4.0 LANGUAGES C CXX)\n",
+                encoding="utf-8",
+            )
+            (ffi_c_dir / "solix_ffi.h").write_text(
+                '#define SOLIX_FFI_VERSION_MAJOR 1\n'
+                '#define SOLIX_FFI_VERSION_MINOR 4\n'
+                '#define SOLIX_FFI_VERSION_PATCH 0\n'
+                '#define SOLIX_FFI_VERSION "1.4.0"\n',
+                encoding="utf-8",
+            )
+            prepare_release_train.update_c_ffi_version(tmp, "1.5.0")
+            self.assertIn("VERSION 1.5.0", (tmp / "ffi" / "c" / "CMakeLists.txt").read_text(encoding="utf-8"))
+            updated_header = (ffi_c_dir / "solix_ffi.h").read_text(encoding="utf-8")
+            self.assertIn("#define SOLIX_FFI_VERSION_MINOR 5", updated_header)
+            self.assertIn('#define SOLIX_FFI_VERSION "1.5.0"', updated_header)
 
     def test_doc_sync_ignores_lsp_cargo_toml_and_scripts_are_emoji_free(self) -> None:
         self.assertEqual(doc_sync_check.check_trigger_matrix(["crates/solix-lsp/Cargo.toml"]), [])

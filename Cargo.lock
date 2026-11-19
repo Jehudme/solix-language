@@ -1262,6 +1262,7 @@ dependencies = [
  "proptest",
  "solix-common",
  "solix-compilation",
+ "solix-ffi",
  "solix-runtime",
  "tempfile",
  "zip",
