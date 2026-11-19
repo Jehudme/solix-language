@@ -347,14 +347,20 @@ fn generate_embedded_assets(manifest_dir: &Path, out_dir: &Path) {
     let target_arch =
         env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| env::consts::ARCH.to_string());
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    let strip_foreign = env::var("SOLIX_STRIP_FOREIGN_BUNDLED_LIBS")
+        .ok()
+        .is_some_and(|val| val.trim() == "1" || val.trim().eq_ignore_ascii_case("true"));
 
     let mut packed_packages: Vec<(String, Vec<u8>)> = Vec::with_capacity(packages.len());
     for (rel_path, archive_path) in &packages {
         if let Ok(raw_bytes) = fs::read(archive_path) {
-            let filtered =
+            let final_bytes = if strip_foreign {
                 filter_slxarc_for_target(&raw_bytes, &target_os, &target_arch, &target_env)
-                    .unwrap_or(raw_bytes);
-            packed_packages.push((rel_path.clone(), filtered));
+                    .unwrap_or(raw_bytes)
+            } else {
+                raw_bytes
+            };
+            packed_packages.push((rel_path.clone(), final_bytes));
         }
     }
     let packages_pack_path = out_dir.join("embedded_packages.pack");

@@ -602,6 +602,12 @@ pub fn resolve_bundled_packages_dir() -> Option<PathBuf> {
             return Some(manifest_assets);
         }
 
+        if has_embedded_bundled_packages()
+            && let Ok(Some(embedded_dir)) = materialize_embedded_bundled_packages()
+        {
+            return Some(embedded_dir);
+        }
+
         if let Ok(current_dir) = std::env::current_dir() {
             let repo_candidate = current_dir
                 .join("crates")
@@ -724,12 +730,13 @@ fn find_vsix_in_directory(directory: &Path) -> Option<PathBuf> {
 /// # Errors
 /// Returns an error if archive reading, unpacking, or registry writing fails.
 pub fn install_bundled_packages(store_directory: &Path, force: bool) -> Result<usize> {
-    install_bundled_packages_inner(store_directory, force, false)
+    install_bundled_packages_inner(store_directory, force, force, false)
 }
 
 fn install_bundled_packages_inner(
     store_directory: &Path,
-    force: bool,
+    override_existing: bool,
+    strict_missing: bool,
     quiet: bool,
 ) -> Result<usize> {
     if IS_BOOTSTRAPPING
@@ -750,7 +757,7 @@ fn install_bundled_packages_inner(
     let bundled_directory = match resolve_bundled_packages_dir() {
         Some(dir) => dir,
         None => {
-            if force {
+            if strict_missing {
                 bail!(
                     "No bundled packages directory found in 'assets/packages/' or embedded in the Solix binary."
                 );
@@ -760,7 +767,7 @@ fn install_bundled_packages_inner(
     };
 
     if !bundled_directory.exists() {
-        if force {
+        if strict_missing {
             bail!(
                 "Bundled packages directory does not exist at '{}'",
                 bundled_directory.display()
@@ -864,7 +871,7 @@ fn install_bundled_packages_inner(
     }
 
     if candidates.is_empty() {
-        if force {
+        if strict_missing {
             bail!(
                 "No bundled package archives (.slxarc) found in '{}'",
                 bundled_directory.display()
@@ -890,14 +897,14 @@ fn install_bundled_packages_inner(
                         && record_version == &package_version
                 });
 
-        if already_installed && !force {
+        if already_installed && !override_existing {
             continue;
         }
 
         crate::commands::pkg::install_package_artifact_with_options(
             &archive_path,
             None,
-            force,
+            override_existing,
             Some(&package_profile),
             Some(store_directory),
             quiet,
@@ -952,6 +959,6 @@ pub fn ensure_bundled_packages_installed(pkg_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let result = install_bundled_packages_inner(pkg_dir, false, true);
+    let result = install_bundled_packages_inner(pkg_dir, true, false, true);
     result.map(|_| ())
 }

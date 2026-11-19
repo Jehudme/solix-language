@@ -9,9 +9,9 @@ use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use anyhow::{Context, Result, bail};
 use solix_common::hash::sha256_file;
 use solix_common::project::{
-    NativeTargetConfig, ProjectManifest, ResolvedProfile, expand_platforms_to_triples,
-    find_manifest_path, host_platform_id, host_target_triple, triple_to_platform_id,
-    validate_archive_relative_path,
+    NativeTargetConfig, ProjectManifest, ResolvedProfile, expand_platform_list,
+    expand_platforms_to_triples, find_manifest_path, host_platform_id, host_target_triple,
+    normalize_platform_token, triple_to_platform_id, validate_archive_relative_path,
 };
 use solix_common::solver::DependencyRequirement;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -222,7 +222,14 @@ fn execute_declarative_build(
     copy_project_tree_filtered(&project_root.join("lib"), &stage_lib_dir, true)?;
     copy_project_tree_filtered(&project_root.join("resources"), &stage_resources_dir, false)?;
 
-    stage_dependency_native_libraries(resolved_profile, args.pkg_dir.as_deref(), &stage_lib_dir)?;
+    let required_platforms =
+        resolve_required_platform_ids(resolved_profile, args.target.as_deref());
+    stage_dependency_native_libraries(
+        resolved_profile,
+        args.pkg_dir.as_deref(),
+        &stage_lib_dir,
+        &required_platforms,
+    )?;
 
     let out_slxb = stage_bin_dir.join(format!("{}.slxb", manifest_data.configuration.name));
     compile_solix_project_sources(
@@ -1296,12 +1303,28 @@ fn copy_project_tree_filtered(source_dir: &Path, dest_dir: &Path, only_libs: boo
     Ok(())
 }
 
+fn resolve_required_platform_ids(
+    resolved_profile: &ResolvedProfile,
+    cli_target: Option<&str>,
+) -> Vec<String> {
+    let required_triples = resolve_native_triples(None, &resolved_profile.platforms, cli_target);
+    let mut platform_ids = Vec::new();
+    for triple in required_triples {
+        let normalized = normalize_platform_token(&triple);
+        if !normalized.is_empty() && !platform_ids.contains(&normalized) {
+            platform_ids.push(normalized);
+        }
+    }
+    platform_ids
+}
+
 fn stage_dependency_native_libraries(
     resolved_profile: &ResolvedProfile,
     pkg_dir_override: Option<&Path>,
     stage_lib_dir: &Path,
+    required_platforms: &[String],
 ) -> Result<()> {
-    if resolved_profile.link != "static" || resolved_profile.dependencies.is_empty() {
+    if resolved_profile.dependencies.is_empty() {
         return Ok(());
     }
 
@@ -1353,54 +1376,115 @@ fn stage_dependency_native_libraries(
         })?;
 
         let mut qualified_basenames: HashSet<String> = HashSet::new();
+        let mut packaged_platforms: BTreeSet<String> = BTreeSet::new();
+        let mut has_any_native_libs = false;
+        let mut has_unqualified_libs = false;
         for zip_idx in 0..zip_reader.len() {
             let entry = zip_reader.by_index(zip_idx)?;
-            let name = entry.name()?.replace('\\', "/");
-            if let Some(rel) = name.strip_prefix("lib/")
-                && rel.contains('/')
-                && is_shared_library_file(Path::new(&name))
-                && let Some(file_name) = Path::new(&name).file_name().and_then(|val| val.to_str())
-            {
-                qualified_basenames.insert(file_name.to_string());
-            }
-        }
-
-        for zip_idx in 0..zip_reader.len() {
-            let mut entry = zip_reader.by_index(zip_idx)?;
             if entry.is_dir() {
                 continue;
             }
-            let entry_name = entry.name()?.replace('\\', "/");
-            if let Some(rel_subpath) = entry_name.strip_prefix("lib/")
-                && is_shared_library_file(Path::new(&entry_name))
+            let name = entry.name()?.replace('\\', "/");
+            if let Some(rel) = name.strip_prefix("lib/")
+                && is_shared_library_file(Path::new(&name))
             {
-                let safe_rel = validate_archive_relative_path(rel_subpath)
-                    .map_err(|error| anyhow::anyhow!("{error}"))?;
-                let is_qualified = rel_subpath.contains('/');
-                if !is_qualified
-                    && Path::new(&entry_name)
-                        .file_name()
-                        .and_then(|val| val.to_str())
-                        .is_some_and(|file_name| qualified_basenames.contains(file_name))
-                {
-                    continue;
+                has_any_native_libs = true;
+                if let Some((subdir, _)) = rel.split_once('/') {
+                    let normalized = normalize_platform_token(subdir);
+                    if !normalized.is_empty() {
+                        packaged_platforms.insert(normalized);
+                    }
+                    if let Some(file_name) =
+                        Path::new(&name).file_name().and_then(|val| val.to_str())
+                    {
+                        qualified_basenames.insert(file_name.to_string());
+                    }
+                } else {
+                    has_unqualified_libs = true;
                 }
-                let dst_path = stage_lib_dir.join(&safe_rel);
-                if dst_path.exists() {
-                    continue;
-                }
-                if let Some(parent_dir) = dst_path.parent() {
-                    fs::create_dir_all(parent_dir)?;
-                }
-                let mut payload = Vec::new();
-                entry.read_to_end(&mut payload)?;
-                fs::write(&dst_path, payload)?;
             }
         }
 
-        if let Ok(inspection) = solix_common::project::SlxarcArchive::inspect(&archive_path)
-            && let Some(dep_manifest) = inspection.manifest
+        let inspection = solix_common::project::SlxarcArchive::inspect(&archive_path).ok();
+        let dep_manifest = inspection.and_then(|insp| insp.manifest);
+
+        if has_unqualified_libs
+            && packaged_platforms.is_empty()
+            && let Some(ref manifest) = dep_manifest
         {
+            for plat in expand_platform_list(&manifest.supported_platforms) {
+                if !plat.is_empty() {
+                    packaged_platforms.insert(plat);
+                }
+            }
+        }
+
+        if has_any_native_libs
+            && !packaged_platforms.contains("universal")
+            && !packaged_platforms.contains("all")
+        {
+            let missing_platforms: Vec<String> = required_platforms
+                .iter()
+                .filter(|req_plat| !packaged_platforms.contains(*req_plat))
+                .cloned()
+                .collect();
+            if !missing_platforms.is_empty() {
+                let packaged_display = if packaged_platforms.is_empty() {
+                    "none".to_string()
+                } else {
+                    packaged_platforms
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                bail!(
+                    "Dependency '{}@{}' (profile '{}') does not support requested target platform(s) [{}]: missing native shared library (.so/.dll/.dylib) (packaged platforms: [{}]). Run 'solix install --bundled --force' for universal bundled libraries or rebuild the dependency with matching 'platforms'.",
+                    req.name,
+                    req.version,
+                    req.profile.as_deref().unwrap_or("release"),
+                    missing_platforms.join(", "),
+                    packaged_display
+                );
+            }
+        }
+
+        if resolved_profile.link == "static" {
+            for zip_idx in 0..zip_reader.len() {
+                let mut entry = zip_reader.by_index(zip_idx)?;
+                if entry.is_dir() {
+                    continue;
+                }
+                let entry_name = entry.name()?.replace('\\', "/");
+                if let Some(rel_subpath) = entry_name.strip_prefix("lib/")
+                    && is_shared_library_file(Path::new(&entry_name))
+                {
+                    let safe_rel = validate_archive_relative_path(rel_subpath)
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                    let is_qualified = rel_subpath.contains('/');
+                    if !is_qualified
+                        && Path::new(&entry_name)
+                            .file_name()
+                            .and_then(|val| val.to_str())
+                            .is_some_and(|file_name| qualified_basenames.contains(file_name))
+                    {
+                        continue;
+                    }
+                    let dst_path = stage_lib_dir.join(&safe_rel);
+                    if dst_path.exists() {
+                        continue;
+                    }
+                    if let Some(parent_dir) = dst_path.parent() {
+                        fs::create_dir_all(parent_dir)?;
+                    }
+                    let mut payload = Vec::new();
+                    entry.read_to_end(&mut payload)?;
+                    fs::write(&dst_path, payload)?;
+                }
+            }
+        }
+
+        if let Some(dep_manifest) = dep_manifest {
             let target_prof = req.profile.as_deref().unwrap_or("release");
             if let Ok(dep_resolved) = dep_manifest.resolve_profile(target_prof) {
                 for (trans_name, trans_spec) in dep_resolved.dependencies {

@@ -292,7 +292,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 })?;
             let archive_manifest = loaded_archive.manifest.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Invalid archive container '{}': missing mandatory 'manifest.toml'",
+                    "Invalid archive container '{}': missing or invalid 'manifest.yaml' / 'manifest.toml'",
                     target_path.display()
                 )
             })?;

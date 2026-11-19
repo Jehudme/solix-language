@@ -1584,11 +1584,15 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
         fs::create_dir_all(&bin_dir).expect("create bin dir");
         fs::create_dir_all(&target_lib_dir).expect("create target lib dir");
 
+        let plat_id =
+            solix_common::project::triple_to_platform_id(triple).unwrap_or("linux-x86_64");
         fs::write(
-            stage_dir.join("manifest.toml"),
-            "[configuration]\nname = \"demo\"\nversion = \"1.0.0\"\n[profiles.release]\nsources = [\"src\"]\n",
+            stage_dir.join("manifest.yaml"),
+            format!(
+                "configuration:\n  name: demo\n  version: \"1.0.0\"\nprofiles:\n  release:\n    sources:\n      - src\nsupported_platforms:\n- {plat_id}\nnative_library_checksums:\n  \"lib/{triple}/{lib_filename}\": \"0000\"\n"
+            ),
         )
-        .expect("write manifest");
+        .expect("write serde-saphyr-formatted manifest.yaml");
         fs::write(
             bin_dir.join("demo.slxb"),
             solix_common::BinaryProgram::new().to_bytes(),
@@ -2306,4 +2310,103 @@ profiles:
         .expect("parse run cargo archive");
     let exit_code = run(run_cli).expect("running Cargo solix-native archive must succeed");
     assert_eq!(exit_code, 49);
+}
+
+#[test]
+fn test_build_fails_when_native_dependency_missing_requested_platform() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let pkg_store = workspace.root_path().join("pkg_store");
+    let pkg_store_str = pkg_store.to_str().expect("valid utf8");
+
+    // Package a host-only native dependency `.slxarc` (only host triple native lib).
+    let dep_stage = workspace.root_path().join("dep_stage");
+    let host_triple = solix_common::project::host_target_triple();
+    let host_lib_name = if cfg!(windows) {
+        "demo_host_native.dll"
+    } else if cfg!(target_os = "macos") {
+        "libdemo_host_native.dylib"
+    } else {
+        "libdemo_host_native.so"
+    };
+    fs::create_dir_all(dep_stage.join("bin")).expect("create dep bin");
+    fs::create_dir_all(dep_stage.join("lib").join(host_triple)).expect("create dep host lib");
+    fs::write(
+        dep_stage.join("manifest.yaml"),
+        "configuration:\n  name: single_plat_dep\n  version: \"1.0.0\"\nprofiles:\n  release:\n    sources:\n      - src\n",
+    )
+    .expect("write dep manifest");
+    fs::write(
+        dep_stage.join("bin").join("single_plat_dep.slxb"),
+        solix_common::BinaryProgram::new().to_bytes(),
+    )
+    .expect("write dep slxb");
+    fs::write(
+        dep_stage.join("lib").join(host_triple).join(host_lib_name),
+        b"host_only_native_bytes",
+    )
+    .expect("write dep native lib");
+
+    let dep_archive = workspace.file_path("single_plat_dep.slxarc");
+    SlxarcArchive::pack_directory(&dep_stage, &dep_archive).expect("pack dep archive");
+
+    let install_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        dep_archive.to_str().expect("valid utf8"),
+        "--profile",
+        "release",
+        "--pkg-dir",
+        pkg_store_str,
+    ])
+    .expect("parse dep install");
+    assert_eq!(run(install_cli).expect("install host-only dep"), 0);
+
+    // Consumer declares `platforms: [linux, windows]` which is NOT covered by a single-OS dependency.
+    let consumer_root = workspace.root_path().join("multi_plat_consumer");
+    fs::create_dir_all(consumer_root.join("src")).expect("create consumer src");
+    fs::write(
+        consumer_root.join("src").join("main.slx"),
+        "public class Main {\n    public static int32 main() { return 0; }\n}\n",
+    )
+    .expect("write consumer main.slx");
+    fs::write(
+        consumer_root.join("manifest.yaml"),
+        r#"configuration:
+  name: multi_plat_consumer
+  version: "0.1.0"
+profiles:
+  release:
+    entrypoint: Main::main
+    static: true
+    sources:
+      - src
+    platforms:
+      - linux
+      - windows
+    dependencies:
+      single_plat_dep:
+        version: "1.0.0"
+        profile: release
+"#,
+    )
+    .expect("write consumer manifest.yaml");
+
+    let build_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        consumer_root.to_str().expect("valid utf8"),
+        "--release",
+        "--pkg-dir",
+        pkg_store_str,
+    ])
+    .expect("parse consumer build cli");
+    let build_err = run(build_cli).expect_err(
+        "building multi-platform consumer against host-only native dependency must fail",
+    );
+    let err_msg = format!("{build_err:#}");
+    assert!(
+        err_msg.contains("single_plat_dep@1.0.0")
+            && err_msg.contains("does not support requested target platform"),
+        "Unexpected error message: {err_msg}"
+    );
 }
