@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.6.2] - 2026-11-19
+
+### Bug Fixes
+
+- *(build,install)* Fix YAML merge corruption, embed universal libs, validate dep platforms & auto-override defaults (#83)
+
 ## [1.6.1] - 2026-11-19
 
 ### Bug Fixes

@@ -2,6 +2,12 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [1.6.2] - 2026-11-19
+
+### Bug Fixes
+
+- *(build,install)* Fix YAML merge corruption, embed universal libs, validate dep platforms & auto-override defaults (#83)
+
 ## [1.6.1] - 2026-11-19
 
 ### Bug Fixes
