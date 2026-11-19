@@ -291,3 +291,53 @@ fn test_strict_namespace_type_path_syntax() {
     let tokens_import_colon = lex_source(0, import_colon_source).expect("Lexing succeeds");
     assert!(parse_source(0, &tokens_import_colon, import_colon_source).is_ok());
 }
+
+#[test]
+fn test_char_literal_escaped_character_bounds_validation() {
+    // 1. Valid single escape sequences and hex escape sequences
+    let valid_snippets = [
+        "char newline = '\\n';",
+        "char tab = '\\t';",
+        "char carriage_return = '\\r';",
+        "char backslash = '\\\\';",
+        "char single_quote = '\\'';",
+        "char double_quote = '\\\"';",
+        "char null_byte = '\\0';",
+        "char ascii_capital_a = '\\x41';",
+        "char standard_char = 'Z';",
+    ];
+
+    for snippet in valid_snippets {
+        let tokens =
+            lex_source(0, snippet).expect("Lexing valid character literal snippet must succeed");
+        let parse_result = parse_source(0, &tokens, snippet);
+        assert!(
+            parse_result.is_ok(),
+            "Expected valid character literal '{snippet}' to parse cleanly, got {:?}",
+            parse_result.err()
+        );
+    }
+
+    // 2. Invalid multi-character literals with leading escapes
+    let invalid_snippets = [
+        "char invalid_newline = '\\nabc';",
+        "char invalid_tab = '\\txyz';",
+        "char invalid_null = '\\00';",
+        "char invalid_hex = '\\x41B';",
+        "char regular_multi = 'ab';",
+    ];
+
+    for snippet in invalid_snippets {
+        let tokens = lex_source(0, snippet).expect("Lexing snippet must succeed");
+        let parse_result = parse_source(0, &tokens, snippet);
+        assert!(
+            parse_result.is_err(),
+            "Expected multi-character literal '{snippet}' to be rejected"
+        );
+        let errors = parse_result.expect_err("Parsing errors");
+        assert!(
+            errors.iter().any(|error| error.error_code() == "E0153"),
+            "Expected E0153 (MultiCharacterLiteral) for '{snippet}', got {errors:?}"
+        );
+    }
+}
