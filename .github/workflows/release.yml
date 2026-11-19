@@ -180,6 +180,9 @@ jobs:
       - name: Run post-bump workspace verification and packaging dry-run
         env:
           BUNDLED_CACHE_HIT: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
+          # Tag vX.Y.Z is not pushed until the next step, so generated template tests
+          # must point at `dev` during this pre-tag verification step.
+          SOLIX_FFI_GIT_TAG: dev
         run: |
           python3 scripts/docs/build_docs_site.py
           cargo build --bin solix
