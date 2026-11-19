@@ -277,6 +277,60 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
             self.assertFalse((out_release_only / "demo-debug@1.0.0").exists())
             self.assertTrue((out_release_only / "demo-release@1.0.0").exists())
 
+    def test_merge_bundled_packages_supports_manifest_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            linux_dir = tmp / "bundled-packages-x86_64-unknown-linux-gnu" / "yamldemo-release@2.1.0"
+            mac_dir = tmp / "bundled-packages-aarch64-apple-darwin" / "yamldemo-release@2.1.0"
+            linux_dir.mkdir(parents=True)
+            mac_dir.mkdir(parents=True)
+            out_dir = tmp / "universal_yaml"
+
+            base_manifest = (
+                "configuration:\n"
+                "  name: yamldemo\n"
+                "  version: \"2.1.0\"\n"
+                "profiles:\n"
+                "  release:\n"
+                "    static: true\n"
+            )
+            with zipfile.ZipFile(linux_dir / "yamldemo.slxarc", "w") as zip_handle:
+                zip_handle.writestr("manifest.yaml", base_manifest)
+                zip_handle.writestr("lib/x86_64-unknown-linux-gnu/libyamldemo.so", b"yaml-linux")
+            with zipfile.ZipFile(mac_dir / "yamldemo.slxarc", "w") as zip_handle:
+                zip_handle.writestr("manifest.yaml", base_manifest)
+                zip_handle.writestr("lib/aarch64-apple-darwin/libyamldemo.dylib", b"yaml-mac")
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "release" / "merge_bundled_packages.py"),
+                    "--input-dirs",
+                    str(linux_dir.parent),
+                    str(mac_dir.parent),
+                    "--output-dir",
+                    str(out_dir),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            merged_archive = out_dir / "yamldemo-release@2.1.0" / "yamldemo.slxarc"
+            self.assertTrue(merged_archive.is_file())
+            with zipfile.ZipFile(merged_archive, "r") as zip_handle:
+                names = set(zip_handle.namelist())
+                self.assertIn("manifest.yaml", names)
+                self.assertIn("lib/x86_64-unknown-linux-gnu/libyamldemo.so", names)
+                self.assertIn("lib/aarch64-apple-darwin/libyamldemo.dylib", names)
+                merged_manifest = zip_handle.read("manifest.yaml").decode("utf-8")
+                self.assertIn("native_library_checksums:", merged_manifest)
+                self.assertIn("supported_platforms:", merged_manifest)
+                self.assertIn(
+                    merge_bundled_packages.compute_sha256_bytes(b"yaml-linux"),
+                    merged_manifest,
+                )
+
     def test_issue_templates_and_workflows_parse_as_valid_yaml(self) -> None:
         template_dir = REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
         for yml_file in sorted(template_dir.glob("*.yml")):

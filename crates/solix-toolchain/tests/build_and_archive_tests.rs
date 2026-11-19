@@ -1375,29 +1375,12 @@ fn test_solix_build_scripts_remain_in_sync_across_repo() {
         .join("solix_build.py");
     let canonical_bytes = fs::read(&canonical_path).expect("read canonical solix_build.py");
 
-    let synced_locations = [
-        manifest_dir
-            .join("assets")
-            .join("templates")
-            .join("untitled-rust")
-            .join("scripts")
-            .join("solix_build.py"),
-        repo_root
-            .join("examples")
-            .join("breakout")
-            .join("scripts")
-            .join("solix_build.py"),
-        repo_root
-            .join("libraries")
-            .join("raylib")
-            .join("scripts")
-            .join("solix_build.py"),
-        repo_root
-            .join("libraries")
-            .join("solixlib")
-            .join("scripts")
-            .join("solix_build.py"),
-    ];
+    let synced_locations = [manifest_dir
+        .join("assets")
+        .join("templates")
+        .join("untitled-rust")
+        .join("scripts")
+        .join("solix_build.py")];
 
     for synced_path in synced_locations {
         let copy_bytes = fs::read(&synced_path)
@@ -1408,6 +1391,24 @@ fn test_solix_build_scripts_remain_in_sync_across_repo() {
             "solix_build.py at '{}' drifted from canonical '{}'",
             synced_path.display(),
             canonical_path.display()
+        );
+    }
+
+    // First-party packages migrated to declarative manifest.yaml must no longer ship solix_build.py.
+    for migrated_dir in [
+        repo_root.join("examples").join("breakout"),
+        repo_root.join("libraries").join("raylib"),
+        repo_root.join("libraries").join("solixlib"),
+    ] {
+        assert!(
+            migrated_dir.join("manifest.yaml").is_file(),
+            "Migrated package '{}' must contain manifest.yaml",
+            migrated_dir.display()
+        );
+        assert!(
+            !migrated_dir.join("scripts").join("solix_build.py").exists(),
+            "Migrated package '{}' must not contain legacy scripts/solix_build.py",
+            migrated_dir.display()
         );
     }
 }
@@ -1989,4 +1990,320 @@ sources = ["src"]
         run_result.is_err(),
         "solix run must reject archive built for an incompatible platform"
     );
+}
+
+#[test]
+fn test_manifest_yaml_declarative_cmake_project_build_and_hooks() {
+    let cmake_probe = std::process::Command::new("cmake")
+        .arg("--version")
+        .output();
+    if cmake_probe.is_err() {
+        return;
+    }
+
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let project_root = workspace.root_path().join("cmake_yaml_demo");
+    fs::create_dir_all(project_root.join("src")).expect("create src dir");
+    fs::create_dir_all(project_root.join("natives").join("cmake_calc"))
+        .expect("create cmake native dir");
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crates dir")
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let ffi_c_dir = repo_root.join("ffi").join("c");
+
+    let cmakelists = r#"cmake_minimum_required(VERSION 3.20)
+project(cmake_calc C)
+
+option(SOLIX_NATIVE_BUILD "Build as Solix native shared library plugin" OFF)
+
+if(SOLIX_NATIVE_BUILD)
+    include(FetchContent)
+    if(DEFINED ENV{SOLIX_FFI_SOURCE_DIR} AND EXISTS "$ENV{SOLIX_FFI_SOURCE_DIR}/CMakeLists.txt")
+        FetchContent_Declare(solix_ffi SOURCE_DIR "$ENV{SOLIX_FFI_SOURCE_DIR}")
+    else()
+        FetchContent_Declare(solix_ffi SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
+    FetchContent_MakeAvailable(solix_ffi)
+    add_library(cmake_calc SHARED calc.c)
+    target_link_libraries(cmake_calc PRIVATE solix::ffi)
+    target_compile_definitions(cmake_calc PRIVATE SOLIX_PLUGIN_MODE=1)
+else()
+    add_library(cmake_calc STATIC calc.c)
+endif()
+"#;
+    fs::write(
+        project_root
+            .join("natives")
+            .join("cmake_calc")
+            .join("CMakeLists.txt"),
+        cmakelists,
+    )
+    .expect("write CMakeLists.txt");
+
+    let calc_c = r#"#include <stdint.h>
+
+#ifdef SOLIX_PLUGIN_MODE
+#include "solix_ffi.h"
+
+static SolixCValue native_calc_add_mul(
+    void* raw_vm_context,
+    const SolixCValue* args,
+    uint32_t argc,
+    SolixCValue* out_error
+) {
+    (void)raw_vm_context;
+    (void)out_error;
+    if (argc < 2) {
+        return solix_cvalue_i32(0);
+    }
+    int32_t lhs = solix_cvalue_as_i32(args[0]);
+    int32_t rhs = solix_cvalue_as_i32(args[1]);
+    return solix_cvalue_i32((lhs + rhs) * 2);
+}
+
+static const SolixNativeEntry CMAKE_CALC_ENTRIES[] = {
+    {"CmakeCalc::add_mul", native_calc_add_mul},
+};
+
+SOLIX_REGISTER_MODULE(CMAKE_CALC_ENTRIES)
+#else
+int32_t standalone_calc_add_mul(int32_t lhs, int32_t rhs) {
+    return (lhs + rhs) * 2;
+}
+#endif
+"#;
+    fs::write(
+        project_root
+            .join("natives")
+            .join("cmake_calc")
+            .join("calc.c"),
+        calc_c,
+    )
+    .expect("write calc.c");
+
+    let main_slx = r#"
+public class CmakeCalc {
+    native public static int32 add_mul(int32 left_val, int32 right_val);
+}
+
+public class Main {
+    public static int32 main() {
+        return CmakeCalc::add_mul(10, 11);
+    }
+}
+"#;
+    fs::write(project_root.join("src").join("main.slx"), main_slx).expect("write main.slx");
+
+    let python_exe = if cfg!(windows) { "python" } else { "python3" };
+    let manifest_yaml = format!(
+        r#"vars:
+  pkg_ver: &proj_ver "0.4.2"
+
+configuration:
+  name: cmake_yaml_demo
+  version: *proj_ver
+  description: Declarative CMake YAML test
+  license: Apache-2.0
+
+profiles:
+  release:
+    entrypoint: Main::main
+    sources:
+      - src
+    platforms:
+      - host
+    natives:
+      cmake_calc:
+        profile: release
+
+  custom_rel:
+    entrypoint: Main::main
+    optimization_level: 2
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - host
+    pre_compile:
+      - "{python_exe} -c \"import pathlib; pathlib.Path('pre_marker.txt').write_text('ok')\""
+    post_compile:
+      - "{python_exe} -c \"import pathlib; assert pathlib.Path('build/custom_rel/cmake_yaml_demo.slxarc').is_file(); pathlib.Path('post_marker.txt').write_text('ok')\""
+    natives:
+      cmake_calc:
+        profile: release
+"#
+    );
+    fs::write(project_root.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+    assert!(ffi_c_dir.is_dir(), "expected ffi/c directory in repo");
+
+    let build_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid path"),
+        "--profile",
+        "custom_rel",
+    ])
+    .expect("parse build custom_rel");
+    assert_eq!(
+        run(build_cli).expect("manifest.yaml CMake build must pass"),
+        0
+    );
+
+    assert_eq!(
+        fs::read_to_string(project_root.join("pre_marker.txt")).expect("pre marker written"),
+        "ok"
+    );
+    assert_eq!(
+        fs::read_to_string(project_root.join("post_marker.txt")).expect("post marker written"),
+        "ok"
+    );
+
+    let archive_path = project_root
+        .join("build")
+        .join("custom_rel")
+        .join("cmake_yaml_demo.slxarc");
+    let inspection = SlxarcArchive::inspect(&archive_path).expect("inspect YAML .slxarc");
+    let parsed_manifest = inspection.manifest.expect("manifest parsed inside .slxarc");
+    assert_eq!(parsed_manifest.version(), "0.4.2");
+    assert!(!parsed_manifest.native_library_checksums.is_empty());
+
+    let run_cli = Cli::try_parse_from(["solix", "run", archive_path.to_str().expect("valid path")])
+        .expect("parse run cmake archive");
+    let exit_code = run(run_cli).expect("running CMake FFI archive must succeed");
+    assert_eq!(exit_code, 42);
+}
+
+#[test]
+fn test_manifest_yaml_auto_detects_cargo_with_solix_native_feature() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let project_root = workspace.root_path().join("cargo_yaml_demo");
+    fs::create_dir_all(project_root.join("src")).expect("create src dir");
+    fs::create_dir_all(project_root.join("natives").join("rust_calc").join("src"))
+        .expect("create rust native dir");
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crates dir")
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let ffi_rust_dir = repo_root.join("ffi").join("rust");
+    let ffi_rust_str = ffi_rust_dir.to_string_lossy().replace('\\', "/");
+
+    let cargo_toml = format!(
+        r#"[package]
+name = "rust_calc"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+solix-native = ["dep:solix-ffi"]
+
+[dependencies]
+solix-ffi = {{ path = "{ffi_rust_str}", optional = true }}
+"#
+    );
+    fs::write(
+        project_root
+            .join("natives")
+            .join("rust_calc")
+            .join("Cargo.toml"),
+        cargo_toml,
+    )
+    .expect("write Cargo.toml");
+
+    let lib_rs = r#"pub fn standalone_square(value: i32) -> i32 {
+    value * value
+}
+
+#[cfg(feature = "solix-native")]
+solix_ffi::solix_export! {
+    "RustCalc::square" => native_square,
+}
+
+#[cfg(feature = "solix-native")]
+pub unsafe extern "C" fn native_square(
+    _vm: *mut std::ffi::c_void,
+    args: *const solix_ffi::SolixCValue,
+    argc: u32,
+    _out_error: *mut solix_ffi::SolixCValue,
+) -> solix_ffi::SolixCValue {
+    if argc < 1 || args.is_null() {
+        return solix_ffi::SolixCValue::from_i32(0);
+    }
+    let input = unsafe { (*args).as_i32() };
+    solix_ffi::SolixCValue::from_i32(standalone_square(input))
+}
+"#;
+    fs::write(
+        project_root
+            .join("natives")
+            .join("rust_calc")
+            .join("src")
+            .join("lib.rs"),
+        lib_rs,
+    )
+    .expect("write lib.rs");
+
+    let main_slx = r#"
+public class RustCalc {
+    native public static int32 square(int32 value);
+}
+
+public class Main {
+    public static int32 main() {
+        return RustCalc::square(7);
+    }
+}
+"#;
+    fs::write(project_root.join("src").join("main.slx"), main_slx).expect("write main.slx");
+
+    let manifest_yaml = r#"configuration:
+  name: cargo_yaml_demo
+  version: "0.1.0"
+
+profiles:
+  release:
+    entrypoint: Main::main
+    sources:
+      - src
+    platforms:
+      - host
+    natives:
+      rust_calc:
+        profile: release
+"#;
+    fs::write(project_root.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+    let build_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid path"),
+        "--profile",
+        "release",
+    ])
+    .expect("parse build release");
+    assert_eq!(
+        run(build_cli).expect("manifest.yaml Cargo build with solix-native must pass"),
+        0
+    );
+
+    let archive_path = project_root
+        .join("build")
+        .join("release")
+        .join("cargo_yaml_demo.slxarc");
+    let run_cli = Cli::try_parse_from(["solix", "run", archive_path.to_str().expect("valid path")])
+        .expect("parse run cargo archive");
+    let exit_code = run(run_cli).expect("running Cargo solix-native archive must succeed");
+    assert_eq!(exit_code, 49);
 }

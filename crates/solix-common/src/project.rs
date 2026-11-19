@@ -101,6 +101,34 @@ pub fn triple_to_platform_id(triple: &str) -> Option<&'static str> {
     }
 }
 
+/// Canonical manifest filenames searched in priority order (`manifest.yaml` first).
+pub const MANIFEST_FILENAMES: [&str; 3] = ["manifest.yaml", "manifest.yml", "manifest.toml"];
+
+/// Searches `project_root` for a manifest file in canonical priority order (`manifest.yaml`, `manifest.yml`, `manifest.toml`).
+#[must_use]
+pub fn find_manifest_path(project_root: &Path) -> Option<PathBuf> {
+    for candidate_name in MANIFEST_FILENAMES {
+        let candidate_path = project_root.join(candidate_name);
+        if candidate_path.is_file() {
+            return Some(candidate_path);
+        }
+    }
+    None
+}
+
+/// Maps a canonical platform identifier (`"linux-x86_64"`, `"macos-aarch64"`, etc.) to its primary target triple.
+#[must_use]
+pub fn platform_id_to_target_triple(platform_id: &str) -> Option<&'static str> {
+    match platform_id.trim() {
+        "linux-x86_64" => Some("x86_64-unknown-linux-gnu"),
+        "linux-aarch64" => Some("aarch64-unknown-linux-gnu"),
+        "windows-x86_64" => Some("x86_64-pc-windows-gnu"),
+        "macos-x86_64" => Some("x86_64-apple-darwin"),
+        "macos-aarch64" => Some("aarch64-apple-darwin"),
+        _ => None,
+    }
+}
+
 /// Normalizes a platform specifier token or Rust triple to its canonical platform ID.
 #[must_use]
 pub fn normalize_platform_token(token: &str) -> String {
@@ -111,34 +139,77 @@ pub fn normalize_platform_token(token: &str) -> String {
     trimmed
 }
 
-/// Expands shorthand platform tokens (`"all"`, `"host"`, `"universal"`) into canonical identifiers.
+/// Expands shorthand platform tokens (`"all"`, `"host"`, `"linux"`, `"windows"`, `"macos"`, `"apple"`)
+/// into canonical `<os>-<arch>` identifiers covering every architecture for each declared OS platform.
 #[must_use]
 pub fn expand_platform_list(platforms: &[String]) -> Vec<String> {
     let mut expanded: Vec<String> = Vec::new();
+    let mut push_unique = |identifier: &str| {
+        if !identifier.is_empty() && !expanded.iter().any(|existing| existing == identifier) {
+            expanded.push(identifier.to_string());
+        }
+    };
+
     for entry in platforms {
         let normalized = normalize_platform_token(entry);
         match normalized.as_str() {
             "all" => {
                 for desktop_platform in ALL_DESKTOP_PLATFORMS {
-                    let owned = desktop_platform.to_string();
-                    if !expanded.contains(&owned) {
-                        expanded.push(owned);
-                    }
+                    push_unique(desktop_platform);
                 }
             }
             "host" => {
-                let host = host_platform_id().to_string();
-                if !expanded.contains(&host) {
-                    expanded.push(host);
-                }
+                push_unique(host_platform_id());
             }
-            _ if !normalized.is_empty() && !expanded.contains(&normalized) => {
-                expanded.push(normalized);
+            "linux" => {
+                push_unique("linux-x86_64");
+                push_unique("linux-aarch64");
             }
-            _ => {}
+            "macos" | "apple" | "darwin" => {
+                push_unique("macos-x86_64");
+                push_unique("macos-aarch64");
+            }
+            "windows" | "win" | "win32" | "win64" => {
+                push_unique("windows-x86_64");
+            }
+            other => {
+                push_unique(other);
+            }
         }
     }
     expanded
+}
+
+/// Expands platform specifiers (`"linux"`, `"macos"`, `"windows"`, `"all"`, `"host"`, or explicit IDs/triples)
+/// directly into target triples covering all architectures for each requested platform.
+#[must_use]
+pub fn expand_platforms_to_triples(platforms: &[String]) -> Vec<String> {
+    let mut triples = Vec::new();
+    let host_plat = host_platform_id();
+    let host_triple = host_target_triple();
+    let expanded_platforms = expand_platform_list(platforms);
+    for platform_id in expanded_platforms {
+        if platform_id == "universal" {
+            continue;
+        }
+        if platform_id == host_plat {
+            let owned_host = host_triple.to_string();
+            if !triples.contains(&owned_host) {
+                triples.push(owned_host);
+            }
+        } else if let Some(triple) = platform_id_to_target_triple(&platform_id) {
+            let owned_triple = triple.to_string();
+            if !triples.contains(&owned_triple) {
+                triples.push(owned_triple);
+            }
+        } else if !platform_id.is_empty() && !triples.contains(&platform_id) {
+            triples.push(platform_id);
+        }
+    }
+    if triples.is_empty() {
+        triples.push(host_triple.to_string());
+    }
+    triples
 }
 
 /// Validates that an archive manifest's `supported_platforms` permits execution on the current host.
@@ -197,12 +268,28 @@ pub struct ProjectConfiguration {
 /// Backwards compatibility alias for `ProjectConfiguration`.
 pub type ProjectInfo = ProjectConfiguration;
 
-/// Profile-specific compilation, dependency, and source configuration declared in `[profiles.<name>]`.
+/// Native CMake or Cargo subproject configuration declared under `profiles.<name>.natives.<key>`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ProfileConfig {
-    /// Optional parent profile to inherit from (defaults to `"release"` if omitted on non-release profiles).
+#[serde(deny_unknown_fields)]
+pub struct NativeTargetConfig {
+    /// Relative path to native project root (defaults to `natives/<key>`).
     #[serde(default)]
-    pub inherits: Option<String>,
+    pub path: Option<String>,
+    /// Native build optimization profile (`"debug"` or `"release"`; defaults to parent Solix profile).
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Target OS platform names (`"linux"`, `"windows"`, `"macos"`, `"all"`, `"host"`, or explicit triples).
+    #[serde(default)]
+    pub platforms: Option<Vec<String>>,
+    /// Extra flags forwarded directly to CMake (`-D...`) or Cargo (`--features ...`).
+    #[serde(default)]
+    pub flags: Vec<String>,
+}
+
+/// Profile-specific compilation, native build, hook, dependency, and source configuration declared in `profiles.<name>`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileConfig {
     /// Optional canonical entrypoint method symbol (e.g. `"Main::main"`, `"TestRunner::test"`).
     #[serde(default)]
     pub entrypoint: Option<String>,
@@ -236,15 +323,24 @@ pub struct ProfileConfig {
     /// List of directory paths (recursive) relative to project root containing `.slx` sources.
     #[serde(default)]
     pub sources: Option<Vec<String>>,
-    /// Target platform constraints for this profile (e.g. `["all"]`, `["host"]`, `["universal"]`, or explicit IDs).
+    /// Target platform constraints for this profile (e.g. `["all"]`, `["host"]`, `["linux", "windows", "macos"]`).
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
+    /// Commands executed sequentially before native and Solix compilation.
+    #[serde(default)]
+    pub pre_compile: Vec<String>,
+    /// Commands executed sequentially after archive packaging.
+    #[serde(default)]
+    pub post_compile: Vec<String>,
     /// Profile-scoped dependencies mapped as `name => specification`.
     #[serde(default)]
     pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
+    /// Profile-scoped native subprojects mapped as `name => native_config`.
+    #[serde(default)]
+    pub natives: std::collections::BTreeMap<String, NativeTargetConfig>,
 }
 
-/// Fully resolved, flattened profile configuration with all inheritance applied.
+/// Fully resolved, self-contained profile configuration (no cross-profile inheritance).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedProfile {
     /// Profile identifier name (e.g. `"debug"`, `"release"`, `"test"`).
@@ -273,8 +369,14 @@ pub struct ResolvedProfile {
     pub sources: Vec<String>,
     /// Resolved target platform specifiers for this profile.
     pub platforms: Vec<String>,
+    /// Commands executed sequentially before native and Solix compilation.
+    pub pre_compile: Vec<String>,
+    /// Commands executed sequentially after packaging.
+    pub post_compile: Vec<String>,
     /// Profile-scoped resolved dependencies.
     pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
+    /// Profile-scoped native projects.
+    pub natives: std::collections::BTreeMap<String, NativeTargetConfig>,
 }
 
 impl ResolvedProfile {
@@ -295,7 +397,58 @@ impl ResolvedProfile {
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
             platforms: vec!["all".to_string()],
+            pre_compile: Vec::new(),
+            post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
+            natives: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Creates the standard default baseline profile for debug or custom builds.
+    #[must_use]
+    pub fn default_debug_baseline(profile_name: &str) -> Self {
+        Self {
+            name: profile_name.to_string(),
+            entrypoint: Some("Main::main".to_string()),
+            opt_level: 0,
+            inline_threshold: 8,
+            debug_symbols: true,
+            is_static: false,
+            emit_disassembly: false,
+            warnings_as_errors: false,
+            verify_checksum: true,
+            link: "dynamic".to_string(),
+            memory_limit_mb: None,
+            sources: vec!["src".to_string()],
+            platforms: vec!["host".to_string()],
+            pre_compile: Vec::new(),
+            post_compile: Vec::new(),
+            dependencies: std::collections::BTreeMap::new(),
+            natives: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Creates the standard default baseline profile for test builds.
+    #[must_use]
+    pub fn default_test_baseline() -> Self {
+        Self {
+            name: "test".to_string(),
+            entrypoint: Some("TestRunner::test".to_string()),
+            opt_level: 0,
+            inline_threshold: 8,
+            debug_symbols: true,
+            is_static: false,
+            emit_disassembly: false,
+            warnings_as_errors: false,
+            verify_checksum: true,
+            link: "dynamic".to_string(),
+            memory_limit_mb: None,
+            sources: vec!["src".to_string(), "tests".to_string()],
+            platforms: vec!["host".to_string()],
+            pre_compile: Vec::new(),
+            post_compile: Vec::new(),
+            dependencies: std::collections::BTreeMap::new(),
+            natives: std::collections::BTreeMap::new(),
         }
     }
 
@@ -426,9 +579,75 @@ impl ProjectManifest {
             .or_else(|| Some("TestRunner::test".to_string()))
     }
 
-    /// Parses a `manifest.toml` string into a strongly-typed `ProjectManifest`.
+    /// Parses a `manifest.yaml` string into a strongly-typed `ProjectManifest`.
+    ///
+    /// Supports YAML anchors/aliases (`&` / `*`), YAML 1.1 merge keys (`<<:`), and an optional
+    /// top-level `vars:` section ignored by schema deserialization. Profile inheritance via
+    /// `inherits` is explicitly rejected.
+    pub fn from_yaml_str(yaml_content: &str) -> Result<Self, EmissionError> {
+        let mut yaml_value: serde_json::Value =
+            serde_saphyr::from_str(yaml_content).map_err(|parse_error| {
+                EmissionError::ContainerSerializationFailed {
+                    reason: format!("failed to parse manifest.yaml: {parse_error}"),
+                }
+            })?;
+
+        if let serde_json::Value::Object(ref mut root_map) = yaml_value {
+            if let Some(serde_json::Value::Object(profiles_map)) = root_map.get_mut("profiles") {
+                for (profile_name, profile_body_val) in profiles_map.iter_mut() {
+                    if profile_body_val.is_null() {
+                        *profile_body_val = serde_json::Value::Object(serde_json::Map::new());
+                    }
+                    if let serde_json::Value::Object(profile_map) = profile_body_val {
+                        if profile_map.contains_key("inherits") {
+                            return Err(EmissionError::ContainerSerializationFailed {
+                                reason: format!(
+                                    "manifest.yaml profile '{profile_name}' uses 'inherits', which has been removed; configure each profile explicitly or use YAML anchors (& / *)"
+                                ),
+                            });
+                        }
+                        if let Some(serde_json::Value::Object(natives_map)) =
+                            profile_map.get_mut("natives")
+                        {
+                            for (_native_name, native_val) in natives_map.iter_mut() {
+                                if native_val.is_null() {
+                                    *native_val = serde_json::Value::Object(serde_json::Map::new());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let retained_keys: Vec<String> = root_map
+                .keys()
+                .filter(|key_str| *key_str == "vars" || key_str.starts_with("x-"))
+                .cloned()
+                .collect();
+            for ignored_key in retained_keys {
+                root_map.remove(&ignored_key);
+            }
+        }
+
+        let manifest: Self = serde_json::from_value(yaml_value).map_err(|parse_error| {
+            EmissionError::ContainerSerializationFailed {
+                reason: format!("failed to parse manifest.yaml: {parse_error}"),
+            }
+        })?;
+
+        if !manifest.profiles.contains_key("release") {
+            return Err(EmissionError::ContainerSerializationFailed {
+                reason: "manifest.yaml must define mandatory profiles.release profile".to_string(),
+            });
+        }
+
+        Ok(manifest)
+    }
+
+    /// Parses a legacy `manifest.toml` string into a strongly-typed `ProjectManifest`
+    /// for backwards compatibility with previously built `.slxarc` archives.
     pub fn from_toml_str(toml_content: &str) -> Result<Self, EmissionError> {
-        let manifest: Self = toml::from_str(toml_content).map_err(|parse_error| {
+        let mut raw_toml: toml::Value = toml::from_str(toml_content).map_err(|parse_error| {
             if toml_content.contains("[info]")
                 || toml_content.contains("[entrypoints]")
                 || toml_content.contains("[build]")
@@ -436,13 +655,30 @@ impl ProjectManifest {
             {
                 EmissionError::ContainerSerializationFailed {
                     reason: format!(
-                        "failed to parse manifest.toml: legacy manifest sections ([info], [entrypoints], [build], [profile.<name>]) are no longer supported; please update to [configuration] and [profiles]: {parse_error}"
+                        "failed to parse manifest.toml: legacy manifest sections ([info], [entrypoints], [build], [profile.<name>]) are no longer supported; please migrate to manifest.yaml: {parse_error}"
                     ),
                 }
             } else {
                 EmissionError::ContainerSerializationFailed {
                     reason: format!("failed to parse manifest.toml: {parse_error}"),
                 }
+            }
+        })?;
+
+        if let Some(toml::Value::Table(profiles_table)) = raw_toml
+            .get_mut("profiles")
+            .filter(|value| value.is_table())
+        {
+            for (_, profile_val) in profiles_table.iter_mut() {
+                if let Some(profile_table) = profile_val.as_table_mut() {
+                    profile_table.remove("inherits");
+                }
+            }
+        }
+
+        let manifest: Self = raw_toml.try_into().map_err(|parse_error| {
+            EmissionError::ContainerSerializationFailed {
+                reason: format!("failed to parse manifest.toml: {parse_error}"),
             }
         })?;
 
@@ -456,7 +692,7 @@ impl ProjectManifest {
         Ok(manifest)
     }
 
-    /// Reads and parses `manifest.toml` from a file path on disk.
+    /// Reads and parses either `manifest.yaml` (preferred) or legacy `manifest.toml` from disk.
     pub fn from_file(file_path: impl AsRef<Path>) -> Result<Self, EmissionError> {
         let path_reference = file_path.as_ref();
         let content = fs::read_to_string(path_reference).map_err(|io_error| {
@@ -467,10 +703,27 @@ impl ProjectManifest {
                 ),
             }
         })?;
-        Self::from_toml_str(&content)
+        let is_toml = path_reference
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext_str| ext_str.eq_ignore_ascii_case("toml"));
+        if is_toml {
+            Self::from_toml_str(&content)
+        } else {
+            Self::from_yaml_str(&content)
+        }
     }
 
-    /// Serializes this manifest to a standard TOML string.
+    /// Serializes this manifest to a clean YAML string (`manifest.yaml`).
+    pub fn to_yaml_string(&self) -> Result<String, EmissionError> {
+        serde_saphyr::to_string(self).map_err(|serialize_error| {
+            EmissionError::ContainerSerializationFailed {
+                reason: format!("failed to serialize manifest to yaml: {serialize_error}"),
+            }
+        })
+    }
+
+    /// Serializes this manifest to a TOML string (legacy compatibility).
     pub fn to_toml_string(&self) -> Result<String, EmissionError> {
         toml::to_string_pretty(self).map_err(|serialize_error| {
             EmissionError::ContainerSerializationFailed {
@@ -479,19 +732,14 @@ impl ProjectManifest {
         })
     }
 
-    /// Resolves the hierarchical profile configuration for the requested profile name.
-    ///
-    /// The only mandatory base profile is `"release"`. If a profile does not define `inherits`,
-    /// it automatically inherits from `"release"`. Profile sources and dependencies are
-    /// inherited and merged hierarchically.
+    /// Resolves the self-contained profile configuration for `target_profile` with zero cross-profile inheritance.
     ///
     /// # Errors
-    /// Returns an error if the mandatory `"release"` profile is missing or a cyclic loop is detected.
+    /// Returns an error if `profiles.release` is missing or if `target_profile` is unknown.
     pub fn resolve_profile(&self, target_profile: &str) -> Result<ResolvedProfile, EmissionError> {
         if !self.profiles.contains_key("release") {
             return Err(EmissionError::ContainerSerializationFailed {
-                reason: "manifest.toml must define mandatory [profiles.release] profile"
-                    .to_string(),
+                reason: "manifest must define mandatory profiles.release profile".to_string(),
             });
         }
 
@@ -502,129 +750,64 @@ impl ProjectManifest {
         {
             return Err(EmissionError::ContainerSerializationFailed {
                 reason: format!(
-                    "Unknown build profile '{target_profile}'; expected 'debug', 'release', 'test', or a profile defined in manifest.toml"
+                    "Unknown build profile '{target_profile}'; expected 'debug', 'release', 'test', or a profile defined in manifest.yaml"
                 ),
             });
         }
 
-        let mut visited_profiles: Vec<String> = Vec::new();
-        let mut resolution_chain: Vec<String> = Vec::new();
-        let mut current_profile_name = target_profile.to_string();
+        let mut resolved = match target_profile {
+            "release" => ResolvedProfile::default_release_baseline(),
+            "test" => ResolvedProfile::default_test_baseline(),
+            other_profile => ResolvedProfile::default_debug_baseline(other_profile),
+        };
 
-        while !current_profile_name.is_empty() {
-            if visited_profiles.contains(&current_profile_name) {
-                return Err(EmissionError::ContainerSerializationFailed {
-                    reason: format!(
-                        "Cyclic profile inheritance detected: {} -> {}",
-                        visited_profiles.join(" -> "),
-                        current_profile_name
-                    ),
-                });
+        if let Some(user_config) = self.profiles.get(target_profile) {
+            if let Some(ref entrypoint) = user_config.entrypoint {
+                resolved.entrypoint = Some(entrypoint.clone());
             }
-
-            visited_profiles.push(current_profile_name.clone());
-            resolution_chain.push(current_profile_name.clone());
-
-            if current_profile_name == "release" {
-                break;
+            if let Some(opt_level) = user_config.optimization_level {
+                resolved.opt_level = opt_level;
             }
-
-            let next_parent = if let Some(config) = self.profiles.get(&current_profile_name) {
-                if let Some(ref inherits_from) = config.inherits {
-                    inherits_from.clone()
+            if let Some(inline_threshold) = user_config.inline_threshold {
+                resolved.inline_threshold = inline_threshold;
+            }
+            if let Some(debug_symbols) = user_config.debug_symbols {
+                resolved.debug_symbols = debug_symbols;
+            }
+            if let Some(is_static) = user_config.is_static {
+                resolved.is_static = is_static;
+                resolved.link = if is_static {
+                    "static".to_string()
                 } else {
-                    "release".to_string()
-                }
-            } else {
-                "release".to_string()
-            };
-
-            current_profile_name = next_parent;
-        }
-
-        let mut resolved = ResolvedProfile::default_release_baseline();
-
-        while let Some(step_profile) = resolution_chain.pop() {
-            if let Some(user_config) = self.profiles.get(&step_profile) {
-                if let Some(ref entrypoint) = user_config.entrypoint {
-                    resolved.entrypoint = Some(entrypoint.clone());
-                }
-                if let Some(opt_level) = user_config.optimization_level {
-                    resolved.opt_level = opt_level;
-                }
-                if let Some(inline_threshold) = user_config.inline_threshold {
-                    resolved.inline_threshold = inline_threshold;
-                }
-                if let Some(debug_symbols) = user_config.debug_symbols {
-                    resolved.debug_symbols = debug_symbols;
-                }
-                if let Some(is_static) = user_config.is_static {
-                    resolved.is_static = is_static;
-                    resolved.link = if is_static {
-                        "static".to_string()
-                    } else {
-                        "dynamic".to_string()
-                    };
-                }
-                if let Some(ref link) = user_config.link {
-                    resolved.link = link.clone();
-                    resolved.is_static = link.eq_ignore_ascii_case("static");
-                }
-                if let Some(emit_disassembly) = user_config.emit_disassembly {
-                    resolved.emit_disassembly = emit_disassembly;
-                }
-                if let Some(warnings_as_errors) = user_config.warnings_as_errors {
-                    resolved.warnings_as_errors = warnings_as_errors;
-                }
-                if let Some(verify_checksum) = user_config.verify_checksum {
-                    resolved.verify_checksum = verify_checksum;
-                }
-                if let Some(memory_limit_mb) = user_config.memory_limit_mb {
-                    resolved.memory_limit_mb = Some(memory_limit_mb);
-                }
-
-                if let Some(ref step_platforms) = user_config.platforms {
-                    resolved.platforms = step_platforms.clone();
-                } else if step_profile == "debug" || step_profile == "test" {
-                    resolved.platforms = vec!["host".to_string()];
-                }
-
-                if let Some(ref step_sources) = user_config.sources {
-                    if step_profile == "release" {
-                        resolved.sources = step_sources.clone();
-                    } else {
-                        for source_dir in step_sources {
-                            if !resolved.sources.contains(source_dir) {
-                                resolved.sources.push(source_dir.clone());
-                            }
-                        }
-                    }
-                }
-
-                for (dep_name, dep_spec) in &user_config.dependencies {
-                    resolved
-                        .dependencies
-                        .insert(dep_name.clone(), dep_spec.clone());
-                }
-            } else if step_profile == "debug" {
-                resolved.opt_level = 0;
-                resolved.inline_threshold = 8;
-                resolved.debug_symbols = true;
-                resolved.is_static = false;
-                resolved.link = "dynamic".to_string();
-                resolved.platforms = vec!["host".to_string()];
-            } else if step_profile == "test" {
-                resolved.opt_level = 0;
-                resolved.inline_threshold = 8;
-                resolved.debug_symbols = true;
-                resolved.entrypoint = Some("TestRunner::test".to_string());
-                resolved.platforms = vec!["host".to_string()];
-                if !resolved.sources.contains(&"tests".to_string())
-                    && !resolved.sources.contains(&"test".to_string())
-                {
-                    resolved.sources.push("tests".to_string());
-                }
+                    "dynamic".to_string()
+                };
             }
+            if let Some(ref link) = user_config.link {
+                resolved.link = link.clone();
+                resolved.is_static = link.eq_ignore_ascii_case("static");
+            }
+            if let Some(emit_disassembly) = user_config.emit_disassembly {
+                resolved.emit_disassembly = emit_disassembly;
+            }
+            if let Some(warnings_as_errors) = user_config.warnings_as_errors {
+                resolved.warnings_as_errors = warnings_as_errors;
+            }
+            if let Some(verify_checksum) = user_config.verify_checksum {
+                resolved.verify_checksum = verify_checksum;
+            }
+            if let Some(memory_limit_mb) = user_config.memory_limit_mb {
+                resolved.memory_limit_mb = Some(memory_limit_mb);
+            }
+            if let Some(ref step_sources) = user_config.sources {
+                resolved.sources = step_sources.clone();
+            }
+            if let Some(ref step_platforms) = user_config.platforms {
+                resolved.platforms = step_platforms.clone();
+            }
+            resolved.pre_compile = user_config.pre_compile.clone();
+            resolved.post_compile = user_config.post_compile.clone();
+            resolved.dependencies = user_config.dependencies.clone();
+            resolved.natives = user_config.natives.clone();
         }
 
         resolved.name = target_profile.to_string();
@@ -840,7 +1023,15 @@ impl SlxarcArchive {
             });
 
             if !is_directory {
-                if entry_name == "manifest.toml" {
+                if entry_name == "manifest.yaml" || entry_name == "manifest.yml" {
+                    let mut manifest_bytes = Vec::new();
+                    if file_entry.read_to_end(&mut manifest_bytes).is_ok()
+                        && let Ok(manifest_text) = std::str::from_utf8(&manifest_bytes)
+                        && let Ok(parsed_manifest) = ProjectManifest::from_yaml_str(manifest_text)
+                    {
+                        manifest_option = Some(parsed_manifest);
+                    }
+                } else if entry_name == "manifest.toml" && manifest_option.is_none() {
                     let mut manifest_bytes = Vec::new();
                     if file_entry.read_to_end(&mut manifest_bytes).is_ok()
                         && let Ok(manifest_text) = std::str::from_utf8(&manifest_bytes)
@@ -887,7 +1078,7 @@ fn read_zip_entry_name(
 }
 
 /// Validates and sanitizes a `.slxarc` ZIP archive member path against Zip-Slip traversal.
-fn validate_archive_relative_path(entry_name: &str) -> Result<PathBuf, EmissionError> {
+pub fn validate_archive_relative_path(entry_name: &str) -> Result<PathBuf, EmissionError> {
     if entry_name.is_empty()
         || entry_name.starts_with('/')
         || entry_name.contains('\\')
@@ -995,7 +1186,20 @@ impl SlxarcArchive {
                 continue;
             }
 
-            if entry_name == "manifest.toml" {
+            if entry_name == "manifest.yaml" || entry_name == "manifest.yml" {
+                let mut manifest_bytes = Vec::new();
+                file_entry
+                    .read_to_end(&mut manifest_bytes)
+                    .map_err(|io_error| EmissionError::ContainerSerializationFailed {
+                        reason: format!("failed to read {entry_name} bytes: {io_error}"),
+                    })?;
+                let manifest_text = std::str::from_utf8(&manifest_bytes).map_err(|utf8_error| {
+                    EmissionError::ContainerSerializationFailed {
+                        reason: format!("invalid utf-8 in {entry_name}: {utf8_error}"),
+                    }
+                })?;
+                manifest_option = Some(ProjectManifest::from_yaml_str(manifest_text)?);
+            } else if entry_name == "manifest.toml" && manifest_option.is_none() {
                 let mut manifest_bytes = Vec::new();
                 file_entry
                     .read_to_end(&mut manifest_bytes)
@@ -1428,28 +1632,48 @@ mod tests {
 
     #[test]
     fn test_manifest_parse_minimal_valid() {
-        let toml_sample = r#"
-[configuration]
-name = "my_app"
-version = "1.2.3"
-description = "A sample Solix application"
-license = "Apache-2.0"
-authors = ["Jane Doe <jane@example.com>"]
+        let yaml_sample = r#"
+vars:
+  common_ver: &app_ver "1.2.3"
 
-[profiles.release]
-entrypoint = "Main::main"
-optimization_level = 3
-inline_threshold = 16
-debug_symbols = false
-static = true
-sources = ["src"]
+configuration:
+  name: my_app
+  version: *app_ver
+  description: A sample Solix application
+  license: Apache-2.0
+  authors:
+    - "Jane Doe <jane@example.com>"
 
-[profiles.test]
-inherits = "release"
-entrypoint = "TestRunner::main"
-sources = ["tests"]
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - linux
+      - macos
+      - windows
+    pre_compile:
+      - echo pre
+    post_compile:
+      - echo post
+    natives:
+      math_native:
+        profile: release
+        platforms: [linux, windows]
+        flags: [-DFOO=ON]
+
+  test:
+    entrypoint: TestRunner::main
+    sources:
+      - src
+      - tests
 "#;
-        let manifest = ProjectManifest::from_toml_str(toml_sample).expect("valid toml");
+        let manifest = ProjectManifest::from_yaml_str(yaml_sample).expect("valid yaml");
         assert_eq!(manifest.configuration.name, "my_app");
         assert_eq!(manifest.configuration.version, "1.2.3");
         assert_eq!(
@@ -1476,9 +1700,44 @@ sources = ["tests"]
         assert_eq!(resolved_release.opt_level, 3);
         assert_eq!(resolved_release.inline_threshold, 16);
         assert_eq!(resolved_release.sources, vec!["src"]);
+        assert_eq!(resolved_release.pre_compile, vec!["echo pre"]);
+        assert_eq!(resolved_release.post_compile, vec!["echo post"]);
+        assert_eq!(
+            expand_platform_list(&resolved_release.platforms),
+            vec![
+                "linux-x86_64",
+                "linux-aarch64",
+                "macos-x86_64",
+                "macos-aarch64",
+                "windows-x86_64",
+            ]
+        );
+        assert_eq!(
+            expand_platforms_to_triples(&["linux".to_string(), "macos".to_string()]),
+            vec![
+                "x86_64-unknown-linux-gnu",
+                "aarch64-unknown-linux-gnu",
+                "x86_64-apple-darwin",
+                "aarch64-apple-darwin",
+            ]
+        );
 
         let resolved_test = manifest.resolve_profile("test").expect("test profile");
         assert_eq!(resolved_test.sources, vec!["src", "tests"]);
+        assert!(resolved_test.natives.is_empty());
+
+        let rejected_inherits = r#"
+configuration:
+  name: legacy_yaml
+profiles:
+  release: {}
+  debug:
+    inherits: release
+"#;
+        assert!(
+            ProjectManifest::from_yaml_str(rejected_inherits).is_err(),
+            "inherits in manifest.yaml must be rejected"
+        );
     }
 
     #[test]

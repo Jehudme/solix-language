@@ -1,0 +1,54 @@
+configuration:
+  name: raylib
+  version: "5.5.0"
+  description: Solix Raylib 1-to-1 Complete Bindings
+  license: zlib/libpng
+  authors: []
+
+profiles:
+  release:
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - host
+    pre_compile:
+      - python3 scripts/prepare_bindings.py
+    natives:
+      raylib:
+        profile: release
+
+  debug:
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    pre_compile:
+      - python3 scripts/prepare_bindings.py
+    natives:
+      raylib:
+        profile: release
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+      - tests
+    platforms:
+      - host
+    pre_compile:
+      - python3 scripts/prepare_bindings.py
+    natives:
+      raylib:
+        profile: release

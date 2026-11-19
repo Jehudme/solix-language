@@ -1140,7 +1140,7 @@ fn run_until_stop<ReaderType: io::Read, WriterType: io::Write>(
     Ok(())
 }
 
-/// Searches parent directories for an enclosing `manifest.toml` root.
+/// Searches parent directories for an enclosing `manifest.yaml` (or `manifest.toml`) root.
 fn find_enclosing_project_root(target_path: &Path) -> Option<PathBuf> {
     let mut current_directory = if target_path.is_dir() {
         target_path.to_path_buf()
@@ -1149,8 +1149,7 @@ fn find_enclosing_project_root(target_path: &Path) -> Option<PathBuf> {
     };
 
     for _depth_index in 0..10 {
-        let manifest_candidate = current_directory.join("manifest.toml");
-        if manifest_candidate.exists() {
+        if solix_common::project::find_manifest_path(&current_directory).is_some() {
             return Some(current_directory);
         }
         let parent = current_directory.parent()?;

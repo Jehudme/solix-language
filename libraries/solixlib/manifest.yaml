@@ -1,0 +1,48 @@
+configuration:
+  name: solix
+  version: "2.0.0"
+  description: Solix Standard Library
+  license: Apache-2.0
+  authors: []
+
+profiles:
+  release:
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - host
+    natives:
+      solixlib_native:
+        profile: release
+
+  debug:
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    natives:
+      solixlib_native:
+        profile: debug
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+      - tests
+    platforms:
+      - host
+    natives:
+      solixlib_native:
+        profile: debug

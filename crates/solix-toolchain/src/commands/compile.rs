@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// Recursively walks `directory_path` collecting all files with `.slx` extension in sorted order.
-fn collect_slx_sources_recursively(
+pub(crate) fn collect_slx_sources_recursively(
     directory_path: &std::path::Path,
     collected_sources: &mut Vec<PathBuf>,
 ) -> Result<()> {
@@ -44,7 +44,7 @@ fn collect_slx_sources_recursively(
     Ok(())
 }
 
-/// Searches upward from the target source path looking for an enclosing `manifest.toml`.
+/// Searches upward from the target source path looking for an enclosing `manifest.yaml` (or `manifest.toml`).
 pub(crate) fn find_parent_manifest(initial_path: &std::path::Path) -> Option<PathBuf> {
     let mut current_directory = if initial_path.is_dir() {
         initial_path.to_path_buf()
@@ -53,8 +53,9 @@ pub(crate) fn find_parent_manifest(initial_path: &std::path::Path) -> Option<Pat
     };
 
     for _ in 0..12 {
-        let manifest_candidate = current_directory.join("manifest.toml");
-        if manifest_candidate.is_file() {
+        if let Some(manifest_candidate) =
+            solix_common::project::find_manifest_path(&current_directory)
+        {
             return Some(manifest_candidate);
         }
         if !current_directory.pop() {

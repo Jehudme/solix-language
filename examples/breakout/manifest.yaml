@@ -1,0 +1,52 @@
+configuration:
+  name: breakout
+  version: "0.1.0"
+  description: Modern neon Breakout showcase game built with Solix and Raylib
+  license: Apache-2.0
+  authors: []
+
+profiles:
+  release:
+    entrypoint: BreakoutGame::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - host
+    dependencies:
+      raylib:
+        version: "5.5.0"
+        profile: release
+
+  debug:
+    entrypoint: BreakoutGame::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    dependencies:
+      raylib:
+        version: "5.5.0"
+        profile: release
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - tests
+    platforms:
+      - host
+    dependencies:
+      raylib:
+        version: "5.5.0"
+        profile: release

@@ -63,7 +63,32 @@ def strip_native_checksum_section(manifest_text: str) -> str:
     return f"{cleaned}\n" if cleaned else ""
 
 
-def parse_folder_identity(folder_name: str, manifest_text: str) -> tuple[str, str, str]:
+def strip_yaml_native_checksum_section(manifest_text: str) -> str:
+    """Removes any existing top-level `supported_platforms:` or `native_library_checksums:` YAML blocks."""
+    output_lines: list[str] = []
+    skipping_block = False
+
+    for raw_line in manifest_text.splitlines():
+        is_top_level = bool(raw_line) and not raw_line[0].isspace() and not raw_line.startswith("#")
+        if is_top_level:
+            stripped = raw_line.strip()
+            if stripped.startswith("supported_platforms:") or stripped.startswith("native_library_checksums:"):
+                skipping_block = True
+                continue
+            skipping_block = False
+
+        if not skipping_block:
+            output_lines.append(raw_line)
+
+    cleaned = "\n".join(output_lines).rstrip()
+    return f"{cleaned}\n" if cleaned else ""
+
+
+def parse_folder_identity(
+    folder_name: str,
+    manifest_text: str,
+    manifest_filename: str = "manifest.toml",
+) -> tuple[str, str, str]:
     """Extracts `(package_name, build_profile, version)` from folder naming + manifest."""
     package_name = ""
     build_profile = "release"
@@ -81,13 +106,30 @@ def parse_folder_identity(folder_name: str, manifest_text: str) -> tuple[str, st
             package_name = left_part
 
     if manifest_text:
-        try:
-            manifest_data = tomllib.loads(manifest_text)
-            config = manifest_data.get("configuration", {})
-            package_name = str(config.get("name", package_name) or package_name)
-            package_version = str(config.get("version", package_version) or package_version)
-        except tomllib.TOMLDecodeError:
-            pass
+        if manifest_filename.endswith((".yaml", ".yml")):
+            in_configuration = False
+            for raw_line in manifest_text.splitlines():
+                stripped = raw_line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if not raw_line[0].isspace():
+                    in_configuration = stripped.startswith("configuration:")
+                    continue
+                if in_configuration and ":" in stripped:
+                    key, raw_val = stripped.split(":", 1)
+                    cleaned_val = raw_val.strip().strip("'\"")
+                    if key.strip() == "name" and cleaned_val:
+                        package_name = cleaned_val
+                    elif key.strip() == "version" and cleaned_val:
+                        package_version = cleaned_val
+        else:
+            try:
+                manifest_data = tomllib.loads(manifest_text)
+                config = manifest_data.get("configuration", {})
+                package_name = str(config.get("name", package_name) or package_name)
+                package_version = str(config.get("version", package_version) or package_version)
+            except tomllib.TOMLDecodeError:
+                pass
 
     return package_name, build_profile, package_version
 
@@ -109,6 +151,7 @@ def merge_package_group(
 ) -> dict[str, Any]:
     """Merges matching `.slxarc` archives into `destination_archive` and returns manifest metadata."""
     base_manifest_text = ""
+    manifest_filename = "manifest.yaml"
     static_entries: dict[str, bytes] = {}
     qualified_natives: dict[str, bytes] = {}
     unqualified_natives: dict[str, bytes] = {}
@@ -124,9 +167,10 @@ def merge_package_group(
                 entry_name = entry_info.filename.replace("\\", "/")
                 payload = zip_reader.read(entry_info.filename)
 
-                if entry_name == "manifest.toml":
+                if entry_name in ("manifest.yaml", "manifest.yml", "manifest.toml"):
                     if not base_manifest_text:
                         base_manifest_text = payload.decode("utf-8")
+                        manifest_filename = entry_name
                     continue
 
                 if entry_name.startswith("lib/") and entry_name.endswith(NATIVE_EXTENSIONS):
@@ -153,7 +197,7 @@ def merge_package_group(
                     unqualified_natives.setdefault(entry_name, payload)
 
     if not base_manifest_text:
-        raise ValueError(f"Cannot merge archives without manifest.toml: {archive_paths}")
+        raise ValueError(f"Cannot merge archives without manifest.yaml or manifest.toml: {archive_paths}")
 
     qualified_basenames = {Path(entry_name).name for entry_name in qualified_natives}
     retained_natives: dict[str, bytes] = dict(qualified_natives)
@@ -178,30 +222,43 @@ def merge_package_group(
         for entry_name, payload in sorted(retained_natives.items())
     }
 
-    cleaned_manifest = strip_native_checksum_section(base_manifest_text)
     merged_platforms = sorted({
         TRIPLE_TO_PLATFORM[target_name]
         for target_name in present_targets
         if target_name in TRIPLE_TO_PLATFORM
     }) or ["universal"]
-    formatted_platforms = ", ".join(f'"{plat}"' for plat in merged_platforms)
-    header_line = f"supported_platforms = [{formatted_platforms}]\n\n"
-    if native_checksums:
-        checksum_lines = [
-            f'"{key}" = "{digest}"'
-            for key, digest in sorted(native_checksums.items())
-        ]
-        unified_manifest = (
-            header_line
-            + f"{cleaned_manifest}\n[native_library_checksums]\n"
-            + "\n".join(checksum_lines)
-            + "\n"
-        )
+
+    if manifest_filename.endswith((".yaml", ".yml")):
+        cleaned_manifest = strip_yaml_native_checksum_section(base_manifest_text)
+        platform_lines = "\n".join(f"  - {plat}" for plat in merged_platforms)
+        sections = [cleaned_manifest.rstrip(), f"supported_platforms:\n{platform_lines}"]
+        if native_checksums:
+            checksum_lines = "\n".join(
+                f'  "{key}": "{digest}"'
+                for key, digest in sorted(native_checksums.items())
+            )
+            sections.append(f"native_library_checksums:\n{checksum_lines}")
+        unified_manifest = "\n".join(part for part in sections if part) + "\n"
     else:
-        unified_manifest = header_line + cleaned_manifest
+        cleaned_manifest = strip_native_checksum_section(base_manifest_text)
+        formatted_platforms = ", ".join(f'"{plat}"' for plat in merged_platforms)
+        header_line = f"supported_platforms = [{formatted_platforms}]\n\n"
+        if native_checksums:
+            checksum_lines = [
+                f'"{key}" = "{digest}"'
+                for key, digest in sorted(native_checksums.items())
+            ]
+            unified_manifest = (
+                header_line
+                + f"{cleaned_manifest}\n[native_library_checksums]\n"
+                + "\n".join(checksum_lines)
+                + "\n"
+            )
+        else:
+            unified_manifest = header_line + cleaned_manifest
 
     all_entries: dict[str, bytes] = {
-        "manifest.toml": unified_manifest.encode("utf-8"),
+        manifest_filename: unified_manifest.encode("utf-8"),
         **static_entries,
         **retained_natives,
     }
@@ -231,7 +288,9 @@ def merge_package_group(
             temp_archive_path.unlink(missing_ok=True)
 
     folder_name = destination_archive.parent.name
-    package_name, build_profile, package_version = parse_folder_identity(folder_name, unified_manifest)
+    package_name, build_profile, package_version = parse_folder_identity(
+        folder_name, unified_manifest, manifest_filename
+    )
     archive_bytes = destination_archive.read_bytes()
 
     return {

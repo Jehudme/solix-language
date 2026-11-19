@@ -47,7 +47,7 @@ All sensitive categories emit a single **`sensitive`** label via [`scripts/ci/pr
 | :--- | :--- | :--- |
 | **CI Workflows & Automation** | `.github/**` | Protects secrets (`RELEASE_TOKEN`, `CARGO_REGISTRY_TOKEN`) and workflow triggers. |
 | **Engineering Guidelines & Scripts** | `docs/guidelines/**`, `CONTRIBUTING.md`, governance Python scripts | Protects `GL-0011`, test gates, and doc invariants. |
-| **Supply Chain & Build Scripts** | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `cliff.toml`, `scripts/**`, `**/build.rs`, `libraries/*/scripts/**`, `crates/solix-toolchain/assets/**` | `build.rs` and Python build helpers execute during builds and packaging. |
+| **Supply Chain & Build Scripts** | `Cargo.toml`, `Cargo.lock`, `deny.toml`, `cliff.toml`, `scripts/**`, `**/build.rs`, `libraries/*/scripts/**`, `crates/solix-toolchain/assets/**` | `build.rs`, `manifest.yaml` pre/post hooks, and release Python helpers execute during builds and cross-platform packaging (`manifest.yaml` & legacy `manifest.toml`). |
 | **Runtime Security, Archives & FFI** | `crates/solix-common/src/project.rs`, `crates/solix-common/src/hash.rs`, `crates/solix-runtime/src/native/**`, `ffi/**` | Safeguards Zip-Slip archive checks, SHA-256 verification, `.slxarc` `supported_platforms` host enforcement, and `unsafe` C-ABI boundaries. |
 
 ### 2.2 Non-Blocking Auditor (`scripts/ci/pr_risk_audit.py`)
