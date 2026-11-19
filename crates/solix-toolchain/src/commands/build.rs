@@ -852,6 +852,18 @@ fn compile_cargo_native(
     Ok(())
 }
 
+fn cmake_path_string(path: &Path) -> String {
+    let raw = path.display().to_string();
+    let stripped = if let Some(unc) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(drive) = raw.strip_prefix(r"\\?\") {
+        drive.to_string()
+    } else {
+        raw
+    };
+    stripped.replace('\\', "/")
+}
+
 fn resolve_ffi_c_source_dir(project_root: &Path) -> Option<PathBuf> {
     if let Ok(explicit_dir) = std::env::var("SOLIX_FFI_SOURCE_DIR") {
         let candidate = PathBuf::from(explicit_dir);
@@ -1053,43 +1065,38 @@ fn compile_cmake_native(
         };
 
         let mut cfg_cmd = Command::new(&cmake_exe);
+        let stage_triple_cmake = cmake_path_string(&stage_triple_dir);
+        let archive_cache_cmake = cmake_path_string(&archive_cache_dir);
         cfg_cmd
             .arg("-S")
-            .arg(&entry.directory)
+            .arg(cmake_path_string(&entry.directory))
             .arg("-B")
-            .arg(&cmake_build_dir)
+            .arg(cmake_path_string(&cmake_build_dir))
             .arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"))
             .arg("-DSOLIX_NATIVE_BUILD=ON")
             .arg("-DBUILD_SHARED_LIBS=ON")
             .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
             .arg("-DBUILD_TESTING=OFF")
             .arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}",
-                stage_triple_dir.display()
+                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={stage_triple_cmake}"
             ))
             .arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={}",
-                stage_triple_dir.display()
+                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
             ))
             .arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={}",
-                stage_triple_dir.display()
+                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
             ))
             .arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={}",
-                stage_triple_dir.display()
+                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={stage_triple_cmake}"
             ))
             .arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={}",
-                stage_triple_dir.display()
+                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
             ))
             .arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={}",
-                stage_triple_dir.display()
+                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
             ))
             .arg(format!(
-                "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={}",
-                archive_cache_dir.display()
+                "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={archive_cache_cmake}"
             ));
 
         if ninja_available && (!cfg!(windows) || is_cross) {
@@ -1098,7 +1105,7 @@ fn compile_cmake_native(
         if let Some(ref toolchain_path) = toolchain_option {
             cfg_cmd.arg(format!(
                 "-DCMAKE_TOOLCHAIN_FILE={}",
-                toolchain_path.display()
+                cmake_path_string(toolchain_path)
             ));
         }
         if is_release && !triple.contains("apple-darwin") && !triple.contains("-msvc") {
@@ -1111,7 +1118,7 @@ fn compile_cmake_native(
         cfg_cmd.current_dir(project_root).env("PATH", &search_path);
         cfg_cmd.env("SOLIX_NATIVE_BUILD", "1");
         if let Some(ref ffi_dir) = ffi_c_source_dir {
-            cfg_cmd.env("SOLIX_FFI_SOURCE_DIR", ffi_dir);
+            cfg_cmd.env("SOLIX_FFI_SOURCE_DIR", cmake_path_string(ffi_dir));
         }
 
         let cfg_status = cfg_cmd
