@@ -875,3 +875,43 @@ fn test_custom_pkg_dir_list_remains_empty_without_auto_bootstrapping() {
         "Non-default --pkg-dir store must remain empty until explicitly installed"
     );
 }
+
+#[test]
+fn test_auto_bootstrap_overrides_stale_preexisting_bundled_package() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("empty_cwd");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+
+    // Pre-seed a stale/incomplete `raylib-release@5.5.0/raylib.slxarc` without the current
+    // `.bundled_bootstrapped_v<version>` marker, simulating an upgrade from an older toolchain.
+    let stale_pkg_dir = solix_home.join("packages").join("raylib-release@5.5.0");
+    fs::create_dir_all(&stale_pkg_dir).expect("create stale pkg dir");
+    let stale_archive = stale_pkg_dir.join("raylib.slxarc");
+    fs::write(&stale_archive, b"stale_placeholder_archive").expect("write stale archive");
+
+    let mut list_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    list_cmd
+        .args(["list", "--json"])
+        .env("SOLIX_FORCE_EMBEDDED_ASSETS", "1");
+    let list_output = list_cmd.output().expect("execute solix list --json");
+    assert!(
+        list_output.status.success(),
+        "solix list --json failed during upgrade override: stderr={}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+
+    let upgraded_bytes = fs::read(&stale_archive).expect("read overridden raylib archive");
+    assert_ne!(
+        upgraded_bytes, b"stale_placeholder_archive",
+        "Auto-bootstrap on new version must override pre-existing stale bundled packages"
+    );
+    let inspection = solix_common::project::SlxarcArchive::inspect(&stale_archive)
+        .expect("overridden bundled archive must be a valid .slxarc with manifest");
+    assert!(
+        inspection.manifest.is_some(),
+        "Overridden bundled archive must contain a valid parsed manifest"
+    );
+}

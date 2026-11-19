@@ -69,7 +69,12 @@ def strip_yaml_native_checksum_section(manifest_text: str) -> str:
     skipping_block = False
 
     for raw_line in manifest_text.splitlines():
-        is_top_level = bool(raw_line) and not raw_line[0].isspace() and not raw_line.startswith("#")
+        is_top_level = (
+            bool(raw_line)
+            and not raw_line[0].isspace()
+            and not raw_line.startswith("#")
+            and not (raw_line.startswith("-") and not raw_line.startswith("---"))
+        )
         if is_top_level:
             stripped = raw_line.strip()
             if stripped.startswith("supported_platforms:") or stripped.startswith("native_library_checksums:"):

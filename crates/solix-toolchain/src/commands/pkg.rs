@@ -189,7 +189,7 @@ pub(crate) fn install_package_artifact_with_options(
 
         let manifest = inspection.manifest.ok_or_else(|| {
             anyhow::anyhow!(
-                "Cannot install archive '{}': missing mandatory 'manifest.toml'",
+                "Cannot install archive '{}': missing or invalid 'manifest.yaml' / 'manifest.toml'",
                 resolved_artifact.display()
             )
         })?;
