@@ -4450,50 +4450,53 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         let mut chars = inner.chars();
         let first = chars.next().unwrap_or('\0');
 
-        if first == '\\' {
+        let decoded_char = if first == '\\' {
             match chars.next() {
-                Some('n') => Ok('\n'),
-                Some('t') => Ok('\t'),
-                Some('r') => Ok('\r'),
-                Some('\\') => Ok('\\'),
-                Some('\'') => Ok('\''),
-                Some('"') => Ok('"'),
-                Some('0') => Ok('\0'),
+                Some('n') => '\n',
+                Some('t') => '\t',
+                Some('r') => '\r',
+                Some('\\') => '\\',
+                Some('\'') => '\'',
+                Some('"') => '"',
+                Some('0') => '\0',
                 Some('x') => {
                     let hex_one = chars.next();
                     let hex_two = chars.next();
                     if let (Some(first_hex), Some(second_hex)) = (hex_one, hex_two) {
                         let hex_str = format!("{}{}", first_hex, second_hex);
                         if let Ok(byte_val) = u8::from_str_radix(&hex_str, 16) {
-                            Ok(byte_val as char)
+                            byte_val as char
                         } else {
                             self.record_error(ParsingError::InvalidEscapeSequence {
                                 span: span.to_source_span(),
                             });
-                            Ok('\0')
+                            '\0'
                         }
                     } else {
                         self.record_error(ParsingError::InvalidEscapeSequence {
                             span: span.to_source_span(),
                         });
-                        Ok('\0')
+                        '\0'
                     }
                 }
                 _ => {
                     self.record_error(ParsingError::InvalidEscapeSequence {
                         span: span.to_source_span(),
                     });
-                    Ok('\0')
+                    '\0'
                 }
             }
         } else {
-            if chars.next().is_some() {
-                self.record_error(ParsingError::MultiCharacterLiteral {
-                    span: span.to_source_span(),
-                });
-            }
-            Ok(first)
+            first
+        };
+
+        if chars.next().is_some() {
+            self.record_error(ParsingError::MultiCharacterLiteral {
+                span: span.to_source_span(),
+            });
         }
+
+        Ok(decoded_char)
     }
 
     // =========================================================================

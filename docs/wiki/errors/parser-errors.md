@@ -91,3 +91,18 @@ This section documents the syntax diagnostics emitted by [`crates/solix-compilat
   import solix.io.Console;
   public class Application { }
   ```
+
+---
+
+### `E0153`: Multi-Character Character Literal
+* **Cause:** A character literal contains more than a single character or has extra trailing characters after an escape sequence.
+* **Bad Code:**
+  ```solix
+  char invalid_letter = 'ab';
+  char invalid_escape = '\nabc';
+  ```
+* **Fixed Code:**
+  ```solix
+  char valid_letter = 'a';
+  char valid_escape = '\n';
+  ```
