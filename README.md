@@ -139,7 +139,7 @@ The single `solix` executable manages all phases of project development, compila
 
 * **64-Bit Register Abstract Machine**: Uniform 8-byte instruction words (`Format A`, `Format B`, `Format C`, `Format Call`), sliding register windows, and linear-scan register allocation for high instruction cache locality.
 * **Deterministic ARC with Segregated Free Lists**: Memory is reclaimed immediately when reference counts drop to zero, executing RAII destructors (`~ClassName()`) deterministically with zero garbage collection pauses.
-* **Hermetic Build Engine (`solix_build.py`)**: All native C, Zig, CMake, and Cargo compilations occur inside `build/.cache/` without host tool contamination or system-wide side effects.
+* **Declarative Pure-Rust Build System (`manifest.yaml`)**: Executes `pre_compile` / `post_compile` hooks, auto-detects dual-mode C/C++ CMake (`solix::ffi`) and Rust Cargo (`solix-ffi`) native extensions across OS-expanded architectures inside isolated `build/.cache/` directories.
 * **Profile-Aware Multi-Version Package Store**: Supports simultaneous side-by-side installations of packages under `<name>-<profile>@<version>` with cryptographic SHA-256 tamper verification.
 * **Comprehensive Tooling**: First-class Language Server Protocol (`solix-lsp`), Debug Adapter Protocol (`solix-dap`), and an official Visual Studio Code extension.
 
@@ -151,7 +151,9 @@ Comprehensive guides, specifications, and architecture deep dives are available 
 
 * [**Master Documentation Hub**](docs/README.md) — Complete taxonomy and architecture guide.
 * [**Getting Started Tutorial**](docs/guide/01_getting_started.md) — First steps with Solix, installation, and project layout.
-* [**Hermetic Build System & Native Bridge**](docs/guide/build_system.md) — Architecture of `solix_build.py`, `.cache/` isolation, and Zig/CMake pipelines.
+* [**Declarative Build System & `manifest.yaml`**](docs/guide/build_system.md) — Pure-Rust `solix build`, YAML anchors, `pre_compile`/`post_compile` hooks, and multi-target compilation.
+* [**FFI SDK Wiki (`ffi/c` & `ffi/rust`)**](docs/wiki/ffi/README.md) — Complete C11/C++17 (`solix::ffi`) and Rust (`solix-ffi`) FFI SDK reference and [Dual-Backend Example](examples/ffi_dual_backend/README.md).
+* [**`manifest.yaml` Wiki Reference**](docs/wiki/manifest.md) — YAML variables, self-contained profiles, platform expansion, and auto-detected `natives`.
 * [**Disassembly Format Reference (`.slxasm`)**](docs/spec/disassembly-format-slxasm.md) — Guide to reading `.slxasm` / `.slxdasm` 64-bit Register VM output.
 * [**VS Code Extension & Debugging**](docs/guide/editors_vscode.md) — Editor setup, CodeLens execution, and interactive DAP debugging.
 * [**CLI Toolchain Reference**](docs/spec/tools/cli/README.md) — Detailed option flags and execution contracts for all `solix` subcommands.

@@ -119,3 +119,12 @@ The virtual machine registers essential built-in native functions into the stand
 When the virtual machine executes within an interactive Debug Adapter Protocol (`solix dap`) session or headless runner, `builtin_println` and `builtin_print` dynamically redirect text output:
 - **Default Execution**: If `vm.output_sink` is `None`, strings are formatted and output to standard host console output (`println!`/`print!`).
 - **DAP Supervised Execution**: If `vm.output_sink` is configured (`Some(sink_handler)`), standard output stream writes are routed into the thread-safe `OutputSink` callback closure, emitting DAP `Event::Output` packets with `category: OutputEventCategory::Stdout`. This prevents guest stdout pollution or pipe corruption across the JSON-RPC wire channel.
+
+---
+
+## Related Documentation
+* [FFI Wiki Overview](../wiki/ffi/README.md)
+* [C & C++ SDK Reference (`solix::ffi`)](../wiki/ffi/c-cpp-sdk.md)
+* [Rust SDK Reference (`solix-ffi`)](../wiki/ffi/rust-sdk.md)
+* [Native Plugins Developer Guide](../guide/09_native_plugins.md)
+* [Dual-Backend FFI Example (`examples/ffi_dual_backend`)](../../examples/ffi_dual_backend/README.md)

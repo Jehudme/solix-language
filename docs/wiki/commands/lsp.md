@@ -59,7 +59,7 @@ name = "solix"
 scope = "source.solix"
 injection-regex = "solix"
 file-types = ["slx"]
-roots = ["manifest.toml"]
+roots = ["manifest.yaml", "manifest.yml", "manifest.toml"]
 language-servers = ["solix-lsp"]
 
 [language-server.solix-lsp]
@@ -75,7 +75,7 @@ The Solix Language Server supports 32 language intelligence features:
 
 1. **Protocol & Lifecycle**: LSP 3.17 initialization, shutdown, exit handshake.
 2. **Document Overlay**: Live in-memory buffer synchronization (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didClose`).
-3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.toml` discovery, unified `[configuration]` and `[profiles]` profile-aware dependency resolution (supporting table notation `name = { version = "...", profile = "..." }` and suffix notation `name-profile = "..."`), and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
+3. **Workspace Discovery**: Multi-file project awareness with upward `manifest.yaml` / `manifest.toml` discovery, unified `configuration` and self-contained `profiles` dependency resolution (supporting mapping notation `name: { version: "...", profile: "..." }` and shorthand notation), and `ClientModuleSolver` dependency resolution (`~/.solix/packages`).
 4. **Resilient Compilation**: AST and semantic cache retention during partial typing or syntax errors.
 5. **Push Diagnostics**: Real-time error and warning squiggles strictly isolated by `source_id` with strict compiler import resolution parity (exempting only `std::*`), linked to the repository error reference documentation (`https://github.com/Jehudme/solix-language/blob/master/docs/wiki/errors/` and offline via `solix wiki`).
 6. **Code Navigation**: Go-to Definition (`gd`), Type Definition (`gy`), Implementation (`gi`), and Find All References (`gr`).
@@ -87,7 +87,7 @@ The Solix Language Server supports 32 language intelligence features:
 12. **Inlay Hints**: True parameter names (e.g., `brick_rect:`, `active_color:` instead of generic `arg0:`) across multi-file and library declarations, interactive hover tooltips exposing full parameter type annotations (e.g., `Rectangle rec`, `Color color`), direct AST callee symbol binding via `resolved_symbols`, live document buffer overlay querying, and RAII scope-exit destructor hints (`~dtor()`).
 13. **Semantic Tokens**: LSP 3.17 delta-encoded token highlighting with UTF-16 coordinate precision, CRLF column alignment, multi-line span splitting, overlap deduplication, strict variable vs nominal class type classification, and syntax-error drift resilience with call-site token classification.
 14. **Document Outline & Workspace Symbols**: Hierarchical symbol outline and fuzzy workspace symbol search.
-15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `Debug Main` for application entrypoints configured in `manifest.toml` (or `"main"` fallback) and `▶ Run Test` / `Debug Test` for test suites, plus reference count lenses linked to `solix.showReferences`.
+15. **Code Lens**: Interactive dual-action lenses: `▶ Run Main` / `Debug Main` for application entrypoints configured in `manifest.yaml` (or `"main"` fallback) and `▶ Run Test` / `Debug Test` for test suites, plus reference count lenses linked to `solix.showReferences`.
 16. **Code Actions & Quick Fixes**: Automated fixes for `E0226` (`.` to `::`), `E0201` (missing imports), `E0284` (add `override`), and `source.organizeImports` filtered dynamically by client request kinds (`params.context.only`).
 17. **Refactoring**: Safe symbol renaming across files.
 18. **Code Formatting**: 4-space indent formatter preserving inline comments, compound operators (`+=`, `-=`, `*=`, `/=`, `%=`), relational operators (`==`, `!=`, `<=`, `>=`), lambda arrows (`=>`), and mid-line blocks (`} else {`).

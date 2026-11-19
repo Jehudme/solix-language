@@ -38,7 +38,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | `-- [guest_args...]` | | Strings | `[]` | Arguments passed directly to the guest application entry point. |
 
 > [!TIP]
-> Direct invocations such as `solix run path/to/file.slx` or `file.slxb` use a zero-overhead CLI fast path that bypasses subcommand augmentation and defers bundled package store bootstrapping and ancestor `manifest.toml` probes until imports or package references require them.
+> Direct invocations such as `solix run path/to/file.slx` or `file.slxb` use a zero-overhead CLI fast path that bypasses subcommand augmentation and defers bundled package store bootstrapping and ancestor `manifest.yaml` probes until imports or package references require them.
 
 ---
 
@@ -63,14 +63,14 @@ solix run bin/app.slxb
 ### 3. Archive Container (`*.slxarc`)
 
 When given an archive container, the runtime:
-1. Inspects embedded `manifest.toml`.
-2. Automatically stages and loads bundled native shared libraries (`natives/*.so`).
+1. Inspects embedded `manifest.yaml` (or legacy `manifest.toml`).
+2. Automatically stages and loads bundled native shared libraries (`lib/<target_triple>/*`).
 3. Sets `SOLIX_RESOURCE_ROOT` to the archive resources directory.
 4. Selects the target entry point using strict precedence:
    - Explicit `--entry <symbol>` override on the CLI (validating symbol existence, throwing `[E0301]` on missing entrypoint).
-   - Explicit `--profile <profile>` (or package spec profile such as `pkg:test`), resolving `[profiles.<profile>].entrypoint` from the bundled `manifest.toml`.
+   - Explicit `--profile <profile>` (or package spec profile such as `pkg:test`), resolving `profiles.<profile>.entrypoint` from the bundled manifest.
    - The compiled entry point recorded in the primary `.slxb` container (`entry_point_id` / `entry_point`), so archives built with `--test` or custom profiles execute their built entrypoint without extra CLI flags.
-   - Fallback to `[profiles.<build_profile>].entrypoint` or `[profiles.release].entrypoint` when no entry point is embedded in the binary.
+   - Fallback to `profiles.<build_profile>.entrypoint` or `profiles.release.entrypoint` when no entry point is embedded in the binary.
 5. Invokes the entry point in the VM.
 
 ```bash

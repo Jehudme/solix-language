@@ -4,15 +4,17 @@ This section covers project initialization and package store management commands
 
 ---
 
-## 1. `solix new`
+## 1. `solix new` & `solix new native`
 
-Scaffolds a complete Solix project workspace with `manifest.toml`, build automation scripts, test suites, and optional native Rust bridge crates:
+### `solix new <path>` (Project Scaffolding)
+
+Scaffolds a complete Solix project workspace configured with `manifest.yaml` (`vars:` anchors, self-contained profiles, pure-Rust `solix build`), test suites, and an optional dual-mode C, C++, or Rust native bridge:
 
 ```bash
 solix new <path> [options]
 ```
 
-### Key Options & Flags
+#### Key Options & Flags
 * `<path>`: Target directory for the new project.
 * `--name <name>`: Project identifier name [default: directory name].
 * `--version <version>`: Initial semantic version [default: `0.1.0`].
@@ -22,20 +24,47 @@ solix new <path> [options]
 * `--main <symbol>`: Main entry point symbol [default: `Main::main`].
 * `--test <symbol>`: Test entry point symbol [default: `TestRunner::test`].
 * `--lib`: Generates a library project (`src/lib.slx`) instead of an application.
-* `--no-native`: Omits the Rust native `cdylib` bridge in `natives/`.
+* `--native [LANG]`: Scaffolds a dual-mode native subproject in `natives/` (`rust` [default], `c`, or `cpp`).
+* `--no-native`: Omits the native subproject in `natives/`.
 * `-d, --deps <pkg@ver>`: Adds dependency in `pkg@ver` format (can be repeated).
-* `--force`: Overwrites existing `manifest.toml` if present in the target directory.
+* `--force`: Overwrites existing `manifest.yaml` (or legacy `manifest.toml`) if present in the target directory.
 
-### Practical Examples
+### `solix new native <name>` (Native Subproject Scaffolding)
+
+Scaffolds a dual-mode native library in **C11 (CMake)**, **C++17 (CMake)**, or **Rust (Cargo)** that builds both as a standalone library/test suite (`cmake` / `cargo test`) and as a Solix VM plugin (`solix build`), automatically registering it under `natives:` in `manifest.yaml`:
+
 ```bash
-# Scaffold a standard application project
+solix new native <name> [options]
+```
+
+#### Key Options & Flags
+* `<name>`: Canonical module identifier (directory name and default Solix class prefix).
+* `-p, --project <path>`: Existing Solix project root containing `manifest.yaml` [default: `.` when `manifest.yaml` exists and `--output` is omitted].
+* `--name <pkg>`: Explicit Cargo package or CMake `project(...)` library name [default: `snake_case(<name>)`].
+* `--version <ver>`: Initial semantic version stamped into `Cargo.toml` or `CMakeLists.txt` [default: `0.1.0`].
+* `--lang, --backend <lang>`: Native implementation backend: `rust` [default], `c`, or `cpp` (`c++` / `cxx`).
+* `-o, --output <dir>`: Custom output directory [default: `<project>/natives/<name>` or `./<name>`].
+* `--platforms <list>`: Comma-separated or repeated target platforms recorded on the `natives:` entry (`host`, `linux`, `windows`, `macos`, `all`).
+* `--profile <list>`: Manifest profile(s) to register the native subproject under [default: existing `release` / `debug`].
+* `--description <text>`: Description written into `Cargo.toml` or `CMakeLists.txt`.
+* `--license <spdx>`: SPDX license identifier [default: `Apache-2.0`].
+* `--author <name>`: Author name written to `Cargo.toml` (repeatable).
+* `--no-register`: Writes the native subproject without modifying `manifest.yaml`.
+* `--force`: Overwrites existing files in the native directory.
+
+#### Practical Examples
+```bash
+# Scaffold a standard application project with a Rust native bridge
 solix new my_app
 
-# Scaffold a reusable library with dependencies
-solix new math_matrix --lib --deps "vector_math@0.1.0"
+# Scaffold an application with a C++17 CMake native bridge
+solix new physics_demo --native cpp
 
-# Scaffold a pure Solix application without Rust native bridge
-solix new simple_cli --no-native
+# Add a C11 CMake library directly into an existing project and register it for all desktop platforms
+solix new native audio_dsp --project . --lang c --platforms linux,macos,windows
+
+# Scaffold a reusable library with dependencies and no native subproject
+solix new math_matrix --lib --no-native --deps "vector_math@0.1.0"
 ```
 
 ---

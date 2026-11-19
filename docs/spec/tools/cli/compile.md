@@ -76,10 +76,10 @@ External symbols and classes from dependencies are fully merged into the output 
 ## Upward Manifest Auto-Discovery
 
 When compiling individual source files located within a Solix project workspace without specifying explicit project flags:
-* `solix compile` searches upward up to 12 directory levels from the first source file for an enclosing `manifest.toml`.
-* If found and `--deps` is not specified on the CLI, dependencies declared under `[dependencies]` in `manifest.toml` are automatically loaded into compilation.
-* If `--name` is omitted, the package name is inherited from `[configuration].name`.
-* If `--entry` is omitted, the entry point is inherited from `[profiles.release].entrypoint` (or active profile).
+* `solix compile` searches upward up to 12 directory levels from the first source file for an enclosing `manifest.yaml` (or legacy `manifest.toml`).
+* If found and `--deps` is not specified on the CLI, dependencies declared under `profiles.<profile>.dependencies` (or legacy `[dependencies]`) are automatically loaded into compilation.
+* If `--name` is omitted, the package name is inherited from `configuration.name`.
+* If `--entry` is omitted, the entry point is inherited from `profiles.release.entrypoint` (or active profile).
 * Project version and description are also inherited from `[configuration]` when CLI defaults or empty values are provided.
 
 This enables standalone compilation, toolchain testing, and editor disassembly inspection of individual project files without requiring manual specification of all transitive package dependencies.
