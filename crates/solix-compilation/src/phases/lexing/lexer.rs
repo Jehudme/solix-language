@@ -216,6 +216,11 @@ impl<'source> LexerState<'source> {
             return;
         }
 
+        let has_leading_zero = first_byte == b'0'
+            && self
+                .peek()
+                .is_some_and(|byte| byte.is_ascii_digit() || byte == b'_');
+
         // Decimal digits
         while let Some(byte) = self.peek() {
             if byte.is_ascii_digit() || byte == b'_' {
@@ -226,11 +231,29 @@ impl<'source> LexerState<'source> {
         }
 
         // Fractional part
-        if self.peek() == Some(b'.')
-            && self
-                .peek_next()
-                .is_some_and(|next_byte| next_byte.is_ascii_digit())
-        {
+        let is_fractional = if self.peek() == Some(b'.') {
+            match self.peek_next() {
+                Some(b'.') => false,
+                Some(next_byte) if next_byte.is_ascii_alphabetic() || next_byte == b'_' => {
+                    let is_suffix_f = (next_byte == b'f' || next_byte == b'F')
+                        && !self.bytes.get(self.cursor + 2).is_some_and(|after_byte| {
+                            after_byte.is_ascii_alphanumeric() || *after_byte == b'_'
+                        });
+                    let is_exponent = (next_byte == b'e' || next_byte == b'E')
+                        && self.bytes.get(self.cursor + 2).is_some_and(|after_byte| {
+                            after_byte.is_ascii_digit()
+                                || *after_byte == b'+'
+                                || *after_byte == b'-'
+                        });
+                    is_suffix_f || is_exponent
+                }
+                _ => true,
+            }
+        } else {
+            false
+        };
+
+        if is_fractional {
             self.advance(); // consume '.'
             while let Some(byte) = self.peek() {
                 if byte.is_ascii_digit() || byte == b'_' {
@@ -260,7 +283,10 @@ impl<'source> LexerState<'source> {
                 self.advance();
             }
 
-            self.add_token(TokenKind::Number);
+            let token = self.add_token(TokenKind::Number);
+            if has_leading_zero {
+                self.errors.push(LexingError::leading_zero_integer(token));
+            }
             return;
         }
 
@@ -282,7 +308,10 @@ impl<'source> LexerState<'source> {
                 self.advance();
             }
 
-            self.add_token(TokenKind::Number);
+            let token = self.add_token(TokenKind::Number);
+            if has_leading_zero {
+                self.errors.push(LexingError::leading_zero_integer(token));
+            }
             return;
         }
 
@@ -291,7 +320,10 @@ impl<'source> LexerState<'source> {
             self.advance();
         }
 
-        self.add_token(TokenKind::Number);
+        let token = self.add_token(TokenKind::Number);
+        if has_leading_zero {
+            self.errors.push(LexingError::leading_zero_integer(token));
+        }
     }
 
     fn handle_string(&mut self) {
@@ -300,6 +332,11 @@ impl<'source> LexerState<'source> {
                 self.advance(); // Consume closing quote
                 self.add_token(TokenKind::String);
                 return;
+            }
+
+            if byte == b'\n' || byte == b'\r' {
+                // Regular strings cannot span multiple lines
+                break;
             }
 
             if byte == b'\\' {

@@ -75,6 +75,17 @@ pub enum LexingError {
         #[label("missing binary digits")]
         span: SourceSpan,
     },
+
+    #[error("Decimal integer literal cannot have leading zeros")]
+    #[diagnostic(
+        code(solix::lexer::leading_zero_integer),
+        help("Remove the leading zero or use '0x' for hexadecimal or '0b' for binary.")
+    )]
+    LeadingZeroIntegerLiteral {
+        token: Token,
+        #[label("leading zero in decimal integer")]
+        span: SourceSpan,
+    },
 }
 
 impl LexingError {
@@ -132,6 +143,15 @@ impl LexingError {
         }
     }
 
+    /// Constructs a new [`LexingError::LeadingZeroIntegerLiteral`] from a token.
+    #[must_use]
+    pub fn leading_zero_integer(token: Token) -> Self {
+        Self::LeadingZeroIntegerLiteral {
+            token,
+            span: token.span.to_source_span(),
+        }
+    }
+
     /// Returns the underlying token associated with this error.
     #[must_use]
     pub const fn token(&self) -> Token {
@@ -141,7 +161,8 @@ impl LexingError {
             | Self::UnterminatedCharacterLiteral { token, .. }
             | Self::UnterminatedBlockComment { token, .. }
             | Self::MalformedHexLiteral { token, .. }
-            | Self::MalformedBinaryLiteral { token, .. } => *token,
+            | Self::MalformedBinaryLiteral { token, .. }
+            | Self::LeadingZeroIntegerLiteral { token, .. } => *token,
         }
     }
 
@@ -155,6 +176,7 @@ impl LexingError {
             Self::UnterminatedBlockComment { .. } => "E0013",
             Self::MalformedHexLiteral { .. } => "E0014",
             Self::MalformedBinaryLiteral { .. } => "E0015",
+            Self::LeadingZeroIntegerLiteral { .. } => "E0016",
         }
     }
 
@@ -167,7 +189,8 @@ impl LexingError {
             | Self::UnterminatedCharacterLiteral { span, .. }
             | Self::UnterminatedBlockComment { span, .. }
             | Self::MalformedHexLiteral { span, .. }
-            | Self::MalformedBinaryLiteral { span, .. } => *span,
+            | Self::MalformedBinaryLiteral { span, .. }
+            | Self::LeadingZeroIntegerLiteral { span, .. } => *span,
         }
     }
 }
@@ -201,6 +224,9 @@ mod tests {
 
         let error_binary = LexingError::malformed_binary(dummy_token);
         assert_eq!(error_binary.error_code(), "E0015");
+
+        let error_leading_zero = LexingError::leading_zero_integer(dummy_token);
+        assert_eq!(error_leading_zero.error_code(), "E0016");
     }
 
     #[test]

@@ -223,7 +223,7 @@ Numeric literals represent compile-time constant values. The lexer classifies th
 
 #### Decimal
 
-A sequence of one or more decimal digits (`0`–`9`). Leading zeros are **not** permitted (a leading zero is reserved for the `0x` and `0b` prefixes below).
+A sequence of one or more decimal digits (`0`–`9`). Leading zeros are **not** permitted (a leading zero is reserved for the `0x` and `0b` prefixes below). Specifying unnecessary leading zeros on a decimal integer (e.g. `0123` or `007`) emits lexical error `E0016`.
 
 ```
 42

@@ -70,3 +70,16 @@ This section documents the lexical analysis diagnostics emitted during tokenizat
   /* Comment started here */
   public int32 main() { return 0; }
   ```
+
+---
+
+### `E0016`: Leading-Zero Decimal Integer Literal
+* **Cause:** A decimal integer begins with an unnecessary leading zero (e.g. `0123`). Leading zeros are prohibited on decimal integers to prevent ambiguity with legacy octal notation.
+* **Bad Code:**
+  ```solix
+  int32 counter_value = 0123;
+  ```
+* **Fixed Code:**
+  ```solix
+  int32 counter_value = 123;
+  ```
