@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -199,6 +200,27 @@ def build_library(
         )
 
 
+def is_cross_target_triple(target_triple: str | None) -> bool:
+    """Returns True when target_triple explicitly targets a platform other than the current host."""
+    if not target_triple:
+        return False
+    cleaned = target_triple.strip().lower()
+    if not cleaned or cleaned == "host":
+        return False
+
+    sys_name = platform.system().lower()
+    host_os = "macos" if sys_name == "darwin" else ("windows" if sys_name.startswith("win") else "linux")
+    mach = platform.machine().lower()
+    host_arch = "aarch64" if mach in ("arm64", "aarch64") else ("x86_64" if mach in ("x86_64", "amd64", "x64") else mach)
+    host_id = f"{host_os}-{host_arch}"
+
+    target_os = "macos" if ("apple-darwin" in cleaned or cleaned.startswith("macos")) else ("windows" if "windows" in cleaned else ("linux" if "linux" in cleaned else ""))
+    target_arch = "aarch64" if ("aarch64" in cleaned or "arm64" in cleaned) else ("x86_64" if "x86_64" in cleaned else "")
+    if not target_os or not target_arch:
+        return False
+    return f"{target_os}-{target_arch}" != host_id
+
+
 def install_library_archive(
     solix_executable: list[str],
     archive_path: Path,
@@ -252,9 +274,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--install",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Install built packages into local package store (default: true)",
+        help="Install host-compatible built packages into local package store (default: true)",
     )
     parser.add_argument(
         "--solix-binary",
@@ -353,8 +375,11 @@ def main() -> None:
 
             print(f"Staged '{relative_archive_path}' ({file_size_bytes} bytes, SHA: {file_digest[:12]}...)")
 
-            if arguments.install:
+            effective_target = arguments.target or environment_variables.get("SOLIX_TARGET_TRIPLE")
+            if arguments.install and not is_cross_target_triple(effective_target):
                 install_library_archive(solix_executable, staged_archive_path, target_profile, environment_variables)
+            elif arguments.install:
+                print(f"Skipping host package store install for cross-target '{effective_target}'.")
 
     for existing_entry in output_directory.iterdir():
         if existing_entry.is_dir() and existing_entry.name not in expected_folders:
