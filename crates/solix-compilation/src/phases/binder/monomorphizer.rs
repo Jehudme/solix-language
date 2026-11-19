@@ -43,16 +43,25 @@ pub struct GenericBlueprintRegistry {
 impl GenericBlueprintRegistry {
     /// Registers a new generic class blueprint.
     pub fn register_blueprint(&mut self, blueprint: GenericBlueprint) {
-        self.blueprints
-            .insert(blueprint.name.clone(), blueprint.clone());
-        self.blueprints
-            .insert(blueprint.fully_qualified_name.clone(), blueprint);
+        let fully_qualified = blueprint.fully_qualified_name.clone();
+        let dot_qualified = fully_qualified.replace("::", ".");
+        let colon_qualified = fully_qualified.replace('.', "::");
+
+        self.blueprints.insert(fully_qualified, blueprint.clone());
+        self.blueprints.insert(dot_qualified, blueprint.clone());
+        self.blueprints.insert(colon_qualified, blueprint.clone());
+
+        if blueprint.package_prefix.is_empty() {
+            self.blueprints.insert(blueprint.name.clone(), blueprint);
+        }
     }
 
     /// Checks if a blueprint exists for the given name.
     #[must_use]
     pub fn has_blueprint(&self, name: &str) -> bool {
         self.blueprints.contains_key(name)
+            || self.blueprints.contains_key(&name.replace("::", "."))
+            || self.blueprints.contains_key(&name.replace('.', "::"))
     }
 
     /// Mangles a generic template name with its concrete type arguments.
@@ -87,14 +96,15 @@ impl GenericBlueprintRegistry {
         next_vtable_id: &mut u32,
     ) -> Result<SymbolId, Vec<BindingError>> {
         let mangled_name = Self::mangle_name(base_name, type_arguments);
-        let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
-        let simple_mangled = Self::mangle_name(simple_base, type_arguments);
+        let dot_mangled = mangled_name.replace("::", ".");
+        let colon_mangled = mangled_name.replace('.', "::");
 
         // Check if already monomorphized
         if let Some(&existing_id) = self
             .instantiated_classes
             .get(&mangled_name)
-            .or_else(|| self.instantiated_classes.get(&simple_mangled))
+            .or_else(|| self.instantiated_classes.get(&dot_mangled))
+            .or_else(|| self.instantiated_classes.get(&colon_mangled))
         {
             return Ok(existing_id);
         }
@@ -102,7 +112,6 @@ impl GenericBlueprintRegistry {
         let blueprint = self
             .blueprints
             .get(base_name)
-            .or_else(|| self.blueprints.get(simple_base))
             .or_else(|| {
                 let dot_name = base_name.replace("::", ".");
                 self.blueprints.get(&dot_name)
@@ -226,7 +235,9 @@ impl GenericBlueprintRegistry {
         self.instantiated_classes
             .insert(mangled_name.clone(), class_symbol_id);
         self.instantiated_classes
-            .insert(simple_mangled, class_symbol_id);
+            .insert(dot_mangled, class_symbol_id);
+        self.instantiated_classes
+            .insert(colon_mangled, class_symbol_id);
 
         let current_vtable_id = *next_vtable_id;
         *next_vtable_id += 1;

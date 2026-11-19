@@ -460,3 +460,102 @@ public int32 main() {
         context_imported.binding_errors
     );
 }
+
+#[test]
+fn test_generic_class_monomorphization_across_namespaces_no_collision() {
+    let game_source = r#"
+package game.collections;
+
+public class Box<T> {
+    public T value;
+
+    public void set_value(T new_value) {
+        this.value = new_value;
+    }
+}
+"#;
+
+    let ui_source = r#"
+package ui.components;
+
+public class Box<T> {
+    public T item;
+
+    public void set_item(T new_item) {
+        this.item = new_item;
+    }
+}
+"#;
+
+    let consumer_source = r#"
+import game.collections.Box as GameBox;
+import ui.components.Box as UiBox;
+
+public int32 main() {
+    GameBox<int32> game_container = new GameBox<int32>();
+    game_container.value = 42;
+    UiBox<int32> ui_container = new UiBox<int32>();
+    ui_container.item = 84;
+    return game_container.value + ui_container.item;
+}
+"#;
+
+    let options = CompilationOptions::new()
+        .with_source("game_box.slx", game_source)
+        .with_source("ui_box.slx", ui_source)
+        .with_source("consumer.slx", consumer_source);
+
+    let mut context = CompilationContext::new(options);
+    lex(&mut context).expect("Lexing must succeed");
+    parse(&mut context).expect("Parsing must succeed");
+    let bind_result = bind(&mut context);
+
+    assert!(
+        bind_result.is_ok(),
+        "Binding generic classes across namespaces must succeed without collision: {:?}",
+        context.binding_errors
+    );
+
+    // Verify both layouts were monomorphized distinctly with their unique fields
+    let artifacts = context
+        .binding_artifacts
+        .as_ref()
+        .expect("Binding artifacts must be populated");
+    let game_box_layout = artifacts
+        .layouts
+        .values()
+        .find(|layout| {
+            (layout.class_name.contains("game::collections")
+                || layout.class_name.contains("game.collections"))
+                && layout.class_name.contains("Box")
+        })
+        .expect("game::collections::Box<int32> layout must be registered");
+
+    assert!(
+        game_box_layout.field_offsets.contains_key("value"),
+        "game::collections::Box must contain field 'value'"
+    );
+    assert!(
+        !game_box_layout.field_offsets.contains_key("item"),
+        "game::collections::Box must not contain field 'item'"
+    );
+
+    let ui_box_layout = artifacts
+        .layouts
+        .values()
+        .find(|layout| {
+            (layout.class_name.contains("ui::components")
+                || layout.class_name.contains("ui.components"))
+                && layout.class_name.contains("Box")
+        })
+        .expect("ui::components::Box<int32> layout must be registered");
+
+    assert!(
+        ui_box_layout.field_offsets.contains_key("item"),
+        "ui::components::Box must contain field 'item'"
+    );
+    assert!(
+        !ui_box_layout.field_offsets.contains_key("value"),
+        "ui::components::Box must not contain field 'value'"
+    );
+}
