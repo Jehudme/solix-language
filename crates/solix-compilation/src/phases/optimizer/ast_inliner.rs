@@ -2019,17 +2019,31 @@ fn inline_call_into_block(
         let is_last_statement = statement_index + 1 == statement_count;
         if is_last_statement && let Statement::Return(return_stmt) = body_statement {
             if let Some(mut return_value) = return_stmt.value.clone() {
-                rename_expression(&mut return_value, &renamed_identifiers, &context.sources);
+                let node_types = context
+                    .binding_artifacts
+                    .as_mut()
+                    .map(|artifacts| &mut artifacts.node_types);
+                rename_expression(
+                    &mut return_value,
+                    &renamed_identifiers,
+                    &context.sources,
+                    node_types,
+                );
                 result_expression = Some(Box::new(return_value));
             }
             break;
         }
 
         let mut cloned_statement = body_statement.clone();
+        let node_types = context
+            .binding_artifacts
+            .as_mut()
+            .map(|artifacts| &mut artifacts.node_types);
         rename_statement(
             &mut cloned_statement,
             &renamed_identifiers,
             &context.sources,
+            node_types,
         );
         block_statements.push(cloned_statement);
     }
@@ -2167,11 +2181,13 @@ fn collect_local_variable_names(
     }
 }
 
-/// Substitutes identifiers matching `renamed_identifiers` with their hygienic synthetic spans.
+/// Substitutes identifiers matching `renamed_identifiers` with their hygienic synthetic spans
+/// while preserving semantic `node_types` for renamed spans so virtual dispatch stays accurate.
 fn rename_expression(
     expression: &mut Expression,
     renamed_identifiers: &HashMap<String, Span>,
     sources: &[String],
+    mut node_types: Option<&mut HashMap<Span, Type>>,
 ) {
     match expression {
         Expression::Identifier { span } => {
@@ -2179,47 +2195,88 @@ fn rename_expression(
             if source_index < sources.len() {
                 let name = &sources[source_index][span.start as usize..span.end as usize];
                 if let Some(&new_span) = renamed_identifiers.get(name) {
+                    if let Some(types_map) = node_types.as_deref_mut()
+                        && !types_map.contains_key(&new_span)
+                        && let Some(resolved_type) = types_map.get(span).cloned()
+                    {
+                        types_map.insert(new_span, resolved_type);
+                    }
                     *span = new_span;
                 }
             }
         }
         Expression::Binary { left, right, .. } => {
-            rename_expression(left, renamed_identifiers, sources);
-            rename_expression(right, renamed_identifiers, sources);
+            rename_expression(
+                left,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_expression(right, renamed_identifiers, sources, node_types);
         }
         Expression::Unary { operand, .. } => {
-            rename_expression(operand, renamed_identifiers, sources);
+            rename_expression(operand, renamed_identifiers, sources, node_types);
         }
         Expression::Assignment { target, value, .. } => {
-            rename_expression(target, renamed_identifiers, sources);
-            rename_expression(value, renamed_identifiers, sources);
+            rename_expression(
+                target,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_expression(value, renamed_identifiers, sources, node_types);
         }
         Expression::MemberAccess { object, .. } => {
-            rename_expression(object, renamed_identifiers, sources);
+            rename_expression(object, renamed_identifiers, sources, node_types);
         }
         Expression::MethodCall {
             callee, arguments, ..
         } => {
-            rename_expression(callee, renamed_identifiers, sources);
+            rename_expression(
+                callee,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
             for argument in arguments {
-                rename_expression(argument, renamed_identifiers, sources);
+                rename_expression(
+                    argument,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
         }
         Expression::ArrayAccess { array, index, .. } => {
-            rename_expression(array, renamed_identifiers, sources);
-            rename_expression(index, renamed_identifiers, sources);
+            rename_expression(
+                array,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_expression(index, renamed_identifiers, sources, node_types);
         }
         Expression::ArrayCreation { size, .. } => {
-            rename_expression(size, renamed_identifiers, sources);
+            rename_expression(size, renamed_identifiers, sources, node_types);
         }
         Expression::ArrayLiteral { elements, .. } | Expression::TupleCreation { elements, .. } => {
             for element in elements {
-                rename_expression(element, renamed_identifiers, sources);
+                rename_expression(
+                    element,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
         }
         Expression::NewInstance { arguments, .. } => {
             for argument in arguments {
-                rename_expression(argument, renamed_identifiers, sources);
+                rename_expression(
+                    argument,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
         }
         Expression::Cast {
@@ -2228,7 +2285,7 @@ fn rename_expression(
         | Expression::Instanceof {
             expression: inner, ..
         } => {
-            rename_expression(inner, renamed_identifiers, sources);
+            rename_expression(inner, renamed_identifiers, sources, node_types);
         }
         Expression::Ternary {
             condition,
@@ -2236,84 +2293,176 @@ fn rename_expression(
             else_branch,
             ..
         } => {
-            rename_expression(condition, renamed_identifiers, sources);
-            rename_expression(then_branch, renamed_identifiers, sources);
-            rename_expression(else_branch, renamed_identifiers, sources);
+            rename_expression(
+                condition,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_expression(
+                then_branch,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_expression(else_branch, renamed_identifiers, sources, node_types);
         }
         Expression::Block {
             statements, result, ..
         } => {
             for statement in statements {
-                rename_statement(statement, renamed_identifiers, sources);
+                rename_statement(
+                    statement,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
             if let Some(res) = result {
-                rename_expression(res, renamed_identifiers, sources);
+                rename_expression(res, renamed_identifiers, sources, node_types);
             }
         }
         _ => {}
     }
 }
 
-/// Substitutes identifiers inside statements with their hygienic synthetic spans.
+/// Substitutes identifiers inside statements with their hygienic synthetic spans
+/// while preserving semantic `node_types` for renamed declarations and references.
 fn rename_statement(
     statement: &mut Statement,
     renamed_identifiers: &HashMap<String, Span>,
     sources: &[String],
+    mut node_types: Option<&mut HashMap<Span, Type>>,
 ) {
     match statement {
         Statement::Block(block) => {
             for nested_statement in &mut block.statements {
-                rename_statement(nested_statement, renamed_identifiers, sources);
+                rename_statement(
+                    nested_statement,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
         }
         Statement::If(if_stmt) => {
-            rename_expression(&mut if_stmt.condition, renamed_identifiers, sources);
-            rename_statement(&mut if_stmt.then_branch, renamed_identifiers, sources);
+            rename_expression(
+                &mut if_stmt.condition,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_statement(
+                &mut if_stmt.then_branch,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
             if let Some(else_branch) = &mut if_stmt.else_branch {
-                rename_statement(else_branch, renamed_identifiers, sources);
+                rename_statement(else_branch, renamed_identifiers, sources, node_types);
             }
         }
         Statement::While(while_stmt) => {
-            rename_expression(&mut while_stmt.condition, renamed_identifiers, sources);
-            rename_statement(&mut while_stmt.body, renamed_identifiers, sources);
+            rename_expression(
+                &mut while_stmt.condition,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_statement(
+                &mut while_stmt.body,
+                renamed_identifiers,
+                sources,
+                node_types,
+            );
         }
         Statement::DoWhile(do_while) => {
-            rename_statement(&mut do_while.body, renamed_identifiers, sources);
-            rename_expression(&mut do_while.condition, renamed_identifiers, sources);
+            rename_statement(
+                &mut do_while.body,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
+            rename_expression(
+                &mut do_while.condition,
+                renamed_identifiers,
+                sources,
+                node_types,
+            );
         }
         Statement::For(for_stmt) => {
             if let Some(initializer) = &mut for_stmt.initializer {
-                rename_statement(initializer, renamed_identifiers, sources);
+                rename_statement(
+                    initializer,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
             if let Some(condition) = &mut for_stmt.condition {
-                rename_expression(condition, renamed_identifiers, sources);
+                rename_expression(
+                    condition,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
             if let Some(update) = &mut for_stmt.update {
-                rename_expression(update, renamed_identifiers, sources);
+                rename_expression(
+                    update,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
-            rename_statement(&mut for_stmt.body, renamed_identifiers, sources);
+            rename_statement(&mut for_stmt.body, renamed_identifiers, sources, node_types);
         }
         Statement::Switch(switch_stmt) => {
-            rename_expression(&mut switch_stmt.discriminant, renamed_identifiers, sources);
+            rename_expression(
+                &mut switch_stmt.discriminant,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
             for case in &mut switch_stmt.cases {
-                rename_expression(&mut case.case_value, renamed_identifiers, sources);
+                rename_expression(
+                    &mut case.case_value,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
                 for case_statement in &mut case.statements {
-                    rename_statement(case_statement, renamed_identifiers, sources);
+                    rename_statement(
+                        case_statement,
+                        renamed_identifiers,
+                        sources,
+                        node_types.as_deref_mut(),
+                    );
                 }
             }
             if let Some(default_statements) = &mut switch_stmt.default_case {
                 for default_statement in default_statements {
-                    rename_statement(default_statement, renamed_identifiers, sources);
+                    rename_statement(
+                        default_statement,
+                        renamed_identifiers,
+                        sources,
+                        node_types.as_deref_mut(),
+                    );
                 }
             }
         }
         Statement::Return(return_stmt) => {
             if let Some(value) = &mut return_stmt.value {
-                rename_expression(value, renamed_identifiers, sources);
+                rename_expression(value, renamed_identifiers, sources, node_types);
             }
         }
         Statement::Throw(throw_stmt) => {
-            rename_expression(&mut throw_stmt.expression, renamed_identifiers, sources);
+            rename_expression(
+                &mut throw_stmt.expression,
+                renamed_identifiers,
+                sources,
+                node_types,
+            );
         }
         Statement::VariableDeclaration(var_decl) => {
             let source_index = var_decl.name_span.id as usize;
@@ -2321,37 +2470,79 @@ fn rename_statement(
                 let name = &sources[source_index]
                     [var_decl.name_span.start as usize..var_decl.name_span.end as usize];
                 if let Some(&new_span) = renamed_identifiers.get(name) {
+                    if let Some(types_map) = node_types.as_deref_mut()
+                        && !types_map.contains_key(&new_span)
+                        && let Some(resolved_type) =
+                            types_map.get(&var_decl.name_span).cloned().or_else(|| {
+                                var_decl
+                                    .initializer
+                                    .as_ref()
+                                    .and_then(|init| types_map.get(&init.span()).cloned())
+                            })
+                    {
+                        types_map.insert(new_span, resolved_type);
+                    }
                     var_decl.name_span = new_span;
                 }
             }
             if let Some(initializer) = &mut var_decl.initializer {
-                rename_expression(initializer, renamed_identifiers, sources);
+                rename_expression(initializer, renamed_identifiers, sources, node_types);
             }
         }
         Statement::Expression(expr_stmt) => {
-            rename_expression(&mut expr_stmt.expression, renamed_identifiers, sources);
+            rename_expression(
+                &mut expr_stmt.expression,
+                renamed_identifiers,
+                sources,
+                node_types,
+            );
         }
         Statement::Assert(assert_stmt) => {
-            rename_expression(&mut assert_stmt.condition, renamed_identifiers, sources);
+            rename_expression(
+                &mut assert_stmt.condition,
+                renamed_identifiers,
+                sources,
+                node_types.as_deref_mut(),
+            );
             if let Some(message) = &mut assert_stmt.message {
-                rename_expression(message, renamed_identifiers, sources);
+                rename_expression(message, renamed_identifiers, sources, node_types);
             }
         }
         Statement::Exit(exit_stmt) => {
-            rename_expression(&mut exit_stmt.code, renamed_identifiers, sources);
+            rename_expression(
+                &mut exit_stmt.code,
+                renamed_identifiers,
+                sources,
+                node_types,
+            );
         }
         Statement::Try(try_stmt) => {
             for try_statement in &mut try_stmt.try_block.statements {
-                rename_statement(try_statement, renamed_identifiers, sources);
+                rename_statement(
+                    try_statement,
+                    renamed_identifiers,
+                    sources,
+                    node_types.as_deref_mut(),
+                );
             }
             for catch_clause in &mut try_stmt.catch_clauses {
                 for catch_statement in &mut catch_clause.block.statements {
-                    rename_statement(catch_statement, renamed_identifiers, sources);
+                    rename_statement(
+                        catch_statement,
+                        renamed_identifiers,
+                        sources,
+                        node_types.as_deref_mut(),
+                    );
                 }
             }
             if let Some(finally_block) = &mut try_stmt.finally_block {
                 for finally_statement in &mut finally_block.statements {
-                    rename_statement(finally_statement, renamed_identifiers, sources);
+                    rename_statement(
+                        finally_statement,
+                        renamed_identifiers,
+                        sources,
+                        node_types.as_deref_mut(),
+                    );
                 }
             }
         }

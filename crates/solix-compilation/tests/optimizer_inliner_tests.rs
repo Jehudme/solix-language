@@ -410,3 +410,50 @@ fn test_threshold_zero_disables_automatic_inlining() {
     let execution_value = run_program(&context);
     assert_eq!(execution_value, Value::I32(42));
 }
+
+#[test]
+fn test_inlined_method_preserves_local_virtual_dispatch() {
+    let source_code = r#"
+        class TextBox {
+            public int32 code;
+
+            public TextBox(int32 initial_code) {
+                this.code = initial_code;
+            }
+
+            public virtual int32 slot_zero() {
+                return 999;
+            }
+
+            public virtual int32 compute_weighted() {
+                return this.code * 3;
+            }
+        }
+
+        class Wrapper {
+            public TextBox inner;
+
+            public Wrapper(int32 raw_code) {
+                this.inner = new TextBox(raw_code);
+            }
+
+            public TextBox unwrap() {
+                return this.inner;
+            }
+
+            public int32 evaluate() {
+                TextBox local_box = this.unwrap();
+                return local_box.compute_weighted();
+            }
+        }
+
+        int32 main() {
+            Wrapper holder = new Wrapper(14);
+            return holder.evaluate();
+        }
+    "#;
+
+    let context = compile_source("test_inlined_local_vcall.slx", source_code, 8);
+    let execution_value = run_program(&context);
+    assert_eq!(execution_value, Value::I32(42));
+}
