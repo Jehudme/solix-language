@@ -79,20 +79,16 @@ pub fn resolve_type_annotation(
             if let Some(symbol_id) = symbol_table.resolve_symbol(source_id, &qualified_name) {
                 if let Some(entry) = symbol_table.get_symbol(symbol_id) {
                     match entry.symbol_type {
-                        Type::Class { .. } => Type::Class {
-                            symbol_name: if entry.fully_qualified_name.is_empty() {
-                                entry.name.clone()
-                            } else {
-                                entry.fully_qualified_name.clone()
-                            },
+                        Type::Class {
+                            ref symbol_name, ..
+                        } => Type::Class {
+                            symbol_name: symbol_name.clone(),
                             type_arguments: Vec::new(),
                         },
-                        Type::Interface { .. } => Type::Interface {
-                            symbol_name: if entry.fully_qualified_name.is_empty() {
-                                entry.name.clone()
-                            } else {
-                                entry.fully_qualified_name.clone()
-                            },
+                        Type::Interface {
+                            ref symbol_name, ..
+                        } => Type::Interface {
+                            symbol_name: symbol_name.clone(),
                             type_arguments: Vec::new(),
                         },
                         Type::Enum { ref symbol_name } => Type::Enum {

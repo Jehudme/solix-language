@@ -10,7 +10,7 @@ use crate::phases::parser::statements::declarations::{ClassDeclaration, ClassMem
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::statements::{Expression, LambdaBody, Statement};
 use solix_common::{PrimitiveKind, Type};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Registered AST blueprint for a generic type or method.
 #[derive(Debug, Clone)]
@@ -34,6 +34,10 @@ pub struct GenericBlueprint {
 pub struct GenericBlueprintRegistry {
     /// Blueprints indexed by fully qualified name (e.g., `"solix.tests.master.MasterContainer"`).
     pub blueprints: HashMap<String, GenericBlueprint>,
+    /// Unique blueprints indexed by simple class name when not declared in multiple namespaces.
+    pub simple_blueprints: HashMap<String, GenericBlueprint>,
+    /// Set of simple class names declared in multiple namespaces (ambiguous).
+    pub ambiguous_simple_names: HashSet<String>,
     /// Instantiated monomorphized class symbol IDs indexed by mangled name.
     pub instantiated_classes: HashMap<String, SymbolId>,
     /// Instantiated monomorphized class ASTs synthesized at compile time.
@@ -51,8 +55,16 @@ impl GenericBlueprintRegistry {
         self.blueprints.insert(dot_qualified, blueprint.clone());
         self.blueprints.insert(colon_qualified, blueprint.clone());
 
-        if blueprint.package_prefix.is_empty() {
-            self.blueprints.insert(blueprint.name.clone(), blueprint);
+        if self.ambiguous_simple_names.contains(&blueprint.name) {
+            // Already identified as ambiguous across namespaces.
+        } else if let Some(existing_blueprint) = self.simple_blueprints.get(&blueprint.name) {
+            if existing_blueprint.fully_qualified_name != blueprint.fully_qualified_name {
+                self.simple_blueprints.remove(&blueprint.name);
+                self.ambiguous_simple_names.insert(blueprint.name.clone());
+            }
+        } else {
+            self.simple_blueprints
+                .insert(blueprint.name.clone(), blueprint);
         }
     }
 
@@ -62,6 +74,7 @@ impl GenericBlueprintRegistry {
         self.blueprints.contains_key(name)
             || self.blueprints.contains_key(&name.replace("::", "."))
             || self.blueprints.contains_key(&name.replace('.', "::"))
+            || self.simple_blueprints.contains_key(name)
     }
 
     /// Mangles a generic template name with its concrete type arguments.
@@ -109,6 +122,7 @@ impl GenericBlueprintRegistry {
             return Ok(existing_id);
         }
 
+        let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
         let blueprint = self
             .blueprints
             .get(base_name)
@@ -120,6 +134,7 @@ impl GenericBlueprintRegistry {
                 let colon_name = base_name.replace('.', "::");
                 self.blueprints.get(&colon_name)
             })
+            .or_else(|| self.simple_blueprints.get(simple_base))
             .cloned()
             .ok_or_else(|| {
                 vec![BindingError::UndefinedSymbol {
@@ -127,6 +142,19 @@ impl GenericBlueprintRegistry {
                     span: miette::SourceSpan::new(0.into(), 0),
                 }]
             })?;
+
+        let fqn_mangled = Self::mangle_name(&blueprint.fully_qualified_name, type_arguments);
+        let fqn_dot = fqn_mangled.replace("::", ".");
+        let fqn_colon = fqn_mangled.replace('.', "::");
+
+        if let Some(&existing_id) = self
+            .instantiated_classes
+            .get(&fqn_mangled)
+            .or_else(|| self.instantiated_classes.get(&fqn_dot))
+            .or_else(|| self.instantiated_classes.get(&fqn_colon))
+        {
+            return Ok(existing_id);
+        }
 
         if blueprint.parameter_names.len() != type_arguments.len() {
             return Err(vec![BindingError::GenericArityMismatch {
@@ -238,6 +266,15 @@ impl GenericBlueprintRegistry {
             .insert(dot_mangled, class_symbol_id);
         self.instantiated_classes
             .insert(colon_mangled, class_symbol_id);
+        self.instantiated_classes
+            .insert(fqn_mangled.clone(), class_symbol_id);
+        self.instantiated_classes.insert(fqn_dot, class_symbol_id);
+        self.instantiated_classes.insert(fqn_colon, class_symbol_id);
+        if !self.ambiguous_simple_names.contains(&blueprint.name) {
+            let simple_mangled = Self::mangle_name(&blueprint.name, type_arguments);
+            self.instantiated_classes
+                .insert(simple_mangled, class_symbol_id);
+        }
 
         let current_vtable_id = *next_vtable_id;
         *next_vtable_id += 1;
