@@ -10,6 +10,9 @@ run-name: "Release | ${{ inputs.version || inputs.bump || 'auto' }}${{ inputs.dr
 permissions:
   contents: read
 
+env:
+  SOLIX_RELEASE_CHANNEL: release
+
 on:
   workflow_dispatch:
     inputs:
@@ -208,7 +211,7 @@ jobs:
 
           git config user.name "solix-release-bot"
           git config user.email "release-bot@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock CHANGELOG.md crates/*/CHANGELOG.md
+          git add Cargo.toml Cargo.lock CHANGELOG.md crates/*/CHANGELOG.md ffi/rust/CHANGELOG.md ffi/c/CHANGELOG.md ffi/c/CMakeLists.txt ffi/c/include/solix_ffi.h
           if ! git diff --cached --quiet; then
             git commit -m "chore(release): release ${NEXT_VER}"
           fi

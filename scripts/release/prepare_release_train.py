@@ -35,7 +35,18 @@ CHANGELOG_FILES = (
     "crates/solix-common/CHANGELOG.md",
     "crates/solix-compilation/CHANGELOG.md",
     "crates/solix-runtime/CHANGELOG.md",
-    "crates/solix-ffi/CHANGELOG.md",
+    "ffi/rust/CHANGELOG.md",
+    "ffi/c/CHANGELOG.md",
+)
+
+CMAKE_FFI_VERSION_RE = re.compile(
+    r"(project\(\s*solix_ffi\s+VERSION\s+)(\d+\.\d+\.\d+)(\s+LANGUAGES\b)"
+)
+HEADER_FFI_VERSION_RE = re.compile(
+    r'(#define\s+SOLIX_FFI_VERSION\s+")(\d+\.\d+\.\d+)(")'
+)
+HEADER_FFI_PART_RE = re.compile(
+    r"(#define\s+SOLIX_FFI_VERSION_(MAJOR|MINOR|PATCH)\s+)(\d+)"
 )
 
 
@@ -256,6 +267,40 @@ def prepend_changelog_section(changelog_path: Path, new_version: str, section_md
     changelog_path.write_text(updated, encoding="utf-8")
 
 
+def update_c_ffi_version(repo_root: Path, new_version: str) -> None:
+    """Updates `ffi/c/CMakeLists.txt` and `ffi/c/include/solix_ffi.h` SDK versions."""
+    major_val, minor_val, patch_val = parse_semver(new_version)
+    cmake_path = repo_root / "ffi" / "c" / "CMakeLists.txt"
+    if cmake_path.is_file():
+        cmake_text = cmake_path.read_text(encoding="utf-8")
+        updated_cmake, subs = CMAKE_FFI_VERSION_RE.subn(
+            rf"\g<1>{new_version}\g<3>", cmake_text, count=1
+        )
+        if subs != 1:
+            raise RuntimeError(f"Failed to update solix_ffi VERSION in '{cmake_path}'")
+        cmake_path.write_text(updated_cmake, encoding="utf-8")
+
+    header_path = repo_root / "ffi" / "c" / "include" / "solix_ffi.h"
+    if header_path.is_file():
+        header_text = header_path.read_text(encoding="utf-8")
+        parts_map = {
+            "MAJOR": str(major_val),
+            "MINOR": str(minor_val),
+            "PATCH": str(patch_val),
+        }
+
+        def replace_part(match_obj: re.Match[str]) -> str:
+            return f"{match_obj.group(1)}{parts_map[match_obj.group(2)]}"
+
+        updated_header = HEADER_FFI_PART_RE.sub(replace_part, header_text)
+        updated_header, str_subs = HEADER_FFI_VERSION_RE.subn(
+            rf"\g<1>{new_version}\g<3>", updated_header, count=1
+        )
+        if str_subs != 1:
+            raise RuntimeError(f"Failed to update SOLIX_FFI_VERSION in '{header_path}'")
+        header_path.write_text(updated_header, encoding="utf-8")
+
+
 def sync_cargo_lock(repo_root: Path) -> None:
     """Refreshes Cargo.lock workspace crate entries cleanly without touching upstream deps."""
     proc = subprocess.run(
@@ -367,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.write and commits:
         update_cargo_toml_version(repo_root / "Cargo.toml", next_version)
+        update_c_ffi_version(repo_root, next_version)
         for rel_changelog in CHANGELOG_FILES:
             prepend_changelog_section(repo_root / rel_changelog, next_version, section_md)
         if not args.no_lock_sync:

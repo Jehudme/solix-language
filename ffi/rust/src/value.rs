@@ -96,6 +96,17 @@ impl SolixCValue {
         }
     }
 
+    /// Creates a function pointer value referencing `func_id`.
+    #[must_use]
+    #[inline]
+    pub const fn from_fn_ptr(func_id: u32) -> Self {
+        Self {
+            tag: TAG_FNPTR,
+            flags: 0,
+            payload: func_id as u64,
+        }
+    }
+
     /// Unpacks the value as a boolean. Returns `false` if tag does not match.
     #[must_use]
     #[inline]
@@ -128,6 +139,13 @@ impl SolixCValue {
     #[must_use]
     #[inline]
     pub const fn as_ref(self) -> u32 {
+        self.payload as u32
+    }
+
+    /// Unpacks the value as a function pointer identifier.
+    #[must_use]
+    #[inline]
+    pub const fn as_fn_ptr(self) -> u32 {
         self.payload as u32
     }
 

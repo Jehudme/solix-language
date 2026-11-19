@@ -607,3 +607,29 @@ fn test_case_49_9_reject_foreign_platform_native_library_format_negative() {
         other => panic!("Expected SharedLibraryError rejecting foreign format, got {other:?}"),
     }
 }
+
+#[test]
+fn test_case_49_10_ffi_sdk_abi_layout_and_magic_parity() {
+    use solix_runtime::native::ffi as rt_ffi;
+    assert_eq!(
+        solix_ffi::SOLIX_VM_CONTEXT_MAGIC,
+        rt_ffi::SOLIX_VM_CONTEXT_MAGIC,
+        "SDK and runtime SOLIX_VM_CONTEXT_MAGIC must stay identical"
+    );
+    assert_eq!(
+        std::mem::size_of::<solix_ffi::SolixCValue>(),
+        std::mem::size_of::<rt_ffi::SolixCValue>()
+    );
+    assert_eq!(
+        std::mem::size_of::<solix_ffi::SolixVmContext>(),
+        std::mem::size_of::<rt_ffi::SolixVmContext>()
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, collect_cycles),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, collect_cycles)
+    );
+    assert_eq!(
+        std::mem::offset_of!(solix_ffi::SolixVmContext, set_cycle_threshold),
+        std::mem::offset_of!(rt_ffi::SolixVmContext, set_cycle_threshold)
+    );
+}

@@ -27,6 +27,12 @@ pub use telemetry::{
     CompileMetricsReport, ProcessTelemetry, RunMetricsReport, capture_process_telemetry,
 };
 
+/// Default Git tag stamped into CMake `FetchContent` templates for `solix::ffi`.
+///
+/// Resolves to `dev` on development builds and `v<CARGO_PKG_VERSION>` on official
+/// release builds (`SOLIX_RELEASE_CHANNEL=release`).
+pub const DEFAULT_FFI_GIT_TAG: &str = env!("SOLIX_FFI_GIT_TAG");
+
 /// Main programmatic entry point for dispatching CLI commands.
 ///
 /// # Errors

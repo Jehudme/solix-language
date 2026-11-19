@@ -94,7 +94,7 @@ RISK_TIERS: tuple[RiskTier, ...] = (
         patterns=(
             re.compile(r"^crates/solix-common/src/(project|hash)\.rs$"),
             re.compile(r"^crates/solix-runtime/src/native/"),
-            re.compile(r"^crates/solix-ffi/"),
+            re.compile(r"^ffi/"),
         ),
         checklist=(
             "Verify path safety, checksum verification, and FFI bounds.",

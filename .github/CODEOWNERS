@@ -31,4 +31,4 @@
 /crates/solix-common/src/project.rs     @Jehudme
 /crates/solix-common/src/hash.rs        @Jehudme
 /crates/solix-runtime/src/native/       @Jehudme
-/crates/solix-ffi/                      @Jehudme
+/ffi/                                   @Jehudme
