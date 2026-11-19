@@ -25,7 +25,6 @@ fn test_solix_new_default_application() {
         no_native: false,
         deps: vec![],
         force: false,
-        script_lang: "solix".to_string(),
     };
 
     let execution_result = run(Cli {
@@ -51,16 +50,14 @@ fn test_solix_new_default_application() {
     assert!(
         target_project_directory
             .join("scripts")
-            .join("build.slx")
-            .exists(),
-        "Default solix new should scaffold scripts/build.slx"
+            .join("build.py")
+            .exists()
     );
     assert!(
-        !target_project_directory
+        target_project_directory
             .join("scripts")
-            .join("build.py")
-            .exists(),
-        "Default solix new should not scaffold scripts/build.py"
+            .join("solix_build.py")
+            .exists()
     );
     assert!(
         target_project_directory
@@ -98,29 +95,7 @@ fn test_solix_new_default_application() {
             .exists()
     );
 
-    // Pre-flight verification via build.slx
-    let check_env_args = BuildArgs {
-        path: target_project_directory.clone(),
-        profile: Some("debug".to_string()),
-        debug: true,
-        release: false,
-        test: false,
-        pkg_dir: None,
-        install: false,
-        force: false,
-        check_env: true,
-        target: None,
-        script: None,
-        inspect_manifest_json: false,
-        stage_deps_only: false,
-        pack_archive: false,
-    };
-    assert!(
-        execute_build(check_env_args).is_ok(),
-        "Pre-flight --check-env via build.slx failed"
-    );
-
-    // Verify full build works on this newly generated build.slx project
+    // Verify build works on this newly generated project
     let build_arguments = BuildArgs {
         path: target_project_directory.clone(),
         profile: Some("debug".to_string()),
@@ -132,15 +107,11 @@ fn test_solix_new_default_application() {
         force: false,
         check_env: false,
         target: None,
-        script: None,
-        inspect_manifest_json: false,
-        stage_deps_only: false,
-        pack_archive: false,
     };
     let build_result = execute_build(build_arguments);
     assert!(
         build_result.is_ok(),
-        "Failed to build newly generated build.slx project: {build_result:?}"
+        "Failed to build newly generated project: {build_result:?}"
     );
 
     let output_archive = target_project_directory
@@ -150,85 +121,6 @@ fn test_solix_new_default_application() {
     assert!(
         output_archive.exists(),
         "Expected output archive at {output_archive:?}"
-    );
-
-    let test_build_args = BuildArgs {
-        path: target_project_directory.clone(),
-        profile: Some("test".to_string()),
-        debug: false,
-        release: false,
-        test: true,
-        pkg_dir: None,
-        install: false,
-        force: false,
-        check_env: false,
-        target: None,
-        script: None,
-        inspect_manifest_json: false,
-        stage_deps_only: false,
-        pack_archive: false,
-    };
-    assert!(execute_build(test_build_args).is_ok());
-
-    let loaded = solix_common::project::SlxarcArchive::extract_and_load(
-        &output_archive,
-        &temporary_directory.path().join("extract_app"),
-    )
-    .expect("Failed to load built .slxarc");
-    assert!(!loaded.binaries.is_empty(), "Built .slxarc must contain program binary");
-}
-
-#[test]
-fn test_solix_new_python_script_lang_build() {
-    let temporary_directory = tempdir().expect("failed to create temp dir");
-    let target_project_directory = temporary_directory.path().join("py_script_app");
-
-    let new_arguments = NewArgs {
-        path: target_project_directory.clone(),
-        name: Some("py_script_app".to_string()),
-        version: "0.1.0".to_string(),
-        description: "Python build script compatibility project".to_string(),
-        license: "Apache-2.0".to_string(),
-        authors: vec![],
-        main: "Main::main".to_string(),
-        test: "TestRunner::test".to_string(),
-        lib: false,
-        native: false,
-        no_native: true,
-        deps: vec![],
-        force: false,
-        script_lang: "python".to_string(),
-    };
-    assert!(run(Cli {
-        command: Commands::New(new_arguments),
-    })
-    .is_ok());
-
-    assert!(target_project_directory.join("scripts/build.py").exists());
-    assert!(target_project_directory.join("scripts/solix_build.py").exists());
-    assert!(!target_project_directory.join("scripts/build.slx").exists());
-
-    let build_arguments = BuildArgs {
-        path: target_project_directory.clone(),
-        profile: Some("debug".to_string()),
-        debug: true,
-        release: false,
-        test: false,
-        pkg_dir: None,
-        install: false,
-        force: false,
-        check_env: false,
-        target: None,
-        script: None,
-        inspect_manifest_json: false,
-        stage_deps_only: false,
-        pack_archive: false,
-    };
-    assert!(execute_build(build_arguments).is_ok());
-    assert!(
-        target_project_directory
-            .join("build/debug/py_script_app.slxarc")
-            .exists()
     );
 }
 
@@ -251,7 +143,6 @@ fn test_solix_new_library_no_native_and_deps() {
         no_native: true,
         deps: vec!["solix@2.0.0".to_string(), "extra_helpers:0.5.1".to_string()],
         force: false,
-        script_lang: "solix".to_string(),
     };
 
     let execution_result = run(Cli {
@@ -315,7 +206,6 @@ fn test_solix_new_existing_directory_force_flag() {
         no_native: true,
         deps: vec![],
         force: false,
-        script_lang: "solix".to_string(),
     };
 
     let first_result = run(Cli {
@@ -347,7 +237,6 @@ fn test_solix_new_existing_directory_force_flag() {
         no_native: true,
         deps: vec![],
         force: true,
-        script_lang: "solix".to_string(),
     };
     forced_arguments.force = true;
 
@@ -384,7 +273,6 @@ fn test_solix_new_explicit_native_flag() {
         no_native: false,
         deps: vec![],
         force: false,
-        script_lang: "solix".to_string(),
     };
 
     let execution_result = run(Cli {

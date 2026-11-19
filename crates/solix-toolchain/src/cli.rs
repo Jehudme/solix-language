@@ -164,7 +164,7 @@ pub struct WikiArgs {
 /// Arguments for `solix build`.
 #[derive(Debug, Args, Clone)]
 pub struct BuildArgs {
-    /// Project root directory containing manifest.toml and scripts/build.{slx,py} [default: current directory]
+    /// Project root directory containing manifest.toml and scripts/build.py [default: current directory]
     #[arg(default_value = ".")]
     pub path: PathBuf,
 
@@ -203,22 +203,6 @@ pub struct BuildArgs {
     /// Compile native artifacts for a single Rust target triple or 'host'
     #[arg(long)]
     pub target: Option<String>,
-
-    /// Explicit path to a custom build script (`.slx` or `.py`) overriding auto-detection
-    #[arg(long)]
-    pub script: Option<PathBuf>,
-
-    /// Internal: emit resolved manifest and target-platform context as JSON
-    #[arg(long, hide = true)]
-    pub inspect_manifest_json: bool,
-
-    /// Internal: stage dependency native shared libraries into build/<profile>/lib/
-    #[arg(long, hide = true)]
-    pub stage_deps_only: bool,
-
-    /// Internal: validate native artifacts and pack build/<profile>/<name>.slxarc
-    #[arg(long, hide = true)]
-    pub pack_archive: bool,
 }
 
 impl BuildArgs {
@@ -605,10 +589,6 @@ pub struct NewArgs {
     /// Overwrite existing manifest.toml if present
     #[arg(long)]
     pub force: bool,
-
-    /// Build script language for scripts/build.* (`solix` or `python`) [default: solix]
-    #[arg(long = "script-lang", default_value = "solix", value_parser = ["solix", "python"])]
-    pub script_lang: String,
 }
 
 /// Arguments for `solix clean`.
