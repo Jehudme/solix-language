@@ -77,6 +77,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
   - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges and `try_ref_regs`.
   - Constructs constant tables for strings, 64-bit floats, and large integers.
   - Performs whole-program reachability analysis and static linking (`--link static`): relocates constant pool references (`LoadConst`, `LoadF64`, `CallExtern`, `CallSymbol`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`), remaps `CallDirect` / `TailCallDirect` / `PackClosure`, imports dependency classes with collision-free vtable IDs and arity-matched constructor overloads, merges dependency static spaces and `@init` initializers, and preserves exported library functions when compiling library containers without an executable entrypoint.
+  - Preserves namespace-qualified class identifiers during method and constructor emission: extracts enclosing class paths using reverse delimiter splitting (`rsplit_once("::")`) rather than truncating to root package segments, ensuring precise class layout resolution, field offset binding, and conflict-free overload registration.
 
 ### 2.6. Binary Packaging & Serialization
 - **Input**: `CompiledProgram` and manifest configuration (`manifest.toml`).

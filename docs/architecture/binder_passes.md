@@ -60,5 +60,6 @@ flowchart TD
 - **Operations**:
   - Scans AST expressions for generic type instantiations (e.g. `List<int32>`, `Map<String, int64>`).
   - Clones the AST template definition recorded during Pass 1a.
+  - Keys blueprint registrations and monomorphization caches strictly on fully qualified names (`fully_qualified_name`, with dot and colon format variants) to guarantee that identical generic class names across distinct namespaces never collide or share instantiations.
   - Substitutes generic type parameters (e.g. `ItemType` $\to$ `int32`) with concrete type arguments.
   - Re-runs Passes 1b and 2 over the specialized class AST subtree to validate types, assign dedicated VTable IDs, and compute field layouts.

@@ -342,7 +342,7 @@ pub fn execute_pass1_symbol_discovery(
                         span: class_declaration.span,
                         modifiers: class_declaration.modifiers.clone(),
                         symbol_type: Type::Class {
-                            symbol_name: class_name.to_string(),
+                            symbol_name: fully_qualified_name.clone(),
                             type_arguments: Vec::new(),
                         },
                         parent_symbol: None,

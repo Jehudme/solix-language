@@ -2094,7 +2094,10 @@ fn compile_single_method(
 
     if is_instance {
         let this_register = allocator.alloc_param("this")?;
-        let class_identifier = symbol.split("::").next().unwrap_or("Object");
+        let class_identifier = symbol
+            .rsplit_once("::")
+            .map(|(class_prefix, _)| class_prefix)
+            .unwrap_or("Object");
         func.local_variables
             .push(solix_common::bytecode::LocalVariableDebugInfo {
                 register: this_register,
@@ -2137,7 +2140,10 @@ fn compile_single_method(
     allocator.enter_scope();
 
     if let Some(body) = &method_decl.body {
-        let cls_name = symbol.split("::").next().unwrap_or("");
+        let cls_name = symbol
+            .rsplit_once("::")
+            .map(|(class_prefix, _)| class_prefix)
+            .unwrap_or("");
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2239,7 +2245,10 @@ fn compile_constructor(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol.split("::").next().unwrap_or("");
+        let cls_name = symbol
+            .rsplit_once("::")
+            .map(|(class_prefix, _)| class_prefix)
+            .unwrap_or("");
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2256,7 +2265,10 @@ fn compile_constructor(
 
         // Superclass constructor chaining: super(...)
         if let Some(super_args) = &ctor.super_call_args {
-            let cls_name = symbol.split("::").next().unwrap_or("");
+            let cls_name = symbol
+                .rsplit_once("::")
+                .map(|(class_prefix, _)| class_prefix)
+                .unwrap_or("");
             let simple_cls = cls_name.rsplit(['.', ':']).next().unwrap_or(cls_name);
             if let Some(layout) = class_layouts
                 .get(cls_name)
@@ -2346,7 +2358,10 @@ fn compile_default_constructor(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol.split("::").next().unwrap_or("");
+        let cls_name = symbol
+            .rsplit_once("::")
+            .map(|(class_prefix, _)| class_prefix)
+            .unwrap_or("");
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2468,7 +2483,10 @@ fn compile_destructor(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol.split("::").next().unwrap_or("");
+        let cls_name = symbol
+            .rsplit_once("::")
+            .map(|(class_prefix, _)| class_prefix)
+            .unwrap_or("");
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2581,7 +2599,10 @@ fn compile_operator(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol.split("::").next().unwrap_or("");
+        let cls_name = symbol
+            .rsplit_once("::")
+            .map(|(class_prefix, _)| class_prefix)
+            .unwrap_or("");
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)

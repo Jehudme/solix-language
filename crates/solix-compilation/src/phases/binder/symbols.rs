@@ -347,13 +347,20 @@ impl SymbolTable {
                     .map(|package_prefix| package_prefix.as_str())
                     .unwrap_or("");
 
+                let caller_root = caller_package.split(['.', ':']).next().unwrap_or("");
+                let is_same_package = caller_package == leading_segment
+                    || caller_root == leading_segment
+                    || caller_package
+                        .replace('.', "::")
+                        .starts_with(&format!("{leading_segment}::"));
+
                 let is_same_file = self
                     .get_symbol(symbol_id)
                     .is_some_and(|symbol_entry| symbol_entry.source_id == source_id);
 
                 if !is_same_file
                     && self.known_packages.contains(leading_segment)
-                    && caller_package != leading_segment
+                    && !is_same_package
                 {
                     let is_cli_linked = self.cli_linked_packages.contains(leading_segment);
                     let is_imported = self.file_imports.get(source_index).is_some_and(|imports| {

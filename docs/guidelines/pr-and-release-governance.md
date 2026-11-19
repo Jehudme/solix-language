@@ -24,6 +24,7 @@ flowchart LR
 
 ### 1.1 Integration Workflow ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml))
 All feature work, bug fixes, dependency bumps (`.github/dependabot.yml`), and documentation PRs **MUST** target **`dev`**.
+* **Action Pinning & Security Scanning:** All third-party GitHub Actions are pinned to immutable commit SHAs with version annotations (`# v2`), validated continuously by `zizmor` and `actionlint`.
 * **No Direct Pushes to `dev`:** The `dev` Repository Ruleset configures Repository Admin with **`pull_request` bypass mode** (blocking direct `git push origin dev` for everyone, including Admins) while enabling strict up-to-date status checks (**"Require branches to be up to date before merging"**).
 * **Dependabot Auto-Merge ([`dependabot-auto-merge.yml`](../../.github/workflows/dependabot-auto-merge.yml)):** Dependency PRs opened by `dependabot[bot]` against `dev` receive automated approval and `--auto` squash-merge so GitHub merges them into `dev` only after all required CI checks pass; failing PRs remain open for manual investigation.
 * **Admin-Only Approval Gate:** Pull requests touching [`.github/CODEOWNERS`](../../.github/CODEOWNERS) sensitive paths **MUST** pass all required status checks and receive maintainer approval (`@Jehudme`).

@@ -345,26 +345,94 @@ impl RuntimeContext {
             }
 
             // Register functions and relocate static base offset + instructions
-            for (local_idx, func) in binary.functions.iter().enumerate() {
-                let global_func_id = func_offset + local_idx as u32;
-                symbol_to_function_id.insert(func.symbol.clone(), global_func_id);
-                let clean = func.symbol.split('(').next().unwrap_or(&func.symbol);
-                if clean != func.symbol {
-                    symbol_to_function_id.insert(clean.to_string(), global_func_id);
-                }
-                let simple = clean.rsplit(['.', ':']).next().unwrap_or(clean);
-                if simple != clean {
-                    symbol_to_function_id
-                        .entry(simple.to_string())
-                        .or_insert(global_func_id);
+            for (local_index, compiled_function) in binary.functions.iter().enumerate() {
+                let global_function_id = func_offset + local_index as u32;
+                symbol_to_function_id.insert(compiled_function.symbol.clone(), global_function_id);
+                let clean_symbol = compiled_function
+                    .symbol
+                    .split('(')
+                    .next()
+                    .unwrap_or(&compiled_function.symbol);
+                if clean_symbol != compiled_function.symbol {
+                    symbol_to_function_id.insert(clean_symbol.to_string(), global_function_id);
                 }
 
-                let mut relocated_func = func.clone();
-                relocated_func.static_base_offset = stat_offset;
+                let is_constructor = clean_symbol.ends_with("::constructor")
+                    || clean_symbol.ends_with(".constructor");
+                let is_destructor = clean_symbol.ends_with("::~destructor")
+                    || clean_symbol.ends_with(".~destructor");
+
+                if is_constructor {
+                    let constructor_arity = compiled_function.param_count.saturating_sub(1);
+                    symbol_to_function_id.insert(
+                        format!("{clean_symbol}/{constructor_arity}"),
+                        global_function_id,
+                    );
+                } else if !is_destructor {
+                    symbol_to_function_id.insert(
+                        format!("{clean_symbol}/{}", compiled_function.param_count),
+                        global_function_id,
+                    );
+                }
+
+                if !binary.package_name.is_empty() {
+                    let package_colon =
+                        format!("{}::{}", binary.package_name, compiled_function.symbol);
+                    let package_dot =
+                        format!("{}.{}", binary.package_name, compiled_function.symbol);
+                    symbol_to_function_id.insert(package_colon, global_function_id);
+                    symbol_to_function_id.insert(package_dot, global_function_id);
+
+                    if clean_symbol != compiled_function.symbol {
+                        let package_clean_colon =
+                            format!("{}::{}", binary.package_name, clean_symbol);
+                        let package_clean_dot = format!("{}.{}", binary.package_name, clean_symbol);
+                        symbol_to_function_id
+                            .insert(package_clean_colon.clone(), global_function_id);
+                        symbol_to_function_id.insert(package_clean_dot.clone(), global_function_id);
+
+                        if is_constructor {
+                            let constructor_arity = compiled_function.param_count.saturating_sub(1);
+                            symbol_to_function_id.insert(
+                                format!("{package_clean_colon}/{constructor_arity}"),
+                                global_function_id,
+                            );
+                            symbol_to_function_id.insert(
+                                format!("{package_clean_dot}/{constructor_arity}"),
+                                global_function_id,
+                            );
+                        } else if !is_destructor {
+                            symbol_to_function_id.insert(
+                                format!("{package_clean_colon}/{}", compiled_function.param_count),
+                                global_function_id,
+                            );
+                            symbol_to_function_id.insert(
+                                format!("{package_clean_dot}/{}", compiled_function.param_count),
+                                global_function_id,
+                            );
+                        }
+                    }
+                }
+
+                let simple_symbol = clean_symbol
+                    .rsplit(['.', ':'])
+                    .next()
+                    .unwrap_or(clean_symbol);
+                if simple_symbol != clean_symbol
+                    && simple_symbol != "constructor"
+                    && !simple_symbol.starts_with('~')
+                {
+                    symbol_to_function_id
+                        .entry(simple_symbol.to_string())
+                        .or_insert(global_function_id);
+                }
+
+                let mut relocated_function = compiled_function.clone();
+                relocated_function.static_base_offset = stat_offset;
 
                 // Rewrite intra-module static instructions to direct global slots at load time
                 if binary.static_space_size > 0 {
-                    for inst in &mut relocated_func.instructions {
+                    for inst in &mut relocated_function.instructions {
                         if inst.raw_opcode() == OpCode::GetStatic as u8
                             && inst.imm32() < binary.static_space_size
                         {
@@ -391,7 +459,7 @@ impl RuntimeContext {
 
                 // Relocate intra-binary call targets and object vtable IDs if func_offset > 0 or vtable_offset > 0
                 if func_offset > 0 || vtable_offset > 0 {
-                    for inst in &mut relocated_func.instructions {
+                    for inst in &mut relocated_function.instructions {
                         if func_offset > 0
                             && (inst.raw_opcode() == OpCode::CallDirect as u8
                                 || inst.raw_opcode() == OpCode::TailCallDirect as u8
@@ -490,11 +558,13 @@ impl RuntimeContext {
                 }
 
                 // Detect @init functions
-                if func.symbol.ends_with("@init") || func.symbol.ends_with("::@init") {
-                    init_function_ids.push(global_func_id);
+                if compiled_function.symbol.ends_with("@init")
+                    || compiled_function.symbol.ends_with("::@init")
+                {
+                    init_function_ids.push(global_function_id);
                 }
 
-                all_functions.push(relocated_func);
+                all_functions.push(relocated_function);
             }
 
             current_static_offset += binary.static_space_size;
@@ -925,44 +995,60 @@ impl RuntimeContext {
     /// Resolves a function's global function ID by its fully qualified or simple symbol name.
     #[must_use]
     pub fn resolve_function_symbol(&self, symbol: &str) -> Option<u32> {
-        if let Some(&id) = self.symbol_to_function_id.get(symbol) {
-            return Some(id);
+        if let Some(&found_id) = self.symbol_to_function_id.get(symbol) {
+            return Some(found_id);
         }
-        if let Some((base, _arity)) = symbol.rsplit_once('/') {
-            if let Some(&id) = self.symbol_to_function_id.get(base) {
-                return Some(id);
+        if let Some((base_symbol, _arity)) = symbol.rsplit_once('/') {
+            if let Some(&found_id) = self.symbol_to_function_id.get(base_symbol) {
+                return Some(found_id);
             }
-            let simple = base.rsplit(['.', ':']).next().unwrap_or(base);
-            if let Some(&id) = self.symbol_to_function_id.get(simple) {
-                return Some(id);
+            let simple_base = base_symbol.rsplit(['.', ':']).next().unwrap_or(base_symbol);
+            if simple_base != "constructor"
+                && !simple_base.starts_with('~')
+                && let Some(&found_id) = self.symbol_to_function_id.get(simple_base)
+            {
+                return Some(found_id);
             }
         }
-        let clean = symbol.split(['(', '/']).next().unwrap_or(symbol);
-        if let Some(&id) = self.symbol_to_function_id.get(clean) {
-            return Some(id);
+        let clean_symbol = symbol.split(['(', '/']).next().unwrap_or(symbol);
+        if let Some(&found_id) = self.symbol_to_function_id.get(clean_symbol) {
+            return Some(found_id);
         }
-        let simple = clean.rsplit(['.', ':']).next().unwrap_or(clean);
-        if let Some(&id) = self.symbol_to_function_id.get(simple) {
-            return Some(id);
+        let simple_clean = clean_symbol
+            .rsplit(['.', ':'])
+            .next()
+            .unwrap_or(clean_symbol);
+        if simple_clean != "constructor"
+            && !simple_clean.starts_with('~')
+            && let Some(&found_id) = self.symbol_to_function_id.get(simple_clean)
+        {
+            return Some(found_id);
         }
-        for (sym, id) in &self.symbol_to_function_id {
-            let sym_clean = sym.split(['(', '/']).next().unwrap_or(sym);
-            if sym_clean == clean || sym_clean.ends_with(clean) {
-                return Some(*id);
+        for (candidate_symbol, &found_id) in &self.symbol_to_function_id {
+            let candidate_clean = candidate_symbol
+                .split(['(', '/'])
+                .next()
+                .unwrap_or(candidate_symbol);
+            if candidate_clean == clean_symbol || candidate_clean.ends_with(clean_symbol) {
+                return Some(found_id);
             }
-            if clean.ends_with("::constructor") {
-                let cls = clean.strip_suffix("::constructor").unwrap_or("");
-                let ctor_alias = format!("{cls}::{cls}");
-                if sym_clean == ctor_alias || sym_clean.ends_with(&ctor_alias) {
-                    return Some(*id);
+            if clean_symbol.ends_with("::constructor") {
+                let class_prefix = clean_symbol.strip_suffix("::constructor").unwrap_or("");
+                let constructor_alias = format!("{class_prefix}::{class_prefix}");
+                if candidate_clean == constructor_alias
+                    || candidate_clean.ends_with(&constructor_alias)
+                {
+                    return Some(found_id);
                 }
             }
-            if let Some((cls, method)) = clean.rsplit_once("::")
-                && method == cls
+            if let Some((class_prefix, method_name)) = clean_symbol.rsplit_once("::")
+                && method_name == class_prefix
             {
-                let ctor_alias = format!("{cls}::constructor");
-                if sym_clean == ctor_alias || sym_clean.ends_with(&ctor_alias) {
-                    return Some(*id);
+                let constructor_alias = format!("{class_prefix}::constructor");
+                if candidate_clean == constructor_alias
+                    || candidate_clean.ends_with(&constructor_alias)
+                {
+                    return Some(found_id);
                 }
             }
         }
