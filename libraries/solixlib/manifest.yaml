@@ -14,7 +14,7 @@ profiles:
     sources:
       - src
     platforms:
-      - host
+      - all
     natives:
       solixlib_native:
         profile: release

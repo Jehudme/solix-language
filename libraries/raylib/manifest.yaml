@@ -14,7 +14,7 @@ profiles:
     sources:
       - src
     platforms:
-      - host
+      - all
     pre_compile:
       - python3 scripts/prepare_bindings.py
     natives:
