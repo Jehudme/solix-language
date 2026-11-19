@@ -1,6 +1,6 @@
-# `solix new` — Project Scaffolding
+# `solix new` — Project & Native Subproject Scaffolding
 
-The `new` subcommand creates and initializes a complete Solix project workspace configured with `manifest.toml`, Python build automation scripts, starter Solix source files, an automated test harness, and an optional Rust native bridge (`cdylib`) extension crate.
+The `new` subcommand initializes Solix project workspaces configured with `manifest.yaml` and provides `solix new native <name>` for scaffolding dual-mode C, C++, or Rust native libraries directly in Rust with zero Python build scripts.
 
 ---
 
@@ -8,19 +8,20 @@ The `new` subcommand creates and initializes a complete Solix project workspace 
 
 ```bash
 solix new <path> [options]
+solix new native <name> [options]
 ```
 
 ---
 
-## Positional Arguments
+## Subcommand 1: `solix new <path>` (Project Scaffolding)
+
+### Positional Arguments
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
 | `<path>` | Path | **Yes** | Destination directory path for the new project. Created if it does not exist. |
 
----
-
-## Options & Flags
+### Options & Flags
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
@@ -28,14 +29,47 @@ solix new <path> [options]
 | `--version <version>` | | String | `"0.1.0"` | Initial semantic version for the package. |
 | `--description <desc>` | | String | `"A Solix project"` | Human-readable package description. |
 | `--license <id>` | | String | `"Apache-2.0"` | SPDX license identifier. |
-| `--author <name>` | | String (Repeated) | `[]` | Author attribution name (can be specified multiple times). |
+| `--author <name>` | | String (Repeated) | `[]` | Author attribution name (can be repeated). |
 | `--main <symbol>` | | String | `"Main::main"` | Canonical application entry point symbol. |
 | `--test <symbol>` | | String | `"TestRunner::test"` | Canonical test runner entry point symbol. |
-| `--lib` | | Flag | `false` | Scaffolds a reusable library project instead of an executable application. |
-| `--native` | | Flag | `false` | Explicitly enables and scaffolds the Rust native `cdylib` extension bridge in `natives/`. |
-| `--no-native` | | Flag | `false` | Omits the Rust native `cdylib` extension crate bridge in `natives/`. |
-| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Declares an external package dependency (e.g. `-d raylib@1.0.0`). |
-| `--force` | | Flag | `false` | Overwrites existing `manifest.toml` if the directory already contains a project. |
+| `--lib` | | Flag | `false` | Scaffolds a reusable library project (`src/lib.slx`) instead of an executable application. |
+| `--native [LANG]` | | String (Optional Value) | `"rust"` | Scaffolds a dual-mode native bridge in `natives/` (`rust`, `c`, or `cpp`). |
+| `--no-native` | | Flag | `false` | Omits the native bridge subproject and creates an empty `natives/.gitkeep`. |
+| `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Declares a `profiles.release.dependencies` package requirement (e.g. `-d raylib@5.5.0`). |
+| `--force` | | Flag | `false` | Overwrites an existing `manifest.yaml` (or `manifest.toml`) if present. |
+
+---
+
+## Subcommand 2: `solix new native <name>` (Dual-Mode Native Bridge Scaffolding)
+
+Creates a standalone and Solix-compatible native library in C (CMake C11), C++ (CMake C++17), or Rust (Cargo), optionally registering it inside the parent project's `manifest.yaml`.
+
+### Positional Arguments
+
+| Argument | Type | Required | Description |
+|---|---|---|---|
+| `<name>` | String | **Yes** | Canonical native module name (folder name and default Solix class prefix). |
+
+### Options & Flags
+
+| Option | Shorthand | Type | Default | Description |
+|---|---|---|---|---|
+| `--project <path>` | `-p` | Path | `.` (if `manifest.yaml` exists and `--output` omitted) | Existing Solix project root where the native crate is placed under `natives/` and registered in `manifest.yaml`. |
+| `--name <pkg>` | | String | snake_case `<name>` | Explicit Cargo `[package] name` or CMake `project(...)` library identifier. |
+| `--version <ver>` | | String | `"0.1.0"` | Initial semantic version stamped into `Cargo.toml` or `CMakeLists.txt`. |
+| `--lang <lang>` | `--backend` | String | `"rust"` | Backend implementation language: `rust`, `c`, or `cpp` (`c++` / `cxx`). |
+| `--output <dir>` | `-o` | Path | `<project>/natives/<name>` or `./<name>` | Custom directory where native source files are written. |
+| `--platforms <list>` | | Comma-separated / Repeated | `[]` | Target OS/architecture platforms recorded under the native entry in `manifest.yaml` (`host`, `linux`, `windows`, `macos`, `all`). |
+| `--profile <list>` | | Comma-separated / Repeated | `release,debug` (existing) | Profile names in `manifest.yaml` to register (`release`, `debug`, `test`, or `all`). |
+| `--description <text>` | | String | `"Dual-mode native library for Solix"` | Description written to `Cargo.toml` or `CMakeLists.txt`. |
+| `--license <spdx>` | | String | `"Apache-2.0"` | SPDX license identifier for `Cargo.toml`. |
+| `--author <name>` | | String (Repeated) | `[]` | Author name written to `Cargo.toml`. |
+| `--no-register` | | Flag | `false` | Scaffolds the native directory without editing `manifest.yaml`. |
+| `--force` | | Flag | `false` | Overwrites existing native files in the target directory. |
+
+### Dual-Mode CMake & Cargo Behavior
+* **C / C++ (CMake):** Generated `CMakeLists.txt` defines `option(SOLIX_NATIVE_BUILD ... OFF)`. When built directly via `cmake -B build && cmake --build build`, it produces a standalone C/C++ library with CTest unit tests (`ctest`). When built via `solix build`, Solix passes `-DSOLIX_NATIVE_BUILD=ON`, which fetches `solix::ffi` via `FetchContent` (`GIT_TAG dev` or release tag `vX.Y.Z`, or `SOLIX_FFI_SOURCE_DIR` locally) and compiles the `SHARED` Solix plugin.
+* **Rust (Cargo):** Generated `Cargo.toml` uses `crate-type = ["cdylib", "rlib"]` with an optional `solix-native = ["dep:solix-ffi"]` feature so `cargo build` / `cargo test` work standalone, while `solix build` automatically passes `--features solix-native`.
 
 ---
 
@@ -47,144 +81,87 @@ Executing `solix new my_app`:
 
 ```text
 my_app/
-├── manifest.toml             # Configuration, metadata, and dependencies
-├── .gitignore                # Ignores /build/, /target/, *.slxb, *.slxarc
+├── manifest.yaml             # Declarative configuration, profiles, and natives
+├── .gitignore                # Ignores /build/, *.slxb, *.slxarc
 ├── src/
 │   └── main.slx              # Starter application source
 ├── tests/
 │   └── test_main.slx         # Automated test entrypoint
 ├── resources/                # Application assets directory
-├── lib/                      # Staging directory for native shared libraries
-├── natives/
-│   └── my_app_bridge/        # Rust cdylib bridge extension
-│       ├── Cargo.toml
-│       └── src/lib.rs        # SolixCValue FFI and native callback exports
-└── scripts/
-    ├── build.py              # Build automation script
-    └── solix_build.py        # Turnkey build orchestration primitives
+├── lib/                      # Optional prebuilt native shared libraries directory
+└── natives/
+    └── my_app_bridge/        # Dual-mode native bridge (Cargo or CMake)
+        ├── Cargo.toml        # Declares [features] solix-native
+        └── src/lib.rs        # Core Rust API + #[cfg(feature = "solix-native")] bridge
 ```
 
-#### Generated `manifest.toml`
-```toml
-[configuration]
-name = "my_app"
-version = "0.1.0"
-description = "A Solix project"
-license = "Apache-2.0"
-authors = []
+#### Generated `manifest.yaml`
 
-[profiles.release]
-entrypoint = "Main::main"
-optimization_level = 3
-inline_threshold = 16
-debug_symbols = false
-static = true
-sources = ["src"]
+```yaml
+vars:
+  project_version: &proj_version "0.1.0"
+  default_platforms: &host_platform
+    - host
 
-[profiles.debug]
-inherits = "release"
-optimization_level = 0
-inline_threshold = 8
-debug_symbols = true
-static = false
+configuration:
+  name: my_app
+  version: *proj_version
+  description: "A Solix project"
+  license: "Apache-2.0"
+  authors: []
 
-[profiles.test]
-inherits = "debug"
-entrypoint = "TestRunner::test"
-sources = ["tests"]
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms: *host_platform
+    natives:
+      my_app_bridge:
+        profile: release
+
+  debug:
+    entrypoint: Main::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms: *host_platform
+    natives:
+      my_app_bridge:
+        profile: debug
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+      - tests
+    platforms: *host_platform
+    natives:
+      my_app_bridge:
+        profile: debug
 ```
-
-#### Generated `src/main.slx`
-```solix
-class Main {
-    public static int32 main() {
-        return 0;
-    }
-}
-```
-
-#### Generated `tests/test_main.slx`
-```solix
-class TestRunner {
-    public static int32 test() {
-        return 0;
-    }
-}
-```
-
-#### Generated Native Bridge (`natives/<project_name>_bridge/Cargo.toml`)
-```toml
-[package]
-name = "<project_name>_bridge"
-version = "0.1.0"
-edition = "2024"
-
-[workspace]
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-solix-ffi = ">=1.1.3, <2.0.0"
-```
-
-### 2. Library Project (`--lib`)
-
-Executing `solix new my_lib --lib`:
-
-Generates `src/lib.slx` with package declaration instead of `src/main.slx`:
-
-```solix
-package my_lib;
-
-public class MyLib {
-    public static int32 version() {
-        return 1;
-    }
-}
-```
-
-### 3. Pure Solix Project (`--no-native`)
-
-Executing `solix new my_tool --no-native`:
-Omits the Rust `Cargo.toml` and native bridge crate inside `natives/`, creating an empty `natives/.gitkeep`.
-
----
-
-## Release Cross-Platform Defaults
-
-Every scaffolded project includes `scripts/build.py` (with a `verify(ctx)` pre-flight hook) and `scripts/solix_build.py`. Native projects default `[profiles.release]` to `platforms = ["all"]` (`["universal"]` when `--no-native` is passed) and `[profiles.debug]`/`[profiles.test]` to `platforms = ["host"]`. Release builds require every desktop architecture (`linux-x86_64`, `linux-aarch64`, `windows-x86_64`, `macos-x86_64`, `macos-aarch64`) to compile unless overridden via `platforms` in `manifest.toml` or `--target <triple>` / `--target host`.
-
----
-
-## Collision Protection Rules
-
-1. If the target directory already contains a `manifest.toml`, `solix new` halts with an error unless `--force` is supplied.
-2. When `--force` is specified, existing files are preserved unless explicitly rewritten by the scaffolding engine.
-
----
-
-## Exit Codes
-
-| Exit Code | Classification | Meaning |
-|---|---|---|
-| `0` | Success | Project workspace successfully initialized. |
-| `1` | Error | Target directory conflict (without `--force`) or filesystem permission failure. |
 
 ---
 
 ## Examples
 
-### Scaffolding an Application with Dependencies
+### Scaffolding an Application with a C++ CMake Bridge
 ```bash
-solix new game_app \
-  --description "2D Arcade Game in Solix" \
-  --author "Alice Dev <alice@example.com>" \
-  --deps "raylib@1.0.0" \
-  --deps "math_matrix@0.2.0"
+solix new game_app --native cpp --description "C++ backed Solix app" -d raylib@5.5.0
 ```
 
-### Scaffolding a Pure Library
+### Adding a Dual-Mode C11 Native Module to an Existing Project
 ```bash
-solix new json_parser --lib --no-native
+solix new native fast_audio --project ./game_app --lang c --version 1.0.0 --platforms linux,windows,macos
 ```

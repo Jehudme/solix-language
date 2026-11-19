@@ -523,14 +523,14 @@ fn test_reinstall_command_with_source_validation() {
     assert_eq!(run(reinstall_cli).expect("reinstall project"), 0);
 
     // Tamper the manifest name: reinstall must fail due to source mismatch
-    let manifest_path = project_dir.join("manifest.toml");
-    let tampered_manifest = r#"
-[configuration]
-name = "tampered_name"
-version = "1.0.0"
+    let manifest_path = project_dir.join("manifest.yaml");
+    let tampered_manifest = r#"configuration:
+  name: tampered_name
+  version: "1.0.0"
 
-[profiles.release]
-entrypoint = "Main::main"
+profiles:
+  release:
+    entrypoint: Main::main
 "#;
     fs::write(&manifest_path, tampered_manifest).expect("write tampered manifest");
 

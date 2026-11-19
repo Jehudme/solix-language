@@ -8,8 +8,20 @@ import { LanguageClient } from 'vscode-languageclient/node';
 let activeBuildProfile: 'debug' | 'release' | 'test' = 'debug';
 let profileStatusBarItem: vscode.StatusBarItem | undefined;
 
+const MANIFEST_FILENAMES = ['manifest.yaml', 'manifest.yml', 'manifest.toml'];
+
+function resolveManifestFile(directory: string): string | undefined {
+    for (const filename of MANIFEST_FILENAMES) {
+        const candidate = path.join(directory, filename);
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    return undefined;
+}
+
 /**
- * Searches parent directory tree starting from target path for a manifest.toml file.
+ * Searches parent directory tree starting from target path for a manifest.yaml (or manifest.toml) file.
  */
 function findProjectRoot(initialFilePath: string): string | undefined {
     try {
@@ -18,8 +30,7 @@ function findProjectRoot(initialFilePath: string): string | undefined {
             : path.dirname(initialFilePath);
 
         for (let depthIndex = 0; depthIndex < 10; depthIndex += 1) {
-            const manifestCandidate = path.join(currentDirectory, 'manifest.toml');
-            if (fs.existsSync(manifestCandidate)) {
+            if (resolveManifestFile(currentDirectory)) {
                 return currentDirectory;
             }
             const parentDirectory = path.dirname(currentDirectory);
@@ -35,12 +46,21 @@ function findProjectRoot(initialFilePath: string): string | undefined {
 }
 
 /**
- * Reads the package name defined under [package] name = "..." in manifest.toml.
+ * Reads the package name defined in manifest.yaml or manifest.toml.
  */
 function readPackageName(projectRoot: string): string {
-    const manifestPath = path.join(projectRoot, 'manifest.toml');
+    const manifestPath = resolveManifestFile(projectRoot);
+    if (!manifestPath) {
+        return path.basename(projectRoot);
+    }
     try {
         const manifestContent = fs.readFileSync(manifestPath, 'utf8');
+        if (manifestPath.endsWith('.yaml') || manifestPath.endsWith('.yml')) {
+            const yamlMatch = manifestContent.match(/^configuration:\s*\r?\n(?:\s+.*\r?\n)*?\s+name:\s*["']?([^\s'"#]+)["']?/m);
+            if (yamlMatch && yamlMatch[1]) {
+                return yamlMatch[1].trim();
+            }
+        }
         const nameMatch = manifestContent.match(/(?:\[configuration\]|\[info\]|\[package\])[^[]*?name\s*=\s*["']([^"']+)["']/s);
         if (nameMatch && nameMatch[1]) {
             return nameMatch[1].trim();
@@ -52,11 +72,57 @@ function readPackageName(projectRoot: string): string {
 }
 
 /**
- * Extracts declared dependencies from manifest.toml content as "name@version" pairs.
- * Dependencies strictly follow table notation: `name = { version = "...", profile = "..." }`.
+ * Extracts declared dependencies from manifest.yaml or manifest.toml content as "name@version" pairs.
  */
-function parseManifestDependencies(manifestContent: string): string[] {
+function parseManifestDependencies(manifestContent: string, isYaml: boolean = false): string[] {
     const dependencies: string[] = [];
+    if (isYaml) {
+        const lines = manifestContent.split(/\r?\n/);
+        let depsIndent = -1;
+        let currentDepName: string | undefined;
+        let currentDepVersion = '*';
+        let currentDepProfile = '';
+        const flushDep = () => {
+            if (currentDepName) {
+                const suffix = currentDepProfile ? `#${currentDepProfile}` : '';
+                dependencies.push(`${currentDepName}@${currentDepVersion}${suffix}`);
+                currentDepName = undefined;
+                currentDepVersion = '*';
+                currentDepProfile = '';
+            }
+        };
+        for (const rawLine of lines) {
+            const trimmed = rawLine.trim();
+            if (!trimmed || trimmed.startsWith('#')) {
+                continue;
+            }
+            const indent = rawLine.length - rawLine.trimStart().length;
+            if (depsIndent >= 0 && indent <= depsIndent) {
+                flushDep();
+                depsIndent = -1;
+            }
+            if (trimmed === 'dependencies:') {
+                depsIndent = indent;
+                continue;
+            }
+            if (depsIndent >= 0) {
+                if (indent === depsIndent + 2 && trimmed.endsWith(':')) {
+                    flushDep();
+                    currentDepName = trimmed.slice(0, -1).trim();
+                } else if (currentDepName && indent >= depsIndent + 4) {
+                    const kvMatch = trimmed.match(/^([a-zA-Z0-9_]+)\s*:\s*["']?([^"'\s#]+)["']?/);
+                    if (kvMatch && kvMatch[1] === 'version') {
+                        currentDepVersion = kvMatch[2];
+                    } else if (kvMatch && kvMatch[1] === 'profile') {
+                        currentDepProfile = kvMatch[2];
+                    }
+                }
+            }
+        }
+        flushDep();
+        return dependencies;
+    }
+
     const depsRegex = /(?:\[dependencies\]|\[profiles\.[^\]]+\.dependencies\])([\s\S]*?)(?:\[|$)/g;
     let depsMatch: RegExpExecArray | null;
     while ((depsMatch = depsRegex.exec(manifestContent)) !== null) {
@@ -89,9 +155,13 @@ function parseManifestDependencies(manifestContent: string): string[] {
 }
 
 /**
- * Extracts canonical entry point symbol from manifest.toml if specified.
+ * Extracts canonical entry point symbol from manifest.yaml or manifest.toml if specified.
  */
 function parseManifestEntryPoint(manifestContent: string): string | undefined {
+    const yamlEntryMatch = manifestContent.match(/^\s+entrypoint\s*:\s*["']?([^\s'"#]+)["']?/m);
+    if (yamlEntryMatch && yamlEntryMatch[1]) {
+        return yamlEntryMatch[1].trim();
+    }
     const profileEntryMatch = manifestContent.match(/entrypoint\s*=\s*["']([^"']+)["']/);
     if (profileEntryMatch && profileEntryMatch[1]) {
         return profileEntryMatch[1].trim();
@@ -152,11 +222,12 @@ class VirtualContentProvider implements vscode.TextDocumentContentProvider {
                     const extraArguments: string[] = [];
 
                     if (projectRoot) {
-                        const manifestPath = path.join(projectRoot, 'manifest.toml');
-                        if (fs.existsSync(manifestPath)) {
+                        const manifestPath = resolveManifestFile(projectRoot);
+                        if (manifestPath && fs.existsSync(manifestPath)) {
                             try {
                                 const manifestContent = fs.readFileSync(manifestPath, 'utf8');
-                                const dependencies = parseManifestDependencies(manifestContent);
+                                const isYaml = manifestPath.endsWith('.yaml') || manifestPath.endsWith('.yml');
+                                const dependencies = parseManifestDependencies(manifestContent, isYaml);
                                 for (const dependency of dependencies) {
                                     extraArguments.push('--deps', dependency);
                                 }

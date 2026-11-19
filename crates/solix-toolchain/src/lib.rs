@@ -13,13 +13,13 @@ pub mod telemetry;
 
 pub use cli::{
     BuildArgs, CleanArgs, Cli, Commands, CompileArgs, DapArgs, DocArgs, FmtArgs, InfoArgs,
-    InstallArgs, ListArgs, LspArgs, NewArgs, ReinstallArgs, RunArgs, SyncArgs, UninstallArgs,
-    WikiArgs,
+    InstallArgs, ListArgs, LspArgs, NewArgs, NewNativeArgs, NewSubcommand, ReinstallArgs, RunArgs,
+    SyncArgs, UninstallArgs, WikiArgs,
 };
 pub use commands::{
     execute_build, execute_clean, execute_compile, execute_dap, execute_doc, execute_fmt,
-    execute_info, execute_install, execute_list, execute_lsp, execute_new, execute_reinstall,
-    execute_run, execute_sync, execute_uninstall, execute_wiki,
+    execute_info, execute_install, execute_list, execute_lsp, execute_new, execute_new_native,
+    execute_reinstall, execute_run, execute_sync, execute_uninstall, execute_wiki,
 };
 pub use diagnostics::render_diagnostics;
 pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
