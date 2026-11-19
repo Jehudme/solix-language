@@ -331,8 +331,16 @@ async function runClientRpcSuite() {
 
         // Step 9: Clean Shutdown
         console.log('Step 8: Sending shutdown request...');
+        if (serverProcess.stdin) {
+            serverProcess.stdin.on('error', () => {});
+        }
         await connection.sendRequest('shutdown');
-        connection.sendNotification('exit');
+        try {
+            await connection.sendNotification('exit');
+        } catch {
+            // Server may close stdio immediately upon receiving exit
+        }
+        connection.dispose();
 
         serverProcess.kill();
         console.log('=== Headless JSON-RPC Client Suite: ALL CHECKS PASSED ===');
