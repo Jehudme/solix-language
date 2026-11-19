@@ -2400,8 +2400,9 @@ profiles:
         pkg_store_str,
     ])
     .expect("parse consumer build cli");
-    let build_err = run(build_cli)
-        .expect_err("building multi-platform consumer against host-only native dependency must fail");
+    let build_err = run(build_cli).expect_err(
+        "building multi-platform consumer against host-only native dependency must fail",
+    );
     let err_msg = format!("{build_err:#}");
     assert!(
         err_msg.contains("single_plat_dep@1.0.0")
