@@ -1,0 +1,128 @@
+package ffi_dual_backend.tests;
+
+import ffi_dual_backend.FfiMatrix;
+import ffi_dual_backend.MatrixBox;
+import ffi_dual_backend.Main;
+
+public class TestRunner {
+    private static int32 verify_scalars() {
+        string null_echo = FfiMatrix::echo_null(null);
+        if (null_echo != null) {
+            return 10;
+        }
+        if (FfiMatrix::invert_bool(true) != false) {
+            return 11;
+        }
+        if (FfiMatrix::invert_bool(false) != true) {
+            return 12;
+        }
+        if (FfiMatrix::add_i32(-15, 57) != 42) {
+            return 13;
+        }
+        if (FfiMatrix::mul_i64(100000L, 500000L) != 50000000000L) {
+            return 14;
+        }
+        float64 fma_result = FfiMatrix::fma_f64(2.5, 4.0, 1.5);
+        if (fma_result < 11.49 || fma_result > 11.51) {
+            return 15;
+        }
+        return 0;
+    }
+
+    private static int32 verify_strings_and_buffers() {
+        string reversed = FfiMatrix::reverse_string("solix-ffi");
+        if (reversed != "iff-xilos") {
+            return 20;
+        }
+
+        char[] input_chars = new char[4];
+        input_chars[0] = 'a';
+        input_chars[1] = 'B';
+        input_chars[2] = 'z';
+        input_chars[3] = '1';
+        char[] upper = FfiMatrix::upper_chars(input_chars);
+        if (upper.length != 4 || upper[0] != 'A' || upper[1] != 'B' || upper[2] != 'Z' || upper[3] != '1') {
+            return 21;
+        }
+
+        int8[] raw_bytes = new int8[3];
+        raw_bytes[0] = (int8)10;
+        raw_bytes[1] = (int8)20;
+        raw_bytes[2] = (int8)30;
+        int8[] xored = FfiMatrix::xor_bytes(raw_bytes, 7);
+        if (xored.length != 3 || xored[0] != (int8)13 || xored[1] != (int8)19 || xored[2] != (int8)25) {
+            return 22;
+        }
+        return 0;
+    }
+
+    private static int32 verify_arrays() {
+        int64[] nums = new int64[3];
+        nums[0] = 3L;
+        nums[1] = -5L;
+        nums[2] = 100000L;
+        int64[] scaled = FfiMatrix::scale_i64_array(nums, 4L);
+        if (scaled.length != 3 || scaled[0] != 12L || scaled[1] != -20L || scaled[2] != 400000L) {
+            return 30;
+        }
+
+        float64[] weights = new float64[3];
+        weights[0] = 1.25;
+        weights[1] = 2.50;
+        weights[2] = 3.75;
+        float64 total = FfiMatrix::sum_f64_array(weights);
+        if (total < 7.49 || total > 7.51) {
+            return 31;
+        }
+
+        string[] pair = FfiMatrix::make_pair_strings("left", "right");
+        if (pair.length != 2 || pair[0] != "left" || pair[1] != "right") {
+            return 32;
+        }
+        return 0;
+    }
+
+    private static int32 verify_objects_and_vm() {
+        MatrixBox box = FfiMatrix::create_box(10, 500000L, "native-obj");
+        if (box.tag_id != 10 || box.weight != 500000L || box.label != "native-obj") {
+            return 40;
+        }
+        int64 updated = FfiMatrix::mutate_box(box, 15);
+        if (updated != 500025L || box.tag_id != 25 || box.weight != 500000L) {
+            return 41;
+        }
+
+        int64 gc_status = FfiMatrix::exercise_gc_and_metrics();
+        if (gc_status < 0L) {
+            return 42;
+        }
+        if (FfiMatrix::checked_div(84, 2) != 42) {
+            return 43;
+        }
+        return 0;
+    }
+
+    public static int32 test() {
+        int32 status_main = Main::main();
+        if (status_main != 0) {
+            return status_main;
+        }
+        int32 status_scalars = TestRunner::verify_scalars();
+        if (status_scalars != 0) {
+            return status_scalars;
+        }
+        int32 status_buffers = TestRunner::verify_strings_and_buffers();
+        if (status_buffers != 0) {
+            return status_buffers;
+        }
+        int32 status_arrays = TestRunner::verify_arrays();
+        if (status_arrays != 0) {
+            return status_arrays;
+        }
+        int32 status_objects = TestRunner::verify_objects_and_vm();
+        if (status_objects != 0) {
+            return status_objects;
+        }
+        return 0;
+    }
+}
