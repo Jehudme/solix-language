@@ -22,6 +22,9 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
         libs: Vec::new(),
         entry: None,
         profile: None,
+        debug: false,
+        release: false,
+        test: false,
         inline_threshold: 8,
         heap_size: "32MB".to_string(),
         max_stack: 1024,
@@ -57,7 +60,7 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
             match flag_name {
                 "--lib" | "-l" => run_args.libs.push(PathBuf::from(flag_val)),
                 "--entry" | "-e" => run_args.entry = Some(flag_val.to_string()),
-                "--profile" => run_args.profile = Some(flag_val.to_string()),
+                "--profile" | "-p" => run_args.profile = Some(flag_val.to_string()),
                 "--inline-threshold" => {
                     run_args.inline_threshold = flag_val.parse().ok()?;
                 }
@@ -95,6 +98,9 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
                 run_args.metrics = Some("text".to_string());
             }
             "--no-verify" | "--ignore-checksum" | "--yolo" => run_args.no_verify = true,
+            "--test" => run_args.test = true,
+            "--debug" => run_args.debug = true,
+            "--release" => run_args.release = true,
             "--lib" | "-l" => {
                 let next_val = os_args.next()?;
                 run_args.libs.push(PathBuf::from(next_val));
@@ -103,7 +109,7 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
                 let next_val = os_args.next()?.into_string().ok()?;
                 run_args.entry = Some(next_val);
             }
-            "--profile" => {
+            "--profile" | "-p" => {
                 let next_val = os_args.next()?.into_string().ok()?;
                 run_args.profile = Some(next_val);
             }

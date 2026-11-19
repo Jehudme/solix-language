@@ -815,7 +815,7 @@ impl ClientModuleSolver {
                         }));
 
                 let cache_valid = if cached_program.native_library_checksums.is_empty() {
-                    !discovered_libs.is_empty()
+                    true
                 } else {
                     expected_checksums_satisfied
                 };

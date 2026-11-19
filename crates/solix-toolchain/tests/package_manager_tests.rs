@@ -915,3 +915,119 @@ fn test_auto_bootstrap_overrides_stale_preexisting_bundled_package() {
         "Overridden bundled archive must contain a valid parsed manifest"
     );
 }
+
+#[test]
+fn test_uninstall_does_not_remove_sibling_prefix_packages() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("solix_packages");
+    fs::create_dir_all(&package_store_directory).expect("Failed to create package store dir");
+    let store_string = package_store_directory.to_str().expect("valid path");
+
+    // 1. Compile and install base package `alpha`
+    let alpha_source = workspace
+        .write_file(
+            "alpha.slx",
+            r#"
+public class AlphaService {
+    public static int32 compute() {
+        return 42;
+    }
+}
+"#,
+        )
+        .expect("write alpha source");
+
+    let alpha_binary = workspace.file_path("alpha.slxb");
+    let compile_alpha_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        alpha_source.to_str().expect("valid path"),
+        "--name",
+        "alpha",
+        "--version",
+        "1.0.0",
+        "-o",
+        alpha_binary.to_str().expect("valid path"),
+    ])
+    .expect("parse compile alpha");
+    assert_eq!(run(compile_alpha_cli).expect("compile alpha"), 0);
+
+    let install_alpha_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        alpha_binary.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("parse install alpha");
+    assert_eq!(run(install_alpha_cli).expect("install alpha"), 0);
+
+    // 2. Compile and install sibling package `alpha-utils`
+    let utils_source = workspace
+        .write_file(
+            "alpha_utils.slx",
+            r#"
+public class AlphaUtils {
+    public static int32 double_val(int32 input_value) {
+        return input_value * 2;
+    }
+}
+"#,
+        )
+        .expect("write alpha_utils source");
+
+    let utils_binary = workspace.file_path("alpha_utils.slxb");
+    let compile_utils_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        utils_source.to_str().expect("valid path"),
+        "--name",
+        "alpha-utils",
+        "--version",
+        "1.0.0",
+        "-o",
+        utils_binary.to_str().expect("valid path"),
+    ])
+    .expect("parse compile alpha-utils");
+    assert_eq!(run(compile_utils_cli).expect("compile alpha-utils"), 0);
+
+    let install_utils_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        utils_binary.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("parse install alpha-utils");
+    assert_eq!(run(install_utils_cli).expect("install alpha-utils"), 0);
+
+    let alpha_folder = package_store_directory.join("alpha-release@1.0.0");
+    let utils_folder = package_store_directory.join("alpha-utils-release@1.0.0");
+    assert!(
+        alpha_folder.exists(),
+        "alpha folder must exist before uninstall"
+    );
+    assert!(
+        utils_folder.exists(),
+        "alpha-utils folder must exist before uninstall"
+    );
+
+    // 3. Uninstall `alpha` only
+    let uninstall_alpha_cli =
+        Cli::try_parse_from(["solix", "uninstall", "alpha", "--pkg-dir", store_string])
+            .expect("parse uninstall alpha");
+    assert_eq!(
+        run(uninstall_alpha_cli).expect("uninstall alpha must succeed"),
+        0
+    );
+
+    // 4. Verify `alpha` is deleted, but `alpha-utils` is still present!
+    assert!(
+        !alpha_folder.exists(),
+        "alpha folder must be deleted after uninstall"
+    );
+    assert!(
+        utils_folder.exists(),
+        "alpha-utils folder must NOT be deleted when uninstalling alpha"
+    );
+}

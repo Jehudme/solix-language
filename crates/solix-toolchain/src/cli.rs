@@ -342,6 +342,18 @@ pub struct RunArgs {
     #[arg(short, long)]
     pub profile: Option<String>,
 
+    /// Shorthand flag for debug build profile
+    #[arg(long, hide = true, conflicts_with_all = ["release", "test"])]
+    pub debug: bool,
+
+    /// Shorthand flag for release build profile
+    #[arg(long, hide = true, conflicts_with_all = ["debug", "test"])]
+    pub release: bool,
+
+    /// Shorthand flag for test build profile
+    #[arg(long, hide = true, conflicts_with_all = ["debug", "release"])]
+    pub test: bool,
+
     /// Inlining statement threshold limit for AstInlinerPhase
     #[arg(long, default_value_t = 8)]
     pub inline_threshold: usize,
@@ -393,6 +405,24 @@ pub struct RunArgs {
     /// Bypass dependency and native library cryptographic SHA-256 checksum verification
     #[arg(long, visible_alias = "ignore-checksum", alias = "yolo")]
     pub no_verify: bool,
+}
+
+impl RunArgs {
+    /// Resolves the effective build profile from explicit `--profile` or shorthand flags (`--test`, `--debug`, `--release`).
+    #[must_use]
+    pub fn resolved_profile(&self) -> Option<String> {
+        if let Some(ref profile_name) = self.profile {
+            Some(profile_name.clone())
+        } else if self.test {
+            Some("test".to_string())
+        } else if self.debug {
+            Some("debug".to_string())
+        } else if self.release {
+            Some("release".to_string())
+        } else {
+            None
+        }
+    }
 }
 
 /// Arguments for `solix info`.
