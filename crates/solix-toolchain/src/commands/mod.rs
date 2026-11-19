@@ -23,7 +23,7 @@ pub use doc::execute_doc;
 pub use fmt::execute_fmt;
 pub use info::execute_info;
 pub use lsp::execute_lsp;
-pub use new::execute_new;
+pub use new::{execute_new, execute_new_native};
 pub use pkg::{
     execute_install, execute_list, execute_reinstall, execute_sync, execute_uninstall,
     install_package_artifact,

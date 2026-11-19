@@ -224,7 +224,7 @@ export async function activate(extensionContext: vscode.ExtensionContext): Promi
         documentSelector: [{ scheme: 'file', language: 'solix' }],
         outputChannel: outputChannel,
         synchronize: {
-            fileEvents: vscode.workspace.createFileSystemWatcher('**/{*.slx,manifest.toml}')
+            fileEvents: vscode.workspace.createFileSystemWatcher('**/{*.slx,manifest.yaml,manifest.yml,manifest.toml}')
         }
     };
 

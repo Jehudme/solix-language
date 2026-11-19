@@ -536,11 +536,84 @@ pub struct ListArgs {
     pub pkg_dir: Option<PathBuf>,
 }
 
+/// Subcommands under `solix new`.
+#[derive(Debug, Subcommand, Clone)]
+pub enum NewSubcommand {
+    /// Scaffolds a dual-mode native C, C++, or Rust subproject and optionally registers it in manifest.yaml
+    Native(NewNativeArgs),
+}
+
+/// Arguments for `solix new native <name>`.
+#[derive(Debug, Args, Clone)]
+pub struct NewNativeArgs {
+    /// Canonical native module identifier (used for folder and default Solix class prefix)
+    pub name: String,
+
+    /// Path to an existing Solix project root containing manifest.yaml [default: "." when --output is omitted]
+    #[arg(short = 'p', long)]
+    pub project: Option<PathBuf>,
+
+    /// Explicit Cargo/CMake package identifier [default: snake_case of <NAME>]
+    #[arg(long = "name")]
+    pub package_name: Option<String>,
+
+    /// Initial semantic version [default: 0.1.0]
+    #[arg(long, default_value = "0.1.0")]
+    pub version: String,
+
+    /// Native backend language: rust (Cargo), c (CMake C11), or cpp (CMake C++17)
+    #[arg(
+        long = "lang",
+        alias = "backend",
+        default_value = "rust",
+        value_name = "LANG"
+    )]
+    pub lang: String,
+
+    /// Output directory for the generated native subproject [default: <project>/natives/<package_name>]
+    #[arg(short = 'o', long)]
+    pub output: Option<PathBuf>,
+
+    /// Target OS/architecture platforms recorded in manifest.yaml (comma-separated or repeatable)
+    #[arg(long = "platforms", value_delimiter = ',')]
+    pub platforms: Vec<String>,
+
+    /// Manifest profile(s) to register the native subproject under [default: release & debug]
+    #[arg(long = "profile", value_delimiter = ',')]
+    pub profiles: Vec<String>,
+
+    /// Human-readable description for Cargo.toml or CMakeLists.txt
+    #[arg(long, default_value = "Dual-mode native library for Solix")]
+    pub description: String,
+
+    /// SPDX license identifier [default: Apache-2.0]
+    #[arg(long, default_value = "Apache-2.0")]
+    pub license: String,
+
+    /// Author name (can be repeated)
+    #[arg(long = "author")]
+    pub authors: Vec<String>,
+
+    /// Scaffold files without registering into manifest.yaml
+    #[arg(long)]
+    pub no_register: bool,
+
+    /// Overwrite existing files inside the target native directory
+    #[arg(long)]
+    pub force: bool,
+}
+
 /// Arguments for `solix new`.
 #[derive(Debug, Args, Clone)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct NewArgs {
+    /// Optional nested scaffolding subcommand (e.g. `solix new native <name>`)
+    #[command(subcommand)]
+    pub subcommand: Option<NewSubcommand>,
+
     /// Target directory path for the new project
-    pub path: PathBuf,
+    #[arg(value_name = "PATH")]
+    pub path: Option<PathBuf>,
 
     /// Project name [default: directory name]
     #[arg(long)]
@@ -574,11 +647,17 @@ pub struct NewArgs {
     #[arg(long)]
     pub lib: bool,
 
-    /// Explicitly scaffold a Rust native cdylib bridge [default: true]
-    #[arg(long, conflicts_with = "no_native")]
-    pub native: bool,
+    /// Scaffold a native bridge (`rust` [default], `c`, or `cpp`)
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "rust",
+        value_name = "LANG",
+        conflicts_with = "no_native"
+    )]
+    pub native: Option<String>,
 
-    /// Do not create a Rust native cdylib bridge
+    /// Do not create a native bridge subproject
     #[arg(long, conflicts_with = "native")]
     pub no_native: bool,
 
@@ -586,7 +665,7 @@ pub struct NewArgs {
     #[arg(short = 'd', long = "deps")]
     pub deps: Vec<String>,
 
-    /// Overwrite existing manifest.toml if present
+    /// Overwrite existing manifest.yaml if present
     #[arg(long)]
     pub force: bool,
 }
@@ -594,7 +673,7 @@ pub struct NewArgs {
 /// Arguments for `solix clean`.
 #[derive(Debug, Args, Clone)]
 pub struct CleanArgs {
-    /// Project root directory containing manifest.toml [default: current directory]
+    /// Project root directory containing manifest.yaml (or manifest.toml) [default: current directory]
     #[arg(default_value = ".")]
     pub path: PathBuf,
 

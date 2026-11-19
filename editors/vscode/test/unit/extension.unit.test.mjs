@@ -253,8 +253,8 @@ function createVscodeMock(workspaceRoot) {
 test('Layer 1: activate registers all commands, providers, and tasks with mocked vscode API', async () => {
     const tempWs = fs.mkdtempSync(path.join(os.tmpdir(), 'solix-vscode-unit-'));
     fs.writeFileSync(
-        path.join(tempWs, 'manifest.toml'),
-        '[configuration]\nname = "unit_demo"\nversion = "0.1.0"\n[profiles.release]\nsources = ["src"]\n'
+        path.join(tempWs, 'manifest.yaml'),
+        'configuration:\n  name: unit_demo\n  version: "0.1.0"\nprofiles:\n  release:\n    sources:\n      - src\n'
     );
     fs.mkdirSync(path.join(tempWs, 'src'));
     fs.writeFileSync(path.join(tempWs, 'src', 'main.slx'), 'int32 main() { return 0; }\n');

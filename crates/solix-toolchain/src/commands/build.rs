@@ -748,6 +748,9 @@ fn compile_cargo_native(
         flag == "--features" || flag.starts_with("--features=") || flag == "--all-features"
     });
 
+    let ffi_rust_source_dir = resolve_ffi_rust_source_dir(project_root);
+    let uses_git_solix_ffi = cargo_uses_git_solix_ffi(&cargo_manifest);
+
     for triple in &entry.target_triples {
         let strategy = select_cargo_strategy(triple, host_triple)?;
         let is_exact_host = triple == host_triple;
@@ -783,6 +786,13 @@ fn compile_cargo_native(
         }
         if entry.has_solix_native_feature && !flags_specify_features {
             command.args(["--features", "solix-native"]);
+        }
+        command.env("SOLIX_NATIVE_BUILD", "1");
+        if uses_git_solix_ffi && let Some(ref rust_ffi_dir) = ffi_rust_source_dir {
+            let patch_path = cmake_path_string(rust_ffi_dir);
+            command.arg("--config").arg(format!(
+                "patch.\"https://github.com/Jehudme/solix-language.git\".solix-ffi.path=\"{patch_path}\""
+            ));
         }
         let uses_explicit_target_flag = !(matches!(strategy, CargoBuildStrategy::HostCargo)
             && cfg!(target_os = "linux")
@@ -864,10 +874,15 @@ fn cmake_path_string(path: &Path) -> String {
     stripped.replace('\\', "/")
 }
 
-fn resolve_ffi_c_source_dir(project_root: &Path) -> Option<PathBuf> {
-    if let Ok(explicit_dir) = std::env::var("SOLIX_FFI_SOURCE_DIR") {
+fn resolve_local_ffi_subdir(
+    project_root: &Path,
+    env_var: &str,
+    subdir: &str,
+    marker_file: &str,
+) -> Option<PathBuf> {
+    if let Ok(explicit_dir) = std::env::var(env_var) {
         let candidate = PathBuf::from(explicit_dir);
-        if candidate.join("CMakeLists.txt").is_file() {
+        if candidate.join(marker_file).is_file() {
             return Some(candidate);
         }
     }
@@ -882,14 +897,29 @@ fn resolve_ffi_c_source_dir(project_root: &Path) -> Option<PathBuf> {
     for start_path in search_roots {
         let mut cursor = Some(start_path.as_path());
         while let Some(current_dir) = cursor {
-            let ffi_c = current_dir.join("ffi").join("c");
-            if ffi_c.join("CMakeLists.txt").is_file() {
-                return Some(ffi_c);
+            let ffi_sub = current_dir.join("ffi").join(subdir);
+            if ffi_sub.join(marker_file).is_file() {
+                return Some(ffi_sub);
             }
             cursor = current_dir.parent();
         }
     }
     None
+}
+
+fn resolve_ffi_c_source_dir(project_root: &Path) -> Option<PathBuf> {
+    resolve_local_ffi_subdir(project_root, "SOLIX_FFI_SOURCE_DIR", "c", "CMakeLists.txt")
+}
+
+fn resolve_ffi_rust_source_dir(project_root: &Path) -> Option<PathBuf> {
+    resolve_local_ffi_subdir(project_root, "SOLIX_FFI_RUST_DIR", "rust", "Cargo.toml")
+}
+
+fn cargo_uses_git_solix_ffi(cargo_manifest_path: &Path) -> bool {
+    let Ok(raw_text) = fs::read_to_string(cargo_manifest_path) else {
+        return false;
+    };
+    raw_text.contains("solix-ffi") && raw_text.contains("github.com/Jehudme/solix-language")
 }
 
 fn cmake_target_descriptor(triple: &str) -> Option<(&'static str, &'static str, &'static str)> {

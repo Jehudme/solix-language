@@ -4,8 +4,20 @@ import * as fs from 'fs';
 import * as childProcess from 'child_process';
 import * as net from 'net';
 
+const MANIFEST_FILENAMES = ['manifest.yaml', 'manifest.yml', 'manifest.toml'];
+
+function resolveManifestFile(directory: string): string | undefined {
+    for (const filename of MANIFEST_FILENAMES) {
+        const candidate = path.join(directory, filename);
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    return undefined;
+}
+
 /**
- * Searches parent directories for manifest.toml to identify project roots.
+ * Searches parent directories for manifest.yaml (or manifest.toml) to identify project roots.
  */
 function findProjectRoot(initialFilePath: string): string | undefined {
     try {
@@ -14,8 +26,7 @@ function findProjectRoot(initialFilePath: string): string | undefined {
             : path.dirname(initialFilePath);
 
         for (let depthIndex = 0; depthIndex < 10; depthIndex += 1) {
-            const manifestCandidate = path.join(currentDirectory, 'manifest.toml');
-            if (fs.existsSync(manifestCandidate)) {
+            if (resolveManifestFile(currentDirectory)) {
                 return currentDirectory;
             }
             const parentDirectory = path.dirname(currentDirectory);
@@ -31,12 +42,21 @@ function findProjectRoot(initialFilePath: string): string | undefined {
 }
 
 /**
- * Reads package name from manifest.toml.
+ * Reads package name from manifest.yaml or manifest.toml.
  */
 function readPackageName(projectRoot: string): string {
-    const manifestPath = path.join(projectRoot, 'manifest.toml');
+    const manifestPath = resolveManifestFile(projectRoot);
+    if (!manifestPath) {
+        return path.basename(projectRoot);
+    }
     try {
         const manifestContent = fs.readFileSync(manifestPath, 'utf8');
+        if (manifestPath.endsWith('.yaml') || manifestPath.endsWith('.yml')) {
+            const yamlMatch = manifestContent.match(/^configuration:\s*\r?\n(?:\s+.*\r?\n)*?\s+name:\s*["']?([^\s'"#]+)["']?/m);
+            if (yamlMatch && yamlMatch[1]) {
+                return yamlMatch[1].trim();
+            }
+        }
         const nameMatch = manifestContent.match(/(?:\[configuration\]|\[info\]|\[package\])[^[]*?name\s*=\s*["']([^"']+)["']/s);
         if (nameMatch && nameMatch[1]) {
             return nameMatch[1].trim();
