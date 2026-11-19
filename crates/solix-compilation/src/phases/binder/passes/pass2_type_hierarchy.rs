@@ -982,6 +982,11 @@ pub fn execute_pass2_type_hierarchy(
         } else {
             None
         };
+        let effective_class_name = if class_fqn.is_empty() {
+            class_name.clone()
+        } else {
+            class_fqn.clone()
+        };
         let previous_active_package = symbol_table.active_package.clone();
         if class_package.is_some() {
             symbol_table.active_package = class_package;
@@ -1143,7 +1148,7 @@ pub fn execute_pass2_type_hierarchy(
                     let field_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: field_name.to_string(),
-                        fully_qualified_name: format!("{class_name}::{field_name}"),
+                        fully_qualified_name: format!("{effective_class_name}::{field_name}"),
                         source_id,
                         span: field_declaration.span,
                         modifiers: field_declaration.modifiers.clone(),
@@ -1490,7 +1495,9 @@ pub fn execute_pass2_type_hierarchy(
                     let method_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: method_name.to_string(),
-                        fully_qualified_name: format!("{class_name}::{method_name}({param_sig})"),
+                        fully_qualified_name: format!(
+                            "{effective_class_name}::{method_name}({param_sig})"
+                        ),
                         source_id,
                         span: method_declaration.span,
                         modifiers: method_declaration.modifiers.clone(),
@@ -1631,7 +1638,9 @@ pub fn execute_pass2_type_hierarchy(
                     let constructor_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: "constructor".to_string(),
-                        fully_qualified_name: format!("{class_name}::constructor/{arity}"),
+                        fully_qualified_name: format!(
+                            "{effective_class_name}::constructor/{arity}"
+                        ),
                         source_id,
                         span: constructor_declaration.span,
                         modifiers: constructor_declaration.modifiers.clone(),
@@ -1653,7 +1662,7 @@ pub fn execute_pass2_type_hierarchy(
                     let destructor_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: "destructor".to_string(),
-                        fully_qualified_name: format!("{class_name}::~destructor"),
+                        fully_qualified_name: format!("{effective_class_name}::~destructor"),
                         source_id,
                         span: destructor_declaration.span,
                         modifiers: Vec::new(),
@@ -1757,7 +1766,7 @@ pub fn execute_pass2_type_hierarchy(
                     let operator_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: operator_name.clone(),
-                        fully_qualified_name: format!("{class_name}::{operator_name}"),
+                        fully_qualified_name: format!("{effective_class_name}::{operator_name}"),
                         source_id,
                         span: operator_declaration.span,
                         modifiers: operator_declaration.modifiers.clone(),

@@ -38,6 +38,7 @@ flowchart TD
   - Validates inheritance graphs and reports `BindingError::CyclicInheritance` on cycles (e.g. `class A extends B` and `class B extends A`).
   - Calculates field byte offsets adhering to natural alignment boundaries ([`crates/solix-compilation/src/phases/binder/layout.rs`](../../crates/solix-compilation/src/phases/binder/layout.rs)).
   - Assigns unique sequential `vtable_id` numbers to all classes and constructs virtual method tables.
+  - Qualifies member symbols (methods, fields, constructors, destructors, operators) using effective fully qualified class names (`package::Class::member(...)`) in `fully_qualified_name`, preventing member collision across distinct namespaces sharing identical class names.
 
 ---
 

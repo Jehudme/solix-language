@@ -457,3 +457,114 @@ fn test_inlined_method_preserves_local_virtual_dispatch() {
     let execution_value = run_program(&context);
     assert_eq!(execution_value, Value::I32(42));
 }
+
+#[test]
+fn test_ast_inliner_method_resolution_across_namespaces_no_collision() {
+    let source_graphics = r#"
+        package graphics;
+
+        public class Renderer {
+            public int32 bias;
+
+            public Renderer(int32 initial_bias) {
+                this.bias = initial_bias;
+            }
+
+            public int32 render() {
+                return this.bias + 10;
+            }
+
+            public static int32 compute_speed(int32 input_speed) {
+                return input_speed * 2;
+            }
+        }
+    "#;
+
+    let source_audio = r#"
+        package audio;
+
+        public class Renderer {
+            public int32 bias;
+
+            public Renderer(int32 initial_bias) {
+                this.bias = initial_bias;
+            }
+
+            public int32 render() {
+                return this.bias + 100;
+            }
+
+            public static int32 compute_speed(int32 input_speed) {
+                return input_speed * 10;
+            }
+        }
+    "#;
+
+    let source_main = r#"
+        import graphics.*;
+        import audio.*;
+
+        public class MainApp {
+            public static int32 main() {
+                graphics::Renderer graphics_renderer = new graphics::Renderer(5);
+                audio::Renderer audio_renderer = new audio::Renderer(7);
+
+                int32 graphics_value = graphics_renderer.render();
+                int32 audio_value = audio_renderer.render();
+
+                int32 graphics_static = graphics::Renderer::compute_speed(3);
+                int32 audio_static = audio::Renderer::compute_speed(3);
+
+                // graphics_value = 5 + 10 = 15
+                // audio_value = 7 + 100 = 107
+                // graphics_static = 3 * 2 = 6
+                // audio_static = 3 * 10 = 30
+                // Total = 15 + 107 + 6 + 30 = 158
+                return graphics_value + audio_value + graphics_static + audio_static;
+            }
+        }
+    "#;
+
+    let options = CompilationOptions::new()
+        .with_source("graphics_renderer.slx", source_graphics)
+        .with_source("audio_renderer.slx", source_audio)
+        .with_source("main.slx", source_main)
+        .with_entry_point(Some("MainApp::main".to_string()))
+        .with_inline_threshold(8);
+
+    let mut context = CompilationContext::new(options);
+    let compilation_result = context.execute();
+    assert!(
+        compilation_result.is_ok(),
+        "Multi-namespace compilation failed: {compilation_result:?}"
+    );
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let program = &artifacts.program;
+
+    // Locate the main function and ensure both render calls were inlined
+    let main_function = program
+        .functions
+        .iter()
+        .find(|function| function.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let contains_render_call = main_function.instructions.iter().any(|instruction| {
+        let raw_opcode = instruction.raw_opcode();
+        (raw_opcode == OpCode::CallDirect as u8
+            || raw_opcode == OpCode::CallVirtual as u8
+            || raw_opcode == OpCode::CallExtern as u8)
+            && instruction.imm32() > 0
+    });
+    assert!(
+        !contains_render_call,
+        "Calls to Renderer methods must be inlined into main"
+    );
+
+    let execution_value = run_program(&context);
+    assert_eq!(
+        execution_value,
+        Value::I32(158),
+        "Each namespace's method body must be independently inlined without cross-namespace collision"
+    );
+}
