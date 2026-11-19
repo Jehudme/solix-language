@@ -236,6 +236,7 @@ impl VirtualMachine {
     ///
     /// # Panics
     /// Panics if heap memory allocation or constant interning fails during initialization.
+    #[allow(clippy::expect_used)]
     #[must_use]
     pub fn new(context: RuntimeContext) -> Self {
         Self::try_new(context).expect("Failed to initialize VirtualMachine")
