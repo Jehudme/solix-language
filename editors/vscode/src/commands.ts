@@ -379,12 +379,12 @@ export function registerSolixCommands(
                 const projectRoot = findProjectRoot(targetFilePath);
                 if (projectRoot) {
                     const packageName = readPackageName(projectRoot);
-                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --test && "${solixBinaryPath}" run --test "build/test/${packageName}.slxarc"`);
+                    terminal.sendText(`cd "${projectRoot}" && "${solixBinaryPath}" build --test && "${solixBinaryPath}" run --profile test "build/test/${packageName}.slxarc"`);
                 } else {
-                    terminal.sendText(`"${solixBinaryPath}" run --test "${targetFilePath}"`);
+                    terminal.sendText(`"${solixBinaryPath}" run --profile test "${targetFilePath}"`);
                 }
             } else {
-                terminal.sendText(`"${solixBinaryPath}" run --test`);
+                terminal.sendText(`"${solixBinaryPath}" run --profile test`);
             }
         })
     );

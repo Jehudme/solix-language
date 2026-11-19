@@ -674,3 +674,61 @@ version = "1.0.0"
         expected_hash
     );
 }
+
+#[test]
+fn test_pure_solix_package_cache_hit_without_native_libraries() {
+    use solix_common::project::SlxarcArchive;
+    use solix_common::solver::ClientModuleSolver;
+
+    let temp_directory = tempfile::tempdir().expect("create temp dir");
+    let staging_directory = temp_directory.path().join("purepkg_stage");
+    let binary_directory = staging_directory.join("bin");
+    std::fs::create_dir_all(&binary_directory).expect("create bin dir");
+
+    let manifest_content = r#"
+[configuration]
+name = "purepkg"
+version = "1.0.0"
+entrypoint = "Main::main"
+
+[profiles.release]
+entrypoint = "Main::main"
+"#;
+    std::fs::write(staging_directory.join("manifest.toml"), manifest_content)
+        .expect("write manifest");
+
+    let mut bytecode_program = BinaryProgram::new();
+    bytecode_program.entry_point = Some("Main::main".to_string());
+    // Pure Solix package has zero native libraries and empty native_library_checksums
+    assert!(bytecode_program.native_library_checksums.is_empty());
+
+    std::fs::write(
+        binary_directory.join("purepkg.slxb"),
+        bytecode_program.to_bytes(),
+    )
+    .expect("write binary");
+
+    let store_directory = temp_directory.path().join("packages");
+    let package_directory = store_directory.join("purepkg-release@1.0.0");
+    std::fs::create_dir_all(&package_directory).expect("create pkg dir");
+    let archive_path = package_directory.join("purepkg.slxarc");
+    SlxarcArchive::pack_directory(&staging_directory, &archive_path).expect("pack archive");
+
+    let module_solver = ClientModuleSolver::with_store_dir(store_directory.clone());
+
+    // First resolution extracts archive and populates cache
+    let first_resolution = module_solver
+        .resolve_compatible("purepkg", PackageVersion::new(1, 0, 0))
+        .expect("first resolution must succeed");
+    assert_eq!(first_resolution.name, "purepkg");
+    assert_eq!(first_resolution.version, PackageVersion::new(1, 0, 0));
+    assert!(first_resolution.native_libraries.is_empty());
+
+    // Second resolution must hit authenticated cache successfully without re-extracting
+    let second_resolution = module_solver
+        .resolve_compatible("purepkg", PackageVersion::new(1, 0, 0))
+        .expect("second resolution must hit cache and succeed");
+    assert_eq!(second_resolution.name, "purepkg");
+    assert_eq!(second_resolution.version, PackageVersion::new(1, 0, 0));
+    assert!(second_resolution.native_libraries.is_empty());
+}

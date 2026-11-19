@@ -45,13 +45,22 @@ solix uninstall raylib@1.0.0
 ### 2. Removing All Installed Versions
 
 When specifying only `<name>`:
-1. Solix locates the package directory: `<pkg_dir>/<name>/`.
-2. Recursively removes the entire directory tree across all installed versions.
+1. Solix locates the package directory: `<pkg_dir>/<name>/` and all profile installations matching `<name>-<profile>@<version>`.
+2. Recursively removes the entire directory tree across all installed versions for that exact package name.
 
 ```bash
 # Remove all versions of a package
 solix uninstall raylib
 ```
+
+### 3. Exact Canonical Name Matching Guarantee
+
+Uninstallation resolves candidate directories using strict package name equality:
+* `<name>-<profile>@<version>`
+* `<name>@<version>`
+* `<name>/<version>/`
+
+Sibling packages sharing a prefix (e.g. `raylib-extras` or `raylib-utils` when uninstalling `raylib`) are protected and are never removed. Native extraction cache directories under `~/.solix/cache/natives/` are similarly cleaned using exact matching.
 
 ---
 

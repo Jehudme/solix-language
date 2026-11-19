@@ -122,6 +122,9 @@ solix uninstall raylib@1.0.0
 solix uninstall raylib
 ```
 
+> [!NOTE]
+> `solix uninstall` enforces exact canonical package matching. Uninstalling a package such as `my-pkg` will never delete sibling packages that happen to share a prefix like `my-pkg-utils`. Both store packages and extracted native caches are cleaned up safely.
+
 ---
 
 ## 4. `solix list`

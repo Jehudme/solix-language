@@ -1019,6 +1019,10 @@ th {
     fs::write(output_dir.join("style.css"), css_content)
         .with_context(|| "[E0302] Failed to write style.css")?;
 
+    let escaped_project_name = escape_html(project_name);
+    let escaped_project_version = escape_html(project_version);
+    let escaped_project_description = escape_html(project_description);
+
     let mut sidebar_html = String::new();
     let mut grouped_packages: BTreeMap<String, Vec<&DocumentedType>> = BTreeMap::new();
     for doc_type in types {
@@ -1030,19 +1034,20 @@ th {
 
     for (pkg_name, pkg_types) in &grouped_packages {
         sidebar_html.push_str(&format!(
-            "<div class=\"nav-group\"><div class=\"nav-title\">{pkg_name}</div><ul>"
+            "<div class=\"nav-group\"><div class=\"nav-title\">{}</div><ul>",
+            escape_html(pkg_name)
         ));
         for doc_type in pkg_types {
             let file_name = format!(
                 "{}_{}.html",
                 doc_type.package_name.replace('.', "_"),
-                doc_type.name
+                sanitize_filename(&doc_type.name)
             );
             sidebar_html.push_str(&format!(
                 "<li><a href=\"{file_name}\"><span class=\"badge badge-{}\">{}</span>{}</a></li>",
-                doc_type.kind,
-                &doc_type.kind[..1],
-                doc_type.name
+                escape_html(&doc_type.kind),
+                escape_html(&doc_type.kind[..1]),
+                escape_html(&doc_type.name)
             ));
         }
         sidebar_html.push_str("</ul></div>");
@@ -1053,18 +1058,18 @@ th {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{project_name} API Documentation</title>
+    <title>{escaped_project_name} API Documentation</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="sidebar">
-        <h2><a href="index.html" style="color: inherit; text-decoration: none;">{project_name}</a></h2>
-        <div class="project-ver">v{project_version}</div>
+        <h2><a href="index.html" style="color: inherit; text-decoration: none;">{escaped_project_name}</a></h2>
+        <div class="project-ver">v{escaped_project_version}</div>
         {sidebar_html}
     </div>
     <div class="content">
-        <h1>{project_name} API Overview</h1>
-        <p>{project_description}</p>
+        <h1>{escaped_project_name} API Overview</h1>
+        <p>{escaped_project_description}</p>
         <h2>Discovered Types</h2>
         <table>
             <thead>
@@ -1088,15 +1093,19 @@ th {
                 let file_name = format!(
                     "{}_{}.html",
                     doc_item.package_name.replace('.', "_"),
-                    doc_item.name
+                    sanitize_filename(&doc_item.name)
                 );
                 format!(
                     "<tr><td><a href=\"{file_name}\"><code>{}</code></a></td><td><span class=\"badge badge-{}\">{}</span></td><td><code>{}</code></td><td>{}</td></tr>",
-                    doc_item.name,
-                    doc_item.kind,
-                    doc_item.kind,
-                    doc_item.package_name,
-                    if doc_item.doc.summary.is_empty() { "—" } else { &doc_item.doc.summary }
+                    escape_html(&doc_item.name),
+                    escape_html(&doc_item.kind),
+                    escape_html(&doc_item.kind),
+                    escape_html(&doc_item.package_name),
+                    if doc_item.doc.summary.is_empty() {
+                        "—".to_string()
+                    } else {
+                        escape_html(&doc_item.doc.summary)
+                    }
                 )
             })
             .collect::<Vec<String>>()
@@ -1110,16 +1119,20 @@ th {
         let file_name = format!(
             "{}_{}.html",
             doc_type.package_name.replace('.', "_"),
-            doc_type.name
+            sanitize_filename(&doc_type.name)
         );
         let mut members_html = String::new();
 
         if !doc_type.enum_variants.is_empty() {
             members_html.push_str("<h2>Variants</h2><table><thead><tr><th>Variant</th><th>Description</th></tr></thead><tbody>");
             for (var_name, var_doc) in &doc_type.enum_variants {
+                let escaped_desc = var_doc
+                    .as_deref()
+                    .map(escape_html)
+                    .unwrap_or_else(|| "—".to_string());
                 members_html.push_str(&format!(
-                    "<tr><td><code>{var_name}</code></td><td>{}</td></tr>",
-                    var_doc.as_deref().unwrap_or("—")
+                    "<tr><td><code>{}</code></td><td>{escaped_desc}</td></tr>",
+                    escape_html(var_name)
                 ));
             }
             members_html.push_str("</tbody></table>");
@@ -1133,22 +1146,32 @@ th {
                     match tag {
                         DocTag::Param { name, description } => {
                             tags_html.push_str(&format!(
-                                "<li><strong><code>{name}</code></strong>: {description}</li>"
+                                "<li><strong><code>{}</code></strong>: {}</li>",
+                                escape_html(name),
+                                escape_html(description)
                             ));
                         }
                         DocTag::Return { description } => {
                             tags_html.push_str(&format!(
-                                "<li><strong>Returns</strong>: {description}</li>"
+                                "<li><strong>Returns</strong>: {}</li>",
+                                escape_html(description)
                             ));
                         }
                         DocTag::Throws {
                             exception_type,
                             description,
                         } => {
-                            tags_html.push_str(&format!("<li><strong>Throws <code>{exception_type}</code></strong>: {description}</li>"));
+                            tags_html.push_str(&format!(
+                                "<li><strong>Throws <code>{}</code></strong>: {}</li>",
+                                escape_html(exception_type),
+                                escape_html(description)
+                            ));
                         }
                         DocTag::Deprecated { reason } => {
-                            tags_html.push_str(&format!("<li style=\"color: #f85149;\"><strong>Deprecated</strong>: {reason}</li>"));
+                            tags_html.push_str(&format!(
+                                "<li style=\"color: #f85149;\"><strong>Deprecated</strong>: {}</li>",
+                                escape_html(reason)
+                            ));
                         }
                     }
                 }
@@ -1156,54 +1179,97 @@ th {
                     tags_html = format!("<ul>{tags_html}</ul>");
                 }
 
+                let escaped_desc = if member.doc.description.is_empty() {
+                    "—".to_string()
+                } else {
+                    escape_html(&member.doc.description)
+                };
+
                 members_html.push_str(&format!(
                     r#"<div class="member-card">
                         <h3>{}</h3>
                         <p>{}</p>
                         {tags_html}
                     </div>"#,
-                    member.signature,
-                    if member.doc.description.is_empty() {
-                        "—"
-                    } else {
-                        &member.doc.description
-                    }
+                    escape_html(&member.signature),
+                    escaped_desc
                 ));
             }
         }
+
+        let mut type_tags_html = String::new();
+        for tag in &doc_type.doc.tags {
+            match tag {
+                DocTag::Param { name, description } => {
+                    type_tags_html.push_str(&format!(
+                        "<li><strong><code>{}</code></strong>: {}</li>",
+                        escape_html(name),
+                        escape_html(description)
+                    ));
+                }
+                DocTag::Return { description } => {
+                    type_tags_html.push_str(&format!(
+                        "<li><strong>Returns</strong>: {}</li>",
+                        escape_html(description)
+                    ));
+                }
+                DocTag::Throws {
+                    exception_type,
+                    description,
+                } => {
+                    type_tags_html.push_str(&format!(
+                        "<li><strong>Throws <code>{}</code></strong>: {}</li>",
+                        escape_html(exception_type),
+                        escape_html(description)
+                    ));
+                }
+                DocTag::Deprecated { reason } => {
+                    type_tags_html.push_str(&format!(
+                        "<li style=\"color: #f85149;\"><strong>Deprecated</strong>: {}</li>",
+                        escape_html(reason)
+                    ));
+                }
+            }
+        }
+        if !type_tags_html.is_empty() {
+            type_tags_html = format!("<ul>{type_tags_html}</ul>");
+        }
+
+        let escaped_type_desc = if doc_type.doc.description.is_empty() {
+            "—".to_string()
+        } else {
+            escape_html(&doc_type.doc.description)
+        };
 
         let type_html = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>{} - {project_name}</title>
+    <title>{} - {escaped_project_name}</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="sidebar">
-        <h2><a href="index.html" style="color: inherit; text-decoration: none;">{project_name}</a></h2>
-        <div class="project-ver">v{project_version}</div>
+        <h2><a href="index.html" style="color: inherit; text-decoration: none;">{escaped_project_name}</a></h2>
+        <div class="project-ver">v{escaped_project_version}</div>
         {sidebar_html}
     </div>
     <div class="content">
         <h1><span class="badge badge-{}">{}</span> {}</h1>
         <p><strong>Package:</strong> <code>{}</code></p>
         <p>{}</p>
+        {type_tags_html}
         {members_html}
     </div>
 </body>
 </html>"#,
-            doc_type.name,
-            doc_type.kind,
-            doc_type.kind,
-            doc_type.name,
-            doc_type.package_name,
-            if doc_type.doc.description.is_empty() {
-                "—"
-            } else {
-                &doc_type.doc.description
-            }
+            escape_html(&doc_type.name),
+            escape_html(&doc_type.kind),
+            escape_html(&doc_type.kind),
+            escape_html(&doc_type.name),
+            escape_html(&doc_type.package_name),
+            escaped_type_desc
         );
 
         fs::write(output_dir.join(file_name), type_html)
@@ -1239,5 +1305,110 @@ pub(crate) fn open_target_in_browser(target: &str) {
         let _ = std::process::Command::new("cmd")
             .args(["/C", "start", "", target])
             .spawn();
+    }
+}
+
+fn escape_html(input_text: &str) -> String {
+    let mut escaped_string = String::with_capacity(input_text.len());
+    for character in input_text.chars() {
+        match character {
+            '<' => escaped_string.push_str("&lt;"),
+            '>' => escaped_string.push_str("&gt;"),
+            '&' => escaped_string.push_str("&amp;"),
+            '"' => escaped_string.push_str("&quot;"),
+            '\'' => escaped_string.push_str("&#39;"),
+            other_character => escaped_string.push(other_character),
+        }
+    }
+    escaped_string
+}
+
+fn sanitize_filename(type_name: &str) -> String {
+    type_name.replace(['<', '>', ':', '"', '/', '\\', '|', '?', '*'], "_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_html_entities() {
+        assert_eq!(escape_html("List<T>"), "List&lt;T&gt;");
+        assert_eq!(
+            escape_html("Map<string, int32>"),
+            "Map&lt;string, int32&gt;"
+        );
+        assert_eq!(
+            escape_html("a & b < c > d \"quoted\" 'single'"),
+            "a &amp; b &lt; c &gt; d &quot;quoted&quot; &#39;single&#39;"
+        );
+    }
+
+    #[test]
+    fn test_html_docs_escapes_generic_signatures() {
+        let temp_directory = tempfile::tempdir().expect("create temp dir");
+        let output_directory = temp_directory.path().join("docs");
+        std::fs::create_dir_all(&output_directory).expect("create docs dir");
+
+        let test_type = DocumentedType {
+            package_name: "test_pkg".to_string(),
+            name: "Container<T>".to_string(),
+            kind: "class".to_string(),
+            modifiers: vec!["public".to_string()],
+            extends_name: None,
+            implements_names: Vec::new(),
+            doc: ParsedDocComment {
+                summary: "Generic container <T>".to_string(),
+                description: "Holds items of type List<T>".to_string(),
+                tags: vec![
+                    DocTag::Param {
+                        name: "initial_item".to_string(),
+                        description: "Initial value of type Option<T>".to_string(),
+                    },
+                    DocTag::Throws {
+                        exception_type: "Error<string>".to_string(),
+                        description: "When item is invalid".to_string(),
+                    },
+                ],
+            },
+            members: vec![DocumentedMember {
+                name: "get_items".to_string(),
+                kind: "method".to_string(),
+                signature: "List<T> get_items<U>(mapper: Func<T, U>)".to_string(),
+                modifiers: vec!["public".to_string()],
+                doc: ParsedDocComment {
+                    summary: "Returns list".to_string(),
+                    description: "Returns List<T> mapped items".to_string(),
+                    tags: Vec::new(),
+                },
+            }],
+            enum_variants: Vec::new(),
+        };
+
+        generate_html_docs(
+            &output_directory,
+            "test_project",
+            "1.0.0",
+            "Test description with <generic> tags",
+            &[test_type],
+        )
+        .expect("generate_html_docs must succeed");
+
+        let index_content =
+            std::fs::read_to_string(output_directory.join("index.html")).expect("read index.html");
+        assert!(index_content.contains("Container&lt;T&gt;"));
+        assert!(index_content.contains("Generic container &lt;T&gt;"));
+        assert!(!index_content.contains("<T>"));
+
+        let type_content =
+            std::fs::read_to_string(output_directory.join("test_pkg_Container_T_.html"))
+                .expect("read type html");
+        assert!(type_content.contains("Container&lt;T&gt;"));
+        assert!(
+            type_content.contains("List&lt;T&gt; get_items&lt;U&gt;(mapper: Func&lt;T, U&gt;)")
+        );
+        assert!(type_content.contains("Option&lt;T&gt;"));
+        assert!(type_content.contains("Error&lt;string&gt;"));
+        assert!(!type_content.contains("<T>"));
     }
 }

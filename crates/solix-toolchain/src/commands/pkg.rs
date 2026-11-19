@@ -566,6 +566,72 @@ pub fn execute_sync(args: SyncArgs) -> Result<()> {
     execute_reinstall(args)
 }
 
+fn matches_installed_store_folder(
+    folder_name: &str,
+    target_package: &str,
+    version_filter: Option<&str>,
+    profile_filter: Option<&str>,
+) -> bool {
+    if folder_name == target_package && version_filter.is_none() && profile_filter.is_none() {
+        return true;
+    }
+
+    if let Some((name_part, version_part)) = folder_name.split_once('@') {
+        if let Some(target_version) = version_filter
+            && version_part != target_version
+        {
+            return false;
+        }
+
+        let (package_candidate, candidate_profile) =
+            if let Some(base_name) = name_part.strip_suffix("-debug") {
+                (base_name, Some("debug"))
+            } else if let Some(base_name) = name_part.strip_suffix("-release") {
+                (base_name, Some("release"))
+            } else if let Some(base_name) = name_part.strip_suffix("-test") {
+                (base_name, Some("test"))
+            } else {
+                (name_part, None)
+            };
+
+        if package_candidate != target_package {
+            return false;
+        }
+
+        if let Some(target_profile) = profile_filter {
+            candidate_profile == Some(target_profile)
+        } else {
+            true
+        }
+    } else {
+        false
+    }
+}
+
+fn matches_native_cache_folder(
+    folder_name: &str,
+    target_package: &str,
+    version_filter: Option<&str>,
+    profile_filter: Option<&str>,
+) -> bool {
+    if matches_installed_store_folder(folder_name, target_package, version_filter, profile_filter) {
+        return true;
+    }
+
+    if let Some((name_part, version_part)) = folder_name.rsplit_once('-') {
+        if name_part != target_package {
+            return false;
+        }
+        if let Some(target_version) = version_filter {
+            version_part == target_version
+        } else {
+            profile_filter.is_none()
+        }
+    } else {
+        false
+    }
+}
+
 /// Uninstalls a package version or an entire package from the local package store.
 ///
 /// # Errors
@@ -591,21 +657,12 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
             let entry_path = entry_result.path();
             let entry_name = entry_result.file_name().to_string_lossy().to_string();
 
-            let should_remove = if let Some(version_target) = version_target_ref {
-                if let Some(prof_target) = profile_target_ref {
-                    entry_name == format!("{package_name}-{prof_target}@{version_target}")
-                } else {
-                    entry_name == format!("{package_name}@{version_target}")
-                        || (entry_name.starts_with(&format!("{package_name}-"))
-                            && entry_name.ends_with(&format!("@{version_target}")))
-                }
-            } else if let Some(prof_target) = profile_target_ref {
-                entry_name.starts_with(&format!("{package_name}-{prof_target}@"))
-            } else {
-                entry_name == package_name
-                    || entry_name.starts_with(&format!("{package_name}-"))
-                    || entry_name.starts_with(&format!("{package_name}@"))
-            };
+            let should_remove = matches_installed_store_folder(
+                &entry_name,
+                &package_name,
+                version_target_ref,
+                profile_target_ref,
+            );
 
             if should_remove && entry_path.exists() {
                 let _ = fs::remove_dir_all(&entry_path);
@@ -640,18 +697,12 @@ pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
     {
         for entry_result in entries.flatten() {
             let folder_name = entry_result.file_name().to_string_lossy().to_string();
-            let should_remove = if let Some(version_target) = version_target_ref {
-                if let Some(prof_target) = profile_target_ref {
-                    folder_name == format!("{package_name}-{prof_target}@{version_target}")
-                        || folder_name == format!("{package_name}-{version_target}")
-                } else {
-                    folder_name.starts_with(&format!("{package_name}-"))
-                        && (folder_name.ends_with(&format!("@{version_target}"))
-                            || folder_name.ends_with(&format!("-{version_target}")))
-                }
-            } else {
-                folder_name.starts_with(&format!("{package_name}-"))
-            };
+            let should_remove = matches_native_cache_folder(
+                &folder_name,
+                &package_name,
+                version_target_ref,
+                profile_target_ref,
+            );
             if should_remove {
                 let _ = fs::remove_dir_all(entry_result.path());
             }

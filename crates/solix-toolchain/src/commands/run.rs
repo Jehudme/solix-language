@@ -73,6 +73,7 @@ fn parse_byte_size(size_str: &str) -> Result<usize> {
 pub fn execute_run(args: RunArgs) -> Result<i32> {
     let total_start = std::time::Instant::now();
     let binary_load_timer = std::time::Instant::now();
+    let effective_profile_arg = args.resolved_profile();
 
     if args.binaries.is_empty() {
         bail!("No binary container or source files provided to execute");
@@ -199,7 +200,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             let (package_name, spec_profile, spec_version) = parse_package_spec(&spec_string);
             let effective_profile = spec_profile
                 .as_deref()
-                .or(args.profile.as_deref())
+                .or(effective_profile_arg.as_deref())
                 .unwrap_or("release");
             resolved_spec_profile = spec_profile.clone();
 
@@ -213,7 +214,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 })
                 .collect();
 
-            if candidates.is_empty() && spec_profile.is_none() && args.profile.is_none() {
+            if candidates.is_empty() && spec_profile.is_none() && effective_profile_arg.is_none() {
                 candidates = registry
                     .packages
                     .iter()
@@ -306,7 +307,9 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
                 runtime_options = runtime_options.with_native_library(native_lib);
             }
             if runtime_options.entry_point.is_none() {
-                let explicit_profile = args.profile.as_deref().or(resolved_spec_profile.as_deref());
+                let explicit_profile = effective_profile_arg
+                    .as_deref()
+                    .or(resolved_spec_profile.as_deref());
                 if let Some(target_profile) = explicit_profile {
                     let resolved_profile = archive_manifest
                         .resolve_profile(target_profile)
@@ -402,7 +405,7 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             read_sources.push((source_path, source_code));
         }
 
-        let parent_manifest = if needs_packages_or_manifest || args.profile.is_some() {
+        let parent_manifest = if needs_packages_or_manifest || effective_profile_arg.is_some() {
             source_paths
                 .first()
                 .and_then(|source_path| crate::commands::compile::find_parent_manifest(source_path))
@@ -414,8 +417,8 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
         };
 
         if let Some(ref manifest) = parent_manifest {
-            let target_profile = args.profile.as_deref().unwrap_or("release");
-            let resolved_profile_config = if args.profile.is_some() {
+            let target_profile = effective_profile_arg.as_deref().unwrap_or("release");
+            let resolved_profile_config = if effective_profile_arg.is_some() {
                 Some(
                     manifest
                         .resolve_profile(target_profile)
