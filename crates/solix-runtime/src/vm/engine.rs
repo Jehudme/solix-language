@@ -128,8 +128,11 @@ pub struct VirtualMachine {
 
 impl VirtualMachine {
     /// Constructs a new `VirtualMachine` instance from the given runtime context.
-    #[must_use]
-    pub fn new(context: RuntimeContext) -> Self {
+    ///
+    /// # Errors
+    /// Returns `RuntimeError::OutOfMemory` if heap allocation for string constants fails,
+    /// or `RuntimeError::HeapMemoryCorruption` if writing string data or block headers fails.
+    pub fn try_new(context: RuntimeContext) -> Result<Self, RuntimeError> {
         let total_static = context.total_static_space;
         let heap_size = context.options.heap_size;
         let cycle_collector_enabled = context.options.cycle_collector;
@@ -156,18 +159,13 @@ impl VirtualMachine {
                     }
                     solix_common::bytecode::ConstantPoolValue::String(string_literal) => {
                         let bytes = string_literal.as_bytes();
-                        let addr = heap.allocate(bytes.len(), BlockTag::String).unwrap_or(0);
-                        if addr > 0 {
-                            let _ = heap.write_bytes(addr, bytes);
-                            if let Ok(mut header) = heap.read_header(addr) {
-                                header.ref_count = crate::memory::layout::MAX_REF_COUNT;
-                                let _ = heap.write_header(addr, header);
-                            }
-                            interned_string_addrs.push(addr);
-                            cached_values.push(Value::Ref(addr));
-                        } else {
-                            cached_values.push(Value::Null);
-                        }
+                        let addr = heap.allocate(bytes.len(), BlockTag::String)?;
+                        heap.write_bytes(addr, bytes)?;
+                        let mut header = heap.read_header(addr)?;
+                        header.ref_count = crate::memory::layout::MAX_REF_COUNT;
+                        heap.write_header(addr, header)?;
+                        interned_string_addrs.push(addr);
+                        cached_values.push(Value::Ref(addr));
                     }
                 }
             }
@@ -196,7 +194,7 @@ impl VirtualMachine {
         let track_metrics = context.options.track_metrics;
         let output_sink = context.options.output_sink.clone();
 
-        Self {
+        Ok(Self {
             context,
             func_code,
             heap,
@@ -231,7 +229,17 @@ impl VirtualMachine {
             arc_cycles_collected: 0,
             arc_cycle_collector_time_micros: 0,
             arc_elided_ops_count: 0,
-        }
+        })
+    }
+
+    /// Constructs a new `VirtualMachine` instance from the given runtime context.
+    ///
+    /// # Panics
+    /// Panics if heap memory allocation or constant interning fails during initialization.
+    #[allow(clippy::expect_used)]
+    #[must_use]
+    pub fn new(context: RuntimeContext) -> Self {
+        Self::try_new(context).expect("Failed to initialize VirtualMachine")
     }
 
     /// Constructs and initializes a `VirtualMachine`, executing all static `@init` initializers.
@@ -239,7 +247,7 @@ impl VirtualMachine {
     /// # Errors
     /// Returns `RuntimeError` if static initialization fails.
     pub fn new_initialized(context: RuntimeContext) -> Result<Self, RuntimeError> {
-        let mut virtual_machine = Self::new(context);
+        let mut virtual_machine = Self::try_new(context)?;
         virtual_machine.initialize_statics()?;
         Ok(virtual_machine)
     }

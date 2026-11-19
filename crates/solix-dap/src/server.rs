@@ -143,7 +143,15 @@ fn handle_client_session<ReaderType: io::Read, WriterType: io::Write>(
                             continue;
                         }
                     };
-                    let mut created_vm = VirtualMachine::new(runtime_context);
+                    let mut created_vm = match VirtualMachine::try_new(runtime_context) {
+                        Ok(vm_instance) => vm_instance,
+                        Err(init_error) => {
+                            server.respond(request.error(&format!(
+                                "Virtual machine initialization failed: {init_error}"
+                            )))?;
+                            continue;
+                        }
+                    };
 
                     // Centralize static initialization (BUG-04)
                     if let Err(init_error) = created_vm.initialize_statics() {

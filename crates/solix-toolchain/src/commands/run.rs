@@ -512,7 +512,8 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
     let context = RuntimeContext::new(runtime_options)
         .map_err(|error| anyhow::anyhow!("Runtime initialization failed: {error}"))?;
 
-    let mut vm = VirtualMachine::new(context);
+    let mut vm = VirtualMachine::try_new(context)
+        .map_err(|error| anyhow::anyhow!("Virtual machine initialization failed: {error}"))?;
     let binary_load_time_us = binary_load_timer.elapsed().as_micros() as u64;
 
     let entry_id = vm.context.entry_point_function_id.ok_or_else(|| {

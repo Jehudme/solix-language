@@ -17,7 +17,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 * `--test`: Executes test entry point defined in archive `manifest.yaml` (`profiles.test.entrypoint`, or legacy `[entrypoints].test`).
 * `-p, --profile <profile>`: Target build profile to execute (`release`, `debug`, `test`).
 * `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
-* `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`].
+* `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`]. Returns `RuntimeError::OutOfMemory` immediately if initial constant pool string interning exceeds this limit.
 * `--max-stack <depth>`: Maximum call stack frame depth [default: `1024`].
 * `-v, --verbose`: Prints VM execution summary and heap statistics upon completion.
 * `--safe`: Executes in defensive safe mode with bounds checking and invariant assertions.
