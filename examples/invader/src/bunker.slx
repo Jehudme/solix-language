@@ -1,0 +1,115 @@
+import raylib.*;
+
+public class BunkerCell {
+    public float32 pos_x;
+    public float32 pos_y;
+    public float32 cell_width;
+    public float32 cell_height;
+    public int32 cell_health; // 3 = full, 2 = cracked, 1 = severe damage, 0 = destroyed
+
+    public BunkerCell(float32 initial_x, float32 initial_y, float32 width_val, float32 height_val) {
+        this.pos_x = initial_x;
+        this.pos_y = initial_y;
+        this.cell_width = width_val;
+        this.cell_height = height_val;
+        this.cell_health = 3;
+    }
+
+    public Rectangle get_rect() {
+        return new Rectangle(this.pos_x, this.pos_y, this.cell_width, this.cell_height);
+    }
+
+    public bool take_damage() {
+        if (this.cell_health <= 0) {
+            return false;
+        }
+        this.cell_health = this.cell_health - 1;
+        return true;
+    }
+
+    public void draw() {
+        if (this.cell_health <= 0) {
+            return;
+        }
+        Color fill_color = new Color(0, 230, 118, 255); // Emerald green
+        if (this.cell_health == 2) {
+            fill_color = new Color(0, 180, 90, 230);
+        } else if (this.cell_health == 1) {
+            fill_color = new Color(0, 120, 60, 180);
+        }
+
+        Raylib::DrawRectangle(
+            (int32)this.pos_x,
+            (int32)this.pos_y,
+            (int32)this.cell_width,
+            (int32)this.cell_height,
+            fill_color
+        );
+    }
+}
+
+public class Bunker {
+    public BunkerCell[] cells;
+    public int32 cell_count;
+    public float32 origin_x;
+    public float32 origin_y;
+
+    public Bunker(float32 base_x, float32 base_y) {
+        this.origin_x = base_x;
+        this.origin_y = base_y;
+
+        // 6 columns wide by 4 rows tall = 24 total slots
+        // - row 0: corners skipped (cols 0 and 5) = 4 cells
+        // - row 1: full width = 6 cells
+        // - row 2: center archway skipped (cols 2 and 3) = 4 cells
+        // - row 3: center archway skipped (cols 2 and 3) = 4 cells
+        // Total active cells = 18
+        this.cell_count = 18;
+        this.cells = new BunkerCell[18];
+
+        float32 cell_step_x = 9.0;
+        float32 cell_step_y = 8.0;
+        int32 cell_cursor = 0;
+
+        for (int32 row_index = 0; row_index < 4; row_index = row_index + 1) {
+            for (int32 col_index = 0; col_index < 6; col_index = col_index + 1) {
+                // Skip center archway at bottom rows
+                if (row_index >= 2 && (col_index == 2 || col_index == 3)) {
+                    continue;
+                }
+                // Skip top left/right corner notches for classic slanted bunker silhouette
+                if (row_index == 0 && (col_index == 0 || col_index == 5)) {
+                    continue;
+                }
+
+                if (cell_cursor < this.cell_count) {
+                    float32 cell_x = base_x + ((float32)col_index * cell_step_x);
+                    float32 cell_y = base_y + ((float32)row_index * cell_step_y);
+                    this.cells[cell_cursor] = new BunkerCell(cell_x, cell_y, cell_step_x - 1.0, cell_step_y - 1.0);
+                    cell_cursor = cell_cursor + 1;
+                }
+            }
+        }
+    }
+
+    public bool test_and_damage(Rectangle projectile_rect) {
+        for (int32 cell_index = 0; cell_index < this.cell_count; cell_index = cell_index + 1) {
+            if (this.cells[cell_index] != null && this.cells[cell_index].cell_health > 0) {
+                Rectangle cell_rect = this.cells[cell_index].get_rect();
+                if (Raylib::CheckCollisionRecs(cell_rect, projectile_rect)) {
+                    this.cells[cell_index].take_damage();
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public void draw() {
+        for (int32 cell_index = 0; cell_index < this.cell_count; cell_index = cell_index + 1) {
+            if (this.cells[cell_index] != null) {
+                this.cells[cell_index].draw();
+            }
+        }
+    }
+}

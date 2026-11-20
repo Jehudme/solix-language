@@ -1,0 +1,100 @@
+import raylib.*;
+
+public class Projectile {
+    public float32 pos_x;
+    public float32 pos_y;
+    public float32 velocity_y;
+    public int32 projectile_kind;
+    public bool active;
+    public float32 width;
+    public float32 height;
+    public Color core_color;
+    public Color glow_color;
+
+    public Projectile() {
+        this.pos_x = 0.0;
+        this.pos_y = 0.0;
+        this.velocity_y = 0.0;
+        this.projectile_kind = ProjectileKind::PLAYER_LASER;
+        this.active = false;
+        this.width = 3.0;
+        this.height = 12.0;
+        this.core_color = Color::WHITE;
+        this.glow_color = Color::WHITE;
+    }
+
+    public void launch(
+        float32 spawn_x,
+        float32 spawn_y,
+        float32 initial_velocity_y,
+        int32 kind_tag,
+        Color main_color,
+        Color rim_color
+    ) {
+        this.pos_x = spawn_x;
+        this.pos_y = spawn_y;
+        this.velocity_y = initial_velocity_y;
+        this.projectile_kind = kind_tag;
+        this.active = true;
+        this.core_color = main_color;
+        this.glow_color = rim_color;
+
+        if (kind_tag == ProjectileKind::PLAYER_LASER) {
+            this.width = 4.0;
+            this.height = 14.0;
+        } else {
+            this.width = 5.0;
+            this.height = 10.0;
+        }
+    }
+
+    public Rectangle get_rect() {
+        return new Rectangle(
+            this.pos_x - (this.width * 0.5),
+            this.pos_y,
+            this.width,
+            this.height
+        );
+    }
+
+    public void update() {
+        if (!this.active) {
+            return;
+        }
+        this.pos_y = this.pos_y + this.velocity_y;
+
+        // Despawn beyond top or bottom boundaries
+        if (this.pos_y < -20.0 || this.pos_y > 670.0) {
+            this.active = false;
+        }
+    }
+
+    public void draw() {
+        if (!this.active) {
+            return;
+        }
+        Rectangle bounding_rect = this.get_rect();
+
+        if (this.projectile_kind == ProjectileKind::PLAYER_LASER) {
+            // Sleek vertical energy beam with outer glow
+            Rectangle glow_rect = new Rectangle(
+                bounding_rect.x - 2.0,
+                bounding_rect.y,
+                bounding_rect.width + 4.0,
+                bounding_rect.height
+            );
+            Raylib::DrawRectangleRounded(glow_rect, 0.4, 4, this.glow_color);
+            Raylib::DrawRectangleRounded(bounding_rect, 0.4, 4, this.core_color);
+        } else {
+            // Zigzag alien plasma bomb
+            Raylib::DrawRectangleRounded(bounding_rect, 0.5, 4, this.glow_color);
+            Rectangle inner_core = new Rectangle(
+                bounding_rect.x + 1.0,
+                bounding_rect.y + 1.0,
+                bounding_rect.width - 2.0,
+                bounding_rect.height - 2.0
+            );
+            Raylib::DrawRectangleRounded(inner_core, 0.5, 4, this.core_color);
+        }
+    }
+}

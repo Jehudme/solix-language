@@ -1,0 +1,138 @@
+import raylib.*;
+import solix.math.Math;
+
+public class Particle {
+    public float32 pos_x;
+    public float32 pos_y;
+    public float32 velocity_x;
+    public float32 velocity_y;
+    public float32 life_remaining;
+    public float32 max_life;
+    public float32 size;
+    public Color color;
+    public bool active;
+
+    public Particle() {
+        this.pos_x = 0.0;
+        this.pos_y = 0.0;
+        this.velocity_x = 0.0;
+        this.velocity_y = 0.0;
+        this.life_remaining = 0.0;
+        this.max_life = 1.0;
+        this.size = 2.0;
+        this.color = Color::WHITE;
+        this.active = false;
+    }
+
+    public void spawn(
+        float32 spawn_x,
+        float32 spawn_y,
+        float32 initial_velocity_x,
+        float32 initial_velocity_y,
+        float32 lifetime,
+        float32 initial_size,
+        Color tint_color
+    ) {
+        this.pos_x = spawn_x;
+        this.pos_y = spawn_y;
+        this.velocity_x = initial_velocity_x;
+        this.velocity_y = initial_velocity_y;
+        this.life_remaining = lifetime;
+        this.max_life = lifetime;
+        this.size = initial_size;
+        this.color = tint_color;
+        this.active = true;
+    }
+
+    public void update() {
+        if (!this.active) {
+            return;
+        }
+        this.pos_x = this.pos_x + this.velocity_x;
+        this.pos_y = this.pos_y + this.velocity_y;
+        this.velocity_x = this.velocity_x * 0.96;
+        this.velocity_y = this.velocity_y * 0.96;
+        this.life_remaining = this.life_remaining - 0.025;
+
+        if (this.life_remaining <= 0.0) {
+            this.active = false;
+        }
+    }
+
+    public void draw() {
+        if (!this.active) {
+            return;
+        }
+        float32 alpha_ratio = this.life_remaining / this.max_life;
+        if (alpha_ratio < 0.0) {
+            alpha_ratio = 0.0;
+        }
+        int32 alpha_byte = (int32)(alpha_ratio * 255.0);
+        Color faded_color = new Color(this.color.r, this.color.g, this.color.b, alpha_byte);
+
+        Raylib::DrawRectangle(
+            (int32)this.pos_x,
+            (int32)this.pos_y,
+            (int32)this.size,
+            (int32)this.size,
+            faded_color
+        );
+    }
+}
+
+public class ParticleSystem {
+    public Particle[] particles;
+    public int32 max_particles;
+    public float32 pseudo_seed;
+
+    public ParticleSystem() {
+        this.max_particles = 140;
+        this.particles = new Particle[140];
+        this.pseudo_seed = 9999.0;
+
+        for (int32 pool_index = 0; pool_index < this.max_particles; pool_index = pool_index + 1) {
+            this.particles[pool_index] = new Particle();
+        }
+    }
+
+    public void spawn_burst(float32 center_x, float32 center_y, Color burst_color, int32 particle_count) {
+        int32 spawned_so_far = 0;
+        for (int32 pool_index = 0; pool_index < this.max_particles && spawned_so_far < particle_count; pool_index = pool_index + 1) {
+            if (!this.particles[pool_index].active) {
+                this.pseudo_seed = ((this.pseudo_seed * 1103515245.0) + 12345.0) % 2147483647.0;
+                float32 raw_angle = (this.pseudo_seed % 628.0) / 100.0;
+
+                this.pseudo_seed = ((this.pseudo_seed * 1103515245.0) + 12345.0) % 2147483647.0;
+                float32 speed_magnitude = ((this.pseudo_seed % 350.0) / 100.0) + 1.2;
+
+                float32 velocity_x = speed_magnitude * (float32)Math::cos((float64)raw_angle);
+                float32 velocity_y = speed_magnitude * (float32)Math::sin((float64)raw_angle);
+                float32 particle_size = (float32)((pool_index % 3) + 2);
+                float32 lifetime = 0.50 + ((float32)(pool_index % 5) * 0.10);
+
+                this.particles[pool_index].spawn(
+                    center_x,
+                    center_y,
+                    velocity_x,
+                    velocity_y,
+                    lifetime,
+                    particle_size,
+                    burst_color
+                );
+                spawned_so_far = spawned_so_far + 1;
+            }
+        }
+    }
+
+    public void update() {
+        for (int32 pool_index = 0; pool_index < this.max_particles; pool_index = pool_index + 1) {
+            this.particles[pool_index].update();
+        }
+    }
+
+    public void draw() {
+        for (int32 pool_index = 0; pool_index < this.max_particles; pool_index = pool_index + 1) {
+            this.particles[pool_index].draw();
+        }
+    }
+}

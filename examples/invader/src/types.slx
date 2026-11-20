@@ -1,0 +1,31 @@
+import raylib.*;
+
+public enum GameState {
+    TITLE = 0,
+    PLAYING = 1,
+    PAUSED = 2,
+    VICTORY = 3,
+    GAME_OVER = 4
+}
+
+public enum InvaderType {
+    SQUID = 0,
+    CRAB = 1,
+    OCTOPUS = 2,
+    MOTHERSHIP = 3
+}
+
+public enum ProjectileKind {
+    PLAYER_LASER = 0,
+    ALIEN_PLASMA = 1
+}
+
+public class GameConstants {
+    public static int32 SCREEN_WIDTH = 800;
+    public static int32 SCREEN_HEIGHT = 650;
+    public static float32 PLAY_AREA_MIN_X = 24.0;
+    public static float32 PLAY_AREA_MAX_X = 776.0;
+    public static float32 BUNKER_BASE_Y = 510.0;
+    public static float32 PLAYER_BASE_Y = 585.0;
+    public static float32 INVASION_LIMIT_Y = 540.0;
+}

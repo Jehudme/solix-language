@@ -1,0 +1,188 @@
+import raylib.*;
+
+public class AudioManager {
+    public bool audio_ready;
+    public bool sound_muted;
+
+    public Sound sound_laser;
+    public Sound sound_alien_laser;
+    public Sound sound_explosion;
+    public Sound sound_step_one;
+    public Sound sound_step_two;
+    public Sound sound_step_three;
+    public Sound sound_step_four;
+    public Sound sound_ufo;
+    public Sound sound_player_death;
+    public Sound sound_shield_hit;
+
+    public static string resolve_sound_path(string relative_path) {
+        if (Raylib::FileExists(relative_path)) {
+            return relative_path;
+        }
+        string project_prefixed = "examples/invader/" + relative_path;
+        if (Raylib::FileExists(project_prefixed)) {
+            return project_prefixed;
+        }
+        return relative_path;
+    }
+
+    public AudioManager() {
+        this.sound_muted = false;
+        this.audio_ready = Raylib::IsAudioDeviceReady();
+
+        if (this.audio_ready) {
+            this.sound_laser = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/laser.wav"));
+            this.sound_alien_laser = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/alien_laser.wav"));
+            this.sound_explosion = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/explosion.wav"));
+            this.sound_step_one = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/invader_step1.wav"));
+            this.sound_step_two = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/invader_step2.wav"));
+            this.sound_step_three = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/invader_step3.wav"));
+            this.sound_step_four = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/invader_step4.wav"));
+            this.sound_ufo = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/ufo.wav"));
+            this.sound_player_death = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/player_death.wav"));
+            this.sound_shield_hit = Raylib::LoadSound(AudioManager::resolve_sound_path("resources/audio/shield_hit.wav"));
+
+            // Configure comfortable default volume mix
+            if (Raylib::IsSoundValid(this.sound_laser)) {
+                Raylib::SetSoundVolume(this.sound_laser, 0.45);
+            }
+            if (Raylib::IsSoundValid(this.sound_alien_laser)) {
+                Raylib::SetSoundVolume(this.sound_alien_laser, 0.35);
+            }
+            if (Raylib::IsSoundValid(this.sound_explosion)) {
+                Raylib::SetSoundVolume(this.sound_explosion, 0.65);
+            }
+            if (Raylib::IsSoundValid(this.sound_step_one)) {
+                Raylib::SetSoundVolume(this.sound_step_one, 0.50);
+            }
+            if (Raylib::IsSoundValid(this.sound_step_two)) {
+                Raylib::SetSoundVolume(this.sound_step_two, 0.50);
+            }
+            if (Raylib::IsSoundValid(this.sound_step_three)) {
+                Raylib::SetSoundVolume(this.sound_step_three, 0.50);
+            }
+            if (Raylib::IsSoundValid(this.sound_step_four)) {
+                Raylib::SetSoundVolume(this.sound_step_four, 0.50);
+            }
+            if (Raylib::IsSoundValid(this.sound_ufo)) {
+                Raylib::SetSoundVolume(this.sound_ufo, 0.40);
+            }
+            if (Raylib::IsSoundValid(this.sound_player_death)) {
+                Raylib::SetSoundVolume(this.sound_player_death, 0.75);
+            }
+            if (Raylib::IsSoundValid(this.sound_shield_hit)) {
+                Raylib::SetSoundVolume(this.sound_shield_hit, 0.40);
+            }
+        }
+    }
+
+    public void toggle_mute() {
+        this.sound_muted = !this.sound_muted;
+    }
+
+    public void play_laser() {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_laser)) {
+            Raylib::PlaySound(this.sound_laser);
+        }
+    }
+
+    public void play_alien_laser() {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_alien_laser)) {
+            Raylib::PlaySound(this.sound_alien_laser);
+        }
+    }
+
+    public void play_explosion() {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_explosion)) {
+            Raylib::PlaySound(this.sound_explosion);
+        }
+    }
+
+    public void play_invader_step(int32 step_index) {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        int32 cadence_note = step_index % 4;
+        if (cadence_note == 0 && Raylib::IsSoundValid(this.sound_step_one)) {
+            Raylib::PlaySound(this.sound_step_one);
+        } else if (cadence_note == 1 && Raylib::IsSoundValid(this.sound_step_two)) {
+            Raylib::PlaySound(this.sound_step_two);
+        } else if (cadence_note == 2 && Raylib::IsSoundValid(this.sound_step_three)) {
+            Raylib::PlaySound(this.sound_step_three);
+        } else if (cadence_note == 3 && Raylib::IsSoundValid(this.sound_step_four)) {
+            Raylib::PlaySound(this.sound_step_four);
+        }
+    }
+
+    public void play_ufo() {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_ufo)) {
+            Raylib::PlaySound(this.sound_ufo);
+        }
+    }
+
+    public void play_player_death() {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_player_death)) {
+            Raylib::PlaySound(this.sound_player_death);
+        }
+    }
+
+    public void play_shield_hit() {
+        if (!this.audio_ready || this.sound_muted) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_shield_hit)) {
+            Raylib::PlaySound(this.sound_shield_hit);
+        }
+    }
+
+    public void unload_all() {
+        if (!this.audio_ready) {
+            return;
+        }
+        if (Raylib::IsSoundValid(this.sound_laser)) {
+            Raylib::UnloadSound(this.sound_laser);
+        }
+        if (Raylib::IsSoundValid(this.sound_alien_laser)) {
+            Raylib::UnloadSound(this.sound_alien_laser);
+        }
+        if (Raylib::IsSoundValid(this.sound_explosion)) {
+            Raylib::UnloadSound(this.sound_explosion);
+        }
+        if (Raylib::IsSoundValid(this.sound_step_one)) {
+            Raylib::UnloadSound(this.sound_step_one);
+        }
+        if (Raylib::IsSoundValid(this.sound_step_two)) {
+            Raylib::UnloadSound(this.sound_step_two);
+        }
+        if (Raylib::IsSoundValid(this.sound_step_three)) {
+            Raylib::UnloadSound(this.sound_step_three);
+        }
+        if (Raylib::IsSoundValid(this.sound_step_four)) {
+            Raylib::UnloadSound(this.sound_step_four);
+        }
+        if (Raylib::IsSoundValid(this.sound_ufo)) {
+            Raylib::UnloadSound(this.sound_ufo);
+        }
+        if (Raylib::IsSoundValid(this.sound_player_death)) {
+            Raylib::UnloadSound(this.sound_player_death);
+        }
+        if (Raylib::IsSoundValid(this.sound_shield_hit)) {
+            Raylib::UnloadSound(this.sound_shield_hit);
+        }
+    }
+}

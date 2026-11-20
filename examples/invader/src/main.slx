@@ -1,0 +1,382 @@
+import raylib.*;
+
+public class InvaderGame {
+    public int32 game_state;
+    public int32 score;
+    public int32 high_score;
+    public int32 wave_number;
+    public float32 screen_shake;
+    public int32 frame_counter;
+
+    public PlayerCannon player;
+    public InvaderArmada armada;
+    public Bunker[] bunkers;
+    public int32 bunker_count;
+
+    public Projectile player_laser;
+    public Projectile[] alien_bombs;
+    public int32 max_alien_bombs;
+
+    public Starfield starfield;
+    public ParticleSystem particles;
+    public AudioManager audio_manager;
+    public UserInterface user_interface;
+
+    public InvaderGame() {
+        this.game_state = GameState::TITLE;
+        this.score = 0;
+        this.high_score = 0;
+        this.wave_number = 1;
+        this.screen_shake = 0.0;
+        this.frame_counter = 0;
+
+        this.starfield = new Starfield();
+        this.particles = new ParticleSystem();
+        this.audio_manager = new AudioManager();
+        this.user_interface = new UserInterface();
+
+        this.player = new PlayerCannon();
+        this.armada = new InvaderArmada();
+
+        // 4 classic defensive bunkers positioned across the playfield
+        this.bunker_count = 4;
+        this.bunkers = new Bunker[4];
+        this.bunkers[0] = new Bunker(110.0, GameConstants::BUNKER_BASE_Y);
+        this.bunkers[1] = new Bunker(270.0, GameConstants::BUNKER_BASE_Y);
+        this.bunkers[2] = new Bunker(430.0, GameConstants::BUNKER_BASE_Y);
+        this.bunkers[3] = new Bunker(590.0, GameConstants::BUNKER_BASE_Y);
+
+        this.player_laser = null;
+
+        this.max_alien_bombs = 10;
+        this.alien_bombs = new Projectile[10];
+        for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+            this.alien_bombs[bomb_index] = null;
+        }
+    }
+
+    public void start_new_game() {
+        this.score = 0;
+        this.wave_number = 1;
+        this.screen_shake = 0.0;
+        this.player.reset_for_match();
+        this.armada.reset_armada();
+
+        // Reconstruct fresh bunkers
+        this.bunkers[0] = new Bunker(110.0, GameConstants::BUNKER_BASE_Y);
+        this.bunkers[1] = new Bunker(270.0, GameConstants::BUNKER_BASE_Y);
+        this.bunkers[2] = new Bunker(430.0, GameConstants::BUNKER_BASE_Y);
+        this.bunkers[3] = new Bunker(590.0, GameConstants::BUNKER_BASE_Y);
+
+        this.player_laser = null;
+        for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+            this.alien_bombs[bomb_index] = null;
+        }
+    }
+
+    public void advance_next_wave() {
+        this.wave_number = this.wave_number + 1;
+        this.screen_shake = 0.0;
+        this.armada.reset_armada();
+        this.player_laser = null;
+        for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+            this.alien_bombs[bomb_index] = null;
+        }
+    }
+
+    public void update_playing() {
+        bool move_left = Raylib::IsKeyDown(KeyboardKey::KEY_LEFT) || Raylib::IsKeyDown(KeyboardKey::KEY_A);
+        bool move_right = Raylib::IsKeyDown(KeyboardKey::KEY_RIGHT) || Raylib::IsKeyDown(KeyboardKey::KEY_D);
+        bool fire_pressed = Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyDown(KeyboardKey::KEY_SPACE);
+
+        // Update player & maybe launch laser
+        Projectile maybe_new_laser = this.player.update(move_left, move_right, fire_pressed, this.audio_manager);
+        if (maybe_new_laser != null && (this.player_laser == null || !this.player_laser.active)) {
+            this.player_laser = maybe_new_laser;
+        }
+
+        // Update player laser
+        if (this.player_laser != null && this.player_laser.active) {
+            this.player_laser.update();
+        }
+
+        // Update alien armada
+        bool invasion_reached_bottom = this.armada.update(this.audio_manager);
+        if (invasion_reached_bottom) {
+            this.game_state = GameState::GAME_OVER;
+            this.audio_manager.play_player_death();
+            return;
+        }
+
+        // Alien bomb drops
+        Projectile new_bomb = this.armada.maybe_drop_bomb(this.audio_manager);
+        if (new_bomb != null) {
+            for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+                if (this.alien_bombs[bomb_index] == null || !this.alien_bombs[bomb_index].active) {
+                    this.alien_bombs[bomb_index] = new_bomb;
+                    break;
+                }
+            }
+        }
+
+        // Update active alien bombs
+        for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+            if (this.alien_bombs[bomb_index] != null && this.alien_bombs[bomb_index].active) {
+                this.alien_bombs[bomb_index].update();
+            }
+        }
+
+        // Collisions: Player laser vs Invader Armada
+        if (this.player_laser != null && this.player_laser.active) {
+            Rectangle laser_rect = this.player_laser.get_rect();
+
+            // Test vs UFO Mothership
+            if (this.armada.mothership.is_active) {
+                Rectangle ufo_rect = this.armada.mothership.get_rect();
+                if (Raylib::CheckCollisionRecs(laser_rect, ufo_rect)) {
+                    this.armada.mothership.is_active = false;
+                    this.player_laser.active = false;
+                    this.score = this.score + this.armada.mothership.bonus_points;
+                    this.audio_manager.play_explosion();
+                    this.particles.spawn_burst(ufo_rect.x + 24.0, ufo_rect.y + 9.0, new Color(255, 64, 129, 255), 40);
+                    this.screen_shake = 5.0;
+                }
+            }
+
+            // Test vs armada grid
+            if (this.player_laser.active) {
+                for (int32 alien_index = 0; alien_index < this.armada.total_aliens; alien_index = alien_index + 1) {
+                    if (this.armada.armada_grid[alien_index].is_alive) {
+                        Rectangle alien_rect = this.armada.armada_grid[alien_index].get_rect();
+                        if (Raylib::CheckCollisionRecs(laser_rect, alien_rect)) {
+                            this.armada.armada_grid[alien_index].is_alive = false;
+                            this.armada.active_aliens = this.armada.active_aliens - 1;
+                            this.player_laser.active = false;
+
+                            this.score = this.score + this.armada.armada_grid[alien_index].point_value;
+                            this.audio_manager.play_explosion();
+
+                            Color alien_burst_color = new Color(0, 229, 255, 255);
+                            if (this.armada.armada_grid[alien_index].alien_type == InvaderType::SQUID) {
+                                alien_burst_color = new Color(224, 64, 251, 255);
+                            } else if (this.armada.armada_grid[alien_index].alien_type == InvaderType::OCTOPUS) {
+                                alien_burst_color = new Color(255, 214, 0, 255);
+                            }
+                            this.particles.spawn_burst(alien_rect.x + 16.0, alien_rect.y + 11.0, alien_burst_color, 24);
+
+                            // Check victory
+                            if (this.armada.active_aliens <= 0) {
+                                this.game_state = GameState::VICTORY;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Test vs bunkers
+            if (this.player_laser != null && this.player_laser.active) {
+                for (int32 bunker_index = 0; bunker_index < this.bunker_count; bunker_index = bunker_index + 1) {
+                    if (this.bunkers[bunker_index].test_and_damage(laser_rect)) {
+                        this.player_laser.active = false;
+                        this.audio_manager.play_shield_hit();
+                        this.particles.spawn_burst(laser_rect.x, laser_rect.y, new Color(0, 230, 118, 200), 8);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Collisions: Alien bombs vs Bunkers & Player
+        for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+            if (this.alien_bombs[bomb_index] != null && this.alien_bombs[bomb_index].active) {
+                Rectangle bomb_rect = this.alien_bombs[bomb_index].get_rect();
+
+                // Test vs bunkers
+                bool bomb_absorbed = false;
+                for (int32 bunker_index = 0; bunker_index < this.bunker_count; bunker_index = bunker_index + 1) {
+                    if (this.bunkers[bunker_index].test_and_damage(bomb_rect)) {
+                        this.alien_bombs[bomb_index].active = false;
+                        this.audio_manager.play_shield_hit();
+                        this.particles.spawn_burst(bomb_rect.x, bomb_rect.y, new Color(0, 230, 118, 200), 8);
+                        bomb_absorbed = true;
+                        break;
+                    }
+                }
+
+                // Test vs player
+                if (!bomb_absorbed) {
+                    Rectangle player_rect = this.player.get_rect();
+                    if (Raylib::CheckCollisionRecs(bomb_rect, player_rect)) {
+                        this.alien_bombs[bomb_index].active = false;
+                        bool player_died = this.player.hit_by_hazard(this.audio_manager, this.particles);
+                        if (player_died) {
+                            this.screen_shake = 9.0;
+                            if (this.player.lives_remaining <= 0) {
+                                this.game_state = GameState::GAME_OVER;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // High score sync
+        if (this.score > this.high_score) {
+            this.high_score = this.score;
+        }
+
+        // Starfield & particle updates
+        this.starfield.update();
+        this.particles.update();
+    }
+
+    public void draw(float32 shake_offset_x, float32 shake_offset_y) {
+        // Space canvas clear
+        Raylib::ClearBackground(new Color(10, 12, 20, 255));
+
+        // Draw background starfield
+        this.starfield.draw();
+
+        // Draw bunkers
+        for (int32 bunker_index = 0; bunker_index < this.bunker_count; bunker_index = bunker_index + 1) {
+            this.bunkers[bunker_index].draw();
+        }
+
+        // Draw player laser
+        if (this.player_laser != null && this.player_laser.active) {
+            this.player_laser.draw();
+        }
+
+        // Draw alien bombs
+        for (int32 bomb_index = 0; bomb_index < this.max_alien_bombs; bomb_index = bomb_index + 1) {
+            if (this.alien_bombs[bomb_index] != null && this.alien_bombs[bomb_index].active) {
+                this.alien_bombs[bomb_index].draw();
+            }
+        }
+
+        // Draw player and alien armada
+        this.player.draw();
+        this.armada.draw();
+
+        // Draw active particles
+        this.particles.draw();
+
+        // HUD overlay
+        this.user_interface.draw_hud(
+            this.score,
+            this.high_score,
+            this.player.lives_remaining,
+            this.wave_number,
+            this.audio_manager.sound_muted
+        );
+
+        // Screen state modals
+        if (this.game_state == GameState::TITLE) {
+            this.user_interface.render_title_screen(this.high_score);
+        } else if (this.game_state == GameState::PAUSED) {
+            this.user_interface.render_pause_screen();
+        } else if (this.game_state == GameState::GAME_OVER) {
+            this.user_interface.render_game_over_screen(false, this.score, this.high_score, this.wave_number);
+        } else if (this.game_state == GameState::VICTORY) {
+            this.user_interface.render_game_over_screen(true, this.score, this.high_score, this.wave_number);
+        }
+
+        // CRT scanline shader effect
+        this.user_interface.draw_crt_overlay();
+    }
+
+    public static int32 main() {
+        Raylib::InitWindow(
+            GameConstants::SCREEN_WIDTH,
+            GameConstants::SCREEN_HEIGHT,
+            "Solix Invaders - Cyber Neon Arcade"
+        );
+        Raylib::InitAudioDevice();
+        Raylib::SetTargetFPS(60);
+        Raylib::SetExitKey(0); // Disable ESC default window close so ESC can be used for pause
+
+        InvaderGame game = new InvaderGame();
+
+        while (!Raylib::WindowShouldClose()) {
+            // Global keybinds
+            if (Raylib::IsKeyPressed(KeyboardKey::KEY_M)) {
+                game.audio_manager.toggle_mute();
+            }
+            if (Raylib::IsKeyPressed(KeyboardKey::KEY_C)) {
+                game.user_interface.crt_scanlines_enabled = !game.user_interface.crt_scanlines_enabled;
+            }
+
+            // State management
+            if (game.game_state == GameState::TITLE) {
+                game.starfield.update();
+                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
+                    game.start_new_game();
+                    game.game_state = GameState::PLAYING;
+                }
+            } else if (game.game_state == GameState::PLAYING) {
+                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                    game.game_state = GameState::PAUSED;
+                } else {
+                    game.update_playing();
+                }
+            } else if (game.game_state == GameState::PAUSED) {
+                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                    game.game_state = GameState::PLAYING;
+                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
+                    game.start_new_game();
+                    game.game_state = GameState::PLAYING;
+                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                    game.game_state = GameState::TITLE;
+                }
+            } else if (game.game_state == GameState::VICTORY) {
+                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
+                    game.advance_next_wave();
+                    game.game_state = GameState::PLAYING;
+                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                    game.game_state = GameState::TITLE;
+                }
+            } else if (game.game_state == GameState::GAME_OVER) {
+                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
+                    game.start_new_game();
+                    game.game_state = GameState::PLAYING;
+                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                    game.game_state = GameState::TITLE;
+                }
+            }
+
+            // Screen shake decay
+            if (game.screen_shake > 0.1) {
+                game.screen_shake = game.screen_shake * 0.88;
+            } else {
+                game.screen_shake = 0.0;
+            }
+            game.frame_counter = game.frame_counter + 1;
+
+            float32 shake_offset_x = 0.0;
+            float32 shake_offset_y = 0.0;
+            if (game.screen_shake > 0.0) {
+                if (game.frame_counter % 2 == 0) {
+                    shake_offset_x = game.screen_shake;
+                } else {
+                    shake_offset_x = 0.0 - game.screen_shake;
+                }
+                if (game.frame_counter % 4 < 2) {
+                    shake_offset_y = game.screen_shake * 0.5;
+                } else {
+                    shake_offset_y = 0.0 - (game.screen_shake * 0.5);
+                }
+            }
+
+            // Rendering pipeline
+            Raylib::BeginDrawing();
+            game.draw(shake_offset_x, shake_offset_y);
+            Raylib::EndDrawing();
+        }
+
+        game.audio_manager.unload_all();
+        Raylib::CloseAudioDevice();
+        Raylib::CloseWindow();
+        return 0;
+    }
+}
