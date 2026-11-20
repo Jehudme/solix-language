@@ -174,6 +174,13 @@ Under `profiles.<name>.natives.<key>`, each native entry omits any explicit `typ
 | `profile` | String | Parent Solix profile | Native optimization profile (`debug` or `release`). |
 | `platforms` | List of Strings | Parent profile `platforms` | Optional override of OS/target platforms for this native crate. |
 | `flags` | List of Strings | `[]` | Extra CMake (`-D...`) or Cargo (`--features ...`) flags. |
+| `strategy` | String | Auto-detected | Compilation strategy (`"host"`, `"zigbuild"`, `"docker"` / `"container"`). |
+| `docker` | Boolean | `false` | Shorthand to force containerized cross-compilation (`cross` for Rust, `dockcross` for CMake). |
+| `docker_image` | String | Standard image | Custom Docker container image override. |
+
+> [!NOTE]
+> **Containerized Cross-Compilation (`strategy: docker`):**
+> Containerized compilation executes native builds inside `cross-rs` or `dockcross` containers. While containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild, it is practical and sufficient for complex native libraries with extensive system library requirements (such as X11, Wayland, or audio drivers).
 
 ---
 

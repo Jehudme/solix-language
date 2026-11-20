@@ -113,3 +113,16 @@ Solix supports two complementary binary linking strategies:
    * Transitive bytecode dependencies are merged into a single consolidated binary payload.
    * Controlled via the `SOLIX_LINK_MODE=static` environment variable or the `--link static` CLI compilation flag.
    * `solix_build.py` checks `os.environ.get("SOLIX_LINK_MODE")` during project build scripts and forwards the flag to `solix compile`.
+
+---
+
+## 6. Containerized Native Cross-Compilation (`strategy: docker`)
+
+When cross-compiling native modules across disparate operating systems and architectures, dependencies that require host-provided system C libraries (such as X11, Wayland, or ALSA) can declare `strategy: docker` (or `docker: true`) in `manifest.yaml`:
+
+* **Rust Dependencies (`Cargo.toml`):** Solix dispatches through `cross` if installed, or runs the container image `ghcr.io/cross-rs/<triple>:edge` directly via Docker.
+* **CMake Dependencies (`CMakeLists.txt`):** Solix dispatches through official `dockcross/<target>` images (e.g. `dockcross/linux-arm64`, `dockcross/windows-static-x64`).
+* **Custom Containers:** Projects can override default images by declaring `docker_image: <custom_image>` in the native target configuration.
+
+> [!NOTE]
+> Containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild and targeted sysroots, but it is practical and sufficient for complex native dependencies with extensive system library requirements.

@@ -21,12 +21,13 @@ pub use cli::{
     UninstallPackageArgs, UninstallSubcommand, WikiArgs,
 };
 pub use commands::{
-    execute_build, execute_clean, execute_compile, execute_compile_package, execute_compile_source,
-    execute_dap, execute_doc, execute_export, execute_fmt, execute_info, execute_install,
-    execute_install_binaries, execute_install_package, execute_list, execute_lsp, execute_new,
-    execute_new_native, execute_new_package, execute_run, execute_run_package, execute_run_source,
-    execute_uninstall, execute_uninstall_binaries, execute_uninstall_package, execute_wiki,
-    install_package_artifact, resolve_bin_store_dir, write_zig_toolchain_file_for_test,
+    cross_image_for_triple, dockcross_image_for_triple, execute_build, execute_clean,
+    execute_compile, execute_compile_package, execute_compile_source, execute_dap, execute_doc,
+    execute_export, execute_fmt, execute_info, execute_install, execute_install_binaries,
+    execute_install_package, execute_list, execute_lsp, execute_new, execute_new_native,
+    execute_new_package, execute_run, execute_run_package, execute_run_source, execute_uninstall,
+    execute_uninstall_binaries, execute_uninstall_package, execute_wiki, install_package_artifact,
+    resolve_bin_store_dir, write_zig_toolchain_file_for_test,
 };
 pub use diagnostics::render_diagnostics;
 pub use process::{

@@ -1134,6 +1134,9 @@ fn register_native_in_manifest(
                 profile: Some(native_profile.to_string()),
                 platforms: platforms_opt.clone(),
                 flags: Vec::new(),
+                strategy: None,
+                docker: None,
+                docker_image: None,
             },
         );
     }

@@ -2621,3 +2621,63 @@ fn test_zigbuild_cross_compilation_toolchain_isolation_and_env_emission() {
         );
     }
 }
+
+#[test]
+fn test_docker_native_strategy_manifest_parsing_and_resolution() {
+    let manifest_yaml = r#"
+configuration:
+  name: "docker_demo"
+  version: "0.1.0"
+  description: "Docker test project"
+  license: "Apache-2.0"
+  authors: []
+
+profiles:
+  release:
+    entrypoint: "Main::main"
+    optimization_level: 3
+    sources: ["src"]
+    platforms: ["all"]
+    natives:
+      rust_worker:
+        strategy: "docker"
+      cmake_worker:
+        docker: true
+        docker_image: "custom/dockcross-arm64:v1"
+"#;
+
+    let parsed_manifest =
+        ProjectManifest::from_yaml_str(manifest_yaml).expect("parse docker manifest");
+    let release_profile = parsed_manifest
+        .resolve_profile("release")
+        .expect("release profile");
+    let rust_config = release_profile
+        .natives
+        .get("rust_worker")
+        .expect("rust_worker config");
+    assert!(rust_config.is_docker_strategy());
+    assert_eq!(rust_config.strategy.as_deref(), Some("docker"));
+
+    let cmake_config = release_profile
+        .natives
+        .get("cmake_worker")
+        .expect("cmake_worker config");
+    assert!(cmake_config.is_docker_strategy());
+    assert_eq!(
+        cmake_config.docker_image.as_deref(),
+        Some("custom/dockcross-arm64:v1")
+    );
+
+    assert_eq!(
+        solix_toolchain::dockcross_image_for_triple("aarch64-unknown-linux-gnu"),
+        Some("dockcross/linux-arm64")
+    );
+    assert_eq!(
+        solix_toolchain::dockcross_image_for_triple("x86_64-pc-windows-gnu"),
+        Some("dockcross/windows-static-x64")
+    );
+    assert_eq!(
+        solix_toolchain::cross_image_for_triple("aarch64-unknown-linux-gnu"),
+        "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
+    );
+}
