@@ -367,6 +367,8 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
     ));
     lines.push("  default_platforms: &host_platform".to_string());
     lines.push("    - host".to_string());
+    lines.push("  release_platforms: &release_platforms".to_string());
+    lines.push("    - all".to_string());
     lines.push(String::new());
 
     lines.push("configuration:".to_string());
@@ -399,7 +401,7 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
         "    static: true".to_string(),
         "    sources:".to_string(),
         "      - src".to_string(),
-        "    platforms: *host_platform".to_string(),
+        "    platforms: *release_platforms".to_string(),
     ]);
     if let Some(key) = spec.native_key {
         lines.extend([

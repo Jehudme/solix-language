@@ -77,6 +77,15 @@ fn test_solix_new_default_application() {
         Some("TestRunner::test")
     );
 
+    let release_profile = parsed_manifest
+        .resolve_profile("release")
+        .expect("release profile");
+    assert_eq!(release_profile.platforms, vec!["all"]);
+    let debug_profile = parsed_manifest
+        .resolve_profile("debug")
+        .expect("debug profile");
+    assert_eq!(debug_profile.platforms, vec!["host"]);
+
     assert!(
         target_project_directory
             .join("src")
@@ -393,6 +402,8 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
         project_root.to_str().expect("valid path"),
         "--lang",
         "cpp",
+        "--platforms",
+        "host",
     ])
     .expect("parse solix new native cpp");
     assert_eq!(run(add_cpp_cli).expect("solix new native cpp"), 0);
