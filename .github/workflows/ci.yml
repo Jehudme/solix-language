@@ -406,6 +406,18 @@ jobs:
           fi
           python3 scripts/tests/run_ffi_suite.py --solix-binary "$SOLIX_EXE"
 
+      - name: Run End-to-End Command & Option Lifecycle Matrix (GL-0009)
+        shell: bash
+        env:
+          CURRENT_OS: ${{ runner.os }}
+        run: |
+          if [ "$CURRENT_OS" = "Windows" ]; then
+            SOLIX_EXE="$(pwd)/target/debug/solix.exe"
+          else
+            SOLIX_EXE="$(pwd)/target/debug/solix"
+          fi
+          python3 scripts/tests/test_cli_lifecycle_matrix.py --solix-binary "$SOLIX_EXE"
+
       - name: Verify stripped release build on dev push
         if: runner.os == 'Linux' && github.event_name == 'push'
         run: cargo build --release --bin solix
