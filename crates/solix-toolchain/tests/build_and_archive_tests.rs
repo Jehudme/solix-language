@@ -2423,16 +2423,14 @@ fn test_slxp_package_root_binaries_and_bin_native_filtering() {
     let stage_bin_triple = stage_directory.join("bin").join(host_triple);
     fs::create_dir_all(&stage_bin_triple).expect("create stage bin target dir");
 
-    let manifest_yaml = format!(
-        r#"configuration:
+    let manifest_yaml = r#"configuration:
   name: modern_slxp_pkg
   version: "1.0.0"
   description: "Test .slxp package container format"
 profiles:
   release:
     entrypoint: Main::main
-"#
-    );
+"#;
     fs::write(stage_directory.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
 
     let binary_program = solix_common::bytecode::BinaryProgram::new();
