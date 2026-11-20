@@ -62,6 +62,16 @@ All test suites and automated test executions **MUST** adhere to the following b
 2. **No Flaky Wall-Clock Sleeps:** Tests **MUST NOT** use arbitrary delays like `std::thread::sleep()` to await asynchronous conditions. Asynchronous workflows (such as in `solix-lsp`) **MUST** coordinate via channels (`tokio::sync::mpsc`), promises, or bounded event barriers.
 3. **Zero Unjustified Ignored Tests:** Pull requests **MUST NOT** disable failing tests using `#[ignore]` without an accompanying link to an open `P0` or `P1` issue documenting the blocker.
 
+### 2.4 CLI Command & Option Lifecycle Matrix Maintenance Mandate
+1. **Universal Command & Option Registration Mandate:**
+   * Whenever any new Solix CLI command, subcommand, argument, or flag is introduced, altered, or deprecated in `crates/solix-toolchain/src/cli.rs`, the engineer **MUST** register and assert that command and its options in `scripts/tests/test_cli_lifecycle_matrix.py`.
+   * CLI tests **MUST NOT** merely check `--help` output; they **MUST** execute the complete real-world developer lifecycle across all 14 primary commands: scaffolding (`solix new`), source formatting (`solix fmt`), documentation (`solix doc`), profile-specific building (`solix build`), virtual machine execution (`solix run`), direct compilation (`solix compile`), container inspection (`solix info`), bundle distribution (`solix export`), package store installation (`solix install`), inventory queries (`solix list`), package removal (`solix uninstall`), workspace cache cleaning (`solix clean`), offline portal queries (`solix wiki`), and language daemon validation (`solix lsp`, `solix dap`).
+2. **Multi-Platform CI Execution Invariant:**
+   * The complete end-to-end command lifecycle matrix (`scripts/tests/test_cli_lifecycle_matrix.py`) **MUST** execute as an automated quality gate in `.github/workflows/ci.yml` across all primary target platforms: Ubuntu Linux (`ubuntu-latest`), macOS (`macos-latest`), and Windows (`windows-latest`).
+   * No pull request adding or altering CLI subcommands, options, or packaging container formats may merge into `dev` unless the full lifecycle matrix passes cleanly on all three operating systems.
+3. **Hermetic Package Store Isolation:**
+   * Lifecycle tests **MUST** isolate all package store operations using `--pkg-dir <ephemeral_temporary_directory>`. CLI tests **MUST NEVER** mutate or depend on the host user's `~/.solix` directory.
+
 ---
 
 ## 3. Structural Specification & Schema
@@ -332,5 +342,6 @@ Reviewers and automated CI gates **MUST** enforce the following criteria prior t
 - [ ] **Hermetic Isolation:** No tests read or write to shared static paths; all disk I/O utilizes `tempfile::tempdir()`.
 - [ ] **No Flaky Sleeps:** Asynchronous tests coordinate using channels or notifications, not `thread::sleep`.
 - [ ] **Zero Unjustified `#[ignore]`:** No tests are disabled without a documented tracking issue.
+- [ ] **CLI Lifecycle Parity:** Any added or updated CLI command, subcommand, or argument is covered in `scripts/tests/test_cli_lifecycle_matrix.py` and passes on Linux, macOS, and Windows.
 - [ ] **Regression Fortress Gates:** Differential `-O0` vs `-O3` (`proptest`), golden `.slxasm` instruction budgets, `.slxb`/`.slxp` corruption fuzzing, ARC/exception leak torture suites (`active_guest_objects == 0`), and `cargo-llvm-cov` CI coverage thresholds remain green.
 - [ ] **Full Pass:** All workspace tests pass under `cargo test --workspace --all-targets`.

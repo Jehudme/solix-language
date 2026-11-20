@@ -531,6 +531,38 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
         gl0011_errors = doc_sync_check.check_single_letter_variables(all_markdown)
         self.assertEqual(gl0011_errors, [])
 
+    def test_cli_lifecycle_matrix_and_maintenance_mandate_registered(self) -> None:
+        lifecycle_script = SCRIPTS_DIR / "tests" / "test_cli_lifecycle_matrix.py"
+        self.assertTrue(lifecycle_script.is_file(), "test_cli_lifecycle_matrix.py must exist")
+
+        ci_workflow_content = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "test_cli_lifecycle_matrix.py",
+            ci_workflow_content,
+            "CI workflow must run test_cli_lifecycle_matrix.py",
+        )
+
+        test_guideline_content = (
+            REPO_ROOT / "docs" / "guidelines" / "authoring-test.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "CLI Command & Option Lifecycle Matrix Maintenance Mandate",
+            test_guideline_content,
+        )
+
+        subcommands = verify_docs.extract_active_subcommands(
+            REPO_ROOT / "crates" / "solix-toolchain" / "src" / "cli.rs"
+        )
+        script_content = lifecycle_script.read_text(encoding="utf-8")
+        for subcommand in subcommands:
+            self.assertIn(
+                f'"{subcommand}"',
+                script_content,
+                f"test_cli_lifecycle_matrix.py must execute subcommand '{subcommand}'",
+            )
+
 
 class SolixBenchCliTests(unittest.TestCase):
     """Tests multi-baseline comparison and cross-language reporting in `scripts/bench/solix_bench.py`."""
