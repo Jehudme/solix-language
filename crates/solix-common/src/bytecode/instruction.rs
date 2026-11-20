@@ -258,6 +258,7 @@ impl fmt::Display for Instruction {
                 | OpCode::CallCallable
                 | OpCode::CallExtern
                 | OpCode::CallNativeDirect
+                | OpCode::CallVirtualDirect
                 | OpCode::PackClosure => {
                     write!(
                         f,

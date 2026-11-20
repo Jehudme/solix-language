@@ -1425,6 +1425,8 @@ fn mark_scalar_for_loops(instructions: &mut [Instruction]) {
                 || (raw >= OpCode::JumpIfLtI32 as u8 && raw <= OpCode::JumpIfNeqI32 as u8)
                 || raw == OpCode::JumpIfLtF64 as u8
                 || raw == OpCode::JumpIfLteF64 as u8
+                || raw == OpCode::JumpIfLtI64 as u8
+                || raw == OpCode::JumpIfLteI64 as u8
             {
                 Some((check_pc as i32) + (body_inst.src2() as i16 as i32))
             } else {
@@ -1517,6 +1519,8 @@ fn needs_sentinel_return(func: &CompiledFunction) -> bool {
             || raw == OpCode::GetArrayJumpIfTrue as u8
             || raw == OpCode::JumpIfLtF64 as u8
             || raw == OpCode::JumpIfLteF64 as u8
+            || raw == OpCode::JumpIfLtI64 as u8
+            || raw == OpCode::JumpIfLteI64 as u8
         {
             Some((pc_idx as i32) + (inst.src2() as i16 as i32))
         } else {

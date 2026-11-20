@@ -29,6 +29,7 @@ pub fn disassemble_instruction(
         | OpCode::CallCallable
         | OpCode::CallExtern
         | OpCode::CallNativeDirect
+        | OpCode::CallVirtualDirect
         | OpCode::PackClosure => {
             let dst = instruction.call_dst();
             let target = instruction.call_target();
@@ -93,7 +94,9 @@ pub fn disassemble_instruction(
         | OpCode::GetArrayJumpIfFalse
         | OpCode::GetArrayJumpIfTrue
         | OpCode::JumpIfLtF64
-        | OpCode::JumpIfLteF64 => {
+        | OpCode::JumpIfLteF64
+        | OpCode::JumpIfLtI64
+        | OpCode::JumpIfLteI64 => {
             let offset = instruction.src2() as i16 as i32;
             let target_pc = pc as i32 + offset;
             format!(
@@ -126,7 +129,11 @@ pub fn disassemble_instruction(
             )
         }
 
-        OpCode::AddI32Imm | OpCode::SubI32Imm | OpCode::MulI32Imm | OpCode::ModI32Imm => {
+        OpCode::AddI32Imm
+        | OpCode::SubI32Imm
+        | OpCode::MulI32Imm
+        | OpCode::ModI32Imm
+        | OpCode::AddI64Imm => {
             let imm = instruction.src2() as i16;
             format!(
                 "{pc:04}  {:<16} r{}, r{}, {imm:+}",
@@ -173,7 +180,12 @@ pub fn disassemble_instruction(
             )
         }
 
-        OpCode::GetField | OpCode::SetField => {
+        OpCode::GetField
+        | OpCode::SetField
+        | OpCode::GetFieldI32
+        | OpCode::GetFieldF64
+        | OpCode::SetFieldI32
+        | OpCode::SetFieldF64 => {
             format!(
                 "{pc:04}  {:<16} r{}, r{}, offset:{}",
                 opcode.mnemonic(),
