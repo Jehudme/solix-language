@@ -402,6 +402,8 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
         project_root.to_str().expect("valid path"),
         "--lang",
         "cpp",
+        "--platforms",
+        "host",
     ])
     .expect("parse solix new native cpp");
     assert_eq!(run(add_cpp_cli).expect("solix new native cpp"), 0);
