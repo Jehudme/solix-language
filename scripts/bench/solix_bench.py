@@ -128,6 +128,125 @@ def get_peak_rss_kb(pid: Optional[int] = None) -> int:
     return 0
 
 
+def get_hardware_telemetry() -> Dict[str, Any]:
+    """Extracts host machine hardware telemetry (CPU model, cores, total RAM, OS kernel)."""
+    detected_cpu = "Unknown CPU"
+    if OS_NAME == "Linux":
+        try:
+            cpu_info_path = Path("/proc/cpuinfo")
+            if cpu_info_path.exists():
+                for raw_line in cpu_info_path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines():
+                    if raw_line.startswith("model name"):
+                        line_parts = raw_line.split(":", 1)
+                        if len(line_parts) == 2:
+                            detected_cpu = line_parts[1].strip()
+                            break
+        except Exception:
+            pass
+    elif OS_NAME == "Darwin":
+        try:
+            sysctl_proc = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if sysctl_proc.returncode == 0 and sysctl_proc.stdout.strip():
+                detected_cpu = sysctl_proc.stdout.strip()
+        except Exception:
+            pass
+    elif OS_NAME == "Windows":
+        try:
+            wmic_proc = subprocess.run(
+                ["wmic", "cpu", "get", "name"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if wmic_proc.returncode == 0:
+                cpu_lines = [
+                    entry.strip()
+                    for entry in wmic_proc.stdout.splitlines()
+                    if entry.strip() and entry.strip() != "Name"
+                ]
+                if cpu_lines:
+                    detected_cpu = cpu_lines[0]
+        except Exception:
+            pass
+
+    if detected_cpu == "Unknown CPU" and platform.processor():
+        detected_cpu = platform.processor()
+
+    cpu_cores_count = os.cpu_count() or 1
+
+    total_ram_megabytes = 0
+    if HAS_PSUTIL:
+        try:
+            total_ram_megabytes = int(psutil.virtual_memory().total // (1024 * 1024))
+        except Exception:
+            pass
+
+    if total_ram_megabytes == 0 and OS_NAME == "Linux":
+        try:
+            mem_info_path = Path("/proc/meminfo")
+            if mem_info_path.exists():
+                for raw_line in mem_info_path.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines():
+                    if raw_line.startswith("MemTotal:"):
+                        line_parts = raw_line.split()
+                        if len(line_parts) >= 2:
+                            total_ram_megabytes = int(line_parts[1]) // 1024
+                            break
+        except Exception:
+            pass
+    elif total_ram_megabytes == 0 and OS_NAME == "Darwin":
+        try:
+            sysctl_mem = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if sysctl_mem.returncode == 0 and sysctl_mem.stdout.strip():
+                total_ram_megabytes = int(
+                    int(sysctl_mem.stdout.strip()) // (1024 * 1024)
+                )
+        except Exception:
+            pass
+    elif total_ram_megabytes == 0 and OS_NAME == "Windows":
+        try:
+            wmic_mem = subprocess.run(
+                ["wmic", "computersystem", "get", "TotalPhysicalMemory"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if wmic_mem.returncode == 0:
+                mem_lines = [
+                    entry.strip()
+                    for entry in wmic_mem.stdout.splitlines()
+                    if entry.strip() and entry.strip() != "TotalPhysicalMemory"
+                ]
+                if mem_lines:
+                    total_ram_megabytes = int(
+                        int(mem_lines[0]) // (1024 * 1024)
+                    )
+        except Exception:
+            pass
+
+    return {
+        "cpu_model": detected_cpu,
+        "cpu_cores": cpu_cores_count,
+        "total_ram_mb": total_ram_megabytes,
+        "os_name": OS_NAME,
+        "os_kernel": platform.platform(),
+        "arch": platform.machine(),
+    }
+
+
 class BenchmarkRunner:
     """Executes benchmark verification and timed multi-engine suites."""
 
@@ -149,6 +268,7 @@ class BenchmarkRunner:
             shutil.which("taskset") if (pin_cpu and OS_NAME == "Linux") else None
         )
         self.c_bins_cache: Dict[str, Path] = {}
+        self.solix_bins_cache: Dict[str, Tuple[Path, float]] = {}
 
     def _load_config(self, config_path: Path) -> Dict[str, Any]:
         if config_path.exists():
@@ -282,6 +402,39 @@ class BenchmarkRunner:
             )
         return slx_files
 
+    def compile_solix_workload(
+        self, slx_files: List[Path], profile: str = "release"
+    ) -> Tuple[Optional[Path], float]:
+        """Compiles Solix source files into an executable .slxb binary before timed VM execution."""
+        if not slx_files:
+            return None, 0.0
+        cache_key = f"{slx_files[0].parent.name}_{profile}"
+        if cache_key in self.solix_bins_cache:
+            return self.solix_bins_cache[cache_key]
+
+        solix_bin = self.resolve_engine("solix")
+        if not solix_bin:
+            return None, 0.0
+
+        temp_build_dir = Path(tempfile.gettempdir()) / "solix_bench_build"
+        temp_build_dir.mkdir(parents=True, exist_ok=True)
+        out_binary = temp_build_dir / f"{cache_key}.slxb"
+
+        cmd = (
+            [solix_bin, "compile"]
+            + [str(path) for path in slx_files]
+            + ["-o", str(out_binary), "--profile", profile]
+        )
+        start_time = time.perf_counter()
+        compile_code, _compile_out, _compile_dur, _compile_rss = self.execute_command(cmd)
+        compile_ms = (time.perf_counter() - start_time) * 1000.0
+
+        if compile_code == 0 and out_binary.exists():
+            cached_result = (out_binary, round(compile_ms, 2))
+            self.solix_bins_cache[cache_key] = cached_result
+            return cached_result
+        return None, 0.0
+
     def run_workload_verification(
         self, workload_dir: Path
     ) -> Tuple[bool, str, Dict[str, Optional[str]]]:
@@ -292,7 +445,13 @@ class BenchmarkRunner:
         if solix_bin:
             slx_files = self._ordered_solix_files(workload_dir)
             if slx_files:
-                cmd = [solix_bin, "run"] + [str(path) for path in slx_files]
+                compiled_bin, _ = self.compile_solix_workload(
+                    slx_files, profile="release"
+                )
+                if compiled_bin:
+                    cmd = [solix_bin, "run", str(compiled_bin)]
+                else:
+                    cmd = [solix_bin, "run"] + [str(path) for path in slx_files]
                 code, out, _, _ = self.execute_command(cmd)
                 results["solix"] = (
                     self.extract_result_checksum(out) if code == 0 else None
@@ -346,41 +505,80 @@ class BenchmarkRunner:
         cmd: List[str],
         warmup_runs: int = 2,
         timed_runs: int = 5,
+        scale_iterations: int = 1,
+        benchmark_duration_ms: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """Runs warmup and timed iterations for a command and summarizes timings."""
-        for _ in range(warmup_runs):
+        """Runs cold-start, warmup, and timed iterations for a command and summarizes timings."""
+        cold_code, _cold_out, cold_duration_ms, cold_rss_kb = self.execute_command(cmd)
+        cold_start_ms = round(cold_duration_ms, 2) if cold_code == 0 else 0.0
+
+        remaining_warmup = max(0, warmup_runs - 1)
+        for _ in range(remaining_warmup):
             self.execute_command(cmd)
 
         durations: List[float] = []
         peak_rss_list: List[int] = []
-        for _ in range(timed_runs):
-            code, _out, duration_ms, rss_kb = self.execute_command(cmd)
-            if code == 0:
-                durations.append(duration_ms)
-                if rss_kb > 0:
-                    peak_rss_list.append(rss_kb)
+        total_timed_elapsed_ms = 0.0
+        required_samples = max(1, timed_runs)
+        sample_counter = 0
+
+        while sample_counter < required_samples or (
+            benchmark_duration_ms is not None and total_timed_elapsed_ms < benchmark_duration_ms
+        ):
+            if scale_iterations > 1:
+                batch_start = time.perf_counter()
+                batch_peak_rss = 0
+                batch_success = True
+                for _ in range(scale_iterations):
+                    iteration_code, _out, _dur, iteration_rss = self.execute_command(cmd)
+                    if iteration_code != 0:
+                        batch_success = False
+                        break
+                    batch_peak_rss = max(batch_peak_rss, iteration_rss)
+                batch_elapsed_ms = (time.perf_counter() - batch_start) * 1000.0
+                if batch_success:
+                    effective_sample_ms = batch_elapsed_ms / scale_iterations
+                    durations.append(effective_sample_ms)
+                    total_timed_elapsed_ms += batch_elapsed_ms
+                    if batch_peak_rss > 0:
+                        peak_rss_list.append(batch_peak_rss)
+            else:
+                sample_code, _sample_out, sample_dur_ms, sample_rss = self.execute_command(cmd)
+                if sample_code == 0:
+                    durations.append(sample_dur_ms)
+                    total_timed_elapsed_ms += sample_dur_ms
+                    if sample_rss > 0:
+                        peak_rss_list.append(sample_rss)
+
+            sample_counter += 1
+            if sample_counter >= 500:
+                break
 
         if not durations:
             return {
+                "cold_start_ms": cold_start_ms,
                 "median_ms": 0.0,
                 "min_ms": 0.0,
                 "max_ms": 0.0,
                 "stdev_ms": 0.0,
-                "rss_kb": 0,
+                "rss_kb": cold_rss_kb,
+                "samples": 0,
             }
 
-        med_ms = statistics.median(durations)
-        min_ms = min(durations)
-        max_ms = max(durations)
-        stdev_ms = statistics.stdev(durations) if len(durations) > 1 else 0.0
-        rss_kb = int(statistics.median(peak_rss_list)) if peak_rss_list else 0
+        median_duration = statistics.median(durations)
+        minimum_duration = min(durations)
+        maximum_duration = max(durations)
+        standard_deviation = statistics.stdev(durations) if len(durations) > 1 else 0.0
+        median_rss = int(statistics.median(peak_rss_list)) if peak_rss_list else cold_rss_kb
 
         return {
-            "median_ms": round(med_ms, 2),
-            "min_ms": round(min_ms, 2),
-            "max_ms": round(max_ms, 2),
-            "stdev_ms": round(stdev_ms, 2),
-            "rss_kb": rss_kb,
+            "cold_start_ms": cold_start_ms,
+            "median_ms": round(median_duration, 2),
+            "min_ms": round(minimum_duration, 2),
+            "max_ms": round(maximum_duration, 2),
+            "stdev_ms": round(standard_deviation, 2),
+            "rss_kb": median_rss,
+            "samples": len(durations),
         }
 
     def run_all_benchmarks(
@@ -391,6 +589,9 @@ class BenchmarkRunner:
         filter_pattern: Optional[str] = None,
         label: Optional[str] = None,
         solix_only: bool = False,
+        scale_iterations: int = 1,
+        benchmark_duration_ms: Optional[float] = None,
+        no_precompile: bool = False,
     ) -> Dict[str, Any]:
         """Runs benchmarks across all workloads and active engines."""
         workload_dirs = self.get_workload_dirs(filter_pattern)
@@ -399,14 +600,24 @@ class BenchmarkRunner:
         lua_bin = None if solix_only else self.resolve_engine("lua")
         luajit_bin = None if solix_only else self.resolve_engine("luajit")
 
+        telemetry = get_hardware_telemetry()
         metadata: Dict[str, Any] = {
             "os": OS_NAME,
             "arch": platform.machine(),
             "mode": mode,
             "warmup": warmup,
             "iterations": iterations,
+            "scale_iterations": scale_iterations,
+            "precompiled": not no_precompile,
             "timestamp": time.time(),
+            "telemetry": telemetry,
+            "cpu_model": telemetry["cpu_model"],
+            "cpu_cores": telemetry["cpu_cores"],
+            "total_ram_mb": telemetry["total_ram_mb"],
+            "os_kernel": telemetry["os_kernel"],
         }
+        if benchmark_duration_ms is not None:
+            metadata["benchmark_duration_ms"] = benchmark_duration_ms
         if label:
             metadata["label"] = label
 
@@ -420,56 +631,99 @@ class BenchmarkRunner:
             results["workloads"][wname] = {}
             slx_files = self._ordered_solix_files(wdir)
 
+            compile_duration_ms = 0.0
+            precompiled_path = None
+            if solix_bin and slx_files and not no_precompile:
+                precompiled_path, compile_duration_ms = self.compile_solix_workload(
+                    slx_files, profile="release"
+                )
+
             if solix_bin and slx_files:
-                fast_cmd = [solix_bin, "run"] + [str(path) for path in slx_files]
-                results["workloads"][wname][
-                    "solix_fast"
-                ] = self.benchmark_workload_engine(fast_cmd, warmup, iterations)
+                if precompiled_path:
+                    fast_cmd = [solix_bin, "run", str(precompiled_path)]
+                else:
+                    fast_cmd = [solix_bin, "run"] + [str(path) for path in slx_files]
+                engine_stats = self.benchmark_workload_engine(
+                    fast_cmd,
+                    warmup_runs=warmup,
+                    timed_runs=iterations,
+                    scale_iterations=scale_iterations,
+                    benchmark_duration_ms=benchmark_duration_ms,
+                )
+                if compile_duration_ms > 0.0:
+                    engine_stats["compile_ms"] = compile_duration_ms
+                results["workloads"][wname]["solix_fast"] = engine_stats
 
             if solix_bin and slx_files and mode in ("safe", "parity"):
-                safe_cmd = (
-                    [solix_bin, "run"]
-                    + [str(path) for path in slx_files]
-                    + ["--safe"]
+                if precompiled_path:
+                    safe_cmd = [solix_bin, "run", str(precompiled_path), "--safe"]
+                else:
+                    safe_cmd = (
+                        [solix_bin, "run"]
+                        + [str(path) for path in slx_files]
+                        + ["--safe"]
+                    )
+                safe_stats = self.benchmark_workload_engine(
+                    safe_cmd,
+                    warmup_runs=warmup,
+                    timed_runs=iterations,
+                    scale_iterations=scale_iterations,
+                    benchmark_duration_ms=benchmark_duration_ms,
                 )
-                results["workloads"][wname][
-                    "solix_safe"
-                ] = self.benchmark_workload_engine(safe_cmd, warmup, iterations)
+                if compile_duration_ms > 0.0:
+                    safe_stats["compile_ms"] = compile_duration_ms
+                results["workloads"][wname]["solix_safe"] = safe_stats
 
             if solix_only or mode == "parity":
                 continue
 
             py_files = sorted(wdir.glob("*.py"))
             if py_bin and py_files:
-                results["workloads"][wname][
-                    "python3"
-                ] = self.benchmark_workload_engine(
-                    [py_bin, str(py_files[0])], warmup, iterations
+                results["workloads"][wname]["python3"] = (
+                    self.benchmark_workload_engine(
+                        [py_bin, str(py_files[0])],
+                        warmup_runs=warmup,
+                        timed_runs=iterations,
+                        scale_iterations=scale_iterations,
+                        benchmark_duration_ms=benchmark_duration_ms,
+                    )
                 )
 
             lua_files = sorted(wdir.glob("*.lua"))
             if lua_bin and lua_files:
-                results["workloads"][wname][
-                    "lua"
-                ] = self.benchmark_workload_engine(
-                    [lua_bin, str(lua_files[0])], warmup, iterations
+                results["workloads"][wname]["lua"] = (
+                    self.benchmark_workload_engine(
+                        [lua_bin, str(lua_files[0])],
+                        warmup_runs=warmup,
+                        timed_runs=iterations,
+                        scale_iterations=scale_iterations,
+                        benchmark_duration_ms=benchmark_duration_ms,
+                    )
                 )
 
             if luajit_bin and lua_files:
-                results["workloads"][wname][
-                    "luajit"
-                ] = self.benchmark_workload_engine(
-                    [luajit_bin, str(lua_files[0])], warmup, iterations
+                results["workloads"][wname]["luajit"] = (
+                    self.benchmark_workload_engine(
+                        [luajit_bin, str(lua_files[0])],
+                        warmup_runs=warmup,
+                        timed_runs=iterations,
+                        scale_iterations=scale_iterations,
+                        benchmark_duration_ms=benchmark_duration_ms,
+                    )
                 )
 
             c_files = sorted(wdir.glob("*.c"))
             if c_files:
                 c_bin = self.compile_c_workload(c_files[0])
                 if c_bin:
-                    results["workloads"][wname][
-                        "c"
-                    ] = self.benchmark_workload_engine(
-                        [str(c_bin)], warmup, iterations
+                    results["workloads"][wname]["c"] = (
+                        self.benchmark_workload_engine(
+                            [str(c_bin)],
+                            warmup_runs=warmup,
+                            timed_runs=iterations,
+                            scale_iterations=scale_iterations,
+                            benchmark_duration_ms=benchmark_duration_ms,
+                        )
                     )
 
         return results
@@ -811,13 +1065,16 @@ def extract_cross_language_rows(benchmark_data: Dict[str, Any]) -> List[Dict[str
     workloads = benchmark_data.get("workloads", {})
     rows: List[Dict[str, Any]] = []
     for wname, engines in sorted(workloads.items()):
-        solix_ms = float(engines.get("solix_fast", {}).get("median_ms", 0.0))
+        solix_entry = engines.get("solix_fast", {})
+        solix_ms = float(solix_entry.get("median_ms", 0.0))
+        compile_ms = float(solix_entry.get("compile_ms", 0.0))
+        cold_ms = float(solix_entry.get("cold_start_ms", 0.0))
         safe_ms = float(engines.get("solix_safe", {}).get("median_ms", 0.0))
         py_ms = float(engines.get("python3", {}).get("median_ms", 0.0))
         lua_ms = float(engines.get("lua", {}).get("median_ms", 0.0))
         luajit_ms = float(engines.get("luajit", {}).get("median_ms", 0.0))
         c_ms = float(engines.get("c", {}).get("median_ms", 0.0))
-        rss_kb = int(engines.get("solix_fast", {}).get("rss_kb", 0))
+        rss_kb = int(solix_entry.get("rss_kb", 0))
         has_any_other = any(
             value > 0.0 for value in (py_ms, lua_ms, luajit_ms, c_ms, safe_ms)
         )
@@ -826,6 +1083,8 @@ def extract_cross_language_rows(benchmark_data: Dict[str, Any]) -> List[Dict[str
         rows.append(
             {
                 "workload": wname,
+                "solix_compile_ms": compile_ms,
+                "solix_cold_ms": cold_ms,
                 "solix_ms": solix_ms,
                 "solix_safe_ms": safe_ms,
                 "python3_ms": py_ms,
@@ -881,10 +1140,20 @@ def render_cross_language_markdown(benchmark_data: Dict[str, Any]) -> str:
 
     lines = ["\n### Cross-Language Comparison\n"]
     lines.append(
-        "| Workload | Solix (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | vs Python | Solix RSS (KB) |"
+        "| Workload | Precompile (ms) | Solix VM (ms) | Cold Start (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | vs Python | Solix RSS (KB) |"
     )
-    lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for row in rows:
+        compile_str = (
+            f"{row['solix_compile_ms']:.2f}"
+            if row.get("solix_compile_ms", 0.0) > 0.0
+            else "-"
+        )
+        cold_str = (
+            f"{row['solix_cold_ms']:.2f}"
+            if row.get("solix_cold_ms", 0.0) > 0.0
+            else "-"
+        )
         solix_str = f"**{row['solix_ms']:.2f}**" if row["solix_ms"] > 0.0 else "-"
         py_str = f"{row['python3_ms']:.2f}" if row["python3_ms"] > 0.0 else "-"
         lua_str = f"{row['lua_ms']:.2f}" if row["lua_ms"] > 0.0 else "-"
@@ -893,7 +1162,7 @@ def render_cross_language_markdown(benchmark_data: Dict[str, Any]) -> str:
         vs_py = f"{row['vs_python']:.2f}x" if row["vs_python"] is not None else "-"
         rss_str = f"{row['solix_rss_kb']}" if row["solix_rss_kb"] > 0 else "-"
         lines.append(
-            f"| `{row['workload']}` | {solix_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {vs_py} | {rss_str} |"
+            f"| `{row['workload']}` | {compile_str} | {solix_str} | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {vs_py} | {rss_str} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -903,11 +1172,25 @@ def render_run_console_table(
 ) -> str:
     """Renders formatted console ASCII tables for a single benchmark run."""
     workloads = benchmark_data.get("workloads", {})
-    mode = benchmark_data.get("metadata", {}).get("mode", "fast")
+    metadata = benchmark_data.get("metadata", {})
+    telemetry = metadata.get("telemetry", {})
+    cpu_model = telemetry.get("cpu_model") or metadata.get("cpu_model")
+    cores = telemetry.get("cpu_cores") or metadata.get("cpu_cores")
+    ram_mb = telemetry.get("total_ram_mb") or metadata.get("total_ram_mb")
+    kernel = telemetry.get("os_kernel") or metadata.get("os_kernel")
+
+    telemetry_banner = ""
+    if cpu_model and cores:
+        telemetry_banner = (
+            f"Hardware Telemetry: {cpu_model} ({cores} cores) | {ram_mb} MB RAM | {kernel}\n\n"
+        )
+
+    mode = metadata.get("mode", "fast")
 
     if mode == "parity":
         headers = [
             "Workload",
+            "Precompile (ms)",
             "Solix Fast (ms)",
             "Solix Safe (ms)",
             "Overhead %",
@@ -916,6 +1199,8 @@ def render_run_console_table(
         ]
         table_rows: List[List[str]] = []
         for wname, edata in sorted(workloads.items()):
+            compile_ms = edata.get("solix_fast", {}).get("compile_ms", 0.0)
+            compile_str = f"{compile_ms:.2f}" if compile_ms > 0 else "-"
             fast_ms = edata.get("solix_fast", {}).get("median_ms", 0.0)
             safe_ms = edata.get("solix_safe", {}).get("median_ms", 0.0)
             fast_rss = edata.get("solix_fast", {}).get("rss_kb", 0)
@@ -928,6 +1213,7 @@ def render_run_console_table(
             table_rows.append(
                 [
                     wname,
+                    compile_str,
                     f"{fast_ms:.2f}",
                     f"{safe_ms:.2f}",
                     overhead,
@@ -935,13 +1221,15 @@ def render_run_console_table(
                     str(safe_rss),
                 ]
             )
-        return format_ascii_table(headers, table_rows)
+        return telemetry_banner + format_ascii_table(headers, table_rows)
 
     cross_rows = extract_cross_language_rows(benchmark_data)
     if include_cross_language:
         headers = [
             "Workload",
+            "Precompile (ms)",
             "Solix (ms)",
+            "Cold (ms)",
             "Python 3 (ms)",
             "Lua (ms)",
             "LuaJIT (ms)",
@@ -951,10 +1239,22 @@ def render_run_console_table(
         ]
         table_rows = []
         for row in cross_rows:
+            compile_val = (
+                f"{row['solix_compile_ms']:.2f}"
+                if row.get("solix_compile_ms", 0.0) > 0.0
+                else "-"
+            )
+            cold_val = (
+                f"{row['solix_cold_ms']:.2f}"
+                if row.get("solix_cold_ms", 0.0) > 0.0
+                else "-"
+            )
             table_rows.append(
                 [
                     row["workload"],
+                    compile_val,
                     f"{row['solix_ms']:.2f}" if row["solix_ms"] > 0 else "-",
+                    cold_val,
                     f"{row['python3_ms']:.2f}" if row["python3_ms"] > 0 else "-",
                     f"{row['lua_ms']:.2f}" if row["lua_ms"] > 0 else "-",
                     f"{row['luajit_ms']:.2f}" if row["luajit_ms"] > 0 else "-",
@@ -965,36 +1265,61 @@ def render_run_console_table(
                     str(row["solix_rss_kb"]),
                 ]
             )
-        return format_ascii_table(headers, table_rows)
+        return telemetry_banner + format_ascii_table(headers, table_rows)
 
-    headers = ["Workload", "Solix Fast (ms)", "Min (ms)", "Max (ms)", "RSS (KB)"]
+    headers = [
+        "Workload",
+        "Precompile (ms)",
+        "Solix Fast (ms)",
+        "Cold (ms)",
+        "Min (ms)",
+        "Max (ms)",
+        "RSS (KB)",
+    ]
     table_rows = []
     for wname, edata in sorted(workloads.items()):
         stats = edata.get("solix_fast", {})
+        compile_ms = stats.get("compile_ms", 0.0)
+        cold_ms = stats.get("cold_start_ms", 0.0)
         table_rows.append(
             [
                 wname,
+                f"{compile_ms:.2f}" if compile_ms > 0 else "-",
                 f"{stats.get('median_ms', 0.0):.2f}",
+                f"{cold_ms:.2f}" if cold_ms > 0 else "-",
                 f"{stats.get('min_ms', 0.0):.2f}",
                 f"{stats.get('max_ms', 0.0):.2f}",
                 str(stats.get("rss_kb", 0)),
             ]
         )
-    return format_ascii_table(headers, table_rows)
+    return telemetry_banner + format_ascii_table(headers, table_rows)
 
 
 def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
     """Renders GitHub Flavored Markdown table for `run --markdown`."""
     workloads = benchmark_data.get("workloads", {})
-    mode = benchmark_data.get("metadata", {}).get("mode", "fast")
+    metadata = benchmark_data.get("metadata", {})
+    mode = metadata.get("mode", "fast")
     lines: List[str] = []
+
+    telemetry = metadata.get("telemetry", {})
+    cpu_model = telemetry.get("cpu_model") or metadata.get("cpu_model")
+    cores = telemetry.get("cpu_cores") or metadata.get("cpu_cores")
+    ram_mb = telemetry.get("total_ram_mb") or metadata.get("total_ram_mb")
+    kernel = telemetry.get("os_kernel") or metadata.get("os_kernel")
+    if cpu_model and cores:
+        lines.append(
+            f"> [!NOTE]\n> **Hardware Telemetry:** {cpu_model} ({cores} cores) | {ram_mb} MB RAM | {kernel}\n"
+        )
 
     if mode == "parity":
         lines.append(
-            "| Workload | Solix Fast (ms) | Solix Safe (ms) | Overhead % | Fast RSS (KB) | Safe RSS (KB) |"
+            "| Workload | Precompile (ms) | Solix Fast (ms) | Solix Safe (ms) | Overhead % | Fast RSS (KB) | Safe RSS (KB) |"
         )
-        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: |")
+        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: |")
         for wname, edata in sorted(workloads.items()):
+            compile_ms = edata.get("solix_fast", {}).get("compile_ms", 0.0)
+            compile_str = f"{compile_ms:.2f}" if compile_ms > 0 else "-"
             fast_ms = edata.get("solix_fast", {}).get("median_ms", 0.0)
             safe_ms = edata.get("solix_safe", {}).get("median_ms", 0.0)
             fast_rss = edata.get("solix_fast", {}).get("rss_kb", 0)
@@ -1005,14 +1330,16 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
                 else "N/A"
             )
             lines.append(
-                f"| `{wname}` | {fast_ms:.2f} | {safe_ms:.2f} | {overhead} | {fast_rss} | {safe_rss} |"
+                f"| `{wname}` | {compile_str} | {fast_ms:.2f} | {safe_ms:.2f} | {overhead} | {fast_rss} | {safe_rss} |"
             )
     else:
         lines.append(
-            "| Workload | Solix (ms) | Python (ms) | Lua (ms) | LuaJIT (ms) | C (ms) | Speedup vs Python | RSS (KB) |"
+            "| Workload | Precompile (ms) | Solix (ms) | Cold (ms) | Python (ms) | Lua (ms) | LuaJIT (ms) | C (ms) | Speedup vs Python | RSS (KB) |"
         )
-        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
         for wname, edata in sorted(workloads.items()):
+            compile_ms = edata.get("solix_fast", {}).get("compile_ms", 0.0)
+            cold_ms = edata.get("solix_fast", {}).get("cold_start_ms", 0.0)
             solix_ms = edata.get("solix_fast", {}).get("median_ms", 0.0)
             py_ms = edata.get("python3", {}).get("median_ms", 0.0)
             lua_ms = edata.get("lua", {}).get("median_ms", 0.0)
@@ -1020,6 +1347,8 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             c_ms = edata.get("c", {}).get("median_ms", 0.0)
             rss_kb = edata.get("solix_fast", {}).get("rss_kb", 0)
 
+            compile_str = f"{compile_ms:.2f}" if compile_ms > 0 else "-"
+            cold_str = f"{cold_ms:.2f}" if cold_ms > 0 else "-"
             speedup_str = (
                 f"{(py_ms / solix_ms):.2f}x"
                 if solix_ms > 0 and py_ms > 0
@@ -1031,7 +1360,7 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             py_str = f"{py_ms:.2f}" if py_ms > 0 else "-"
 
             lines.append(
-                f"| `{wname}` | **{solix_ms:.2f}** | {py_str} | {lua_str} | {luajit_str} | {c_str} | {speedup_str} | {rss_kb} |"
+                f"| `{wname}` | {compile_str} | **{solix_ms:.2f}** | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {speedup_str} | {rss_kb} |"
             )
 
     return "\n".join(lines)
@@ -1326,6 +1655,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only run Solix benchmarks (skip comparative engines)",
     )
     run_parser.add_argument(
+        "--scale-iterations",
+        "--inner-loop",
+        dest="scale_iterations",
+        type=int,
+        default=1,
+        help="Scale benchmark execution passes per sample (default: 1)",
+    )
+    run_parser.add_argument(
+        "--benchmark-duration-ms",
+        type=float,
+        default=None,
+        help="Target minimum sample duration in milliseconds across iterations",
+    )
+    run_parser.add_argument(
+        "--no-precompile",
+        action="store_true",
+        help="Execute Solix directly on sources without pre-compiling to .slxb",
+    )
+    run_parser.add_argument(
         "--cross-language",
         action="store_true",
         help="Include comparative language timings in table output",
@@ -1530,6 +1878,9 @@ def _handle_run(args: argparse.Namespace, root_dir: Path) -> int:
         filter_pattern=args.workload,
         label=args.label,
         solix_only=args.solix_only,
+        scale_iterations=args.scale_iterations,
+        benchmark_duration_ms=args.benchmark_duration_ms,
+        no_precompile=args.no_precompile,
     )
 
     output_format = args.format

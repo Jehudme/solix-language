@@ -612,6 +612,43 @@ class SolixBenchCliTests(unittest.TestCase):
             self.assertEqual(parsed_json["labels"], ["v1.4.0", "v1.5.0", "v1.6.0"])
             self.assertEqual(parsed_json["summary"]["geomean_vs_first"], [1.0, 1.33, 2.0])
 
+    def test_solix_bench_telemetry_and_scaling_flags(self) -> None:
+        """Tests that `solix_bench run` captures hardware telemetry and supports iteration scaling."""
+        bench_proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "bench" / "solix_bench.py"),
+                "run",
+                "--workload",
+                "01_fib",
+                "--solix-only",
+                "--scale-iterations",
+                "2",
+                "--warmup",
+                "1",
+                "--iterations",
+                "2",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(bench_proc.returncode, 0, msg=bench_proc.stderr)
+        benchmark_payload = json.loads(bench_proc.stdout)
+        self.assertIn("metadata", benchmark_payload)
+        self.assertIn("telemetry", benchmark_payload["metadata"])
+        self.assertIn("cpu_model", benchmark_payload["metadata"]["telemetry"])
+        self.assertIn("cpu_cores", benchmark_payload["metadata"]["telemetry"])
+        self.assertIn("total_ram_mb", benchmark_payload["metadata"]["telemetry"])
+        self.assertEqual(benchmark_payload["metadata"]["scale_iterations"], 2)
+        self.assertTrue(benchmark_payload["metadata"]["precompiled"])
+        self.assertIn("01_fib_recursive", benchmark_payload["workloads"])
+        solix_stats = benchmark_payload["workloads"]["01_fib_recursive"]["solix_fast"]
+        self.assertIn("compile_ms", solix_stats)
+        self.assertIn("cold_start_ms", solix_stats)
+        self.assertGreater(solix_stats["compile_ms"], 0.0)
+
     def test_ci_workflow_removes_sensitive_label_and_includes_pr_benchmark(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("--remove-label", ci_text)
