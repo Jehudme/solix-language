@@ -420,6 +420,64 @@ impl SharedLibraryLoader {
         Ok(())
     }
 
+    /// Discovers and loads native shared libraries from a target directory (such as `bin/<target_triple>/`).
+    ///
+    /// Only libraries whose basename matches `native_*` or `libnative_*` (or are explicitly declared in
+    /// `declared_libraries`) are loaded into the symbol table. Transitive or support libraries (e.g.
+    /// `libglfw.so`, `glfw3.dll`) are ignored.
+    pub fn load_directory_filtered(
+        &mut self,
+        target_directory: &Path,
+        declared_libraries: &[String],
+    ) -> Result<Vec<std::path::PathBuf>, RuntimeError> {
+        let mut loaded_paths = Vec::new();
+        if !target_directory.is_dir() {
+            return Ok(loaded_paths);
+        }
+        let directory_entries = std::fs::read_dir(target_directory).map_err(|io_error| {
+            RuntimeError::SharedLibraryError {
+                path: target_directory.display().to_string(),
+                reason: format!("failed to read directory: {io_error}"),
+            }
+        })?;
+
+        for entry_result in directory_entries.flatten() {
+            let entry_path = entry_result.path();
+            if !entry_path.is_file() {
+                continue;
+            }
+            let file_name = entry_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            let extension = entry_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("");
+
+            let is_shared_library = extension.eq_ignore_ascii_case("so")
+                || extension.eq_ignore_ascii_case("dll")
+                || extension.eq_ignore_ascii_case("dylib");
+            if !is_shared_library {
+                continue;
+            }
+
+            let is_declared = declared_libraries.iter().any(|declared_lib| {
+                solix_common::project::matches_declared_dynamic_library(file_name, declared_lib)
+            });
+            let is_native_module =
+                solix_common::project::is_solix_native_module_name(file_name) || is_declared;
+
+            if !is_native_module {
+                continue;
+            }
+
+            self.load_library(&entry_path)?;
+            loaded_paths.push(entry_path);
+        }
+        Ok(loaded_paths)
+    }
+
     /// Probes loaded libraries for a direct symbol matching `symbol_name` or its mangled alternatives.
     #[must_use]
     pub fn resolve_direct_symbol(&self, symbol_name: &str) -> Option<NativeCFunctionPtr> {

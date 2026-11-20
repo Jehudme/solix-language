@@ -122,6 +122,19 @@ When the virtual machine executes within an interactive Debug Adapter Protocol (
 
 ---
 
+## 6. Native Dynamic Library Loader Isolation & Filter Policy
+
+To eliminate security risks and unpredictable host environment pollution, the Solix runtime enforces strict library discovery isolation:
+
+1. **Restricted Target Platform Directory**: The runtime never searches arbitrary system directories or the host system environment search paths. Instead, native modules are resolved exclusively from the active platform target directory (`bin/<target_triple>/` with fallback to `lib/<target_triple>/`) inside the extracted package cache or explicit `--lib` command options.
+2. **Solix Native Module Prefix & Suffix Filtering**: By default, dynamic loader discovery automatically loads only shared libraries following Solix native plugin naming conventions:
+   - Module prefix: `native_*` or `libnative_*` (e.g., `libnative_math.so`, `native_math.dll`).
+   - Module suffix: `*_native` or `lib*native` (e.g., `libsolixlib_native.so`).
+3. **Explicit Declaration via `dynamic_libraries`**: Shared libraries that do not use standard `native_*` naming prefixes are only loaded into the virtual machine symbol table if explicitly declared in the project's `manifest.yaml` (under `dynamic_libraries` or profile `natives`) or embedded within the binary container's `dynamic_libraries` metadata list.
+4. **Transitive Support Library Isolation**: Non-Solix third-party companion libraries (such as system drivers, rendering libraries, or windowing dependencies like `libglfw.so` or `glfw3.dll`) placed alongside native plugins in target folders are extracted to disk for operating system dynamic linker resolution, but are strictly excluded from registration in the Solix VM FFI native dispatch table.
+
+---
+
 ## Related Documentation
 * [FFI Wiki Overview](../wiki/ffi/README.md)
 * [C & C++ SDK Reference (`solix::ffi`)](../wiki/ffi/c-cpp-sdk.md)

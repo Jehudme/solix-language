@@ -881,6 +881,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     program.static_space_size = static_layout.static_space_size;
     program.static_symbols_map = static_layout.static_symbols_map;
     program.constant_pool = constant_pool;
+    program.dynamic_libraries = context.options.dynamic_libraries.clone();
     program.entry_point = context.options.entry_point.clone();
     if let Some(target_entry) = &context.options.entry_point {
         for (function_index, function) in program.functions.iter().enumerate() {
@@ -984,6 +985,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         build_profile: program.build_profile.clone(),
         native_library_checksums: program.native_library_checksums.clone(),
         dependencies,
+        dynamic_libraries: program.dynamic_libraries.clone(),
         exported_classes,
         exported_enums,
         exported_functions,

@@ -160,6 +160,9 @@ pub struct BinaryProgram {
     pub build_profile: String,
     /// Cryptographic SHA-256 digests of bundled native shared libraries.
     pub native_library_checksums: std::collections::HashMap<String, String>,
+    /// Declared dynamic shared library dependencies required by this binary.
+    #[serde(default)]
+    pub dynamic_libraries: Vec<String>,
     /// Pre-parsed AST binary bytes for instant dependency ingestion.
     pub exported_ast_bytes: Vec<u8>,
     /// Full export manifest for dynamic linking and API reflection.
@@ -197,6 +200,7 @@ impl BinaryProgram {
             package_description: String::new(),
             build_profile: "debug".to_string(),
             native_library_checksums: std::collections::HashMap::new(),
+            dynamic_libraries: Vec::new(),
             exported_ast_bytes: Vec::new(),
             export_manifest: ExportManifest::default(),
             source_files: Vec::new(),
@@ -426,6 +430,9 @@ impl BinaryProgram {
         }
         if manifest_to_serialize.native_library_checksums.is_empty() {
             manifest_to_serialize.native_library_checksums = self.native_library_checksums.clone();
+        }
+        if manifest_to_serialize.dynamic_libraries.is_empty() {
+            manifest_to_serialize.dynamic_libraries = self.dynamic_libraries.clone();
         }
 
         let manifest_bytes = serde_json::to_vec(&manifest_to_serialize).unwrap_or_default();
@@ -774,6 +781,7 @@ impl BinaryProgram {
             "debug".to_string()
         };
         let native_library_checksums = export_manifest.native_library_checksums.clone();
+        let dynamic_libraries = export_manifest.dynamic_libraries.clone();
         let source_files = export_manifest.source_files.clone();
 
         Ok(BinaryProgram {
@@ -794,6 +802,7 @@ impl BinaryProgram {
             package_description,
             build_profile,
             native_library_checksums,
+            dynamic_libraries,
             exported_ast_bytes,
             export_manifest,
             source_files,

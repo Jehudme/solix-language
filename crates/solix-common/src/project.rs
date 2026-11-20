@@ -338,6 +338,9 @@ pub struct ProfileConfig {
     /// Profile-scoped native subprojects mapped as `name => native_config`.
     #[serde(default)]
     pub natives: std::collections::BTreeMap<String, NativeTargetConfig>,
+    /// Declared dynamic shared library dependencies required by this profile.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_libraries: Vec<String>,
 }
 
 /// Fully resolved, self-contained profile configuration (no cross-profile inheritance).
@@ -369,6 +372,8 @@ pub struct ResolvedProfile {
     pub sources: Vec<String>,
     /// Resolved target platform specifiers for this profile.
     pub platforms: Vec<String>,
+    /// Declared dynamic shared library dependencies.
+    pub dynamic_libraries: Vec<String>,
     /// Commands executed sequentially before native and Solix compilation.
     pub pre_compile: Vec<String>,
     /// Commands executed sequentially after packaging.
@@ -397,6 +402,7 @@ impl ResolvedProfile {
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
             platforms: vec!["all".to_string()],
+            dynamic_libraries: Vec::new(),
             pre_compile: Vec::new(),
             post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
@@ -421,6 +427,7 @@ impl ResolvedProfile {
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
             platforms: vec!["host".to_string()],
+            dynamic_libraries: Vec::new(),
             pre_compile: Vec::new(),
             post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
@@ -445,6 +452,7 @@ impl ResolvedProfile {
             memory_limit_mb: None,
             sources: vec!["src".to_string(), "tests".to_string()],
             platforms: vec!["host".to_string()],
+            dynamic_libraries: Vec::new(),
             pre_compile: Vec::new(),
             post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
@@ -528,6 +536,9 @@ pub struct ProjectManifest {
     /// Cryptographic SHA-256 digests of bundled native shared libraries.
     #[serde(default)]
     pub native_library_checksums: std::collections::HashMap<String, String>,
+    /// Declared dynamic shared library dependencies required by this project.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_libraries: Vec<String>,
 }
 
 impl ProjectManifest {
@@ -808,6 +819,19 @@ impl ProjectManifest {
             resolved.post_compile = user_config.post_compile.clone();
             resolved.dependencies = user_config.dependencies.clone();
             resolved.natives = user_config.natives.clone();
+            if !user_config.dynamic_libraries.is_empty() {
+                resolved.dynamic_libraries = user_config.dynamic_libraries.clone();
+            }
+        }
+
+        if resolved.dynamic_libraries.is_empty() && !self.dynamic_libraries.is_empty() {
+            resolved.dynamic_libraries = self.dynamic_libraries.clone();
+        }
+
+        for native_name in resolved.natives.keys() {
+            if !resolved.dynamic_libraries.contains(native_name) {
+                resolved.dynamic_libraries.push(native_name.clone());
+            }
         }
 
         resolved.name = target_profile.to_string();
@@ -832,9 +856,53 @@ impl ProjectManifest {
     }
 }
 
-/// Detailed metadata record for an individual entry inside a `.slxarc` container.
+fn strip_library_extension(name_str: &str) -> &str {
+    if let Some(stripped) = name_str.strip_suffix(".so") {
+        stripped
+    } else if let Some(stripped) = name_str.strip_suffix(".dylib") {
+        stripped
+    } else if let Some(stripped) = name_str.strip_suffix(".dll") {
+        stripped
+    } else {
+        name_str
+    }
+}
+
+/// Returns `true` if the shared library filename corresponds to a Solix native module (`native_*` or `libnative_*`).
+#[must_use]
+pub fn is_solix_native_module_name(file_name: &str) -> bool {
+    let lower_name = file_name.to_ascii_lowercase();
+    let stem = strip_library_extension(&lower_name);
+    let base = stem.strip_prefix("lib").unwrap_or(stem);
+    base.starts_with("native")
+        || base.ends_with("native")
+        || base.contains("_native_")
+        || base.starts_with("bridge")
+        || base.ends_with("bridge")
+        || base.contains("_bridge_")
+}
+
+/// Returns `true` if `file_name` matches a declared dynamic library specification,
+/// accounting for platform prefixes (`lib`) and extensions (`.so`, `.dylib`, `.dll`).
+#[must_use]
+pub fn matches_declared_dynamic_library(file_name: &str, declared: &str) -> bool {
+    if file_name.eq_ignore_ascii_case(declared) {
+        return true;
+    }
+    let file_stem = strip_library_extension(file_name);
+    let declared_stem = strip_library_extension(declared);
+
+    let file_base = file_stem.strip_prefix("lib").unwrap_or(file_stem);
+    let declared_base = declared_stem.strip_prefix("lib").unwrap_or(declared_stem);
+
+    file_base.eq_ignore_ascii_case(declared_base)
+        || file_name.starts_with(declared)
+        || file_stem.starts_with(declared_stem)
+}
+
+/// Detailed metadata record for an individual entry inside a `.slxp` container.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SlxarcFileEntry {
+pub struct SlxpFileEntry {
     /// Relative path within the archive container.
     pub path: String,
     /// Uncompressed payload size in bytes.
@@ -845,29 +913,29 @@ pub struct SlxarcFileEntry {
     pub is_directory: bool,
 }
 
-/// Inspection summary containing decoded contents of a `.slxarc` archive container.
+/// Inspection summary containing decoded contents of a `.slxp` package container.
 #[derive(Debug, Clone)]
-pub struct SlxarcInspection {
-    /// Project manifest metadata, if bundled at the archive root.
+pub struct SlxpInspection {
+    /// Project manifest metadata, if bundled at the package root.
     pub manifest: Option<ProjectManifest>,
-    /// Full list of file entries contained within the archive.
-    pub file_entries: Vec<SlxarcFileEntry>,
-    /// Deserialized Solix bytecode binaries embedded inside the archive.
+    /// Full list of file entries contained within the package.
+    pub file_entries: Vec<SlxpFileEntry>,
+    /// Deserialized Solix bytecode binaries embedded inside the package.
     pub binaries: Vec<(String, BinaryProgram)>,
-    /// List of native dynamic shared libraries identified within `lib/`.
+    /// List of native dynamic shared libraries identified within `bin/` or `lib/`.
     pub native_libraries: Vec<String>,
 }
 
-/// Fully extracted and loaded `.slxarc` package ready for virtual machine execution.
+/// Fully extracted and loaded `.slxp` package ready for virtual machine execution.
 #[derive(Debug, Clone)]
-pub struct LoadedSlxarc {
-    /// Project manifest metadata bundled with the archive.
+pub struct LoadedSlxp {
+    /// Project manifest metadata bundled with the package.
     pub manifest: Option<ProjectManifest>,
-    /// Primary compiled bytecode binaries found inside `bin/` or root.
+    /// Primary compiled bytecode binaries found inside `binaries.slxb` or root.
     pub binaries: Vec<BinaryProgram>,
     /// Discovered host native shared library file paths extracted to the runtime cache.
     pub native_libraries: Vec<PathBuf>,
-    /// Secondary dependency `.slxb` binaries found inside `lib/`.
+    /// Secondary dependency `.slxb` binaries found inside `lib/` or `bin/`.
     pub secondary_binaries: Vec<BinaryProgram>,
     /// All files extracted to the cache directory.
     pub extracted_files: Vec<PathBuf>,
@@ -877,11 +945,17 @@ pub struct LoadedSlxarc {
     pub resource_total_bytes: u64,
 }
 
-/// Archive container packager, extractor, and inspector for `.slxarc` distributions.
-pub struct SlxarcArchive;
+/// Backwards compatibility aliases for `.slxarc` terminology.
+pub type SlxarcFileEntry = SlxpFileEntry;
+pub type SlxarcInspection = SlxpInspection;
+pub type LoadedSlxarc = LoadedSlxp;
+pub type SlxarcArchive = SlxpPackage;
 
-impl SlxarcArchive {
-    /// Packages an entire directory tree into a deterministic `.slxarc` archive.
+/// Package container packager, extractor, and inspector for `.slxp` distributions.
+pub struct SlxpPackage;
+
+impl SlxpPackage {
+    /// Packages an entire directory tree into a deterministic `.slxp` package archive.
     pub fn pack_directory(
         staging_directory: &Path,
         output_archive_path: &Path,
@@ -1113,12 +1187,12 @@ pub fn validate_archive_relative_path(entry_name: &str) -> Result<PathBuf, Emiss
     Ok(sanitized)
 }
 
-impl SlxarcArchive {
+impl SlxpPackage {
     /// Extracts host native shared libraries and loads bytecode binaries for VM execution.
     pub fn extract_and_load(
         archive_path: &Path,
         extract_cache_directory: &Path,
-    ) -> Result<LoadedSlxarc, EmissionError> {
+    ) -> Result<LoadedSlxp, EmissionError> {
         let archive_file = File::open(archive_path).map_err(|io_error| {
             EmissionError::ContainerSerializationFailed {
                 reason: format!(
@@ -1172,6 +1246,7 @@ impl SlxarcArchive {
             std::collections::HashMap::new();
         let mut resource_files = Vec::new();
         let mut resource_total_bytes = 0u64;
+        let mut candidate_native_libraries = Vec::new();
 
         for index in 0..zip_reader.len() {
             let mut file_entry = zip_reader.by_index(index).map_err(|zip_error| {
@@ -1212,6 +1287,21 @@ impl SlxarcArchive {
                     }
                 })?;
                 manifest_option = Some(ProjectManifest::from_toml_str(manifest_text)?);
+            } else if entry_name == "binaries.slxb" {
+                let mut binary_bytes = Vec::new();
+                file_entry
+                    .read_to_end(&mut binary_bytes)
+                    .map_err(|io_error| EmissionError::ContainerSerializationFailed {
+                        reason: format!("failed to read root binary '{entry_name}': {io_error}"),
+                    })?;
+                let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
+                    EmissionError::ContainerSerializationFailed {
+                        reason: format!(
+                            "failed to decode root binary '{entry_name}': {deser_error:?}"
+                        ),
+                    }
+                })?;
+                binaries.insert(0, binary);
             } else if entry_name.starts_with("bin/") && entry_name.ends_with(".slxb") {
                 let mut binary_bytes = Vec::new();
                 file_entry
@@ -1242,12 +1332,17 @@ impl SlxarcArchive {
                     }
                 })?;
                 secondary_binaries.push(binary);
-            } else if entry_name.starts_with("lib/") && entry_name.ends_with(host_extension) {
-                let relative_parts: Vec<&str> = entry_name
-                    .strip_prefix("lib/")
-                    .unwrap_or("")
-                    .split('/')
-                    .collect();
+            } else if (entry_name.starts_with("bin/") || entry_name.starts_with("lib/"))
+                && entry_name.ends_with(host_extension)
+            {
+                let relative_parts: Vec<&str> =
+                    if let Some(stripped) = entry_name.strip_prefix("bin/") {
+                        stripped.split('/').collect()
+                    } else if let Some(stripped) = entry_name.strip_prefix("lib/") {
+                        stripped.split('/').collect()
+                    } else {
+                        Vec::new()
+                    };
                 let is_qualified_subdir = relative_parts.len() > 1;
                 let entry_priority = if is_qualified_subdir {
                     native_target_subdir_priority(relative_parts[0])
@@ -1259,7 +1354,7 @@ impl SlxarcArchive {
                     continue;
                 }
 
-                // Extract host native library atomically, preferring exact ABI > compatible sibling ABI > unqualified `lib/<file>`.
+                // Extract host native library atomically, preferring exact ABI > compatible sibling ABI > unqualified `bin/<file>` or `lib/<file>`.
                 let file_name_os = Path::new(&entry_name)
                     .file_name()
                     .unwrap_or(std::ffi::OsStr::new("native.so"));
@@ -1339,8 +1434,9 @@ impl SlxarcArchive {
 
                 native_entry_priorities.insert(file_name_os.to_os_string(), entry_priority);
                 native_entry_names.insert(target_path.clone(), entry_name.clone());
-                if !native_libraries.contains(&target_path) {
-                    native_libraries.push(target_path.clone());
+
+                if !candidate_native_libraries.contains(&target_path) {
+                    candidate_native_libraries.push(target_path.clone());
                 }
                 if !extracted_files.contains(&target_path) {
                     extracted_files.push(target_path);
@@ -1394,12 +1490,14 @@ impl SlxarcArchive {
             .map(|binary| &binary.native_library_checksums)
             .unwrap_or(&empty_checksums);
 
-        for native_lib_path in &native_libraries {
-            let file_name = native_lib_path
+        for extracted_file_path in &extracted_files {
+            let file_name = extracted_file_path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("");
-            let preferred_entry = native_entry_names.get(native_lib_path).map(String::as_str);
+            let preferred_entry = native_entry_names
+                .get(extracted_file_path)
+                .map(String::as_str);
             let expected_checksum =
                 resolve_expected_native_checksum(manifest_checksums, file_name, preferred_entry)
                     .or_else(|| {
@@ -1411,11 +1509,11 @@ impl SlxarcArchive {
                     });
 
             if let Some(expected) = expected_checksum {
-                let actual = crate::hash::sha256_file(native_lib_path).map_err(|io_error| {
+                let actual = crate::hash::sha256_file(extracted_file_path).map_err(|io_error| {
                     EmissionError::ContainerSerializationFailed {
                         reason: format!(
                             "failed to hash extracted native library '{}': {io_error}",
-                            native_lib_path.display()
+                            extracted_file_path.display()
                         ),
                     }
                 })?;
@@ -1423,7 +1521,7 @@ impl SlxarcArchive {
                     return Err(EmissionError::ContainerSerializationFailed {
                         reason: format!(
                             "native library checksum verification failed for '{}': expected {expected}, found {actual}",
-                            native_lib_path.display()
+                            extracted_file_path.display()
                         ),
                     });
                 }
@@ -1451,7 +1549,10 @@ impl SlxarcArchive {
                     }
                 })?;
                 let entry_name = read_zip_entry_name(&file_entry, index)?;
-                if entry_name.ends_with(".slxb") && !entry_name.starts_with("lib/") {
+                if entry_name.ends_with(".slxb")
+                    && !entry_name.starts_with("lib/")
+                    && !entry_name.starts_with("bin/")
+                {
                     let mut binary_bytes = Vec::new();
                     file_entry
                         .read_to_end(&mut binary_bytes)
@@ -1468,7 +1569,28 @@ impl SlxarcArchive {
             }
         }
 
-        Ok(LoadedSlxarc {
+        for candidate_path in candidate_native_libraries {
+            let file_name_lossy = candidate_path
+                .file_name()
+                .map(|name_os| name_os.to_string_lossy())
+                .unwrap_or_default();
+            let is_declared =
+                manifest_option.as_ref().is_some_and(|manifest| {
+                    manifest.dynamic_libraries.iter().any(|declared| {
+                        matches_declared_dynamic_library(&file_name_lossy, declared)
+                    })
+                }) || binaries.iter().any(|binary| {
+                    binary.dynamic_libraries.iter().any(|declared| {
+                        matches_declared_dynamic_library(&file_name_lossy, declared)
+                    })
+                });
+            let is_solix_native = is_solix_native_module_name(&file_name_lossy) || is_declared;
+            if is_solix_native && !native_libraries.contains(&candidate_path) {
+                native_libraries.push(candidate_path);
+            }
+        }
+
+        Ok(LoadedSlxp {
             manifest: manifest_option,
             binaries,
             native_libraries,
@@ -1575,11 +1697,15 @@ pub fn native_target_subdir_priority(subdirectory: &str) -> u8 {
     0
 }
 
-/// Returns `true` when an archive checksum key under `lib/` targets the active host platform
-/// (either unqualified `lib/<file>` or `lib/<matching-subdir>/<file>`).
+/// Returns `true` when an archive checksum key under `bin/` or `lib/` targets the active host platform
+/// (either unqualified `bin/<file>`, `lib/<file>` or `bin/<matching-subdir>/<file>`, `lib/<matching-subdir>/<file>`).
 #[must_use]
 pub fn native_checksum_key_applies_to_host(checksum_key: &str) -> bool {
-    let Some(relative) = checksum_key.strip_prefix("lib/") else {
+    let relative = if let Some(stripped) = checksum_key.strip_prefix("bin/") {
+        stripped
+    } else if let Some(stripped) = checksum_key.strip_prefix("lib/") {
+        stripped
+    } else {
         return !checksum_key.contains('/');
     };
     match relative.split_once('/') {
@@ -1590,7 +1716,7 @@ pub fn native_checksum_key_applies_to_host(checksum_key: &str) -> bool {
 
 /// Resolves the expected SHA-256 digest for `file_name` from a `native_library_checksums` map,
 /// preferring `preferred_entry_name`, exact-ABI host entries (`priority = 3`), and compatible
-/// sibling-ABI entries (`priority = 2`) before falling back to `lib/<file_name>`.
+/// sibling-ABI entries (`priority = 2`) before falling back to `bin/<file_name>` or `lib/<file_name>`.
 #[must_use]
 pub fn resolve_expected_native_checksum<'a>(
     checksums: &'a std::collections::HashMap<String, String>,
@@ -1605,9 +1731,11 @@ pub fn resolve_expected_native_checksum<'a>(
     let suffix = format!("/{file_name}");
     let mut best_match: Option<(u8, &'a str)> = None;
     for (key, hash) in checksums {
-        if let Some(subdir) = key
-            .strip_prefix("lib/")
-            .and_then(|rel| rel.strip_suffix(&suffix))
+        let stripped = key
+            .strip_prefix("bin/")
+            .or_else(|| key.strip_prefix("lib/"));
+        if let Some(rel) = stripped
+            && let Some(subdir) = rel.strip_suffix(&suffix)
             && !subdir.contains('/')
         {
             let priority = native_target_subdir_priority(subdir);
@@ -1619,9 +1747,11 @@ pub fn resolve_expected_native_checksum<'a>(
     if let Some((_, hash)) = best_match {
         return Some(hash);
     }
-    let unqualified_key = format!("lib/{file_name}");
+    let unqualified_bin = format!("bin/{file_name}");
+    let unqualified_lib = format!("lib/{file_name}");
     checksums
-        .get(&unqualified_key)
+        .get(&unqualified_bin)
+        .or_else(|| checksums.get(&unqualified_lib))
         .or_else(|| checksums.get(file_name))
         .map(String::as_str)
 }
@@ -1790,11 +1920,11 @@ version = "0.1.0"
         fs::write(bin_dir.join("pack_test.slxb"), &binary_bytes).unwrap();
 
         #[cfg(target_os = "windows")]
-        let host_lib_name = "test_lib.dll";
+        let host_lib_name = "native_test_lib.dll";
         #[cfg(target_os = "macos")]
-        let host_lib_name = "test_lib.dylib";
+        let host_lib_name = "libnative_test_lib.dylib";
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        let host_lib_name = "test_lib.so";
+        let host_lib_name = "libnative_test_lib.so";
 
         fs::write(lib_dir.join(host_lib_name), b"dummy_so_bytes").unwrap();
 
@@ -1912,19 +2042,19 @@ version = "0.1.0"
         let (host_sub, wrong_sub, host_lib) = (
             "x86_64-pc-windows-msvc",
             "aarch64-pc-windows-msvc",
-            "test_lib.dll",
+            "native_test_lib.dll",
         );
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         let (host_sub, wrong_sub, host_lib) = (
             "aarch64-apple-darwin",
             "x86_64-apple-darwin",
-            "libtest_lib.dylib",
+            "libnative_test_lib.dylib",
         );
         #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
         let (host_sub, wrong_sub, host_lib) = (
             "x86_64-apple-darwin",
             "aarch64-apple-darwin",
-            "libtest_lib.dylib",
+            "libnative_test_lib.dylib",
         );
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         let (host_sub, wrong_sub, host_lib) = (
@@ -1938,7 +2068,7 @@ version = "0.1.0"
             } else {
                 "aarch64-unknown-linux-gnu"
             },
-            "libtest_lib.so",
+            "libnative_test_lib.so",
         );
 
         fs::create_dir_all(&bin_dir).unwrap();

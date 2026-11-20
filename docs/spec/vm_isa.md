@@ -254,4 +254,15 @@ For host embeddings, game engines, and long-running interactive processes, the S
 4. **Load-Time Duplicate Symbol Rejection (`R0024`):**
    - When loading multiple `BinaryProgram` modules into `RuntimeContext::new`, duplicate non-generic function, class, or static global symbols immediately raise `RuntimeError::DuplicateSymbolDefinition` (`R0024`).
 
+---
+
+## 10. Container Binary Serialization & Declared Dynamic Libraries
+
+The bytecode serialization format preserves project-level dynamic library dependencies to support automated FFI linkage:
+
+* **`BinaryProgram` Manifest Metadata:** Encodes `dynamic_libraries: Vec<String>` alongside exported functions, classes, and native checksum tables.
+* **`ExportManifest` Integration:** Stores declared shared library identifiers into Section 6 (`Metadata & ExportManifest`), allowing standalone packages and container runners to verify and quicken external native symbols deterministically without external manifest lookups.
+
+---
+
 See [`.slxasm` Disassembly Format Specification](disassembly-format-slxasm.md) for reading emitted bytecode listings.

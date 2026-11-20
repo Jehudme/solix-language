@@ -28,6 +28,7 @@ fn create_math_binary(package_version: &str) -> BinaryProgram {
         build_profile: "release".to_string(),
         native_library_checksums: std::collections::HashMap::new(),
         dependencies: Vec::new(),
+        dynamic_libraries: Vec::new(),
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {
@@ -88,6 +89,7 @@ fn create_app_binary_requiring(dependency_version: PackageVersion) -> BinaryProg
             profile: None,
             sha256: String::new(),
         }],
+        dynamic_libraries: Vec::new(),
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),
         exported_functions: Vec::new(),

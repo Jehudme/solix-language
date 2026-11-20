@@ -164,6 +164,19 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         options = options.with_entry_point(Some(entry_sym));
     }
 
+    let declared_dynamic_libs = parent_manifest
+        .as_ref()
+        .map(|manifest| {
+            manifest
+                .resolve_profile(&args.profile)
+                .map(|resolved| resolved.dynamic_libraries)
+                .unwrap_or_else(|_| manifest.dynamic_libraries.clone())
+        })
+        .unwrap_or_default();
+    if !declared_dynamic_libs.is_empty() {
+        options = options.with_dynamic_libraries(declared_dynamic_libs);
+    }
+
     if args.inline_threshold != 8 {
         options = options.with_inline_threshold(args.inline_threshold);
     }
@@ -221,7 +234,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     for lib_path in &args.libs {
         if lib_path
             .extension()
-            .is_some_and(|extension| extension == "slxarc")
+            .is_some_and(|extension| extension == "slxp" || extension == "slxarc")
         {
             let temp_dir = tempfile::Builder::new()
                 .prefix("solix_compile_")
@@ -232,13 +245,13 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
                     )
                 })?;
             let loaded_archive =
-                solix_common::project::SlxarcArchive::extract_and_load(lib_path, temp_dir.path())
+                solix_common::project::SlxpPackage::extract_and_load(lib_path, temp_dir.path())
                     .map_err(|load_error| {
-                    anyhow::anyhow!(
-                        "Failed to extract dependency archive '{}': {load_error}",
-                        lib_path.display()
-                    )
-                })?;
+                        anyhow::anyhow!(
+                            "Failed to extract dependency archive '{}': {load_error}",
+                            lib_path.display()
+                        )
+                    })?;
             for binary_program in loaded_archive.binaries {
                 options = options.with_dependency_binary(binary_program);
             }

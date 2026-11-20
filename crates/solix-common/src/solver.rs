@@ -728,18 +728,24 @@ impl ClientModuleSolver {
         version: PackageVersion,
         version_dir: &std::path::Path,
     ) -> Result<SolvedPackage, SolverError> {
-        let mut slxarc_candidate = version_dir.join(format!("{package_name}.slxarc"));
+        let mut archive_candidate = version_dir.join(format!("{package_name}.slxp"));
+        if !archive_candidate.exists() {
+            archive_candidate = version_dir.join(format!("{package_name}.slxarc"));
+        }
         let mut slxb_candidate = version_dir.join(format!("{package_name}.slxb"));
 
-        if !slxarc_candidate.exists()
+        if !archive_candidate.exists()
             && !slxb_candidate.exists()
             && let Ok(dir_entries) = fs::read_dir(version_dir)
         {
             for entry_result in dir_entries.flatten() {
                 let file_path = entry_result.path();
                 if file_path.is_file() {
-                    if file_path.extension().is_some_and(|ext| ext == "slxarc") {
-                        slxarc_candidate = file_path;
+                    if file_path
+                        .extension()
+                        .is_some_and(|ext| ext == "slxp" || ext == "slxarc")
+                    {
+                        archive_candidate = file_path;
                         break;
                     } else if file_path.extension().is_some_and(|ext| ext == "slxb") {
                         slxb_candidate = file_path;
@@ -749,7 +755,7 @@ impl ClientModuleSolver {
             }
         }
 
-        if slxarc_candidate.exists() {
+        if archive_candidate.exists() {
             let extraction_folder_name = version_dir
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
@@ -759,10 +765,14 @@ impl ClientModuleSolver {
             // 1. Check authenticated extraction cache first to avoid re-inflating archive
             if let Ok(Some(cached_program)) =
                 self.package_cache
-                    .get_cached_binary(package_name, version, &slxarc_candidate)
+                    .get_cached_binary(package_name, version, &archive_candidate)
             {
                 let mut discovered_libs = Vec::new();
-                let candidate_dirs = [&extraction_target, &extraction_target.join("lib")];
+                let candidate_dirs = [
+                    &extraction_target,
+                    &extraction_target.join("bin"),
+                    &extraction_target.join("lib"),
+                ];
                 for candidate_dir in candidate_dirs {
                     if candidate_dir.exists()
                         && candidate_dir.is_dir()
@@ -785,7 +795,18 @@ impl ClientModuleSolver {
                                             || ext_str.eq_ignore_ascii_case("dylib")
                                     })
                             {
-                                discovered_libs.push(entry_path);
+                                let is_declared =
+                                    cached_program.dynamic_libraries.iter().any(|declared| {
+                                        crate::project::matches_declared_dynamic_library(
+                                            &entry_name_str,
+                                            declared,
+                                        )
+                                    });
+                                if crate::project::is_solix_native_module_name(&entry_name_str)
+                                    || is_declared
+                                {
+                                    discovered_libs.push(entry_path);
+                                }
                             }
                         }
                     }
@@ -821,18 +842,17 @@ impl ClientModuleSolver {
                 };
 
                 if cache_valid {
-                    if let Ok(inspection) =
-                        crate::project::SlxarcArchive::inspect(&slxarc_candidate)
+                    if let Ok(inspection) = crate::project::SlxpPackage::inspect(&archive_candidate)
                         && let Some(ref manifest) = inspection.manifest
                     {
                         crate::project::validate_archive_host_compatibility(
                             manifest,
-                            &slxarc_candidate.display().to_string(),
+                            &archive_candidate.display().to_string(),
                         )
                         .map_err(|error| SolverError::ExtractionError {
                             reason: format!(
                                 "Archive compatibility check failed for '{}': {error}",
-                                slxarc_candidate.display()
+                                archive_candidate.display()
                             ),
                         })?;
                     }
@@ -846,22 +866,22 @@ impl ClientModuleSolver {
             }
 
             // 2. Cache miss: extract archive from scratch
-            let loaded_archive = crate::project::SlxarcArchive::extract_and_load(
-                &slxarc_candidate,
+            let loaded_archive = crate::project::SlxpPackage::extract_and_load(
+                &archive_candidate,
                 &extraction_target,
             )
             .map_err(|error| SolverError::ExtractionError {
                 reason: format!(
                     "Failed to extract '{package_name}' archive at '{}': {error}",
-                    slxarc_candidate.display()
+                    archive_candidate.display()
                 ),
             })?;
 
             let primary_program = loaded_archive.binaries.into_iter().next().ok_or_else(|| {
                 SolverError::ExtractionError {
                     reason: format!(
-                        "Archive '{}' does not contain a primary binary in bin/",
-                        slxarc_candidate.display()
+                        "Archive '{}' does not contain a primary binary",
+                        archive_candidate.display()
                     ),
                 }
             })?;
@@ -871,7 +891,7 @@ impl ClientModuleSolver {
             let _ = self.package_cache.put_cached_binary(
                 package_name,
                 version,
-                &slxarc_candidate,
+                &archive_candidate,
                 &primary_program,
                 &primary_bytes,
             );

@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use solix_common::bytecode::BinaryProgram;
 use solix_common::hash::{sha256_file, sha256_hex};
-use solix_common::project::SlxarcArchive;
 use solix_common::solver::PackageVersion;
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -370,18 +369,24 @@ fn backfill_package_from_dir(
     version_string: &str,
     version_dir: &Path,
 ) -> Option<PackageRecord> {
-    let mut slxarc_candidate = version_dir.join(format!("{package_name}.slxarc"));
+    let mut slxp_candidate = version_dir.join(format!("{package_name}.slxp"));
+    if !slxp_candidate.exists() {
+        slxp_candidate = version_dir.join(format!("{package_name}.slxarc"));
+    }
     let mut slxb_candidate = version_dir.join(format!("{package_name}.slxb"));
 
-    if !slxarc_candidate.exists()
+    if !slxp_candidate.exists()
         && !slxb_candidate.exists()
         && let Ok(dir_entries) = fs::read_dir(version_dir)
     {
         for entry_result in dir_entries.flatten() {
             let file_path = entry_result.path();
             if file_path.is_file() {
-                if file_path.extension().is_some_and(|ext| ext == "slxarc") {
-                    slxarc_candidate = file_path;
+                if file_path
+                    .extension()
+                    .is_some_and(|ext| ext == "slxp" || ext == "slxarc")
+                {
+                    slxp_candidate = file_path;
                     break;
                 } else if file_path.extension().is_some_and(|ext| ext == "slxb") {
                     slxb_candidate = file_path;
@@ -396,10 +401,14 @@ fn backfill_package_from_dir(
         .map_or(0, |duration| duration.as_secs());
     let iso8601_string = format_iso8601_timestamp(current_timestamp);
 
-    if slxarc_candidate.exists() {
-        let file_metadata = fs::metadata(&slxarc_candidate).ok()?;
-        let computed_sha256 = sha256_file(&slxarc_candidate).ok()?;
-        let inspection = SlxarcArchive::inspect(&slxarc_candidate).ok()?;
+    if slxp_candidate.exists() {
+        let is_slxp = slxp_candidate
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext_str| ext_str.eq_ignore_ascii_case("slxp"));
+        let file_metadata = fs::metadata(&slxp_candidate).ok()?;
+        let computed_sha256 = sha256_file(&slxp_candidate).ok()?;
+        let inspection = solix_common::project::SlxpPackage::inspect(&slxp_candidate).ok()?;
 
         let description = inspection
             .manifest
@@ -425,14 +434,18 @@ fn backfill_package_from_dir(
         Some(PackageRecord {
             name: package_name.to_string(),
             version: version_string.to_string(),
-            kind: "slxarc".to_string(),
+            kind: if is_slxp {
+                "slxp".to_string()
+            } else {
+                "slxarc".to_string()
+            },
             build_profile: build_profile.to_string(),
             sha256: computed_sha256,
             size_bytes: file_metadata.len(),
             installed_at_unix_secs: current_timestamp,
             installed_at_iso8601: iso8601_string,
             source: None,
-            artifact_path: slxarc_candidate,
+            artifact_path: slxp_candidate,
             native_libraries,
             description,
             license,

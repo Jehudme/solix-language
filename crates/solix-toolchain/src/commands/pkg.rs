@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use solix_common::bytecode::BinaryProgram;
 use solix_common::cache::PackageCache;
 use solix_common::hash::{sha256_file, sha256_hex};
-use solix_common::project::{ProjectManifest, SlxarcArchive};
+use solix_common::project::ProjectManifest;
 use solix_common::solver::PackageVersion;
 use std::fmt::Write as FmtWrite;
 use std::fs;
@@ -173,19 +173,21 @@ pub(crate) fn install_package_artifact_with_options(
             );
         }
         Ok(record)
-    } else if extension.eq_ignore_ascii_case("slxarc") {
+    } else if extension.eq_ignore_ascii_case("slxp") || extension.eq_ignore_ascii_case("slxarc") {
+        let is_slxp = extension.eq_ignore_ascii_case("slxp");
         let computed_sha256 = sha256_file(&resolved_artifact).with_context(|| {
             format!(
                 "Failed to compute SHA-256 for archive '{}'",
                 resolved_artifact.display()
             )
         })?;
-        let inspection = SlxarcArchive::inspect(&resolved_artifact).with_context(|| {
-            format!(
-                "Failed to inspect archive container at '{}'",
-                resolved_artifact.display()
-            )
-        })?;
+        let inspection = solix_common::project::SlxpPackage::inspect(&resolved_artifact)
+            .with_context(|| {
+                format!(
+                    "Failed to inspect archive container at '{}'",
+                    resolved_artifact.display()
+                )
+            })?;
 
         let manifest = inspection.manifest.ok_or_else(|| {
             anyhow::anyhow!(
@@ -217,7 +219,8 @@ pub(crate) fn install_package_artifact_with_options(
 
         let folder_name = format!("{package_name}-{effective_profile}@{package_version}");
         let target_dir = store_directory.join(&folder_name);
-        let target_file = target_dir.join(format!("{package_name}.slxarc"));
+        let target_ext = if is_slxp { "slxp" } else { "slxarc" };
+        let target_file = target_dir.join(format!("{package_name}.{target_ext}"));
 
         let already_installed = registry.packages.iter().any(|existing| {
             existing.name == package_name
@@ -245,16 +248,18 @@ pub(crate) fn install_package_artifact_with_options(
             )
         })?;
 
+        let dual_ext = if is_slxp { "slxarc" } else { "slxp" };
+        let dual_file = target_dir.join(format!("{package_name}.{dual_ext}"));
+        let _ = fs::copy(&resolved_artifact, &dual_file);
+
         let file_size = fs::metadata(&target_file)?.len();
 
         // Warm the authenticated extract cache
         let cache = FilesystemPackageCache::new();
         let primary_binary_key = format!("bin/{package_name}.slxb");
-        if let Some((_, primary_binary)) = inspection
-            .binaries
-            .iter()
-            .find(|(entry_name, _)| entry_name == &primary_binary_key)
-        {
+        if let Some((_, primary_binary)) = inspection.binaries.iter().find(|(entry_name, _)| {
+            entry_name == "binaries.slxb" || entry_name == &primary_binary_key
+        }) {
             let binary_raw_bytes = primary_binary.to_bytes();
             let _ = cache.put_cached_binary(
                 package_name,
@@ -268,7 +273,11 @@ pub(crate) fn install_package_artifact_with_options(
         let record = PackageRecord {
             name: package_name.to_string(),
             version: package_version.to_string(),
-            kind: "slxarc".to_string(),
+            kind: if is_slxp {
+                "slxp".to_string()
+            } else {
+                "slxarc".to_string()
+            },
             build_profile: effective_profile.to_string(),
             sha256: computed_sha256,
             size_bytes: file_size,
@@ -286,14 +295,14 @@ pub(crate) fn install_package_artifact_with_options(
 
         if !quiet {
             println!(
-                "Installed '{package_name}-{effective_profile}@{package_version}' (.slxarc) to {}",
+                "Installed '{package_name}-{effective_profile}@{package_version}' (.{target_ext}) to {}",
                 target_file.display()
             );
         }
         Ok(record)
     } else {
         bail!(
-            "Unsupported package format '{}'. Only .slxb and .slxarc packages can be installed.",
+            "Unsupported package format '{}'. Only .slxp, .slxb, and .slxarc packages can be installed.",
             resolved_artifact.display()
         );
     }
@@ -363,22 +372,33 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
             target: None,
         })?;
 
+        let candidate_slxp = resolved_path
+            .join("build")
+            .join(profile)
+            .join(format!("{package_name}.slxp"));
         let candidate_archive = resolved_path
             .join("build")
             .join(profile)
             .join(format!("{package_name}.slxarc"));
-        let archive_path = if candidate_archive.exists() {
+        let archive_path = if candidate_slxp.exists() {
+            candidate_slxp
+        } else if candidate_archive.exists() {
             candidate_archive
         } else {
+            let alt_slxp = resolved_path
+                .join("build")
+                .join(format!("{package_name}.slxp"));
             let alt_candidate = resolved_path
                 .join("build")
                 .join(format!("{package_name}.slxarc"));
-            if alt_candidate.exists() {
+            if alt_slxp.exists() {
+                alt_slxp
+            } else if alt_candidate.exists() {
                 alt_candidate
             } else {
                 bail!(
-                    "Build succeeded but expected archive was not found at '{}'",
-                    candidate_archive.display()
+                    "Build succeeded but expected package archive was not found at '{}'",
+                    candidate_slxp.display()
                 );
             }
         };

@@ -546,7 +546,10 @@ fn directory_has_bundled_packages(directory: &Path) -> bool {
                 && file_path
                     .extension()
                     .and_then(|ext| ext.to_str())
-                    .is_some_and(|ext_str| ext_str.eq_ignore_ascii_case("slxarc"))
+                    .is_some_and(|ext_str| {
+                        ext_str.eq_ignore_ascii_case("slxp")
+                            || ext_str.eq_ignore_ascii_case("slxarc")
+                    })
             {
                 return true;
             }
@@ -853,7 +856,13 @@ fn install_bundled_packages_inner(
                         (name_profile_part, "release")
                     };
 
-                let archive_candidate = entry_path.join(format!("{pkg_name}.slxarc"));
+                let slxp_candidate = entry_path.join(format!("{pkg_name}.slxp"));
+                let slxarc_candidate = entry_path.join(format!("{pkg_name}.slxarc"));
+                let archive_candidate = if slxp_candidate.exists() {
+                    slxp_candidate
+                } else {
+                    slxarc_candidate
+                };
                 if archive_candidate.exists()
                     && !candidates.iter().any(|(name, prof, ver, _)| {
                         name == pkg_name && prof == pkg_profile && ver == version_part
