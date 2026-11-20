@@ -440,8 +440,13 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
         }
     }
     for reg in function.param_count..function.num_registers {
+        let is_catch_reg = function
+            .exception_handlers
+            .iter()
+            .any(|handler| handler.catch_reg == reg);
         let idx = reg as usize;
-        if has_any_write[idx]
+        if !is_catch_reg
+            && has_any_write[idx]
             && !has_non_immortal_direct_write[idx]
             && !mov_sources.contains_key(&reg)
         {
@@ -451,8 +456,13 @@ fn elide_redundant_arc_ops(function: &mut CompiledFunction) {
     loop {
         let mut added = false;
         for reg in function.param_count..function.num_registers {
+            let is_catch_reg = function
+                .exception_handlers
+                .iter()
+                .any(|handler| handler.catch_reg == reg);
             let idx = reg as usize;
-            if always_immortal_regs.contains(&reg)
+            if is_catch_reg
+                || always_immortal_regs.contains(&reg)
                 || !has_any_write[idx]
                 || has_non_immortal_direct_write[idx]
             {
@@ -904,7 +914,12 @@ fn elide_borrowed_local_arc_ops(function: &mut CompiledFunction) {
 
     let mut unowned_borrowed_regs = borrowed_aliases.clone();
     for candidate_reg in window_elided_regs {
-        if candidate_reg < function.param_count {
+        if candidate_reg < function.param_count
+            || function
+                .exception_handlers
+                .iter()
+                .any(|handler| handler.catch_reg == candidate_reg)
+        {
             continue;
         }
         let still_owns_ref = function.instructions.iter().any(|inst| {

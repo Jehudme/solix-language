@@ -181,3 +181,80 @@ fn test_constant_pool_builder_lifecycle() {
     let pool = builder.finish();
     assert_eq!(pool.len(), 3);
 }
+
+#[test]
+fn test_parameter_bounds_and_no_overlap_under_heavy_register_pressure() {
+    let parameter_count: u16 = 8;
+    let mut allocator = RegisterAllocator::new(parameter_count);
+    assert_eq!(allocator.param_count(), parameter_count);
+
+    let mut parameter_registers = Vec::new();
+    for parameter_index in 0..parameter_count {
+        let parameter_name = format!("param_{parameter_index}");
+        let allocated_param = allocator.alloc_param(&parameter_name).expect("alloc param");
+        assert_eq!(allocated_param, parameter_index);
+        parameter_registers.push(allocated_param);
+    }
+
+    // Enter multiple nested scopes and allocate local variables
+    let mut local_registers = Vec::new();
+    for scope_depth in 0..5 {
+        allocator.enter_scope();
+        for local_index in 0..12 {
+            let local_name = format!("local_s{scope_depth}_{local_index}");
+            let allocated_local = allocator.alloc_local(&local_name).expect("alloc local");
+            assert!(
+                allocated_local >= parameter_count,
+                "Local register {allocated_local} must not overlap parameter space"
+            );
+            local_registers.push(allocated_local);
+        }
+    }
+
+    // Allocate heavy scratch temporaries simulating nested expression trees
+    let mut temporary_registers = Vec::new();
+    for _ in 0..64 {
+        let temp_reg = allocator.alloc_temp().expect("alloc temp");
+        assert!(
+            temp_reg >= parameter_count,
+            "Temp register {temp_reg} must not overlap parameter space"
+        );
+        temporary_registers.push(temp_reg);
+    }
+
+    // Scramble deallocations and window reservations
+    for temp_reg in temporary_registers.drain(..32) {
+        allocator.free_temp(temp_reg);
+    }
+
+    let window_base = allocator.alloc_window(16).expect("alloc window 16");
+    assert!(
+        window_base >= parameter_count,
+        "Call window base {window_base} must not overlap parameter space"
+    );
+    allocator.free_window(window_base, 16);
+
+    // Pop nested scopes
+    for _ in 0..5 {
+        allocator.exit_scope();
+    }
+
+    // Re-allocate temporaries and locals after scope reclamation
+    for _ in 0..100 {
+        let recycled_temp = allocator.alloc_temp().expect("alloc temp");
+        assert!(
+            recycled_temp >= parameter_count,
+            "Recycled register {recycled_temp} must never overlap parameter range 0..{parameter_count}"
+        );
+        allocator.free_temp(recycled_temp);
+    }
+
+    // Verify all original parameters still resolve correctly
+    for parameter_index in 0..parameter_count {
+        let parameter_name = format!("param_{parameter_index}");
+        assert_eq!(
+            allocator.lookup_local(&parameter_name),
+            Some(parameter_index)
+        );
+    }
+}

@@ -209,9 +209,15 @@ impl RuntimeContext {
                 let is_generic_instantiation =
                     func.symbol.contains('<') && func.symbol.contains('>');
                 let is_generic_template = generic_template_names.contains(&func.symbol)
-                    || generic_template_names
-                        .iter()
-                        .any(|template_name| func.symbol.starts_with(template_name));
+                    || generic_template_names.iter().any(|template_name| {
+                        func.symbol.starts_with(template_name)
+                            || template_name.ends_with(&format!(
+                                "::{}",
+                                func.symbol.split("::").next().unwrap_or("")
+                            ))
+                            || (func.symbol.contains("::")
+                                && func.symbol.split("::").next() == Some(template_name.as_str()))
+                    });
                 if !is_synthetic && !is_generic_instantiation && !is_generic_template {
                     if let Some(first_module) = defined_functions.get(&func.symbol) {
                         if first_module != &binary_label {
