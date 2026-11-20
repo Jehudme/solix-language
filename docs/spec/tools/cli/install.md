@@ -102,4 +102,6 @@ When invoked with `--vscode`, Solix locates the bundled `.vsix` extension archiv
 solix install --vscode
 ```
 
+On Windows, editor CLI commands such as `code` or `cursor` are frequently installed as batch scripts (`code.cmd`) alongside extensionless POSIX shell wrappers. Solix automatically inspects `PATHEXT` to prioritize Windows executable extensions (`.exe`, `.cmd`, `.bat`) over extensionless files, and executes batch scripts via `cmd.exe /c` to prevent Win32 error 193 execution defects.
+
 If no supported editor CLI is found in `PATH`, the command prints the absolute path to the `.vsix` file along with instructions for manual graphical installation.

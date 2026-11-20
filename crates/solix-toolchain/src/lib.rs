@@ -7,6 +7,7 @@ pub mod cache;
 pub mod cli;
 pub mod commands;
 pub mod diagnostics;
+pub mod process;
 pub mod registry;
 pub mod solver;
 pub mod telemetry;
@@ -28,6 +29,9 @@ pub use commands::{
     install_package_artifact, resolve_bin_store_dir,
 };
 pub use diagnostics::render_diagnostics;
+pub use process::{
+    create_process_command, find_executable_in_path, find_executable_in_search_paths,
+};
 pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
 pub use telemetry::{
     CompileMetricsReport, ProcessTelemetry, RunMetricsReport, capture_process_telemetry,
