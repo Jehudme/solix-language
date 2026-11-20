@@ -18,6 +18,7 @@ pub mod wiki;
 
 pub use build::{
     cross_image_for_triple, dockcross_image_for_triple, execute_build,
+    resolve_cargo_target_cache_dir, resolve_cmake_target_cache_dir,
     write_zig_toolchain_file_for_test,
 };
 pub use clean::execute_clean;

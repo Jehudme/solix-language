@@ -819,6 +819,31 @@ fn ensure_rustup_target_installed(
     Ok(())
 }
 
+#[must_use]
+pub fn resolve_cargo_target_cache_dir(cache_dir: &Path, is_docker: bool) -> PathBuf {
+    if is_docker {
+        cache_dir.join("cargo-docker")
+    } else {
+        cache_dir.join("cargo")
+    }
+}
+
+#[must_use]
+pub fn resolve_cmake_target_cache_dir(
+    cache_dir: &Path,
+    native_name: &str,
+    profile_name: &str,
+    target_triple: &str,
+    is_docker: bool,
+) -> PathBuf {
+    let cache_subdir = if is_docker { "cmake-docker" } else { "cmake" };
+    cache_dir
+        .join(cache_subdir)
+        .join(native_name)
+        .join(profile_name)
+        .join(target_triple)
+}
+
 fn compile_cargo_native(
     entry: &ResolvedNativeEntry,
     project_root: &Path,
@@ -826,7 +851,6 @@ fn compile_cargo_native(
     stage_lib_dir: &Path,
 ) -> Result<()> {
     let host_triple = host_target_triple();
-    let cargo_target_dir = cache_dir.join("cargo");
     let cargo_manifest = entry.directory.join("Cargo.toml");
     let is_release = entry.native_profile.eq_ignore_ascii_case("release");
     let profile_subdir = if is_release { "release" } else { "debug" };
@@ -841,8 +865,10 @@ fn compile_cargo_native(
 
     for triple in &entry.target_triples {
         let strategy = select_cargo_strategy(triple, host_triple, entry.is_docker_strategy())?;
+        let is_docker = matches!(strategy, CargoBuildStrategy::Docker);
+        let cargo_target_dir = resolve_cargo_target_cache_dir(cache_dir, is_docker);
         let is_exact_host = triple == host_triple;
-        if !is_exact_host && !matches!(strategy, CargoBuildStrategy::Docker) {
+        if !is_exact_host && !is_docker {
             ensure_rustup_target_installed(triple, &search_path)?;
         }
 
@@ -1174,6 +1200,12 @@ fn write_zig_toolchain_file(toolchain_dir: &Path, triple: &str, zig_exe: &Path) 
         ""
     };
 
+    let root_path_setting = if host_matches_target {
+        String::new()
+    } else {
+        "set(CMAKE_FIND_ROOT_PATH \"/__solix_no_sysroot__\")\n".to_string()
+    };
+
     let toolchain_content = format!(
         "set(CMAKE_SYSTEM_NAME {system_name})\n\
          set(CMAKE_SYSTEM_PROCESSOR {processor_name})\n\
@@ -1183,6 +1215,7 @@ fn write_zig_toolchain_file(toolchain_dir: &Path, triple: &str, zig_exe: &Path) 
          set(CMAKE_RANLIB \"{}\")\n\
          {darwin_extra}\
          set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)\n\
+         {root_path_setting}\
          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n\
          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY {find_mode})\n\
          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE {find_mode})\n\
@@ -1235,11 +1268,13 @@ fn compile_cmake_native(
             entry.name
         );
 
-        let cmake_build_dir = cache_dir
-            .join("cmake")
-            .join(&entry.name)
-            .join(&entry.native_profile)
-            .join(triple);
+        let cmake_build_dir = resolve_cmake_target_cache_dir(
+            cache_dir,
+            &entry.name,
+            &entry.native_profile,
+            triple,
+            entry.is_docker_strategy(),
+        );
         let stage_triple_dir = stage_lib_dir.join(triple);
         let archive_cache_dir = cache_dir.join("archives").join(&entry.name).join(triple);
         fs::create_dir_all(&cmake_build_dir)?;

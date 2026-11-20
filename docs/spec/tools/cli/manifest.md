@@ -181,6 +181,7 @@ Under `profiles.<name>.natives.<key>`, each native entry omits any explicit `typ
 > [!NOTE]
 > **Containerized Cross-Compilation (`strategy: docker`):**
 > Containerized compilation executes native builds inside `cross-rs` or `dockcross` containers. While containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild, it is practical and sufficient for complex native libraries with extensive system library requirements (such as X11, Wayland, or audio drivers).
+> Containerized toolchain caches (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) are isolated from host compilation directories to prevent host-compiled build scripts from leaking into container environments.
 
 ---
 

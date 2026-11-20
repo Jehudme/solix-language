@@ -20,6 +20,9 @@ profiles:
     natives:
       raylib:
         profile: release
+        platforms:
+          - host
+          - windows-x86_64
 
   debug:
     optimization_level: 0

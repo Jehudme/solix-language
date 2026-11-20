@@ -2608,6 +2608,10 @@ fn test_zigbuild_cross_compilation_toolchain_isolation_and_env_emission() {
             "Cross-target CMake toolchain must enforce CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY to prevent host header leaks"
         );
         assert!(
+            cmake_content.contains("set(CMAKE_FIND_ROOT_PATH \"/__solix_no_sysroot__\")"),
+            "Cross-target CMake toolchain must set CMAKE_FIND_ROOT_PATH to prevent host header leaks"
+        );
+        assert!(
             cmake_content.contains("set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)"),
             "Cross-target CMake toolchain must enforce CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY"
         );
@@ -2680,4 +2684,51 @@ profiles:
         solix_toolchain::cross_image_for_triple("aarch64-unknown-linux-gnu"),
         "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
     );
+}
+
+#[test]
+fn test_docker_and_host_cache_directories_are_strictly_isolated() {
+    let dummy_cache_dir = Path::new("/tmp/solix_build_cache");
+    let host_cargo_target_dir =
+        solix_toolchain::resolve_cargo_target_cache_dir(dummy_cache_dir, false);
+    let docker_cargo_target_dir =
+        solix_toolchain::resolve_cargo_target_cache_dir(dummy_cache_dir, true);
+    assert_eq!(host_cargo_target_dir, dummy_cache_dir.join("cargo"));
+    assert_eq!(
+        docker_cargo_target_dir,
+        dummy_cache_dir.join("cargo-docker")
+    );
+    assert_ne!(host_cargo_target_dir, docker_cargo_target_dir);
+
+    let host_cmake_target_dir = solix_toolchain::resolve_cmake_target_cache_dir(
+        dummy_cache_dir,
+        "sample_bridge",
+        "release",
+        "x86_64-unknown-linux-gnu",
+        false,
+    );
+    let docker_cmake_target_dir = solix_toolchain::resolve_cmake_target_cache_dir(
+        dummy_cache_dir,
+        "sample_bridge",
+        "release",
+        "x86_64-unknown-linux-gnu",
+        true,
+    );
+    assert_eq!(
+        host_cmake_target_dir,
+        dummy_cache_dir
+            .join("cmake")
+            .join("sample_bridge")
+            .join("release")
+            .join("x86_64-unknown-linux-gnu")
+    );
+    assert_eq!(
+        docker_cmake_target_dir,
+        dummy_cache_dir
+            .join("cmake-docker")
+            .join("sample_bridge")
+            .join("release")
+            .join("x86_64-unknown-linux-gnu")
+    );
+    assert_ne!(host_cmake_target_dir, docker_cmake_target_dir);
 }
