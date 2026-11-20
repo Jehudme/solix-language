@@ -155,6 +155,15 @@ pub enum OpCode {
     MulF64Imm = 0xE3,
     JumpIfLtF64 = 0xE4,
     JumpIfLteF64 = 0xE5,
+
+    AddI64Imm = 0xE6,
+    JumpIfLtI64 = 0xE7,
+    JumpIfLteI64 = 0xE8,
+    GetFieldI32 = 0xE9,
+    GetFieldF64 = 0xEA,
+    SetFieldI32 = 0xEB,
+    SetFieldF64 = 0xEC,
+    CallVirtualDirect = 0xED,
 }
 
 impl OpCode {
@@ -295,6 +304,15 @@ impl OpCode {
             0xE3 => Some(Self::MulF64Imm),
             0xE4 => Some(Self::JumpIfLtF64),
             0xE5 => Some(Self::JumpIfLteF64),
+
+            0xE6 => Some(Self::AddI64Imm),
+            0xE7 => Some(Self::JumpIfLtI64),
+            0xE8 => Some(Self::JumpIfLteI64),
+            0xE9 => Some(Self::GetFieldI32),
+            0xEA => Some(Self::GetFieldF64),
+            0xEB => Some(Self::SetFieldI32),
+            0xEC => Some(Self::SetFieldF64),
+            0xED => Some(Self::CallVirtualDirect),
 
             _ => None,
         }
@@ -451,6 +469,15 @@ impl OpCode {
             Self::MulF64Imm => "MUL_F64_IMM",
             Self::JumpIfLtF64 => "JUMP_IF_LT_F64",
             Self::JumpIfLteF64 => "JUMP_IF_LTE_F64",
+
+            Self::AddI64Imm => "ADD_I64_IMM",
+            Self::JumpIfLtI64 => "JUMP_IF_LT_I64",
+            Self::JumpIfLteI64 => "JUMP_IF_LTE_I64",
+            Self::GetFieldI32 => "GET_FIELD_I32",
+            Self::GetFieldF64 => "GET_FIELD_F64",
+            Self::SetFieldI32 => "SET_FIELD_I32",
+            Self::SetFieldF64 => "SET_FIELD_F64",
+            Self::CallVirtualDirect => "CALL_VIRTUAL_DIRECT",
         }
     }
 }
@@ -484,10 +511,11 @@ mod tests {
             assert_eq!(OpCode::from_u8(raw_byte, 0).ok(), decoded);
         }
 
-        let extra_bytes: [u8; 39] = [
+        let extra_bytes: [u8; 47] = [
             0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x90, 0x91, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xB0,
             0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB,
-            0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0x00,
+            0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9,
+            0xEA, 0xEB, 0xEC, 0xED, 0x00,
         ];
         for raw_byte in extra_bytes {
             let decoded = OpCode::from_raw_u8(raw_byte);

@@ -124,6 +124,16 @@ pub struct VirtualMachine {
     pub arc_cycle_collector_time_micros: u64,
     /// Count of elided ARC operations from optimizer.
     pub arc_elided_ops_count: u64,
+    /// Monomorphic call site inline caches mapping (function_id, pc) to expected vtable and target.
+    pub monomorphic_call_caches: std::collections::HashMap<(u32, u32), MonomorphicCallSite>,
+}
+
+/// Inline cache record for a quickened monomorphic call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonomorphicCallSite {
+    pub expected_vtable_id: u32,
+    pub original_slot: u16,
+    pub target_func_id: u32,
 }
 
 impl VirtualMachine {
@@ -229,6 +239,7 @@ impl VirtualMachine {
             arc_cycles_collected: 0,
             arc_cycle_collector_time_micros: 0,
             arc_elided_ops_count: 0,
+            monomorphic_call_caches: std::collections::HashMap::new(),
         })
     }
 

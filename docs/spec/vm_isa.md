@@ -187,6 +187,14 @@ Used for static, direct, and virtual function dispatch:
 | `0xE3` | `MulF64Imm` | A | `dst, src1, const_idx` | Fuses float64 register multiplication with a constant pool immediate operand: `dst = reg[src1] * const_pool[const_idx]`. |
 | `0xE4` | `JumpIfLtF64` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs < rhs` (`float64`). |
 | `0xE5` | `JumpIfLteF64` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs <= rhs` (`float64`). |
+| `0xE6` | `AddI64Imm` | A | `dst, src1, imm16` | Fused signed 64-bit immediate addition: `dst = src1 + sign_extend(imm16)`. |
+| `0xE7` | `JumpIfLtI64` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs < rhs` (`int64`). |
+| `0xE8` | `JumpIfLteI64` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs <= rhs` (`int64`). |
+| `0xE9` | `GetFieldI32` | A | `dst, obj, offset` | Direct 32-bit integer field load from heap object payload: reads `int32` from `obj + offset` bypassing tag validation. |
+| `0xEA` | `GetFieldF64` | A | `dst, obj, offset` | Direct 64-bit float field load from heap object payload: reads `float64` from `obj + offset` bypassing tag validation. |
+| `0xEB` | `SetFieldI32` | A | `val, obj, offset` | Direct 32-bit integer field store into heap object payload: writes `int32` to `obj + offset` bypassing reference counting. |
+| `0xEC` | `SetFieldF64` | A | `val, obj, offset` | Direct 64-bit float field store into heap object payload: writes `float64` to `obj + offset` bypassing reference counting. |
+| `0xED` | `CallVirtualDirect` | Call | `dst, target_fn, arg_base, arg_count` | Monomorphic quickened virtual call: invokes direct function target `target_fn` if vtable ID matches cached monomorphic call site; unquickens to `CallVirtual` on class miss. |
 
 ---
 

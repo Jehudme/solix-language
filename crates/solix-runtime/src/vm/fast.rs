@@ -6,7 +6,7 @@ use crate::exceptions::RuntimeError;
 use crate::frame::CallFrame;
 use crate::memory::layout::BlockTag;
 use crate::value::Value;
-use crate::vm::engine::VirtualMachine;
+use crate::vm::engine::{MonomorphicCallSite, VirtualMachine};
 use solix_common::bytecode::{ConstantPoolValue, Instruction, OpCode};
 
 /// Compact 8-byte boxed trap wrapper keeping error paths out of hot register allocation and stack frames.
@@ -4258,7 +4258,74 @@ impl VirtualMachine {
                                 return Err(self.resolve_virtual_slot_error(vtable_id, slot));
                             }
                         };
+                        let caller_func_id = self.call_frames.last().map(|frame| frame.function_id);
+                        if let Some(func_id) = caller_func_id {
+                            let caller_pc = pc.saturating_sub(1);
+                            self.monomorphic_call_caches.insert(
+                                (func_id, caller_pc as u32),
+                                MonomorphicCallSite {
+                                    expected_vtable_id: vtable_id,
+                                    original_slot: slot as u16,
+                                    target_func_id: global_func_id,
+                                },
+                            );
+                            let quickened = Instruction::format_call(
+                                OpCode::CallVirtualDirect,
+                                inst.call_dst(),
+                                (global_func_id & 0xFFFF) as u16,
+                                inst.arg_base(),
+                                inst.arg_count(),
+                            );
+                            self.patch_instruction(func_id, caller_pc, quickened);
+                        }
                         break 'call_dispatch (global_func_id, 0);
+                    }
+
+                    OpCode::CallVirtualDirect => {
+                        let arg_base = inst.arg_base() as usize;
+                        let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
+                        let vtable_id = read_heap_u32_fast(&self.heap.buffer, obj_addr)?;
+                        let caller_func_id = self.call_frames.last().map(|frame| frame.function_id);
+                        let caller_pc = pc.saturating_sub(1);
+                        let cached_site = caller_func_id.and_then(|func_id| {
+                            self.monomorphic_call_caches
+                                .get(&(func_id, caller_pc as u32))
+                                .copied()
+                        });
+
+                        if let (Some(site), Some(func_id)) = (cached_site, caller_func_id) {
+                            if site.expected_vtable_id == vtable_id {
+                                break 'call_dispatch (site.target_func_id, 0);
+                            }
+                            let unquickened = Instruction::format_call(
+                                OpCode::CallVirtual,
+                                inst.call_dst(),
+                                site.original_slot,
+                                inst.arg_base(),
+                                inst.arg_count(),
+                            );
+                            self.patch_instruction(func_id, caller_pc, unquickened);
+                            let slot = site.original_slot as usize;
+                            let global_func_id = match self
+                                .context
+                                .flat_vtables
+                                .get(vtable_id as usize)
+                                .and_then(|slots| slots.get(slot))
+                                .copied()
+                            {
+                                Some(resolved_func_id) => resolved_func_id,
+                                None => {
+                                    if let Some(frame) = self.call_frames.last_mut() {
+                                        frame.pc = pc as u32;
+                                    }
+                                    return Err(self.resolve_virtual_slot_error(vtable_id, slot));
+                                }
+                            };
+                            break 'call_dispatch (global_func_id, 0);
+                        } else {
+                            let target_func_id = inst.call_target() as u32;
+                            break 'call_dispatch (target_func_id, 0);
+                        }
                     }
 
                     OpCode::CallInterface => {
@@ -5495,6 +5562,102 @@ impl VirtualMachine {
                         if val_a <= val_b {
                             pc = ((pc as i32 - 1) + offset) as usize;
                         }
+                    }
+
+                    OpCode::AddI64Imm => {
+                        let imm_val = inst.src2() as i16 as i64;
+                        let src_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let val_num = if let Value::I64(num) = *src_ref {
+                            num
+                        } else {
+                            read_i64_fast(src_ref)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) =
+                                Value::I64(val_num.wrapping_add(imm_val));
+                        }
+                    }
+
+                    OpCode::JumpIfLtI64 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_lhs, val_rhs) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                (read_i64_fast(left_ref)?, read_i64_fast(right_ref)?)
+                            };
+                        if val_lhs < val_rhs {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfLteI64 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_lhs, val_rhs) =
+                            if let (Value::I64(lhs), Value::I64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                (read_i64_fast(left_ref)?, read_i64_fast(right_ref)?)
+                            };
+                        if val_lhs <= val_rhs {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::GetFieldI32 => {
+                        let obj_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let offset = inst.src2() as usize;
+                        let field_addr = obj_addr + offset as u32;
+                        let dst_idx = inst.dst() as usize;
+                        unsafe {
+                            *reg_base.add(dst_idx) =
+                                Value::I32(
+                                    read_heap_u32_or_zero(&self.heap.buffer, field_addr) as i32
+                                );
+                        }
+                    }
+
+                    OpCode::GetFieldF64 => {
+                        let obj_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let offset = inst.src2() as usize;
+                        let field_addr = obj_addr + offset as u32;
+                        let dst_idx = inst.dst() as usize;
+                        unsafe {
+                            *reg_base.add(dst_idx) = Value::F64(f64::from_bits(
+                                read_heap_u64_or_zero(&self.heap.buffer, field_addr),
+                            ));
+                        }
+                    }
+
+                    OpCode::SetFieldI32 => {
+                        let obj_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let offset = inst.src2() as usize;
+                        let val_idx = inst.dst() as usize;
+                        let val_ref = unsafe { &*reg_base.add(val_idx) };
+                        let field_addr = obj_addr + offset as u32;
+                        write_heap_u32_fast(
+                            &mut self.heap.buffer,
+                            field_addr,
+                            read_i32_fast(val_ref)? as u32,
+                        );
+                    }
+
+                    OpCode::SetFieldF64 => {
+                        let obj_addr =
+                            read_nonnull_ref_fast(unsafe { &*reg_base.add(inst.src1() as usize) })?;
+                        let offset = inst.src2() as usize;
+                        let val_idx = inst.dst() as usize;
+                        let val_ref = unsafe { &*reg_base.add(val_idx) };
+                        let field_addr = obj_addr + offset as u32;
+                        let val_bits = read_f64_fast(val_ref)?.to_bits();
+                        write_heap_u64_fast(&mut self.heap.buffer, field_addr, val_bits);
                     }
 
                     // =============================================================

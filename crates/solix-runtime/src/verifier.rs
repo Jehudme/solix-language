@@ -286,7 +286,8 @@ fn verify_instruction(
         | OpCode::CallSymbol
         | OpCode::CallCallable
         | OpCode::CallExtern
-        | OpCode::CallNativeDirect => {
+        | OpCode::CallNativeDirect
+        | OpCode::CallVirtualDirect => {
             check_reg(instruction.call_dst(), "call_dst")?;
             let argument_count = instruction.arg_count() as u16;
             if argument_count > 0 {
@@ -316,12 +317,12 @@ fn verify_instruction(
             check_reg(instruction.dst(), "dst")?;
         }
 
-        OpCode::GetField => {
+        OpCode::GetField | OpCode::GetFieldI32 | OpCode::GetFieldF64 => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "object_reg")?;
         }
 
-        OpCode::SetField => {
+        OpCode::SetField | OpCode::SetFieldI32 | OpCode::SetFieldF64 => {
             check_reg(instruction.dst(), "value_reg")?;
             check_reg(instruction.src1(), "object_reg")?;
         }
@@ -422,7 +423,11 @@ fn verify_instruction(
         }
 
         // Superinstructions
-        OpCode::AddI32Imm | OpCode::SubI32Imm | OpCode::MulI32Imm | OpCode::ModI32Imm => {
+        OpCode::AddI32Imm
+        | OpCode::SubI32Imm
+        | OpCode::MulI32Imm
+        | OpCode::ModI32Imm
+        | OpCode::AddI64Imm => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "src1")?;
         }
@@ -478,7 +483,9 @@ fn verify_instruction(
         | OpCode::JumpIfEqI32
         | OpCode::JumpIfNeqI32
         | OpCode::JumpIfLtF64
-        | OpCode::JumpIfLteF64 => {
+        | OpCode::JumpIfLteF64
+        | OpCode::JumpIfLtI64
+        | OpCode::JumpIfLteI64 => {
             check_reg(instruction.dst(), "reg_a")?;
             check_reg(instruction.src1(), "reg_b")?;
             let offset = instruction.src2() as i16 as i32;
