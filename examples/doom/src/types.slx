@@ -1,0 +1,66 @@
+package doom;
+
+public class GameState {
+    public static const int32 TITLE = 0;
+    public static const int32 PLAYING = 1;
+    public static const int32 PAUSED = 2;
+    public static const int32 INTERMISSION = 3;
+    public static const int32 GAME_OVER = 4;
+    public static const int32 VICTORY = 5;
+}
+
+public class WeaponKind {
+    public static const int32 FIST = 0;
+    public static const int32 PISTOL = 1;
+    public static const int32 SHOTGUN = 2;
+    public static const int32 CHAINGUN = 3;
+    public static const int32 ROCKET_LAUNCHER = 4;
+}
+
+public class EnemyKind {
+    public static const int32 ZOMBIEMAN = 0;
+    public static const int32 IMP = 1;
+    public static const int32 PINKY_DEMON = 2;
+    public static const int32 CACODEMON = 3;
+}
+
+public class EnemyAiState {
+    public static const int32 IDLE = 0;
+    public static const int32 CHASE = 1;
+    public static const int32 ATTACK = 2;
+    public static const int32 PAIN = 3;
+    public static const int32 DEATH = 4;
+    public static const int32 DEAD = 5;
+}
+
+public class PickupKind {
+    public static const int32 STIMPACK = 0;       // +10 Health
+    public static const int32 MEDIKIT = 1;        // +25 Health
+    public static const int32 ARMOR_BONUS = 2;    // +10 Armor
+    public static const int32 GREEN_ARMOR = 3;    // Set Armor to 100
+    public static const int32 AMMO_CLIP = 4;      // +10 Bullets
+    public static const int32 AMMO_SHELLS = 5;    // +4 Shells
+    public static const int32 AMMO_ROCKETS = 6;   // +2 Rockets
+    public static const int32 WEAPON_SHOTGUN = 7;
+    public static const int32 WEAPON_CHAINGUN = 8;
+    public static const int32 WEAPON_LAUNCHER = 9;
+    public static const int32 BLUE_KEY = 10;
+    public static const int32 RED_KEY = 11;
+    public static const int32 YELLOW_KEY = 12;
+}
+
+public class ProjectileKind {
+    public static const int32 PLAYER_ROCKET = 0;
+    public static const int32 IMP_FIREBALL = 1;
+    public static const int32 CACODEMON_BALL = 2;
+}
+
+public class DoomConstants {
+    public static const int32 SCREEN_WIDTH = 1024;
+    public static const int32 SCREEN_HEIGHT = 768;
+    public static const float32 FOV_DEFAULT = 75.0;
+    public static const float32 PLAYER_EYE_HEIGHT = 1.60;
+    public static const float32 PLAYER_RADIUS = 0.40;
+    public static const float32 PLAYER_BASE_SPEED = 0.14;
+    public static const float32 PLAYER_RUN_SPEED = 0.22;
+}

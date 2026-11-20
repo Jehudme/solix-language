@@ -1,0 +1,69 @@
+package doom;
+
+import raylib.*;
+import solix.math.Math;
+
+public class DoomMath {
+    public static float32 clamp_float(float32 value_val, float32 min_val, float32 max_val) {
+        if (value_val < min_val) {
+            return min_val;
+        }
+        if (value_val > max_val) {
+            return max_val;
+        }
+        return value_val;
+    }
+
+    public static float32 distance_3d(
+        float32 origin_x,
+        float32 origin_y,
+        float32 origin_z,
+        float32 target_x,
+        float32 target_y,
+        float32 target_z
+    ) {
+        float32 diff_x = target_x - origin_x;
+        float32 diff_y = target_y - origin_y;
+        float32 diff_z = target_z - origin_z;
+        float64 sum_squares = (float64)((diff_x * diff_x) + (diff_y * diff_y) + (diff_z * diff_z));
+        return (float32)Math::sqrt(sum_squares);
+    }
+
+    public static float32 distance_2d(
+        float32 origin_x,
+        float32 origin_z,
+        float32 target_x,
+        float32 target_z
+    ) {
+        float32 diff_x = target_x - origin_x;
+        float32 diff_z = target_z - origin_z;
+        float64 sum_squares = (float64)((diff_x * diff_x) + (diff_z * diff_z));
+        return (float32)Math::sqrt(sum_squares);
+    }
+
+    public static float32 calculate_yaw_angle(float32 from_x, float32 from_z, float32 to_x, float32 to_z) {
+        float32 delta_x = to_x - from_x;
+        float32 delta_z = to_z - from_z;
+        float64 angle_radians = Math::atan2((float64)delta_z, (float64)delta_x);
+        return (float32)(angle_radians * 57.29577951308232); // Radians to degrees
+    }
+
+    public static bool test_box_overlap(
+        float32 box_a_min_x,
+        float32 box_a_min_z,
+        float32 box_a_max_x,
+        float32 box_a_max_z,
+        float32 box_b_min_x,
+        float32 box_b_min_z,
+        float32 box_b_max_x,
+        float32 box_b_max_z
+    ) {
+        if (box_a_max_x < box_b_min_x || box_a_min_x > box_b_max_x) {
+            return false;
+        }
+        if (box_a_max_z < box_b_min_z || box_a_min_z > box_b_max_z) {
+            return false;
+        }
+        return true;
+    }
+}

@@ -1,0 +1,62 @@
+configuration:
+  name: doom
+  version: "1.0.0"
+  description: Modern 3D Retro Doom FPS Arcade Showcase built with Solix, Raylib 3D, and Solixlib
+  license: Apache-2.0
+  authors: []
+
+profiles:
+  release:
+    entrypoint: DoomGame::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - host
+    dependencies:
+      raylib:
+        version: "5.5.0"
+        profile: release
+      solix:
+        version: "2.0.0"
+        profile: release
+
+  debug:
+    entrypoint: DoomGame::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    dependencies:
+      raylib:
+        version: "5.5.0"
+        profile: release
+      solix:
+        version: "2.0.0"
+        profile: release
+
+  test:
+    entrypoint: DoomTestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+      - tests
+    platforms:
+      - host
+    dependencies:
+      raylib:
+        version: "5.5.0"
+        profile: release
+      solix:
+        version: "2.0.0"
+        profile: release

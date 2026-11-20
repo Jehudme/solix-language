@@ -1,0 +1,260 @@
+package doom;
+
+import raylib.*;
+import solix.math.Math;
+
+public class EnemyMonster {
+    public int32 enemy_kind;
+    public float32 pos_x;
+    public float32 pos_y;
+    public float32 pos_z;
+    public float32 health_val;
+    public float32 max_health_val;
+    public int32 ai_state;
+    public int32 attack_cooldown;
+    public int32 pain_timer;
+    public int32 death_timer;
+    public bool is_alive;
+    public float32 collision_radius;
+    public float32 movement_speed;
+
+    public EnemyMonster(int32 kind, float32 spawn_x, float32 spawn_y, float32 spawn_z) {
+        this.enemy_kind = kind;
+        this.pos_x = spawn_x;
+        this.pos_y = spawn_y;
+        this.pos_z = spawn_z;
+        this.ai_state = EnemyAiState::IDLE;
+        this.attack_cooldown = 30;
+        this.pain_timer = 0;
+        this.death_timer = 0;
+        this.is_alive = true;
+
+        if (kind == EnemyKind::ZOMBIEMAN) {
+            this.max_health_val = 30.0;
+            this.collision_radius = 0.40;
+            this.movement_speed = 0.055;
+        } else if (kind == EnemyKind::IMP) {
+            this.max_health_val = 60.0;
+            this.collision_radius = 0.45;
+            this.movement_speed = 0.065;
+        } else if (kind == EnemyKind::PINKY_DEMON) {
+            this.max_health_val = 140.0;
+            this.collision_radius = 0.65;
+            this.movement_speed = 0.095; // Fast charge
+        } else { // CACODEMON
+            this.max_health_val = 280.0;
+            this.collision_radius = 0.80;
+            this.movement_speed = 0.045;
+            this.pos_y = spawn_y + 1.2; // Floats above ground
+        }
+        this.health_val = this.max_health_val;
+    }
+
+    public void take_damage(float32 damage_amount, DoomAudioManager audio_manager) {
+        if (!this.is_alive) {
+            return;
+        }
+        this.health_val = this.health_val - damage_amount;
+        this.ai_state = EnemyAiState::PAIN;
+        this.pain_timer = 8;
+
+        if (this.health_val <= 0.0) {
+            this.health_val = 0.0;
+            this.is_alive = false;
+            this.ai_state = EnemyAiState::DEATH;
+            this.death_timer = 24;
+            audio_manager.play_sound(audio_manager.sound_zombie_groan);
+        }
+    }
+
+    public void update(
+        float32 player_x,
+        float32 player_y,
+        float32 player_z,
+        LevelMap map,
+        Projectile[] projectiles,
+        int32 max_projectiles,
+        DoomAudioManager audio_manager
+    ) {
+        if (this.ai_state == EnemyAiState::DEAD) {
+            return;
+        }
+
+        if (this.ai_state == EnemyAiState::DEATH) {
+            this.death_timer = this.death_timer - 1;
+            if (this.death_timer <= 0) {
+                this.ai_state = EnemyAiState::DEAD;
+            }
+            return;
+        }
+
+        if (this.ai_state == EnemyAiState::PAIN) {
+            this.pain_timer = this.pain_timer - 1;
+            if (this.pain_timer <= 0) {
+                this.ai_state = EnemyAiState::CHASE;
+            }
+            return;
+        }
+
+        float32 distance_to_player = DoomMath::distance_2d(this.pos_x, this.pos_z, player_x, player_z);
+
+        if (this.ai_state == EnemyAiState::IDLE) {
+            if (distance_to_player < 14.0) {
+                this.ai_state = EnemyAiState::CHASE;
+                audio_manager.play_sound_spatial(
+                    audio_manager.sound_zombie_groan,
+                    this.pos_x,
+                    this.pos_z,
+                    player_x,
+                    player_z,
+                    20.0
+                );
+            }
+            return;
+        }
+
+        if (this.ai_state == EnemyAiState::CHASE) {
+            // Move toward player
+            float32 delta_x = player_x - this.pos_x;
+            float32 delta_z = player_z - this.pos_z;
+            if (distance_to_player > 0.1) {
+                float32 step_x = (delta_x / distance_to_player) * this.movement_speed;
+                float32 step_z = (delta_z / distance_to_player) * this.movement_speed;
+
+                float32 target_x = this.pos_x + step_x;
+                float32 target_z = this.pos_z + step_z;
+
+                if (!map.test_wall_collision(target_x, this.pos_z, this.collision_radius)) {
+                    this.pos_x = target_x;
+                }
+                if (!map.test_wall_collision(this.pos_x, target_z, this.collision_radius)) {
+                    this.pos_z = target_z;
+                }
+            }
+
+            // Decide to attack
+            this.attack_cooldown = this.attack_cooldown - 1;
+            if (this.attack_cooldown <= 0) {
+                if (this.enemy_kind == EnemyKind::PINKY_DEMON) {
+                    if (distance_to_player < 1.8) {
+                        this.ai_state = EnemyAiState::ATTACK;
+                        this.attack_cooldown = 45;
+                        audio_manager.play_sound(audio_manager.sound_demon_bite);
+                    }
+                } else if (this.enemy_kind == EnemyKind::IMP) {
+                    if (distance_to_player < 16.0) {
+                        this.ai_state = EnemyAiState::ATTACK;
+                        this.attack_cooldown = 60;
+                        this.launch_fireball(player_x, player_y, player_z, projectiles, max_projectiles, audio_manager);
+                    }
+                } else if (this.enemy_kind == EnemyKind::ZOMBIEMAN) {
+                    if (distance_to_player < 18.0) {
+                        this.ai_state = EnemyAiState::ATTACK;
+                        this.attack_cooldown = 50;
+                        audio_manager.play_sound(audio_manager.sound_pistol);
+                    }
+                } else { // CACODEMON
+                    if (distance_to_player < 20.0) {
+                        this.ai_state = EnemyAiState::ATTACK;
+                        this.attack_cooldown = 70;
+                        this.launch_fireball(player_x, player_y, player_z, projectiles, max_projectiles, audio_manager);
+                    }
+                }
+            }
+        } else if (this.ai_state == EnemyAiState::ATTACK) {
+            this.attack_cooldown = this.attack_cooldown - 1;
+            if (this.attack_cooldown <= 25) {
+                this.ai_state = EnemyAiState::CHASE;
+            }
+        }
+    }
+
+    public void launch_fireball(
+        float32 player_x,
+        float32 player_y,
+        float32 player_z,
+        Projectile[] projectiles,
+        int32 max_projectiles,
+        DoomAudioManager audio_manager
+    ) {
+        float32 diff_x = player_x - this.pos_x;
+        float32 diff_y = (player_y + DoomConstants::PLAYER_EYE_HEIGHT * 0.7) - this.pos_y;
+        float32 diff_z = player_z - this.pos_z;
+        float32 total_distance = DoomMath::distance_3d(this.pos_x, this.pos_y, this.pos_z, player_x, player_y, player_z);
+
+        if (total_distance <= 0.1) {
+            return;
+        }
+
+        float32 dir_x = diff_x / total_distance;
+        float32 dir_y = diff_y / total_distance;
+        float32 dir_z = diff_z / total_distance;
+
+        for (int32 proj_idx = 0; proj_idx < max_projectiles; proj_idx = proj_idx + 1) {
+            if (projectiles[proj_idx] != null && !projectiles[proj_idx].is_active) {
+                int32 proj_kind = (this.enemy_kind == EnemyKind::CACODEMON) ? ProjectileKind::CACODEMON_BALL : ProjectileKind::IMP_FIREBALL;
+                float32 projectile_speed = 0.28;
+                float32 damage_value = 16.0;
+
+                projectiles[proj_idx].launch(
+                    proj_kind,
+                    this.pos_x,
+                    this.pos_y + 0.8,
+                    this.pos_z,
+                    dir_x,
+                    dir_y,
+                    dir_z,
+                    projectile_speed,
+                    damage_value,
+                    1.5,
+                    false // Enemy projectile
+                );
+                audio_manager.play_sound(audio_manager.sound_imp_fireball);
+                return;
+            }
+        }
+    }
+
+    public void draw() {
+        if (this.ai_state == EnemyAiState::DEAD) {
+            // Draw collapsed remains
+            Vector3 remains_pos = new Vector3(this.pos_x, this.pos_y + 0.08, this.pos_z);
+            Raylib::DrawCube(remains_pos, 0.9, 0.12, 0.9, Color::DARKGRAY);
+            return;
+        }
+
+        Vector3 body_pos = new Vector3(this.pos_x, this.pos_y + 0.9, this.pos_z);
+
+        Color main_color = Color::RED;
+        Color accent_color = Color::BLACK;
+
+        if (this.enemy_kind == EnemyKind::ZOMBIEMAN) {
+            main_color = new Color(130, 140, 110, 255); // Tan military uniform
+            accent_color = new Color(70, 80, 50, 255);
+            Raylib::DrawCube(body_pos, 0.65, 1.6, 0.65, main_color);
+            Raylib::DrawCubeWires(body_pos, 0.65, 1.6, 0.65, accent_color);
+        } else if (this.enemy_kind == EnemyKind::IMP) {
+            main_color = new Color(145, 90, 55, 255);   // Leathery brown demon
+            accent_color = new Color(255, 60, 20, 255);  // Glowing red eyes
+            Raylib::DrawCube(body_pos, 0.70, 1.7, 0.70, main_color);
+            Raylib::DrawCubeWires(body_pos, 0.70, 1.7, 0.70, accent_color);
+        } else if (this.enemy_kind == EnemyKind::PINKY_DEMON) {
+            main_color = new Color(220, 100, 130, 255); // Pink muscular beast
+            accent_color = Color::DARKGRAY;
+            Raylib::DrawCube(body_pos, 1.1, 1.5, 1.1, main_color);
+            Raylib::DrawCubeWires(body_pos, 1.1, 1.5, 1.1, accent_color);
+        } else { // CACODEMON
+            main_color = new Color(210, 40, 40, 255);   // Crimson sphere
+            accent_color = Color::YELLOW;
+            Raylib::DrawSphere(body_pos, 0.9, main_color);
+            Raylib::DrawSphereWires(body_pos, 0.92, 8, 8, accent_color);
+        }
+
+        // Draw health bar over monster
+        if (this.health_val < this.max_health_val && this.is_alive) {
+            float32 health_ratio = this.health_val / this.max_health_val;
+            Vector3 health_bar_pos = new Vector3(this.pos_x, this.pos_y + 1.9, this.pos_z);
+            Raylib::DrawCube(health_bar_pos, 0.8 * health_ratio, 0.08, 0.08, Color::RED);
+        }
+    }
+}

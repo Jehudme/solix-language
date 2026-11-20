@@ -1,0 +1,80 @@
+package doom;
+
+public class DoomTestRunner {
+    public static int32 test() {
+        // 1. Verify Constants
+        if (DoomConstants::SCREEN_WIDTH != 1024 || DoomConstants::SCREEN_HEIGHT != 768) {
+            return 1;
+        }
+
+        // 2. Verify Math Distance & Box Collision
+        float32 dist_result = DoomMath::distance_3d(0.0, 0.0, 0.0, 3.0, 0.0, 4.0);
+        if (dist_result < 4.99 || dist_result > 5.01) {
+            return 2;
+        }
+
+        bool boxes_overlap = DoomMath::test_box_overlap(0.0, 0.0, 2.0, 2.0, 1.0, 1.0, 3.0, 3.0);
+        if (!boxes_overlap) {
+            return 3;
+        }
+
+        bool boxes_apart = DoomMath::test_box_overlap(0.0, 0.0, 1.0, 1.0, 5.0, 5.0, 6.0, 6.0);
+        if (boxes_apart) {
+            return 4;
+        }
+
+        // 3. Verify LevelMap Architecture
+        LevelMap test_map = new LevelMap();
+        if (test_map.wall_count != 14 || test_map.sector_count != 6) {
+            return 5;
+        }
+
+        // Test toxic acid hazard in sector 2 (x: 14.0, z: 6.0)
+        bool is_toxic = test_map.check_toxic_hazard(14.0, 6.0);
+        if (!is_toxic) {
+            return 6;
+        }
+
+        // Test safe zone in room 0 (x: 0.0, z: 0.0)
+        bool is_safe = test_map.check_toxic_hazard(0.0, 0.0);
+        if (is_safe) {
+            return 7;
+        }
+
+        // 4. Verify Player Stats & Armor Absorption
+        Player test_player = new Player(0.0, 0.0, 0.0);
+        if (test_player.health_val != 100.0 || test_player.armor_val != 25.0) {
+            return 8;
+        }
+
+        // 5. Verify Weapon System & Ammo Tracking
+        WeaponManager test_weapons = new WeaponManager();
+        if (test_weapons.ammo_bullets != 50 || test_weapons.ammo_shells != 16) {
+            return 9;
+        }
+        test_weapons.select_weapon(WeaponKind::SHOTGUN);
+        test_weapons.consume_ammo();
+        if (test_weapons.ammo_shells != 15) {
+            return 10;
+        }
+
+        // 6. Verify Enemy Monster Stats
+        EnemyMonster test_zombie = new EnemyMonster(EnemyKind::ZOMBIEMAN, 5.0, 0.0, 5.0);
+        if (test_zombie.max_health_val != 30.0 || !test_zombie.is_alive) {
+            return 11;
+        }
+
+        EnemyMonster test_imp = new EnemyMonster(EnemyKind::IMP, 10.0, 0.0, 10.0);
+        if (test_imp.max_health_val != 60.0) {
+            return 12;
+        }
+
+        EnemyMonster test_pinky = new EnemyMonster(EnemyKind::PINKY_DEMON, 15.0, 0.0, 15.0);
+        if (test_pinky.max_health_val != 140.0) {
+            return 13;
+        }
+
+        // All assertions passed cleanly
+        return 0;
+    }
+}

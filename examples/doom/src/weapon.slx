@@ -1,0 +1,181 @@
+package doom;
+
+import raylib.*;
+import solix.math.Math;
+
+public class WeaponManager {
+    public int32 active_weapon_kind;
+    public bool[] unlocked_weapons;
+
+    public int32 ammo_bullets;
+    public int32 ammo_shells;
+    public int32 ammo_rockets;
+
+    public int32 max_bullets;
+    public int32 max_shells;
+    public int32 max_rockets;
+
+    public int32 cooldown_ticks;
+    public int32 animation_frame;
+    public float32 recoil_offset_y;
+    public float32 screen_shake_trigger;
+
+    public WeaponManager() {
+        this.active_weapon_kind = WeaponKind::PISTOL;
+        this.unlocked_weapons = new bool[5];
+        this.unlocked_weapons[WeaponKind::FIST] = true;
+        this.unlocked_weapons[WeaponKind::PISTOL] = true;
+        this.unlocked_weapons[WeaponKind::SHOTGUN] = true; // Start with shotgun for arcade showcase fun!
+        this.unlocked_weapons[WeaponKind::CHAINGUN] = false;
+        this.unlocked_weapons[WeaponKind::ROCKET_LAUNCHER] = false;
+
+        this.ammo_bullets = 50;
+        this.ammo_shells = 16;
+        this.ammo_rockets = 4;
+
+        this.max_bullets = 200;
+        this.max_shells = 50;
+        this.max_rockets = 50;
+
+        this.cooldown_ticks = 0;
+        this.animation_frame = 0;
+        this.recoil_offset_y = 0.0;
+        this.screen_shake_trigger = 0.0;
+    }
+
+    public void select_weapon(int32 slot_index) {
+        if (slot_index >= 0 && slot_index < 5) {
+            if (this.unlocked_weapons[slot_index]) {
+                this.active_weapon_kind = slot_index;
+                this.cooldown_ticks = 10;
+                this.animation_frame = 0;
+                this.recoil_offset_y = 0.0;
+            }
+        }
+    }
+
+    public bool has_ammo_for_current() {
+        if (this.active_weapon_kind == WeaponKind::FIST) {
+            return true;
+        } else if (this.active_weapon_kind == WeaponKind::PISTOL || this.active_weapon_kind == WeaponKind::CHAINGUN) {
+            return this.ammo_bullets > 0;
+        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
+            return this.ammo_shells > 0;
+        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
+            return this.ammo_rockets > 0;
+        }
+        return false;
+    }
+
+    public int32 get_current_ammo_count() {
+        if (this.active_weapon_kind == WeaponKind::PISTOL || this.active_weapon_kind == WeaponKind::CHAINGUN) {
+            return this.ammo_bullets;
+        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
+            return this.ammo_shells;
+        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
+            return this.ammo_rockets;
+        }
+        return 999; // Fist
+    }
+
+    public void consume_ammo() {
+        if (this.active_weapon_kind == WeaponKind::PISTOL || this.active_weapon_kind == WeaponKind::CHAINGUN) {
+            this.ammo_bullets = this.ammo_bullets - 1;
+        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
+            this.ammo_shells = this.ammo_shells - 1;
+        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
+            this.ammo_rockets = this.ammo_rockets - 1;
+        }
+    }
+
+    public void update() {
+        if (this.cooldown_ticks > 0) {
+            this.cooldown_ticks = this.cooldown_ticks - 1;
+            if (this.cooldown_ticks > 12) {
+                this.animation_frame = 1; // Flash frame
+                this.recoil_offset_y = 18.0;
+            } else if (this.cooldown_ticks > 6) {
+                this.animation_frame = 2; // Recoil frame
+                this.recoil_offset_y = 10.0;
+            } else {
+                this.animation_frame = 3; // Pump / cycle frame
+                this.recoil_offset_y = 4.0;
+            }
+        } else {
+            this.animation_frame = 0; // Idle
+            this.recoil_offset_y = 0.0;
+        }
+    }
+
+    public void draw_first_person_weapon(int32 screen_width, int32 screen_height, float32 bob_offset) {
+        int32 center_screen_x = screen_width / 2;
+        int32 base_screen_y = screen_height - 110 + (int32)(this.recoil_offset_y + (bob_offset * 60.0));
+
+        if (this.active_weapon_kind == WeaponKind::FIST) {
+            // Draw Knuckled brass fist
+            Color skin_tan = new Color(220, 160, 130, 255);
+            Color brass_gold = new Color(240, 190, 40, 255);
+            Raylib::DrawRectangle(center_screen_x - 50, base_screen_y - 60, 100, 80, skin_tan);
+            Raylib::DrawRectangle(center_screen_x - 45, base_screen_y - 75, 90, 22, brass_gold);
+            Raylib::DrawRectangle(center_screen_x - 40, base_screen_y - 80, 80, 8, Color::BLACK);
+        } else if (this.active_weapon_kind == WeaponKind::PISTOL) {
+            // Draw standard issue Beretta 92FS / Walter PPK style
+            Color gun_metal = new Color(60, 65, 75, 255);
+            Color gun_slide = new Color(90, 95, 105, 255);
+            Color grip_brown = new Color(90, 50, 30, 255);
+
+            Raylib::DrawRectangle(center_screen_x - 14, base_screen_y - 100, 28, 80, gun_slide);
+            Raylib::DrawRectangle(center_screen_x - 18, base_screen_y - 50, 36, 60, grip_brown);
+            Raylib::DrawRectangle(center_screen_x - 8, base_screen_y - 115, 16, 20, gun_metal);
+
+            if (this.animation_frame == 1) {
+                // Muzzle flash
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 26.0, Color::YELLOW);
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 14.0, Color::WHITE);
+            }
+        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
+            // Draw iconic 12-gauge pump-action shotgun
+            Color steel_barrel = new Color(75, 80, 90, 255);
+            Color wood_stock = new Color(120, 65, 35, 255);
+            Color shadow_crevice = new Color(30, 35, 40, 255);
+
+            // Double / pump barrel
+            Raylib::DrawRectangle(center_screen_x - 22, base_screen_y - 140, 44, 110, steel_barrel);
+            Raylib::DrawRectangle(center_screen_x - 2, base_screen_y - 140, 4, 110, shadow_crevice);
+            // Wooden pump grip
+            Raylib::DrawRectangle(center_screen_x - 28, base_screen_y - 70, 56, 45, wood_stock);
+
+            if (this.animation_frame == 1) {
+                // Massive shotgun muzzle blast
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 150, 42.0, Color::ORANGE);
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 150, 24.0, Color::YELLOW);
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 150, 12.0, Color::WHITE);
+            }
+        } else if (this.active_weapon_kind == WeaponKind::CHAINGUN) {
+            // Triple-barrel Gatling rotary gun
+            Color gun_gray = new Color(50, 55, 60, 255);
+            Color rotary_cylinder = new Color(85, 90, 100, 255);
+
+            Raylib::DrawRectangle(center_screen_x - 35, base_screen_y - 130, 70, 100, rotary_cylinder);
+            Raylib::DrawRectangle(center_screen_x - 18, base_screen_y - 145, 36, 30, gun_gray);
+
+            if (this.animation_frame == 1) {
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 145, 30.0, Color::YELLOW);
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 145, 15.0, Color::WHITE);
+            }
+        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
+            // Heavy military bazooka muzzle
+            Color olive_drab = new Color(70, 85, 55, 255);
+            Color rocket_tube = new Color(40, 45, 40, 255);
+
+            Raylib::DrawRectangle(center_screen_x - 45, base_screen_y - 120, 90, 90, olive_drab);
+            Raylib::DrawCircle(center_screen_x, base_screen_y - 80, 32.0, rocket_tube);
+            Raylib::DrawCircle(center_screen_x, base_screen_y - 80, 18.0, Color::RED); // Warhead tip visible
+
+            if (this.animation_frame == 1) {
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 50.0, Color::ORANGE);
+                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 28.0, Color::WHITE);
+            }
+        }
+    }
+}
