@@ -26,7 +26,7 @@ pub use commands::{
     execute_install_binaries, execute_install_package, execute_list, execute_lsp, execute_new,
     execute_new_native, execute_new_package, execute_run, execute_run_package, execute_run_source,
     execute_uninstall, execute_uninstall_binaries, execute_uninstall_package, execute_wiki,
-    install_package_artifact, resolve_bin_store_dir,
+    install_package_artifact, resolve_bin_store_dir, write_zig_toolchain_file_for_test,
 };
 pub use diagnostics::render_diagnostics;
 pub use process::{

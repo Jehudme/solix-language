@@ -783,6 +783,7 @@ fn compile_cargo_native(
 
     let ffi_rust_source_dir = resolve_ffi_rust_source_dir(project_root);
     let uses_git_solix_ffi = cargo_uses_git_solix_ffi(&cargo_manifest);
+    let zig_exe_option = find_executable("zig");
 
     for triple in &entry.target_triples {
         let strategy = select_cargo_strategy(triple, host_triple)?;
@@ -864,6 +865,39 @@ fn compile_cargo_native(
             command.env(format!("CC_{underscored}"), &cc_path);
             if let Some(ar_path) = find_executable(cross_ar) {
                 command.env(format!("AR_{underscored}"), ar_path);
+            }
+        }
+
+        if matches!(strategy, CargoBuildStrategy::Zigbuild)
+            && !is_exact_host
+            && let Some(ref zig_exe) = zig_exe_option
+        {
+            let toolchains_dir = cargo_target_dir.join("toolchains");
+            if let Ok(toolchain_path) = write_zig_toolchain_file(&toolchains_dir, triple, zig_exe) {
+                let bin_dir = toolchains_dir.join("bin");
+                let wrapper_ext = if cfg!(windows) { ".cmd" } else { "" };
+                let cc_wrapper = bin_dir.join(format!("zig-cc-{triple}{wrapper_ext}"));
+                let cxx_wrapper = bin_dir.join(format!("zig-cxx-{triple}{wrapper_ext}"));
+                let ar_wrapper = bin_dir.join(format!("zig-ar{wrapper_ext}"));
+                let ranlib_wrapper = bin_dir.join(format!("zig-ranlib{wrapper_ext}"));
+
+                let underscored = triple.replace('-', "_");
+                command.env(format!("CC_{underscored}"), &cc_wrapper);
+                command.env(format!("CXX_{underscored}"), &cxx_wrapper);
+                command.env(format!("AR_{underscored}"), &ar_wrapper);
+                command.env(format!("RANLIB_{underscored}"), &ranlib_wrapper);
+                command.env(
+                    format!("CMAKE_TOOLCHAIN_FILE_{underscored}"),
+                    &toolchain_path,
+                );
+                command.env("CMAKE_TOOLCHAIN_FILE", &toolchain_path);
+
+                let current_path = std::env::var("PATH").unwrap_or_default();
+                let path_separator = if cfg!(windows) { ";" } else { ":" };
+                command.env(
+                    "PATH",
+                    format!("{}{path_separator}{current_path}", bin_dir.display()),
+                );
             }
         }
 
@@ -966,6 +1000,14 @@ fn cmake_target_descriptor(triple: &str) -> Option<(&'static str, &'static str, 
         "aarch64-apple-darwin" => Some(("Darwin", "arm64", "aarch64-macos")),
         _ => None,
     }
+}
+
+pub fn write_zig_toolchain_file_for_test(
+    toolchain_dir: &Path,
+    triple: &str,
+    zig_exe: &Path,
+) -> Result<PathBuf> {
+    write_zig_toolchain_file(toolchain_dir, triple, zig_exe)
 }
 
 fn write_zig_toolchain_file(toolchain_dir: &Path, triple: &str, zig_exe: &Path) -> Result<PathBuf> {
