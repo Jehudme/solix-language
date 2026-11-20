@@ -123,6 +123,8 @@ When cross-compiling native modules across disparate operating systems and archi
 * **Rust Dependencies (`Cargo.toml`):** Solix dispatches through `cross` if installed, or runs the container image `ghcr.io/cross-rs/<triple>:edge` directly via Docker.
 * **CMake Dependencies (`CMakeLists.txt`):** Solix dispatches through official `dockcross/<target>` images (e.g. `dockcross/linux-arm64`, `dockcross/windows-static-x64`).
 * **Custom Containers:** Projects can override default images by declaring `docker_image: <custom_image>` in the native target configuration.
+* **Target Cache Isolation:** Solix segregates container compilation target directories (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, preventing host-compiled build scripts from being executed under container dynamic linkers.
+* **Native Target Platform Scoping:** Individual native subprojects can restrict their compiled targets with `platforms: [host, windows-x86_64]` under `profiles.<name>.natives.<key>` while retaining universal pure-Solix packaging.
 
 > [!NOTE]
 > Containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild and targeted sysroots, but it is practical and sufficient for complex native dependencies with extensive system library requirements.

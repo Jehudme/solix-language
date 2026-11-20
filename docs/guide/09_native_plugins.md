@@ -240,6 +240,21 @@ profiles:
 
 * **Rust Natives (`Cargo.toml`):** Solix compiles via `cross` or official images (`ghcr.io/cross-rs/<target>:edge`).
 * **CMake Natives (`CMakeLists.txt`):** Solix compiles via `dockcross/<target>` images (e.g. `dockcross/linux-arm64`).
+* **Cache Isolation:** Solix automatically segregates container target directories (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, preventing host-compiled build scripts from failing inside container environments.
+* **Native Target Platform Overrides:** Complex native bridges that rely on host-installed desktop SDKs (such as desktop GUI libraries requiring X11) can override the parent profile's target platforms using `natives.<name>.platforms`:
+  ```yaml
+  profiles:
+    release:
+      platforms:
+        - all
+      natives:
+        gui_native:
+          profile: release
+          platforms:
+            - host
+            - windows-x86_64
+  ```
+  This allows pure Solix bytecode archives to remain universal across all platforms while constraining native binary bundling to validated desktop targets.
 
 > [!NOTE]
 > Containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild and targeted sysroots, but it is practical and sufficient for complex dependencies with extensive system libraries.
