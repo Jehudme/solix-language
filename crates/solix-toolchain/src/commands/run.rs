@@ -148,7 +148,8 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
             || extension.eq_ignore_ascii_case("dylib")
         {
             runtime_options = runtime_options.with_native_library(lib_path);
-        } else if extension.eq_ignore_ascii_case("slxarc")
+        } else if extension.eq_ignore_ascii_case("slxp")
+            || extension.eq_ignore_ascii_case("slxarc")
             || extension.eq_ignore_ascii_case("slxpac")
         {
             let cache_root = ensure_temp_cache_dir(&mut temp_cache_dir)?;
@@ -277,12 +278,20 @@ pub fn execute_run(args: RunArgs) -> Result<i32> {
 
         if extension.eq_ignore_ascii_case("slx") {
             source_paths.push(target_path);
-        } else if extension.eq_ignore_ascii_case("slxarc")
+        } else if extension.eq_ignore_ascii_case("slxp")
+            || extension.eq_ignore_ascii_case("slxarc")
             || extension.eq_ignore_ascii_case("slxpac")
         {
             let cache_root = ensure_temp_cache_dir(&mut temp_cache_dir)?;
             let is_slxpac = extension.eq_ignore_ascii_case("slxpac");
-            let kind_string = if is_slxpac { "slxpac" } else { "slxarc" };
+            let is_slxp = extension.eq_ignore_ascii_case("slxp");
+            let kind_string = if is_slxp {
+                "slxp"
+            } else if is_slxpac {
+                "slxpac"
+            } else {
+                "slxarc"
+            };
             runtime_options = runtime_options.with_container_kind(kind_string);
             let loaded_archive = SlxarcArchive::extract_and_load(target_path, cache_root)
                 .with_context(|| {

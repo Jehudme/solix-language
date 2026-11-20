@@ -165,6 +165,9 @@ pub struct ExportManifest {
     /// Explicit package dependencies recorded during compilation.
     #[serde(default)]
     pub dependencies: Vec<crate::solver::DependencyRequirement>,
+    /// Declared dynamic shared library dependencies required by this binary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_libraries: Vec<String>,
     /// Exported nominal classes and interfaces.
     pub exported_classes: Vec<ExportedClass>,
     /// Exported nominal enumerations.

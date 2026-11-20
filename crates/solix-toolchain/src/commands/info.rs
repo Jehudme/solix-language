@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
 use solix_common::cache::PackageCache;
 use solix_common::hash::{sha256_file, sha256_hex};
-use solix_common::project::{SlxarcArchive, SlxarcInspection};
+use solix_common::project::SlxarcInspection;
 use solix_common::solver::PackageVersion;
 use solix_compilation::manifest_to_source;
 use solix_compilation::phases::emitter::disassemble_program;
@@ -67,16 +67,19 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
     let is_archive = target_path
         .extension()
         .and_then(|extension| extension.to_str())
-        .map(|ext_str| ext_str.eq_ignore_ascii_case("slxarc"))
+        .map(|ext_str| {
+            ext_str.eq_ignore_ascii_case("slxp") || ext_str.eq_ignore_ascii_case("slxarc")
+        })
         .unwrap_or(false);
 
     if is_archive {
-        let inspection = SlxarcArchive::inspect(&target_path).with_context(|| {
-            format!(
-                "Failed to inspect .slxarc archive container from '{}'",
-                target_path.display()
-            )
-        })?;
+        let inspection =
+            solix_common::project::SlxpPackage::inspect(&target_path).with_context(|| {
+                format!(
+                    "Failed to inspect package container from '{}'",
+                    target_path.display()
+                )
+            })?;
 
         let computed_sha256 = sha256_file(&target_path).unwrap_or_default();
 
@@ -101,7 +104,10 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         let mut bundled_platforms: Vec<String> = Vec::new();
         for entry in &inspection.file_entries {
             let clean_path = entry.path.trim_start_matches('/');
-            if let Some(rest) = clean_path.strip_prefix("lib/") {
+            let stripped = clean_path
+                .strip_prefix("bin/")
+                .or_else(|| clean_path.strip_prefix("lib/"));
+            if let Some(rest) = stripped {
                 let mut segments = rest.split('/');
                 if let Some(target_platform) = segments.next()
                     && !target_platform.is_empty()

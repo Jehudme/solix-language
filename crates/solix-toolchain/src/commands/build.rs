@@ -222,43 +222,55 @@ fn execute_declarative_build(
     copy_project_tree_filtered(&project_root.join("lib"), &stage_lib_dir, true)?;
     copy_project_tree_filtered(&project_root.join("resources"), &stage_resources_dir, false)?;
 
+    let mut resolved_profile = resolved_profile.clone();
     let required_platforms =
-        resolve_required_platform_ids(resolved_profile, args.target.as_deref());
+        resolve_required_platform_ids(&resolved_profile, args.target.as_deref());
     stage_dependency_native_libraries(
-        resolved_profile,
+        &mut resolved_profile,
         args.pkg_dir.as_deref(),
         &stage_lib_dir,
         &required_platforms,
     )?;
 
-    let out_slxb = stage_bin_dir.join(format!("{}.slxb", manifest_data.configuration.name));
+    copy_project_tree_filtered(&project_root.join("bin"), &stage_bin_dir, true)?;
+    copy_project_tree_filtered(&stage_lib_dir, &stage_bin_dir, true)?;
+
+    let out_slxb = stage_dir.join("binaries.slxb");
     compile_solix_project_sources(
         project_root,
         manifest_data,
-        resolved_profile,
+        &resolved_profile,
         &stage_lib_dir,
         &out_slxb,
         args.pkg_dir.as_deref(),
     )?;
+    let legacy_slxb = stage_bin_dir.join(format!("{}.slxb", manifest_data.configuration.name));
+    let _ = fs::copy(&out_slxb, &legacy_slxb);
 
     let (checksums, supported_platforms) = collect_native_checksums_and_platforms(&stage_lib_dir)?;
     let mut staged_manifest = manifest_data.clone();
     staged_manifest.native_library_checksums = checksums;
     staged_manifest.supported_platforms = supported_platforms;
+    staged_manifest.dynamic_libraries = resolved_profile.dynamic_libraries.clone();
 
     let staged_manifest_yaml = staged_manifest
         .to_yaml_string()
         .map_err(|error| anyhow::anyhow!("{error}"))?;
     fs::write(stage_dir.join("manifest.yaml"), staged_manifest_yaml)?;
 
+    let output_slxp = profile_dir.join(format!("{}.slxp", manifest_data.configuration.name));
     let output_slxarc = profile_dir.join(format!("{}.slxarc", manifest_data.configuration.name));
+    if output_slxp.exists() {
+        let _ = fs::remove_file(&output_slxp);
+    }
     if output_slxarc.exists() {
         let _ = fs::remove_file(&output_slxarc);
     }
-    solix_common::project::SlxarcArchive::pack_directory(&stage_dir, &output_slxarc)
+    solix_common::project::SlxpPackage::pack_directory(&stage_dir, &output_slxp)
         .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let _ = fs::copy(&output_slxp, &output_slxarc);
 
-    println!("  [package] Emitted archive: {}", output_slxarc.display());
+    println!("  [package] Emitted package: {}", output_slxp.display());
 
     if !resolved_profile.post_compile.is_empty() {
         println!(
@@ -267,7 +279,7 @@ fn execute_declarative_build(
         );
         let post_env = build_hook_environment(
             project_root,
-            resolved_profile,
+            &resolved_profile,
             solix_bin,
             &stage_dir,
             &cache_dir,
@@ -1319,7 +1331,7 @@ fn resolve_required_platform_ids(
 }
 
 fn stage_dependency_native_libraries(
-    resolved_profile: &ResolvedProfile,
+    resolved_profile: &mut ResolvedProfile,
     pkg_dir_override: Option<&Path>,
     stage_lib_dir: &Path,
     required_platforms: &[String],
@@ -1359,11 +1371,13 @@ fn stage_dependency_native_libraries(
         let Ok(archive_path) = solver.resolve_container_path(&lookup_name, req.version) else {
             continue;
         };
-        let is_slxarc = archive_path
+        let is_container = archive_path
             .extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext_str| ext_str.eq_ignore_ascii_case("slxarc"));
-        if !is_slxarc || !visited_archives.insert(archive_path.clone()) {
+            .is_some_and(|ext_str| {
+                ext_str.eq_ignore_ascii_case("slxarc") || ext_str.eq_ignore_ascii_case("slxp")
+            });
+        if !is_container || !visited_archives.insert(archive_path.clone()) {
             continue;
         }
 
@@ -1385,7 +1399,10 @@ fn stage_dependency_native_libraries(
                 continue;
             }
             let name = entry.name()?.replace('\\', "/");
-            if let Some(rel) = name.strip_prefix("lib/")
+            let stripped_name = name
+                .strip_prefix("bin/")
+                .or_else(|| name.strip_prefix("lib/"));
+            if let Some(rel) = stripped_name
                 && is_shared_library_file(Path::new(&name))
             {
                 has_any_native_libs = true;
@@ -1405,7 +1422,7 @@ fn stage_dependency_native_libraries(
             }
         }
 
-        let inspection = solix_common::project::SlxarcArchive::inspect(&archive_path).ok();
+        let inspection = solix_common::project::SlxpPackage::inspect(&archive_path).ok();
         let dep_manifest = inspection.and_then(|insp| insp.manifest);
 
         if has_unqualified_libs
@@ -1456,7 +1473,10 @@ fn stage_dependency_native_libraries(
                     continue;
                 }
                 let entry_name = entry.name()?.replace('\\', "/");
-                if let Some(rel_subpath) = entry_name.strip_prefix("lib/")
+                let stripped_subpath = entry_name
+                    .strip_prefix("bin/")
+                    .or_else(|| entry_name.strip_prefix("lib/"));
+                if let Some(rel_subpath) = stripped_subpath
                     && is_shared_library_file(Path::new(&entry_name))
                 {
                     let safe_rel = validate_archive_relative_path(rel_subpath)
@@ -1484,9 +1504,24 @@ fn stage_dependency_native_libraries(
             }
         }
 
-        if let Some(dep_manifest) = dep_manifest {
+        if let Some(ref manifest) = dep_manifest {
+            for dep_lib in &manifest.dynamic_libraries {
+                if !resolved_profile.dynamic_libraries.contains(dep_lib) {
+                    resolved_profile.dynamic_libraries.push(dep_lib.clone());
+                }
+            }
             let target_prof = req.profile.as_deref().unwrap_or("release");
-            if let Ok(dep_resolved) = dep_manifest.resolve_profile(target_prof) {
+            if let Ok(dep_resolved) = manifest.resolve_profile(target_prof) {
+                for dep_lib in &dep_resolved.dynamic_libraries {
+                    if !resolved_profile.dynamic_libraries.contains(dep_lib) {
+                        resolved_profile.dynamic_libraries.push(dep_lib.clone());
+                    }
+                }
+                for native_name in dep_resolved.natives.keys() {
+                    if !resolved_profile.dynamic_libraries.contains(native_name) {
+                        resolved_profile.dynamic_libraries.push(native_name.clone());
+                    }
+                }
                 for (trans_name, trans_spec) in dep_resolved.dependencies {
                     let trans_spec_str =
                         format!("{trans_name}@{}#{}", trans_spec.version, trans_spec.profile);
@@ -1632,6 +1667,7 @@ fn collect_native_checksums_and_platforms(
             .replace('\\', "/");
         let digest = sha256_file(&file_path)
             .with_context(|| format!("failed to hash native library '{}'", file_path.display()))?;
+        checksums.insert(format!("bin/{rel_path}"), digest.clone());
         checksums.insert(format!("lib/{rel_path}"), digest);
 
         let parts: Vec<&str> = rel_path.split('/').collect();

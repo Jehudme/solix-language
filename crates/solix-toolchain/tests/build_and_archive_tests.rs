@@ -2410,3 +2410,181 @@ profiles:
         "Unexpected error message: {err_msg}"
     );
 }
+
+// ============================================================================
+// Test B.17: .slxp Package Architecture, Root binaries.slxb, and Native Loader Filtering
+// ============================================================================
+
+#[test]
+fn test_slxp_package_root_binaries_and_bin_native_filtering() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let host_triple = solix_common::project::host_target_triple();
+    let stage_directory = workspace.file_path("stage_slxp");
+    let stage_bin_triple = stage_directory.join("bin").join(host_triple);
+    fs::create_dir_all(&stage_bin_triple).expect("create stage bin target dir");
+
+    let manifest_yaml = format!(
+        r#"configuration:
+  name: modern_slxp_pkg
+  version: "1.0.0"
+  description: "Test .slxp package container format"
+profiles:
+  release:
+    entrypoint: Main::main
+"#
+    );
+    fs::write(stage_directory.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+    let binary_program = solix_common::bytecode::BinaryProgram::new();
+    let binary_bytes = binary_program.to_bytes();
+    fs::write(stage_directory.join("binaries.slxb"), &binary_bytes)
+        .expect("write root binaries.slxb");
+
+    #[cfg(target_os = "windows")]
+    let native_module_name = "native_calc.dll";
+    #[cfg(target_os = "macos")]
+    let native_module_name = "libnative_calc.dylib";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let native_module_name = "libnative_calc.so";
+
+    #[cfg(target_os = "windows")]
+    let transitive_lib_name = "glfw3.dll";
+    #[cfg(target_os = "macos")]
+    let transitive_lib_name = "libglfw.dylib";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let transitive_lib_name = "libglfw.so";
+
+    fs::write(
+        stage_bin_triple.join(native_module_name),
+        b"NATIVE_MODULE_STUB_BYTES",
+    )
+    .expect("write native module");
+    fs::write(
+        stage_bin_triple.join(transitive_lib_name),
+        b"TRANSITIVE_LIB_STUB_BYTES",
+    )
+    .expect("write transitive lib");
+
+    let package_path = workspace.file_path("modern_slxp_pkg.slxp");
+    solix_common::project::SlxpPackage::pack_directory(&stage_directory, &package_path)
+        .expect("pack slxp package");
+    assert!(package_path.is_file(), "Emitted .slxp package must exist");
+
+    let inspection =
+        solix_common::project::SlxpPackage::inspect(&package_path).expect("inspect slxp package");
+    assert!(
+        inspection.manifest.is_some(),
+        "Package manifest must be parsed"
+    );
+    assert_eq!(
+        inspection.binaries.len(),
+        1,
+        "Package must contain root binaries.slxb"
+    );
+    assert_eq!(
+        inspection.binaries[0].0, "binaries.slxb",
+        "Primary binary must be root binaries.slxb"
+    );
+
+    let extract_cache = workspace.file_path("extract_cache");
+    let loaded =
+        solix_common::project::SlxpPackage::extract_and_load(&package_path, &extract_cache)
+            .expect("extract and load slxp package");
+
+    assert_eq!(
+        loaded.binaries.len(),
+        1,
+        "Loaded package must have primary binary"
+    );
+
+    let loaded_native_names: Vec<String> = loaded
+        .native_libraries
+        .iter()
+        .filter_map(|lib_path| {
+            lib_path
+                .file_name()
+                .and_then(|file_name| file_name.to_str())
+                .map(str::to_string)
+        })
+        .collect();
+    assert!(
+        loaded_native_names.contains(&native_module_name.to_string()),
+        "native_* module must be registered in loaded native_libraries"
+    );
+    assert!(
+        !loaded_native_names.contains(&transitive_lib_name.to_string()),
+        "Transitive support library must NOT be registered in loaded native_libraries"
+    );
+
+    assert!(
+        extract_cache.join(transitive_lib_name).exists(),
+        "Transitive support library must still be extracted to disk for dynamic linker resolution"
+    );
+}
+
+#[test]
+fn test_slxp_package_dynamic_libraries_declaration_permits_non_prefixed_modules() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let host_triple = solix_common::project::host_target_triple();
+    let stage_directory = workspace.file_path("stage_declared");
+    let stage_bin_triple = stage_directory.join("bin").join(host_triple);
+    fs::create_dir_all(&stage_bin_triple).expect("create stage bin target dir");
+
+    #[cfg(target_os = "windows")]
+    let custom_driver_name = "custom_driver.dll";
+    #[cfg(target_os = "macos")]
+    let custom_driver_name = "libcustom_driver.dylib";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let custom_driver_name = "libcustom_driver.so";
+
+    let manifest_yaml = format!(
+        r#"configuration:
+  name: declared_driver_pkg
+  version: "1.0.0"
+dynamic_libraries:
+  - "{custom_driver_name}"
+profiles:
+  release:
+    entrypoint: Main::main
+"#
+    );
+    fs::write(stage_directory.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+    let mut binary_program = solix_common::bytecode::BinaryProgram::new();
+    binary_program
+        .dynamic_libraries
+        .push(custom_driver_name.to_string());
+    let binary_bytes = binary_program.to_bytes();
+    fs::write(stage_directory.join("binaries.slxb"), &binary_bytes)
+        .expect("write root binaries.slxb");
+
+    fs::write(
+        stage_bin_triple.join(custom_driver_name),
+        b"CUSTOM_DRIVER_STUB_BYTES",
+    )
+    .expect("write custom driver");
+
+    let package_path = workspace.file_path("declared_driver_pkg.slxp");
+    solix_common::project::SlxpPackage::pack_directory(&stage_directory, &package_path)
+        .expect("pack slxp package");
+
+    let extract_cache = workspace.file_path("driver_extract_cache");
+    let loaded =
+        solix_common::project::SlxpPackage::extract_and_load(&package_path, &extract_cache)
+            .expect("extract and load slxp package");
+
+    let loaded_native_names: Vec<String> = loaded
+        .native_libraries
+        .iter()
+        .filter_map(|lib_path| {
+            lib_path
+                .file_name()
+                .and_then(|file_name| file_name.to_str())
+                .map(str::to_string)
+        })
+        .collect();
+    assert!(
+        loaded_native_names.contains(&custom_driver_name.to_string()),
+        "Declared non-native_ dynamic library must be registered when explicitly declared in metadata"
+    );
+}

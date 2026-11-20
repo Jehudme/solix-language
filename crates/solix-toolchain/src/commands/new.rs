@@ -637,6 +637,7 @@ license = "{lic}"
 [workspace]
 
 [lib]
+name = "native_{pkg}"
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -760,12 +761,16 @@ option(BUILD_TESTING "Build standalone unit tests" ON)
 if(SOLIX_NATIVE_BUILD)
 {fetch_block}
 
-    add_library({pkg} SHARED
+    add_library(native_{pkg} SHARED
         src/{pkg}.c
         src/solix_bridge.c
     )
-    target_link_libraries({pkg} PRIVATE solix::ffi)
-    target_compile_definitions({pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
+    set_target_properties(native_{pkg} PROPERTIES OUTPUT_NAME "native_{pkg}")
+    target_link_libraries(native_{pkg} PRIVATE solix::ffi)
+    target_compile_definitions(native_{pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
+    target_include_directories(native_{pkg} PUBLIC
+        "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
+    )
 else()
     add_library({pkg}
         src/{pkg}.c
@@ -776,11 +781,10 @@ else()
         target_link_libraries({pkg}_tests PRIVATE {pkg})
         add_test(NAME {pkg}_unit_tests COMMAND {pkg}_tests)
     endif()
+    target_include_directories({pkg} PUBLIC
+        "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
+    )
 endif()
-
-target_include_directories({pkg} PUBLIC
-    "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
-)
 "#,
         pkg = pkg,
         ver = spec.version,
@@ -899,12 +903,16 @@ option(BUILD_TESTING "Build standalone unit tests" ON)
 if(SOLIX_NATIVE_BUILD)
 {fetch_block}
 
-    add_library({pkg} SHARED
+    add_library(native_{pkg} SHARED
         src/{pkg}.cpp
         src/solix_bridge.cpp
     )
-    target_link_libraries({pkg} PRIVATE solix::ffi)
-    target_compile_definitions({pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
+    set_target_properties(native_{pkg} PROPERTIES OUTPUT_NAME "native_{pkg}")
+    target_link_libraries(native_{pkg} PRIVATE solix::ffi)
+    target_compile_definitions(native_{pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
+    target_include_directories(native_{pkg} PUBLIC
+        "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
+    )
 else()
     add_library({pkg}
         src/{pkg}.cpp
@@ -915,11 +923,10 @@ else()
         target_link_libraries({pkg}_tests PRIVATE {pkg})
         add_test(NAME {pkg}_unit_tests COMMAND {pkg}_tests)
     endif()
+    target_include_directories({pkg} PUBLIC
+        "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
+    )
 endif()
-
-target_include_directories({pkg} PUBLIC
-    "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
-)
 "#,
         pkg = pkg,
         ver = spec.version,

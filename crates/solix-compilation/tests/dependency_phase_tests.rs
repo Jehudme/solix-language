@@ -32,6 +32,7 @@ fn create_dummy_library_binary(
         build_profile: "debug".to_string(),
         native_library_checksums: std::collections::HashMap::new(),
         dependencies,
+        dynamic_libraries: Vec::new(),
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {

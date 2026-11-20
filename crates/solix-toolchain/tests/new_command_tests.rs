@@ -347,6 +347,12 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
 
     let rust_dir = project_root.join("natives").join("fastmath");
     assert!(rust_dir.join("Cargo.toml").is_file());
+    let cargo_toml_content =
+        fs::read_to_string(rust_dir.join("Cargo.toml")).expect("read rust Cargo.toml");
+    assert!(
+        cargo_toml_content.contains("name = \"native_fastmath\""),
+        "Generated Cargo.toml must name the library native_fastmath"
+    );
     // Standalone Cargo unit tests pass without --features solix-native
     let cargo_test_status = Command::new("cargo")
         .args(["test", "--manifest-path"])
@@ -389,6 +395,29 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
     ])
     .expect("parse solix new native cpp");
     assert_eq!(run(add_cpp_cli).expect("solix new native cpp"), 0);
+
+    let c_cmakelists = fs::read_to_string(
+        project_root
+            .join("natives")
+            .join("calcc")
+            .join("CMakeLists.txt"),
+    )
+    .expect("read C CMakeLists.txt");
+    assert!(
+        c_cmakelists.contains("add_library(native_calcc SHARED"),
+        "C CMakeLists.txt must create library native_calcc"
+    );
+    let cpp_cmakelists = fs::read_to_string(
+        project_root
+            .join("natives")
+            .join("calccpp")
+            .join("CMakeLists.txt"),
+    )
+    .expect("read C++ CMakeLists.txt");
+    assert!(
+        cpp_cmakelists.contains("add_library(native_calccpp SHARED"),
+        "C++ CMakeLists.txt must create library native_calccpp"
+    );
 
     let updated_manifest =
         ProjectManifest::from_file(project_root.join("manifest.yaml")).expect("reload manifest");
@@ -480,5 +509,21 @@ public class Main {
         let run_cli = Cli::try_parse_from(["solix", "run", arc_path.to_str().expect("valid path")])
             .expect("parse solix run");
         assert_eq!(run(run_cli).expect("run combined multi-native archive"), 42);
+
+        let slxp_path = project_root
+            .join("build")
+            .join("release")
+            .join("multi_native_app.slxp");
+        assert!(
+            slxp_path.is_file(),
+            "Expected .slxp package container to be emitted"
+        );
+        let run_slxp_cli =
+            Cli::try_parse_from(["solix", "run", slxp_path.to_str().expect("valid path")])
+                .expect("parse solix run slxp");
+        assert_eq!(
+            run(run_slxp_cli).expect("run combined multi-native slxp package"),
+            42
+        );
     }
 }

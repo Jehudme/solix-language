@@ -628,11 +628,29 @@ impl RuntimeContext {
 
         let mut shared_libraries = Vec::new();
         for library_path in &options.native_libraries {
+            let file_name = library_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+
+            // Filter out unlisted transitive support libraries placed in target directories:
+            let is_in_target_dir = library_path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|parent_name| parent_name.to_str())
+                .is_some_and(|parent_str| parent_str.contains('-'));
+            let is_declared = options.binaries.iter().any(|binary_program| {
+                binary_program.dynamic_libraries.iter().any(|declared_lib| {
+                    solix_common::project::matches_declared_dynamic_library(file_name, declared_lib)
+                })
+            });
+            let is_solix_native =
+                solix_common::project::is_solix_native_module_name(file_name) || is_declared;
+            if is_in_target_dir && !is_solix_native {
+                continue;
+            }
+
             if options.verify_checksums {
-                let file_name = library_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("");
                 let expected_checksum = options.binaries.iter().find_map(|binary_program| {
                     solix_common::project::resolve_expected_native_checksum(
                         &binary_program.native_library_checksums,

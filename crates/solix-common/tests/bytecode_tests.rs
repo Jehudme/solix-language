@@ -407,6 +407,7 @@ fn test_export_manifest_json_extraction() {
         build_profile: "debug".to_string(),
         native_library_checksums: std::collections::HashMap::new(),
         dependencies: Vec::new(),
+        dynamic_libraries: Vec::new(),
         exported_classes: vec![exported_class],
         exported_enums: Vec::new(),
         exported_functions: vec![exported_func],
@@ -443,6 +444,7 @@ fn test_binary_program_manifest_round_trip() {
         build_profile: "release".to_string(),
         native_library_checksums: std::collections::HashMap::new(),
         dependencies: Vec::new(),
+        dynamic_libraries: Vec::new(),
         exported_classes: Vec::new(),
         exported_enums: Vec::new(),
         exported_functions: vec![ExportedFunction {

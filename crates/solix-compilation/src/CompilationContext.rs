@@ -105,6 +105,8 @@ pub struct CompilationOptions {
     pub verify_checksums: bool,
     /// Whether to generate and serialize exported API header AST bytes and per-source disassembly snapshots (default true; false for direct `solix run`).
     pub emit_export_metadata: bool,
+    /// Declared dynamic shared library dependencies required by this compilation.
+    pub dynamic_libraries: Vec<String>,
 }
 
 impl Default for CompilationOptions {
@@ -133,7 +135,15 @@ impl CompilationOptions {
             link_mode: LinkMode::Dynamic,
             verify_checksums: true,
             emit_export_metadata: true,
+            dynamic_libraries: Vec::new(),
         }
+    }
+
+    /// Sets declared dynamic shared library dependencies.
+    #[must_use]
+    pub fn with_dynamic_libraries(mut self, libraries: Vec<String>) -> Self {
+        self.dynamic_libraries = libraries;
+        self
     }
 
     /// Sets whether to generate and serialize exported API header AST bytes and per-source snapshots.
