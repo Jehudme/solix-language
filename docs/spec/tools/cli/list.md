@@ -56,7 +56,7 @@ solix list --json
     "installed_at_unix_secs": 1762839894,
     "installed_at_iso8601": "2026-11-11T05:44:54Z",
     "source": "/home/user/solixlib",
-    "artifact_path": "/home/user/.solix/packages/solix-release@2.0.0/solix.slxarc",
+    "artifact_path": "/home/user/.solix/packages/solix-release@2.0.0/solix.slxp",
     "native_libraries": {
       "lib/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
     },

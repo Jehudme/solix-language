@@ -7,21 +7,21 @@
 
 ## 1. Pure-Rust Declarative Build Pipeline
 
-Solix orchestrates project compilation, native library compilation, asset staging, and `.slxarc` archive packaging natively inside the `solix build` Rust binary with zero Python runtime scripts (`manifest.yaml` replaces legacy `manifest.toml` and `scripts/build.py`).
+Solix orchestrates project compilation, native library compilation, asset staging, and `.slxp` package packaging natively inside the `solix build` Rust binary with zero Python runtime scripts (`manifest.yaml` replaces legacy `manifest.toml` and `scripts/build.py`).
 
 ### Execution Flow
 
 ```mermaid
 flowchart TD
-    CLI["solix build [path] --profile <name>"] --> Manifest["Load manifest.yaml (YAML 1.2 + vars Anchors)"]
+    CLI["solix build [path] --profile <name> [--platform <target>]"] --> Manifest["Load manifest.yaml (YAML 1.2 + vars Anchors)"]
     Manifest --> Profile["Resolve Self-Contained Profile (Zero Inheritance)"]
     Profile --> Platforms["Expand OS Platforms -> All Architecture Targets"]
     Platforms --> Env["Phase 0: Verify Native Toolchains (cargo / cmake / zig)"]
     Env --> Pre["Phase 1: Run pre_compile Command Hooks"]
     Pre --> Native["Phase 2: Auto-Detect & Compile Cargo / CMake Natives"]
     Native --> Stage["Phase 3: Stage resources/ & Dependency Native Libs"]
-    Stage --> Compile["Phase 4: Compile .slx Sources -> bytecode.slxb"]
-    Compile --> Pack["Phase 5: Stamp supported_platforms & Checksums -> .slxarc"]
+    Stage --> Compile["Phase 4: Compile .slx Sources -> binaries.slxb"]
+    Compile --> Pack["Phase 5: Stamp supported_platforms & Checksums -> .slxp"]
     Pack --> Post["Phase 6: Run post_compile Command Hooks"]
 ```
 
@@ -36,7 +36,7 @@ my_solix_project/
 ├── manifest.yaml                    # Declarative project manifest (YAML + vars anchors)
 ├── src/                             # Primary Solix source code (.slx)
 ├── tests/                           # Solix test suites (.slx)
-├── resources/                       # Static assets packaged into archive res://
+├── resources/                       # Static assets packaged into package res://
 ├── lib/                             # Optional prebuilt native libraries
 ├── natives/                         # Native subprojects (auto-detected Cargo or CMake)
 │   ├── rust_bridge/                 # Cargo crate (`Cargo.toml`, `solix-native` feature)
@@ -46,13 +46,13 @@ my_solix_project/
     │   ├── cargo/                   # Shared CARGO_TARGET_DIR across profiles/targets
     │   ├── cmake/                   # Per-native, per-target CMake configure & build dirs
     │   └── stage/<profile>/
-    │       ├── bin/<name>.slxb
-    │       ├── lib/<target_triple>/
+    │       ├── binaries.slxb
+    │       ├── bin/<target_triple>/native_<name>.<ext>
     │       └── resources/
     ├── debug/
-    │   └── <name>.slxarc
+    │   └── <name>.slxp
     └── release/
-        └── <name>.slxarc
+        └── <name>.slxp
 ```
 
 ---
@@ -76,9 +76,9 @@ Under `profiles.<name>.natives.<key>`, no explicit backend `type` field is requi
 
 Profiles support sequential command lists:
 * `pre_compile`: Runs after toolchain verification and before native/Solix compilation (e.g., generating C bindings or fetching vendored headers).
-* `post_compile`: Runs after the final `.slxarc` archive is packaged.
+* `post_compile`: Runs after the final `.slxp` package is packaged.
 
-Hook commands receive `SOLIX_PROJECT_ROOT`, `SOLIX_PROFILE`, `SOLIX_BIN`, `SOLIX_STAGE_DIR`, `SOLIX_CACHE_DIR`, and `SOLIX_OUTPUT_SLXARC`.
+Hook commands receive `SOLIX_PROJECT_ROOT`, `SOLIX_PROFILE`, `SOLIX_BIN`, `SOLIX_STAGE_DIR`, `SOLIX_CACHE_DIR`, and `SOLIX_OUTPUT_SLXP`.
 
 ---
 

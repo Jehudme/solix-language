@@ -37,7 +37,7 @@ solix uninstall <spec> [options]
 
 When specifying `<name>@<version>`:
 1. Solix locates the target version directory: `<pkg_dir>/<name>/<version>/`.
-2. Deletes the version directory and its contents (`.slxb`, `.slxarc`, unpacked headers).
+2. Deletes the version directory and its contents (`.slxb`, `.slxp`, unpacked headers).
 3. If no other versions remain inside `<pkg_dir>/<name>/`, the empty parent package directory is cleaned up.
 
 ```bash

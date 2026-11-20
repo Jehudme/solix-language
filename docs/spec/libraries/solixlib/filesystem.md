@@ -6,7 +6,7 @@ The `solix.io.filesystem` module provides cross-platform filesystem paths, file 
 1. `Path`: Cross-platform path string manipulation, delimiter normalization, extraction of directories, file names, extensions, and `res://` virtual URI detection.
 2. `File`: Static helpers for synchronous file I/O, text reading/writing, line-by-line streaming into collections, copying, moving, deleting files, dual-location (`is_resource`) selection, and `res://` resolution.
 3. `Directory`: Directory management, hierarchical path creation, enumeration of directory contents (files and subdirectories), and recursive/non-recursive deletion.
-4. `Resource`: Application resource access for bundled assets within `.slxarc` packages or development directories. See [Resource Specification](resource.md).
+4. `Resource`: Application resource access for bundled assets within `.slxp` packages or development directories. See [Resource Specification](resource.md).
 
 ---
 

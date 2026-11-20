@@ -82,17 +82,17 @@ bool has_completed = false;
 
 ---
 
-## 5. Unicode Characters
+## 5. ASCII Characters
 
-The `char` type represents a single 32-bit Unicode scalar value (U+0000 to U+10FFFF):
-* **Storage Width:** 32 bits (4 bytes).
+The `char` type represents a single 8-bit ASCII character value (`0x00` to `0x7F`, 0–127):
+* **Storage Width:** 8 bits (1 byte, 1-byte alignment).
 * **Enclosure:** Single quotes `'...'`.
 * **Default Value:** `'\0'` (Null character).
 
 ```solix
 char latin_letter = 'A';
-char greek_symbol = 'λ';
-char section_mark = '§';
+char digit_symbol = '9';
+char hash_mark    = '#';
 char newline_char = '\n';
 ```
 

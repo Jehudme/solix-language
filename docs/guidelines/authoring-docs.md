@@ -62,7 +62,7 @@ docs/
 │   ├── optimizer-and-inliner.md
 │   ├── vm_isa.md
 │   ├── disassembly-format-slxasm.md
-│   ├── binary-formats-slxb-and-slxarc.md
+│   ├── binary-formats-slxb-and-slxp.md
 │   ├── package-solver-and-linking.md
 │   ├── native_interop.md
 │   ├── statements/         # Statement & Expression Compilation Mechanics with Bytecode
@@ -71,7 +71,7 @@ docs/
 ├── architecture/           # Compiler Pipeline, Binder Passes, VirtualHeap, ARC & Exceptions
 ├── wiki/                   # Atomic Reference Wiki ("Fast Dictionary Reference")
 │   ├── README.md           # Master Wiki Index
-│   ├── errors/             # E0000..E0350 compiler errors & R0001..R0023 runtime traps
+│   ├── errors/             # E0000..E0350 compiler errors & R0001..R0024 runtime traps
 │   ├── primitives/         # All 14 built-in primitive types & aliases
 │   ├── commands/           # solix compile, build, run, new, install, list, info
 │   └── keywords/           # 45+ reserved keywords grouped by syntactic category

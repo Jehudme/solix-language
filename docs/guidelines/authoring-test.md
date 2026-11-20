@@ -332,5 +332,5 @@ Reviewers and automated CI gates **MUST** enforce the following criteria prior t
 - [ ] **Hermetic Isolation:** No tests read or write to shared static paths; all disk I/O utilizes `tempfile::tempdir()`.
 - [ ] **No Flaky Sleeps:** Asynchronous tests coordinate using channels or notifications, not `thread::sleep`.
 - [ ] **Zero Unjustified `#[ignore]`:** No tests are disabled without a documented tracking issue.
-- [ ] **Regression Fortress Gates:** Differential `-O0` vs `-O3` (`proptest`), golden `.slxasm` instruction budgets, `.slxb`/`.slxarc` corruption fuzzing, ARC/exception leak torture suites (`active_guest_objects == 0`), and `cargo-llvm-cov` CI coverage thresholds remain green.
+- [ ] **Regression Fortress Gates:** Differential `-O0` vs `-O3` (`proptest`), golden `.slxasm` instruction budgets, `.slxb`/`.slxp` corruption fuzzing, ARC/exception leak torture suites (`active_guest_objects == 0`), and `cargo-llvm-cov` CI coverage thresholds remain green.
 - [ ] **Full Pass:** All workspace tests pass under `cargo test --workspace --all-targets`.

@@ -1,6 +1,6 @@
-# `solix info` — Binary & Archive Container Inspection
+# `solix info` — Binary & Package Container Inspection
 
-The `info` subcommand inspects compiled binary containers (`.slxb`), archive packages (`.slxarc`), or installed packages by name (`solix info <pkg_name>`), dumping container summaries, SHA-256 checksums, cache status, reconstructed Solix API interfaces, 64-bit Register VM disassemblies, or machine-readable JSON metadata.
+The `info` subcommand inspects compiled binary containers (`.slxb`), package containers (`.slxp`), or installed packages by name (`solix info <pkg_name>`), dumping container summaries, SHA-256 checksums, cache status, reconstructed Solix API interfaces, 64-bit Register VM disassemblies, or machine-readable JSON metadata.
 
 ---
 
@@ -16,7 +16,7 @@ solix info <target> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<target>` | Path or String | **Yes** | Path to target compiled binary (`*.slxb`), archive (`*.slxarc`), or registered package specification (`<name>[:<profile>][@<version>]`). |
+| `<target>` | Path or String | **Yes** | Path to target compiled binary (`*.slxb`), package (`*.slxp`), or registered package specification (`<name>[:<profile>][@<version>]`). |
 
 ---
 
@@ -48,8 +48,8 @@ solix info solix
 
 Output:
 ```text
-=== Solix Archive Container Inspection (.slxarc) ===
-Archive:          /home/user/.solix/packages/solix-release@2.0.0/solix.slxarc
+=== Solix Package Container Inspection (.slxp) ===
+Package:          /home/user/.solix/packages/solix-release@2.0.0/solix.slxp
 File Size:        1.5 MB (1572864 bytes)
 SHA-256:          46747ea15ac6f2f15d462438a63fb9ef71581361ab5facca844c97a488d24812
 Build Profile:    release

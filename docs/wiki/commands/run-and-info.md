@@ -4,17 +4,19 @@
 
 ## 1. `solix run`
 
-Executes compiled `.slxb` binaries, packaged `.slxarc` archives, or executes `.slx` source files on-the-fly:
+Executes compiled `.slxb` binaries, packaged `.slxp` containers, or executes `.slx` source files on-the-fly:
 
 ```bash
 solix run <binaries...> [options] [-- [guest_args...]]
+solix run package [path] [options] [-- [guest_args...]]
+solix run source <file.slx> [options] [-- [guest_args...]]
 ```
 
 ### Key Options & Flags
-* `<binaries...>`: One or more target binary files (`.slxb`), project archives (`.slxarc`), or raw source files (`.slx`).
+* `<binaries...>`: One or more target binary files (`.slxb`), package containers (`.slxp`), or raw source files (`.slx`).
 * `-l, --lib <path>`: External library binary or native shared object (`.so`, `.dll`, `.dylib`) to link (can be repeated).
 * `-e, --entry <symbol>`: Overrides application entry point method [default: `Main::main`].
-* `--test`: Executes test entry point defined in archive `manifest.yaml` (`profiles.test.entrypoint`, or legacy `[entrypoints].test`).
+* `--test`: Executes test entry point defined in package `manifest.yaml` (`profiles.test.entrypoint`, or legacy `[entrypoints].test`).
 * `-p, --profile <profile>`: Target build profile to execute (`release`, `debug`, `test`).
 * `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
 * `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`]. Returns `RuntimeError::OutOfMemory` immediately if initial constant pool string interning exceeds this limit.
@@ -30,15 +32,17 @@ solix run <binaries...> [options] [-- [guest_args...]]
 ```bash
 # Run a source file directly on-the-fly (no intermediate .slxb file needed)
 solix run src/main.slx
+solix run source src/main.slx
 
 # Execute a compiled binary container
 solix run bin/app.slxb
 
-# Execute a packaged project archive container
-solix run build/release/my_game.slxarc
+# Execute a packaged project container
+solix run build/release/my_game.slxp
+solix run package ./my_game
 
-# Execute project unit tests packaged within the archive
-solix run --test build/debug/my_game.slxarc
+# Execute project unit tests packaged within the container
+solix run --test build/debug/my_game.slxp
 
 # Run an installed package directly by name, version, or profile
 solix run my-app
@@ -57,14 +61,14 @@ solix run bin/app.slxb --heap-size 128MB -v
 
 ## 2. `solix info`
 
-Inspects binary container (`.slxb`) or archive container (`.slxarc`) metadata, export manifests, disassemblies, and reconstructed APIs:
+Inspects binary container (`.slxb`) or package container (`.slxp`) metadata, export manifests, disassemblies, and reconstructed APIs:
 
 ```bash
 solix info <binary> [options]
 ```
 
 ### Key Options & Flags
-* `<binary>`: Path to compiled binary container (`*.slxb`) or archive container (`*.slxarc`).
+* `<binary>`: Path to compiled binary container (`*.slxb`) or package container (`*.slxp`).
 * `-o, --output <file>`: Destination file path for inspection data [default: `stdout`].
 * `--disasm`: Disassembles all functions into human-readable 64-bit Register VM opcodes.
 * `--api`: Emits reconstructed Solix public API interface declarations (`.slx`).
@@ -75,8 +79,8 @@ solix info <binary> [options]
 # View summary of a binary container (classes, methods, static size)
 solix info bin/app.slxb
 
-# Inspect an archive package (manifest, files, native libraries, binaries)
-solix info build/release/my_game.slxarc
+# Inspect a package container (manifest, files, native libraries, binaries)
+solix info build/release/my_game.slxp
 
 # Print reconstructed Solix API interface for a library
 solix info ~/.solix/packages/math_utils/1.0.0/math_utils.slxb --api
@@ -93,4 +97,3 @@ solix info bin/app.slxb --json -o target/manifest.json
 ## Related Specifications
 * Formal Spec: [`docs/spec/tools/cli/run.md`](../../spec/tools/cli/run.md)
 * Formal Spec: [`docs/spec/tools/cli/info.md`](../../spec/tools/cli/info.md)
-* Disassembly Guide: [`docs/spec/disassembly-format-slxasm.md`](../../spec/disassembly-format-slxasm.md)

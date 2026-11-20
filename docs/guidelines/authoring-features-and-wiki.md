@@ -34,7 +34,7 @@ All documentation authors **MUST** adhere to the following normative invariants:
    * Every wiki error code page **MUST** link to the specification pass that emitted the diagnostic (e.g., `E0105` links to `docs/spec/statements/declarations.md`).
 3. **Zero Legacy Artifact Rule:**
    * Documentation **MUST NEVER** reference obsolete Solix v1.x concepts (`solix.json`, `.slxbin`, stack VM opcodes `PUSH_CONST`, dot-access for static members `Math.add`, or generic error tags `[E_BIND]`).
-   * All documents **MUST** reflect modern Solix v2.0 reality: register-based 64-bit VM, scope resolution `::`, `manifest.toml`, `.slxb` / `.slxarc`, and granular error codes (`E0000`–`E0290`, `R0001`–`R0023`).
+   * All documents **MUST** reflect modern Solix v2.0 reality: register-based 64-bit VM, scope resolution `::`, `manifest.yaml` (legacy `manifest.toml`), `.slxb` / `.slxp`, and granular error codes (`E0000`–`E0299`, `R0001`–`R0024`).
 4. **Code Verification Mandate & Single-Letter Variable Prohibition (GL-0011):**
    * All Solix and Rust code snippets across guides, specs, and wiki articles **MUST** be valid, compilable code.
    * Single-letter variable names (`x`, `y`, `i`, `n`, `s`, `v`, `e`, etc.) are **STRICTLY FORBIDDEN** across all documentation and examples. Use descriptive, self-documenting identifiers (e.g., `coord_x`, `coord_y`, `index`, `element`, `item_count`, `error_value`).

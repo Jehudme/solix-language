@@ -1,29 +1,29 @@
 # CLI Reference: Package Management Commands
 
-This section covers project initialization and package store management commands: `solix new`, `solix install`, `solix uninstall`, and `solix list`.
+This section covers project initialization and package store management commands: `solix new`, `solix install`, `solix uninstall`, `solix export`, and `solix list`.
 
 ---
 
-## 1. `solix new` & `solix new native`
+## 1. `solix new package` & `solix new native`
 
-### `solix new <path>` (Project Scaffolding)
+### `solix new package <path>` (Package Scaffolding)
 
-Scaffolds a complete Solix project workspace configured with `manifest.yaml` (`vars:` anchors, self-contained profiles, pure-Rust `solix build`), test suites, and an optional dual-mode C, C++, or Rust native bridge:
+Scaffolds a complete Solix package workspace configured with `manifest.yaml` (`vars:` anchors, self-contained profiles, pure-Rust `solix build`), test suites, and an optional dual-mode C, C++, or Rust native bridge:
 
 ```bash
-solix new <path> [options]
+solix new package <path> [options]
 ```
 
 #### Key Options & Flags
-* `<path>`: Target directory for the new project.
-* `--name <name>`: Project identifier name [default: directory name].
+* `<path>`: Target directory for the new package.
+* `--name <name>`: Package identifier name [default: directory name].
 * `--version <version>`: Initial semantic version [default: `0.1.0`].
-* `--description <desc>`: Project description [default: `A Solix project`].
+* `--description <desc>`: Package description [default: `A Solix project`].
 * `--license <id>`: SPDX license identifier [default: `Apache-2.0`].
 * `--author <name>`: Author attribution (can be repeated).
 * `--main <symbol>`: Main entry point symbol [default: `Main::main`].
 * `--test <symbol>`: Test entry point symbol [default: `TestRunner::test`].
-* `--lib`: Generates a library project (`src/lib.slx`) instead of an application.
+* `--lib`: Generates a library package (`src/lib.slx`) instead of an application.
 * `--native [LANG]`: Scaffolds a dual-mode native subproject in `natives/` (`rust` [default], `c`, or `cpp`).
 * `--no-native`: Omits the native subproject in `natives/`.
 * `-d, --deps <pkg@ver>`: Adds dependency in `pkg@ver` format (can be repeated).
@@ -54,31 +54,32 @@ solix new native <name> [options]
 
 #### Practical Examples
 ```bash
-# Scaffold a standard application project with a Rust native bridge
-solix new my_app
+# Scaffold a standard application package with a Rust native bridge
+solix new package my_app
 
 # Scaffold an application with a C++17 CMake native bridge
-solix new physics_demo --native cpp
+solix new package physics_demo --native cpp
 
 # Add a C11 CMake library directly into an existing project and register it for all desktop platforms
 solix new native audio_dsp --project . --lang c --platforms linux,macos,windows
 
 # Scaffold a reusable library with dependencies and no native subproject
-solix new math_matrix --lib --no-native --deps "vector_math@0.1.0"
+solix new package math_matrix --lib --no-native --deps "vector_math@0.1.0"
 ```
 
 ---
 
 ## 2. `solix install`
 
-Installs a compiled `.slxb` binary container or `.slxarc` archive package into the local package store (`~/.solix/packages`):
+Installs a compiled `.slxb` binary container or `.slxp` package into the local package store (`~/.solix/packages`):
 
 ```bash
-solix install <path> [options]
+solix install package <path> [options]
+solix install binaries <path> [options]
 ```
 
 ### Key Options & Flags
-* `<path>`: Path to the target `.slxb` or `.slxarc` file to install.
+* `<path>`: Path to the target `.slxp` package or `.slxb` binary file to install.
 * `--bundled`: Installs or re-extracts bundled first-party packages (`solix`, `raylib`) from `assets/packages/`.
 * `--vscode`: Automatically installs the bundled official Solix extension into VS Code, VSCodium, or Cursor.
 * `-f, --force`: Overwrites existing package version in the store.
@@ -93,33 +94,37 @@ solix install --vscode
 solix install --bundled --force
 
 # Install a compiled binary library into the package store
-solix install build/release/math_utils.slxb
+solix install binaries build/release/math_utils.slxb
 
-# Install a packaged distribution archive with native shared libraries
-solix install build/release/raylib_solix.slxarc
+# Install a packaged distribution container with native shared libraries
+solix install package build/release/raylib_solix.slxp
 ```
 
 ---
 
 ## 3. `solix uninstall`
 
-Removes a specific version or all versions of a package from the local package store:
+Removes a specific version or all versions of a package or binary from the local package store:
 
 ```bash
-solix uninstall <spec> [options]
+solix uninstall package <name_or_spec> [options]
+solix uninstall binaries <name_or_spec> [options]
 ```
 
 ### Key Options & Flags
-* `<spec>`: Package name (e.g. `raylib` to remove all versions) or package@version (e.g. `raylib@1.0.0` to remove a specific version).
+* `<name_or_spec>`: Package name (e.g. `raylib` to remove all versions) or package@version (e.g. `raylib@1.0.0` to remove a specific version).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
 
 ### Practical Examples
 ```bash
 # Remove an exact version of a package
-solix uninstall raylib@1.0.0
+solix uninstall package raylib@1.0.0
 
 # Remove all installed versions of a package
-solix uninstall raylib
+solix uninstall package raylib
+
+# Remove a standalone binary
+solix uninstall binaries math_utils
 ```
 
 > [!NOTE]
@@ -127,9 +132,20 @@ solix uninstall raylib
 
 ---
 
-## 4. `solix list`
+## 4. `solix export`
 
-Lists all packages and versions installed in the local package store:
+Exports a compiled package or binary container for distribution:
+
+```bash
+solix export package <path> --output <destination.slxp>
+solix export binaries <path> --output <destination.slxb>
+```
+
+---
+
+## 5. `solix list`
+
+Lists all packages and versions installed in the local package store, displaying kind as `package` or `binaries`:
 
 ```bash
 solix list [options]
@@ -137,6 +153,7 @@ solix list [options]
 
 ### Key Options & Flags
 * `--json`: Emits the package inventory as machine-readable JSON.
+* `--kind <package|binaries>`: Filters by container kind.
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
 
 ### Practical Examples
@@ -154,5 +171,6 @@ solix list --json
 * Formal Spec: [`docs/spec/tools/cli/new.md`](../../spec/tools/cli/new.md)
 * Formal Spec: [`docs/spec/tools/cli/install.md`](../../spec/tools/cli/install.md)
 * Formal Spec: [`docs/spec/tools/cli/uninstall.md`](../../spec/tools/cli/uninstall.md)
+* Formal Spec: [`docs/spec/tools/cli/export.md`](../../spec/tools/cli/export.md)
 * Formal Spec: [`docs/spec/tools/cli/list.md`](../../spec/tools/cli/list.md)
 * Formal Spec: [`docs/spec/tools/cli/manifest.md`](../../spec/tools/cli/manifest.md)

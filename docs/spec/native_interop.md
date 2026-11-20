@@ -22,7 +22,7 @@ Shared libraries are loaded dynamically at runtime via `libloading` and register
 
 ## 2. ABI Value Representation: `SolixCValue`
 
-Values passed between the Solix virtual machine and native functions are encoded in a 16-byte aligned `SolixCValue` struct:
+Values passed between the Solix virtual machine and native functions are encoded in a `SolixCValue` struct (exact size 16 bytes, 8-byte alignment):
 
 ```rust
 #[repr(C)]

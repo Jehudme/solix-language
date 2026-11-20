@@ -12,11 +12,11 @@ Both backends implement identical `FfiMatrix::*` symbols exercising scalar `Soli
 ```bash
 # Test via the CMake (C11/C++17) backend
 solix build examples/ffi_dual_backend --profile cmake_backend
-solix run examples/ffi_dual_backend/build/cmake_backend/ffi_dual_backend.slxarc
+solix run examples/ffi_dual_backend/build/cmake_backend/ffi_dual_backend.slxp
 
 # Test via the Rust backend
 solix build examples/ffi_dual_backend --profile rust_backend
-solix run examples/ffi_dual_backend/build/rust_backend/ffi_dual_backend.slxarc
+solix run examples/ffi_dual_backend/build/rust_backend/ffi_dual_backend.slxp
 ```
 
 ## Standalone Native Unit Tests (Without Solix Plugin Mode)

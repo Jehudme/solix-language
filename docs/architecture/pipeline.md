@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The Solix compilation pipeline transforms human-readable Solix source files (`.slx`) into compact, high-performance virtual machine bytecode containers (`.slxb` standalone binaries or `.slxarc` multi-module project archives). The emitted bytecode is executed directly by the Solix Register Virtual Machine.
+The Solix compilation pipeline transforms human-readable Solix source files (`.slx`) into compact, high-performance virtual machine bytecode containers (`.slxb` standalone binaries or `.slxp` multi-module packages). The emitted bytecode is executed directly by the Solix Register Virtual Machine.
 
 The pipeline operates across discrete compiler phases with strict diagnostic halting boundaries:
 
@@ -13,7 +13,7 @@ flowchart TD
     ParserPhase --> BinderPhase["3. Binder Phase\nSymbol Discovery, Type Checking, ARC Hooks"]
     BinderPhase --> OptimizerPhase["4. Optimizer Phase\nAST Inlining & Bytecode Peep-Hole"]
     OptimizerPhase --> EmitterPhase["5. Emitter Phase\nRegister Allocation & Bytecode Assembly"]
-    EmitterPhase --> ContainerSerialization["6. Container Serialization\n.slxb / .slxarc Packaging"]
+    EmitterPhase --> ContainerSerialization["6. Container Serialization\n.slxb / .slxp Packaging"]
     ContainerSerialization --> RuntimeVM["7. Runtime Engine\n64-bit Register VM Execution"]
 ```
 
@@ -81,7 +81,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 
 ### 2.6. Binary Packaging & Serialization
 - **Input**: `CompiledProgram` and manifest configuration (`manifest.toml`).
-- **Output**: Binary file on disk (`.slxb` or `.slxarc`).
+- **Output**: Binary file on disk (`.slxb` or `.slxp`).
 - **Responsibilities**:
   - Serializes magic headers (`SLXB` / `SLXC`), schema versions, and dependency manifests.
   - Bundles compiled bytecode, metadata symbol exports, and native bridge declarations.

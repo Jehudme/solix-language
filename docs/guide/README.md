@@ -17,7 +17,7 @@ Welcome to the Solix developer guides. These documents are written for developer
 | 7 | [`07_functions_and_lambdas.md`](07_functions_and_lambdas.md) | Static methods, function pointers `ret(*)(params)`, lambdas `=>`, closures, ARC captures |
 | 8 | [`08_generics_and_templates.md`](08_generics_and_templates.md) | Generic classes, multiple type parameters, deduction, monomorphization pipeline |
 | 9 | [`09_native_plugins.md`](09_native_plugins.md) | Dual-mode C, C++ (`solix::ffi`), and Rust (`solix-ffi`) extensions, ABI conventions, dynamic loader (`.so`/`.dll`/`.dylib`) |
-| 10 | [`packaging_and_resources.md`](packaging_and_resources.md) | Single-file `.slxarc` project archives, manifest specification, native discovery, `Resource` API |
+| 10 | [`packaging_and_resources.md`](packaging_and_resources.md) | Single-file `.slxp` package containers, manifest specification, native discovery, `Resource` API |
 | 11 | [`editors_vscode.md`](editors_vscode.md) | Visual Studio Code syntax highlighting, Language Server Protocol (`solix-lsp`), configuration |
 | 12 | [`release.md`](release.md) | Automated build pipelines, cross-compilation, packaging, and release automation |
 | 13 | [`build_system.md`](build_system.md) | Pure-Rust `solix build` architecture, `manifest.yaml` profiles/hooks/natives, and cross-compilation |

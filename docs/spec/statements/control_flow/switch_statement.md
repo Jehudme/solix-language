@@ -26,7 +26,7 @@ A `SwitchStatement` evaluates a discriminant expression and branches to matching
 
 ## 3. Class Equality Operator Dispatch
 
-Classes used in equality switch cases must implement `operator ==` or `operator !=`. If neither operator overload is present on the class, the compiler rejects the switch with diagnostic `E0310`.
+Classes used in equality switch cases must implement `operator ==` or `operator !=`. If neither operator overload is present on the class, the compiler rejects the switch with diagnostic `E0292`.
 
 ```solix
 class ComplexNumber {
@@ -86,8 +86,8 @@ string describe_node(Node node) {
 
 | Code | Name | Description |
 |---|---|---|
-| `E0310` | `SwitchClassMissingEqualityOperator` | Emitted when a class instance is compared in a switch case without implementing `operator ==` or `operator !=`. |
-| `E0311` | `IncompatibleSwitchCaseType` | Emitted when a case value type cannot be assigned or compared to the discriminant type. |
-| `E0312` | `DuplicateSwitchCaseConstant` | Emitted when duplicate case values or duplicate pattern targets are defined in the same switch. |
-| `E0313` | `InvalidSwitchPatternTarget` | Emitted when `instanceof` targets a non-class, non-interface, non-tuple type. |
-| `E0314` | `TupleArityMismatchInCase` | Emitted when the number of elements in a tuple case pattern mismatches the discriminant tuple arity. |
+| `E0292` | `SwitchClassMissingEqualityOperator` | Emitted when a class instance is compared in a switch case without implementing `operator ==` or `operator !=`. |
+| `E0293` | `IncompatibleSwitchCaseType` | Emitted when a case value type cannot be assigned or compared to the discriminant type. |
+| `E0294` | `DuplicateSwitchCaseConstant` | Emitted when duplicate case values or duplicate pattern targets are defined in the same switch. |
+| `E0295` | `InvalidSwitchPatternTarget` | Emitted when `instanceof` targets a non-class, non-interface, non-tuple type. |
+| `E0296` | `TupleArityMismatchInCase` | Emitted when the number of elements in a tuple case pattern mismatches the discriminant tuple arity. |

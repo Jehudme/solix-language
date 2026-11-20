@@ -1,12 +1,12 @@
-# Formal Specification: Binary Formats (`.slxb` & `.slxarc`)
+# Formal Specification: Binary Formats (`.slxb` & `.slxp`)
 
 ## Document Metadata
 
 * **Specification ID:** SPEC-0009
-* **Scope:** Bytecode Container & Project Archive Container Layouts (`crates/solix-common/src/bytecode/`)
+* **Scope:** Bytecode Container & Package Container Layouts (`crates/solix-common/src/bytecode/`, `crates/solix-common/src/project.rs`)
 * **Status:** Final Normative Standard
 * **Governing Guideline:** `docs/guidelines/authoring-specs.md` (GL-0005)
-* **Rust Implementation:** [`crates/solix-common/src/bytecode/binary.rs`](../../crates/solix-common/src/bytecode/binary.rs)
+* **Rust Implementation:** [`crates/solix-common/src/bytecode/binary.rs`](../../crates/solix-common/src/bytecode/binary.rs), [`crates/solix-common/src/project.rs`](../../crates/solix-common/src/project.rs)
 
 ---
 
@@ -47,26 +47,34 @@ Every compiled `.slxb` file consists of a 16-byte fixed container header followe
 
 ---
 
-## 2. `.slxarc` Archive Package Container
+## 2. `.slxp` Package Container Layout
 
-A `.slxarc` file is a deterministic, cross-platform archive encapsulating compiled bytecode, native dynamic libraries, and application resources:
+A `.slxp` file is a deterministic, cross-platform ZIP-compatible package encapsulating compiled bytecode, native shared libraries, and application resources:
 
 ```text
-package.slxarc (ZIP Container)
-├── manifest.toml              # Project metadata, entrypoints, and dependencies
+package.slxp (ZIP Container)
+├── manifest.yaml              # Package metadata, entrypoints, and dependencies
+├── binaries.slxb              # Primary compiled bytecode container at package root
 ├── bin/
-│   └── package.slxb           # Primary compiled bytecode container
-├── lib/
-│   ├── secondary.slxb         # Bundled dependency bytecode
-│   ├── x86_64-linux/
-│   │   └── libnative.so       # Host platform native shared library
-│   ├── x86_64-windows/
-│   │   └── native.dll
-│   └── aarch64-macos/
-│       └── libnative.dylib
+│   ├── x86_64-unknown-linux-gnu/
+│   │   ├── libnative_core.so  # Native library (prefixed with native_ or libnative_)
+│   │   └── libhelper.so       # Transitive support library (unregistered in FFI table)
+│   ├── x86_64-pc-windows-msvc/
+│   │   ├── native_core.dll
+│   │   └── helper.dll
+│   └── aarch64-apple-darwin/
+│       ├── libnative_core.dylib
+│       └── libhelper.dylib
 └── resources/                 # Application assets (fonts, images, data files)
 ```
 
-### Extraction & Caching Behavior
-* At runtime, the package manager extracts native libraries matching the host platform (`host_triple`) into `~/.solix/cache/natives/<name>-<version>/`.
-* Primary and secondary `.slxb` files are loaded directly into the VM runtime without requiring filesystem extraction.
+### Root Bytecode Layout
+* The primary compiled program is packaged directly at the root as `binaries.slxb`.
+* Secondary bundled libraries reside under `lib/` as needed.
+* The VM loads root `binaries.slxb` into runtime memory directly from the package without requiring disk extraction.
+
+### Native Loader & Isolation Policy
+* At runtime, native libraries matching the active host target triple (`host_triple`) are extracted to isolated cache directory `~/.solix/cache/packages/<name>-<version>/bin/<target>/`.
+* **Strict Loading Rule**: The runtime ONLY loads and registers libraries whose filenames start with `native_` (or platform equivalent `libnative_`).
+* **Transitive Dependency Isolation**: Auxiliary or transitive support libraries located in `bin/<target>/` that do not start with `native_` remain un-registered in the Solix VM FFI symbol table, ensuring dependencies cannot collide with user FFI bindings.
+* **Hermetic Search**: The runtime never searches host system `PATH` or arbitrary system directories; all native symbols are resolved strictly from the active package's `bin/<target>/` location.

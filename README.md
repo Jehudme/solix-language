@@ -6,17 +6,17 @@
 
 Solix is a modern, statically typed programming language designed to be fast, memory-safe, and easy to learn. It combines the clean, expressive syntax of languages like C# and Java with the predictable performance and resource control of systems languages like C++ and Rust.
 
-Written entirely in safe Rust (`#![forbid(unsafe_code)]`), Solix is built from the ground up to provide a complete, self-contained development ecosystem: an Ahead-of-Time compiler, an optimized 64-bit register-based virtual machine, automatic reference-counted memory management without garbage collection pauses, a unified command-line toolchain, and first-class Visual Studio Code integration.
+Written entirely in safe Rust (`#![forbid(unsafe_code)]`), Solix is built from the ground up to provide a complete, self-contained development ecosystem: an Ahead-of-Time compiler, an optimized 64-bit register-based virtual machine, automatic reference-counted memory management without stop-the-world tracing GC pauses, a unified command-line toolchain, and first-class Visual Studio Code integration.
 
 ---
 
 ## Key Design Principles
 
-### Memory Safety Without Garbage Collection Pauses
-Solix manages heap memory through deterministic **Automatic Reference Counting (ARC)**. You never have to manually allocate and free memory with pointers, and unlike languages that rely on tracing garbage collectors, Solix never pauses your program to perform garbage collection sweeps. When an object reference count drops to zero, Solix frees its memory immediately and runs its class destructor (`~ClassName()`) deterministically. This makes Solix ideal for interactive applications, games, audio processing, and systems software where consistent frame rates and low latency are essential.
+### Memory Safety with Deterministic ARC & Bounded Cycle Collection
+Solix manages heap memory primarily through deterministic **Automatic Reference Counting (ARC)**. You never have to manually allocate and free memory with pointers, and unlike languages that rely on tracing garbage collectors with unpredictable stop-the-world pauses, Solix reclaims memory immediately as soon as an object reference count drops to zero and runs its class destructor (`~ClassName()`) deterministically. For complex cyclic object graphs, Solix provides a bounded, synchronous cycle collector based on Bacon & Rajan (2001) that isolates and collects garbage cycles on demand without non-deterministic tracing pauses.
 
 ### Fast 64-Bit Register Virtual Machine
-The Solix compiler translates source code into compact binary containers (`.slxb`) and standalone multi-file distribution archives (`.slxarc`). These containers execute on a high-throughput 64-bit register virtual machine featuring fixed 8-byte instruction words, sliding register windows, and linear-scan register allocation. The result is fast execution, compact binary footprints, and consistent behavior across Linux, macOS, and Windows.
+The Solix compiler translates source code into compact binary containers (`.slxb`) and standalone multi-file distribution packages (`.slxp`). These containers execute on a high-throughput 64-bit register virtual machine featuring fixed 8-byte instruction words, sliding register windows, and linear-scan register allocation. The result is fast execution, compact binary footprints, and consistent behavior across Linux, macOS, and Windows.
 
 ### Clean and Explicit Scope Syntax
 Solix enforces clear visual separation between namespaces, types, and instance members:
@@ -24,7 +24,7 @@ Solix enforces clear visual separation between namespaces, types, and instance m
 * **Member Access (`.`)**: Used strictly for instance fields, object properties, and instance method invocations (e.g. `player.health`, `particle.update(delta_time)`).
 
 ### All-in-One Unified Toolchain
-Developing with Solix requires no external build tools, Makefiles, or complicated configuration. The single, consolidated `solix` executable manages the entire development lifecycle: project creation (`solix new`), compilation (`solix compile`), project builds (`solix build`), execution (`solix run`), code formatting (`solix fmt`), API documentation generation (`solix doc`), bundled offline documentation (`solix wiki`), package management (`solix install`, `solix list`), and editor language intelligence (`solix lsp`, `solix dap`).
+Developing with Solix requires no external build tools, Makefiles, or complicated configuration. The single, consolidated `solix` executable manages the entire development lifecycle: package creation (`solix new package`, `solix new native`), compilation (`solix compile source`, `solix compile package`), package builds (`solix build`), execution (`solix run package`, `solix run source`), code formatting (`solix fmt`), API documentation generation (`solix doc`), bundled offline documentation (`solix wiki`), package management (`solix install`, `solix uninstall`, `solix export`, `solix list`), and editor language intelligence (`solix lsp`, `solix dap`).
 
 ---
 
@@ -117,16 +117,16 @@ The single `solix` executable manages all phases of project development, compila
 
 | Command | Purpose | Example |
 |:---|:---|:---|
-| `solix new` | Scaffolds a new application or library project | `solix new my_game --deps raylib@5.5.0` |
-| `solix compile` | Compiles `.slx` source files into a `.slxb` container | `solix compile src/main.slx -o bin/app.slxb` |
-| `solix build` | Builds a project into an isolated `.slxarc` package | `solix build --profile release` |
-| `solix run` | Executes `.slxb` binaries, `.slxarc` archives, or `.slx` sources | `solix run build/release/my_game.slxarc` |
-| `solix clean` | Cleans project build artifacts (`build/`) or caches (`.cache/`) | `solix clean --cache-only` |
-| `solix install` | Installs an archive, project, or VS Code extension | `solix install --vscode` |
-| `solix reinstall` | Rebuilds and reinstalls packages from recorded source paths | `solix reinstall --all` |
-| `solix uninstall` | Removes packages or specific versions from the local store | `solix uninstall raylib@5.5.0` |
-| `solix list` | Lists all installed packages with sizes, profiles, and digests | `solix list --json` |
-| `solix info` | Inspects container metadata, disassembly, or exported APIs | `solix info build/release/app.slxarc` |
+| `solix new` | Scaffolds a new package or native project | `solix new package my_game` |
+| `solix compile` | Compiles `.slx` source files or packages into `.slxb` | `solix compile source src/main.slx -o bin/app.slxb` |
+| `solix build` | Builds a package into an isolated `.slxp` bundle with `--platform` target support | `solix build --profile release --platform x86_64-unknown-linux-gnu` |
+| `solix run` | Executes `.slxp` packages, `.slxb` binaries, or `.slx` source files | `solix run package build/release/my_game.slxp` |
+| `solix clean` | Cleans package build artifacts (`build/`) or caches (`.cache/`) | `solix clean --cache-only` |
+| `solix install` | Installs `.slxp` packages, `.slxb` binaries, or VS Code extension | `solix install package build/release/my_game.slxp` |
+| `solix uninstall` | Removes packages or binaries from the local store | `solix uninstall package raylib` |
+| `solix export` | Exports installed packages or binaries to a destination | `solix export package raylib --output dist/` |
+| `solix list` | Lists all installed items with `KIND` (`package` / `binaries`), sizes, and digests | `solix list --json` |
+| `solix info` | Inspects container metadata, disassembly, or exported APIs | `solix info build/release/app.slxp` |
 | `solix lsp` | Starts the standard Language Server Protocol (LSP 3.17) | `solix lsp --stdio` |
 | `solix dap` | Starts the Debug Adapter Protocol (DAP) service | `solix dap --port 45678` |
 | `solix fmt` | Formats Solix source files according to official style | `solix fmt src/` |
@@ -138,7 +138,7 @@ The single `solix` executable manages all phases of project development, compila
 ## Architectural Overview
 
 * **64-Bit Register Abstract Machine**: Uniform 8-byte instruction words (`Format A`, `Format B`, `Format C`, `Format Call`), sliding register windows, and linear-scan register allocation for high instruction cache locality.
-* **Deterministic ARC with Segregated Free Lists**: Memory is reclaimed immediately when reference counts drop to zero, executing RAII destructors (`~ClassName()`) deterministically with zero garbage collection pauses.
+* **Deterministic ARC with Segregated Free Lists & Cycle Collection**: Memory is reclaimed immediately when reference counts drop to zero, executing RAII destructors (`~ClassName()`) deterministically without stop-the-world tracing GC pauses, with bounded synchronous cycle collection for cyclic graphs.
 * **Declarative Pure-Rust Build System (`manifest.yaml`)**: Executes `pre_compile` / `post_compile` hooks, auto-detects dual-mode C/C++ CMake (`solix::ffi`) and Rust Cargo (`solix-ffi`) native extensions across OS-expanded architectures inside isolated `build/.cache/` directories.
 * **Profile-Aware Multi-Version Package Store**: Supports simultaneous side-by-side installations of packages under `<name>-<profile>@<version>` with cryptographic SHA-256 tamper verification.
 * **Comprehensive Tooling**: First-class Language Server Protocol (`solix-lsp`), Debug Adapter Protocol (`solix-dap`), and an official Visual Studio Code extension.

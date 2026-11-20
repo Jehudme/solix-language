@@ -31,7 +31,7 @@ solix compile package [path] [options]
 | `--deps-source <path>` | | Path (Repeated) | `[]` | Additional Solix source file or directory dependencies to compile against. |
 | `--deps-package <path>` | | Path (Repeated) | `[]` | Package archive or package directory dependencies to link against. |
 | `--deps-binaries <path>` | | Path (Repeated) | `[]` | Precompiled `.slxb` binary containers to link against. |
-| `--deps-file <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxarc` archives whose API interfaces should be extracted and linked (visible alias `--lib`). |
+| `--deps-file <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxp` packages whose API interfaces should be extracted and linked (visible alias `--lib`). |
 | `--name <name>` | `-n` | String | (Derived from sources) | Package or module identifier name. |
 | `--version <semver>` | `-V` | String | `"0.1.0"` | Semantic version string embedded into binary container metadata. |
 | `--description <desc>` | | String | `""` | Human-readable package description. |

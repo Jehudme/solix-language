@@ -29,7 +29,7 @@ SuperFieldAccess : 'super' '.' Identifier
 - **Slot 0 Binding**: `super` evaluates to the object reference at local slot 0 (`this`), but type-bound to the superclass definition.
 - **Direct Dispatch**: When invoking `super.method()`, the compiler bypasses virtual table dynamic dispatch and emits a direct `CALL` opcode to the superclass method address.
 - **Constructor Chaining**: If a derived constructor does not explicitly invoke `super(...)`, the compiler automatically inserts an implicit zero-argument `super()` call before executing any statements.
-- Using `super` outside an instance method or constructor triggers compiler error `E0312: 'super' used outside of class or in static context`.
+- Using `super` outside an instance method or constructor triggers compiler error `E0261: Keyword 'super' can only be used inside subclasses with a declared superclass`.
 
 ## 4. Code Examples
 

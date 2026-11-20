@@ -243,7 +243,7 @@ fn test_switch_instanceof_tuple_pattern() {
 }
 
 #[test]
-fn test_switch_class_without_equality_rejected_e0310() {
+fn test_switch_class_without_equality_rejected_e0292() {
     let source_code = r#"
         class PlainData {
             public int32 value_field;
@@ -255,11 +255,11 @@ fn test_switch_class_without_equality_rejected_e0310() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0310");
+    assert_compile_error(source_code, "E0292");
 }
 
 #[test]
-fn test_switch_incompatible_case_type_rejected_e0311() {
+fn test_switch_incompatible_case_type_rejected_e0293() {
     let source_code = r#"
         void test_type_incompatibility(int32 numeric_argument) {
             switch (numeric_argument) {
@@ -267,11 +267,11 @@ fn test_switch_incompatible_case_type_rejected_e0311() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0311");
+    assert_compile_error(source_code, "E0293");
 }
 
 #[test]
-fn test_switch_duplicate_case_rejected_e0312() {
+fn test_switch_duplicate_case_rejected_e0294() {
     let source_code = r#"
         void test_duplicate_case(int32 numeric_argument) {
             switch (numeric_argument) {
@@ -280,11 +280,11 @@ fn test_switch_duplicate_case_rejected_e0312() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0312");
+    assert_compile_error(source_code, "E0294");
 }
 
 #[test]
-fn test_switch_invalid_instanceof_pattern_target_rejected_e0313() {
+fn test_switch_invalid_instanceof_pattern_target_rejected_e0295() {
     let source_code = r#"
         class SampleObject {}
 
@@ -294,11 +294,11 @@ fn test_switch_invalid_instanceof_pattern_target_rejected_e0313() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0313");
+    assert_compile_error(source_code, "E0295");
 }
 
 #[test]
-fn test_switch_tuple_arity_mismatch_rejected_e0314() {
+fn test_switch_tuple_arity_mismatch_rejected_e0296() {
     let source_code = r#"
         void test_tuple_arity((int32, string) input_tuple) {
             switch (input_tuple) {
@@ -306,5 +306,5 @@ fn test_switch_tuple_arity_mismatch_rejected_e0314() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0314");
+    assert_compile_error(source_code, "E0296");
 }
