@@ -46,6 +46,38 @@ struct ResolvedNativeEntry {
     target_triples: Vec<String>,
     flags: Vec<String>,
     has_solix_native_feature: bool,
+    strategy: Option<String>,
+    docker: bool,
+    docker_image: Option<String>,
+}
+
+impl ResolvedNativeEntry {
+    fn is_docker_strategy(&self) -> bool {
+        self.docker
+            || self.strategy.as_deref().is_some_and(|strategy_name| {
+                strategy_name.eq_ignore_ascii_case("docker")
+                    || strategy_name.eq_ignore_ascii_case("container")
+            })
+    }
+}
+
+/// Resolves the canonical dockcross container image name for a target triple.
+#[must_use]
+pub fn dockcross_image_for_triple(triple: &str) -> Option<&'static str> {
+    match triple {
+        "x86_64-unknown-linux-gnu" => Some("dockcross/linux-x64"),
+        "aarch64-unknown-linux-gnu" => Some("dockcross/linux-arm64"),
+        "x86_64-pc-windows-gnu" | "x86_64-pc-windows-msvc" => Some("dockcross/windows-static-x64"),
+        "x86_64-apple-darwin" => Some("dockcross/darwin-x64"),
+        "aarch64-apple-darwin" => Some("dockcross/darwin-arm64"),
+        _ => None,
+    }
+}
+
+/// Resolves the canonical cross-rs container image name for a target triple.
+#[must_use]
+pub fn cross_image_for_triple(triple: &str) -> String {
+    format!("ghcr.io/cross-rs/{triple}:edge")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +87,7 @@ enum CargoBuildStrategy {
     CargoXwin,
     SystemCross,
     HostCargo,
+    Docker,
 }
 
 /// Executes the `build` subcommand using declarative `manifest.yaml` (or legacy fallback).
@@ -457,6 +490,7 @@ fn discover_native_entries(
             NativeBackend::Cmake => false,
         };
 
+        let is_docker = native_cfg.is_docker_strategy();
         entries.push(ResolvedNativeEntry {
             name: native_name,
             directory: native_dir,
@@ -465,6 +499,9 @@ fn discover_native_entries(
             target_triples,
             flags: native_cfg.flags,
             has_solix_native_feature,
+            strategy: native_cfg.strategy,
+            docker: is_docker,
+            docker_image: native_cfg.docker_image,
         });
     }
 
@@ -589,10 +626,20 @@ fn verify_build_environment(
         );
         for triple in &entry.target_triples {
             let is_cross = triple != host_triple;
+            if entry.is_docker_strategy() {
+                if entry.backend == NativeBackend::Cargo && find_executable("cross").is_some() {
+                    let cross_version = require_tool_version("cross", &["--version"])?;
+                    println!("  [check] {cross_version} (for {triple} via cross-rs container)");
+                } else {
+                    let docker_version = require_tool_version("docker", &["--version"])?;
+                    println!("  [check] {docker_version} (for {triple} via Docker container)");
+                }
+                continue;
+            }
             match entry.backend {
                 NativeBackend::Cargo => {
                     if is_cross {
-                        let strategy = select_cargo_strategy(triple, host_triple)?;
+                        let strategy = select_cargo_strategy(triple, host_triple, false)?;
                         if matches!(strategy, CargoBuildStrategy::Zigbuild) {
                             let zig_ver = require_tool_version("zig", &["version"])?;
                             println!("  [check] zig {zig_ver} (for {triple})");
@@ -662,7 +709,14 @@ fn require_tool_version(tool_name: &str, version_args: &[&str]) -> Result<String
     Ok(format!("{stdout_line} ({})", exe_path.display()))
 }
 
-fn select_cargo_strategy(target_triple: &str, host_triple: &str) -> Result<CargoBuildStrategy> {
+fn select_cargo_strategy(
+    target_triple: &str,
+    host_triple: &str,
+    is_docker: bool,
+) -> Result<CargoBuildStrategy> {
+    if is_docker {
+        return Ok(CargoBuildStrategy::Docker);
+    }
     let is_exact_host = target_triple == host_triple;
     let is_darwin_on_darwin = cfg!(target_os = "macos") && target_triple.contains("apple-darwin");
     let is_msvc_target = target_triple.contains("-pc-windows-msvc");
@@ -786,9 +840,9 @@ fn compile_cargo_native(
     let zig_exe_option = find_executable("zig");
 
     for triple in &entry.target_triples {
-        let strategy = select_cargo_strategy(triple, host_triple)?;
+        let strategy = select_cargo_strategy(triple, host_triple, entry.is_docker_strategy())?;
         let is_exact_host = triple == host_triple;
-        if !is_exact_host {
+        if !is_exact_host && !matches!(strategy, CargoBuildStrategy::Docker) {
             ensure_rustup_target_installed(triple, &search_path)?;
         }
 
@@ -802,18 +856,57 @@ fn compile_cargo_native(
             entry.name, entry.native_profile, triple, strategy
         );
 
-        let cargo_executable = find_executable("cargo").unwrap_or_else(|| PathBuf::from("cargo"));
-        let mut command = crate::process::create_process_command(&cargo_executable);
-        if matches!(strategy, CargoBuildStrategy::CargoXwin) {
-            command.args(["xwin", "build"]);
+        let mut command = if matches!(strategy, CargoBuildStrategy::Docker) {
+            if let Some(cross_executable) = find_executable("cross") {
+                let mut cmd = crate::process::create_process_command(&cross_executable);
+                cmd.arg("build");
+                cmd.arg("--manifest-path")
+                    .arg(&cargo_manifest)
+                    .arg("--target-dir")
+                    .arg(&cargo_target_dir);
+                cmd
+            } else if let Some(docker_executable) = find_executable("docker") {
+                let image = entry
+                    .docker_image
+                    .clone()
+                    .unwrap_or_else(|| cross_image_for_triple(triple));
+                let mut cmd = crate::process::create_process_command(&docker_executable);
+                let manifest_relative = cargo_manifest
+                    .strip_prefix(project_root)
+                    .unwrap_or(&cargo_manifest);
+                let target_dir_relative = cargo_target_dir
+                    .strip_prefix(project_root)
+                    .unwrap_or(&cargo_target_dir);
+                cmd.args(["run", "--rm"]);
+                cmd.arg("-v")
+                    .arg(format!("{}:/work", project_root.display()));
+                cmd.args(["-w", "/work"]);
+                cmd.arg(&image);
+                cmd.args(["cargo", "build"]);
+                cmd.arg("--manifest-path").arg(manifest_relative);
+                cmd.arg("--target-dir").arg(target_dir_relative);
+                cmd
+            } else {
+                bail!(
+                    "Cannot build containerized native dependency '{}' for target '{triple}': neither 'cross' nor 'docker' executable was found on PATH",
+                    entry.name
+                );
+            }
         } else {
-            command.arg(subcommand);
-        }
-        command
-            .arg("--manifest-path")
-            .arg(&cargo_manifest)
-            .arg("--target-dir")
-            .arg(&cargo_target_dir);
+            let cargo_executable =
+                find_executable("cargo").unwrap_or_else(|| PathBuf::from("cargo"));
+            let mut cmd = crate::process::create_process_command(&cargo_executable);
+            if matches!(strategy, CargoBuildStrategy::CargoXwin) {
+                cmd.args(["xwin", "build"]);
+            } else {
+                cmd.arg(subcommand);
+            }
+            cmd.arg("--manifest-path")
+                .arg(&cargo_manifest)
+                .arg("--target-dir")
+                .arg(&cargo_target_dir);
+            cmd
+        };
         if is_release {
             command.arg("--release");
             command.env("CARGO_PROFILE_RELEASE_STRIP", "symbols");
@@ -1152,6 +1245,118 @@ fn compile_cmake_native(
         fs::create_dir_all(&cmake_build_dir)?;
         fs::create_dir_all(&stage_triple_dir)?;
         fs::create_dir_all(&archive_cache_dir)?;
+
+        if entry.is_docker_strategy() {
+            let docker_exe = find_executable("docker").ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Cannot cross-compile CMake project '{}' for target '{triple}': 'docker' not found on PATH",
+                    entry.name
+                )
+            })?;
+            let dockcross_image = entry
+                .docker_image
+                .clone()
+                .or_else(|| dockcross_image_for_triple(triple).map(str::to_string))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "No default dockcross image known for target '{triple}'. Please specify 'docker_image: <image>' in manifest.yaml"
+                    )
+                })?;
+
+            let stage_triple_cmake = cmake_path_string(&stage_triple_dir);
+            let archive_cache_cmake = cmake_path_string(&archive_cache_dir);
+            let mut cfg_cmd = crate::process::create_process_command(&docker_exe);
+            cfg_cmd.args(["run", "--rm"]);
+            cfg_cmd
+                .arg("-v")
+                .arg(format!("{}:/work", project_root.display()));
+            cfg_cmd.args(["-w", "/work"]);
+            cfg_cmd.arg(&dockcross_image);
+            cfg_cmd.args(["cmake", "-S"]);
+            cfg_cmd.arg(cmake_path_string(&entry.directory));
+            cfg_cmd.arg("-B");
+            cfg_cmd.arg(cmake_path_string(&cmake_build_dir));
+            cfg_cmd.arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"));
+            cfg_cmd.arg("-DSOLIX_NATIVE_BUILD=ON");
+            cfg_cmd.arg("-DBUILD_SHARED_LIBS=ON");
+            cfg_cmd.arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON");
+            cfg_cmd.arg("-DBUILD_TESTING=OFF");
+            cfg_cmd.arg(format!(
+                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={stage_triple_cmake}"
+            ));
+            cfg_cmd.arg(format!(
+                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
+            ));
+            cfg_cmd.arg(format!(
+                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
+            ));
+            cfg_cmd.arg(format!(
+                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={stage_triple_cmake}"
+            ));
+            cfg_cmd.arg(format!(
+                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
+            ));
+            cfg_cmd.arg(format!(
+                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
+            ));
+            cfg_cmd.arg(format!(
+                "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={archive_cache_cmake}"
+            ));
+            for flag in &entry.flags {
+                cfg_cmd.arg(flag);
+            }
+            let cfg_status = cfg_cmd.status().with_context(|| {
+                format!(
+                    "failed to configure CMake project '{}' via dockcross container",
+                    entry.name
+                )
+            })?;
+            if !cfg_status.success() {
+                bail!(
+                    "dockcross cmake configure failed for '{}' (target: '{triple}')",
+                    entry.name
+                );
+            }
+
+            let mut build_cmd = crate::process::create_process_command(&docker_exe);
+            build_cmd.args(["run", "--rm"]);
+            build_cmd
+                .arg("-v")
+                .arg(format!("{}:/work", project_root.display()));
+            build_cmd.args(["-w", "/work"]);
+            build_cmd.arg(&dockcross_image);
+            build_cmd.args([
+                "cmake",
+                "--build",
+                &cmake_path_string(&cmake_build_dir),
+                "--config",
+                cmake_build_type,
+            ]);
+            let build_status = build_cmd.status().with_context(|| {
+                format!(
+                    "failed to build CMake project '{}' via dockcross container",
+                    entry.name
+                )
+            })?;
+            if !build_status.success() {
+                bail!(
+                    "dockcross cmake build failed for '{}' (target: '{triple}')",
+                    entry.name
+                );
+            }
+
+            let mut staged_count = count_shared_libs_in_dir(&stage_triple_dir);
+            if staged_count == 0 {
+                staged_count += copy_shared_libs_recursive(&cmake_build_dir, &stage_triple_dir)?;
+            }
+            if staged_count == 0 {
+                bail!(
+                    "dockcross CMake build succeeded for '{}' ({triple}) but emitted no shared library (.so/.dll/.dylib)",
+                    entry.name
+                );
+            }
+            continue;
+        }
 
         let toolchain_option = if is_cross {
             let zig_exe = zig_exe_option.as_ref().ok_or_else(|| {

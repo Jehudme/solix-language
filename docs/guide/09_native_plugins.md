@@ -223,6 +223,29 @@ During `solix build`, the pure-Rust build orchestrator executes `pre_compile` ho
 
 ---
 
+### 4.1 Containerized Cross-Compilation (`strategy: docker`)
+
+For native projects that require external host development libraries (such as X11, Wayland, ALSA, or Mesa OpenGL) that are unavailable in minimal cross-compilation toolchains, Solix supports containerized compilation via Docker:
+
+```yaml
+profiles:
+  release:
+    platforms:
+      - all
+    natives:
+      heavy_native_module:
+        profile: release
+        strategy: docker # Compiles via cross (Rust) or dockcross (CMake)
+```
+
+* **Rust Natives (`Cargo.toml`):** Solix compiles via `cross` or official images (`ghcr.io/cross-rs/<target>:edge`).
+* **CMake Natives (`CMakeLists.txt`):** Solix compiles via `dockcross/<target>` images (e.g. `dockcross/linux-arm64`).
+
+> [!NOTE]
+> Containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild and targeted sysroots, but it is practical and sufficient for complex dependencies with extensive system libraries.
+
+---
+
 ## 5. Next Steps & Further Reading
 
 - **FFI SDK Wikis**:

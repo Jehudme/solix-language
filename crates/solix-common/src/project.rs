@@ -284,6 +284,27 @@ pub struct NativeTargetConfig {
     /// Extra flags forwarded directly to CMake (`-D...`) or Cargo (`--features ...`).
     #[serde(default)]
     pub flags: Vec<String>,
+    /// Explicit native build strategy (e.g. `"host"`, `"zigbuild"`, `"docker"`, `"container"`).
+    #[serde(default)]
+    pub strategy: Option<String>,
+    /// Whether to force containerized execution via Docker (cross / dockcross).
+    #[serde(default)]
+    pub docker: Option<bool>,
+    /// Optional custom Docker container image override.
+    #[serde(default)]
+    pub docker_image: Option<String>,
+}
+
+impl NativeTargetConfig {
+    /// Returns true if this native target is configured to compile inside a Docker container.
+    #[must_use]
+    pub fn is_docker_strategy(&self) -> bool {
+        self.docker.unwrap_or(false)
+            || self.strategy.as_deref().is_some_and(|strategy_name| {
+                strategy_name.eq_ignore_ascii_case("docker")
+                    || strategy_name.eq_ignore_ascii_case("container")
+            })
+    }
 }
 
 /// Profile-specific compilation, native build, hook, dependency, and source configuration declared in `profiles.<name>`.
