@@ -10,9 +10,11 @@
 
 #![forbid(unsafe_code)]
 
-use solix_common::bytecode::OpCode;
+use solix_common::bytecode::{Instruction, OpCode};
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_compilation::phases::optimizer::escape_analysis::{self, EscapeCategory};
 use solix_runtime::{RuntimeContext, RuntimeOptions, Value, VirtualMachine};
+use std::collections::HashSet;
 
 /// Helper to compile source code and return the compilation context and VM execution result.
 fn compile_and_execute(source_code: &str) -> (CompilationContext, Value) {
@@ -1690,4 +1692,248 @@ fn test_specialize_primitive_field_access() {
         has_specialized_field_opcode,
         "Expected specialized primitive field opcode in compiled program"
     );
+}
+
+#[test]
+fn test_escape_analysis_instruction_read_write_coverage() {
+    let mut candidate_registers = HashSet::new();
+    candidate_registers.insert(5u16);
+    candidate_registers.insert(6u16);
+
+    // 1. Fused ALU Immediate Superinstructions: write dst, read src1
+    let add_f64_inst = Instruction::format_a(OpCode::AddF64Imm, 0, 10, 5, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&add_f64_inst),
+        Some(10)
+    );
+    assert!(escape_analysis::instruction_writes_reg(&add_f64_inst, 10));
+    assert!(escape_analysis::instruction_reads_reg(&add_f64_inst, 5));
+    assert!(!escape_analysis::instruction_reads_reg(&add_f64_inst, 10));
+
+    let sub_f64_inst = Instruction::format_a(OpCode::SubF64Imm, 0, 11, 5, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&sub_f64_inst),
+        Some(11)
+    );
+    assert!(escape_analysis::instruction_reads_reg(&sub_f64_inst, 5));
+
+    let mul_f64_inst = Instruction::format_a(OpCode::MulF64Imm, 0, 12, 5, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&mul_f64_inst),
+        Some(12)
+    );
+    assert!(escape_analysis::instruction_reads_reg(&mul_f64_inst, 5));
+
+    let add_i64_inst = Instruction::format_a(OpCode::AddI64Imm, 0, 13, 6, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&add_i64_inst),
+        Some(13)
+    );
+    assert!(escape_analysis::instruction_reads_reg(&add_i64_inst, 6));
+
+    // 2. Fused Branch Superinstructions: read dst and src1
+    let jump_lt_f64_inst = Instruction::format_a(OpCode::JumpIfLtF64, 0, 5, 6, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&jump_lt_f64_inst),
+        None
+    );
+    assert!(escape_analysis::instruction_reads_reg(&jump_lt_f64_inst, 5));
+    assert!(escape_analysis::instruction_reads_reg(&jump_lt_f64_inst, 6));
+
+    let jump_lte_f64_inst = Instruction::format_a(OpCode::JumpIfLteF64, 0, 5, 7, 0);
+    assert!(escape_analysis::instruction_reads_reg(
+        &jump_lte_f64_inst,
+        5
+    ));
+    assert!(escape_analysis::instruction_reads_reg(
+        &jump_lte_f64_inst,
+        7
+    ));
+
+    let jump_lt_i64_inst = Instruction::format_a(OpCode::JumpIfLtI64, 0, 6, 8, 0);
+    assert!(escape_analysis::instruction_reads_reg(&jump_lt_i64_inst, 6));
+    assert!(escape_analysis::instruction_reads_reg(&jump_lt_i64_inst, 8));
+
+    let jump_lte_i64_inst = Instruction::format_a(OpCode::JumpIfLteI64, 0, 6, 8, 0);
+    assert!(escape_analysis::instruction_reads_reg(
+        &jump_lte_i64_inst,
+        6
+    ));
+    assert!(escape_analysis::instruction_reads_reg(
+        &jump_lte_i64_inst,
+        8
+    ));
+
+    let array_jump_inst = Instruction::format_a(OpCode::GetArrayJumpIfTrue, 0, 5, 6, 0);
+    assert!(escape_analysis::instruction_reads_reg(&array_jump_inst, 5));
+    assert!(escape_analysis::instruction_reads_reg(&array_jump_inst, 6));
+
+    // 3. Field Superinstructions:
+    // GetFieldI32/F64: write dst, read src1 (object)
+    let get_field_i32_inst = Instruction::format_a(OpCode::GetFieldI32, 0, 20, 5, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&get_field_i32_inst),
+        Some(20)
+    );
+    assert!(escape_analysis::instruction_reads_reg(
+        &get_field_i32_inst,
+        5
+    ));
+
+    let get_field_f64_inst = Instruction::format_a(OpCode::GetFieldF64, 0, 21, 5, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&get_field_f64_inst),
+        Some(21)
+    );
+    assert!(escape_analysis::instruction_reads_reg(
+        &get_field_f64_inst,
+        5
+    ));
+
+    // SetFieldI32/F64: read dst (val) and src1 (object)
+    let set_field_i32_inst = Instruction::format_a(OpCode::SetFieldI32, 0, 6, 5, 0);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&set_field_i32_inst),
+        None
+    );
+    assert!(escape_analysis::instruction_reads_reg(
+        &set_field_i32_inst,
+        6
+    ));
+    assert!(escape_analysis::instruction_reads_reg(
+        &set_field_i32_inst,
+        5
+    ));
+
+    let set_field_f64_inst = Instruction::format_a(OpCode::SetFieldF64, 0, 7, 5, 0);
+    assert!(escape_analysis::instruction_reads_reg(
+        &set_field_f64_inst,
+        7
+    ));
+    assert!(escape_analysis::instruction_reads_reg(
+        &set_field_f64_inst,
+        5
+    ));
+
+    // 4. Quickened Virtual Call: CallVirtualDirect
+    let call_direct_inst = Instruction::format_call(OpCode::CallVirtualDirect, 25, 42, 5, 2);
+    assert_eq!(
+        escape_analysis::instruction_write_dst(&call_direct_inst),
+        Some(25)
+    );
+    assert!(escape_analysis::instruction_reads_reg(&call_direct_inst, 5));
+    assert!(escape_analysis::instruction_reads_reg(&call_direct_inst, 6));
+    assert!(!escape_analysis::instruction_reads_reg(
+        &call_direct_inst,
+        7
+    ));
+
+    // 5. Escape Category Classifications
+    let escape_return = Instruction::format_a(OpCode::ReturnValue, 0, 5, 0, 0);
+    assert_eq!(
+        escape_analysis::evaluate_instruction_escape(&escape_return, &candidate_registers),
+        Some(EscapeCategory::GlobalEscape)
+    );
+
+    let escape_throw = Instruction::format_a(OpCode::Throw, 0, 6, 0, 0);
+    assert_eq!(
+        escape_analysis::evaluate_instruction_escape(&escape_throw, &candidate_registers),
+        Some(EscapeCategory::GlobalEscape)
+    );
+
+    let escape_set_field = Instruction::format_a(OpCode::SetField, 0, 5, 9, 0);
+    assert_eq!(
+        escape_analysis::evaluate_instruction_escape(&escape_set_field, &candidate_registers),
+        Some(EscapeCategory::GlobalEscape)
+    );
+
+    let escape_set_field_i32 = Instruction::format_a(OpCode::SetFieldI32, 0, 5, 9, 0);
+    assert_eq!(
+        escape_analysis::evaluate_instruction_escape(&escape_set_field_i32, &candidate_registers),
+        Some(EscapeCategory::GlobalEscape)
+    );
+
+    let escape_set_array = Instruction::format_a(OpCode::SetArray, 0, 9, 10, 5);
+    assert_eq!(
+        escape_analysis::evaluate_instruction_escape(&escape_set_array, &candidate_registers),
+        Some(EscapeCategory::GlobalEscape)
+    );
+
+    let escape_call_direct = Instruction::format_call(OpCode::CallVirtualDirect, 30, 100, 5, 1);
+    assert_eq!(
+        escape_analysis::evaluate_instruction_escape(&escape_call_direct, &candidate_registers),
+        Some(EscapeCategory::GlobalEscape)
+    );
+}
+
+#[test]
+fn test_optimizer_relocation_exactness_with_dead_code_and_fused_superinstructions() {
+    let source_code = r#"
+        class SpecialError {}
+
+        class RelocationRunner {
+            public static int32 run_test(int32 mode_selector, int32 input_value) {
+                int32 computation_result = 0;
+                try {
+                    // Dead branch and calculation for dead-code elimination
+                    int32 unused_calculation = input_value + 100;
+                    if (false) {
+                        int32 dead_result = 999;
+                        computation_result = dead_result;
+                    }
+                    // Fusable superinstruction calculation: input_value + 1
+                    int32 stepped_value = input_value + 1;
+                    if (mode_selector == 1) {
+                        throw new SpecialError();
+                    }
+                    computation_result = stepped_value * 2;
+                } catch (SpecialError captured_error) {
+                    computation_result = 42;
+                }
+                return computation_result;
+            }
+        }
+
+        int32 main() {
+            int32 normal_path_result = RelocationRunner::run_test(0, 10);
+            int32 error_path_result = RelocationRunner::run_test(1, 10);
+
+            if (normal_path_result == 22 && error_path_result == 42) {
+                return 0;
+            }
+            return 1;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(0));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let runner_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("run_test"))
+        .expect("run_test function must exist");
+
+    assert!(
+        !runner_func.exception_handlers.is_empty(),
+        "Exception handler table must not be empty after optimization"
+    );
+
+    for handler in &runner_func.exception_handlers {
+        assert!(
+            handler.try_start_pc < handler.try_end_pc,
+            "try_start_pc ({}) must precede try_end_pc ({})",
+            handler.try_start_pc,
+            handler.try_end_pc
+        );
+        assert!(
+            (handler.try_end_pc as usize) <= runner_func.instructions.len(),
+            "try_end_pc must be within instruction stream length"
+        );
+        assert!(
+            (handler.handler_pc as usize) < runner_func.instructions.len(),
+            "handler_pc must point inside instruction stream"
+        );
+    }
 }

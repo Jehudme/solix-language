@@ -23,7 +23,8 @@ pub enum EscapeCategory {
 }
 
 /// Identifies whether an instruction causes the target register (or its aliases) to escape.
-fn evaluate_instruction_escape(
+#[must_use]
+pub fn evaluate_instruction_escape(
     instruction: &Instruction,
     target_registers: &HashSet<u16>,
 ) -> Option<EscapeCategory> {
@@ -40,7 +41,11 @@ fn evaluate_instruction_escape(
     }
 
     // 3. SetField: if candidate is the value being stored into a field -> GlobalEscape
-    if raw_opcode == OpCode::SetField as u8 && target_registers.contains(&instruction.dst()) {
+    if (raw_opcode == OpCode::SetField as u8
+        || raw_opcode == OpCode::SetFieldI32 as u8
+        || raw_opcode == OpCode::SetFieldF64 as u8)
+        && target_registers.contains(&instruction.dst())
+    {
         return Some(EscapeCategory::GlobalEscape);
     }
 
@@ -59,8 +64,11 @@ fn evaluate_instruction_escape(
         return Some(EscapeCategory::GlobalEscape);
     }
 
-    // 6. Dynamic dispatch calls: CallVirtual, CallInterface -> GlobalEscape
-    if raw_opcode == OpCode::CallVirtual as u8 || raw_opcode == OpCode::CallInterface as u8 {
+    // 6. Dynamic dispatch calls: CallVirtual, CallInterface, CallVirtualDirect -> GlobalEscape
+    if raw_opcode == OpCode::CallVirtual as u8
+        || raw_opcode == OpCode::CallInterface as u8
+        || raw_opcode == OpCode::CallVirtualDirect as u8
+    {
         let argument_base = instruction.arg_base();
         let argument_count = instruction.arg_count() as u16;
         for reg_offset in 0..argument_count {
@@ -216,7 +224,8 @@ fn decode_branch_target(
 }
 
 /// Returns `Some(reg)` if `instruction` overwrites a single destination register `reg`.
-fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
+#[must_use]
+pub fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     let raw = instruction.raw_opcode();
     if (OpCode::Mov as u8..=OpCode::LoadConst as u8).contains(&raw)
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
@@ -243,6 +252,12 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || raw == OpCode::ConvIToF as u8
         || raw == OpCode::ConvFToI as u8
         || raw == OpCode::TupleInstanceof as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
     {
         return Some(instruction.dst());
     }
@@ -256,6 +271,7 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || raw == OpCode::CallSymbol as u8
         || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
+        || raw == OpCode::CallVirtualDirect as u8
     {
         return Some(instruction.call_dst());
     }
@@ -264,7 +280,8 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
 }
 
 /// Returns `true` if `instruction` writes to `target_reg` (including `UnpackCaptures` register windows).
-fn instruction_writes_reg(instruction: &Instruction, target_reg: u16) -> bool {
+#[must_use]
+pub fn instruction_writes_reg(instruction: &Instruction, target_reg: u16) -> bool {
     if instruction.raw_opcode() == OpCode::UnpackCaptures as u8 {
         let base = instruction.arg_base();
         let count = instruction.arg_count() as u16;
@@ -274,9 +291,15 @@ fn instruction_writes_reg(instruction: &Instruction, target_reg: u16) -> bool {
 }
 
 /// Returns `true` if `instruction` reads `target_reg`.
-fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
+#[must_use]
+pub fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
     let raw = instruction.raw_opcode();
-    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw) {
+    if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
+        || raw == OpCode::JumpIfLtF64 as u8
+        || raw == OpCode::JumpIfLteF64 as u8
+        || raw == OpCode::JumpIfLtI64 as u8
+        || raw == OpCode::JumpIfLteI64 as u8
+    {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
     if raw == OpCode::JumpIfI32Imm as u8 {
@@ -299,6 +322,10 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
+        || raw == OpCode::AddI64Imm as u8
     {
         return instruction.src1() == target_reg;
     }
@@ -311,6 +338,8 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
         || raw == OpCode::NegI64 as u8
         || raw == OpCode::NegF64 as u8
         || raw == OpCode::GetField as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
@@ -330,7 +359,10 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
     {
         return instruction.dst() == target_reg;
     }
-    if raw == OpCode::SetField as u8 {
+    if raw == OpCode::SetField as u8
+        || raw == OpCode::SetFieldI32 as u8
+        || raw == OpCode::SetFieldF64 as u8
+    {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
     if raw == OpCode::GetArray as u8 {
@@ -365,6 +397,7 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
         || raw == OpCode::CallSymbol as u8
         || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
+        || raw == OpCode::CallVirtualDirect as u8
     {
         if raw == OpCode::CallCallable as u8 && instruction.call_target() == target_reg {
             return true;
@@ -490,6 +523,7 @@ fn rewrite_any_write_dst(instruction: &Instruction, new_dst: u16) -> Option<Inst
         || raw == OpCode::CallSymbol as u8
         || raw == OpCode::CallExtern as u8
         || raw == OpCode::PackClosure as u8
+        || raw == OpCode::CallVirtualDirect as u8
     {
         let opcode = OpCode::from_raw_u8(raw)?;
         return Some(Instruction::format_call(
@@ -1260,10 +1294,15 @@ fn try_scalar_replace_one(
 
     // 4. Clean up reference_registers when no remaining instruction writes a potential reference to that register
     for &alias_register in &ever_aliases {
-        let can_still_hold_reference = function.instructions.iter().any(|inst| {
-            instruction_writes_reg(inst, alias_register)
-                && instruction_can_write_reference(inst.raw_opcode())
-        });
+        let is_catch_reg = function
+            .exception_handlers
+            .iter()
+            .any(|handler| handler.catch_reg == alias_register);
+        let can_still_hold_reference = is_catch_reg
+            || function.instructions.iter().any(|inst| {
+                instruction_writes_reg(inst, alias_register)
+                    && instruction_can_write_reference(inst.raw_opcode())
+            });
         if !can_still_hold_reference {
             function
                 .reference_registers

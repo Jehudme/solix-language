@@ -80,7 +80,9 @@ impl RegisterAllocator {
             let popped_scope = self.scopes.pop();
             if let Some(scope) = popped_scope {
                 for reg in scope.allocated {
-                    self.free_registers.insert(reg);
+                    if reg >= self.param_count {
+                        self.free_registers.insert(reg);
+                    }
                 }
             }
         }
@@ -96,7 +98,9 @@ impl RegisterAllocator {
     /// Returns previously excluded registers back to the free pool.
     pub fn return_to_free(&mut self, regs: &[u16]) {
         for &reg in regs {
-            self.free_registers.insert(reg);
+            if reg >= self.param_count && !self.is_active_local_or_param(reg) {
+                self.free_registers.insert(reg);
+            }
         }
     }
 
@@ -257,9 +261,11 @@ impl RegisterAllocator {
     }
 
     fn take_register(&mut self) -> Result<u16, EmissionError> {
-        if let Some(&recycled) = self.free_registers.iter().next() {
+        while let Some(&recycled) = self.free_registers.iter().next() {
             self.free_registers.remove(&recycled);
-            return Ok(recycled);
+            if recycled >= self.param_count && !self.is_active_local_or_param(recycled) {
+                return Ok(recycled);
+            }
         }
 
         let reg = self.next_register;
