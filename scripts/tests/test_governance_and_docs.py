@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -614,40 +615,71 @@ class SolixBenchCliTests(unittest.TestCase):
 
     def test_solix_bench_telemetry_and_scaling_flags(self) -> None:
         """Tests that `solix_bench run` captures hardware telemetry and supports iteration scaling."""
-        bench_proc = subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPTS_DIR / "bench" / "solix_bench.py"),
-                "run",
-                "--workload",
-                "01_fib",
-                "--solix-only",
-                "--scale-iterations",
-                "2",
-                "--warmup",
-                "1",
-                "--iterations",
-                "2",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(bench_proc.returncode, 0, msg=bench_proc.stderr)
-        benchmark_payload = json.loads(bench_proc.stdout)
-        self.assertIn("metadata", benchmark_payload)
-        self.assertIn("telemetry", benchmark_payload["metadata"])
-        self.assertIn("cpu_model", benchmark_payload["metadata"]["telemetry"])
-        self.assertIn("cpu_cores", benchmark_payload["metadata"]["telemetry"])
-        self.assertIn("total_ram_mb", benchmark_payload["metadata"]["telemetry"])
-        self.assertEqual(benchmark_payload["metadata"]["scale_iterations"], 2)
-        self.assertTrue(benchmark_payload["metadata"]["precompiled"])
-        self.assertIn("01_fib_recursive", benchmark_payload["workloads"])
-        solix_stats = benchmark_payload["workloads"]["01_fib_recursive"]["solix_fast"]
-        self.assertIn("compile_ms", solix_stats)
-        self.assertIn("cold_start_ms", solix_stats)
-        self.assertGreater(solix_stats["compile_ms"], 0.0)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            mock_solix = temp_path / ("solix.cmd" if platform.system() == "Windows" else "solix")
+            mock_solix_py = temp_path / "mock_solix.py"
+            mock_solix_py.write_text(
+                "import sys, pathlib\n"
+                "arguments = sys.argv[1:]\n"
+                "if arguments and arguments[0] == 'compile':\n"
+                "    for index, token in enumerate(arguments):\n"
+                "        if token == '-o' and index + 1 < len(arguments):\n"
+                "            pathlib.Path(arguments[index + 1]).write_bytes(b'SLXB_MOCK')\n"
+                "    print('Compiled mock')\n"
+                "    sys.exit(0)\n"
+                "print('RESULT: 317811')\n"
+                "sys.exit(0)\n",
+                encoding="utf-8",
+            )
+            if platform.system() == "Windows":
+                mock_solix.write_text(
+                    f"@echo off\r\n\"{sys.executable}\" \"{mock_solix_py}\" %*\r\n",
+                    encoding="utf-8",
+                )
+            else:
+                mock_solix.write_text(
+                    f"#!/bin/sh\nexec \"{sys.executable}\" \"{mock_solix_py}\" \"$@\"\n",
+                    encoding="utf-8",
+                )
+                mock_solix.chmod(0o755)
+
+            bench_proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bench" / "solix_bench.py"),
+                    "run",
+                    "--solix-bin",
+                    str(mock_solix),
+                    "--workload",
+                    "01_fib",
+                    "--solix-only",
+                    "--scale-iterations",
+                    "2",
+                    "--warmup",
+                    "1",
+                    "--iterations",
+                    "2",
+                    "--json",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bench_proc.returncode, 0, msg=bench_proc.stderr)
+            benchmark_payload = json.loads(bench_proc.stdout)
+            self.assertIn("metadata", benchmark_payload)
+            self.assertIn("telemetry", benchmark_payload["metadata"])
+            self.assertIn("cpu_model", benchmark_payload["metadata"]["telemetry"])
+            self.assertIn("cpu_cores", benchmark_payload["metadata"]["telemetry"])
+            self.assertIn("total_ram_mb", benchmark_payload["metadata"]["telemetry"])
+            self.assertEqual(benchmark_payload["metadata"]["scale_iterations"], 2)
+            self.assertTrue(benchmark_payload["metadata"]["precompiled"])
+            self.assertIn("01_fib_recursive", benchmark_payload["workloads"])
+            solix_stats = benchmark_payload["workloads"]["01_fib_recursive"]["solix_fast"]
+            self.assertIn("compile_ms", solix_stats)
+            self.assertIn("cold_start_ms", solix_stats)
+            self.assertGreater(solix_stats["compile_ms"], 0.0)
 
     def test_ci_workflow_removes_sensitive_label_and_includes_pr_benchmark(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
