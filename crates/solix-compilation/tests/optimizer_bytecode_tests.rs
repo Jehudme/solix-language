@@ -1459,3 +1459,235 @@ fn test_positive_array_fill_loop_flag_and_bounds_fallback() {
         "expected IndexOutOfBounds, got {err:?}"
     );
 }
+
+#[test]
+fn test_fuse_f64_arithmetic_superinstructions() {
+    let source_code = r#"
+        float64 compute() {
+            float64 base_val = 10.5;
+            float64 step_val = base_val + 2.5;
+            float64 sub_val = step_val - 1.0;
+            float64 mul_val = sub_val * 3.0;
+            return mul_val;
+        }
+
+        int32 main() {
+            float64 compute_val = compute();
+            if (compute_val == 36.0) {
+                return 36;
+            }
+            return 0;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(36));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let compute_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("compute"))
+        .expect("compute function must exist");
+
+    let has_add_f64_imm = compute_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::AddF64Imm as u8);
+    let has_sub_f64_imm = compute_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::SubF64Imm as u8);
+    let has_mul_f64_imm = compute_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::MulF64Imm as u8);
+
+    assert!(
+        has_add_f64_imm,
+        "Expected AddF64Imm in compute function bytecode"
+    );
+    assert!(
+        has_sub_f64_imm,
+        "Expected SubF64Imm in compute function bytecode"
+    );
+    assert!(
+        has_mul_f64_imm,
+        "Expected MulF64Imm in compute function bytecode"
+    );
+}
+
+#[test]
+fn test_fuse_i64_arithmetic_superinstructions() {
+    let source_code = r#"
+        int64 compute() {
+            int64 count_val = 1000;
+            int64 stepped_val = count_val + 250;
+            return stepped_val;
+        }
+
+        int32 main() {
+            int64 result_val = compute();
+            if (result_val == 1250) {
+                return 1250;
+            }
+            return 0;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(1250));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let compute_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("compute"))
+        .expect("compute function must exist");
+
+    let has_add_i64_imm = compute_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::AddI64Imm as u8);
+    assert!(
+        has_add_i64_imm,
+        "Expected AddI64Imm in compute function bytecode"
+    );
+}
+
+#[test]
+fn test_fuse_f64_and_i64_comparison_branches() {
+    let source_code = r#"
+        int32 main() {
+            float64 left_float = 0.0;
+            float64 right_float = 5.0;
+            while (left_float < right_float) {
+                left_float = left_float + 1.0;
+            }
+
+            int64 left_int = 100;
+            int64 right_int = 200;
+            int32 int_result = 0;
+            if (left_int < right_int) {
+                int_result = 20;
+            }
+
+            return (int32)left_float + int_result;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(25));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_jump_if_lt_f64 = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::JumpIfLtF64 as u8);
+    let has_jump_if_i64_branch = main_func.instructions.iter().any(|inst| {
+        inst.raw_opcode() == OpCode::JumpIfLtI64 as u8
+            || inst.raw_opcode() == OpCode::JumpIfLteI64 as u8
+    });
+
+    assert!(
+        has_jump_if_lt_f64,
+        "Expected JumpIfLtF64 in main function bytecode"
+    );
+    assert!(
+        has_jump_if_i64_branch,
+        "Expected JumpIfLtI64 or JumpIfLteI64 in main function bytecode"
+    );
+}
+
+#[test]
+fn test_fuse_get_array_jump_if_true() {
+    let source_code = r#"
+        int32 main() {
+            bool[] flags = new bool[3];
+            flags[1] = true;
+            int32 count = 0;
+            int32 index_val = 1;
+            while (flags[index_val]) {
+                count = count + 1;
+                flags[index_val] = false;
+            }
+            return count;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(1));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let main_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("main"))
+        .expect("main function must exist");
+
+    let has_get_array_jump_true = main_func
+        .instructions
+        .iter()
+        .any(|inst| inst.raw_opcode() == OpCode::GetArrayJumpIfTrue as u8);
+    assert!(
+        has_get_array_jump_true,
+        "Expected GetArrayJumpIfTrue in main function bytecode"
+    );
+}
+
+#[test]
+fn test_specialize_primitive_field_access() {
+    let source_code = r#"
+        class Particle {
+            int32 id;
+            float64 mass;
+
+            Particle(int32 particle_id, float64 particle_mass) {
+                this.id = particle_id;
+                this.mass = particle_mass;
+            }
+
+            int32 get_id() {
+                return this.id;
+            }
+
+            float64 get_mass() {
+                return this.mass;
+            }
+        }
+
+        int32 main() {
+            Particle particle = new Particle(42, 12.5);
+            int32 retrieved_id = particle.get_id();
+            float64 retrieved_mass = particle.get_mass();
+            if (retrieved_mass > 10.0) {
+                return retrieved_id;
+            }
+            return 0;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let has_specialized_field_opcode = artifacts.program.functions.iter().any(|func| {
+        func.instructions.iter().any(|inst| {
+            let raw = inst.raw_opcode();
+            raw == OpCode::GetFieldI32 as u8
+                || raw == OpCode::GetFieldF64 as u8
+                || raw == OpCode::SetFieldI32 as u8
+                || raw == OpCode::SetFieldF64 as u8
+        })
+    });
+
+    assert!(
+        has_specialized_field_opcode,
+        "Expected specialized primitive field opcode in compiled program"
+    );
+}

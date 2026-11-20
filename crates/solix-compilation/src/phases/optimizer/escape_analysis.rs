@@ -201,6 +201,11 @@ fn decode_branch_target(
         || raw_opcode == OpCode::ForLoopI32 as u8
         || raw_opcode == OpCode::JumpIfI32Imm as u8
         || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
+        || raw_opcode == OpCode::GetArrayJumpIfTrue as u8
+        || raw_opcode == OpCode::JumpIfLtF64 as u8
+        || raw_opcode == OpCode::JumpIfLteF64 as u8
+        || raw_opcode == OpCode::JumpIfLtI64 as u8
+        || raw_opcode == OpCode::JumpIfLteI64 as u8
     {
         let target_pc = (pc_index as i32) + (instruction.src2() as i16 as i32);
         if target_pc >= 0 && (target_pc as usize) <= inst_count {
@@ -287,7 +292,7 @@ fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool {
             || instruction.src1() == target_reg
             || instruction.src2() == target_reg;
     }
-    if raw == OpCode::GetArrayJumpIfFalse as u8 {
+    if raw == OpCode::GetArrayJumpIfFalse as u8 || raw == OpCode::GetArrayJumpIfTrue as u8 {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
     if raw == OpCode::AddI32Imm as u8
@@ -429,6 +434,11 @@ fn is_reg_read_before_write_from(
                 || raw == OpCode::ForLoopI32 as u8
                 || raw == OpCode::JumpIfI32Imm as u8
                 || raw == OpCode::GetArrayJumpIfFalse as u8
+                || raw == OpCode::GetArrayJumpIfTrue as u8
+                || raw == OpCode::JumpIfLtF64 as u8
+                || raw == OpCode::JumpIfLteF64 as u8
+                || raw == OpCode::JumpIfLtI64 as u8
+                || raw == OpCode::JumpIfLteI64 as u8
             {
                 if let Some(target_pc) = jump_targets[cur] {
                     worklist.push(target_pc);
@@ -1345,6 +1355,11 @@ pub fn apply_arc_elision(function: &mut CompiledFunction) -> usize {
                     || forward_raw == OpCode::ForLoopI32 as u8
                     || forward_raw == OpCode::JumpIfI32Imm as u8
                     || forward_raw == OpCode::GetArrayJumpIfFalse as u8
+                    || forward_raw == OpCode::GetArrayJumpIfTrue as u8
+                    || forward_raw == OpCode::JumpIfLtF64 as u8
+                    || forward_raw == OpCode::JumpIfLteF64 as u8
+                    || forward_raw == OpCode::JumpIfLtI64 as u8
+                    || forward_raw == OpCode::JumpIfLteI64 as u8
                 {
                     let Some(target_pc) =
                         decode_branch_target(&forward_inst, forward_index, instruction_count)
