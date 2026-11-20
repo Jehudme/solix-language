@@ -1,0 +1,261 @@
+package doom;
+
+import raylib.*;
+
+public class DoomUserInterface {
+    public DoomUserInterface() {
+    }
+
+    public void draw_crosshair(int32 screen_width, int32 screen_height) {
+        int32 center_screen_x = screen_width / 2;
+        int32 center_screen_y = screen_height / 2;
+        Color crosshair_cyan = new Color(0, 230, 255, 180);
+
+        Raylib::DrawRectangle(center_screen_x - 8, center_screen_y - 1, 16, 2, crosshair_cyan);
+        Raylib::DrawRectangle(center_screen_x - 1, center_screen_y - 8, 2, 16, crosshair_cyan);
+        Raylib::DrawCircle(center_screen_x, center_screen_y, 2.0, Color::WHITE);
+    }
+
+    public void draw_screen_flashes(int32 damage_flash, int32 pickup_flash, int32 screen_width, int32 screen_height) {
+        if (damage_flash > 0) {
+            int32 alpha_byte = (int32)(((float32)damage_flash / 12.0) * 110.0);
+            Color red_tint = new Color(220, 20, 20, alpha_byte);
+            Raylib::DrawRectangle(0, 0, screen_width, screen_height, red_tint);
+        } else if (pickup_flash > 0) {
+            int32 alpha_byte = (int32)(((float32)pickup_flash / 8.0) * 75.0);
+            Color gold_tint = new Color(255, 215, 0, alpha_byte);
+            Raylib::DrawRectangle(0, 0, screen_width, screen_height, gold_tint);
+        }
+    }
+
+    public void draw_status_bar(
+        Player player,
+        WeaponManager weapons,
+        int32 screen_width,
+        int32 screen_height,
+        bool is_sound_muted
+    ) {
+        int32 bar_height = 100;
+        int32 bar_pos_y = screen_height - bar_height;
+
+        // Classic Status Bar dark beveled frame
+        Color outer_frame = new Color(45, 45, 50, 255);
+        Color inner_plate = new Color(28, 30, 35, 255);
+        Color border_highlight = new Color(90, 95, 105, 255);
+        Color text_gold = new Color(255, 210, 30, 255);
+        Color label_gray = new Color(140, 150, 165, 255);
+
+        Raylib::DrawRectangle(0, bar_pos_y, screen_width, bar_height, outer_frame);
+        Raylib::DrawRectangle(6, bar_pos_y + 6, screen_width - 12, bar_height - 12, inner_plate);
+        Raylib::DrawRectangleLines(6, bar_pos_y + 6, screen_width - 12, bar_height - 12, border_highlight);
+
+        // Section 1: AMMO
+        Raylib::DrawText("AMMO", 35, bar_pos_y + 14, 18, label_gray);
+        string ammo_text = "" + weapons.get_current_ammo_count();
+        if (weapons.active_weapon_kind == WeaponKind::FIST) {
+            ammo_text = "INF";
+        }
+        Raylib::DrawText(ammo_text, 40, bar_pos_y + 42, 34, text_gold);
+
+        // Section 2: HEALTH
+        Raylib::DrawText("HEALTH", 180, bar_pos_y + 14, 18, label_gray);
+        Color health_color = text_gold;
+        if (player.health_val <= 25.0) {
+            health_color = Color::RED;
+        }
+        Raylib::DrawText("" + (int32)player.health_val + "%", 180, bar_pos_y + 42, 34, health_color);
+
+        // Section 3: ARMS MATRIX (2, 3, 4, 5)
+        Raylib::DrawText("ARMS", 320, bar_pos_y + 14, 18, label_gray);
+        for (int32 slot_index = 1; slot_index < 5; slot_index = slot_index + 1) {
+            int32 slot_x = 320 + ((slot_index - 1) * 24);
+            bool unlocked = weapons.unlocked_weapons[slot_index];
+            bool active = (weapons.active_weapon_kind == slot_index);
+            Color slot_color = unlocked ? (active ? Color::GREEN : text_gold) : Color::DARKGRAY;
+            Raylib::DrawText("" + (slot_index + 1), slot_x, bar_pos_y + 46, 20, slot_color);
+        }
+
+        // Section 4: DOOMGUY ANIMATED MUGSHOT (Center)
+        int32 face_box_x = (screen_width / 2) - 36;
+        int32 face_box_y = bar_pos_y + 12;
+        Raylib::DrawRectangle(face_box_x, face_box_y, 72, 76, new Color(18, 20, 24, 255));
+        Raylib::DrawRectangleLines(face_box_x, face_box_y, 72, 76, border_highlight);
+
+        this.draw_doomguy_mugshot(face_box_x + 36, face_box_y + 38, player);
+
+        // Section 5: ARMOR
+        Raylib::DrawText("ARMOR", 580, bar_pos_y + 14, 18, label_gray);
+        Color armor_color = (player.armor_val > 0.0) ? new Color(0, 229, 255, 255) : Color::GRAY;
+        Raylib::DrawText("" + (int32)player.armor_val + "%", 580, bar_pos_y + 42, 34, armor_color);
+
+        // Section 6: KEYCARDS (Blue, Red, Yellow)
+        Raylib::DrawText("KEYS", 730, bar_pos_y + 14, 18, label_gray);
+        // Blue Card
+        Color blue_slot = player.has_blue_key ? new Color(0, 140, 255, 255) : new Color(25, 40, 60, 255);
+        Raylib::DrawRectangle(730, bar_pos_y + 42, 14, 24, blue_slot);
+        Raylib::DrawRectangleLines(730, bar_pos_y + 42, 14, 24, Color::BLACK);
+
+        // Red Card
+        Color red_slot = player.has_red_key ? new Color(255, 40, 40, 255) : new Color(60, 25, 25, 255);
+        Raylib::DrawRectangle(752, bar_pos_y + 42, 14, 24, red_slot);
+        Raylib::DrawRectangleLines(752, bar_pos_y + 42, 14, 24, Color::BLACK);
+
+        // Yellow Card
+        Color yellow_slot = player.has_yellow_key ? new Color(255, 214, 0, 255) : new Color(60, 55, 20, 255);
+        Raylib::DrawRectangle(774, bar_pos_y + 42, 14, 24, yellow_slot);
+        Raylib::DrawRectangleLines(774, bar_pos_y + 42, 14, 24, Color::BLACK);
+
+        // Section 7: Sound & Status
+        if (is_sound_muted) {
+            Raylib::DrawText("[ MUTED (M) ]", 850, bar_pos_y + 42, 18, Color::RED);
+        } else {
+            Raylib::DrawText("[ AUDIO ON ]", 850, bar_pos_y + 42, 18, new Color(0, 230, 118, 200));
+        }
+    }
+
+    public void draw_doomguy_mugshot(int32 center_x, int32 center_y, Player player) {
+        if (!player.is_alive) {
+            // Dead Doomguy face (pale / skull gray)
+            Color dead_skin = new Color(170, 170, 180, 255);
+            Raylib::DrawRectangle(center_x - 22, center_y - 26, 44, 52, dead_skin);
+            // X-eyes
+            Raylib::DrawText("X", center_x - 14, center_y - 12, 16, Color::RED);
+            Raylib::DrawText("X", center_x + 4, center_y - 12, 16, Color::RED);
+            // Blood pool
+            Raylib::DrawRectangle(center_x - 16, center_y + 10, 32, 6, Color::MAROON);
+            return;
+        }
+
+        Color marine_hair = new Color(80, 45, 25, 255);
+        Color marine_skin = new Color(225, 170, 135, 255);
+
+        // Progressively bloodier skin tone as health decreases
+        if (player.health_val < 35.0) {
+            marine_skin = new Color(210, 130, 110, 255);
+        } else if (player.health_val < 65.0) {
+            marine_skin = new Color(220, 150, 125, 255);
+        }
+
+        // Head Base
+        Raylib::DrawRectangle(center_x - 24, center_y - 28, 48, 56, marine_skin);
+        // Marine buzz-cut hair
+        Raylib::DrawRectangle(center_x - 24, center_y - 30, 48, 14, marine_hair);
+
+        // Eye darting animation
+        int32 pupil_offset_x = 0;
+        int32 glance_cycle = (player.look_direction_tick / 75) % 4;
+        if (glance_cycle == 1) {
+            pupil_offset_x = -3; // Glancing left
+        } else if (glance_cycle == 3) {
+            pupil_offset_x = 3;  // Glancing right
+        }
+
+        // Eyebrows
+        Color brow_color = Color::BLACK;
+        if (player.mugshot_expression == 2) { // Pain
+            Raylib::DrawLine(center_x - 16, center_y - 10, center_x - 4, center_y - 6, brow_color);
+            Raylib::DrawLine(center_x + 4, center_y - 6, center_x + 16, center_y - 10, brow_color);
+        } else {
+            Raylib::DrawRectangle(center_x - 16, center_y - 10, 12, 3, brow_color);
+            Raylib::DrawRectangle(center_x + 4, center_y - 10, 12, 3, brow_color);
+        }
+
+        // Eyes (white sclera)
+        Raylib::DrawRectangle(center_x - 14, center_y - 6, 9, 6, Color::WHITE);
+        Raylib::DrawRectangle(center_x + 5, center_y - 6, 9, 6, Color::WHITE);
+
+        // Pupils (blue eyes)
+        Color eye_blue = new Color(30, 100, 220, 255);
+        Raylib::DrawRectangle(center_x - 11 + pupil_offset_x, center_y - 5, 4, 4, eye_blue);
+        Raylib::DrawRectangle(center_x + 8 + pupil_offset_x, center_y - 5, 4, 4, eye_blue);
+
+        // Nose
+        Raylib::DrawRectangle(center_x - 2, center_y, 4, 8, new Color(190, 130, 100, 255));
+
+        // Mouth expressions
+        if (player.mugshot_expression == 1) { // Evil Grin on weapon pickup
+            Raylib::DrawRectangle(center_x - 12, center_y + 12, 24, 6, Color::WHITE);
+            Raylib::DrawRectangle(center_x - 10, center_y + 11, 20, 2, Color::BLACK);
+            Raylib::DrawRectangle(center_x - 10, center_y + 16, 20, 2, Color::BLACK);
+        } else if (player.mugshot_expression == 2) { // Ouch grimace
+            Raylib::DrawRectangle(center_x - 14, center_y + 10, 28, 8, Color::BLACK);
+            Raylib::DrawRectangle(center_x - 11, center_y + 12, 22, 4, Color::WHITE);
+        } else { // Neutral determined look
+            Raylib::DrawRectangle(center_x - 10, center_y + 13, 20, 3, Color::BLACK);
+        }
+
+        // Blood splatters if wounded
+        if (player.health_val < 65.0) {
+            Raylib::DrawRectangle(center_x - 18, center_y - 18, 4, 10, Color::RED);
+            Raylib::DrawRectangle(center_x + 12, center_y + 4, 5, 8, Color::RED);
+        }
+        if (player.health_val < 35.0) {
+            Raylib::DrawRectangle(center_x - 6, center_y + 18, 12, 4, Color::MAROON);
+            Raylib::DrawRectangle(center_x + 8, center_y - 24, 6, 12, Color::RED);
+        }
+    }
+
+    public void render_title_screen(int32 screen_width, int32 screen_height) {
+        Raylib::DrawRectangle(0, 0, screen_width, screen_height, new Color(15, 12, 18, 240));
+
+        int32 center_screen_x = screen_width / 2;
+
+        Color crimson_title = new Color(230, 35, 35, 255);
+        Color gold_shadow = new Color(255, 200, 20, 255);
+
+        Raylib::DrawText("DOOM : SOLIX", center_screen_x - 220, 120, 60, gold_shadow);
+        Raylib::DrawText("DOOM : SOLIX", center_screen_x - 224, 116, 60, crimson_title);
+
+        Raylib::DrawText("3D RETRO FIRST-PERSON SHOOTER SHOWCASE", center_screen_x - 250, 200, 22, Color::WHITE);
+
+        Color box_plate = new Color(30, 35, 45, 220);
+        Raylib::DrawRectangle(center_screen_x - 260, 260, 520, 280, box_plate);
+        Raylib::DrawRectangleLines(center_screen_x - 260, 260, 520, 280, new Color(90, 100, 120, 255));
+
+        Raylib::DrawText("CONTROLS", center_screen_x - 60, 280, 24, Color::YELLOW);
+        Raylib::DrawText("WASD Keys         - Move & Strafe", center_screen_x - 220, 325, 20, Color::WHITE);
+        Raylib::DrawText("Mouse / Arrows    - Aim & Look Around", center_screen_x - 220, 355, 20, Color::WHITE);
+        Raylib::DrawText("Left Click / Ctrl - Fire Weapon", center_screen_x - 220, 385, 20, Color::WHITE);
+        Raylib::DrawText("1, 2, 3, 4, 5     - Switch Weapons", center_screen_x - 220, 415, 20, Color::WHITE);
+        Raylib::DrawText("E Key             - Open Doors & Switches", center_screen_x - 220, 445, 20, Color::WHITE);
+        Raylib::DrawText("M Key             - Toggle Audio Mute", center_screen_x - 220, 475, 20, Color::WHITE);
+
+        Raylib::DrawText("PRESS [ SPACE ] OR [ ENTER ] TO ENTER THE HANGAR", center_screen_x - 300, 580, 22, Color::GREEN);
+    }
+
+    public void render_intermission_screen(
+        int32 level_completed,
+        int32 kills_count,
+        int32 total_enemies,
+        int32 screen_width,
+        int32 screen_height
+    ) {
+        Raylib::DrawRectangle(0, 0, screen_width, screen_height, new Color(10, 12, 16, 250));
+
+        int32 center_screen_x = screen_width / 2;
+
+        Color crimson_blood = new Color(220, 40, 40, 255);
+        Raylib::DrawText("LEVEL COMPLETED!", center_screen_x - 180, 130, 42, crimson_blood);
+
+        string map_title = (level_completed == 1) ? "E1M1: HANGAR" : "E1M2: NUCLEAR PLANT";
+        Raylib::DrawText(map_title, center_screen_x - 120, 200, 28, Color::WHITE);
+
+        int32 kill_percent = 100;
+        if (total_enemies > 0) {
+            kill_percent = (kills_count * 100) / total_enemies;
+        }
+
+        Raylib::DrawText("KILLS : " + kill_percent + "%", center_screen_x - 100, 290, 26, Color::YELLOW);
+        Raylib::DrawText("ITEMS : 100%", center_screen_x - 100, 340, 26, Color::YELLOW);
+        Raylib::DrawText("SECRET: 100%", center_screen_x - 100, 390, 26, Color::YELLOW);
+
+        Raylib::DrawText("PRESS [ SPACE ] OR [ ENTER ] TO ADVANCE", center_screen_x - 240, 520, 24, Color::GREEN);
+    }
+
+    public void render_game_over_screen(int32 screen_width, int32 screen_height) {
+        Raylib::DrawRectangle(0, 0, screen_width, screen_height, new Color(20, 5, 5, 230));
+        int32 center_screen_x = screen_width / 2;
+        Raylib::DrawText("YOU HAVE PERISHED", center_screen_x - 200, 260, 42, Color::RED);
+        Raylib::DrawText("PRESS [ R ] TO RESPAWN OR [ Q ] FOR TITLE", center_screen_x - 240, 360, 22, Color::WHITE);
+    }
+}
