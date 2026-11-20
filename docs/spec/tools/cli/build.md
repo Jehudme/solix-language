@@ -57,6 +57,7 @@ flowchart TD
 * **Isolated Platform Directory (`bin/<target>/`):** Native modules targeting host or cross-compilation platforms are organized under `bin/<target_triple>/` (with fallback to `lib/<target_triple>/`).
 * **Modern Container Emission:** Emits standard `.slxp` (Solix Package) format containing root `binaries.slxb` and target-tripled `bin/<target>/` native shared libraries.
 * **Cross-Platform Tool Invocation:** Native build toolchains (`cargo`, `cmake`, `zig`) are located respecting host executable formats and `PATHEXT` on Windows, ensuring `.cmd` and `.bat` wrappers are cleanly dispatched without error 193.
+* **Hermetic Zigbuild Toolchain Isolation:** When cross-compiling native modules via Zig (`cargo-zigbuild`), Solix generates isolated compiler wrappers (`zig-cc`, `zig-cxx`, `zig-ar`) and injects a dedicated CMake toolchain file configured with `CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY`. This prevents cross-compilation targets from leaking host `/usr/include` headers (such as host glibc and X11 definitions).
 
 ### Dual-Mode Native Compilation & Dependency Platform Validation
 * **CMake (`CMakeLists.txt`):** `solix build` configures CMake with `-DSOLIX_NATIVE_BUILD=ON` and sets `SOLIX_NATIVE_BUILD=1`. When built outside `solix build`, the same CMake project builds cleanly as a standalone embeddable library.

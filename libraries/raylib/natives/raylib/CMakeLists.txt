@@ -1,4 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
 project(solix_raylib_vendor C)
 
 set(RAYLIB_VERSION "6.2" CACHE STRING "Raylib release tag")

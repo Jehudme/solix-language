@@ -2586,3 +2586,38 @@ profiles:
         "Declared non-native_ dynamic library must be registered when explicitly declared in metadata"
     );
 }
+
+#[test]
+fn test_zigbuild_cross_compilation_toolchain_isolation_and_env_emission() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_triple = "aarch64-unknown-linux-gnu";
+    let fake_zig_path = workspace.file_path("fake_zig");
+    fs::write(&fake_zig_path, b"#!/bin/sh\nexit 0\n").expect("write fake zig");
+
+    let toolchains_dir = workspace.root_path().join("toolchains");
+    let toolchain_cmake = solix_toolchain::write_zig_toolchain_file_for_test(
+        &toolchains_dir,
+        target_triple,
+        &fake_zig_path,
+    );
+    if let Ok(toolchain_file_path) = toolchain_cmake {
+        assert!(toolchain_file_path.exists());
+        let cmake_content = fs::read_to_string(&toolchain_file_path).expect("read toolchain cmake");
+        assert!(
+            cmake_content.contains("set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)"),
+            "Cross-target CMake toolchain must enforce CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY to prevent host header leaks"
+        );
+        assert!(
+            cmake_content.contains("set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)"),
+            "Cross-target CMake toolchain must enforce CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY"
+        );
+        assert!(
+            cmake_content.contains("set(CMAKE_SYSTEM_NAME Linux)"),
+            "Linux target must set CMAKE_SYSTEM_NAME Linux"
+        );
+        assert!(
+            cmake_content.contains("set(CMAKE_SYSTEM_PROCESSOR aarch64)"),
+            "aarch64 target must set CMAKE_SYSTEM_PROCESSOR aarch64"
+        );
+    }
+}

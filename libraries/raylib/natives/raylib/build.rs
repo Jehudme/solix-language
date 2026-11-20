@@ -118,6 +118,17 @@ fn main() {
 
             let underscored_triple = target_triple.replace('-', "_");
             let is_cross_target = !host_triple.is_empty() && target_triple != host_triple;
+
+            let toolchain_file_env = env::var(format!("CMAKE_TOOLCHAIN_FILE_{underscored_triple}"))
+                .or_else(|_| env::var("CMAKE_TOOLCHAIN_FILE"))
+                .ok()
+                .filter(|val| !val.trim().is_empty());
+            if let Some(ref toolchain_path) = toolchain_file_env {
+                if Path::new(toolchain_path).exists() {
+                    cmake_cmd.arg(format!("-DCMAKE_TOOLCHAIN_FILE={toolchain_path}"));
+                }
+            }
+
             if is_cross_target {
                 if target_triple.contains("-windows-") {
                     cmake_cmd.arg("-DCMAKE_SYSTEM_NAME=Windows");
@@ -145,6 +156,13 @@ fn main() {
                 .filter(|val| !val.trim().is_empty());
             if let Some(c_compiler) = target_cc {
                 cmake_cmd.arg(format!("-DCMAKE_C_COMPILER={c_compiler}"));
+            }
+            let target_cxx = env::var(format!("CXX_{underscored_triple}"))
+                .or_else(|_| env::var("TARGET_CXX"))
+                .ok()
+                .filter(|val| !val.trim().is_empty());
+            if let Some(cxx_compiler) = target_cxx {
+                cmake_cmd.arg(format!("-DCMAKE_CXX_COMPILER={cxx_compiler}"));
             }
             let target_ar = env::var(format!("AR_{underscored_triple}"))
                 .or_else(|_| env::var("TARGET_AR"))
