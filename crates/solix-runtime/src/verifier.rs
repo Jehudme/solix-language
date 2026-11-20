@@ -434,11 +434,24 @@ fn verify_instruction(
             check_reg(instruction.src2(), "src2_reg")?;
         }
 
-        OpCode::GetArrayJumpIfFalse => {
+        OpCode::GetArrayJumpIfFalse | OpCode::GetArrayJumpIfTrue => {
             check_reg(instruction.dst(), "arr_reg")?;
             check_reg(instruction.src1(), "idx_reg")?;
             let offset = instruction.src2() as i16 as i32;
             check_branch_target(offset)?;
+        }
+
+        OpCode::AddF64Imm | OpCode::SubF64Imm | OpCode::MulF64Imm => {
+            check_reg(instruction.dst(), "dst")?;
+            check_reg(instruction.src1(), "src1")?;
+            let pool_index = instruction.src2() as usize;
+            if pool_index >= constant_pool_len {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: constant pool index {pool_index} exceeds constant pool size {constant_pool_len}"
+                    ),
+                });
+            }
         }
 
         OpCode::ForLoopI32 => {
@@ -463,7 +476,9 @@ fn verify_instruction(
         | OpCode::JumpIfGtI32
         | OpCode::JumpIfGteI32
         | OpCode::JumpIfEqI32
-        | OpCode::JumpIfNeqI32 => {
+        | OpCode::JumpIfNeqI32
+        | OpCode::JumpIfLtF64
+        | OpCode::JumpIfLteF64 => {
             check_reg(instruction.dst(), "reg_a")?;
             check_reg(instruction.src1(), "reg_b")?;
             let offset = instruction.src2() as i16 as i32;

@@ -5341,6 +5341,162 @@ impl VirtualMachine {
                         }
                     }
 
+                    OpCode::GetArrayJumpIfTrue => {
+                        let arr_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let arr_addr = if let Value::Ref(addr) = *arr_ref
+                            && addr > 0
+                        {
+                            addr
+                        } else {
+                            read_nonnull_ref_slow(arr_ref)?
+                        };
+                        let idx_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let index_i64 = if let Value::I32(num_val) = *idx_ref {
+                            num_val as i64
+                        } else {
+                            read_array_index_slow(idx_ref)?
+                        };
+                        let arr_offset = arr_addr as usize;
+                        let heap_len = self.heap.buffer.len();
+                        if arr_offset < 8 || arr_offset + 8 > heap_len {
+                            return Err(VmTrap::null_reference());
+                        }
+                        let buf_ptr = self.heap.buffer.as_ptr();
+                        let tag_nibble = unsafe { (*buf_ptr.add(arr_offset - 1) >> 4) & 0x0F };
+                        let elem_truthy = if tag_nibble == BlockTag::ArrayRef as u8 {
+                            let header_qword = unsafe {
+                                u64::from_le(std::ptr::read_unaligned(
+                                    buf_ptr.add(arr_offset).cast::<u64>(),
+                                ))
+                            };
+                            let array_len = (header_qword as u32) as usize;
+                            if (index_i64 as u64) >= (array_len as u64) {
+                                return Err(VmTrap::index_out_of_bounds(index_i64, array_len));
+                            }
+                            let index_usize = index_i64 as usize;
+                            let meta_masked = ((header_qword >> 32) as u32) & 0xFF00_00FF;
+                            const META_BOOL_1B: u32 = (11 << 24) | 1;
+                            if meta_masked == META_BOOL_1B {
+                                let elem_offset = arr_offset + 8 + index_usize;
+                                if elem_offset + 1 > heap_len {
+                                    return Err(VmTrap::null_reference());
+                                }
+                                unsafe { *buf_ptr.add(elem_offset) != 0 }
+                            } else {
+                                let elem_size_raw = (meta_masked & 0xFF) as u8;
+                                let elem_type_tag = (meta_masked >> 24) as u8;
+                                let val = get_array_variant_cold(
+                                    &self.heap,
+                                    arr_offset,
+                                    index_usize,
+                                    elem_size_raw,
+                                    elem_type_tag,
+                                )?;
+                                read_truthy_fast(&val)
+                            }
+                        } else {
+                            let val =
+                                self.execute_get_array_special(arr_offset, index_i64, tag_nibble)?;
+                            read_truthy_fast(&val)
+                        };
+                        let take_branch = if inst.flags() == 0 {
+                            elem_truthy
+                        } else {
+                            !elem_truthy
+                        };
+                        if take_branch {
+                            let offset = inst.src2() as i16 as i32;
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::AddF64Imm => {
+                        let binary_id = self.current_frame_fast()?.binary_id as usize;
+                        let const_index = inst.src2() as usize;
+                        let const_val = self.const_pool_cache[binary_id][const_index];
+                        let const_num = match const_val {
+                            Value::F64(num) => num,
+                            _ => read_f64_fast(&const_val)?,
+                        };
+                        let src_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let src_num = if let Value::F64(num) = *src_ref {
+                            num
+                        } else {
+                            read_f64_fast(src_ref)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(src_num + const_num);
+                        }
+                    }
+
+                    OpCode::SubF64Imm => {
+                        let binary_id = self.current_frame_fast()?.binary_id as usize;
+                        let const_index = inst.src2() as usize;
+                        let const_val = self.const_pool_cache[binary_id][const_index];
+                        let const_num = match const_val {
+                            Value::F64(num) => num,
+                            _ => read_f64_fast(&const_val)?,
+                        };
+                        let src_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let src_num = if let Value::F64(num) = *src_ref {
+                            num
+                        } else {
+                            read_f64_fast(src_ref)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(src_num - const_num);
+                        }
+                    }
+
+                    OpCode::MulF64Imm => {
+                        let binary_id = self.current_frame_fast()?.binary_id as usize;
+                        let const_index = inst.src2() as usize;
+                        let const_val = self.const_pool_cache[binary_id][const_index];
+                        let const_num = match const_val {
+                            Value::F64(num) => num,
+                            _ => read_f64_fast(&const_val)?,
+                        };
+                        let src_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let src_num = if let Value::F64(num) = *src_ref {
+                            num
+                        } else {
+                            read_f64_fast(src_ref)?
+                        };
+                        unsafe {
+                            *reg_base.add(inst.dst() as usize) = Value::F64(src_num * const_num);
+                        }
+                    }
+
+                    OpCode::JumpIfLtF64 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::F64(lhs), Value::F64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                (read_f64_fast(left_ref)?, read_f64_fast(right_ref)?)
+                            };
+                        if val_a < val_b {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
+                    OpCode::JumpIfLteF64 => {
+                        let offset = inst.src2() as i16 as i32;
+                        let left_ref = unsafe { &*reg_base.add(inst.dst() as usize) };
+                        let right_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
+                        let (val_a, val_b) =
+                            if let (Value::F64(lhs), Value::F64(rhs)) = (*left_ref, *right_ref) {
+                                (lhs, rhs)
+                            } else {
+                                (read_f64_fast(left_ref)?, read_f64_fast(right_ref)?)
+                            };
+                        if val_a <= val_b {
+                            pc = ((pc as i32 - 1) + offset) as usize;
+                        }
+                    }
+
                     // =============================================================
                     // 0xB0 .. 0xBF: Exception Handling
                     // =============================================================

@@ -162,7 +162,7 @@ Used for static, direct, and virtual function dispatch:
 - `GetArray`: Retrieves array element by index using single-qword header validation and typed inline fast paths for `bool` (`(elem_size == 1, type_tag == 11)`), `int32` (`(elem_size == 4, type_tag == 3)`), `float64` (`(elem_size == 8, type_tag == 10)`), and 8-byte reference/`string` arrays (`elem_size == 8` with reference/string tags), delegating `float32`, `Tuple`, and cold fallback variants out of line.
 - `SetArray`: Writes array element at specified index with specialized inline stores for `bool`, `int32`, `float32` (32-bit float conversion), `float64`, and reference arrays (including `FLAG_MOVE` `0x80` ownership transfer without extra `IncRef`/`DecRef`), delegating remaining variants to `execute_set_array_slow`.
 
-### 3.8. Superinstructions (`0xD0` .. `0xDF`)
+### 3.8. Superinstructions (`0xD0` .. `0xEF`)
 | Opcode Hex | Name | Format | Operands | Description |
 |---|---|---|---|---|
 | `0xD0` | `AddI32Imm` | A | `dst, src1, imm16` | Fused signed 32-bit immediate add: `dst = src1 + sign_extend(imm16)`. |
@@ -181,6 +181,12 @@ Used for static, direct, and virtual function dispatch:
 | `0xDD` | `TailCallDirect` | Call | `dst, fn_id, arg_base, arg_count` | Tail-call replacement reusing the current caller `CallFrame` and register window directly when caller and callee hold no reference registers or exception handlers. |
 | `0xDE` | `MulAddF64` | A | `dst, src1, src2` (`flags`: `addend`) | Fused IEEE-754 float64 multiply-add step: `reg[dst] = reg[src1] * reg[src2] + reg[addend]`. |
 | `0xDF` | `GetArrayJumpIfFalse` | A | `arr, idx, offset` (`flags`: invert) | Loads primitive array element `reg[arr][reg[idx]]` and branches immediately on falsy (`flags == 0`) or truthy (`flags != 0`) without materializing an intermediate boolean register. |
+| `0xE0` | `GetArrayJumpIfTrue` | A | `arr, idx, offset` (`flags`: invert) | Loads primitive array element `reg[arr][reg[idx]]` and branches immediately on truthy (`flags == 0`) or falsy (`flags != 0`) without materializing an intermediate boolean register. |
+| `0xE1` | `AddF64Imm` | A | `dst, src1, const_idx` | Fuses float64 register addition with a constant pool immediate operand: `dst = reg[src1] + const_pool[const_idx]`. |
+| `0xE2` | `SubF64Imm` | A | `dst, src1, const_idx` | Fuses float64 register subtraction with a constant pool immediate operand: `dst = reg[src1] - const_pool[const_idx]`. |
+| `0xE3` | `MulF64Imm` | A | `dst, src1, const_idx` | Fuses float64 register multiplication with a constant pool immediate operand: `dst = reg[src1] * const_pool[const_idx]`. |
+| `0xE4` | `JumpIfLtF64` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs < rhs` (`float64`). |
+| `0xE5` | `JumpIfLteF64` | A | `lhs, rhs, offset` | Jumps by signed `offset` if `lhs <= rhs` (`float64`). |
 
 ---
 
