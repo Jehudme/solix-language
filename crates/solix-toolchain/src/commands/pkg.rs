@@ -1156,7 +1156,8 @@ pub fn execute_install_vscode() -> Result<()> {
             .unwrap_or("editor");
 
         println!("Installing extension using '{editor_display}'...");
-        let installation_status = std::process::Command::new(editor_executable)
+        let mut install_command = crate::process::create_process_command(editor_executable);
+        let installation_status = install_command
             .arg("--install-extension")
             .arg(&extension_path)
             .status();
@@ -1187,25 +1188,4 @@ pub fn execute_install_vscode() -> Result<()> {
     Ok(())
 }
 
-fn find_executable_in_path(executable_name: &str) -> Option<PathBuf> {
-    if let Some(path_variable) = std::env::var_os("PATH") {
-        for path_entry in std::env::split_paths(&path_variable) {
-            let direct_candidate = path_entry.join(executable_name);
-            if direct_candidate.is_file() {
-                return Some(direct_candidate);
-            }
-            #[cfg(windows)]
-            {
-                let cmd_candidate = path_entry.join(format!("{executable_name}.cmd"));
-                if cmd_candidate.is_file() {
-                    return Some(cmd_candidate);
-                }
-                let exe_candidate = path_entry.join(format!("{executable_name}.exe"));
-                if exe_candidate.is_file() {
-                    return Some(exe_candidate);
-                }
-            }
-        }
-    }
-    None
-}
+use crate::process::find_executable_in_path;

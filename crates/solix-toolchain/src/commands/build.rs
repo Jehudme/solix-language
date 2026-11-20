@@ -633,30 +633,15 @@ fn dirs_home() -> Option<PathBuf> {
 
 fn find_executable(tool_name: &str) -> Option<PathBuf> {
     let search_path = build_search_path_env();
-    for dir in std::env::split_paths(&search_path) {
-        let direct = dir.join(tool_name);
-        if direct.is_file() {
-            return Some(direct);
-        }
-        if cfg!(windows) {
-            let with_exe = dir.join(format!("{tool_name}.exe"));
-            if with_exe.is_file() {
-                return Some(with_exe);
-            }
-            let with_cmd = dir.join(format!("{tool_name}.cmd"));
-            if with_cmd.is_file() {
-                return Some(with_cmd);
-            }
-        }
-    }
-    None
+    crate::process::find_executable_in_search_paths(tool_name, &search_path)
 }
 
 fn require_tool_version(tool_name: &str, version_args: &[&str]) -> Result<String> {
     let exe_path = find_executable(tool_name).ok_or_else(|| {
         anyhow::anyhow!("[verify] Required build tool '{tool_name}' was not found on PATH")
     })?;
-    let output = Command::new(&exe_path)
+    let mut version_command = crate::process::create_process_command(&exe_path);
+    let output = version_command
         .args(version_args)
         .env("PATH", build_search_path_env())
         .output()
@@ -744,7 +729,8 @@ fn ensure_rustup_target_installed(
     let Some(rustup_exe) = find_executable("rustup") else {
         return Ok(());
     };
-    let list_output = Command::new(&rustup_exe)
+    let mut list_cmd = crate::process::create_process_command(&rustup_exe);
+    let list_output = list_cmd
         .args(["target", "list", "--installed"])
         .env("PATH", search_path)
         .output();
@@ -767,7 +753,8 @@ fn ensure_rustup_target_installed(
         );
     }
     println!("  [rustup] Installing target stdlib '{target_triple}'...");
-    let add_status = Command::new(&rustup_exe)
+    let mut add_cmd = crate::process::create_process_command(&rustup_exe);
+    let add_status = add_cmd
         .args(["target", "add", target_triple])
         .env("PATH", search_path)
         .status()
@@ -814,8 +801,8 @@ fn compile_cargo_native(
             entry.name, entry.native_profile, triple, strategy
         );
 
-        let mut command =
-            Command::new(find_executable("cargo").unwrap_or_else(|| PathBuf::from("cargo")));
+        let cargo_executable = find_executable("cargo").unwrap_or_else(|| PathBuf::from("cargo"));
+        let mut command = crate::process::create_process_command(&cargo_executable);
         if matches!(strategy, CargoBuildStrategy::CargoXwin) {
             command.args(["xwin", "build"]);
         } else {
@@ -1140,7 +1127,7 @@ fn compile_cmake_native(
             None
         };
 
-        let mut cfg_cmd = Command::new(&cmake_exe);
+        let mut cfg_cmd = crate::process::create_process_command(&cmake_exe);
         let stage_triple_cmake = cmake_path_string(&stage_triple_dir);
         let archive_cache_cmake = cmake_path_string(&archive_cache_dir);
         cfg_cmd
@@ -1207,7 +1194,7 @@ fn compile_cmake_native(
             );
         }
 
-        let mut build_cmd = Command::new(&cmake_exe);
+        let mut build_cmd = crate::process::create_process_command(&cmake_exe);
         build_cmd
             .arg("--build")
             .arg(&cmake_build_dir)
