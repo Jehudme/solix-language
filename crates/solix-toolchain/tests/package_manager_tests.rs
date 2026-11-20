@@ -480,67 +480,184 @@ fn test_list_output_file_redirection() {
 }
 
 #[test]
-fn test_reinstall_command_with_source_validation() {
+fn test_reinstall_and_sync_commands_removed() {
+    let parse_reinstall_result = Cli::try_parse_from(["solix", "reinstall"]);
+    assert!(
+        parse_reinstall_result.is_err(),
+        "solix reinstall must be completely removed from CLI subcommands"
+    );
+
+    let parse_sync_result = Cli::try_parse_from(["solix", "sync"]);
+    assert!(
+        parse_sync_result.is_err(),
+        "solix sync must be completely removed from CLI subcommands"
+    );
+}
+
+#[test]
+fn test_subcommands_install_and_uninstall_package_and_binaries() {
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
     let package_store_directory = workspace.root_path().join("solix_packages");
     fs::create_dir_all(&package_store_directory).expect("Failed to create package store dir");
     let store_string = package_store_directory.to_str().expect("valid path");
 
-    let project_dir = workspace.root_path().join("my_lib");
-    let new_cli = Cli::try_parse_from([
+    let project_dir = workspace.root_path().join("my_pkg");
+    let new_package_cli = Cli::try_parse_from([
         "solix",
         "new",
+        "package",
         project_dir.to_str().expect("valid path"),
         "--name",
-        "my_lib",
+        "my_pkg",
         "--version",
         "1.0.0",
         "--no-native",
     ])
-    .expect("new cli");
-    assert_eq!(run(new_cli).expect("new project"), 0);
+    .expect("new package cli");
+    assert_eq!(run(new_package_cli).expect("new package project"), 0);
 
-    // Install from project directory
-    let install_cli = Cli::try_parse_from([
+    // 1. Build package archive (.slxp)
+    let build_cli = Cli::try_parse_from([
         "solix",
-        "install",
+        "build",
         project_dir.to_str().expect("valid path"),
         "--pkg-dir",
         store_string,
     ])
-    .expect("install cli");
-    assert_eq!(run(install_cli).expect("install project"), 0);
+    .expect("build cli");
+    assert_eq!(run(build_cli).expect("build project"), 0);
 
-    let installed_archive = package_store_directory
-        .join("my_lib-release@1.0.0")
-        .join("my_lib.slxarc");
-    assert!(installed_archive.exists(), "Installed archive must exist");
+    let built_slxp = project_dir
+        .join("build")
+        .join("release")
+        .join("my_pkg.slxp");
+    assert!(built_slxp.exists(), "Built .slxp must exist");
 
-    // Reinstall by package name
-    let reinstall_cli =
-        Cli::try_parse_from(["solix", "reinstall", "my_lib", "--pkg-dir", store_string])
-            .expect("reinstall cli");
-    assert_eq!(run(reinstall_cli).expect("reinstall project"), 0);
+    // 2. Install package via `solix install package <path.slxp>`
+    let install_pkg_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        "package",
+        built_slxp.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("install package cli");
+    assert_eq!(run(install_pkg_cli).expect("install package command"), 0);
 
-    // Tamper the manifest name: reinstall must fail due to source mismatch
-    let manifest_path = project_dir.join("manifest.yaml");
-    let tampered_manifest = r#"configuration:
-  name: tampered_name
-  version: "1.0.0"
+    // 3. Compile standalone binary (.slxb)
+    let bin_output = workspace.root_path().join("standalone_app.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        "source",
+        project_dir
+            .join("src")
+            .join("main.slx")
+            .to_str()
+            .expect("valid path"),
+        "-o",
+        bin_output.to_str().expect("valid path"),
+    ])
+    .expect("compile source cli");
+    assert_eq!(run(compile_cli).expect("compile standalone binary"), 0);
+    assert!(bin_output.exists(), "Compiled standalone binary must exist");
 
-profiles:
-  release:
-    entrypoint: Main::main
-"#;
-    fs::write(&manifest_path, tampered_manifest).expect("write tampered manifest");
+    // 4. Install binary via `solix install binaries <path.slxb>`
+    let install_bin_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        "binaries",
+        bin_output.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("install binaries cli");
+    assert_eq!(run(install_bin_cli).expect("install binaries command"), 0);
 
-    let reinstall_mismatch =
-        Cli::try_parse_from(["solix", "reinstall", "my_lib", "--pkg-dir", store_string])
-            .expect("reinstall cli");
-    let mismatch_result = run(reinstall_mismatch);
+    // 5. Verify list displays KIND as binaries and package
+    let list_cli = Cli::try_parse_from(["solix", "list", "--pkg-dir", store_string, "--json"])
+        .expect("list json cli");
+    assert_eq!(run(list_cli).expect("list command"), 0);
+
+    // 6. Test uninstall package via `solix uninstall package <name>`
+    let uninstall_pkg_cli = Cli::try_parse_from([
+        "solix",
+        "uninstall",
+        "package",
+        "my_pkg",
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("uninstall package cli");
+    assert_eq!(
+        run(uninstall_pkg_cli).expect("uninstall package command"),
+        0
+    );
+
+    // 7. Test uninstall binary via `solix uninstall binaries <name>`
+    let uninstall_bin_cli = Cli::try_parse_from([
+        "solix",
+        "uninstall",
+        "binaries",
+        "my_pkg",
+        "--pkg-dir",
+        store_string,
+    ])
+    .expect("uninstall binaries cli");
+    assert_eq!(
+        run(uninstall_bin_cli).expect("uninstall binaries command"),
+        0
+    );
+}
+
+#[test]
+fn test_export_package_and_binaries_subcommands() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let project_dir = workspace.root_path().join("exportable_app");
+
+    let new_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        project_dir.to_str().expect("valid path"),
+        "--name",
+        "exportable_app",
+        "--no-native",
+    ])
+    .expect("new package cli");
+    assert_eq!(run(new_cli).expect("new package project"), 0);
+
+    let exported_package_path = workspace.root_path().join("exported_bundle.slxp");
+    let export_pkg_cli = Cli::try_parse_from([
+        "solix",
+        "export",
+        "package",
+        project_dir.to_str().expect("valid path"),
+        "-o",
+        exported_package_path.to_str().expect("valid path"),
+    ])
+    .expect("export package cli");
+    assert_eq!(run(export_pkg_cli).expect("export package"), 0);
     assert!(
-        mismatch_result.is_err(),
-        "Reinstall with mismatched manifest name must fail"
+        exported_package_path.exists(),
+        "Exported package archive must exist"
+    );
+
+    let exported_binary_path = workspace.root_path().join("exported_app.slxb");
+    let export_bin_cli = Cli::try_parse_from([
+        "solix",
+        "export",
+        "binaries",
+        project_dir.to_str().expect("valid path"),
+        "-o",
+        exported_binary_path.to_str().expect("valid path"),
+    ])
+    .expect("export binaries cli");
+    assert_eq!(run(export_bin_cli).expect("export binaries"), 0);
+    assert!(
+        exported_binary_path.exists(),
+        "Exported standalone binary must exist"
     );
 }
 

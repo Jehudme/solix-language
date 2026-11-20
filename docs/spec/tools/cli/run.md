@@ -7,6 +7,8 @@ The `run` subcommand executes Solix bytecode binary containers (`*.slxb`), appli
 ## Synopsis
 
 ```bash
+solix run package [target] [options] [-- [guest_args...]]
+solix run source <sources...> [options] [-- [guest_args...]]
 solix run <binaries...> [options] [-- [guest_args...]]
 ```
 
@@ -16,7 +18,9 @@ solix run <binaries...> [options] [-- [guest_args...]]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<binaries...>` | Paths | **Yes** | One or more `.slxb` binary containers, `.slxarc` archives, or `.slx` source files to execute. |
+| `[target]` | Path | Optional (for `package`) | Path to a Solix project root directory or `.slxp` package archive (defaults to current directory). |
+| `<sources...>` | Paths | **Yes** (for `source`) | One or more `.slx` source files to compile in-memory and execute directly. |
+| `<binaries...>` | Paths | **Yes** (for direct invocation) | One or more `.slxb` binary containers, `.slxarc` archives, or `.slx` source files to execute. |
 
 ---
 

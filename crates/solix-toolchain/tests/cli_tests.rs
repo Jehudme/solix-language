@@ -1801,3 +1801,256 @@ public class Game {
 
     assert_eq!(run(run_cli).expect("run succeeds"), 36);
 }
+
+#[test]
+fn test_cli_new_package_and_native_subcommands() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let package_dir = workspace.file_path("my_scaffold_pkg");
+
+    // 1. solix new package <path>
+    let new_package_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        package_dir.to_str().expect("valid path"),
+        "--name",
+        "my_scaffold_pkg",
+        "--no-native",
+    ])
+    .expect("parse new package cli");
+    assert_eq!(run(new_package_cli).expect("execute new package"), 0);
+    assert!(package_dir.join("manifest.yaml").exists());
+    assert!(package_dir.join("src").join("main.slx").exists());
+
+    // 2. solix new native <name> inside existing project
+    let new_native_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "native",
+        "my_native_math",
+        "--project",
+        package_dir.to_str().expect("valid path"),
+        "--lang",
+        "rust",
+    ])
+    .expect("parse new native cli");
+    assert_eq!(run(new_native_cli).expect("execute new native"), 0);
+    assert!(
+        package_dir
+            .join("natives")
+            .join("my_native_math")
+            .join("Cargo.toml")
+            .exists()
+    );
+}
+
+#[test]
+fn test_cli_compile_source_with_all_dep_flags_and_compile_package() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+
+    // 1. Create a helper library source and compile it to a binary container (.slxb)
+    let helper_src = workspace
+        .write_file(
+            "helper.slx",
+            r#"
+public class MathHelper {
+    public static int32 add_five(int32 value) {
+        return value + 5;
+    }
+}
+"#,
+        )
+        .expect("write helper.slx");
+
+    let helper_bin = workspace.file_path("helper.slxb");
+    let compile_helper_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        "source",
+        helper_src.to_str().expect("valid path"),
+        "-o",
+        helper_bin.to_str().expect("valid path"),
+    ])
+    .expect("parse compile helper");
+    assert_eq!(run(compile_helper_cli).expect("compile helper"), 0);
+    assert!(helper_bin.exists());
+
+    // 2. Create another helper source to test --deps-source
+    let source_dep = workspace
+        .write_file(
+            "source_dep.slx",
+            r#"
+public class SourceHelper {
+    public static int32 double_it(int32 value) {
+        return value * 2;
+    }
+}
+"#,
+        )
+        .expect("write source_dep.slx");
+
+    // 3. Compile main.slx linking via --deps-source and --deps-binaries
+    let main_src = workspace
+        .write_file(
+            "main.slx",
+            r#"
+class Main {
+    public static int32 main() {
+        int32 step_one = MathHelper::add_five(10);
+        return SourceHelper::double_it(step_one);
+    }
+}
+"#,
+        )
+        .expect("write main.slx");
+
+    let main_bin = workspace.file_path("main.slxb");
+    let compile_main_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        "source",
+        main_src.to_str().expect("valid path"),
+        "--deps-source",
+        source_dep.to_str().expect("valid path"),
+        "--deps-binaries",
+        helper_bin.to_str().expect("valid path"),
+        "-o",
+        main_bin.to_str().expect("valid path"),
+    ])
+    .expect("parse compile main with deps");
+    assert_eq!(run(compile_main_cli).expect("compile main with deps"), 0);
+    assert!(main_bin.exists());
+
+    // Run the compiled binary container to verify logic ( (10 + 5) * 2 = 30 )
+    let run_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        main_bin.to_str().expect("valid path"),
+        "-l",
+        helper_bin.to_str().expect("valid path"),
+    ])
+    .expect("parse run main");
+    assert_eq!(run(run_cli).expect("run main"), 30);
+
+    // 4. Test `solix compile package ./pkg_dir`
+    let pkg_dir = workspace.file_path("package_to_compile");
+    let new_pkg_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        pkg_dir.to_str().expect("valid path"),
+        "--name",
+        "package_to_compile",
+        "--no-native",
+    ])
+    .expect("parse new package");
+    assert_eq!(run(new_pkg_cli).expect("new package"), 0);
+
+    let compile_pkg_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        "package",
+        pkg_dir.to_str().expect("valid path"),
+    ])
+    .expect("parse compile package");
+    assert_eq!(run(compile_pkg_cli).expect("compile package"), 0);
+    assert!(pkg_dir.join("binaries.slxb").exists());
+}
+
+#[test]
+fn test_cli_run_package_and_source_subcommands() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+
+    // 1. solix run source <file.slx>
+    let standalone_src = workspace
+        .write_file(
+            "standalone.slx",
+            r#"
+class Main {
+    public static int32 main() {
+        return 55;
+    }
+}
+"#,
+        )
+        .expect("write standalone.slx");
+
+    let run_source_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        "source",
+        standalone_src.to_str().expect("valid path"),
+    ])
+    .expect("parse run source cli");
+    assert_eq!(run(run_source_cli).expect("run source succeeds"), 55);
+
+    // 2. solix run package <package_dir>
+    let package_dir = workspace.file_path("executable_pkg");
+    let new_package_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        package_dir.to_str().expect("valid path"),
+        "--name",
+        "executable_pkg",
+        "--no-native",
+    ])
+    .expect("parse new package cli");
+    assert_eq!(run(new_package_cli).expect("new package project"), 0);
+
+    // Replace src/main.slx with an exit code of 77
+    let main_slx_path = package_dir.join("src").join("main.slx");
+    std::fs::write(
+        &main_slx_path,
+        r#"
+public class Main {
+    public static int32 main() {
+        return 77;
+    }
+}
+"#,
+    )
+    .expect("write updated main.slx");
+
+    let run_package_cli = Cli::try_parse_from([
+        "solix",
+        "run",
+        "package",
+        package_dir.to_str().expect("valid path"),
+    ])
+    .expect("parse run package cli");
+    assert_eq!(run(run_package_cli).expect("run package succeeds"), 77);
+}
+
+#[test]
+fn test_cli_build_platform_option() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let package_dir = workspace.file_path("platform_pkg");
+
+    let new_package_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        package_dir.to_str().expect("valid path"),
+        "--name",
+        "platform_pkg",
+        "--no-native",
+    ])
+    .expect("parse new package cli");
+    assert_eq!(run(new_package_cli).expect("new package project"), 0);
+
+    // solix build --platform windows --check-env
+    let build_platform_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        package_dir.to_str().expect("valid path"),
+        "--platform",
+        "windows",
+        "--check-env",
+    ])
+    .expect("parse build platform cli");
+    assert_eq!(
+        run(build_platform_cli).expect("build platform check-env succeeds"),
+        0
+    );
+}

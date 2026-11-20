@@ -28,6 +28,7 @@ solix build [path] [options]
 | `--debug` | | Flag | `false` | Shorthand for `--profile debug`. |
 | `--release` | | Flag | `false` | Shorthand for `--profile release`. |
 | `--test` | | Flag | `false` | Shorthand for `--profile test`. |
+| `--platform <platform>` | | String | None | Filters build and native compilation to a designated target platform or OS family (e.g. `linux`, `windows`, `macos`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 | `--install` | | Flag | `false` | Automatically installs the built `.slxp` package into the package store. |
 | `--force` | | Flag | `false` | Overwrites existing installed package when paired with `--install`. |

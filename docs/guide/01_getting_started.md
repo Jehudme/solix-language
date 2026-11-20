@@ -384,15 +384,15 @@ solix install build/release/math_utils.slxb
 > [!NOTE]
 > Solix guards against accidental package overwrites. If `<name>@<version>` is already installed, `solix install` refuses to overwrite unless `--force` (`-f`) is explicitly provided.
 
-### 2. Reinstall Packages from Source (`solix reinstall`)
-When developing libraries locally, `solix reinstall` (alias `sync`) eliminates the manual rebuild-and-reinstall loop by validating source manifests and rebuilding installed packages directly from their recorded source directories:
+### 2. Export Packages for Distribution (`solix export`)
+To package libraries or binaries for distribution, use `solix export`:
 
 ```bash
-# Reinstall a specific package from its recorded source directory
-solix reinstall solixlib
+# Export a built package archive container
+solix export package ./solixlib --output ./dist/solixlib.slxp
 
-# Reinstall all registered packages that have source project directories
-solix reinstall --all
+# Export standalone bytecode binaries
+solix export binaries ./build/release/solixlib.slxb --output ./dist/solixlib.slxb
 ```
 
 ### 3. List Installed Packages (`solix list`)

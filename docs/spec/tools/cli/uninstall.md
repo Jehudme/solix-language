@@ -7,6 +7,8 @@ The `uninstall` subcommand removes an installed package or a specific package ve
 ## Synopsis
 
 ```bash
+solix uninstall package <name> [options]
+solix uninstall binaries <name> [options]
 solix uninstall <spec> [options]
 ```
 
@@ -16,7 +18,8 @@ solix uninstall <spec> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<spec>` | String | **Yes** | Target specification formatted as `<name>[:<profile>][@<version>]` (e.g. `raylib`, `raylib@1.0.0`, `raylib:debug@1.0.0`, or `raylib:debug`). |
+| `<name>` | String | **Yes** (for `package`/`binaries`) | Identifier of the package or binary container to remove. |
+| `<spec>` | String | **Yes** (for direct uninstallation) | Target specification formatted as `<name>[:<profile>][@<version>]` (e.g. `raylib`, `raylib@1.0.0`, `raylib:debug@1.0.0`, or `raylib:debug`). |
 
 ---
 

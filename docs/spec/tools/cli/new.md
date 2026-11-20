@@ -7,13 +7,13 @@ The `new` subcommand initializes Solix project workspaces configured with `manif
 ## Synopsis
 
 ```bash
-solix new <path> [options]
+solix new package <path> [options]
 solix new native <name> [options]
 ```
 
 ---
 
-## Subcommand 1: `solix new <path>` (Project Scaffolding)
+## Subcommand 1: `solix new package <path>` (Project Scaffolding)
 
 ### Positional Arguments
 

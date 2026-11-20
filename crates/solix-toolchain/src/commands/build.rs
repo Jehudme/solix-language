@@ -3,7 +3,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::cli::{BuildArgs, CompileArgs};
+use crate::cli::{BuildArgs, CompileSourceArgs};
 use crate::commands::compile::collect_slx_sources_recursively;
 use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use anyhow::{Context, Result, bail};
@@ -147,6 +147,7 @@ fn execute_declarative_build(
         project_root,
         resolved_profile,
         args.target.as_deref(),
+        args.platform.as_deref(),
         manifest_path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -223,8 +224,11 @@ fn execute_declarative_build(
     copy_project_tree_filtered(&project_root.join("resources"), &stage_resources_dir, false)?;
 
     let mut resolved_profile = resolved_profile.clone();
-    let required_platforms =
-        resolve_required_platform_ids(&resolved_profile, args.target.as_deref());
+    let required_platforms = resolve_required_platform_ids(
+        &resolved_profile,
+        args.target.as_deref(),
+        args.platform.as_deref(),
+    );
     stage_dependency_native_libraries(
         &mut resolved_profile,
         args.pkg_dir.as_deref(),
@@ -390,6 +394,7 @@ fn discover_native_entries(
     project_root: &Path,
     resolved_profile: &ResolvedProfile,
     cli_target: Option<&str>,
+    cli_platform: Option<&str>,
     is_yaml_manifest: bool,
 ) -> Result<Vec<ResolvedNativeEntry>> {
     let mut entries = Vec::new();
@@ -444,6 +449,7 @@ fn discover_native_entries(
             native_cfg.platforms.as_deref(),
             &resolved_profile.platforms,
             cli_target,
+            cli_platform,
         );
 
         let has_solix_native_feature = match backend {
@@ -496,6 +502,7 @@ fn resolve_native_triples(
     native_platforms: Option<&[String]>,
     profile_platforms: &[String],
     cli_target: Option<&str>,
+    cli_platform: Option<&str>,
 ) -> Vec<String> {
     let env_target = std::env::var("SOLIX_TARGET_TRIPLE")
         .ok()
@@ -512,7 +519,27 @@ fn resolve_native_triples(
     }
 
     let chosen_platforms = native_platforms.unwrap_or(profile_platforms);
-    expand_platforms_to_triples(chosen_platforms)
+    let all_triples = expand_platforms_to_triples(chosen_platforms);
+
+    if let Some(platform_filter) = cli_platform {
+        let platform_triples = expand_platforms_to_triples(&[platform_filter.to_string()]);
+        let filtered: Vec<String> = all_triples
+            .into_iter()
+            .filter(|triple| {
+                platform_triples.contains(triple)
+                    || triple
+                        .to_ascii_lowercase()
+                        .contains(&platform_filter.to_ascii_lowercase())
+            })
+            .collect();
+        if filtered.is_empty() {
+            platform_triples
+        } else {
+            filtered
+        }
+    } else {
+        all_triples
+    }
 }
 
 fn verify_build_environment(
@@ -1318,8 +1345,10 @@ fn copy_project_tree_filtered(source_dir: &Path, dest_dir: &Path, only_libs: boo
 fn resolve_required_platform_ids(
     resolved_profile: &ResolvedProfile,
     cli_target: Option<&str>,
+    cli_platform: Option<&str>,
 ) -> Vec<String> {
-    let required_triples = resolve_native_triples(None, &resolved_profile.platforms, cli_target);
+    let required_triples =
+        resolve_native_triples(None, &resolved_profile.platforms, cli_target, cli_platform);
     let mut platform_ids = Vec::new();
     for triple in required_triples {
         let normalized = normalize_platform_token(&triple);
@@ -1604,9 +1633,12 @@ fn compile_solix_project_sources(
         manifest_data.configuration.name, resolved_profile.name
     );
 
-    crate::commands::compile::execute_compile(CompileArgs {
+    crate::commands::compile::execute_compile_source(CompileSourceArgs {
         sources: discovered_files,
         output: Some(output_slxb.to_path_buf()),
+        deps_source: Vec::new(),
+        deps_package: Vec::new(),
+        deps_binaries: Vec::new(),
         deps: dep_specs,
         libs,
         name: Some(manifest_data.configuration.name.clone()),
@@ -1787,6 +1819,11 @@ fn execute_legacy_python_build(
     if args.check_env {
         command.arg("--check-env");
         command.env("SOLIX_VERIFY_ONLY", "1");
+    }
+
+    if let Some(ref platform) = args.platform {
+        command.arg("--platform").arg(platform);
+        command.env("SOLIX_PLATFORM", platform);
     }
 
     if let Some(ref target_override) = args.target {

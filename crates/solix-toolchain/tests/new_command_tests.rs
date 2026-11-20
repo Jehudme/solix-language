@@ -98,6 +98,7 @@ fn test_solix_new_default_application() {
     // Build debug profile via pure-Rust builder
     let build_arguments = BuildArgs {
         path: target_project_directory.clone(),
+        platform: None,
         profile: Some("debug".to_string()),
         debug: true,
         release: false,
