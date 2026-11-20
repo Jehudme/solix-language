@@ -2,6 +2,49 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [1.7.0] - 2026-11-20
+
+### Bug Fixes
+
+- *(build)* Isolate cross-compilation toolchain and prevent host header leaks in raylib zigbuild (#118)
+- *(toolchain)* Resolve Windows executable resolution and .cmd spawning error 193 (#116)
+- *(toolchain)* Fix pure-solix package cache check, uninstall prefix collision, and doc HTML escaping
+- *(parser)* Reject trailing characters in escaped char literals (closes #101)
+- *(lexer)* Enforce strict newlines, trailing decimal floats, and reject leading zeros (closes #100)
+- *(runtime)* Allow clippy::expect_used on backward-compatible VirtualMachine::new constructor
+- *(runtime)* Propagate string allocation and memory-write errors during vm init (closes #99)
+- *(optimizer)* Disambiguate ast inliner methods across namespaces (closes #98)
+- *(binder)* Isolate monomorphizer cache and fix namespaced constructor resolution
+- *(binder)* Ensure root package hierarchy access in symbol resolution
+- *(binder)* Prevent generic class cache collisions across namespaces in monomorphizer
+
+### Documentation
+
+- Migrate to .slxp package format and synchronize specifications (#94, #96)
+- *(pipeline)* Document namespaced class extraction and collapse clippy conditions
+
+### Features
+
+- *(bench)* Modernize benchmark suite with pre-compilation, hardware telemetry & iteration controls (#120)
+- *(build)* Support containerized cross-compilation for native modules via cross and dockcross (#122)
+- *(toolchain)* Default new project template release profile to platforms: all (#117)
+- *(optimizer)* Wire 0xE0-0xED superinstruction peephole fusion passes (#93) (#113)
+- *(vm)* Implement Category 2 & 3 superinstructions 0xE6..=0xED (fixes #92)
+- *(vm)* Implement Category 1 superinstructions 0xE0..=0xE5 (fixes #91)
+- *(cli)* Restructure CLI subcommands, add export, and retire reinstall (fixes #89, #90)
+- *(package)* Modernize container format to .slxp and enforce strict native loader filtering (#87, #88) (#109)
+
+### Performance
+
+- *(vm)* Eliminate frame lookup overhead in fast dispatch and optimize polymorphic virtual calls (#121)
+
+### Testing
+
+- *(ci)* Implement end-to-end multi-platform command lifecycle pipeline & maintenance mandate (#119) (#129)
+- *(bench)* Make test_solix_bench_telemetry_and_scaling_flags hermetic with mock binary
+- *(toolchain)* Specify host platform for CalcCpp native module in test (#117)
+- Strengthen test coverage across register bounds, escape analysis, and ARC paths (#102)
+
 ## [1.6.3] - 2026-11-19
 
 ### Build System
