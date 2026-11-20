@@ -90,7 +90,10 @@ pub fn disassemble_instruction(
         | OpCode::JumpIfEqI32
         | OpCode::JumpIfNeqI32
         | OpCode::ForLoopI32
-        | OpCode::GetArrayJumpIfFalse => {
+        | OpCode::GetArrayJumpIfFalse
+        | OpCode::GetArrayJumpIfTrue
+        | OpCode::JumpIfLtF64
+        | OpCode::JumpIfLteF64 => {
             let offset = instruction.src2() as i16 as i32;
             let target_pc = pc as i32 + offset;
             format!(
@@ -127,6 +130,16 @@ pub fn disassemble_instruction(
             let imm = instruction.src2() as i16;
             format!(
                 "{pc:04}  {:<16} r{}, r{}, {imm:+}",
+                opcode.mnemonic(),
+                instruction.dst(),
+                instruction.src1()
+            )
+        }
+
+        OpCode::AddF64Imm | OpCode::SubF64Imm | OpCode::MulF64Imm => {
+            let constant_index = instruction.src2();
+            format!(
+                "{pc:04}  {:<16} r{}, r{}, const[{constant_index}]",
                 opcode.mnemonic(),
                 instruction.dst(),
                 instruction.src1()

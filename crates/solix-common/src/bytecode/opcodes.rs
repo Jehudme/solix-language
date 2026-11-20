@@ -148,6 +148,13 @@ pub enum OpCode {
     TailCallDirect = 0xDD,
     MulAddF64 = 0xDE,
     GetArrayJumpIfFalse = 0xDF,
+
+    GetArrayJumpIfTrue = 0xE0,
+    AddF64Imm = 0xE1,
+    SubF64Imm = 0xE2,
+    MulF64Imm = 0xE3,
+    JumpIfLtF64 = 0xE4,
+    JumpIfLteF64 = 0xE5,
 }
 
 impl OpCode {
@@ -281,6 +288,13 @@ impl OpCode {
             0xDD => Some(Self::TailCallDirect),
             0xDE => Some(Self::MulAddF64),
             0xDF => Some(Self::GetArrayJumpIfFalse),
+
+            0xE0 => Some(Self::GetArrayJumpIfTrue),
+            0xE1 => Some(Self::AddF64Imm),
+            0xE2 => Some(Self::SubF64Imm),
+            0xE3 => Some(Self::MulF64Imm),
+            0xE4 => Some(Self::JumpIfLtF64),
+            0xE5 => Some(Self::JumpIfLteF64),
 
             _ => None,
         }
@@ -430,6 +444,13 @@ impl OpCode {
             Self::TailCallDirect => "TAIL_CALL_DIRECT",
             Self::MulAddF64 => "MUL_ADD_F64",
             Self::GetArrayJumpIfFalse => "GET_ARRAY_JMP_FALSE",
+
+            Self::GetArrayJumpIfTrue => "GET_ARRAY_JMP_TRUE",
+            Self::AddF64Imm => "ADD_F64_IMM",
+            Self::SubF64Imm => "SUB_F64_IMM",
+            Self::MulF64Imm => "MUL_F64_IMM",
+            Self::JumpIfLtF64 => "JUMP_IF_LT_F64",
+            Self::JumpIfLteF64 => "JUMP_IF_LTE_F64",
         }
     }
 }
@@ -463,10 +484,10 @@ mod tests {
             assert_eq!(OpCode::from_u8(raw_byte, 0).ok(), decoded);
         }
 
-        let extra_bytes: [u8; 33] = [
+        let extra_bytes: [u8; 39] = [
             0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x90, 0x91, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xB0,
             0xC0, 0xC1, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB,
-            0xDC, 0xDD, 0xDE, 0xDF, 0x00,
+            0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0x00,
         ];
         for raw_byte in extra_bytes {
             let decoded = OpCode::from_raw_u8(raw_byte);
