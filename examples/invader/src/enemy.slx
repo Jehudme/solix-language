@@ -1,0 +1,358 @@
+import raylib.*;
+
+public class InvaderAlien {
+    public float32 pos_x;
+    public float32 pos_y;
+    public int32 alien_type; // InvaderType: SQUID (0), CRAB (1), OCTOPUS (2)
+    public bool is_alive;
+    public int32 point_value;
+    public float32 width_val;
+    public float32 height_val;
+
+    public InvaderAlien(float32 initial_x, float32 initial_y, int32 type_id) {
+        this.pos_x = initial_x;
+        this.pos_y = initial_y;
+        this.alien_type = type_id;
+        this.is_alive = true;
+        this.width_val = 32.0;
+        this.height_val = 22.0;
+
+        if (type_id == InvaderType::SQUID) {
+            this.point_value = 30;
+        } else if (type_id == InvaderType::CRAB) {
+            this.point_value = 20;
+        } else {
+            this.point_value = 10;
+        }
+    }
+
+    public Rectangle get_rect() {
+        return new Rectangle(this.pos_x, this.pos_y, this.width_val, this.height_val);
+    }
+
+    public void draw(int32 anim_frame) {
+        if (!this.is_alive) {
+            return;
+        }
+
+        // Distinct retro palette for each invader species
+        Color alien_color = new Color(0, 229, 255, 255); // Neon Cyan for Crab
+        if (this.alien_type == InvaderType::SQUID) {
+            alien_color = new Color(224, 64, 251, 255); // Neon Magenta for Squid
+        } else if (this.alien_type == InvaderType::OCTOPUS) {
+            alien_color = new Color(255, 214, 0, 255); // Neon Gold/Yellow for Octopus
+        }
+
+        int32 center_int_x = (int32)(this.pos_x + 16.0);
+        int32 center_int_y = (int32)(this.pos_y + 11.0);
+
+        if (this.alien_type == InvaderType::SQUID) {
+            // Squid: sleek triangular head with two eyes and dual tentacles
+            Raylib::DrawRectangle(center_int_x - 6, center_int_y - 8, 12, 10, alien_color);
+            Raylib::DrawRectangle(center_int_x - 10, center_int_y - 4, 20, 6, alien_color);
+            // Eyes
+            Raylib::DrawRectangle(center_int_x - 4, center_int_y - 3, 2, 2, Color::BLACK);
+            Raylib::DrawRectangle(center_int_x + 2, center_int_y - 3, 2, 2, Color::BLACK);
+            // Animated tentacles
+            if (anim_frame == 0) {
+                Raylib::DrawRectangle(center_int_x - 8, center_int_y + 4, 4, 6, alien_color);
+                Raylib::DrawRectangle(center_int_x + 4, center_int_y + 4, 4, 6, alien_color);
+            } else {
+                Raylib::DrawRectangle(center_int_x - 4, center_int_y + 4, 8, 6, alien_color);
+            }
+        } else if (this.alien_type == InvaderType::CRAB) {
+            // Crab: wide body, antenna claws, and walking legs
+            Raylib::DrawRectangle(center_int_x - 12, center_int_y - 5, 24, 10, alien_color);
+            Raylib::DrawRectangle(center_int_x - 8, center_int_y - 9, 16, 4, alien_color);
+            // Eyes
+            Raylib::DrawRectangle(center_int_x - 6, center_int_y - 4, 3, 3, Color::BLACK);
+            Raylib::DrawRectangle(center_int_x + 3, center_int_y - 4, 3, 3, Color::BLACK);
+            // Claws and legs
+            if (anim_frame == 0) {
+                Raylib::DrawRectangle(center_int_x - 14, center_int_y - 8, 4, 6, alien_color);
+                Raylib::DrawRectangle(center_int_x + 10, center_int_y - 8, 4, 6, alien_color);
+                Raylib::DrawRectangle(center_int_x - 10, center_int_y + 5, 4, 5, alien_color);
+                Raylib::DrawRectangle(center_int_x + 6, center_int_y + 5, 4, 5, alien_color);
+            } else {
+                Raylib::DrawRectangle(center_int_x - 14, center_int_y + 2, 4, 7, alien_color);
+                Raylib::DrawRectangle(center_int_x + 10, center_int_y + 2, 4, 7, alien_color);
+                Raylib::DrawRectangle(center_int_x - 6, center_int_y + 5, 12, 4, alien_color);
+            }
+        } else {
+            // Octopus: broad dome, wide eyes, four undulating tentacles
+            Raylib::DrawRectangle(center_int_x - 10, center_int_y - 8, 20, 10, alien_color);
+            Raylib::DrawRectangle(center_int_x - 12, center_int_y - 4, 24, 7, alien_color);
+            // Eyes
+            Raylib::DrawRectangle(center_int_x - 5, center_int_y - 3, 3, 3, Color::BLACK);
+            Raylib::DrawRectangle(center_int_x + 2, center_int_y - 3, 3, 3, Color::BLACK);
+            // Tentacles
+            if (anim_frame == 0) {
+                Raylib::DrawRectangle(center_int_x - 12, center_int_y + 4, 4, 6, alien_color);
+                Raylib::DrawRectangle(center_int_x - 4, center_int_y + 4, 3, 5, alien_color);
+                Raylib::DrawRectangle(center_int_x + 1, center_int_y + 4, 3, 5, alien_color);
+                Raylib::DrawRectangle(center_int_x + 8, center_int_y + 4, 4, 6, alien_color);
+            } else {
+                Raylib::DrawRectangle(center_int_x - 8, center_int_y + 4, 5, 6, alien_color);
+                Raylib::DrawRectangle(center_int_x + 3, center_int_y + 4, 5, 6, alien_color);
+            }
+        }
+    }
+}
+
+public class MothershipUfo {
+    public float32 pos_x;
+    public float32 pos_y;
+    public float32 speed_x;
+    public bool is_active;
+    public int32 bonus_points;
+    public float32 width_val;
+    public float32 height_val;
+
+    public MothershipUfo() {
+        this.pos_x = -60.0;
+        this.pos_y = 52.0;
+        this.speed_x = 2.4;
+        this.is_active = false;
+        this.bonus_points = 200;
+        this.width_val = 48.0;
+        this.height_val = 18.0;
+    }
+
+    public void trigger_flyby() {
+        if (this.is_active) {
+            return;
+        }
+        this.pos_x = -50.0;
+        this.pos_y = 52.0;
+        this.is_active = true;
+    }
+
+    public Rectangle get_rect() {
+        return new Rectangle(this.pos_x, this.pos_y, this.width_val, this.height_val);
+    }
+
+    public void update() {
+        if (!this.is_active) {
+            return;
+        }
+        this.pos_x = this.pos_x + this.speed_x;
+        if (this.pos_x > 840.0) {
+            this.is_active = false;
+        }
+    }
+
+    public void draw() {
+        if (!this.is_active) {
+            return;
+        }
+        Color ufo_crimson = new Color(255, 23, 68, 255);
+        Color ufo_core = new Color(255, 128, 171, 255);
+        Color cockpit_cyan = new Color(0, 229, 255, 255);
+
+        int32 center_int_x = (int32)(this.pos_x + 24.0);
+        int32 center_int_y = (int32)(this.pos_y + 9.0);
+
+        // Flying saucer main disk
+        Raylib::DrawRectangle(center_int_x - 22, center_int_y - 2, 44, 7, ufo_crimson);
+        Raylib::DrawRectangle(center_int_x - 14, center_int_y - 6, 28, 5, ufo_core);
+        // Cockpit dome
+        Raylib::DrawRectangle(center_int_x - 6, center_int_y - 8, 12, 3, cockpit_cyan);
+        // Underbody landing lights
+        Raylib::DrawRectangle(center_int_x - 16, center_int_y + 5, 4, 3, Color::YELLOW);
+        Raylib::DrawRectangle(center_int_x - 2, center_int_y + 5, 4, 3, Color::YELLOW);
+        Raylib::DrawRectangle(center_int_x + 12, center_int_y + 5, 4, 3, Color::YELLOW);
+    }
+}
+
+public class InvaderArmada {
+    public InvaderAlien[] armada_grid;
+    public int32 total_aliens;
+    public int32 active_aliens;
+
+    public float32 direction_x;
+    public float32 step_distance_x;
+    public float32 descent_step_y;
+
+    public int32 march_timer;
+    public int32 march_cadence_delay;
+    public int32 animation_frame;
+    public int32 march_step_counter;
+
+    public int32 bomb_drop_timer;
+    public int32 bomb_drop_delay;
+
+    public MothershipUfo mothership;
+    public int32 ufo_spawn_timer;
+
+    public InvaderArmada() {
+        this.total_aliens = 55;
+        this.active_aliens = 55;
+        this.armada_grid = new InvaderAlien[55];
+
+        this.direction_x = 1.0;
+        this.step_distance_x = 8.0;
+        this.descent_step_y = 16.0;
+
+        this.march_timer = 0;
+        this.march_cadence_delay = 42;
+        this.animation_frame = 0;
+        this.march_step_counter = 0;
+
+        this.bomb_drop_timer = 0;
+        this.bomb_drop_delay = 60;
+
+        this.mothership = new MothershipUfo();
+        this.ufo_spawn_timer = 0;
+
+        this.reset_armada();
+    }
+
+    public void reset_armada() {
+        this.active_aliens = 55;
+        this.direction_x = 1.0;
+        this.march_timer = 0;
+        this.march_cadence_delay = 42;
+        this.animation_frame = 0;
+        this.march_step_counter = 0;
+        this.bomb_drop_timer = 0;
+        this.bomb_drop_delay = 60;
+        this.ufo_spawn_timer = 0;
+
+        float32 grid_origin_x = 80.0;
+        float32 grid_origin_y = 95.0;
+        float32 spacing_x = 52.0;
+        float32 spacing_y = 38.0;
+
+        int32 alien_cursor = 0;
+        for (int32 row_index = 0; row_index < 5; row_index = row_index + 1) {
+            int32 species_id = InvaderType::OCTOPUS;
+            if (row_index == 0) {
+                species_id = InvaderType::SQUID;
+            } else if (row_index == 1 || row_index == 2) {
+                species_id = InvaderType::CRAB;
+            }
+
+            for (int32 col_index = 0; col_index < 11; col_index = col_index + 1) {
+                float32 spawn_pos_x = grid_origin_x + ((float32)col_index * spacing_x);
+                float32 spawn_pos_y = grid_origin_y + ((float32)row_index * spacing_y);
+
+                this.armada_grid[alien_cursor] = new InvaderAlien(spawn_pos_x, spawn_pos_y, species_id);
+                alien_cursor = alien_cursor + 1;
+            }
+        }
+    }
+
+    public bool update(AudioManager audio_manager) {
+        // Update mothership
+        this.mothership.update();
+        this.ufo_spawn_timer = this.ufo_spawn_timer + 1;
+        if (this.ufo_spawn_timer >= 900) { // Every ~15 seconds
+            this.ufo_spawn_timer = 0;
+            this.mothership.trigger_flyby();
+            audio_manager.play_ufo();
+        }
+
+        if (this.active_aliens <= 0) {
+            return false;
+        }
+
+        // Dynamically recalculate marching cadence: speeds up as aliens die
+        // From 42 frames (~0.7s) down to 3 frames (~0.05s) for the last survivor!
+        int32 target_delay = ((this.active_aliens * 38) / 55) + 3;
+        this.march_cadence_delay = target_delay;
+
+        this.march_timer = this.march_timer + 1;
+        if (this.march_timer >= this.march_cadence_delay) {
+            this.march_timer = 0;
+            this.animation_frame = 1 - this.animation_frame;
+            this.march_step_counter = this.march_step_counter + 1;
+
+            audio_manager.play_invader_step(this.march_step_counter);
+
+            // Check if boundary hit requires descent
+            bool hit_boundary = false;
+            for (int32 alien_index = 0; alien_index < this.total_aliens; alien_index = alien_index + 1) {
+                if (this.armada_grid[alien_index].is_alive) {
+                    float32 next_x = this.armada_grid[alien_index].pos_x + (this.direction_x * this.step_distance_x);
+                    if (this.direction_x > 0.0 && next_x > 745.0) {
+                        hit_boundary = true;
+                    } else if (this.direction_x < 0.0 && next_x < 25.0) {
+                        hit_boundary = true;
+                    }
+                }
+            }
+
+            if (hit_boundary) {
+                // Reverse direction and march downward
+                this.direction_x = 0.0 - this.direction_x;
+                for (int32 alien_index = 0; alien_index < this.total_aliens; alien_index = alien_index + 1) {
+                    if (this.armada_grid[alien_index].is_alive) {
+                        this.armada_grid[alien_index].pos_y = this.armada_grid[alien_index].pos_y + this.descent_step_y;
+                    }
+                }
+            } else {
+                // March horizontally
+                for (int32 alien_index = 0; alien_index < this.total_aliens; alien_index = alien_index + 1) {
+                    if (this.armada_grid[alien_index].is_alive) {
+                        this.armada_grid[alien_index].pos_x = this.armada_grid[alien_index].pos_x + (this.direction_x * this.step_distance_x);
+                    }
+                }
+            }
+        }
+
+        // Check if any invader has invaded player territory
+        for (int32 alien_index = 0; alien_index < this.total_aliens; alien_index = alien_index + 1) {
+            if (this.armada_grid[alien_index].is_alive) {
+                if (this.armada_grid[alien_index].pos_y >= GameConstants::INVASION_LIMIT_Y) {
+                    return true; // Invasion successful -> Game Over!
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public Projectile maybe_drop_bomb(AudioManager audio_manager) {
+        if (this.active_aliens <= 0) {
+            return null;
+        }
+
+        this.bomb_drop_timer = this.bomb_drop_timer + 1;
+        // Bomb drop cadence scales with surviving invader count
+        int32 current_drop_limit = ((this.active_aliens * 45) / 55) + 18;
+        if (this.bomb_drop_timer >= current_drop_limit) {
+            this.bomb_drop_timer = 0;
+
+            // Pick a random column (0..10)
+            int32 random_column = (this.march_step_counter * 7 + 3) % 11;
+
+            // Find lowest living invader in that column
+            for (int32 row_index = 4; row_index >= 0; row_index = row_index - 1) {
+                int32 alien_idx = (row_index * 11) + random_column;
+                if (this.armada_grid[alien_idx].is_alive) {
+                    Projectile alien_bomb = new Projectile();
+                    Color bomb_core = new Color(255, 82, 82, 255);
+                    Color bomb_glow = new Color(255, 23, 68, 160);
+                    alien_bomb.launch(
+                        this.armada_grid[alien_idx].pos_x + 16.0,
+                        this.armada_grid[alien_idx].pos_y + 20.0,
+                        4.2,
+                        ProjectileKind::ALIEN_PLASMA,
+                        bomb_core,
+                        bomb_glow
+                    );
+                    audio_manager.play_alien_laser();
+                    return alien_bomb;
+                }
+            }
+        }
+        return null;
+    }
+
+    public void draw() {
+        this.mothership.draw();
+        for (int32 alien_index = 0; alien_index < this.total_aliens; alien_index = alien_index + 1) {
+            this.armada_grid[alien_index].draw(this.animation_frame);
+        }
+    }
+}

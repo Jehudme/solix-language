@@ -1,0 +1,58 @@
+import raylib.*;
+
+public class TestRunner {
+    public static int32 test() {
+        // 1. Verify GameConstants boundaries
+        if (GameConstants::SCREEN_WIDTH != 800 || GameConstants::SCREEN_HEIGHT != 650) {
+            return 1;
+        }
+
+        // 2. Verify InvaderArmada grid setup
+        InvaderArmada test_armada = new InvaderArmada();
+        if (test_armada.total_aliens != 55 || test_armada.active_aliens != 55) {
+            return 2;
+        }
+        // Row 0 must be SQUID (30 pts)
+        if (test_armada.armada_grid[0].alien_type != InvaderType::SQUID || test_armada.armada_grid[0].point_value != 30) {
+            return 3;
+        }
+        // Row 1 must be CRAB (20 pts)
+        if (test_armada.armada_grid[11].alien_type != InvaderType::CRAB || test_armada.armada_grid[11].point_value != 20) {
+            return 4;
+        }
+        // Row 4 must be OCTOPUS (10 pts)
+        if (test_armada.armada_grid[44].alien_type != InvaderType::OCTOPUS || test_armada.armada_grid[44].point_value != 10) {
+            return 5;
+        }
+
+        // 3. Verify Bunker cell collision and progressive damage
+        Bunker test_bunker = new Bunker(100.0, 500.0);
+        if (test_bunker.cell_count != 18) {
+            return 6;
+        }
+        Rectangle direct_hit_rect = new Rectangle(102.0, 502.0, 4.0, 10.0);
+        bool hit_detected = test_bunker.test_and_damage(direct_hit_rect);
+        if (!hit_detected) {
+            return 7;
+        }
+
+        // 4. Verify PlayerCannon boundaries and lives
+        PlayerCannon test_player = new PlayerCannon();
+        if (test_player.lives_remaining != 3) {
+            return 8;
+        }
+        if (test_player.pos_y != GameConstants::PLAYER_BASE_Y) {
+            return 9;
+        }
+
+        // 5. Verify Projectile bounds
+        Projectile test_projectile = new Projectile();
+        test_projectile.launch(400.0, 300.0, -8.0, ProjectileKind::PLAYER_LASER, Color::WHITE, Color::WHITE);
+        if (!test_projectile.active || test_projectile.velocity_y != -8.0) {
+            return 10;
+        }
+
+        // All assertions passed cleanly
+        return 0;
+    }
+}

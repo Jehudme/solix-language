@@ -1,0 +1,154 @@
+import raylib.*;
+
+public class PlayerCannon {
+    public float32 pos_x;
+    public float32 pos_y;
+    public float32 width_val;
+    public float32 height_val;
+    public float32 move_speed;
+
+    public int32 lives_remaining;
+    public int32 cooldown_ticks;
+    public int32 invulnerable_ticks;
+    public bool is_exploding;
+    public int32 explosion_timer;
+
+    public PlayerCannon() {
+        this.width_val = 36.0;
+        this.height_val = 20.0;
+        this.move_speed = 5.2;
+        this.lives_remaining = 3;
+        this.cooldown_ticks = 0;
+        this.invulnerable_ticks = 0;
+        this.is_exploding = false;
+        this.explosion_timer = 0;
+
+        this.pos_x = 400.0 - (this.width_val * 0.5);
+        this.pos_y = GameConstants::PLAYER_BASE_Y;
+    }
+
+    public void reset_for_match() {
+        this.lives_remaining = 3;
+        this.cooldown_ticks = 0;
+        this.invulnerable_ticks = 60;
+        this.is_exploding = false;
+        this.explosion_timer = 0;
+        this.pos_x = 400.0 - (this.width_val * 0.5);
+        this.pos_y = GameConstants::PLAYER_BASE_Y;
+    }
+
+    public Rectangle get_rect() {
+        return new Rectangle(this.pos_x, this.pos_y, this.width_val, this.height_val);
+    }
+
+    public Projectile update(
+        bool move_left,
+        bool move_right,
+        bool fire_pressed,
+        AudioManager audio_manager
+    ) {
+        if (this.is_exploding) {
+            this.explosion_timer = this.explosion_timer - 1;
+            if (this.explosion_timer <= 0) {
+                this.is_exploding = false;
+                this.pos_x = 400.0 - (this.width_val * 0.5);
+                this.invulnerable_ticks = 90; // 1.5 seconds invulnerability
+            }
+            return null;
+        }
+
+        if (this.invulnerable_ticks > 0) {
+            this.invulnerable_ticks = this.invulnerable_ticks - 1;
+        }
+        if (this.cooldown_ticks > 0) {
+            this.cooldown_ticks = this.cooldown_ticks - 1;
+        }
+
+        // Horizontal movement
+        if (move_left) {
+            this.pos_x = this.pos_x - this.move_speed;
+        }
+        if (move_right) {
+            this.pos_x = this.pos_x + this.move_speed;
+        }
+
+        // Boundary clamp
+        if (this.pos_x < GameConstants::PLAY_AREA_MIN_X) {
+            this.pos_x = GameConstants::PLAY_AREA_MIN_X;
+        }
+        if (this.pos_x + this.width_val > GameConstants::PLAY_AREA_MAX_X) {
+            this.pos_x = GameConstants::PLAY_AREA_MAX_X - this.width_val;
+        }
+
+        // Weapon firing
+        if (fire_pressed && this.cooldown_ticks == 0) {
+            this.cooldown_ticks = 18; // Max ~3 shots per second
+            Projectile new_laser = new Projectile();
+            Color laser_neon = new Color(0, 255, 128, 255);
+            Color laser_glow = new Color(0, 229, 255, 180);
+            new_laser.launch(
+                this.pos_x + (this.width_val * 0.5),
+                this.pos_y - 8.0,
+                -9.5,
+                ProjectileKind::PLAYER_LASER,
+                laser_neon,
+                laser_glow
+            );
+            audio_manager.play_laser();
+            return new_laser;
+        }
+
+        return null;
+    }
+
+    public bool hit_by_hazard(AudioManager audio_manager, ParticleSystem particles) {
+        if (this.is_exploding || this.invulnerable_ticks > 0) {
+            return false;
+        }
+
+        this.lives_remaining = this.lives_remaining - 1;
+        this.is_exploding = true;
+        this.explosion_timer = 50;
+
+        audio_manager.play_player_death();
+        Color death_spark = new Color(0, 255, 128, 255);
+        particles.spawn_burst(this.pos_x + 18.0, this.pos_y + 10.0, death_spark, 35);
+
+        return true;
+    }
+
+    public void draw() {
+        if (this.is_exploding) {
+            return;
+        }
+
+        // Blink when invulnerable
+        if (this.invulnerable_ticks > 0 && (this.invulnerable_ticks % 6 < 3)) {
+            return;
+        }
+
+        int32 center_int_x = (int32)(this.pos_x + 18.0);
+        int32 base_int_y = (int32)this.pos_y;
+
+        Color cannon_green = new Color(0, 230, 118, 255);
+        Color cannon_bright = new Color(105, 240, 174, 255);
+        Color cockpit_cyan = new Color(0, 229, 255, 255);
+
+        // Defender tank base
+        Raylib::DrawRectangle(center_int_x - 18, base_int_y + 10, 36, 10, cannon_green);
+        // Mid chassis
+        Raylib::DrawRectangle(center_int_x - 14, base_int_y + 5, 28, 6, cannon_green);
+        // Cockpit window
+        Raylib::DrawRectangle(center_int_x - 5, base_int_y + 6, 10, 4, cockpit_cyan);
+        // Center gun turret
+        Raylib::DrawRectangle(center_int_x - 3, base_int_y - 4, 6, 10, cannon_bright);
+        // Muzzle nozzle
+        Raylib::DrawRectangle(center_int_x - 1, base_int_y - 8, 2, 4, cannon_bright);
+
+        // Shield aura ring if invulnerable
+        if (this.invulnerable_ticks > 0) {
+            Color shield_ring = new Color(0, 229, 255, 140);
+            Raylib::DrawCircleLines(center_int_x, base_int_y + 6, 26.0, shield_ring);
+        }
+    }
+}
