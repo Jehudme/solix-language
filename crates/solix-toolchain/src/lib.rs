@@ -12,14 +12,20 @@ pub mod solver;
 pub mod telemetry;
 
 pub use cli::{
-    BuildArgs, CleanArgs, Cli, Commands, CompileArgs, DapArgs, DocArgs, FmtArgs, InfoArgs,
-    InstallArgs, ListArgs, LspArgs, NewArgs, NewNativeArgs, NewSubcommand, ReinstallArgs, RunArgs,
-    SyncArgs, UninstallArgs, WikiArgs,
+    BuildArgs, CleanArgs, Cli, Commands, CompileArgs, CompilePackageArgs, CompileSourceArgs,
+    CompileSubcommand, DapArgs, DocArgs, ExportArgs, ExportBinariesArgs, ExportPackageArgs,
+    ExportSubcommand, FmtArgs, InfoArgs, InstallArgs, InstallBinariesArgs, InstallPackageArgs,
+    InstallSubcommand, ListArgs, LspArgs, NewArgs, NewNativeArgs, NewPackageArgs, NewSubcommand,
+    RunArgs, RunPackageArgs, RunSourceArgs, RunSubcommand, UninstallArgs, UninstallBinariesArgs,
+    UninstallPackageArgs, UninstallSubcommand, WikiArgs,
 };
 pub use commands::{
-    execute_build, execute_clean, execute_compile, execute_dap, execute_doc, execute_fmt,
-    execute_info, execute_install, execute_list, execute_lsp, execute_new, execute_new_native,
-    execute_reinstall, execute_run, execute_sync, execute_uninstall, execute_wiki,
+    execute_build, execute_clean, execute_compile, execute_compile_package, execute_compile_source,
+    execute_dap, execute_doc, execute_export, execute_fmt, execute_info, execute_install,
+    execute_install_binaries, execute_install_package, execute_list, execute_lsp, execute_new,
+    execute_new_native, execute_new_package, execute_run, execute_run_package, execute_run_source,
+    execute_uninstall, execute_uninstall_binaries, execute_uninstall_package, execute_wiki,
+    install_package_artifact, resolve_bin_store_dir,
 };
 pub use diagnostics::render_diagnostics;
 pub use solver::{ClientModuleSolver, resolve_native_cache_dir, resolve_package_store_dir};
@@ -63,8 +69,8 @@ pub fn run(cli: Cli) -> anyhow::Result<i32> {
             execute_install(args)?;
             Ok(0)
         }
-        Commands::Reinstall(args) => {
-            execute_reinstall(args)?;
+        Commands::Export(args) => {
+            execute_export(args)?;
             Ok(0)
         }
         Commands::Uninstall(args) => {

@@ -3,7 +3,10 @@
 #![forbid(unsafe_code)]
 
 use crate::cache::FilesystemPackageCache;
-use crate::cli::{BuildArgs, InstallArgs, ListArgs, ReinstallArgs, SyncArgs, UninstallArgs};
+use crate::cli::{
+    BuildArgs, InstallArgs, InstallBinariesArgs, InstallPackageArgs, InstallSubcommand, ListArgs,
+    UninstallArgs, UninstallBinariesArgs, UninstallPackageArgs, UninstallSubcommand,
+};
 use crate::commands::execute_build;
 use crate::registry::{
     PackageRecord, PackageRegistry, format_iso8601_timestamp, parse_package_spec,
@@ -19,6 +22,49 @@ use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Resolves the store directory for standalone binaries (~/.solix/bin/ or $SOLIX_BIN_DIR or override).
+pub fn resolve_bin_store_dir(pkg_dir_override: Option<&Path>) -> PathBuf {
+    if let Some(custom_dir) = pkg_dir_override {
+        let canonical = custom_dir.to_path_buf();
+        if canonical.file_name().and_then(|val| val.to_str()) == Some("packages")
+            && let Some(parent) = canonical.parent()
+        {
+            return parent.join("bin");
+        }
+        return canonical.join("bin");
+    }
+
+    if let Ok(bin_dir) = std::env::var("SOLIX_BIN_DIR") {
+        let trimmed = bin_dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    if let Ok(home_dir) = std::env::var("SOLIX_HOME") {
+        let trimmed = home_dir.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed).join("bin");
+        }
+    }
+
+    if cfg!(windows) {
+        if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            let trimmed = user_profile.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed).join(".solix").join("bin");
+            }
+        }
+    } else if let Ok(home) = std::env::var("HOME") {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed).join(".solix").join("bin");
+        }
+    }
+
+    PathBuf::from(".solix").join("bin")
+}
 
 /// Installs an artifact (.slxb or .slxarc) into the package store, optionally registering source project dir.
 ///
@@ -150,7 +196,7 @@ pub(crate) fn install_package_artifact_with_options(
         let record = PackageRecord {
             name: package_name.to_string(),
             version: package_version.to_string(),
-            kind: "slxb".to_string(),
+            kind: "binaries".to_string(),
             build_profile: effective_profile.to_string(),
             sha256: computed_sha256,
             size_bytes: file_size,
@@ -273,11 +319,7 @@ pub(crate) fn install_package_artifact_with_options(
         let record = PackageRecord {
             name: package_name.to_string(),
             version: package_version.to_string(),
-            kind: if is_slxp {
-                "slxp".to_string()
-            } else {
-                "slxarc".to_string()
-            },
+            kind: "package".to_string(),
             build_profile: effective_profile.to_string(),
             sha256: computed_sha256,
             size_bytes: file_size,
@@ -308,11 +350,195 @@ pub(crate) fn install_package_artifact_with_options(
     }
 }
 
+/// Installs a package (.slxp) into the package store.
+///
+/// # Errors
+/// Returns an error if building fails or installation fails.
+pub fn execute_install_package(args: InstallPackageArgs) -> Result<()> {
+    let resolved_path = solix_common::canonicalize_host_path(&args.path).with_context(|| {
+        format!(
+            "Failed to resolve package path at '{}'",
+            args.path.display()
+        )
+    })?;
+
+    if !resolved_path.exists() {
+        bail!("Package path not found at '{}'", resolved_path.display());
+    }
+
+    if resolved_path.is_dir() {
+        let manifest_path =
+            solix_common::project::find_manifest_path(&resolved_path).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Cannot install project at '{}': manifest.yaml (or manifest.toml) not found",
+                    resolved_path.display()
+                )
+            })?;
+
+        let manifest = ProjectManifest::from_file(&manifest_path)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let package_name = manifest.configuration.name.clone();
+        let profile = args.resolved_profile();
+
+        execute_build(BuildArgs {
+            path: resolved_path.clone(),
+            platform: None,
+            profile: Some(profile.to_string()),
+            debug: false,
+            release: false,
+            test: false,
+            pkg_dir: args.pkg_dir.clone(),
+            install: false,
+            force: args.force,
+            check_env: false,
+            target: None,
+        })?;
+
+        let candidate_slxp = resolved_path
+            .join("build")
+            .join(profile)
+            .join(format!("{package_name}.slxp"));
+        let candidate_archive = resolved_path
+            .join("build")
+            .join(profile)
+            .join(format!("{package_name}.slxarc"));
+        let archive_path = if candidate_slxp.exists() {
+            candidate_slxp
+        } else if candidate_archive.exists() {
+            candidate_archive
+        } else {
+            bail!(
+                "Build succeeded but expected package archive was not found at '{}'",
+                candidate_slxp.display()
+            );
+        };
+
+        install_package_artifact(
+            &archive_path,
+            Some(resolved_path),
+            args.force,
+            Some(profile),
+            args.pkg_dir.as_deref(),
+        )?;
+        Ok(())
+    } else {
+        install_package_artifact(
+            &resolved_path,
+            None,
+            args.force,
+            Some(args.resolved_profile()),
+            args.pkg_dir.as_deref(),
+        )?;
+        Ok(())
+    }
+}
+
+/// Installs a standalone binary (.slxb) into ~/.solix/bin/.
+///
+/// # Errors
+/// Returns an error if reading the binary or copying to the binary store fails.
+pub fn execute_install_binaries(args: InstallBinariesArgs) -> Result<()> {
+    let resolved_path = solix_common::canonicalize_host_path(&args.path)
+        .with_context(|| format!("Failed to resolve binary path at '{}'", args.path.display()))?;
+
+    if !resolved_path.exists() {
+        bail!("Binary path not found at '{}'", resolved_path.display());
+    }
+
+    let file_bytes = fs::read(&resolved_path).with_context(|| {
+        format!(
+            "Failed to read binary file at '{}'",
+            resolved_path.display()
+        )
+    })?;
+    let program = BinaryProgram::from_bytes(&file_bytes).with_context(|| {
+        format!(
+            "Failed to deserialize binary container from '{}'",
+            resolved_path.display()
+        )
+    })?;
+
+    let binary_name = if !program.package_name.trim().is_empty() {
+        program.package_name.trim().to_string()
+    } else {
+        resolved_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("binary")
+            .to_string()
+    };
+
+    let bin_store_dir = resolve_bin_store_dir(args.pkg_dir.as_deref());
+    fs::create_dir_all(&bin_store_dir).with_context(|| {
+        format!(
+            "Failed to create binary store directory at '{}'",
+            bin_store_dir.display()
+        )
+    })?;
+
+    let destination_file = bin_store_dir.join(format!("{binary_name}.slxb"));
+    if destination_file.exists() && !args.force {
+        bail!(
+            "Binary '{}' is already installed at '{}'. Use '--force' to overwrite.",
+            binary_name,
+            destination_file.display()
+        );
+    }
+
+    fs::copy(&resolved_path, &destination_file)
+        .with_context(|| format!("Failed to copy binary to '{}'", destination_file.display()))?;
+
+    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+    let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
+
+    let current_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs());
+    let iso8601_string = format_iso8601_timestamp(current_timestamp);
+    let computed_sha256 = sha256_hex(&file_bytes);
+    let file_size = destination_file.metadata()?.len();
+
+    let record = PackageRecord {
+        name: binary_name.clone(),
+        version: if !program.package_version.trim().is_empty() {
+            program.package_version.clone()
+        } else {
+            "0.1.0".to_string()
+        },
+        kind: "binaries".to_string(),
+        build_profile: args.resolved_profile().to_string(),
+        sha256: computed_sha256,
+        size_bytes: file_size,
+        installed_at_unix_secs: current_timestamp,
+        installed_at_iso8601: iso8601_string,
+        source: None,
+        artifact_path: destination_file.clone(),
+        native_libraries: program.native_library_checksums.clone(),
+        description: program.package_description.clone(),
+        license: String::new(),
+        authors: Vec::new(),
+    };
+
+    registry.register(record)?;
+    println!(
+        "Installed binary '{}' to {}",
+        binary_name,
+        destination_file.display()
+    );
+    Ok(())
+}
+
 /// Installs a `.slxb` binary container, `.slxarc` archive, or project directory into the package store.
 ///
 /// # Errors
 /// Returns an error if building fails, package cannot be read, metadata is missing, or copy operations fail.
 pub fn execute_install(args: InstallArgs) -> Result<()> {
+    if let Some(subcmd) = args.subcommand {
+        return match subcmd {
+            InstallSubcommand::Package(package_args) => execute_install_package(package_args),
+            InstallSubcommand::Binaries(binaries_args) => execute_install_binaries(binaries_args),
+        };
+    }
     if args.vscode {
         return execute_install_vscode();
     }
@@ -361,6 +587,7 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
 
         execute_build(BuildArgs {
             path: resolved_path.clone(),
+            platform: None,
             profile: Some(profile.to_string()),
             debug: false,
             release: false,
@@ -421,169 +648,6 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
         )?;
         Ok(())
     }
-}
-
-/// Reinstalls and rebuilds installed packages from their recorded source directories.
-///
-/// # Errors
-/// Returns an error if rebuilding, packaging, or registry persistence fails.
-pub fn execute_reinstall(args: ReinstallArgs) -> Result<()> {
-    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
-    let registry = PackageRegistry::load_or_sync(&store_directory)?;
-
-    let mut targets_to_reinstall: Vec<PackageRecord> = Vec::new();
-
-    if args.all {
-        for record in &registry.packages {
-            if record.source.is_some() {
-                targets_to_reinstall.push(record.clone());
-            }
-        }
-        if targets_to_reinstall.is_empty() {
-            println!("No registered packages with source project directories found to reinstall.");
-            return Ok(());
-        }
-    } else if let Some(ref spec) = args.spec {
-        let (package_name, profile_filter, spec_version_part) = parse_package_spec(spec);
-
-        let mut matching_records: Vec<&PackageRecord> = registry
-            .packages
-            .iter()
-            .filter(|record| record.name == package_name)
-            .collect();
-
-        if let Some(prof) = profile_filter.as_deref() {
-            matching_records.retain(|record| record.build_profile == prof);
-        }
-        if let Some(version_str) = spec_version_part {
-            matching_records.retain(|record| record.version == version_str);
-        }
-
-        if matching_records.is_empty() {
-            bail!("Package '{spec}' is not registered in the package store.");
-        }
-
-        for record in matching_records {
-            if record.source.is_some() {
-                targets_to_reinstall.push(record.clone());
-            } else {
-                bail!(
-                    "Package '{}-{}@{}' does not have a recorded source project directory to reinstall from.",
-                    record.name,
-                    record.build_profile,
-                    record.version
-                );
-            }
-        }
-    } else {
-        let current_directory = std::env::current_dir()?;
-        if let Some(manifest_path) = solix_common::project::find_manifest_path(&current_directory) {
-            let manifest = ProjectManifest::from_file(&manifest_path)
-                .map_err(|error| anyhow::anyhow!("{error}"))?;
-            let matching_records = registry.find_all(&manifest.configuration.name);
-            for record in matching_records {
-                targets_to_reinstall.push(record.clone());
-            }
-            if targets_to_reinstall.is_empty() {
-                execute_install(InstallArgs {
-                    path: Some(current_directory),
-                    bundled: false,
-                    vscode: false,
-                    force: args.force,
-                    profile: args.profile,
-                    pkg_dir: args.pkg_dir,
-                })?;
-                return Ok(());
-            }
-        } else {
-            bail!("Must specify a package name or '--all' to reinstall packages.");
-        }
-    }
-
-    for record in targets_to_reinstall {
-        let Some(project_directory) = record.source.as_ref() else {
-            eprintln!(
-                "warning: Source directory for '{}-{}@{}' is missing; skipping.",
-                record.name, record.build_profile, record.version,
-            );
-            continue;
-        };
-        if !project_directory.exists() {
-            eprintln!(
-                "warning: Source directory for '{}-{}@{}' at '{}' no longer exists; skipping.",
-                record.name,
-                record.build_profile,
-                record.version,
-                project_directory.display()
-            );
-            continue;
-        }
-
-        let Some(manifest_path) = solix_common::project::find_manifest_path(project_directory)
-        else {
-            eprintln!(
-                "warning: Source manifest for '{}-{}@{}' at '{}' no longer exists; skipping.",
-                record.name,
-                record.build_profile,
-                record.version,
-                project_directory.display()
-            );
-            continue;
-        };
-
-        let source_manifest = ProjectManifest::from_file(&manifest_path)
-            .map_err(|error| anyhow::anyhow!("{error}"))?;
-        if source_manifest.configuration.name != record.name {
-            bail!(
-                "Source directory manifest name '{}' does not match package name '{}'",
-                source_manifest.configuration.name,
-                record.name
-            );
-        }
-        if source_manifest.configuration.version != record.version {
-            bail!(
-                "Source directory manifest version '{}' does not match package version '{}'",
-                source_manifest.configuration.version,
-                record.version
-            );
-        }
-
-        let effective_profile =
-            args.profile
-                .as_deref()
-                .unwrap_or(if !record.build_profile.is_empty() {
-                    &record.build_profile
-                } else {
-                    "release"
-                });
-
-        println!(
-            "Reinstalling '{}-{}@{}' from '{}' (profile: {effective_profile})...",
-            record.name,
-            record.build_profile,
-            record.version,
-            project_directory.display()
-        );
-
-        execute_install(InstallArgs {
-            path: Some(project_directory.clone()),
-            bundled: false,
-            vscode: false,
-            force: true,
-            profile: Some(effective_profile.to_string()),
-            pkg_dir: args.pkg_dir.clone(),
-        })?;
-    }
-
-    Ok(())
-}
-
-/// Backward compatibility alias for `execute_reinstall`.
-///
-/// # Errors
-/// Returns an error if rebuilding, packaging, or registry persistence fails.
-pub fn execute_sync(args: SyncArgs) -> Result<()> {
-    execute_reinstall(args)
 }
 
 fn matches_installed_store_folder(
@@ -652,12 +716,150 @@ fn matches_native_cache_folder(
     }
 }
 
+/// Uninstalls a package with exact matching.
+///
+/// # Errors
+/// Returns an error if the package is not installed or deletion fails.
+pub fn execute_uninstall_package(args: UninstallPackageArgs) -> Result<()> {
+    let specification = args.spec.trim();
+    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+    let native_cache_directory = resolve_native_cache_dir(&store_directory);
+    let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
+
+    let (package_name, profile_filter, spec_version_part) = parse_package_spec(specification);
+    let version_target_ref = spec_version_part.as_deref();
+    let profile_target_ref = profile_filter.as_deref();
+
+    let removed_records = registry.unregister_matching(
+        &package_name,
+        version_target_ref,
+        profile_target_ref,
+        Some("package"),
+    )?;
+
+    let mut any_folder_removed = false;
+    if store_directory.exists()
+        && let Ok(store_entries) = fs::read_dir(&store_directory)
+    {
+        for entry_result in store_entries.flatten() {
+            let entry_path = entry_result.path();
+            let entry_name = entry_result.file_name().to_string_lossy().to_string();
+
+            let should_remove = matches_installed_store_folder(
+                &entry_name,
+                &package_name,
+                version_target_ref,
+                profile_target_ref,
+            );
+
+            if should_remove && entry_path.exists() {
+                let _ = fs::remove_dir_all(&entry_path);
+                any_folder_removed = true;
+            }
+        }
+    }
+
+    let legacy_package_folder = store_directory.join(&package_name);
+    if legacy_package_folder.exists() {
+        if let Some(version_target) = version_target_ref {
+            let legacy_version_folder = legacy_package_folder.join(version_target);
+            if legacy_version_folder.exists() {
+                let _ = fs::remove_dir_all(&legacy_version_folder);
+                any_folder_removed = true;
+            }
+        } else {
+            let _ = fs::remove_dir_all(&legacy_package_folder);
+            any_folder_removed = true;
+        }
+        if let Ok(mut remaining) = fs::read_dir(&legacy_package_folder)
+            && remaining.next().is_none()
+        {
+            let _ = fs::remove_dir(&legacy_package_folder);
+        }
+    }
+
+    if native_cache_directory.exists()
+        && let Ok(entries) = fs::read_dir(&native_cache_directory)
+    {
+        for entry_result in entries.flatten() {
+            let folder_name = entry_result.file_name().to_string_lossy().to_string();
+            let should_remove = matches_native_cache_folder(
+                &folder_name,
+                &package_name,
+                version_target_ref,
+                profile_target_ref,
+            );
+            if should_remove {
+                let _ = fs::remove_dir_all(entry_result.path());
+            }
+        }
+    }
+
+    if removed_records.is_empty() && !any_folder_removed {
+        bail!("Package '{specification}' is not currently installed");
+    }
+
+    println!("Uninstalled package '{specification}' successfully.");
+    Ok(())
+}
+
+/// Uninstalls a binary with exact matching.
+///
+/// # Errors
+/// Returns an error if the binary is not installed or deletion fails.
+pub fn execute_uninstall_binaries(args: UninstallBinariesArgs) -> Result<()> {
+    let specification = args.spec.trim();
+    let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
+    let bin_store_dir = resolve_bin_store_dir(args.pkg_dir.as_deref());
+    let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
+
+    let (binary_name, profile_filter, spec_version_part) = parse_package_spec(specification);
+
+    let removed_records = registry.unregister_matching(
+        &binary_name,
+        spec_version_part.as_deref(),
+        profile_filter.as_deref(),
+        Some("binaries"),
+    )?;
+
+    let binary_file = bin_store_dir.join(format!("{binary_name}.slxb"));
+    let mut file_removed = false;
+    if binary_file.exists() {
+        let _ = fs::remove_file(&binary_file);
+        file_removed = true;
+    }
+
+    if removed_records.is_empty() && !file_removed {
+        bail!(
+            "Binary '{specification}' is not currently installed in '{}'",
+            bin_store_dir.display()
+        );
+    }
+
+    println!("Uninstalled binary '{specification}' successfully.");
+    Ok(())
+}
+
 /// Uninstalls a package version or an entire package from the local package store.
 ///
 /// # Errors
 /// Returns an error if the package is not installed or filesystem deletion fails.
 pub fn execute_uninstall(args: UninstallArgs) -> Result<()> {
-    let specification = args.spec.trim();
+    if let Some(subcmd) = args.subcommand {
+        return match subcmd {
+            UninstallSubcommand::Package(package_args) => execute_uninstall_package(package_args),
+            UninstallSubcommand::Binaries(binaries_args) => {
+                execute_uninstall_binaries(binaries_args)
+            }
+        };
+    }
+
+    let Some(specification_raw) = args.spec else {
+        bail!(
+            "Missing package or binary name to uninstall. Usage: `solix uninstall package <NAME>` or `solix uninstall binaries <NAME>`"
+        );
+    };
+    let specification = specification_raw.trim();
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let native_cache_directory = resolve_native_cache_dir(&store_directory);
     let mut registry = PackageRegistry::load_or_sync(&store_directory)?;
@@ -762,6 +964,16 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
 
     let mut filtered_packages: Vec<PackageRecord> = registry.packages;
 
+    for package in &mut filtered_packages {
+        if package.kind.eq_ignore_ascii_case("slxb")
+            || package.kind.eq_ignore_ascii_case("binaries")
+        {
+            package.kind = "binaries".to_string();
+        } else {
+            package.kind = "package".to_string();
+        }
+    }
+
     if let Some(ref filter_query) = args.filter {
         let query_lower = filter_query.to_ascii_lowercase();
         filtered_packages.retain(|package_record| {
@@ -785,8 +997,15 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
     }
 
     if let Some(ref kind_filter) = args.kind {
+        let normalized_filter = if kind_filter.eq_ignore_ascii_case("binaries")
+            || kind_filter.eq_ignore_ascii_case("slxb")
+        {
+            "binaries"
+        } else {
+            "package"
+        };
         filtered_packages
-            .retain(|package_record| package_record.kind.eq_ignore_ascii_case(kind_filter));
+            .retain(|package_record| package_record.kind.eq_ignore_ascii_case(normalized_filter));
     }
 
     match args.sort.to_ascii_lowercase().as_str() {
@@ -836,12 +1055,12 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
         } else {
             let _ = writeln!(
                 output_content,
-                "{:<16} {:<10} {:<7} {:<8} {:<10} {:<20} {:<15} SOURCE",
+                "{:<16} {:<10} {:<8} {:<8} {:<10} {:<20} {:<15} SOURCE",
                 "NAME", "VERSION", "KIND", "PROFILE", "SIZE", "INSTALLED AT", "SHA256"
             );
             let _ = writeln!(
                 output_content,
-                "{:-<16} {:-<10} {:-<7} {:-<8} {:-<10} {:-<20} {:-<15} {:-<20}",
+                "{:-<16} {:-<10} {:-<8} {:-<8} {:-<10} {:-<20} {:-<15} {:-<20}",
                 "", "", "", "", "", "", "", ""
             );
             for package in &filtered_packages {
@@ -858,7 +1077,7 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
 
                 let _ = writeln!(
                     output_content,
-                    "{:<16} {:<10} {:<7} {:<8} {:<10} {:<20} {:<15} {}",
+                    "{:<16} {:<10} {:<8} {:<8} {:<10} {:<20} {:<15} {}",
                     package.name,
                     package.version,
                     package.kind,

@@ -2,24 +2,25 @@
 
 #![forbid(unsafe_code)]
 
-use crate::cli::CompileArgs;
+use crate::cli::{CompileArgs, CompilePackageArgs, CompileSourceArgs, CompileSubcommand};
 use crate::diagnostics::render_diagnostics;
 use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use crate::telemetry::CompileMetricsReport;
 use anyhow::{Context, Result, bail};
 use solix_common::bytecode::{BinaryProgram, extract_api_manifest};
+use solix_common::project::ProjectManifest;
 use solix_common::solver::DependencyRequirement;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
 use solix_compilation::CompilationPipeline;
 use solix_compilation::manifest_to_source;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 /// Recursively walks `directory_path` collecting all files with `.slx` extension in sorted order.
 pub(crate) fn collect_slx_sources_recursively(
-    directory_path: &std::path::Path,
+    directory_path: &Path,
     collected_sources: &mut Vec<PathBuf>,
 ) -> Result<()> {
     let mut entries = Vec::new();
@@ -45,7 +46,7 @@ pub(crate) fn collect_slx_sources_recursively(
 }
 
 /// Searches upward from the target source path looking for an enclosing `manifest.yaml` (or `manifest.toml`).
-pub(crate) fn find_parent_manifest(initial_path: &std::path::Path) -> Option<PathBuf> {
+pub(crate) fn find_parent_manifest(initial_path: &Path) -> Option<PathBuf> {
     let mut current_directory = if initial_path.is_dir() {
         initial_path.to_path_buf()
     } else {
@@ -65,11 +66,53 @@ pub(crate) fn find_parent_manifest(initial_path: &std::path::Path) -> Option<Pat
     None
 }
 
-/// Executes the `compile` subcommand.
+/// Executes the `compile` subcommand, routing to `compile source`, `compile package`, or direct compilation.
 ///
 /// # Errors
 /// Returns an error if file I/O fails or compilation encounters diagnostics.
 pub fn execute_compile(args: CompileArgs) -> Result<()> {
+    if let Some(subcommand) = args.subcommand {
+        return match subcommand {
+            CompileSubcommand::Source(source_args) => execute_compile_source(source_args),
+            CompileSubcommand::Package(package_args) => execute_compile_package(package_args),
+        };
+    }
+
+    let source_args = CompileSourceArgs {
+        sources: args.sources,
+        output: args.output,
+        deps_source: args.deps_source,
+        deps_package: args.deps_package,
+        deps_binaries: args.deps_binaries,
+        deps: args.deps,
+        libs: args.libs,
+        name: args.name,
+        version: args.version,
+        description: args.description,
+        profile: args.profile,
+        emit_api: args.emit_api,
+        check: args.check,
+        time: args.time,
+        metrics: args.metrics,
+        metrics_json: args.metrics_json,
+        inline_threshold: args.inline_threshold,
+        entry: args.entry,
+        link: args.link,
+        r#static: args.r#static,
+        pkg_dir: args.pkg_dir,
+        install: args.install,
+        force: args.force,
+        no_verify: args.no_verify,
+    };
+
+    execute_compile_source(source_args)
+}
+
+/// Executes `solix compile source <files...>`.
+///
+/// # Errors
+/// Returns an error if reading sources, resolving dependencies, or compilation fails.
+pub fn execute_compile_source(args: CompileSourceArgs) -> Result<()> {
     let start_total = Instant::now();
 
     // 1. Resolve build profile
@@ -92,7 +135,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         bail!("No Solix source files (*.slx) found to compile");
     }
 
-    // 2b. Attempt to discover parent manifest.toml if within a Solix project
+    // 2b. Attempt to discover parent manifest if within a Solix project
     let parent_manifest = resolved_sources
         .first()
         .and_then(|source_path| find_parent_manifest(source_path))
@@ -188,6 +231,25 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         options = options.with_source(source_path.display().to_string(), code);
     }
 
+    // 5b. Register explicit source dependencies passed via --deps-source
+    for dependency_source_path in &args.deps_source {
+        let mut source_files = Vec::new();
+        if dependency_source_path.is_dir() {
+            collect_slx_sources_recursively(dependency_source_path, &mut source_files)?;
+        } else {
+            source_files.push(dependency_source_path.clone());
+        }
+        for path_entry in source_files {
+            let code = fs::read_to_string(&path_entry).with_context(|| {
+                format!(
+                    "Failed to read dependency source file '{}'",
+                    path_entry.display()
+                )
+            })?;
+            options = options.with_source(path_entry.display().to_string(), code);
+        }
+    }
+
     // 6. Register explicit dependency specifications (--deps <name>@<version>) or parent manifest dependencies
     for dependency_specification in &args.deps {
         let requirement =
@@ -229,8 +291,54 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
         }
     }
 
-    // 7. Mount dependency library binaries or archives passed via `-l, --lib`
+    // 7. Mount dependency library binaries or archives passed via --deps-package, --deps-binaries, or `-l, --lib`
     let mut temp_archive_directories: Vec<tempfile::TempDir> = Vec::new();
+
+    // 7a. Mount package dependencies (--deps-package)
+    for package_path in &args.deps_package {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("solix_compile_pkg_")
+            .tempdir()
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "Failed to create temporary directory for package extraction: {error}"
+                )
+            })?;
+        let loaded_archive =
+            solix_common::project::SlxpPackage::extract_and_load(package_path, temp_dir.path())
+                .map_err(|load_error| {
+                    anyhow::anyhow!(
+                        "Failed to extract dependency package '{}': {load_error}",
+                        package_path.display()
+                    )
+                })?;
+        for binary_program in loaded_archive.binaries {
+            options = options.with_dependency_binary(binary_program);
+        }
+        for secondary_program in loaded_archive.secondary_binaries {
+            options = options.with_dependency_binary(secondary_program);
+        }
+        temp_archive_directories.push(temp_dir);
+    }
+
+    // 7b. Mount standalone binary dependencies (--deps-binaries)
+    for binary_path in &args.deps_binaries {
+        let lib_bytes = fs::read(binary_path).with_context(|| {
+            format!(
+                "Failed to read dependency binary '{}'",
+                binary_path.display()
+            )
+        })?;
+        let lib_binary = BinaryProgram::from_bytes(&lib_bytes).with_context(|| {
+            format!(
+                "Failed to decode binary container from '{}'",
+                binary_path.display()
+            )
+        })?;
+        options = options.with_dependency_binary(lib_binary);
+    }
+
+    // 7c. Mount legacy `-l, --lib` files
     for lib_path in &args.libs {
         if lib_path
             .extension()
@@ -291,7 +399,7 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
 
     let elapsed = start_total.elapsed();
 
-    // 6. Output handling
+    // 9. Output handling
     if args.check {
         let is_json_metrics = args.metrics_json || args.metrics.as_deref() == Some("json");
         let is_text_metrics = args.metrics.as_deref() == Some("text");
@@ -442,4 +550,143 @@ pub fn execute_compile(args: CompileArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Executes `solix compile package [path]`.
+///
+/// # Errors
+/// Returns an error if project manifest is missing or compilation fails.
+pub fn execute_compile_package(args: CompilePackageArgs) -> Result<()> {
+    let project_root = solix_common::canonicalize_host_path(&args.path)
+        .with_context(|| format!("Failed to resolve package path '{}'", args.path.display()))?;
+
+    let manifest_path = find_parent_manifest(&project_root).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Cannot compile package at '{}': manifest.yaml not found",
+            project_root.display()
+        )
+    })?;
+
+    let manifest =
+        ProjectManifest::from_file(&manifest_path).map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let output_path = match args.output {
+        Some(explicit_out) => explicit_out,
+        None => project_root.join("binaries.slxb"),
+    };
+
+    execute_compile_package_to_output(
+        &project_root,
+        &manifest,
+        &args.profile,
+        &output_path,
+        args.pkg_dir.as_deref(),
+        args.check,
+    )?;
+
+    if !args.check {
+        println!(
+            "Compiled package '{}' to {}",
+            manifest.configuration.name,
+            output_path.display()
+        );
+    }
+
+    Ok(())
+}
+
+/// Compiles a package's sources directly into a destination binary container (`binaries.slxb`).
+///
+/// # Errors
+/// Returns an error if source files are missing or compilation fails.
+pub fn execute_compile_package_to_output(
+    project_root: &Path,
+    manifest_data: &ProjectManifest,
+    profile_name: &str,
+    output_slxb: &Path,
+    pkg_dir_override: Option<&Path>,
+    check_only: bool,
+) -> Result<()> {
+    let resolved_profile = manifest_data
+        .resolve_profile(profile_name)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let mut source_roots = Vec::new();
+    for rel_src in &resolved_profile.sources {
+        let candidate = if Path::new(rel_src).is_absolute() {
+            PathBuf::from(rel_src)
+        } else {
+            project_root.join(rel_src)
+        };
+        if candidate.exists() {
+            source_roots.push(candidate);
+        }
+    }
+    if source_roots.is_empty() {
+        bail!(
+            "No Solix source directories exist for profile '{}' (configured: {})",
+            resolved_profile.name,
+            resolved_profile.sources.join(", ")
+        );
+    }
+
+    let mut discovered_files = Vec::new();
+    for source_root in &source_roots {
+        if source_root.is_dir() {
+            collect_slx_sources_recursively(source_root, &mut discovered_files)?;
+        } else if source_root.is_file() {
+            discovered_files.push(source_root.clone());
+        }
+    }
+    if discovered_files.is_empty() {
+        bail!(
+            "No Solix source files (*.slx) found in profile '{}' sources",
+            resolved_profile.name
+        );
+    }
+
+    let mut dep_specs = Vec::new();
+    for (dep_name, dep_spec) in &resolved_profile.dependencies {
+        let formatted = if dep_spec.profile.is_empty() {
+            format!("{dep_name}@{}", dep_spec.version)
+        } else {
+            format!("{dep_name}@{}#{}", dep_spec.version, dep_spec.profile)
+        };
+        dep_specs.push(formatted);
+    }
+
+    let compiler_profile = if resolved_profile.name == "test" {
+        "test".to_string()
+    } else if resolved_profile.opt_level >= 2 && !resolved_profile.debug_symbols {
+        "release".to_string()
+    } else {
+        "debug".to_string()
+    };
+
+    execute_compile_source(CompileSourceArgs {
+        sources: discovered_files,
+        output: Some(output_slxb.to_path_buf()),
+        deps_source: Vec::new(),
+        deps_package: Vec::new(),
+        deps_binaries: Vec::new(),
+        deps: dep_specs,
+        libs: Vec::new(),
+        name: Some(manifest_data.configuration.name.clone()),
+        version: manifest_data.configuration.version.clone(),
+        description: manifest_data.configuration.description.clone(),
+        profile: compiler_profile,
+        emit_api: None,
+        check: check_only,
+        time: false,
+        metrics: None,
+        metrics_json: false,
+        inline_threshold: resolved_profile.inline_threshold,
+        entry: resolved_profile.entrypoint.clone(),
+        link: resolved_profile.link.clone(),
+        r#static: resolved_profile.is_static,
+        pkg_dir: pkg_dir_override.map(Path::to_path_buf),
+        install: false,
+        force: false,
+        no_verify: !resolved_profile.verify_checksum,
+    })
 }

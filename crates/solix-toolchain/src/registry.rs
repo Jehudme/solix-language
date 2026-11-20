@@ -340,14 +340,35 @@ impl PackageRegistry {
         package_version: Option<&str>,
         profile: Option<&str>,
     ) -> Result<Vec<PackageRecord>> {
+        self.unregister_matching(package_name, package_version, profile, None)
+    }
+
+    /// Removes matching package records filtered by kind from the registry and persists changes to disk.
+    pub fn unregister_matching(
+        &mut self,
+        package_name: &str,
+        package_version: Option<&str>,
+        profile: Option<&str>,
+        kind_filter: Option<&str>,
+    ) -> Result<Vec<PackageRecord>> {
         let mut removed_records = Vec::new();
         self.packages.retain(|existing| {
             let name_matches = existing.name == package_name;
             let version_matches = package_version.is_none_or(|version| existing.version == version);
             let profile_matches =
                 profile.is_none_or(|profile_target| existing.build_profile == profile_target);
+            let kind_matches = match kind_filter {
+                Some("package") => {
+                    existing.kind == "package"
+                        || existing.kind == "slxp"
+                        || existing.kind == "slxarc"
+                }
+                Some("binaries") => existing.kind == "binaries" || existing.kind == "slxb",
+                Some(other) => existing.kind.eq_ignore_ascii_case(other),
+                None => true,
+            };
 
-            if name_matches && version_matches && profile_matches {
+            if name_matches && version_matches && profile_matches && kind_matches {
                 removed_records.push(existing.clone());
                 false
             } else {

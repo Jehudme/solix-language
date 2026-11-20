@@ -154,7 +154,11 @@ public class Greeter {
     let record = greeter_record.unwrap();
     assert_eq!(record.name, "greeter");
     assert_eq!(record.version, "2.1.0");
-    assert_eq!(record.kind, "slxb");
+    assert!(
+        record.kind == "binaries" || record.kind == "slxb",
+        "Record kind must be binaries or slxb, got: {}",
+        record.kind
+    );
     assert!(!record.sha256.is_empty());
 }
 

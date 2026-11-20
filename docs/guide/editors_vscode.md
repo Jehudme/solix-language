@@ -46,7 +46,7 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 | `solix.debugTest` | `Debug Test Suite (solix dap --test)` | Starts interactive debugging of test runner. Wired to `Debug Test` CodeLens. |
 | `solix.showReferences` | `Show References` | Opens VS Code reference peek view for symbol references at target location. |
 | `solix.buildProject` | `Build Project (solix build)` | Builds the active workspace project into `.slxarc`. |
-| `solix.syncPackages` | `Reinstall Packages (solix reinstall --all)` | Runs `solix reinstall --all` and refreshes language server indexes. |
+| `solix.syncPackages` | `Refresh Packages` | Refreshes local package inventory and language server indexes. |
 | `solix.showDisassembly` | `Inspect 64-Bit Register VM Disassembly` | Opens a side-by-side virtual read-only tab (`solix-disasm://...`) showing disassembled 64-bit VM bytecode. |
 | `solix.showSynthesizedApi` | `Inspect Exported Public API (.slx)` | Opens a side-by-side virtual read-only tab (`solix-api://...`) showing public `.slx` API headers. |
 | `solix.restartServer` | `Restart Language Server` | Cleanly restarts the LanguageClient and re-analyzes all buffers. |

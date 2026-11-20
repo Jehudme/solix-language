@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 
 use crate::DEFAULT_FFI_GIT_TAG;
-use crate::cli::{NewArgs, NewNativeArgs, NewSubcommand};
+use crate::cli::{NewArgs, NewNativeArgs, NewPackageArgs, NewSubcommand};
 use anyhow::{Context, Result, bail};
 use solix_common::project::{NativeTargetConfig, ProjectManifest, find_manifest_path};
 use std::collections::BTreeMap;
@@ -87,15 +87,42 @@ fn to_snake_case(raw_name: &str) -> String {
 /// Returns an error if required arguments are missing, existing files conflict without
 /// `--force`, or filesystem scaffolding fails.
 pub fn execute_new(args: NewArgs) -> Result<()> {
-    if let Some(NewSubcommand::Native(native_args)) = args.subcommand {
-        return execute_new_native(native_args);
+    if let Some(subcmd) = args.subcommand {
+        return match subcmd {
+            NewSubcommand::Package(package_args) => execute_new_package(package_args),
+            NewSubcommand::Native(native_args) => execute_new_native(native_args),
+        };
     }
 
     let Some(raw_target_path) = args.path else {
         bail!(
-            "Missing required project path. Usage: `solix new <PATH>` or `solix new native <NAME>`"
+            "Missing required project path. Usage: `solix new package <PATH>` or `solix new native <NAME>`"
         );
     };
+
+    execute_new_package(NewPackageArgs {
+        path: raw_target_path,
+        name: args.name,
+        version: args.version,
+        description: args.description,
+        license: args.license,
+        authors: args.authors,
+        main: args.main,
+        test: args.test,
+        lib: args.lib,
+        native: args.native,
+        no_native: args.no_native,
+        deps: args.deps,
+        force: args.force,
+    })
+}
+
+/// Executes `solix new package <path>`.
+///
+/// # Errors
+/// Returns an error if existing files conflict without `--force`, or filesystem scaffolding fails.
+pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
+    let raw_target_path = args.path;
 
     let target_path = solix_common::canonicalize_host_path(&raw_target_path)
         .unwrap_or_else(|_| raw_target_path.clone());
@@ -149,7 +176,7 @@ pub fn execute_new(args: NewArgs) -> Result<()> {
     )?;
     fs::write(
         target_path.join(".gitignore"),
-        "/build/\n*.slxb\n*.slxarc\n",
+        "/build/\n*.slxb\n*.slxarc\n*.slxp\n",
     )?;
 
     let manifest_yaml = render_project_manifest_yaml(&ProjectManifestRenderSpec {

@@ -7,6 +7,8 @@ The `install` subcommand installs compiled Solix binary containers (`.slxb`), ar
 ## Synopsis
 
 ```bash
+solix install package <path> [options]
+solix install binaries <path.slxb> [options]
 solix install [<path>] [options]
 ```
 
@@ -16,7 +18,8 @@ solix install [<path>] [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `[path]` | Path | Optional | Path to a `.slxb` binary container, `.slxarc` archive file, or project root directory containing `manifest.yaml` (or legacy `manifest.toml`). Required unless `--bundled` or `--vscode` is specified. |
+| `<path>` | Path | **Yes** (for `package`/`binaries`) | Path to a `.slxp`/`.slxarc` package, project directory, or `.slxb` standalone binary container. |
+| `[path]` | Path | Optional | Path for top-level install fallback; required unless `--bundled` or `--vscode` is specified. |
 
 ---
 

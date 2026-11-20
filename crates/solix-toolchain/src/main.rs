@@ -18,6 +18,7 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
     }
 
     let mut run_args = RunArgs {
+        subcommand: None,
         binaries: Vec::new(),
         libs: Vec::new(),
         entry: None,
@@ -52,6 +53,9 @@ fn try_parse_fast_run_args() -> Option<RunArgs> {
             continue;
         }
         if !arg_str.starts_with('-') || arg_str == "-" {
+            if arg_str == "package" || arg_str == "source" {
+                return None;
+            }
             run_args.binaries.push(PathBuf::from(arg_str));
             continue;
         }

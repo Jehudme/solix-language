@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 
-use crate::cli::RunArgs;
+use crate::cli::{BuildArgs, RunArgs, RunPackageArgs, RunSourceArgs, RunSubcommand};
 use crate::diagnostics::render_diagnostics;
 use crate::registry::{PackageRecord, PackageRegistry, parse_package_spec};
 use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
@@ -62,6 +62,134 @@ fn parse_byte_size(size_str: &str) -> Result<usize> {
     }
 }
 
+/// Executes `solix run package <path>`.
+///
+/// # Errors
+/// Returns an error if building or executing the package fails.
+pub fn execute_run_package(args: RunPackageArgs) -> Result<i32> {
+    let resolved_target =
+        solix_common::canonicalize_host_path(&args.target).with_context(|| {
+            format!(
+                "Failed to resolve target package at '{}'",
+                args.target.display()
+            )
+        })?;
+
+    let effective_profile = args
+        .resolved_profile()
+        .unwrap_or_else(|| "release".to_string());
+
+    let (package_binary, entry_override) = if resolved_target.is_dir() {
+        let manifest_path = solix_common::project::find_manifest_path(&resolved_target)
+            .ok_or_else(|| {
+                anyhow::anyhow!("No manifest.yaml found in '{}'", resolved_target.display())
+            })?;
+        let manifest = solix_common::project::ProjectManifest::from_file(&manifest_path)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let package_name = manifest.configuration.name.clone();
+
+        let slxp_candidate = resolved_target
+            .join("build")
+            .join(&effective_profile)
+            .join(format!("{package_name}.slxp"));
+        let slxarc_candidate = resolved_target
+            .join("build")
+            .join(&effective_profile)
+            .join(format!("{package_name}.slxarc"));
+        let root_binaries = resolved_target.join("binaries.slxb");
+
+        let artifact_to_run = if slxp_candidate.exists() {
+            slxp_candidate
+        } else if slxarc_candidate.exists() {
+            slxarc_candidate
+        } else if root_binaries.exists() {
+            root_binaries
+        } else {
+            crate::commands::execute_build(BuildArgs {
+                path: resolved_target.clone(),
+                platform: None,
+                profile: Some(effective_profile.clone()),
+                debug: false,
+                release: false,
+                test: false,
+                pkg_dir: args.pkg_dir.clone(),
+                install: false,
+                force: true,
+                check_env: false,
+                target: None,
+            })?;
+            if slxp_candidate.exists() {
+                slxp_candidate
+            } else if slxarc_candidate.exists() {
+                slxarc_candidate
+            } else {
+                resolved_target
+                    .join("build")
+                    .join(&effective_profile)
+                    .join(format!("{package_name}.slxp"))
+            }
+        };
+        let entry_point = args.entry.or_else(|| manifest.main_entrypoint());
+        (artifact_to_run, entry_point)
+    } else {
+        (resolved_target, args.entry)
+    };
+
+    execute_run(RunArgs {
+        subcommand: None,
+        binaries: vec![package_binary],
+        libs: Vec::new(),
+        entry: entry_override,
+        profile: Some(effective_profile),
+        debug: args.debug,
+        release: args.release,
+        test: args.test,
+        inline_threshold: 8,
+        heap_size: args.heap_size,
+        max_stack: args.max_stack,
+        cycle_collector: args.cycle_collector,
+        cycle_threshold: args.cycle_threshold,
+        cycle_budget_us: args.cycle_budget_us,
+        verbose: args.verbose,
+        safe: args.safe,
+        metrics: args.metrics,
+        metrics_json: args.metrics_json,
+        args: args.args,
+        pkg_dir: args.pkg_dir,
+        no_verify: args.no_verify,
+    })
+}
+
+/// Executes `solix run source <file.slx>`.
+///
+/// # Errors
+/// Returns an error if compiling or executing the source file fails.
+pub fn execute_run_source(args: RunSourceArgs) -> Result<i32> {
+    execute_run(RunArgs {
+        subcommand: None,
+        binaries: args.sources,
+        libs: args.libs,
+        entry: args.entry,
+        profile: args.profile,
+        debug: args.debug,
+        release: args.release,
+        test: args.test,
+        inline_threshold: args.inline_threshold,
+        heap_size: args.heap_size,
+        max_stack: args.max_stack,
+        cycle_collector: args.cycle_collector,
+        cycle_threshold: args.cycle_threshold,
+        cycle_budget_us: args.cycle_budget_us,
+        verbose: args.verbose,
+        safe: args.safe,
+        metrics: args.metrics,
+        metrics_json: args.metrics_json,
+        args: args.args,
+        pkg_dir: args.pkg_dir,
+        no_verify: args.no_verify,
+    })
+}
+
 /// Executes the `run` subcommand.
 ///
 /// If any `.slx` source files are passed, they are automatically compiled on-the-fly
@@ -71,6 +199,13 @@ fn parse_byte_size(size_str: &str) -> Result<usize> {
 /// # Errors
 /// Returns an error if source compilation, binary loading, VM initialization, or execution fails.
 pub fn execute_run(args: RunArgs) -> Result<i32> {
+    if let Some(subcmd) = args.subcommand {
+        return match subcmd {
+            RunSubcommand::Package(package_args) => execute_run_package(package_args),
+            RunSubcommand::Source(source_args) => execute_run_source(source_args),
+        };
+    }
+
     let total_start = std::time::Instant::now();
     let binary_load_timer = std::time::Instant::now();
     let effective_profile_arg = args.resolved_profile();

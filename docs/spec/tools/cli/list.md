@@ -18,7 +18,7 @@ solix list [options]
 |---|---|---|---|---|
 | `--filter <query>` | `-f` | String | | Filters packages by matching substring in name or description. |
 | `--profile <prof>` | | String | | Filters packages by build profile (`debug`, `release`, `test`). |
-| `--kind <kind>` | `-k` | String | | Filters packages by container format (`slxb`, `slxarc`). |
+| `--kind <kind>` | `-k` | String | | Filters packages by container format (`package`, `binaries`, `slxp`, `slxb`, `slxarc`). |
 | `--sort <key>` | | String | `"name"` | Sort field: `name`, `version`, `date`, `size`, or `profile`. |
 | `--reverse` | `-r` | Flag | `false` | Reverses sort order. |
 | `--json` | | Flag | `false` | Output package inventory formatted as structured JSON. |
@@ -32,10 +32,10 @@ solix list [options]
 
 ```text
 Installed Solix Packages (/home/user/.solix/packages):
-NAME             VERSION    KIND    PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE
----------------- ---------- ------- -------- ---------- -------------------- --------------- --------------------
-solix            2.0.0      slxarc  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
-raylib           1.2.0      slxarc  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
+NAME             VERSION    KIND     PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE
+---------------- ---------- -------- -------- ---------- -------------------- --------------- --------------------
+solix            2.0.0      package  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
+raylib           1.2.0      package  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
 ```
 
 ### 2. JSON Output (`--json`)
@@ -49,7 +49,7 @@ solix list --json
   {
     "name": "solix",
     "version": "2.0.0",
-    "kind": "slxarc",
+    "kind": "package",
     "build_profile": "release",
     "sha256": "46747ea15ac6f2f15d462438a63fb9ef71581361ab5facca844c97a488d24812",
     "size_bytes": 698144,

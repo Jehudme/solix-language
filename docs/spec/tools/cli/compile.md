@@ -7,7 +7,8 @@ The `compile` subcommand compiles one or more Solix source files (`*.slx`) into 
 ## Synopsis
 
 ```bash
-solix compile <sources...> [options]
+solix compile source <sources...> [options]
+solix compile package [path] [options]
 ```
 
 ---
@@ -16,7 +17,8 @@ solix compile <sources...> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<sources...>` | Paths | **Yes** | One or more `.slx` source file paths or directories containing Solix source code. |
+| `<sources...>` | Paths | **Yes** (for `source`) | One or more `.slx` source file paths or directories containing Solix source code. |
+| `[path]` | Path | Optional (for `package`) | Package directory containing `manifest.yaml` (defaults to current directory). |
 
 ---
 
@@ -26,6 +28,9 @@ solix compile <sources...> [options]
 |---|---|---|---|---|
 | `--output <file>` | `-o` | Path | `<name>.slxb` | Destination file path for the compiled `.slxb` binary container. |
 | `--deps <spec>` | `-d` | String (Repeated) | `[]` | Package dependency requirements formatted as `<name>[:<profile>][@<version>]` (e.g. `-d raylib:release@5.5.0`). |
+| `--deps-source <path>` | | Path (Repeated) | `[]` | Additional Solix source file or directory dependencies to compile against. |
+| `--deps-package <path>` | | Path (Repeated) | `[]` | Package archive or package directory dependencies to link against. |
+| `--deps-binaries <path>` | | Path (Repeated) | `[]` | Precompiled `.slxb` binary containers to link against. |
 | `--deps-file <path>` | `-l` | Path (Repeated) | `[]` | Paths to external `.slxb` binaries or `.slxarc` archives whose API interfaces should be extracted and linked (visible alias `--lib`). |
 | `--name <name>` | `-n` | String | (Derived from sources) | Package or module identifier name. |
 | `--version <semver>` | `-V` | String | `"0.1.0"` | Semantic version string embedded into binary container metadata. |
@@ -41,7 +46,7 @@ solix compile <sources...> [options]
 | `--static` | | Flag | `false` | Shorthand for static linking mode (`--link static`), merging dependencies into a single self-contained binary. |
 | `--no-verify` | | Flag | `false` | Bypasses dependency cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
-| `--install` | | Flag | `false` | Automatically installs the compiled binary container into the local package store upon success (visible alias `--sync`). |
+| `--install` | | Flag | `false` | Automatically installs the compiled binary container into the local package store upon success. |
 | `--force-install` | `-f` | Flag | `false` | Overwrites existing package artifacts when `--install` is active. |
 
 ---
