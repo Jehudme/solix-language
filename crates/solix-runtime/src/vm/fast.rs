@@ -2467,7 +2467,7 @@ impl VirtualMachine {
         caller_dst: u16,
         caller_arg_start: usize,
         arg_count: usize,
-    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
+    ) -> Result<(*const Instruction, usize, usize, *mut Value, usize, u32), VmTrap> {
         let Some(meta) = self.context.function_meta.get(global_func_id as usize) else {
             return Err(function_not_found_error(global_func_id));
         };
@@ -2476,10 +2476,11 @@ impl VirtualMachine {
         };
         let call_result =
             self.invoke_native_callback_fast(native_callback, caller_arg_start, arg_count)?;
-        let (caller_func_id, resume_pc, caller_reg_base_offset) = {
+        let (caller_func_id, caller_binary_id, resume_pc, caller_reg_base_offset) = {
             let caller = self.current_frame_fast()?;
             (
                 caller.function_id as usize,
+                caller.binary_id as usize,
                 caller.pc as usize,
                 caller.register_base as usize,
             )
@@ -2496,6 +2497,8 @@ impl VirtualMachine {
             code_span.inst_len,
             resume_pc,
             caller_reg_base,
+            caller_binary_id,
+            code_span.static_base_offset,
         ))
     }
 
@@ -3183,7 +3186,7 @@ impl VirtualMachine {
         caller_dst: u16,
         caller_arg_start: usize,
         arg_count: usize,
-    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
+    ) -> Result<(*const Instruction, usize, usize, *mut Value, usize, u32), VmTrap> {
         if self.call_frames.len() >= self.context.options.max_call_stack_depth {
             return Err(stack_overflow_error(
                 self.call_frames.len(),
@@ -3267,7 +3270,14 @@ impl VirtualMachine {
         }
         // SAFETY: reg_base + num_regs <= self.register_stack.len() was ensured above.
         let reg_base_ptr = unsafe { self.register_stack.as_mut_ptr().add(reg_base) };
-        Ok((inst_ptr, inst_len, 0, reg_base_ptr))
+        Ok((
+            inst_ptr,
+            inst_len,
+            0,
+            reg_base_ptr,
+            binary_id,
+            code_span.static_base_offset,
+        ))
     }
 
     #[cold]
@@ -3278,7 +3288,7 @@ impl VirtualMachine {
         caller_dst: u16,
         caller_arg_start: usize,
         arg_count: usize,
-    ) -> Result<(*const Instruction, usize, usize, *mut Value), VmTrap> {
+    ) -> Result<(*const Instruction, usize, usize, *mut Value, usize, u32), VmTrap> {
         let Some(span) = self.func_code.get(global_func_id as usize).copied() else {
             return Err(function_not_found_error(global_func_id));
         };
@@ -3344,12 +3354,16 @@ impl VirtualMachine {
         let mut inst_len: usize = 0;
         let mut pc: usize;
         let mut reg_base: *mut Value;
+        let mut current_binary_id: usize;
+        let mut current_static_base: u32;
         let mut local_inst_count: u64 = 0;
 
         macro_rules! reload_frame {
             () => {
                 let curr = self.current_frame_fast()?;
                 inst_ptr = curr.inst_ptr;
+                current_binary_id = curr.binary_id as usize;
+                current_static_base = self.func_code[curr.function_id as usize].static_base_offset;
                 if SINGLE_STEP {
                     inst_len = self.func_code[curr.function_id as usize].inst_len;
                 }
@@ -3396,6 +3410,8 @@ impl VirtualMachine {
                 }
                 let caller_frame = self.current_frame_fast()?;
                 inst_ptr = caller_frame.inst_ptr;
+                current_binary_id = caller_frame.binary_id as usize;
+                current_static_base = self.func_code[caller_frame.function_id as usize].static_base_offset;
                 if SINGLE_STEP {
                     inst_len = self.func_code[caller_frame.function_id as usize].inst_len;
                 }
@@ -3479,9 +3495,8 @@ impl VirtualMachine {
                     }
 
                     OpCode::LoadF64 => {
-                        let binary_id = self.current_frame_fast()?.binary_id as usize;
                         let idx = inst.imm32() as usize;
-                        let val = self.const_pool_cache[binary_id][idx];
+                        let val = self.const_pool_cache[current_binary_id][idx];
                         // SAFETY: Destination register is within frame window
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = val;
@@ -3489,9 +3504,8 @@ impl VirtualMachine {
                     }
 
                     OpCode::LoadConst => {
-                        let binary_id = self.current_frame_fast()?.binary_id as usize;
                         let pool_idx = inst.imm32() as usize;
-                        let const_val = self.const_pool_cache[binary_id][pool_idx];
+                        let const_val = self.const_pool_cache[current_binary_id][pool_idx];
                         // SAFETY: Destination register is within frame window
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = const_val;
@@ -4210,6 +4224,8 @@ impl VirtualMachine {
                                 caller_frame.inst_ptr = span.inst_ptr;
                                 caller_frame.active_closure = None;
                                 inst_ptr = span.inst_ptr;
+                                current_binary_id = span.binary_id as usize;
+                                current_static_base = span.static_base_offset;
                                 pc = 0;
                                 continue 'dispatch_loop;
                             }
@@ -4228,7 +4244,14 @@ impl VirtualMachine {
                         let caller_arg_start = caller_frame.register_base as usize + arg_base;
 
                         flush_inst_count!();
-                        (inst_ptr, inst_len, pc, reg_base) = self.invoke_native_call_id(
+                        (
+                            inst_ptr,
+                            inst_len,
+                            pc,
+                            reg_base,
+                            current_binary_id,
+                            current_static_base,
+                        ) = self.invoke_native_call_id(
                             global_func_id,
                             caller_dst,
                             caller_arg_start,
@@ -4239,7 +4262,9 @@ impl VirtualMachine {
                     }
 
                     OpCode::CallVirtual => {
-                        let slot = inst.call_target() as usize;
+                        let raw_target = inst.call_target();
+                        let is_polymorphic = (raw_target & 0x8000) != 0;
+                        let slot = (raw_target & 0x7FFF) as usize;
                         let arg_base = inst.arg_base() as usize;
                         let obj_addr = read_nonnull_ref_fast(unsafe { &*reg_base.add(arg_base) })?;
                         let vtable_id = read_heap_u32_fast(&self.heap.buffer, obj_addr)?;
@@ -4258,25 +4283,28 @@ impl VirtualMachine {
                                 return Err(self.resolve_virtual_slot_error(vtable_id, slot));
                             }
                         };
-                        let caller_func_id = self.call_frames.last().map(|frame| frame.function_id);
-                        if let Some(func_id) = caller_func_id {
-                            let caller_pc = pc.saturating_sub(1);
-                            self.monomorphic_call_caches.insert(
-                                (func_id, caller_pc as u32),
-                                MonomorphicCallSite {
-                                    expected_vtable_id: vtable_id,
-                                    original_slot: slot as u16,
-                                    target_func_id: global_func_id,
-                                },
-                            );
-                            let quickened = Instruction::format_call(
-                                OpCode::CallVirtualDirect,
-                                inst.call_dst(),
-                                (global_func_id & 0xFFFF) as u16,
-                                inst.arg_base(),
-                                inst.arg_count(),
-                            );
-                            self.patch_instruction(func_id, caller_pc, quickened);
+                        if !is_polymorphic {
+                            let caller_func_id =
+                                self.call_frames.last().map(|frame| frame.function_id);
+                            if let Some(func_id) = caller_func_id {
+                                let caller_pc = pc.saturating_sub(1);
+                                self.monomorphic_call_caches.insert(
+                                    (func_id, caller_pc as u32),
+                                    MonomorphicCallSite {
+                                        expected_vtable_id: vtable_id,
+                                        original_slot: slot as u16,
+                                        target_func_id: global_func_id,
+                                    },
+                                );
+                                let quickened = Instruction::format_call(
+                                    OpCode::CallVirtualDirect,
+                                    inst.call_dst(),
+                                    (global_func_id & 0xFFFF) as u16,
+                                    inst.arg_base(),
+                                    inst.arg_count(),
+                                );
+                                self.patch_instruction(func_id, caller_pc, quickened);
+                            }
                         }
                         break 'call_dispatch (global_func_id, 0);
                     }
@@ -4300,7 +4328,7 @@ impl VirtualMachine {
                             let unquickened = Instruction::format_call(
                                 OpCode::CallVirtual,
                                 inst.call_dst(),
-                                site.original_slot,
+                                site.original_slot | 0x8000,
                                 inst.arg_base(),
                                 inst.arg_count(),
                             );
@@ -4612,10 +4640,7 @@ impl VirtualMachine {
                     }
 
                     OpCode::GetStatic => {
-                        let static_base = self.func_code
-                            [self.current_frame_fast()?.function_id as usize]
-                            .static_base_offset;
-                        let slot = (static_base + inst.imm32()) as usize;
+                        let slot = (current_static_base + inst.imm32()) as usize;
                         if slot >= self.static_slots.len() {
                             return Err(VmTrap::invalid_static_offset(
                                 slot as u32,
@@ -4631,10 +4656,7 @@ impl VirtualMachine {
                     }
 
                     OpCode::SetStatic => {
-                        let static_base = self.func_code
-                            [self.current_frame_fast()?.function_id as usize]
-                            .static_base_offset;
-                        let slot_idx = static_base + inst.imm32();
+                        let slot_idx = current_static_base + inst.imm32();
                         let val_to_set = unsafe { *reg_base.add(inst.dst() as usize) };
                         self.set_static_trap(slot_idx, val_to_set)?;
                     }
@@ -5478,9 +5500,8 @@ impl VirtualMachine {
                     }
 
                     OpCode::AddF64Imm => {
-                        let binary_id = self.current_frame_fast()?.binary_id as usize;
                         let const_index = inst.src2() as usize;
-                        let const_val = self.const_pool_cache[binary_id][const_index];
+                        let const_val = self.const_pool_cache[current_binary_id][const_index];
                         let const_num = match const_val {
                             Value::F64(num) => num,
                             _ => read_f64_fast(&const_val)?,
@@ -5497,9 +5518,8 @@ impl VirtualMachine {
                     }
 
                     OpCode::SubF64Imm => {
-                        let binary_id = self.current_frame_fast()?.binary_id as usize;
                         let const_index = inst.src2() as usize;
-                        let const_val = self.const_pool_cache[binary_id][const_index];
+                        let const_val = self.const_pool_cache[current_binary_id][const_index];
                         let const_num = match const_val {
                             Value::F64(num) => num,
                             _ => read_f64_fast(&const_val)?,
@@ -5516,9 +5536,8 @@ impl VirtualMachine {
                     }
 
                     OpCode::MulF64Imm => {
-                        let binary_id = self.current_frame_fast()?.binary_id as usize;
                         let const_index = inst.src2() as usize;
-                        let const_val = self.const_pool_cache[binary_id][const_index];
+                        let const_val = self.const_pool_cache[current_binary_id][const_index];
                         let const_num = match const_val {
                             Value::F64(num) => num,
                             _ => read_f64_fast(&const_val)?,
@@ -5817,12 +5836,21 @@ impl VirtualMachine {
                 }
                 inst_ptr = span.inst_ptr;
                 inst_len = span.inst_len;
+                current_binary_id = span.binary_id as usize;
+                current_static_base = span.static_base_offset;
                 pc = 0;
             } else {
                 if span.is_native {
                     flush_inst_count!();
                 }
-                (inst_ptr, inst_len, pc, reg_base) = self.dispatch_call_slow(
+                (
+                    inst_ptr,
+                    inst_len,
+                    pc,
+                    reg_base,
+                    current_binary_id,
+                    current_static_base,
+                ) = self.dispatch_call_slow(
                     call_func_id,
                     call_dst,
                     caller_arg_start,

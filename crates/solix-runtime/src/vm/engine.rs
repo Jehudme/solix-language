@@ -136,6 +136,11 @@ pub struct MonomorphicCallSite {
     pub target_func_id: u32,
 }
 
+impl MonomorphicCallSite {
+    /// Sentinel vtable ID indicating a polymorphic or megamorphic call site that should not quicken.
+    pub const POLYMORPHIC_VTABLE_ID: u32 = u32::MAX;
+}
+
 impl VirtualMachine {
     /// Constructs a new `VirtualMachine` instance from the given runtime context.
     ///

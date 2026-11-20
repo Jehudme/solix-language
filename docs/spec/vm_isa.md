@@ -194,7 +194,7 @@ Used for static, direct, and virtual function dispatch:
 | `0xEA` | `GetFieldF64` | A | `dst, obj, offset` | Direct 64-bit float field load from heap object payload: reads `float64` from `obj + offset` bypassing tag validation. |
 | `0xEB` | `SetFieldI32` | A | `val, obj, offset` | Direct 32-bit integer field store into heap object payload: writes `int32` to `obj + offset` bypassing reference counting. |
 | `0xEC` | `SetFieldF64` | A | `val, obj, offset` | Direct 64-bit float field store into heap object payload: writes `float64` to `obj + offset` bypassing reference counting. |
-| `0xED` | `CallVirtualDirect` | Call | `dst, target_fn, arg_base, arg_count` | Monomorphic quickened virtual call: invokes direct function target `target_fn` if vtable ID matches cached monomorphic call site; unquickens to `CallVirtual` on class miss. |
+| `0xED` | `CallVirtualDirect` | Call | `dst, target_fn, arg_base, arg_count` | Monomorphic quickened virtual call: invokes direct function target `target_fn` if vtable ID matches cached monomorphic call site; on class miss, unquickens to `CallVirtual` with the polymorphic bit (0x8000) set in target slot to avoid repeated quickening overhead. |
 
 ---
 
@@ -202,6 +202,7 @@ Used for static, direct, and virtual function dispatch:
 
 When a function executes, its activation record occupies a `CallFrame`:
 - **Sliding Register Base**: When calling `CallDirect(dst, fn_id, arg_base, arg_count)`, registers `r[arg_base .. arg_base + arg_count]` become `r[0 .. arg_count]` in the callee frame.
+- **Direct Dispatch Pointer Caching**: In `run_fast_trap`, `current_binary_id` and `current_static_base` are cached in local execution stack variables across frame transitions, enabling constant pool loads (`LoadF64`, `LoadConst`, `AddF64Imm`, `SubF64Imm`, `MulF64Imm`) and static slot offsets (`GetStatic`, `SetStatic`) to execute with zero vector indirection or frame lookup overhead.
 - **Max Call Stack Depth**: The virtual machine limits recursion to `65,536` frames, raising `RuntimeError::StackOverflow` if exceeded.
 
 ---
