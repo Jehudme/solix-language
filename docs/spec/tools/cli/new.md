@@ -102,6 +102,8 @@ vars:
   project_version: &proj_version "0.1.0"
   default_platforms: &host_platform
     - host
+  release_platforms: &release_platforms
+    - all
 
 configuration:
   name: my_app
@@ -119,7 +121,7 @@ profiles:
     static: true
     sources:
       - src
-    platforms: *host_platform
+    platforms: *release_platforms
     natives:
       my_app_bridge:
         profile: release
