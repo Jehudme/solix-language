@@ -3,7 +3,7 @@
 The `manifest.yaml` file is the declarative configuration descriptor for Solix projects, applications, and libraries. It defines package identity, self-contained build profiles, platform target expansion, pre/post compilation command hooks, auto-detected Cargo and CMake native subprojects, and dependency requirements.
 
 > [!NOTE]
-> `solix` also supports reading legacy `manifest.toml` manifests inside existing packages or older `.slxarc` containers during migration, while `manifest.yaml` (and `manifest.yml`) takes priority when present.
+> `solix` also supports reading legacy `manifest.toml` manifests inside existing packages during migration, while `manifest.yaml` (and `manifest.yml`) takes priority when present.
 
 ---
 
@@ -139,7 +139,7 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 | `sources` | List of Strings | `["src"]` (`["tests"]` for `test`) | Recursive directory paths to discover `.slx` source files. |
 | `platforms` | List of Strings | `["host"]` | OS names or architecture targets (see Platform Expansion below). |
 | `pre_compile` | List of Strings | `[]` | Shell/tool commands run sequentially before native and Solix compilation. |
-| `post_compile` | List of Strings | `[]` | Shell/tool commands run sequentially after `.slxarc` archive packaging. |
+| `post_compile` | List of Strings | `[]` | Shell/tool commands run sequentially after `.slxp` package packaging. |
 | `dependencies` | Mapping | `{}` | Profile-scoped dependency map (`name -> { version, profile }`). |
 | `natives` | Mapping | `{}` | Native subprojects compiled automatically for this profile. |
 
@@ -179,7 +179,7 @@ Under `profiles.<name>.natives.<key>`, each native entry omits any explicit `typ
 
 ### 5. `supported_platforms` & `native_library_checksums` Metadata (Generated)
 
-During `.slxarc` packaging, `solix build` and `scripts/release/merge_bundled_packages.py` embed top-level `supported_platforms` and cryptographic FIPS 180-4 SHA-256 digests (`native_library_checksums`) inside the packaged `manifest.yaml` across host and cross-compiled target directories (`lib/<target_triple>/`):
+During `.slxp` packaging, `solix build` and `scripts/release/merge_bundled_packages.py` embed top-level `supported_platforms` and cryptographic FIPS 180-4 SHA-256 digests (`native_library_checksums`) inside the packaged `manifest.yaml` across host and cross-compiled target directories (`bin/<target_triple>/`):
 
 ```yaml
 supported_platforms:
@@ -190,7 +190,7 @@ supported_platforms:
   - macos-aarch64
 
 native_library_checksums:
-  "lib/x86_64-unknown-linux-gnu/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
+  "bin/x86_64-unknown-linux-gnu/native_solixlib.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
 ```
 
-When installing or loading an `.slxarc` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxarcArchive::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`).
+When installing or loading an `.slxp` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxpPackage::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`). Companion native shared libraries must follow the `native_*` naming convention for dynamic loading into the VM FFI table.

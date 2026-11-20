@@ -45,7 +45,7 @@ Solix defines **13 primitive types** built into the compiler. They are never hea
 | Type | Description |
 |------|-------------|
 | `bool` | Boolean: `true` or `false` |
-| `char` | A single Unicode code point (stored as an integer) |
+| `char` | An 8-bit primitive ASCII character (`0x00`–`0x7F`, 1 byte, 1-byte alignment) |
 | `void` | The absence of a value; valid only as a method return type |
 
 ### Literals
@@ -62,7 +62,7 @@ float64 pi       = 3.141592653589793;
 ```
 
 > [!NOTE]
-> Character literals can be written directly using single quotes (e.g. `'A'`) or cast from integer Unicode code points (e.g. `(char)65`). Numeric literals coerce to smaller integer and float types automatically when the value fits the target range.
+> Character literals are written using single quotes (e.g. `'A'`) or cast from 8-bit integer ASCII values (e.g. `(char)65`). In Solix, `char` is an 8-bit primitive type representing ASCII characters (`0x00`–`0x7F`) with 1-byte storage and alignment. Numeric literals coerce to smaller integer and float types automatically when the value fits the target range.
 
 ---
 

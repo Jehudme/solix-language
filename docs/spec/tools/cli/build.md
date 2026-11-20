@@ -1,6 +1,6 @@
 # `solix build` — Project Manifest & Container Build
 
-The `build` subcommand orchestrates project building and packaging directly in Rust from `manifest.yaml` (with legacy `manifest.toml` compatibility). It runs `pre_compile` hooks, auto-detects Cargo (`Cargo.toml`) and CMake (`CMakeLists.txt`) native subprojects, compiles Solix source files, packages distributable `.slxp` (and legacy `.slxarc`) containers (`build/<profile>/<name>.slxp`), and runs `post_compile` hooks.
+The `build` subcommand orchestrates project building and packaging directly in Rust from `manifest.yaml` (with legacy `manifest.toml` compatibility). It runs `pre_compile` hooks, auto-detects Cargo (`Cargo.toml`) and CMake (`CMakeLists.txt`) native subprojects, compiles Solix source files, packages distributable `.slxp` containers (`build/<profile>/<name>.slxp`), and runs `post_compile` hooks.
 
 ---
 
@@ -55,7 +55,7 @@ flowchart TD
 ### Modernized Package Container Architecture (`.slxp`)
 * **Package Root Bytecode (`binaries.slxb`):** The primary compiled Solix bytecode is placed at the package root as `binaries.slxb`.
 * **Isolated Platform Directory (`bin/<target>/`):** Native modules targeting host or cross-compilation platforms are organized under `bin/<target_triple>/` (with fallback to `lib/<target_triple>/`).
-* **Dual Format Emission:** Emits modern `.slxp` (Solix Package) while generating `.slxarc` for seamless backward compatibility.
+* **Modern Container Emission:** Emits standard `.slxp` (Solix Package) format containing root `binaries.slxb` and target-tripled `bin/<target>/` native shared libraries.
 
 ### Dual-Mode Native Compilation & Dependency Platform Validation
 * **CMake (`CMakeLists.txt`):** `solix build` configures CMake with `-DSOLIX_NATIVE_BUILD=ON` and sets `SOLIX_NATIVE_BUILD=1`. When built outside `solix build`, the same CMake project builds cleanly as a standalone embeddable library.

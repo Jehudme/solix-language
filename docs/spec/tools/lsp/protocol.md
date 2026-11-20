@@ -180,7 +180,7 @@ The Solix VS Code extension embeds `solix.tmLanguage.json` for syntax tokenizati
 All text offset conversions from LSP coordinates (UTF-16/character columns) to byte indices clamp boundaries to valid UTF-8 character boundaries (`is_char_boundary` / `clamp_to_char_boundary`). Slicing within multi-byte UTF-8 sequences in strings or comments is strictly prevented.
 
 ### 7.2 External Package Index Caching
-To maintain sub-millisecond response latency during interactive typing, the LSP maintains an in-memory cache of resolved external package symbol indices (`PackageExportIndex`) keyed by `(package_name, profile, version, archive_mtime_secs)`. Modifications to installed `.slxarc` packages immediately invalidate cache entries via filesystem mtime detection.
+To maintain sub-millisecond response latency during interactive typing, the LSP maintains an in-memory cache of resolved external package symbol indices (`PackageExportIndex`) keyed by `(package_name, profile, version, archive_mtime_secs)`. Modifications to installed `.slxp` packages immediately invalidate cache entries via filesystem mtime detection.
 
 ### 7.3 Semantic Tokens Drift Resilience & Coordinate Sanitization
 Semantic tokens (`textDocument/semanticTokens/full`) utilize LSP 3.17 relative delta encoding (`delta_line`, `delta_start_character`, `length`, `token_type`, `token_modifiers`). To prevent semantic token desynchronization and mid-word color fragmentation during syntax errors:

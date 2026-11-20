@@ -350,6 +350,6 @@ This guarantees that resources (file descriptors, locks, sockets, memory buffers
 ### Further Reading
 - [`try` Keyword Reference](../wiki/keywords/control_flow/try.md): Protected execution scopes and exception interception.
 - [`throw` Keyword Reference](../wiki/keywords/control_flow/throw.md): Raising exceptions and propagating error states.
-- [Runtime Error Directory](../wiki/errors/runtime-errors.md): Complete index of runtime exception codes (`R0001`–`R0023`).
+- [Runtime Error Directory](../wiki/errors/runtime-errors.md): Complete index of runtime exception codes (`R0001`–`R0024`).
 - [Formal Exception Specification](../spec/statements/control_flow/try_catch_finally_statement.md): VM unwinding tables and cleanup opcodes.
 

@@ -27,7 +27,7 @@ int32 result = MathBridge::fast_add(15, 27);
 
 ## 2. Stable C-ABI: `SolixCValue`
 
-Values are passed across the native boundary using the 16-byte aligned `SolixCValue` structure (defined identically in [`ffi/rust`](../../ffi/rust/src/value.rs) and [`ffi/c/include/solix_ffi.h`](../../ffi/c/include/solix_ffi.h)):
+Values are passed across the native boundary using the `SolixCValue` structure (exact size 16 bytes, 8-byte alignment, defined identically in [`ffi/rust`](../../ffi/rust/src/value.rs) and [`ffi/c/include/solix_ffi.h`](../../ffi/c/include/solix_ffi.h)):
 
 ```rust
 #[repr(C)]
@@ -213,10 +213,10 @@ Then run a single build command:
 solix build --profile release
 ```
 
-During `solix build`, the pure-Rust build orchestrator executes `pre_compile` hooks, compiles every native subproject under `natives/` across all expanded target triples (`lib/<target_triple>/*`), embeds SHA-256 checksums in `manifest.yaml`, compiles Solix sources, packages the `.slxarc` container, and executes `post_compile` hooks.
+During `solix build`, the pure-Rust build orchestrator executes `pre_compile` hooks, compiles every native subproject under `natives/` across all expanded target triples (`bin/<target_triple>/native_*`), embeds SHA-256 checksums in `manifest.yaml`, compiles Solix sources, packages the `.slxp` container with root `binaries.slxb`, and executes `post_compile` hooks.
 
 > [!NOTE]
-> Native libraries are hermetically packaged inside `.slxarc` binaries. When executing or distributing your application, the Solix runtime automatically extracts and loads matching native shared libraries for the host operating system and CPU architecture.
+> Native libraries are hermetically packaged inside `.slxp` packages. When executing or distributing your application, the Solix runtime automatically extracts and loads matching native shared libraries starting with `native_` for the host operating system and CPU architecture without searching host system PATH.
 
 > [!IMPORTANT]
 > All native symbols declared with `native` must be exported and registered via `solix_register_natives`. Unresolved native symbols produce link errors during VM initialization.
@@ -236,4 +236,4 @@ During `solix build`, the pure-Rust build orchestrator executes `pre_compile` ho
 - **Further Reading**:
   - [Native FFI & ABI Specification](../spec/native_interop.md)
   - [native Keyword Modifier Reference](../wiki/keywords/modifiers/native.md)
-  - [Binary Packaging Specification](../spec/binary-formats-slxb-and-slxarc.md)
+  - [Binary Packaging Specification](../spec/binary-formats-slxb-and-slxp.md)

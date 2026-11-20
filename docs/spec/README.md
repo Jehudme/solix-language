@@ -14,7 +14,7 @@ Per [`GL-0012`](../guidelines/authoring-features-and-wiki.md), specifications se
 * [**64-Bit Register VM ISA & Opcode Matrix**](vm_isa.md): Register execution model, Instruction Formats A/B/C/Call, sliding register window ABI, opcode taxonomy, and modular multi-entrypoint lifecycle.
 * [**Disassembly Format (`.slxasm` / `.slxdasm`)**](disassembly-format-slxasm.md): Constant pools, vtables, `.function` headers, operand syntax, instruction flags, and exception tables.
 * [**Optimizer & AST Inliner**](optimizer-and-inliner.md): Dead-code elimination, leaf function inlining, LICM constant hoisting, and peephole superinstruction fusion.
-* [**Binary Formats (`.slxb` & `.slxarc`)**](binary-formats-slxb-and-slxarc.md): On-disk bytecode binary containers and cross-platform archive packaging layouts.
+* [**Binary Formats (`.slxb` & `.slxp`)**](binary-formats-slxb-and-slxp.md): On-disk bytecode binary containers and cross-platform package layouts.
 * [**Package Solver & Dual-Mode Linking**](package-solver-and-linking.md): SemVer dependency resolution, profile fallback, dynamic quickening, and static linking.
 * [**Native Interoperability & C-FFI ABI**](native_interop.md): C-ABI bridge, `solix-ffi` SDK, plugin loader, data layout conversions, and dynamic shared library integration.
 

@@ -1,6 +1,6 @@
 # Solix Language Reference: Statements & Constructs
 
-This directory contains the practical, code-first language reference for all 37 statements, declarations, and expressions in Solix.
+This directory contains the practical, code-first language reference for all 43 specification documents (representing 44 language constructs, including `assert` and `exit` intrinsics) in Solix.
 
 Each document focuses strictly on the architecture and mechanics of the construct:
 1. **Overview & Purpose**: Direct, plain-English explanation of what the construct does, why it exists, and its core language rules.

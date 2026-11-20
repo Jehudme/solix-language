@@ -1,6 +1,6 @@
 # `solix export` — Package and Binary Export
 
-The `export` subcommand exports packaged containers (`.slxp` or `.slxarc`) or compiled bytecode binaries (`.slxb`) to designated destination directories or archive paths for distribution.
+The `export` subcommand exports packaged containers (`.slxp`) or compiled bytecode binaries (`.slxb`) to designated destination directories or package paths for distribution.
 
 ---
 

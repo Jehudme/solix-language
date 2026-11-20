@@ -17,7 +17,7 @@ Solix produces human-readable register VM assembly listings from either source c
 # Emit .slxasm alongside compiled .slxb during compilation
 solix compile src/main.slx --emit-disassembly
 
-# Inspect an existing .slxb or .slxarc archive on stdout
+# Inspect an existing .slxb or .slxp package on stdout
 solix info build/release/app.slxb --disasm
 ```
 

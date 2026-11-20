@@ -2,7 +2,7 @@
 
 Solix is a statically typed, high-performance object-oriented programming language designed for predictable memory management through Automatic Reference Counting (ARC) and a register-based virtual machine.
 
-This guide provides a practical, hands-on walkthrough for setting up the toolchain, scaffolding new projects, running code directly on-the-fly, building distributable archive packages (`.slxarc`), inspecting binary containers (`.slxb`), and managing local dependencies with the `solix` CLI.
+This guide provides a practical, hands-on walkthrough for setting up the toolchain, scaffolding new projects, running code directly on-the-fly, building distributable packages (`.slxp`), inspecting binary containers (`.slxb`), and managing local dependencies with the `solix` CLI.
 
 ---
 
@@ -90,10 +90,10 @@ solix <subcommand> [options] [arguments...]
 |---|---|---|
 | `new` | Scaffolds a project workspace (`manifest.yaml`, tests, optional `c`/`cpp`/`rust` native) or adds a native library via `solix new native` | [docs/spec/tools/cli/new.md](../spec/tools/cli/new.md) |
 | `compile` | Directly compiles source files into executable bytecode (`.slxb`) | [docs/spec/tools/cli/compile.md](../spec/tools/cli/compile.md) |
-| `build` | Builds multi-file projects into distribution archive packages (`.slxarc`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
-| `run` | Executes bytecode containers, archive packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](../spec/tools/cli/run.md) |
+| `build` | Builds multi-file projects into distribution packages (`.slxp`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
+| `run` | Executes bytecode containers, packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](../spec/tools/cli/run.md) |
 | `info` | Inspects container metadata, disassembles bytecode, or reconstructs APIs | [docs/spec/tools/cli/info.md](../spec/tools/cli/info.md) |
-| `install` | Installs `.slxb` binaries or `.slxarc` archives into the local package store | [docs/spec/tools/cli/install.md](../spec/tools/cli/install.md) |
+| `install` | Installs `.slxb` binaries or `.slxp` packages into the local package store | [docs/spec/tools/cli/install.md](../spec/tools/cli/install.md) |
 | `uninstall` | Removes installed packages or specific versions from the local store | [docs/spec/tools/cli/uninstall.md](../spec/tools/cli/uninstall.md) |
 | `list` | Lists all installed packages and versions | [docs/spec/tools/cli/list.md](../spec/tools/cli/list.md) |
 | `doc` | Generates static HTML or Markdown API documentation from source doc comments | [docs/spec/tools/cli/doc.md](../spec/tools/cli/doc.md) |
@@ -279,24 +279,24 @@ solix run bin/hello_solix.slxb
 
 ## Building Projects (`solix build`)
 
-For projects with `manifest.yaml` (or legacy `manifest.toml`), use `solix build` to execute `pre_compile` hooks, auto-detect and build CMake/Cargo native extensions, stage resources, compile Solix source code, and assemble a single distributable archive container (`.slxarc`):
+For projects with `manifest.yaml` (or legacy `manifest.toml`), use `solix build` to execute `pre_compile` hooks, auto-detect and build CMake/Cargo native extensions, stage resources, compile Solix source code, and assemble a single distributable package container (`.slxp`):
 
 ### 1. Debug Build (Default)
 ```bash
 solix build
 ```
-Creates: `build/debug/hello_solix.slxarc`.
+Creates: `build/debug/hello_solix.slxp`.
 
 ### 2. Optimized Release Build
 ```bash
 solix build --release
 ```
-Creates: `build/release/hello_solix.slxarc`.
+Creates: `build/release/hello_solix.slxp`.
 
-### Running Built Archives
-Execute the archive package directly with `solix run`:
+### Running Built Packages
+Execute the package directly with `solix run`:
 ```bash
-solix run build/release/hello_solix.slxarc
+solix run build/release/hello_solix.slxp
 ```
 
 The VM runtime automatically extracts the manifest, stages native libraries in memory, configures resource access, and executes the `[entrypoints].main` method.
@@ -322,25 +322,25 @@ To build and run tests:
 solix build --test
 
 # Execute test suite entrypoint
-solix run --test build/test/hello_solix.slxarc
+solix run --test build/test/hello_solix.slxp
 ```
 
 ---
 
 ## Inspecting Containers & Disassembly (`solix info`)
 
-The `solix info` command inspects compiled `.slxb` binaries and `.slxarc` archive containers.
+The `solix info` command inspects compiled `.slxb` binaries and `.slxp` package containers.
 
 ### Inspect Container Summary
 ```bash
-solix info build/release/hello_solix.slxarc
+solix info build/release/hello_solix.slxp
 ```
 
 Displays package metadata, entry points, contained files with compressed and uncompressed byte sizes, and native shared libraries.
 
 ### Disassemble Virtual Machine Instructions (`--disasm`)
 ```bash
-solix info build/release/hello_solix.slxarc --disasm
+solix info build/release/hello_solix.slxp --disasm
 ```
 
 Outputs the disassembled 64-bit Register VM opcodes (`Format A`, `Format B`, `Format Call`), registers, and constant pool entries.
@@ -354,31 +354,31 @@ Emits the public API interface source code (`.slx`) reconstructed directly from 
 
 ### Output JSON Metadata (`--json`)
 ```bash
-solix info build/release/hello_solix.slxarc --json
+solix info build/release/hello_solix.slxp --json
 ```
 
 ---
 
-## Local Package Management (`install`, `sync`, `list`, `uninstall`)
+## Local Package Management (`install`, `list`, `uninstall`, `export`)
 
-Solix includes local package store management commands (`install`, `sync`, `list`, `uninstall`) for sharing libraries across projects on your local machine with end-to-end cryptographic SHA-256 verification.
+Solix includes local package store management commands (`install`, `list`, `uninstall`, `export`) for sharing libraries across projects on your local machine with end-to-end cryptographic SHA-256 verification.
 
 The local package store resides at `~/.solix/packages/` (or `%USERPROFILE%\.solix\packages` on Windows), managed by an automatic self-healing registry manifest at `registry.json`.
 
 ### 1. Install a Package (`solix install`)
-You can install precompiled `.slxb` binaries, `.slxarc` archives, or install directly from a project folder:
+You can install precompiled `.slxb` binaries, `.slxp` packages, or install directly from a project folder:
 
 ```bash
 # Install directly from a library project directory (builds and registers source folder)
-solix install ../libraries/solixlib --release
+solix install package ../libraries/solixlib --release
 
 # Automatically install on build or compile
 solix build --release --install
-solix compile src/math.slx --name math_utils --version 1.0.0 --install
+solix compile source src/math.slx --name math_utils --version 1.0.0 --install
 
 # Install precompiled containers
-solix install build/release/raylib.slxarc
-solix install build/release/math_utils.slxb
+solix install package build/release/raylib.slxp
+solix install binaries build/release/math_utils.slxb
 ```
 
 > [!NOTE]
@@ -388,7 +388,7 @@ solix install build/release/math_utils.slxb
 To package libraries or binaries for distribution, use `solix export`:
 
 ```bash
-# Export a built package archive container
+# Export a built package container
 solix export package ./solixlib --output ./dist/solixlib.slxp
 
 # Export standalone bytecode binaries
@@ -404,17 +404,17 @@ solix list
 # Filter and sort packages
 solix list --filter math
 solix list --profile release
-solix list --kind slxarc --sort size --reverse
+solix list --kind package --sort size --reverse
 solix list --json
 ```
 
 Output:
 ```text
 Installed Solix Packages (/home/user/.solix/packages):
-NAME             VERSION    KIND    PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE DIR
----------------- ---------- ------- -------- ---------- -------------------- --------------- --------------------
-solix            2.0.0      slxarc  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
-raylib           1.2.0      slxarc  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
+NAME             VERSION    KIND     PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE DIR
+---------------- ---------- -------- -------- ---------- -------------------- --------------- --------------------
+solix            2.0.0      package  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
+raylib           1.2.0      package  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
 ```
 
 ### 4. Inspect Packages & Modules (`solix info`)
@@ -433,11 +433,11 @@ solix info solix --json
 
 ### 5. Uninstall a Package (`solix uninstall`)
 ```bash
-# Uninstall an exact version
-solix uninstall math_utils@0.1.0
+# Uninstall an exact package version
+solix uninstall package math_utils@0.1.0
 
-# Uninstall all versions of a package
-solix uninstall math_utils
+# Uninstall binaries
+solix uninstall binaries math_utils
 ```
 
 ### 6. Cryptographic Verification & Bypassing Checks (`--no-verify`)

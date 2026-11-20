@@ -701,8 +701,10 @@ jobs:
           for dir in crates/solix-toolchain/assets/packages/*@*; do
             dir_name=$(basename "$dir")
             pkg_id="${dir_name%%@*}"
-            for arc in "$dir"/*.slxarc; do
-              cp "$arc" "target/distrib/${pkg_id}.slxarc"
+            for arc in "$dir"/*.slxp "$dir"/*.slxarc; do
+              if [ -f "$arc" ]; then
+                cp "$arc" "target/distrib/${pkg_id}.slxp"
+              fi
             done
           done
 
@@ -745,7 +747,7 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
-            target/distrib/*.slxarc
+            target/distrib/*.slxp
 
   build-global-artifacts:
     name: Build Global Release Installers

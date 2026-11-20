@@ -1,6 +1,6 @@
 # `solix install` — Package Installation
 
-The `install` subcommand installs compiled Solix binary containers (`.slxb`), archive packages (`.slxarc`), or project source directories into the local package store, making them available for dependency resolution across Solix projects.
+The `install` subcommand installs compiled Solix binary containers (`.slxb`), packages (`.slxp`), or project source directories into the local package store, making them available for dependency resolution across Solix projects.
 
 ---
 
@@ -18,7 +18,7 @@ solix install [<path>] [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<path>` | Path | **Yes** (for `package`/`binaries`) | Path to a `.slxp`/`.slxarc` package, project directory, or `.slxb` standalone binary container. |
+| `<path>` | Path | **Yes** (for `package`/`binaries`) | Path to a `.slxp` package, project directory, or `.slxb` standalone binary container. |
 | `[path]` | Path | Optional | Path for top-level install fallback; required unless `--bundled` or `--vscode` is specified. |
 
 ---
@@ -62,30 +62,30 @@ solix install ../libraries/solixlib --profile release --force
 
 When `<path>` points to a project directory containing `manifest.yaml` (or legacy `manifest.toml`):
 1. Solix builds the project with the requested profile (`solix build <dir> --profile <profile>`).
-2. Locates the emitted `.slxarc` archive in `build/<profile>/<name>.slxarc`.
+2. Locates the emitted `.slxp` package in `build/<profile>/<name>.slxp`.
 3. Validates native library SHA-256 checksums and warms the authenticated extract cache at `~/.solix/cache/packages/`.
-4. Copies the archive to `<pkg_dir>/<name>-<profile>@<version>/<name>.slxarc`.
+4. Copies the package to `<pkg_dir>/<name>-<profile>@<version>/<name>.slxp`.
 5. Records the canonical `source`, `build_profile`, `sha256`, `size_bytes`, and timestamps into `$SOLIX_PKG_DIR/registry.json`.
 
 ```bash
-solix install ./libraries/solixlib --profile release
+solix install package ./libraries/solixlib --profile release
 ```
 
-### 4. Container Installation (`.slxb` & `.slxarc`)
+### 4. Container Installation (`.slxb` & `.slxp`)
 
-When installing a `.slxb` or `.slxarc` file directly:
+When installing a `.slxb` or `.slxp` file directly:
 1. Solix verifies the container header, computes the artifact's SHA-256 digest, and parses metadata.
-2. If `.slxarc`, extracts and validates bundled native library checksums against `manifest.yaml` (`manifest.toml` for legacy archives) and warms `~/.solix/cache/packages/`.
+2. If `.slxp`, extracts and validates bundled native library checksums against `manifest.yaml` (`manifest.toml` for legacy archives) and warms `~/.solix/cache/packages/`.
 3. Copies the container artifact into `<pkg_dir>/<name>-<profile>@<version>/<name>.<ext>`.
 4. Registers the package entry in `registry.json`.
 
 ```bash
-solix install build/release/raylib.slxarc --force
+solix install package build/release/raylib.slxp --force
 ```
 
 ### 5. Bundled Standard Libraries Installation (`--bundled`)
 
-When invoked with `--bundled`, Solix locates bundled first-party `.slxarc` archives (checking `SOLIX_BUNDLED_PACKAGES_DIR`, sibling `<exe_dir>/assets/packages/`, workspace assets, or materializing the compile-time embedded archives into `~/.solix/cache/bundled_packages/`) and installs the `release` profile packages of `solix` and `raylib` into `$SOLIX_PKG_DIR`.
+When invoked with `--bundled`, Solix locates bundled first-party packages (checking `SOLIX_BUNDLED_PACKAGES_DIR`, sibling `<exe_dir>/assets/packages/`, workspace assets, or materializing the compile-time embedded archives into `~/.solix/cache/bundled_packages/`) and installs the `release` profile packages of `solix` and `raylib` into `$SOLIX_PKG_DIR`.
 
 ```bash
 # Re-extract bundled standard libraries

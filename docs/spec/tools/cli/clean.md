@@ -45,7 +45,7 @@ Cleaned '/path/to/project/build': Reclaimed 14.2 MB across 48 file(s).
 
 ### 2. Cache-Only Cleanup (`--cache-only`)
 
-Passing `--cache-only` removes strictly the `build/.cache/` directory while preserving final distribution packages (such as `build/release/<name>.slxarc`):
+Passing `--cache-only` removes strictly the `build/.cache/` directory while preserving final distribution packages (such as `build/release/<name>.slxp`):
 
 ```bash
 solix clean --cache-only

@@ -17,7 +17,7 @@ The standard library specifications cover every module family shipped inside `so
 - [`linear_collections.md`](linear_collections.md) — Stack, Queue, Deque, and linear buffers
 - [`collections_core.md`](collections_core.md) — Collection interfaces, iterators, and enumeration contracts
 - [`primitives.md`](primitives.md) — Primitive boxing wrappers, parsing, and bit-level inspection
-- [`resource.md`](resource.md) — Embedded asset extraction from `.slxarc` containers
+- [`resource.md`](resource.md) — Embedded asset extraction from `.slxp` containers
 - [`scaffolding.md`](scaffolding.md) — Project templates, boilerplate scaffolding, and test harnesses
 - [`json.md`](json.md) — Structured JSON parsing and JSON pointer queries
 - [`net.md`](net.md) — Cross-platform TCP/UDP sockets and HTTP client

@@ -1294,11 +1294,11 @@ impl BindingError {
             Self::IncompatibleDependencyVersion { .. } => "E0289",
             Self::ExternalPackageNotFound { .. } => "E0290",
             Self::DependencyChecksumMismatch { .. } => "E0291",
-            Self::SwitchClassMissingEqualityOperator { .. } => "E0310",
-            Self::IncompatibleSwitchCaseType { .. } => "E0311",
-            Self::DuplicateSwitchCaseConstant { .. } => "E0312",
-            Self::InvalidSwitchPatternTarget { .. } => "E0313",
-            Self::TupleArityMismatchInCase { .. } => "E0314",
+            Self::SwitchClassMissingEqualityOperator { .. } => "E0292",
+            Self::IncompatibleSwitchCaseType { .. } => "E0293",
+            Self::DuplicateSwitchCaseConstant { .. } => "E0294",
+            Self::InvalidSwitchPatternTarget { .. } => "E0295",
+            Self::TupleArityMismatchInCase { .. } => "E0296",
         }
     }
 

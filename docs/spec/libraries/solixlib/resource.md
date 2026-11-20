@@ -2,10 +2,10 @@
 
 ## Overview
 
-The `solix.io.filesystem.Resource` class and accompanying dual-location filesystem APIs provide first-class access to packaged application resources (`resources/` directory within `.slxarc` application bundles or local project development root).
+The `solix.io.filesystem.Resource` class and accompanying dual-location filesystem APIs provide first-class access to packaged application resources (`resources/` directory within `.slxp` application packages or local project development root).
 
 Solix programs can selectively read from either:
-1. **Application Resources**: Internal assets bundled inside the `.slxarc` package (e.g., config templates, UI shaders, default databases, localization catalogs).
+1. **Application Resources**: Internal assets bundled inside the `.slxp` package (e.g., config templates, UI shaders, default databases, localization catalogs).
 2. **Host Filesystem**: External files and directories located on the host operating system.
 
 ---
@@ -17,7 +17,7 @@ Static utilities for inspecting, locating, and reading bundled application resou
 ### Static Methods
 
 - `static String get_resource_directory()`:
-  Returns the absolute path to the active application resource root. When executing from a `.slxarc` bundle, this points to the unpacked cache directory for bundled resources. In development mode (`solix run .`), it falls back to `<project_root>/resources`.
+  Returns the absolute path to the active application resource root. When executing from a `.slxp` package, this points to the unpacked cache directory for bundled resources. In development mode (`solix run .`), it falls back to `<project_root>/resources`.
 - `static String get_path(String rel_path)`:
   Resolves a relative resource path against the application resource root, returning a normalized absolute path string. If `rel_path` is `null`, returns `get_resource_directory()`.
 - `static bool exists(String rel_path)`:

@@ -1,6 +1,6 @@
 # `solix run` — Virtual Machine Execution
 
-The `run` subcommand executes Solix bytecode binary containers (`*.slxb`), application archive packages (`*.slxarc`), or compiles and runs raw source files (`*.slx`) on-the-fly in the 64-bit Register Virtual Machine.
+The `run` subcommand executes Solix bytecode binary containers (`*.slxb`), application packages (`*.slxp`), or compiles and runs raw source files (`*.slx`) on-the-fly in the 64-bit Register Virtual Machine.
 
 ---
 
@@ -20,7 +20,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 |---|---|---|---|
 | `[target]` | Path | Optional (for `package`) | Path to a Solix project root directory or `.slxp` package archive (defaults to current directory). |
 | `<sources...>` | Paths | **Yes** (for `source`) | One or more `.slx` source files to compile in-memory and execute directly. |
-| `<binaries...>` | Paths | **Yes** (for direct invocation) | One or more `.slxb` binary containers, `.slxarc` archives, or `.slx` source files to execute. |
+| `<binaries...>` | Paths | **Yes** (for direct invocation) | One or more `.slxb` binary containers, `.slxp` packages, or `.slx` source files to execute. |
 
 ---
 
@@ -28,7 +28,7 @@ solix run <binaries...> [options] [-- [guest_args...]]
 
 | Option | Shorthand | Type | Default | Description |
 |---|---|---|---|---|
-| `--lib <path>` | `-l` | Path (Repeated) | `[]` | Additional library files or native shared libraries to load (`*.slxb`, `*.slxarc`, `*.so`, `*.dll`, `*.dylib`). |
+| `--lib <path>` | `-l` | Path (Repeated) | `[]` | Additional library files or native shared libraries to load (`*.slxb`, `*.slxp`, `*.so`, `*.dll`, `*.dylib`). |
 | `--entry <symbol>` | `-e` | String | None | Overrides default entry point symbol (e.g. `Main::main`). If the specified entrypoint symbol does not exist in the loaded program or archive container, execution halts immediately with diagnostic code `[E0301]`. |
 | `--profile <profile>` | `-p` | String | None | Target build profile to execute (e.g. `release`, `debug`, `test`). |
 | `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for AST inlining when compiling `.slx` sources. |
@@ -64,25 +64,25 @@ When given a compiled `.slxb` container, the VM decodes the binary, initializes 
 solix run bin/app.slxb
 ```
 
-### 3. Archive Container (`*.slxarc`)
+### 3. Package Container (`*.slxp`)
 
-When given an archive container, the runtime:
+When given a package container, the runtime:
 1. Inspects embedded `manifest.yaml` (or legacy `manifest.toml`).
-2. Automatically stages and loads bundled native shared libraries (`lib/<target_triple>/*`).
-3. Sets `SOLIX_RESOURCE_ROOT` to the archive resources directory.
+2. Automatically stages and loads bundled companion native shared libraries matching `native_*` in `bin/<target_triple>/*` (with fallback to `lib/<target_triple>/*`).
+3. Sets `SOLIX_RESOURCE_ROOT` to the package resources directory.
 4. Selects the target entry point using strict precedence:
    - Explicit `--entry <symbol>` override on the CLI (validating symbol existence, throwing `[E0301]` on missing entrypoint).
    - Explicit `--profile <profile>` (or package spec profile such as `pkg:test`), resolving `profiles.<profile>.entrypoint` from the bundled manifest.
-   - The compiled entry point recorded in the primary `.slxb` container (`entry_point_id` / `entry_point`), so archives built with `--test` or custom profiles execute their built entrypoint without extra CLI flags.
+   - The compiled entry point recorded in the root `binaries.slxb` container (`entry_point_id` / `entry_point`), so packages built with `--test` or custom profiles execute their built entrypoint without extra CLI flags.
    - Fallback to `profiles.<build_profile>.entrypoint` or `profiles.release.entrypoint` when no entry point is embedded in the binary.
 5. Invokes the entry point in the VM.
 
 ```bash
 # Run application
-solix run build/release/my_app.slxarc
+solix run build/release/my_app.slxp
 
 # Run test profile container
-solix run build/test/my_app.slxarc
+solix run build/test/my_app.slxp
 ```
 
 ### 4. Installed Package Execution
@@ -111,7 +111,7 @@ solix run my-app --profile debug
 All arguments placed after `--` are passed directly into the guest Solix program:
 
 ```bash
-solix run build/release/my_app.slxarc -- --port 8080 --host 0.0.0.0
+solix run build/release/my_app.slxp -- --port 8080 --host 0.0.0.0
 ```
 
 ---

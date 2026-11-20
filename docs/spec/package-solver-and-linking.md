@@ -67,12 +67,12 @@ The local package store organizes artifacts using strict versioned directory pat
 ~/.solix/packages/
 ├── solix/
 │   ├── 1.0.0/
-│   │   └── solix.slxarc
+│   │   └── solix.slxp
 │   └── 2.0.0/
-│       └── solix.slxarc
+│       └── solix.slxp
 └── raylib/
     └── 5.0.0/
-        └── raylib.slxarc
+        └── raylib.slxp
 ```
 
 Resolution Priority:
@@ -107,7 +107,7 @@ Solix supports two complementary binary linking strategies:
 
 1. **Dynamic Linking (`--link dynamic`, default):**
    * Dependencies are resolved at runtime via the local package store (`~/.solix/packages`).
-   * Compiled `.slxb` and `.slxarc` archives only bundle project-local bytecode and native extensions.
+   * Compiled `.slxb` and `.slxp` packages only bundle project-local bytecode and native extensions.
 
 2. **Static Linking (`--link static`):**
    * Transitive bytecode dependencies are merged into a single consolidated binary payload.

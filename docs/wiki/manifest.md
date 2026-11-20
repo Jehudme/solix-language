@@ -135,7 +135,7 @@ Every profile under `profiles.<profile_name>` is **strictly self-contained**:
 | `sources` | List of Strings | `["src"]` | `["src"]` | `["tests"]` | Directories scanned recursively for `.slx` files |
 | `platforms` | List of Strings | `["host"]` | `["host"]` | `["host"]` | Target OS tokens, `<os>-<arch>` pairs, or Rust triples |
 | `pre_compile` | List of Strings | `[]` | `[]` | `[]` | Commands executed sequentially before native & Solix compilation |
-| `post_compile` | List of Strings | `[]` | `[]` | `[]` | Commands executed sequentially after `.slxarc` packaging |
+| `post_compile` | List of Strings | `[]` | `[]` | `[]` | Commands executed sequentially after `.slxp` packaging |
 | `dependencies` | Mapping | `{}` | `{}` | `{}` | Profile-scoped dependency requirements |
 | `natives` | Mapping | `{}` | `{}` | `{}` | Auto-detected native subprojects compiled for this profile |
 
@@ -163,7 +163,7 @@ Commands run in sequence from the project root directory with helper environment
 * `SOLIX_BIN` — Path to the active `solix` executable
 * `SOLIX_STAGE_DIR` — Build staging directory under `build/.cache/stage/<profile>/`
 * `SOLIX_CACHE_DIR` — Build cache directory (`build/.cache/`)
-* `SOLIX_OUTPUT_SLXARC` — Destination path of the generated `.slxarc` archive
+* `SOLIX_OUTPUT_SLXP` — Destination path of the generated `.slxp` package
 
 ---
 
@@ -198,7 +198,7 @@ dependencies:
 
 ### 7. Generated Package Integrity Fields
 
-During `solix build`, packaged `.slxarc` archives receive automatically stamped `supported_platforms` and `native_library_checksums` mappings (FIPS 180-4 SHA-256 digests keyed by `lib/<target_triple>/<library_filename>`).
+During `solix build`, packaged `.slxp` packages receive automatically stamped `supported_platforms` and `native_library_checksums` mappings (FIPS 180-4 SHA-256 digests keyed by `bin/<target_triple>/<library_filename>`). Companion native shared libraries must follow the `native_*` naming convention for runtime dynamic loading.
 
 ---
 

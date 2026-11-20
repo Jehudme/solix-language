@@ -392,7 +392,7 @@ jobs:
           "$SOLIX_EXE" build examples/breakout --profile debug
           "$SOLIX_EXE" build examples/breakout --profile release --target host
           "$SOLIX_EXE" build examples/breakout --profile test
-          "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxarc
+          "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxp
 
       - name: Run FFI C/C++/Rust matrix and dual-backend example suite
         shell: bash

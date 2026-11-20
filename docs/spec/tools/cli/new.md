@@ -82,7 +82,7 @@ Executing `solix new my_app`:
 ```text
 my_app/
 ├── manifest.yaml             # Declarative configuration, profiles, and natives
-├── .gitignore                # Ignores /build/, *.slxb, *.slxarc
+├── .gitignore                # Ignores /build/, *.slxb, *.slxp
 ├── src/
 │   └── main.slx              # Starter application source
 ├── tests/

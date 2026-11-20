@@ -46,9 +46,9 @@ All contributors and CI verification pipelines **MUST** enforce the following ru
 6. **No Legacy Syntax in Documentation:**
    All new and updated documentation **MUST** use modern Solix v2.0 semantics:
    * Scope resolution `::` for static methods, static fields, and enums (`Math::sin`, `Color::Red`).
-   * `.slxb` and `.slxarc` container extensions.
-   * `manifest.toml` package metadata.
-   * Canonical diagnostic error codes (`E0000`–`E0290`, `R0001`–`R0023`).
+   * `.slxb` and `.slxp` container extensions.
+   * `manifest.yaml` (legacy `manifest.toml`) package metadata.
+   * Canonical diagnostic error codes (`E0000`–`E0299`, `R0001`–`R0024`).
 
 ---
 
@@ -61,9 +61,9 @@ When `git diff origin/dev...HEAD` reveals modifications in any left-hand subsyst
 | **CLI Arguments & Flags**<br>`crates/solix-toolchain/src/cli.rs`<br>`crates/solix-toolchain/src/commands/` | `docs/wiki/commands/*.md` | `docs/spec/tools/cli/*.md` (`new.md`, `compile.md`, `build.md`, `run.md`, `info.md`, `install.md`, `uninstall.md`, `list.md`, `manifest.md`) | `docs/guide/01_getting_started.md` |
 | **Lexer & Tokens**<br>`crates/solix-compilation/src/phases/lexing/` | `docs/wiki/keywords/`<br>`docs/wiki/primitives/`<br>`docs/wiki/errors/lexer-errors.md` | `docs/spec/lexical.md` | `docs/guide/02_variables_and_types.md` |
 | **Parser & AST Nodes**<br>`crates/solix-compilation/src/phases/parser/` | `docs/wiki/errors/parser-errors.md` (`E0101`–`E0200`) | `docs/spec/statements/*.md` | Relevant guides in `docs/guide/02..07` |
-| **Type Binder & Semantics**<br>`crates/solix-compilation/src/phases/binder/` | `docs/wiki/errors/binder-errors.md` (`E0201`–`E0290`) | `docs/spec/types.md` | `docs/architecture/binder_passes.md`<br>`docs/guide/04_classes_and_oop.md` |
+| **Type Binder & Semantics**<br>`crates/solix-compilation/src/phases/binder/` | `docs/wiki/errors/binder-errors.md` (`E0201`–`E0299`) | `docs/spec/types.md` | `docs/architecture/binder_passes.md`<br>`docs/guide/04_classes_and_oop.md` |
 | **Emitter & Bytecode Codegen**<br>`crates/solix-compilation/src/phases/emitter/` | N/A | `docs/spec/vm_isa.md`<br>`docs/spec/disassembly-format-slxasm.md`<br>`docs/spec/statements/*.md` (Register VM lowering listings) | `docs/architecture/pipeline.md` |
-| **Register VM & Opcodes**<br>`crates/solix-runtime/src/vm/`<br>`crates/solix-common/src/bytecode/` | `docs/wiki/errors/runtime-errors.md` (`R0001`–`R0023`) | `docs/spec/vm_isa.md` | `docs/architecture/memory_model.md`<br>`docs/architecture/arc_internals.md`<br>`docs/architecture/exception_unwinding.md`<br>`docs/guide/05_memory_management_and_arc.md` |
+| **Register VM & Opcodes**<br>`crates/solix-runtime/src/vm/`<br>`crates/solix-common/src/bytecode/` | `docs/wiki/errors/runtime-errors.md` (`R0001`–`R0024`) | `docs/spec/vm_isa.md` | `docs/architecture/memory_model.md`<br>`docs/architecture/arc_internals.md`<br>`docs/architecture/exception_unwinding.md`<br>`docs/guide/05_memory_management_and_arc.md` |
 | **Native Interop & FFI**<br>`crates/solix-runtime/src/native/` | N/A | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
 | **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/solix_scaffold.py`<br>`crates/solix-toolchain/assets/scripts/solix_build.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
