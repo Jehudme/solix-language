@@ -40,11 +40,17 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         let class_descriptors = emission_artifacts.program.classes.clone();
         let function_descriptors = emission_artifacts.program.functions.clone();
         let allow_arith_inline = context.options.inline_threshold > 0;
+        let pool_ref = Some(&emission_artifacts.program.constant_pool);
 
         // Optimize each compiled function individually first so leaf constructors and arithmetic
         // leaf helpers shrink to minimal bodies.
         for compiled_function in &mut emission_artifacts.program.functions {
-            optimize_function(compiled_function, &class_descriptors, &function_descriptors);
+            optimize_function(
+                compiled_function,
+                &class_descriptors,
+                &function_descriptors,
+                pool_ref,
+            );
         }
 
         // Inline small leaf constructors and pure leaf arithmetic functions across callers
@@ -96,6 +102,7 @@ impl CompilationPhase for BytecodeOptimizerPhase {
                             compiled_function,
                             &class_descriptors,
                             &optimized_snapshot,
+                            pool_ref,
                         );
                     }
                 }
@@ -109,11 +116,11 @@ impl CompilationPhase for BytecodeOptimizerPhase {
             emission_artifacts.program.functions.iter_mut().enumerate()
         {
             rotate_bottom_tested_loops(compiled_function);
-            optimize_peephole_passes(compiled_function, true);
+            optimize_peephole_passes(compiled_function, true, pool_ref);
             hoist_loop_invariant_constants(compiled_function);
             eliminate_common_subexpressions(compiled_function);
             elide_borrowed_local_arc_ops(compiled_function);
-            optimize_peephole_passes(compiled_function, true);
+            optimize_peephole_passes(compiled_function, true, pool_ref);
             fuse_post_licm_add_load_band(compiled_function);
             propagate_entry_constants(compiled_function, true);
             transform_binary_additive_self_recursion(compiled_function, func_idx);
@@ -128,6 +135,7 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         for compiled_function in &mut emission_artifacts.program.functions {
             mark_array_fill_loops(compiled_function);
             lower_tail_calls(compiled_function, &func_has_refs);
+            specialize_primitive_field_accesses(compiled_function);
         }
 
         // Keep functions_by_source synchronized with optimized functions when emitting build artifacts
@@ -167,15 +175,16 @@ fn optimize_function(
     function: &mut CompiledFunction,
     classes: &[solix_common::bytecode::CompiledClass],
     all_functions: &[CompiledFunction],
+    constant_pool: Option<&solix_common::bytecode::ConstantPool>,
 ) {
     super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
     super::escape_analysis::apply_arc_elision(function);
     elide_redundant_arc_ops(function);
-    optimize_peephole_passes(function, false);
+    optimize_peephole_passes(function, false, constant_pool);
     elide_borrowed_local_arc_ops(function);
     elide_fresh_null_set_fields(function);
     propagate_entry_constants(function, false);
-    optimize_peephole_passes(function, false);
+    optimize_peephole_passes(function, false, constant_pool);
     hoist_loop_invariant_constants(function);
     eliminate_common_subexpressions(function);
     if eliminate_dead_pack_closures(function) {
@@ -186,7 +195,7 @@ fn optimize_function(
             break;
         }
     }
-    optimize_peephole_passes(function, false);
+    optimize_peephole_passes(function, false, constant_pool);
 }
 
 /// Returns `true` if `reg` holds a guaranteed immortal/null/FnPtr value throughout an immutable local array
@@ -358,6 +367,10 @@ fn is_guaranteed_non_heap_write(inst: Instruction, immortal_arrays: &HashSet<u16
             | OpCode::SubI32Imm
             | OpCode::MulI32Imm
             | OpCode::ModI32Imm
+            | OpCode::AddI64Imm
+            | OpCode::AddF64Imm
+            | OpCode::SubF64Imm
+            | OpCode::MulF64Imm
             | OpCode::ForLoopI32
             | OpCode::AddBandI32
             | OpCode::MulAddF64
@@ -1045,6 +1058,10 @@ fn is_pure_diamond_setup_inst(inst: Instruction) -> bool {
         | OpCode::AddI32Imm
         | OpCode::SubI32Imm
         | OpCode::MulI32Imm
+        | OpCode::AddI64Imm
+        | OpCode::AddF64Imm
+        | OpCode::SubF64Imm
+        | OpCode::MulF64Imm
         | OpCode::ConvIToF
         | OpCode::ConvFToI => true,
         OpCode::ModI32Imm => (inst.src2() as i16) > 0,
@@ -1772,6 +1789,10 @@ fn is_pure_leaf_arith_inst(inst: Instruction, param_count: u16) -> bool {
             | OpCode::AddI32Imm
             | OpCode::SubI32Imm
             | OpCode::MulI32Imm
+            | OpCode::AddI64Imm
+            | OpCode::AddF64Imm
+            | OpCode::SubF64Imm
+            | OpCode::MulF64Imm
             | OpCode::AddBandI32
             | OpCode::MulAddF64
             | OpCode::ConvIToF
@@ -1782,9 +1803,13 @@ fn is_pure_leaf_arith_inst(inst: Instruction, param_count: u16) -> bool {
 /// Remaps registers in an inlined leaf constructor or pure arithmetic leaf function instruction.
 fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> Instruction {
     let raw = inst.raw_opcode();
-    if raw == OpCode::SetField as u8 {
+    if (raw == OpCode::SetField as u8
+        || raw == OpCode::SetFieldI32 as u8
+        || raw == OpCode::SetFieldF64 as u8)
+        && let Some(opcode) = OpCode::from_raw_u8(raw)
+    {
         return Instruction::format_a(
-            OpCode::SetField,
+            opcode,
             inst.flags(),
             remap_reg(inst.dst()),
             remap_reg(inst.src1()),
@@ -1805,7 +1830,11 @@ fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> 
     }
     if (raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
-        || raw == OpCode::MulI32Imm as u8)
+        || raw == OpCode::MulI32Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8)
         && let Some(opcode) = OpCode::from_raw_u8(raw)
     {
         return Instruction::format_a(
@@ -1888,7 +1917,10 @@ fn inline_leaf_functions(
                     {
                         return true;
                     }
-                    raw == OpCode::SetField as u8 && inst.src1() == 0
+                    (raw == OpCode::SetField as u8
+                        || raw == OpCode::SetFieldI32 as u8
+                        || raw == OpCode::SetFieldF64 as u8)
+                        && inst.src1() == 0
                 });
             if body_ok {
                 leaf_kinds[func_idx] = LeafKind::Constructor;
@@ -2078,7 +2110,11 @@ fn inline_leaf_functions(
 
 /// Executes convergent multi-pass peephole fusion and redundant `Mov` elimination
 /// backed by forward CFG liveness verification.
-fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fusion: bool) {
+fn optimize_peephole_passes(
+    function: &mut CompiledFunction,
+    allow_imm_branch_fusion: bool,
+    constant_pool: Option<&solix_common::bytecode::ConstantPool>,
+) {
     let original_count = function.instructions.len();
     if original_count == 0 {
         return;
@@ -2202,7 +2238,19 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                 let is_branch =
                     next_raw == OpCode::JumpIfFalse as u8 || next_raw == OpCode::JumpIfTrue as u8;
 
-                if !next_is_critical && is_compare && is_branch {
+                let is_f64_compare_branch = (current_raw == OpCode::LtF64 as u8
+                    || current_raw == OpCode::LteF64 as u8)
+                    && next_raw == OpCode::JumpIfTrue as u8;
+
+                let is_i64_compare_branch = (current_raw == OpCode::LtI64 as u8
+                    || current_raw == OpCode::LteI64 as u8
+                    || current_raw == OpCode::GtI64 as u8
+                    || current_raw == OpCode::GteI64 as u8)
+                    && is_branch;
+
+                if !next_is_critical
+                    && ((is_compare && is_branch) || is_f64_compare_branch || is_i64_compare_branch)
+                {
                     let cmp_dst = current_entry.instruction.dst();
                     if cmp_dst == next_entry.instruction.cond_reg()
                         && is_dead_after_use(
@@ -2214,46 +2262,93 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                             &stream_critical,
                         )
                     {
-                        let fused_opcode =
-                            match (current_raw, next_raw == OpCode::JumpIfFalse as u8) {
-                                (raw_val, true) if raw_val == OpCode::LtI32 as u8 => {
-                                    OpCode::JumpIfGteI32
-                                }
-                                (raw_val, false) if raw_val == OpCode::LtI32 as u8 => {
-                                    OpCode::JumpIfLtI32
-                                }
-                                (raw_val, true) if raw_val == OpCode::LteI32 as u8 => {
-                                    OpCode::JumpIfGtI32
-                                }
-                                (raw_val, false) if raw_val == OpCode::LteI32 as u8 => {
-                                    OpCode::JumpIfLteI32
-                                }
-                                (raw_val, true) if raw_val == OpCode::GtI32 as u8 => {
-                                    OpCode::JumpIfLteI32
-                                }
-                                (raw_val, false) if raw_val == OpCode::GtI32 as u8 => {
-                                    OpCode::JumpIfGtI32
-                                }
-                                (raw_val, true) if raw_val == OpCode::GteI32 as u8 => {
-                                    OpCode::JumpIfLtI32
-                                }
-                                (raw_val, false) if raw_val == OpCode::GteI32 as u8 => {
-                                    OpCode::JumpIfGteI32
-                                }
-                                (raw_val, true) if raw_val == OpCode::EqI32 as u8 => {
-                                    OpCode::JumpIfNeqI32
-                                }
-                                (raw_val, false) if raw_val == OpCode::EqI32 as u8 => {
-                                    OpCode::JumpIfEqI32
-                                }
-                                (raw_val, true) if raw_val == OpCode::NeqI32 as u8 => {
-                                    OpCode::JumpIfEqI32
-                                }
-                                _ => OpCode::JumpIfNeqI32,
+                        let (fused_opcode, reg_first, reg_second) = if is_f64_compare_branch {
+                            let opcode_val = if current_raw == OpCode::LtF64 as u8 {
+                                OpCode::JumpIfLtF64
+                            } else {
+                                OpCode::JumpIfLteF64
                             };
+                            (
+                                opcode_val,
+                                current_entry.instruction.src1(),
+                                current_entry.instruction.src2(),
+                            )
+                        } else if is_i64_compare_branch {
+                            let is_false_branch = next_raw == OpCode::JumpIfFalse as u8;
+                            let src_one = current_entry.instruction.src1();
+                            let src_two = current_entry.instruction.src2();
+                            match (current_raw, is_false_branch) {
+                                (raw_val, false) if raw_val == OpCode::LtI64 as u8 => {
+                                    (OpCode::JumpIfLtI64, src_one, src_two)
+                                }
+                                (raw_val, true) if raw_val == OpCode::LtI64 as u8 => {
+                                    (OpCode::JumpIfLteI64, src_two, src_one)
+                                }
+                                (raw_val, false) if raw_val == OpCode::LteI64 as u8 => {
+                                    (OpCode::JumpIfLteI64, src_one, src_two)
+                                }
+                                (raw_val, true) if raw_val == OpCode::LteI64 as u8 => {
+                                    (OpCode::JumpIfLtI64, src_two, src_one)
+                                }
+                                (raw_val, false) if raw_val == OpCode::GtI64 as u8 => {
+                                    (OpCode::JumpIfLtI64, src_two, src_one)
+                                }
+                                (raw_val, true) if raw_val == OpCode::GtI64 as u8 => {
+                                    (OpCode::JumpIfLteI64, src_one, src_two)
+                                }
+                                (raw_val, false) if raw_val == OpCode::GteI64 as u8 => {
+                                    (OpCode::JumpIfLteI64, src_two, src_one)
+                                }
+                                (raw_val, true) if raw_val == OpCode::GteI64 as u8 => {
+                                    (OpCode::JumpIfLtI64, src_one, src_two)
+                                }
+                                _ => (OpCode::JumpIfLtI64, src_one, src_two),
+                            }
+                        } else {
+                            let opcode_val =
+                                match (current_raw, next_raw == OpCode::JumpIfFalse as u8) {
+                                    (raw_val, true) if raw_val == OpCode::LtI32 as u8 => {
+                                        OpCode::JumpIfGteI32
+                                    }
+                                    (raw_val, false) if raw_val == OpCode::LtI32 as u8 => {
+                                        OpCode::JumpIfLtI32
+                                    }
+                                    (raw_val, true) if raw_val == OpCode::LteI32 as u8 => {
+                                        OpCode::JumpIfGtI32
+                                    }
+                                    (raw_val, false) if raw_val == OpCode::LteI32 as u8 => {
+                                        OpCode::JumpIfLteI32
+                                    }
+                                    (raw_val, true) if raw_val == OpCode::GtI32 as u8 => {
+                                        OpCode::JumpIfLteI32
+                                    }
+                                    (raw_val, false) if raw_val == OpCode::GtI32 as u8 => {
+                                        OpCode::JumpIfGtI32
+                                    }
+                                    (raw_val, true) if raw_val == OpCode::GteI32 as u8 => {
+                                        OpCode::JumpIfLtI32
+                                    }
+                                    (raw_val, false) if raw_val == OpCode::GteI32 as u8 => {
+                                        OpCode::JumpIfGteI32
+                                    }
+                                    (raw_val, true) if raw_val == OpCode::EqI32 as u8 => {
+                                        OpCode::JumpIfNeqI32
+                                    }
+                                    (raw_val, false) if raw_val == OpCode::EqI32 as u8 => {
+                                        OpCode::JumpIfEqI32
+                                    }
+                                    (raw_val, true) if raw_val == OpCode::NeqI32 as u8 => {
+                                        OpCode::JumpIfEqI32
+                                    }
+                                    _ => OpCode::JumpIfNeqI32,
+                                };
+                            (
+                                opcode_val,
+                                current_entry.instruction.src1(),
+                                current_entry.instruction.src2(),
+                            )
+                        };
 
-                        let reg_a = current_entry.instruction.src1();
-                        let reg_b = current_entry.instruction.src2();
                         let mut merged_pcs = {
                             let mut combined_pcs = std::mem::take(&mut pending_orphaned_pcs);
                             combined_pcs.extend_from_slice(&current_entry.covered_original_pcs);
@@ -2262,7 +2357,13 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                         merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
 
                         next_stream.push(IntermediateInstruction {
-                            instruction: Instruction::format_a(fused_opcode, 0, reg_a, reg_b, 0),
+                            instruction: Instruction::format_a(
+                                fused_opcode,
+                                0,
+                                reg_first,
+                                reg_second,
+                                0,
+                            ),
                             original_pc: current_entry.original_pc,
                             covered_original_pcs: merged_pcs,
                             jump_target_old_pc: next_entry.jump_target_old_pc,
@@ -2518,6 +2619,224 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                 }
 
                 // ---------------------------------------------------------
+                // Pattern 2-f64: LoadF64 + AddF64 / SubF64 / MulF64 Fusion -> AddF64Imm / SubF64Imm / MulF64Imm
+                // ---------------------------------------------------------
+                if !next_is_critical && current_raw == OpCode::LoadF64 as u8 {
+                    let const_idx = current_entry.instruction.imm32();
+                    if const_idx <= u16::MAX as u32 {
+                        let r_const = current_entry.instruction.dst();
+                        if next_raw == OpCode::AddF64 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+                            let other_reg = if src2_reg == r_const && src1_reg != r_const {
+                                Some(src1_reg)
+                            } else if src1_reg == r_const && src2_reg != r_const {
+                                Some(src2_reg)
+                            } else {
+                                None
+                            };
+                            if let Some(r_other) = other_reg
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_const,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                    &stream_critical,
+                                )
+                            {
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::AddF64Imm,
+                                        0,
+                                        dst_reg,
+                                        r_other,
+                                        const_idx as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        } else if next_raw == OpCode::SubF64 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+                            if src2_reg == r_const
+                                && src1_reg != r_const
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_const,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                    &stream_critical,
+                                )
+                            {
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::SubF64Imm,
+                                        0,
+                                        dst_reg,
+                                        src1_reg,
+                                        const_idx as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        } else if next_raw == OpCode::MulF64 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+                            let other_reg = if src2_reg == r_const && src1_reg != r_const {
+                                Some(src1_reg)
+                            } else if src1_reg == r_const && src2_reg != r_const {
+                                Some(src2_reg)
+                            } else {
+                                None
+                            };
+                            if let Some(r_other) = other_reg
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_const,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                    &stream_critical,
+                                )
+                            {
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::MulF64Imm,
+                                        0,
+                                        dst_reg,
+                                        r_other,
+                                        const_idx as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
+                // Pattern 2-i64: LoadI64 / LoadI32 / LoadConst(Int64) + AddI64 Fusion -> AddI64Imm
+                // ---------------------------------------------------------
+                if !next_is_critical {
+                    let maybe_imm_i64 = if current_raw == OpCode::LoadI64 as u8
+                        || current_raw == OpCode::LoadI32 as u8
+                    {
+                        let imm_val = current_entry.instruction.imm32_signed();
+                        if (-32768..=32767).contains(&imm_val) {
+                            Some(imm_val)
+                        } else {
+                            None
+                        }
+                    } else if current_raw == OpCode::LoadConst as u8 {
+                        let const_idx = current_entry.instruction.imm32() as usize;
+                        constant_pool.and_then(|pool| match pool.values.get(const_idx) {
+                            Some(solix_common::bytecode::ConstantPoolValue::Int64(num))
+                                if (-32768..=32767).contains(num) =>
+                            {
+                                Some(*num as i32)
+                            }
+                            _ => None,
+                        })
+                    } else {
+                        None
+                    };
+
+                    if let Some(imm_val) = maybe_imm_i64 {
+                        let r_imm = current_entry.instruction.dst();
+                        if next_raw == OpCode::AddI64 as u8 {
+                            let dst_reg = next_entry.instruction.dst();
+                            let src1_reg = next_entry.instruction.src1();
+                            let src2_reg = next_entry.instruction.src2();
+                            let other_reg = if src2_reg == r_imm && src1_reg != r_imm {
+                                Some(src1_reg)
+                            } else if src1_reg == r_imm && src2_reg != r_imm {
+                                Some(src2_reg)
+                            } else {
+                                None
+                            };
+                            if let Some(r_other) = other_reg
+                                && is_dead_after_use(
+                                    &stream,
+                                    cursor + 1,
+                                    r_imm,
+                                    function,
+                                    &old_pc_to_stream_idx,
+                                    &stream_critical,
+                                )
+                            {
+                                let mut merged_pcs = {
+                                    let mut combined_pcs =
+                                        std::mem::take(&mut pending_orphaned_pcs);
+                                    combined_pcs
+                                        .extend_from_slice(&current_entry.covered_original_pcs);
+                                    combined_pcs
+                                };
+                                merged_pcs.extend_from_slice(&next_entry.covered_original_pcs);
+                                next_stream.push(IntermediateInstruction {
+                                    instruction: Instruction::format_a(
+                                        OpCode::AddI64Imm,
+                                        0,
+                                        dst_reg,
+                                        r_other,
+                                        imm_val as i16 as u16,
+                                    ),
+                                    original_pc: current_entry.original_pc,
+                                    covered_original_pcs: merged_pcs,
+                                    jump_target_old_pc: None,
+                                });
+                                changed = true;
+                                cursor += 2;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // ---------------------------------------------------------
                 // Pattern 2b: AddI32 + Band Fusion -> AddBandI32
                 // ---------------------------------------------------------
                 if !next_is_critical
@@ -2671,7 +2990,11 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
                             &stream_critical,
                         )
                     {
-                        let cond_flag = u8::from(next_raw == OpCode::JumpIfTrue as u8);
+                        let fused_opcode = if next_raw == OpCode::JumpIfTrue as u8 {
+                            OpCode::GetArrayJumpIfTrue
+                        } else {
+                            OpCode::GetArrayJumpIfFalse
+                        };
                         let mut merged_pcs = {
                             let mut combined_pcs = std::mem::take(&mut pending_orphaned_pcs);
                             combined_pcs.extend_from_slice(&current_entry.covered_original_pcs);
@@ -2681,8 +3004,8 @@ fn optimize_peephole_passes(function: &mut CompiledFunction, allow_imm_branch_fu
 
                         next_stream.push(IntermediateInstruction {
                             instruction: Instruction::format_a(
-                                OpCode::GetArrayJumpIfFalse,
-                                cond_flag,
+                                fused_opcode,
+                                0,
                                 arr_reg,
                                 idx_reg,
                                 0,
@@ -2971,6 +3294,69 @@ fn is_hoistable_pure_arith(raw: u8) -> bool {
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
+}
+
+/// Checks whether `inst` is a candidate operation that can be duplicated during loop rotation.
+fn is_rotatable_guard_op(raw: u8) -> bool {
+    is_hoistable_pure_arith(raw)
+        || raw == OpCode::LtF64 as u8
+        || raw == OpCode::LteF64 as u8
+        || raw == OpCode::LtI64 as u8
+        || raw == OpCode::LteI64 as u8
+        || raw == OpCode::GetArray as u8
+}
+
+/// Specializes general `GetField` and `SetField` instructions accessing primitive int32/uint32
+/// (tags 5, 6) or float64 (tag 10) fields into `GetFieldI32`/`SetFieldI32` or `GetFieldF64`/`SetFieldF64`
+/// to eliminate runtime tag checking in tight dispatch loops.
+fn specialize_primitive_field_accesses(function: &mut CompiledFunction) {
+    for inst in &mut function.instructions {
+        let raw = inst.raw_opcode();
+        let raw_flags = inst.flags();
+        let is_weak = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
+        let is_move = (raw_flags & solix_common::bytecode::instruction::FLAG_MOVE) != 0;
+        let field_tag = (raw_flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1;
+        if is_weak || is_move {
+            continue;
+        }
+        if raw == OpCode::GetField as u8 {
+            if field_tag == 5 || field_tag == 6 {
+                *inst = Instruction::format_a(
+                    OpCode::GetFieldI32,
+                    0,
+                    inst.dst(),
+                    inst.src1(),
+                    inst.src2(),
+                );
+            } else if field_tag == 10 {
+                *inst = Instruction::format_a(
+                    OpCode::GetFieldF64,
+                    0,
+                    inst.dst(),
+                    inst.src1(),
+                    inst.src2(),
+                );
+            }
+        } else if raw == OpCode::SetField as u8 {
+            if field_tag == 5 || field_tag == 6 {
+                *inst = Instruction::format_a(
+                    OpCode::SetFieldI32,
+                    0,
+                    inst.dst(),
+                    inst.src1(),
+                    inst.src2(),
+                );
+            } else if field_tag == 10 {
+                *inst = Instruction::format_a(
+                    OpCode::SetFieldF64,
+                    0,
+                    inst.dst(),
+                    inst.src1(),
+                    inst.src2(),
+                );
+            }
+        }
+    }
 }
 
 /// Checks whether all input operand registers read by a hoistable pure arithmetic instruction
@@ -3320,21 +3706,50 @@ fn invert_loop_guard(instruction: Instruction, back_offset: i32) -> Option<Instr
     let raw = instruction.raw_opcode();
     if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
         || raw == OpCode::GetArrayJumpIfFalse as u8
+        || raw == OpCode::GetArrayJumpIfTrue as u8
+        || raw == OpCode::JumpIfLtI64 as u8
+        || raw == OpCode::JumpIfLteI64 as u8
     {
         let offset_i16 = i16::try_from(back_offset).ok()?;
-        let inverted = match raw {
-            val if val == OpCode::JumpIfLtI32 as u8 => OpCode::JumpIfGteI32,
-            val if val == OpCode::JumpIfLteI32 as u8 => OpCode::JumpIfGtI32,
-            val if val == OpCode::JumpIfGtI32 as u8 => OpCode::JumpIfLteI32,
-            val if val == OpCode::JumpIfGteI32 as u8 => OpCode::JumpIfLtI32,
-            val if val == OpCode::JumpIfEqI32 as u8 => OpCode::JumpIfNeqI32,
-            _ => OpCode::JumpIfEqI32,
+        let (inverted, dst_reg, src_reg) = match raw {
+            val if val == OpCode::JumpIfLtI32 as u8 => {
+                (OpCode::JumpIfGteI32, instruction.dst(), instruction.src1())
+            }
+            val if val == OpCode::JumpIfLteI32 as u8 => {
+                (OpCode::JumpIfGtI32, instruction.dst(), instruction.src1())
+            }
+            val if val == OpCode::JumpIfGtI32 as u8 => {
+                (OpCode::JumpIfLteI32, instruction.dst(), instruction.src1())
+            }
+            val if val == OpCode::JumpIfGteI32 as u8 => {
+                (OpCode::JumpIfLtI32, instruction.dst(), instruction.src1())
+            }
+            val if val == OpCode::JumpIfEqI32 as u8 => {
+                (OpCode::JumpIfNeqI32, instruction.dst(), instruction.src1())
+            }
+            val if val == OpCode::GetArrayJumpIfFalse as u8 => (
+                OpCode::GetArrayJumpIfTrue,
+                instruction.dst(),
+                instruction.src1(),
+            ),
+            val if val == OpCode::GetArrayJumpIfTrue as u8 => (
+                OpCode::GetArrayJumpIfFalse,
+                instruction.dst(),
+                instruction.src1(),
+            ),
+            val if val == OpCode::JumpIfLtI64 as u8 => {
+                (OpCode::JumpIfLteI64, instruction.src1(), instruction.dst())
+            }
+            val if val == OpCode::JumpIfLteI64 as u8 => {
+                (OpCode::JumpIfLtI64, instruction.src1(), instruction.dst())
+            }
+            _ => (OpCode::JumpIfEqI32, instruction.dst(), instruction.src1()),
         };
         return Some(Instruction::format_a(
             inverted,
             0,
-            instruction.dst(),
-            instruction.src1(),
+            dst_reg,
+            src_reg,
             offset_i16 as u16,
         ));
     }
@@ -3386,7 +3801,7 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
                     one_insn_candidates.push((header_pc, loop_end));
                 } else if header_pc + 2 <= loop_end
                     && !critical_targets.contains(&(header_pc + 1))
-                    && is_hoistable_pure_arith(function.instructions[header_pc].raw_opcode())
+                    && is_rotatable_guard_op(function.instructions[header_pc].raw_opcode())
                     && decode_jump_target(
                         function.instructions[header_pc + 1],
                         header_pc + 1,
@@ -3597,6 +4012,11 @@ fn decode_jump_target(
         || raw_opcode == OpCode::ForLoopI32 as u8
         || raw_opcode == OpCode::JumpIfI32Imm as u8
         || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
+        || raw_opcode == OpCode::GetArrayJumpIfTrue as u8
+        || raw_opcode == OpCode::JumpIfLtF64 as u8
+        || raw_opcode == OpCode::JumpIfLteF64 as u8
+        || raw_opcode == OpCode::JumpIfLtI64 as u8
+        || raw_opcode == OpCode::JumpIfLteI64 as u8
     {
         let target_pc = (pc_index as i32) + (instruction.src2() as i16 as i32);
         if target_pc >= 0 && (target_pc as usize) <= inst_count {
@@ -3619,6 +4039,11 @@ fn relocate_jump_instruction(
         || raw_opcode == OpCode::ForLoopI32 as u8
         || raw_opcode == OpCode::JumpIfI32Imm as u8
         || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
+        || raw_opcode == OpCode::GetArrayJumpIfTrue as u8
+        || raw_opcode == OpCode::JumpIfLtF64 as u8
+        || raw_opcode == OpCode::JumpIfLteF64 as u8
+        || raw_opcode == OpCode::JumpIfLtI64 as u8
+        || raw_opcode == OpCode::JumpIfLteI64 as u8
     {
         if let Some(opcode) = OpCode::from_raw_u8(raw_opcode) {
             return Instruction::format_a(
@@ -4181,6 +4606,11 @@ fn is_conditional_branch(raw: u8) -> bool {
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::JumpIfI32Imm as u8
         || raw == OpCode::GetArrayJumpIfFalse as u8
+        || raw == OpCode::GetArrayJumpIfTrue as u8
+        || raw == OpCode::JumpIfLtF64 as u8
+        || raw == OpCode::JumpIfLteF64 as u8
+        || raw == OpCode::JumpIfLtI64 as u8
+        || raw == OpCode::JumpIfLteI64 as u8
 }
 
 fn can_instruction_throw(raw: u8) -> bool {
@@ -4192,6 +4622,10 @@ fn can_instruction_throw(raw: u8) -> bool {
         || raw == OpCode::LoadBool as u8
         || raw == OpCode::LoadNull as u8
         || raw == OpCode::LoadConst as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
         || raw == OpCode::IncRef as u8
         || raw == OpCode::Jump as u8
         || raw == OpCode::JumpIfTrue as u8
@@ -4207,12 +4641,18 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
         || raw == OpCode::ForLoopI32 as u8
         || raw == OpCode::AddBandI32 as u8
         || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::AllocObject as u8
         || raw == OpCode::AllocObjectExtern as u8
         || raw == OpCode::GetField as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
         || raw == OpCode::GetStatic as u8
         || raw == OpCode::GetStaticDirect as u8
         || raw == OpCode::GetStaticGlobal as u8
@@ -4311,6 +4751,11 @@ fn rewrite_instruction_read_register(
 
     if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
         || raw == OpCode::GetArrayJumpIfFalse as u8
+        || raw == OpCode::GetArrayJumpIfTrue as u8
+        || raw == OpCode::JumpIfLtF64 as u8
+        || raw == OpCode::JumpIfLteF64 as u8
+        || raw == OpCode::JumpIfLtI64 as u8
+        || raw == OpCode::JumpIfLteI64 as u8
     {
         let new_dst = if instruction.dst() == from_reg {
             to_reg
@@ -4335,6 +4780,10 @@ fn rewrite_instruction_read_register(
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
     {
         let new_src1 = if instruction.src1() == from_reg {
             to_reg
@@ -4359,6 +4808,8 @@ fn rewrite_instruction_read_register(
         || raw == OpCode::NegI64 as u8
         || raw == OpCode::NegF64 as u8
         || raw == OpCode::GetField as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
@@ -4436,7 +4887,10 @@ fn rewrite_instruction_read_register(
         ));
     }
 
-    if raw == OpCode::SetField as u8 {
+    if raw == OpCode::SetField as u8
+        || raw == OpCode::SetFieldI32 as u8
+        || raw == OpCode::SetFieldF64 as u8
+    {
         let new_dst = if instruction.dst() == from_reg {
             to_reg
         } else {
@@ -4612,6 +5066,11 @@ fn collect_critical_targets(function: &CompiledFunction) -> HashSet<usize> {
             || raw_opcode == OpCode::ForLoopI32 as u8
             || raw_opcode == OpCode::JumpIfI32Imm as u8
             || raw_opcode == OpCode::GetArrayJumpIfFalse as u8
+            || raw_opcode == OpCode::GetArrayJumpIfTrue as u8
+            || raw_opcode == OpCode::JumpIfLtF64 as u8
+            || raw_opcode == OpCode::JumpIfLteF64 as u8
+            || raw_opcode == OpCode::JumpIfLtI64 as u8
+            || raw_opcode == OpCode::JumpIfLteI64 as u8
         {
             let offset = instruction.src2() as i16 as i32;
             let target_pc = (pc_index as i32) + offset;
@@ -4644,6 +5103,12 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
         || raw == OpCode::AddBandI32 as u8
         || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::ConvIToF as u8
@@ -4660,6 +5125,12 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
         || raw == OpCode::AddBandI32 as u8
         || raw == OpCode::MulAddF64 as u8
         || raw == OpCode::ConvIToF as u8
@@ -4774,6 +5245,11 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     // Format A: compare-and-jump instructions read dst and src1
     if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw)
         || raw == OpCode::GetArrayJumpIfFalse as u8
+        || raw == OpCode::GetArrayJumpIfTrue as u8
+        || raw == OpCode::JumpIfLtF64 as u8
+        || raw == OpCode::JumpIfLteF64 as u8
+        || raw == OpCode::JumpIfLtI64 as u8
+        || raw == OpCode::JumpIfLteI64 as u8
     {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
@@ -4794,7 +5270,7 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
             || instruction.src2() == target_reg;
     }
 
-    if raw == OpCode::GetArrayJumpIfFalse as u8 {
+    if raw == OpCode::GetArrayJumpIfFalse as u8 || raw == OpCode::GetArrayJumpIfTrue as u8 {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
 
@@ -4803,6 +5279,10 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
         || raw == OpCode::ModI32Imm as u8
+        || raw == OpCode::AddI64Imm as u8
+        || raw == OpCode::AddF64Imm as u8
+        || raw == OpCode::SubF64Imm as u8
+        || raw == OpCode::MulF64Imm as u8
     {
         return instruction.src1() == target_reg;
     }
@@ -4817,6 +5297,8 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
         || raw == OpCode::NegI64 as u8
         || raw == OpCode::NegF64 as u8
         || raw == OpCode::GetField as u8
+        || raw == OpCode::GetFieldI32 as u8
+        || raw == OpCode::GetFieldF64 as u8
         || raw == OpCode::ArrayLength as u8
         || raw == OpCode::AllocArray as u8
         || raw == OpCode::GetTuple as u8
@@ -4837,7 +5319,10 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     }
 
     // Format A: SetField reads dst (value) and src1 (object)
-    if raw == OpCode::SetField as u8 {
+    if raw == OpCode::SetField as u8
+        || raw == OpCode::SetFieldI32 as u8
+        || raw == OpCode::SetFieldF64 as u8
+    {
         return instruction.dst() == target_reg || instruction.src1() == target_reg;
     }
 
