@@ -15,6 +15,7 @@ public class WallBlock {
     public int32 door_state;   // 0 = closed, 1 = opening, 2 = open, 3 = closing
     public float32 door_height_offset;
     public int32 door_stay_timer;
+    public int32 wall_texture_type; // 0 = brown brick, 1 = computer tech, 2 = startan
 
     public WallBlock(
         float32 initial_x,
@@ -39,6 +40,7 @@ public class WallBlock {
         this.door_state = 0;
         this.door_height_offset = 0.0;
         this.door_stay_timer = 0;
+        this.wall_texture_type = 0;
     }
 
     public void update_door(DoomAudioManager audio_manager) {
@@ -86,18 +88,51 @@ public class WallBlock {
     }
 
     public void draw() {
+        this.draw_with_resources(null);
+    }
+
+    public void draw_with_resources(DoomResources resources) {
         float32 effective_y = this.center_y + this.door_height_offset;
         Vector3 wall_pos = new Vector3(this.center_x, effective_y, this.center_z);
         Vector3 wall_size = new Vector3(this.size_x, this.size_y, this.size_z);
 
+        if (resources != null && resources.is_loaded) {
+            Model selected_model = resources.model_wall_brown;
+            if (this.is_door) {
+                if (this.required_key == 1) {
+                    selected_model = resources.model_door_big;
+                } else if (this.required_key == 2) {
+                    selected_model = resources.model_door_exit;
+                } else {
+                    selected_model = resources.model_door_normal;
+                }
+            } else if (this.wall_texture_type == 1) {
+                selected_model = resources.model_wall_tech;
+            } else if (this.wall_texture_type == 2) {
+                selected_model = resources.model_wall_startan;
+            }
+
+            if (selected_model.meshCount > 0) {
+                Raylib::DrawModelEx(
+                    selected_model,
+                    wall_pos,
+                    new Vector3(0.0, 1.0, 0.0),
+                    0.0,
+                    wall_size,
+                    Color::WHITE
+                );
+                return;
+            }
+        }
+
         Color render_color = this.wall_color;
         if (this.is_door) {
             if (this.required_key == 1) {
-                render_color = new Color(0, 140, 255, 255); // Blue key door
+                render_color = new Color(0, 140, 255, 255);
             } else if (this.required_key == 2) {
-                render_color = new Color(255, 40, 40, 255);  // Red key door
+                render_color = new Color(255, 40, 40, 255);
             } else if (this.required_key == 3) {
-                render_color = new Color(255, 214, 0, 255); // Yellow key door
+                render_color = new Color(255, 214, 0, 255);
             }
         }
 
@@ -140,15 +175,43 @@ public class FloorSector {
     }
 
     public void draw() {
-        // Draw floor
-        Vector3 floor_pos = new Vector3(this.center_x, this.floor_y, this.center_z);
-        Vector3 floor_size = new Vector3(this.size_x, 0.1, this.size_z);
-        Raylib::DrawCubeV(floor_pos, floor_size, this.floor_color);
+        this.draw_with_resources(null);
+    }
 
-        // Draw ceiling
+    public void draw_with_resources(DoomResources resources) {
+        Vector3 floor_pos = new Vector3(this.center_x, this.floor_y, this.center_z);
+        Vector3 floor_size = new Vector3(this.size_x, 1.0, this.size_z);
+
         Vector3 ceiling_pos = new Vector3(this.center_x, this.ceiling_y, this.center_z);
-        Vector3 ceiling_size = new Vector3(this.size_x, 0.1, this.size_z);
-        Raylib::DrawCubeV(ceiling_pos, ceiling_size, this.ceiling_color);
+        Vector3 ceiling_size = new Vector3(this.size_x, 1.0, this.size_z);
+
+        if (resources != null && resources.is_loaded) {
+            Model active_floor_model = this.is_toxic_acid ? resources.model_acid_flat : resources.model_floor_flat;
+            if (active_floor_model.meshCount > 0) {
+                Raylib::DrawModelEx(
+                    active_floor_model,
+                    floor_pos,
+                    new Vector3(0.0, 1.0, 0.0),
+                    0.0,
+                    floor_size,
+                    Color::WHITE
+                );
+            }
+            if (resources.model_ceil_flat.meshCount > 0) {
+                Raylib::DrawModelEx(
+                    resources.model_ceil_flat,
+                    ceiling_pos,
+                    new Vector3(0.0, 1.0, 0.0),
+                    0.0,
+                    ceiling_size,
+                    Color::WHITE
+                );
+            }
+            return;
+        }
+
+        Raylib::DrawCubeV(floor_pos, new Vector3(this.size_x, 0.1, this.size_z), this.floor_color);
+        Raylib::DrawCubeV(ceiling_pos, new Vector3(this.size_x, 0.1, this.size_z), this.ceiling_color);
     }
 }
 
@@ -179,9 +242,7 @@ public class LevelMap {
         this.exit_activated = false;
 
         if (level_number == 1) {
-            // ==========================================
             // LEVEL 1: "E1M1 - HANGAR"
-            // ==========================================
             this.player_spawn_x = 0.0;
             this.player_spawn_y = 0.0;
             this.player_spawn_z = 0.0;
@@ -197,17 +258,11 @@ public class LevelMap {
             Color brown_ceiling = new Color(50, 45, 40, 255);
             Color acid_slime = new Color(20, 180, 40, 255);
 
-            // 0: Spawn U-Room
             this.sectors[0] = new FloorSector(0.0, 0.0, 16.0, 16.0, 0.0, 4.0, gray_floor, brown_ceiling, false);
-            // 1: Slime bridge corridor
             this.sectors[1] = new FloorSector(14.0, 0.0, 12.0, 6.0, 0.0, 4.0, gray_floor, brown_ceiling, false);
-            // 2: Toxic Slime Pit (North)
             this.sectors[2] = new FloorSector(14.0, 6.0, 12.0, 6.0, -0.4, 4.0, acid_slime, brown_ceiling, true);
-            // 3: Toxic Slime Pit (South)
             this.sectors[3] = new FloorSector(14.0, -6.0, 12.0, 6.0, -0.4, 4.0, acid_slime, brown_ceiling, true);
-            // 4: Blue Key Vault (North alcove)
             this.sectors[4] = new FloorSector(14.0, 12.0, 8.0, 6.0, 0.2, 3.5, gray_floor, brown_ceiling, false);
-            // 5: Exit chamber
             this.sectors[5] = new FloorSector(32.0, 0.0, 14.0, 12.0, 0.0, 3.8, gray_floor, brown_ceiling, false);
 
             this.wall_count = 14;
@@ -217,37 +272,47 @@ public class LevelMap {
             Color dark_slate = new Color(85, 90, 100, 255);
             Color blue_trim = new Color(0, 120, 220, 255);
 
-            // Perimeter walls of Room 0
-            this.walls[0] = new WallBlock(-8.0, 2.0, 0.0, 1.0, 4.0, 16.0, metal_gray, false, 0); // West
-            this.walls[1] = new WallBlock(0.0, 2.0, 8.0, 16.0, 4.0, 1.0, metal_gray, false, 0);  // North
-            this.walls[2] = new WallBlock(0.0, 2.0, -8.0, 16.0, 4.0, 1.0, metal_gray, false, 0); // South
+            // Perimeter walls of Room 0 (STARTAN textures)
+            this.walls[0] = new WallBlock(-8.0, 2.0, 0.0, 1.0, 4.0, 16.0, metal_gray, false, 0);
+            this.walls[0].wall_texture_type = 2; // STARTAN
+            this.walls[1] = new WallBlock(0.0, 2.0, 8.0, 16.0, 4.0, 1.0, metal_gray, false, 0);
+            this.walls[1].wall_texture_type = 2;
+            this.walls[2] = new WallBlock(0.0, 2.0, -8.0, 16.0, 4.0, 1.0, metal_gray, false, 0);
+            this.walls[2].wall_texture_type = 2;
 
-            // Central computer pillar in U-room
+            // Central computer pillar in U-room (Tech computer panels)
             this.walls[3] = new WallBlock(0.0, 2.0, 0.0, 4.0, 4.0, 4.0, dark_slate, false, 0);
+            this.walls[3].wall_texture_type = 1; // COMP2
 
-            // Corridor dividing walls
+            // Corridor dividing walls (Brown brick)
             this.walls[4] = new WallBlock(8.0, 2.0, 5.5, 1.0, 4.0, 5.0, metal_gray, false, 0);
+            this.walls[4].wall_texture_type = 0; // BROWN1
             this.walls[5] = new WallBlock(8.0, 2.0, -5.5, 1.0, 4.0, 5.0, metal_gray, false, 0);
+            this.walls[5].wall_texture_type = 0;
 
             // Toxic slime exterior walls
             this.walls[6] = new WallBlock(14.0, 2.0, 15.0, 12.0, 4.0, 1.0, metal_gray, false, 0);
+            this.walls[6].wall_texture_type = 1;
             this.walls[7] = new WallBlock(14.0, 2.0, -9.0, 12.0, 4.0, 1.0, metal_gray, false, 0);
+            this.walls[7].wall_texture_type = 1;
 
             // Blue Key Vault Door
             this.walls[8] = new WallBlock(14.0, 2.0, 9.0, 6.0, 4.0, 1.0, blue_trim, true, 1);
 
             // Exit Gate Wall & Door
             this.walls[9] = new WallBlock(25.0, 2.0, 4.0, 1.0, 4.0, 6.0, metal_gray, false, 0);
+            this.walls[9].wall_texture_type = 0;
             this.walls[10] = new WallBlock(25.0, 2.0, -4.0, 1.0, 4.0, 6.0, metal_gray, false, 0);
-            this.walls[11] = new WallBlock(25.0, 2.0, 0.0, 1.0, 4.0, 3.0, blue_trim, true, 0); // Normal door to exit room
+            this.walls[10].wall_texture_type = 0;
+            this.walls[11] = new WallBlock(25.0, 2.0, 0.0, 1.0, 4.0, 3.0, blue_trim, true, 0);
 
             // Exit room walls
-            this.walls[12] = new WallBlock(39.0, 2.0, 0.0, 1.0, 4.0, 12.0, dark_slate, false, 0); // East back wall
+            this.walls[12] = new WallBlock(39.0, 2.0, 0.0, 1.0, 4.0, 12.0, dark_slate, false, 0);
+            this.walls[12].wall_texture_type = 2;
             this.walls[13] = new WallBlock(32.0, 2.0, 6.0, 14.0, 4.0, 1.0, dark_slate, false, 0);
+            this.walls[13].wall_texture_type = 2;
         } else {
-            // ==========================================
             // LEVEL 2: "E1M2 - NUCLEAR PLANT"
-            // ==========================================
             this.player_spawn_x = 0.0;
             this.player_spawn_y = 0.0;
             this.player_spawn_z = 0.0;
@@ -276,27 +341,32 @@ public class LevelMap {
             Color red_trim = new Color(230, 40, 40, 255);
 
             this.walls[0] = new WallBlock(-9.0, 2.2, 0.0, 1.0, 4.5, 18.0, rusty_iron, false, 0);
+            this.walls[0].wall_texture_type = 1;
             this.walls[1] = new WallBlock(0.0, 2.2, 9.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
+            this.walls[1].wall_texture_type = 1;
             this.walls[2] = new WallBlock(0.0, 2.2, -9.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
+            this.walls[2].wall_texture_type = 1;
 
-            // Maze obstacles in chamber 1
             this.walls[3] = new WallBlock(-2.0, 2.2, 2.0, 4.0, 4.5, 4.0, rusty_iron, false, 0);
+            this.walls[3].wall_texture_type = 0;
             this.walls[4] = new WallBlock(4.0, 2.2, -2.0, 4.0, 4.5, 4.0, rusty_iron, false, 0);
+            this.walls[4].wall_texture_type = 0;
 
-            // Red Key Door
             this.walls[5] = new WallBlock(9.0, 2.2, 0.0, 1.0, 4.5, 4.0, red_trim, true, 2);
 
-            // Nuclear chamber walls
             this.walls[6] = new WallBlock(18.0, 2.2, -6.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
+            this.walls[6].wall_texture_type = 2;
             this.walls[7] = new WallBlock(18.0, 2.2, 14.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
+            this.walls[7].wall_texture_type = 2;
 
-            // Gate to final vault
             this.walls[8] = new WallBlock(27.0, 2.2, 0.0, 1.0, 4.5, 4.0, rusty_iron, true, 0);
 
-            // Exit chamber walls
             this.walls[9] = new WallBlock(47.0, 2.0, 0.0, 1.0, 4.0, 10.0, rusty_iron, false, 0);
+            this.walls[9].wall_texture_type = 1;
             this.walls[10] = new WallBlock(42.0, 2.0, 5.0, 10.0, 4.0, 1.0, rusty_iron, false, 0);
+            this.walls[10].wall_texture_type = 1;
             this.walls[11] = new WallBlock(42.0, 2.0, -5.0, 10.0, 4.0, 1.0, rusty_iron, false, 0);
+            this.walls[11].wall_texture_type = 1;
         }
     }
 
@@ -354,7 +424,6 @@ public class LevelMap {
     public bool test_wall_collision(float32 next_x, float32 next_z, float32 radius) {
         for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
             WallBlock wall = this.walls[wall_index];
-            // If door is open, player can walk through
             if (wall.is_door && wall.door_height_offset > 2.0) {
                 continue;
             }
@@ -364,21 +433,25 @@ public class LevelMap {
 
             if (next_x >= wall.center_x - half_x && next_x <= wall.center_x + half_x &&
                 next_z >= wall.center_z - half_z && next_z <= wall.center_z + half_z) {
-                return true; // Collision detected
+                return true;
             }
         }
         return false;
     }
 
     public void draw() {
+        this.draw_with_resources(null);
+    }
+
+    public void draw_with_resources(DoomResources resources) {
         // Draw sectors (floors & ceilings)
         for (int32 sector_index = 0; sector_index < this.sector_count; sector_index = sector_index + 1) {
-            this.sectors[sector_index].draw();
+            this.sectors[sector_index].draw_with_resources(resources);
         }
 
         // Draw walls and doors
         for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
-            this.walls[wall_index].draw();
+            this.walls[wall_index].draw_with_resources(resources);
         }
 
         // Draw exit switch pillar

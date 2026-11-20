@@ -1,0 +1,238 @@
+package doom;
+
+import raylib.*;
+
+public class DoomResources {
+    public bool is_loaded;
+
+    // 3D Textured Models
+    public Model model_wall_brown;
+    public Model model_wall_tech;
+    public Model model_wall_startan;
+    public Model model_door_normal;
+    public Model model_door_big;
+    public Model model_door_exit;
+    public Model model_floor_flat;
+    public Model model_ceil_flat;
+    public Model model_acid_flat;
+
+    // Billboard Monster Sprites
+    public Texture2D tex_zombie_walk;
+    public Texture2D tex_zombie_attack;
+    public Texture2D tex_zombie_pain;
+    public Texture2D tex_zombie_dead;
+
+    public Texture2D tex_imp_walk;
+    public Texture2D tex_imp_attack;
+    public Texture2D tex_imp_pain;
+    public Texture2D tex_imp_dead;
+
+    public Texture2D tex_demon_walk;
+    public Texture2D tex_demon_attack;
+    public Texture2D tex_demon_pain;
+    public Texture2D tex_demon_dead;
+
+    public Texture2D tex_baron_walk;
+    public Texture2D tex_baron_attack;
+    public Texture2D tex_baron_pain;
+    public Texture2D tex_baron_dead;
+
+    public Texture2D tex_barrel;
+    public Texture2D tex_barrel_exp;
+
+    // Pickups
+    public Texture2D tex_item_bonus;
+    public Texture2D tex_item_medikit;
+    public Texture2D tex_item_armor;
+    public Texture2D tex_item_key_blue;
+    public Texture2D tex_item_key_red;
+    public Texture2D tex_item_key_yellow;
+
+    // Projectiles
+    public Texture2D tex_proj_fireball;
+    public Texture2D tex_proj_rocket;
+
+    // HUD First Person Weapons
+    public Texture2D tex_weapon_fist;
+    public Texture2D tex_weapon_pistol_idle;
+    public Texture2D tex_weapon_pistol_fire;
+    public Texture2D tex_weapon_shotgun_idle;
+    public Texture2D tex_weapon_shotgun_fire;
+    public Texture2D tex_weapon_shotgun_pump;
+    public Texture2D tex_weapon_chaingun_1;
+    public Texture2D tex_weapon_chaingun_2;
+    public Texture2D tex_weapon_rocket_idle;
+    public Texture2D tex_weapon_rocket_fire;
+
+    // HUD Status Bar & Doomguy Faces
+    public Texture2D tex_hud_status_bar;
+    public Texture2D tex_face_normal;
+    public Texture2D tex_face_right;
+    public Texture2D tex_face_left;
+    public Texture2D tex_face_evil;
+    public Texture2D tex_face_ouch;
+    public Texture2D tex_face_dead;
+
+    public static string resolve_resource_path(string relative_path) {
+        if (Raylib::FileExists(relative_path)) {
+            return relative_path;
+        }
+        string project_prefixed = "examples/doom/" + relative_path;
+        if (Raylib::FileExists(project_prefixed)) {
+            return project_prefixed;
+        }
+        return relative_path;
+    }
+
+    public DoomResources() {
+        this.is_loaded = false;
+    }
+
+    public void load() {
+        if (this.is_loaded) {
+            return;
+        }
+
+        // 3D Textured Models
+        this.model_wall_brown = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/wall_brown.obj"));
+        this.model_wall_tech = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/wall_tech.obj"));
+        this.model_wall_startan = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/wall_startan.obj"));
+        this.model_door_normal = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/door_normal.obj"));
+        this.model_door_big = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/door_big.obj"));
+        this.model_door_exit = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/door_exit.obj"));
+        this.model_floor_flat = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/floor_flat.obj"));
+        this.model_ceil_flat = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/ceil_flat.obj"));
+        this.model_acid_flat = Raylib::LoadModel(DoomResources::resolve_resource_path("resources/models/acid_flat.obj"));
+
+        // Billboard Monster Sprites
+        this.tex_zombie_walk = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/possa1.png"));
+        this.tex_zombie_attack = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/posse0.png"));
+        this.tex_zombie_pain = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/possg0.png"));
+        this.tex_zombie_dead = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/possl0.png"));
+
+        this.tex_imp_walk = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/trooa1.png"));
+        this.tex_imp_attack = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/trooe0.png"));
+        this.tex_imp_pain = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/trooh0.png"));
+        this.tex_imp_dead = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/troom0.png"));
+
+        this.tex_demon_walk = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/sarga1.png"));
+        this.tex_demon_attack = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/sarge0.png"));
+        this.tex_demon_pain = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/sargh0.png"));
+        this.tex_demon_dead = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/sargn0.png"));
+
+        this.tex_baron_walk = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bossa1.png"));
+        this.tex_baron_attack = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bosse0.png"));
+        this.tex_baron_pain = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bossh0.png"));
+        this.tex_baron_dead = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bosso0.png"));
+
+        this.tex_barrel = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bar1a0.png"));
+        this.tex_barrel_exp = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bexpc0.png"));
+
+        // Pickups
+        this.tex_item_bonus = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bon1a0.png"));
+        this.tex_item_medikit = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/media0.png"));
+        this.tex_item_armor = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/arm1a0.png"));
+        this.tex_item_key_blue = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bkeya0.png"));
+        this.tex_item_key_red = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/rkeya0.png"));
+        this.tex_item_key_yellow = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/ykeya0.png"));
+
+        // Projectiles
+        this.tex_proj_fireball = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/bal1a0.png"));
+        this.tex_proj_rocket = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/sprites/misla1.png"));
+
+        // HUD Weapons
+        this.tex_weapon_fist = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/punga0.png"));
+        this.tex_weapon_pistol_idle = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/pisga0.png"));
+        this.tex_weapon_pistol_fire = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/pisgb0.png"));
+        this.tex_weapon_shotgun_idle = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/shtga0.png"));
+        this.tex_weapon_shotgun_fire = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/shtgb0.png"));
+        this.tex_weapon_shotgun_pump = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/shtgd0.png"));
+        this.tex_weapon_chaingun_1 = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/chgga0.png"));
+        this.tex_weapon_chaingun_2 = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/chggb0.png"));
+        this.tex_weapon_rocket_idle = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/misga0.png"));
+        this.tex_weapon_rocket_fire = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/weapons/misgb0.png"));
+
+        // HUD Status Bar
+        this.tex_hud_status_bar = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stbar.png"));
+        this.tex_face_normal = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stfst00.png"));
+        this.tex_face_right = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stfst01.png"));
+        this.tex_face_left = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stfst02.png"));
+        this.tex_face_evil = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stfevl0.png"));
+        this.tex_face_ouch = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stfouch0.png"));
+        this.tex_face_dead = Raylib::LoadTexture(DoomResources::resolve_resource_path("resources/hud/stfdead0.png"));
+
+        this.is_loaded = true;
+    }
+
+    public void unload() {
+        if (!this.is_loaded) {
+            return;
+        }
+
+        // Unload Models
+        Raylib::UnloadModel(this.model_wall_brown);
+        Raylib::UnloadModel(this.model_wall_tech);
+        Raylib::UnloadModel(this.model_wall_startan);
+        Raylib::UnloadModel(this.model_door_normal);
+        Raylib::UnloadModel(this.model_door_big);
+        Raylib::UnloadModel(this.model_door_exit);
+        Raylib::UnloadModel(this.model_floor_flat);
+        Raylib::UnloadModel(this.model_ceil_flat);
+        Raylib::UnloadModel(this.model_acid_flat);
+
+        // Unload Textures
+        Raylib::UnloadTexture(this.tex_zombie_walk);
+        Raylib::UnloadTexture(this.tex_zombie_attack);
+        Raylib::UnloadTexture(this.tex_zombie_pain);
+        Raylib::UnloadTexture(this.tex_zombie_dead);
+
+        Raylib::UnloadTexture(this.tex_imp_walk);
+        Raylib::UnloadTexture(this.tex_imp_attack);
+        Raylib::UnloadTexture(this.tex_imp_pain);
+        Raylib::UnloadTexture(this.tex_imp_dead);
+
+        Raylib::UnloadTexture(this.tex_demon_walk);
+        Raylib::UnloadTexture(this.tex_demon_attack);
+        Raylib::UnloadTexture(this.tex_demon_pain);
+        Raylib::UnloadTexture(this.tex_demon_dead);
+
+        Raylib::UnloadTexture(this.tex_baron_walk);
+        Raylib::UnloadTexture(this.tex_baron_attack);
+        Raylib::UnloadTexture(this.tex_baron_pain);
+        Raylib::UnloadTexture(this.tex_baron_dead);
+
+        Raylib::UnloadTexture(this.tex_barrel);
+        Raylib::UnloadTexture(this.tex_barrel_exp);
+
+        Raylib::UnloadTexture(this.tex_item_bonus);
+        Raylib::UnloadTexture(this.tex_item_medikit);
+        Raylib::UnloadTexture(this.tex_item_armor);
+        Raylib::UnloadTexture(this.tex_item_key_blue);
+        Raylib::UnloadTexture(this.tex_item_key_red);
+        Raylib::UnloadTexture(this.tex_item_key_yellow);
+
+        Raylib::UnloadTexture(this.tex_proj_fireball);
+        Raylib::UnloadTexture(this.tex_proj_rocket);
+
+        Raylib::UnloadTexture(this.tex_weapon_fist);
+        Raylib::UnloadTexture(this.tex_weapon_pistol_idle);
+        Raylib::UnloadTexture(this.tex_weapon_pistol_fire);
+        Raylib::UnloadTexture(this.tex_weapon_shotgun_idle);
+        Raylib::UnloadTexture(this.tex_weapon_shotgun_fire);
+        Raylib::UnloadTexture(this.tex_weapon_shotgun_pump);
+        Raylib::UnloadTexture(this.tex_weapon_chaingun_1);
+        Raylib::UnloadTexture(this.tex_weapon_chaingun_2);
+        Raylib::UnloadTexture(this.tex_weapon_rocket_idle);
+        Raylib::UnloadTexture(this.tex_weapon_rocket_fire);
+
+        Raylib::UnloadTexture(this.tex_hud_status_bar);
+        Raylib::UnloadTexture(this.tex_face_normal);
+        Raylib::UnloadTexture(this.tex_face_right);
+        Raylib::UnloadTexture(this.tex_face_left);
+        Raylib::UnloadTexture(this.tex_face_evil);
+        Raylib::UnloadTexture(this.tex_face_ouch);
+        Raylib::UnloadTexture(this.tex_face_dead);
+
+        this.is_loaded = false;
+    }
+}

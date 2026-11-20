@@ -23,7 +23,7 @@ public class DoomTestRunner {
             return 4;
         }
 
-        // 3. Verify LevelMap Architecture
+        // 3. Verify LevelMap Architecture & Wall Texture Properties
         LevelMap test_map = new LevelMap();
         if (test_map.wall_count != 14 || test_map.sector_count != 6) {
             return 5;
@@ -39,6 +39,11 @@ public class DoomTestRunner {
         bool is_safe = test_map.check_toxic_hazard(0.0, 0.0);
         if (is_safe) {
             return 7;
+        }
+
+        // Verify wall texture types (0 = brown, 1 = tech, 2 = startan)
+        if (test_map.walls[0].wall_texture_type != 2 || test_map.walls[3].wall_texture_type != 1) {
+            return 14;
         }
 
         // 4. Verify Player Stats & Armor Absorption
@@ -72,6 +77,24 @@ public class DoomTestRunner {
         EnemyMonster test_pinky = new EnemyMonster(EnemyKind::PINKY_DEMON, 15.0, 0.0, 15.0);
         if (test_pinky.max_health_val != 140.0) {
             return 13;
+        }
+
+        // 7. Verify Natural FPS Camera Controls (Mouse look direction)
+        FpsCamera test_cam = new FpsCamera(0.0, 0.0, 0.0);
+        test_cam.update_look(20.0, -10.0, 0.1);
+        // Moving mouse right (positive delta) must increase yaw angle (turning right)
+        if (test_cam.yaw_angle < 1.99 || test_cam.yaw_angle > 2.01) {
+            return 15;
+        }
+        // Moving mouse up (negative delta_y in screen space) must increase pitch (looking up)
+        if (test_cam.pitch_angle < 0.99 || test_cam.pitch_angle > 1.01) {
+            return 16;
+        }
+
+        // 8. Verify DoomResources Manager Instance
+        DoomResources test_res = new DoomResources();
+        if (test_res.is_loaded) {
+            return 17;
         }
 
         // All assertions passed cleanly

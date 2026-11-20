@@ -14,6 +14,7 @@ public class DoomGame {
     public DoomAudioManager audio_manager;
     public DoomUserInterface user_interface;
     public DoomParticlePool particle_pool;
+    public DoomResources resources;
 
     public EnemyMonster[] enemies;
     public int32 enemy_count;
@@ -30,6 +31,7 @@ public class DoomGame {
         this.game_state = GameState::TITLE;
         this.current_level = 1;
 
+        this.resources = new DoomResources();
         this.audio_manager = new DoomAudioManager();
         this.user_interface = new DoomUserInterface();
         this.particle_pool = new DoomParticlePool();
@@ -159,14 +161,14 @@ public class DoomGame {
                     this.projectiles[proj_idx].launch(
                         ProjectileKind::PLAYER_ROCKET,
                         this.player.pos_x + (forward_x * 0.6),
-                        this.player.pos_y + DoomConstants::PLAYER_EYE_HEIGHT * 0.8,
+                        this.player.pos_y + (DoomConstants::PLAYER_EYE_HEIGHT * 0.8),
                         this.player.pos_z + (forward_z * 0.6),
                         forward_x,
                         forward_y,
                         forward_z,
-                        0.48,
-                        120.0,
-                        4.5,
+                        (float32)0.48,
+                        (float32)120.0,
+                        (float32)4.5,
                         true
                     );
                     return;
@@ -402,18 +404,18 @@ public class DoomGame {
         // ==========================================
         Raylib::BeginMode3D(this.camera.camera_instance);
 
-        // 1. Draw 3D map sectors, walls, toxic slime, and doors
-        this.level_map.draw();
+        // 1. Draw 3D map sectors, textured walls, toxic slime, and doors
+        this.level_map.draw_with_resources(this.resources);
 
-        // 2. Draw enemies in 3D
+        // 2. Draw 2.5D billboard enemies in 3D
         for (int32 enemy_index = 0; enemy_index < this.enemy_count; enemy_index = enemy_index + 1) {
-            this.enemies[enemy_index].draw();
+            this.enemies[enemy_index].draw_with_camera(this.camera.billboard_camera, this.resources);
         }
 
-        // 3. Draw active 3D projectiles
+        // 3. Draw active 3D billboard projectiles
         for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
             if (this.projectiles[proj_idx].is_active) {
-                this.projectiles[proj_idx].draw();
+                this.projectiles[proj_idx].draw_with_camera(this.camera.billboard_camera, this.resources);
             }
         }
 
@@ -429,20 +431,22 @@ public class DoomGame {
             // 1. Crosshair
             this.user_interface.draw_crosshair(DoomConstants::SCREEN_WIDTH, DoomConstants::SCREEN_HEIGHT);
 
-            // 2. First-person weapon view model
-            this.weapon_manager.draw_first_person_weapon(
+            // 2. Authentic first-person weapon view model
+            this.weapon_manager.draw_first_person_weapon_with_resources(
                 DoomConstants::SCREEN_WIDTH,
                 DoomConstants::SCREEN_HEIGHT,
-                this.camera.bob_offset_y
+                this.camera.bob_offset_y,
+                this.resources
             );
 
-            // 3. Status Bar
-            this.user_interface.draw_status_bar(
+            // 3. Authentic Doom Status Bar & Doomguy Face
+            this.user_interface.draw_status_bar_with_resources(
                 this.player,
                 this.weapon_manager,
                 DoomConstants::SCREEN_WIDTH,
                 DoomConstants::SCREEN_HEIGHT,
-                this.audio_manager.sound_muted
+                this.audio_manager.sound_muted,
+                this.resources
             );
 
             // 4. Fullscreen damage / pickup flashes
@@ -479,6 +483,7 @@ public class DoomGame {
         Raylib::DisableCursor(); // Capture mouse for smooth FPS camera
 
         DoomGame game = new DoomGame();
+        game.resources.load();
 
         while (!Raylib::WindowShouldClose()) {
             // Mute toggle
@@ -524,6 +529,7 @@ public class DoomGame {
         }
 
         Raylib::EnableCursor();
+        game.resources.unload();
         game.audio_manager.unload_all();
         Raylib::CloseAudioDevice();
         Raylib::CloseWindow();

@@ -18,6 +18,8 @@ public class DoomAudioManager {
     public Sound sound_door_open;
     public Sound sound_switch_click;
     public Sound sound_item_pickup;
+    public Sound sound_player_death;
+    public Sound sound_bump_oof;
 
     public static string resolve_sound_path(string relative_path) {
         if (Raylib::FileExists(relative_path)) {
@@ -35,18 +37,66 @@ public class DoomAudioManager {
         this.audio_ready = Raylib::IsAudioDeviceReady();
 
         if (this.audio_ready) {
-            this.sound_pistol = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/pistol.wav"));
-            this.sound_shotgun = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/shotgun.wav"));
+            // Load authentic id Software Doom WAV sounds with fallback support
+            this.sound_pistol = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dspistol.wav"));
+            if (!Raylib::IsSoundValid(this.sound_pistol)) {
+                this.sound_pistol = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/pistol.wav"));
+            }
+
+            this.sound_shotgun = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsshotgn.wav"));
+            if (!Raylib::IsSoundValid(this.sound_shotgun)) {
+                this.sound_shotgun = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/shotgun.wav"));
+            }
+
             this.sound_chaingun = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/chaingun.wav"));
-            this.sound_rocket_launch = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/rocket_launch.wav"));
-            this.sound_rocket_explosion = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/rocket_explosion.wav"));
-            this.sound_imp_fireball = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/imp_fireball.wav"));
-            this.sound_zombie_groan = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/zombie_groan.wav"));
-            this.sound_demon_bite = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/demon_bite.wav"));
-            this.sound_player_pain = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/player_pain.wav"));
-            this.sound_door_open = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/door_open.wav"));
-            this.sound_switch_click = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/switch_click.wav"));
-            this.sound_item_pickup = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/item_pickup.wav"));
+
+            this.sound_rocket_launch = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsrlaunc.wav"));
+            if (!Raylib::IsSoundValid(this.sound_rocket_launch)) {
+                this.sound_rocket_launch = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/rocket_launch.wav"));
+            }
+
+            this.sound_rocket_explosion = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsrxplod.wav"));
+            if (!Raylib::IsSoundValid(this.sound_rocket_explosion)) {
+                this.sound_rocket_explosion = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/rocket_explosion.wav"));
+            }
+
+            this.sound_imp_fireball = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsfirsht.wav"));
+            if (!Raylib::IsSoundValid(this.sound_imp_fireball)) {
+                this.sound_imp_fireball = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/imp_fireball.wav"));
+            }
+
+            this.sound_zombie_groan = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsposit1.wav"));
+            if (!Raylib::IsSoundValid(this.sound_zombie_groan)) {
+                this.sound_zombie_groan = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/zombie_groan.wav"));
+            }
+
+            this.sound_demon_bite = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsclaw.wav"));
+            if (!Raylib::IsSoundValid(this.sound_demon_bite)) {
+                this.sound_demon_bite = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/demon_bite.wav"));
+            }
+
+            this.sound_player_pain = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsplpain.wav"));
+            if (!Raylib::IsSoundValid(this.sound_player_pain)) {
+                this.sound_player_pain = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/player_pain.wav"));
+            }
+
+            this.sound_door_open = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsdoropn.wav"));
+            if (!Raylib::IsSoundValid(this.sound_door_open)) {
+                this.sound_door_open = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/door_open.wav"));
+            }
+
+            this.sound_switch_click = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsswtchn.wav"));
+            if (!Raylib::IsSoundValid(this.sound_switch_click)) {
+                this.sound_switch_click = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/switch_click.wav"));
+            }
+
+            this.sound_item_pickup = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsitemup.wav"));
+            if (!Raylib::IsSoundValid(this.sound_item_pickup)) {
+                this.sound_item_pickup = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/item_pickup.wav"));
+            }
+
+            this.sound_player_death = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dspldeth.wav"));
+            this.sound_bump_oof = Raylib::LoadSound(DoomAudioManager::resolve_sound_path("resources/audio/dsoof.wav"));
 
             if (Raylib::IsSoundValid(this.sound_pistol)) {
                 Raylib::SetSoundVolume(this.sound_pistol, 0.55);
@@ -84,6 +134,12 @@ public class DoomAudioManager {
             if (Raylib::IsSoundValid(this.sound_item_pickup)) {
                 Raylib::SetSoundVolume(this.sound_item_pickup, 0.45);
             }
+            if (Raylib::IsSoundValid(this.sound_player_death)) {
+                Raylib::SetSoundVolume(this.sound_player_death, 0.75);
+            }
+            if (Raylib::IsSoundValid(this.sound_bump_oof)) {
+                Raylib::SetSoundVolume(this.sound_bump_oof, 0.55);
+            }
         }
     }
 
@@ -100,30 +156,8 @@ public class DoomAudioManager {
         }
     }
 
-    public void play_sound_spatial(
-        Sound sound,
-        float32 sound_x,
-        float32 sound_z,
-        float32 listener_x,
-        float32 listener_z,
-        float32 max_audible_distance
-    ) {
-        if (this.sound_muted || !this.audio_ready) {
-            return;
-        }
-        if (!Raylib::IsSoundValid(sound)) {
-            return;
-        }
-        float32 distance = DoomMath::distance_2d(sound_x, sound_z, listener_x, listener_z);
-        if (distance >= max_audible_distance) {
-            return;
-        }
-        float32 volume_ratio = 1.0 - (distance / max_audible_distance);
-        if (volume_ratio < 0.05) {
-            return;
-        }
-        Raylib::SetSoundVolume(sound, volume_ratio * 0.75);
-        Raylib::PlaySound(sound);
+    public void unload() {
+        this.unload_all();
     }
 
     public void unload_all() {
@@ -165,6 +199,12 @@ public class DoomAudioManager {
         }
         if (Raylib::IsSoundValid(this.sound_item_pickup)) {
             Raylib::UnloadSound(this.sound_item_pickup);
+        }
+        if (Raylib::IsSoundValid(this.sound_player_death)) {
+            Raylib::UnloadSound(this.sound_player_death);
+        }
+        if (Raylib::IsSoundValid(this.sound_bump_oof)) {
+            Raylib::UnloadSound(this.sound_bump_oof);
         }
     }
 }

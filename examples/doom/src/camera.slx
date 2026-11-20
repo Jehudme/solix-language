@@ -5,6 +5,7 @@ import solix.math.Math;
 
 public class FpsCamera {
     public Camera3D camera_instance;
+    public Camera billboard_camera;
     public float32 yaw_angle;
     public float32 pitch_angle;
     public float32 view_bob_phase;
@@ -27,10 +28,19 @@ public class FpsCamera {
             DoomConstants::FOV_DEFAULT,
             CameraProjection::CAMERA_PERSPECTIVE
         );
+
+        this.billboard_camera = new Camera();
+        this.billboard_camera.position = new Vector3(camera_pos.x, camera_pos.y, camera_pos.z);
+        this.billboard_camera.target = new Vector3(camera_target.x, camera_target.y, camera_target.z);
+        this.billboard_camera.up = new Vector3(0.0, 1.0, 0.0);
+        this.billboard_camera.fovy = DoomConstants::FOV_DEFAULT;
+        this.billboard_camera.projection = CameraProjection::CAMERA_PERSPECTIVE;
     }
 
     public void update_look(float32 delta_mouse_x, float32 delta_mouse_y, float32 sensitivity) {
-        this.yaw_angle = this.yaw_angle - (delta_mouse_x * sensitivity);
+        // Natural FPS look controls: moving mouse right rotates yaw clockwise/right,
+        // moving mouse up tilts pitch upward without inversion.
+        this.yaw_angle = this.yaw_angle + (delta_mouse_x * sensitivity);
         this.pitch_angle = this.pitch_angle - (delta_mouse_y * sensitivity);
 
         // Clamp pitch to avoid gimbal flip (-85 degrees to +85 degrees)
@@ -50,6 +60,10 @@ public class FpsCamera {
         this.camera_instance.position.y = eye_y;
         this.camera_instance.position.z = player_z;
 
+        this.billboard_camera.position.x = player_x;
+        this.billboard_camera.position.y = eye_y;
+        this.billboard_camera.position.z = player_z;
+
         // Calculate target point based on yaw and pitch
         float64 yaw_rad = (float64)this.yaw_angle * 0.017453292519943295;
         float64 pitch_rad = (float64)this.pitch_angle * 0.017453292519943295;
@@ -61,6 +75,10 @@ public class FpsCamera {
         this.camera_instance.target.x = player_x + forward_dir_x;
         this.camera_instance.target.y = eye_y + forward_dir_y;
         this.camera_instance.target.z = player_z + forward_dir_z;
+
+        this.billboard_camera.target.x = player_x + forward_dir_x;
+        this.billboard_camera.target.y = eye_y + forward_dir_y;
+        this.billboard_camera.target.z = player_z + forward_dir_z;
     }
 
     public float32 get_forward_x() {
