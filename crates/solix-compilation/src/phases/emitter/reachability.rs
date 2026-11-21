@@ -203,6 +203,24 @@ impl<'program> StaticLinker<'program> {
                 self.enqueue_function_index(func_index);
             }
         }
+
+        // Statically imported dependencies may have companion native FFI libraries (e.g. Raylib)
+        // that construct or unpack class instances by name at runtime via `solix_vm_get_class_vtable_id`.
+        // Ensure all dependency class descriptors are imported into the target program.
+        self.import_dependency_classes();
+    }
+
+    fn import_dependency_classes(&mut self) {
+        for dep_idx in 0..self.dependency_programs.len() {
+            let dep_vtables: Vec<u32> = self.dependency_programs[dep_idx]
+                .classes
+                .iter()
+                .map(|candidate_class| candidate_class.vtable_id)
+                .collect();
+            for dep_vt in dep_vtables {
+                self.import_dep_class(dep_idx, dep_vt);
+            }
+        }
     }
 
     fn enqueue_function_index(&mut self, func_index: usize) {

@@ -1,5 +1,0 @@
-newmtl WallStep
-map_Kd ../textures/step2.png
-Ka 1.0 1.0 1.0
-Kd 1.0 1.0 1.0
-Ks 0.0 0.0 0.0
