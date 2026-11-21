@@ -88,7 +88,11 @@ public class DoomResources {
     }
 
     public void load() {
-        string models_dir = "examples/doom/resources/models/";
+        string base_dir = "examples/doom/resources/";
+        if (!Raylib::FileExists("examples/doom/resources/models/level_floors.obj")) {
+            base_dir = "resources/";
+        }
+        string models_dir = base_dir + "models/";
         this.model_wall_brown = Raylib::LoadModel(models_dir + "wall_brown.obj");
         this.model_wall_tech = Raylib::LoadModel(models_dir + "wall_tech.obj");
         this.model_wall_startan = Raylib::LoadModel(models_dir + "wall_startan.obj");
@@ -106,7 +110,7 @@ public class DoomResources {
         this.model_ceil_flat = Raylib::LoadModel(models_dir + "ceil_flat.obj");
         this.model_acid_flat = Raylib::LoadModel(models_dir + "acid_flat.obj");
 
-        string sprites_dir = "examples/doom/resources/sprites/";
+        string sprites_dir = base_dir + "sprites/";
         this.tex_zombie_walk = Raylib::LoadTexture(sprites_dir + "possa1.png");
         this.tex_zombie_attack = Raylib::LoadTexture(sprites_dir + "posse0.png");
         this.tex_zombie_pain = Raylib::LoadTexture(sprites_dir + "possh0.png");
@@ -138,7 +142,7 @@ public class DoomResources {
         this.tex_projectile_fireball = Raylib::LoadTexture(sprites_dir + "bal1a0.png");
         this.tex_projectile_rocket = Raylib::LoadTexture(sprites_dir + "misla1.png");
 
-        string weapons_dir = "examples/doom/resources/weapons/";
+        string weapons_dir = base_dir + "weapons/";
         this.tex_fist_idle = Raylib::LoadTexture(weapons_dir + "punga0.png");
         this.tex_fist_punch = Raylib::LoadTexture(weapons_dir + "pungb0.png");
         this.tex_pistol_idle = Raylib::LoadTexture(weapons_dir + "pisga0.png");
@@ -151,7 +155,7 @@ public class DoomResources {
         this.tex_rocket_idle = Raylib::LoadTexture(weapons_dir + "misga0.png");
         this.tex_rocket_fire = Raylib::LoadTexture(weapons_dir + "misgb0.png");
 
-        string hud_dir = "examples/doom/resources/hud/";
+        string hud_dir = base_dir + "hud/";
         this.tex_stbar = Raylib::LoadTexture(hud_dir + "stbar.png");
 
         for (int32 digit_index = 0; digit_index < 10; digit_index = digit_index + 1) {

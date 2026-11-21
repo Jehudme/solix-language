@@ -35,6 +35,9 @@ public class DoomAudio {
 
     public void load() {
         string audio_prefix = "examples/doom/resources/audio/";
+        if (!Raylib::FileExists("examples/doom/resources/audio/dspistol.wav")) {
+            audio_prefix = "resources/audio/";
+        }
         this.sound_pistol = Raylib::LoadSound(audio_prefix + "dspistol.wav");
         this.sound_shotgun = Raylib::LoadSound(audio_prefix + "dsshotgn.wav");
         this.sound_rocket = Raylib::LoadSound(audio_prefix + "dsrlaunc.wav");
