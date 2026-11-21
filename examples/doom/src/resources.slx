@@ -17,6 +17,8 @@ public class DoomResources {
     public Model model_door_blue;
     public Model model_door_red;
     public Model model_door_yellow;
+    public Model model_level_floors;
+    public Model model_level_ceilings;
     public Model model_floor_flat;
     public Model model_ceil_flat;
     public Model model_acid_flat;
@@ -98,6 +100,8 @@ public class DoomResources {
         this.model_door_blue = Raylib::LoadModel(models_dir + "door_blue.obj");
         this.model_door_red = Raylib::LoadModel(models_dir + "door_red.obj");
         this.model_door_yellow = Raylib::LoadModel(models_dir + "door_yellow.obj");
+        this.model_level_floors = Raylib::LoadModel(models_dir + "level_floors.obj");
+        this.model_level_ceilings = Raylib::LoadModel(models_dir + "level_ceilings.obj");
         this.model_floor_flat = Raylib::LoadModel(models_dir + "floor_flat.obj");
         this.model_ceil_flat = Raylib::LoadModel(models_dir + "ceil_flat.obj");
         this.model_acid_flat = Raylib::LoadModel(models_dir + "acid_flat.obj");
@@ -207,6 +211,8 @@ public class DoomResources {
         Raylib::UnloadModel(this.model_door_blue);
         Raylib::UnloadModel(this.model_door_red);
         Raylib::UnloadModel(this.model_door_yellow);
+        Raylib::UnloadModel(this.model_level_floors);
+        Raylib::UnloadModel(this.model_level_ceilings);
         Raylib::UnloadModel(this.model_floor_flat);
         Raylib::UnloadModel(this.model_ceil_flat);
         Raylib::UnloadModel(this.model_acid_flat);

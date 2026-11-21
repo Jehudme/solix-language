@@ -1,0 +1,36 @@
+newmtl floor5_1
+map_Kd ../textures/floor5_1.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl floor5_3
+map_Kd ../textures/floor5_3.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl floor6_1
+map_Kd ../textures/floor6_1.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl nukage3
+map_Kd ../textures/nukage3.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl step1
+map_Kd ../textures/step1.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl step2
+map_Kd ../textures/step2.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+

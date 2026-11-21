@@ -1,0 +1,54 @@
+newmtl ceil3_5
+map_Kd ../textures/ceil3_5.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl f_sky1
+map_Kd ../textures/f_sky1.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl flat10
+map_Kd ../textures/flat10.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl flat20
+map_Kd ../textures/flat20.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl flat23
+map_Kd ../textures/flat23.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl flat5_4
+map_Kd ../textures/flat5_4.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl floor3_3
+map_Kd ../textures/floor3_3.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl tlite6_5
+map_Kd ../textures/tlite6_5.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+
+newmtl tlite6_6
+map_Kd ../textures/tlite6_6.png
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+

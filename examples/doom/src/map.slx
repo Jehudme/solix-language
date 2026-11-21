@@ -174,16 +174,41 @@ public class LevelMap {
         return false;
     }
 
+    public bool check_line_of_sight(
+        float32 start_coord_x,
+        float32 start_coord_z,
+        float32 end_coord_x,
+        float32 end_coord_z
+    ) {
+        for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
+            WallSegment wall = this.walls[wall_index];
+            if (wall != null && (wall.is_solid || (wall.is_door && wall.door_state == 0))) {
+                if (DoomMath::test_segment_intersection(
+                    start_coord_x,
+                    start_coord_z,
+                    end_coord_x,
+                    end_coord_z,
+                    wall.start_x,
+                    wall.start_z,
+                    wall.end_x,
+                    wall.end_z
+                )) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public void draw_world(DoomResources resources) {
         if (resources == null || !resources.is_loaded) {
             return;
         }
 
-        // 1. Draw large floor plane
-        Vector3 floor_pos = new Vector3((float32)0.0, (float32)0.0, (float32)0.0);
-        Vector3 floor_scale = new Vector3((float32)300.0, (float32)1.0, (float32)300.0);
-        Vector3 rotation_axis = new Vector3((float32)0.0, (float32)1.0, (float32)0.0);
-        Raylib::DrawModelEx(resources.model_floor_flat, floor_pos, rotation_axis, (float32)0.0, floor_scale, Color::WHITE);
+        // 1. Draw authentic textured sector floors and ceilings
+        Vector3 level_origin = new Vector3((float32)0.0, (float32)0.0, (float32)0.0);
+        Raylib::DrawModel(resources.model_level_floors, level_origin, (float32)1.0, Color::WHITE);
+        Raylib::DrawModel(resources.model_level_ceilings, level_origin, (float32)1.0, Color::WHITE);
 
         // 2. Draw all authentic wall segments
         for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
