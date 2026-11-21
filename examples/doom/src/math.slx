@@ -81,4 +81,33 @@ public class DoomMath {
 
         return (float32)0.0;
     }
+
+    public static bool test_segment_intersection(
+        float32 seg1_start_x,
+        float32 seg1_start_z,
+        float32 seg1_end_x,
+        float32 seg1_end_z,
+        float32 seg2_start_x,
+        float32 seg2_start_z,
+        float32 seg2_end_x,
+        float32 seg2_end_z
+    ) {
+        float32 delta1_x = seg1_end_x - seg1_start_x;
+        float32 delta1_z = seg1_end_z - seg1_start_z;
+        float32 delta2_x = seg2_end_x - seg2_start_x;
+        float32 delta2_z = seg2_end_z - seg2_start_z;
+
+        float32 determinant = (delta1_x * delta2_z) - (delta1_z * delta2_x);
+        if (determinant > (float32)-0.0001 && determinant < (float32)0.0001) {
+            return false;
+        }
+
+        float32 diff_start_x = seg2_start_x - seg1_start_x;
+        float32 diff_start_z = seg2_start_z - seg1_start_z;
+
+        float32 param_s = ((diff_start_x * delta2_z) - (diff_start_z * delta2_x)) / determinant;
+        float32 param_t = ((diff_start_x * delta1_z) - (diff_start_z * delta1_x)) / determinant;
+
+        return (param_s >= (float32)0.0 && param_s <= (float32)1.0 && param_t >= (float32)0.0 && param_t <= (float32)1.0);
+    }
 }

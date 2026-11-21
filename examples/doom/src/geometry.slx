@@ -128,7 +128,7 @@ public class WallSegment {
         float32 effective_center_y = this.center_pos_y + this.door_offset_y;
         Vector3 wall_position = new Vector3(this.center_pos_x, effective_center_y, this.center_pos_z);
         Vector3 rotation_axis = new Vector3((float32)0.0, (float32)1.0, (float32)0.0);
-        Vector3 wall_scale = new Vector3(this.wall_length, this.wall_height, (float32)0.1);
+        Vector3 wall_scale = new Vector3(this.wall_length, this.wall_height, (float32)0.22);
 
         Model selected_model = resources.get_wall_model(this.texture_id);
         Raylib::DrawModelEx(

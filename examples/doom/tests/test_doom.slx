@@ -4,7 +4,7 @@ public class DoomTestRunner {
     public static int32 test() {
         // 1. Verify E1M1 Map Data
         LevelMap test_map = new LevelMap();
-        if (test_map.wall_count != 665) {
+        if (test_map.wall_count != 686) {
             return 1;
         }
         if (test_map.enemy_count != 89) {
@@ -13,7 +13,7 @@ public class DoomTestRunner {
         if (test_map.pickup_count != 87) {
             return 3;
         }
-        if (test_map.player_spawn_x != (float32)3.0 || test_map.player_spawn_z != (float32)8.5) {
+        if (test_map.player_spawn_x != (float32)3.0 || test_map.player_spawn_y != (float32)6.25 || test_map.player_spawn_z != (float32)8.5) {
             return 4;
         }
 
@@ -23,7 +23,7 @@ public class DoomTestRunner {
         if (test_camera.yaw_angle <= (float32)0.0) {
             return 5;
         }
-        test_camera.update_position((float32)3.0, (float32)0.0, (float32)8.5, true);
+        test_camera.update_position((float32)3.0, (float32)6.25, (float32)8.5, true);
 
         // 3. Verify Player State & Collision
         DoomPlayer test_player = new DoomPlayer(test_map.player_spawn_x, test_map.player_spawn_y, test_map.player_spawn_z);
@@ -42,7 +42,7 @@ public class DoomTestRunner {
         }
         test_weapons.update();
 
-        // 5. Verify DoomMath Collision and Distance
+        // 5. Verify DoomMath Collision, Distance and Line-of-Sight Intersection
         float32 dist_result = DoomMath::distance_2d((float32)0.0, (float32)0.0, (float32)3.0, (float32)4.0);
         if (dist_result < (float32)4.99 || dist_result > (float32)5.01) {
             return 9;
@@ -60,27 +60,60 @@ public class DoomTestRunner {
             return 10;
         }
 
-        // 6. Verify Entities (Monsters, Pickups, Projectiles)
-        EnemyMonster test_monster = new EnemyMonster(EnemyKind::ZOMBIEMAN, (float32)10.0, (float32)0.0, (float32)10.0);
-        if (test_monster.health_val != (float32)30.0 || !test_monster.is_alive) {
+        bool lines_intersect = DoomMath::test_segment_intersection(
+            (float32)0.0, (float32)0.0, (float32)10.0, (float32)10.0,
+            (float32)0.0, (float32)10.0, (float32)10.0, (float32)0.0
+        );
+        if (!lines_intersect) {
             return 11;
         }
 
-        PickupItem test_pickup = new PickupItem(PickupKind::SHOTGUN, (float32)5.0, (float32)0.0, (float32)5.0);
-        if (test_pickup.is_collected) {
+        bool lines_parallel = DoomMath::test_segment_intersection(
+            (float32)0.0, (float32)0.0, (float32)10.0, (float32)0.0,
+            (float32)0.0, (float32)5.0, (float32)10.0, (float32)5.0
+        );
+        if (lines_parallel) {
             return 12;
+        }
+
+        // 6. Verify Entities (Monsters, Pickups, Projectiles)
+        EnemyMonster test_monster = new EnemyMonster(EnemyKind::ZOMBIEMAN, (float32)10.0, (float32)6.25, (float32)10.0);
+        if (test_monster.health_val != (float32)30.0 || !test_monster.is_alive) {
+            return 13;
+        }
+
+        PickupItem test_pickup = new PickupItem(PickupKind::SHOTGUN, (float32)5.0, (float32)6.25, (float32)5.0);
+        if (test_pickup.is_collected) {
+            return 14;
         }
 
         Projectile test_projectile = new Projectile();
         test_projectile.launch((float32)0.0, (float32)1.0, (float32)0.0, (float32)0.1, (float32)0.0, (float32)0.0, (float32)20.0, true, false);
         if (!test_projectile.is_active) {
-            return 13;
+            return 15;
         }
 
         // 7. Verify HUD
         DoomHUD test_hud = new DoomHUD();
         if (test_hud.face_anim_timer != 0) {
-            return 14;
+            return 16;
+        }
+
+        // 8. Verify Hitscan Weapon Targeting and Monster Damage
+        DoomPlayer combat_player = new DoomPlayer((float32)14.0, (float32)6.25, (float32)8.5);
+        FpsCamera combat_camera = new FpsCamera((float32)14.0, (float32)6.25, (float32)8.5, (float32)-25.0);
+        DoomAudio test_audio = new DoomAudio();
+        test_weapons.perform_hitscan(combat_player, combat_camera, test_map, test_audio, (float32)15.0, (float32)100.0);
+
+        bool monster_took_damage = false;
+        for (int32 monster_index = 0; monster_index < test_map.enemy_count; monster_index = monster_index + 1) {
+            EnemyMonster monster = test_map.enemies[monster_index];
+            if (monster != null && monster.health_val < monster.max_health_val) {
+                monster_took_damage = true;
+            }
+        }
+        if (!monster_took_damage) {
+            return 17;
         }
 
         return 0;

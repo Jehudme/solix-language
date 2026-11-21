@@ -90,13 +90,13 @@ public class WeaponManager {
             this.fire_timer = 18;
             this.muzzle_flash_timer = 8;
             audio_manager.play_sound(audio_manager.sound_punch);
-            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)20.0, (float32)2.0);
+            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)20.0, (float32)2.5);
         } else if (this.selected_weapon == WeaponKind::PISTOL) {
             this.ammo_bullets = this.ammo_bullets - 1;
             this.fire_timer = 14;
             this.muzzle_flash_timer = 6;
             audio_manager.play_sound(audio_manager.sound_pistol);
-            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)15.0, (float32)25.0);
+            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)15.0, (float32)100.0);
         } else if (this.selected_weapon == WeaponKind::SHOTGUN) {
             this.ammo_shells = this.ammo_shells - 1;
             this.fire_timer = 40;
@@ -104,14 +104,14 @@ public class WeaponManager {
             audio_manager.play_sound(audio_manager.sound_shotgun);
             // Shotgun fires 7 pellets
             for (int32 pellet_index = 0; pellet_index < 7; pellet_index = pellet_index + 1) {
-                this.perform_hitscan(player, camera, level_map, audio_manager, (float32)12.0, (float32)25.0);
+                this.perform_hitscan(player, camera, level_map, audio_manager, (float32)12.0, (float32)100.0);
             }
         } else if (this.selected_weapon == WeaponKind::CHAINGUN) {
             this.ammo_bullets = this.ammo_bullets - 1;
             this.fire_timer = 6;
             this.muzzle_flash_timer = 4;
             audio_manager.play_sound(audio_manager.sound_pistol);
-            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)12.0, (float32)25.0);
+            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)12.0, (float32)100.0);
         }
     }
 
@@ -137,14 +137,16 @@ public class WeaponManager {
                 float32 diff_z = monster.pos_z - player.pos_z;
                 float32 dist = DoomMath::distance_2d(player.pos_x, player.pos_z, monster.pos_x, monster.pos_z);
 
-                if (dist < best_dist) {
+                if (dist < best_dist && dist > (float32)0.1) {
                     float32 norm_diff_x = diff_x / dist;
                     float32 norm_diff_z = diff_z / dist;
 
                     float32 dot_val = (dir_x * norm_diff_x) + (dir_z * norm_diff_z);
-                    if (dot_val > (float32)0.92) { // Within aim cone
-                        best_dist = dist;
-                        best_target_index = monster_idx;
+                    if (dot_val > (float32)0.82) { // Within aim cone
+                        if (level_map.check_line_of_sight(player.pos_x, player.pos_z, monster.pos_x, monster.pos_z)) {
+                            best_dist = dist;
+                            best_target_index = monster_idx;
+                        }
                     }
                 }
             }
