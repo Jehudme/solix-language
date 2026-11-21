@@ -46,7 +46,7 @@ f 5/1/6 4/3/6 8/4/6
 
 
 def generate_plane_obj(output_obj_path, material_filename, material_name, is_floor_plane):
-    normal_y = 1.0 if is_floor_plane else -1.0
+    normal_elevation = 1.0 if is_floor_plane else -1.0
     content = f"""mtllib {material_filename}
 usemtl {material_name}
 v -0.5 0.0 -0.5
@@ -57,7 +57,7 @@ vt 0.0 0.0
 vt 1.0 0.0
 vt 1.0 1.0
 vt 0.0 1.0
-vn 0.0 {normal_y} 0.0
+vn 0.0 {normal_elevation} 0.0
 """
     if is_floor_plane:
         content += "f 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n"
@@ -87,9 +87,14 @@ def main():
         ("wall_brown", "WallBrown", "../textures/brown1.png"),
         ("wall_tech", "WallTech", "../textures/comp2.png"),
         ("wall_startan", "WallStartan", "../textures/startan1.png"),
+        ("wall_step", "WallStep", "../textures/step2.png"),
+        ("wall_exitsign", "WallExitSign", "../textures/exitsign.png"),
+        ("wall_switch", "WallSwitch", "../textures/sw1brcom.png"),
         ("door_normal", "DoorNormal", "../textures/door3.png"),
-        ("door_big", "DoorBig", "../textures/bigdoor1.png"),
-        ("door_exit", "DoorExit", "../textures/exitdoor.png"),
+        ("door_big", "DoorBig", "../textures/bigdoor2.png"),
+        ("door_blue", "DoorBlue", "../textures/doorblu.png"),
+        ("door_red", "DoorRed", "../textures/doorred.png"),
+        ("door_yellow", "DoorYellow", "../textures/dooryel.png"),
     ]
 
     for model_name, mat_name, tex_path in cube_configs:
@@ -97,20 +102,20 @@ def main():
         mtl_path = os.path.join(models_dir, f"{model_name}.mtl")
         generate_mtl(mtl_path, mat_name, tex_path)
         generate_cube_obj(obj_path, f"{model_name}.mtl", mat_name)
-        print(f"Generated {model_name}.obj / .mtl")
 
     plane_configs = [
         ("floor_flat", "FloorFlat", "../textures/floor4_8.png", True),
         ("ceil_flat", "CeilFlat", "../textures/ceil3_5.png", False),
-        ("acid_flat", "AcidFlat", "../textures/floor7_1.png", True),
+        ("acid_flat", "AcidFlat", "../textures/nukage3.png", True),
     ]
 
-    for plane_name, mat_name, tex_path, floor_flag in plane_configs:
-        obj_path = os.path.join(models_dir, f"{plane_name}.obj")
-        mtl_path = os.path.join(models_dir, f"{plane_name}.mtl")
+    for model_name, mat_name, tex_path, is_floor_flag in plane_configs:
+        obj_path = os.path.join(models_dir, f"{model_name}.obj")
+        mtl_path = os.path.join(models_dir, f"{model_name}.mtl")
         generate_mtl(mtl_path, mat_name, tex_path)
-        generate_plane_obj(obj_path, f"{plane_name}.mtl", mat_name, floor_flag)
-        print(f"Generated {plane_name}.obj / .mtl")
+        generate_plane_obj(obj_path, f"{model_name}.mtl", mat_name, is_floor_flag)
+
+    print(f"Generated {len(cube_configs) + len(plane_configs)} 3D models in {models_dir}")
 
 
 if __name__ == "__main__":

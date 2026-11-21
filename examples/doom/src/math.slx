@@ -1,69 +1,84 @@
 package doom;
 
-import raylib.*;
 import solix.math.Math;
 
 public class DoomMath {
-    public static float32 clamp_float(float32 value_val, float32 min_val, float32 max_val) {
-        if (value_val < min_val) {
-            return min_val;
-        }
-        if (value_val > max_val) {
-            return max_val;
-        }
-        return value_val;
+    public static float32 PI = (float32)3.14159265;
+
+    public static float32 distance_2d(float32 first_x, float32 first_z, float32 second_x, float32 second_z) {
+        float32 delta_x = second_x - first_x;
+        float32 delta_z = second_z - first_z;
+        return (float32)Math::sqrt((float64)((delta_x * delta_x) + (delta_z * delta_z)));
     }
 
     public static float32 distance_3d(
-        float32 origin_x,
-        float32 origin_y,
-        float32 origin_z,
-        float32 target_x,
-        float32 target_y,
-        float32 target_z
+        float32 first_x,
+        float32 first_y,
+        float32 first_z,
+        float32 second_x,
+        float32 second_y,
+        float32 second_z
     ) {
-        float32 diff_x = target_x - origin_x;
-        float32 diff_y = target_y - origin_y;
-        float32 diff_z = target_z - origin_z;
-        float64 sum_squares = (float64)((diff_x * diff_x) + (diff_y * diff_y) + (diff_z * diff_z));
-        return (float32)Math::sqrt(sum_squares);
+        float32 delta_x = second_x - first_x;
+        float32 delta_y = second_y - first_y;
+        float32 delta_z = second_z - first_z;
+        return (float32)Math::sqrt((float64)((delta_x * delta_x) + (delta_y * delta_y) + (delta_z * delta_z)));
     }
 
-    public static float32 distance_2d(
-        float32 origin_x,
-        float32 origin_z,
-        float32 target_x,
-        float32 target_z
-    ) {
-        float32 diff_x = target_x - origin_x;
-        float32 diff_z = target_z - origin_z;
-        float64 sum_squares = (float64)((diff_x * diff_x) + (diff_z * diff_z));
-        return (float32)Math::sqrt(sum_squares);
-    }
-
-    public static float32 calculate_yaw_angle(float32 from_x, float32 from_z, float32 to_x, float32 to_z) {
-        float32 delta_x = to_x - from_x;
-        float32 delta_z = to_z - from_z;
-        float64 angle_radians = Math::atan2((float64)delta_z, (float64)delta_x);
-        return (float32)(angle_radians * 57.29577951308232); // Radians to degrees
-    }
-
-    public static bool test_box_overlap(
-        float32 box_a_min_x,
-        float32 box_a_min_z,
-        float32 box_a_max_x,
-        float32 box_a_max_z,
-        float32 box_b_min_x,
-        float32 box_b_min_z,
-        float32 box_b_max_x,
-        float32 box_b_max_z
-    ) {
-        if (box_a_max_x < box_b_min_x || box_a_min_x > box_b_max_x) {
-            return false;
+    public static float32 clamp(float32 target_val, float32 min_val, float32 max_val) {
+        if (target_val < min_val) {
+            return min_val;
         }
-        if (box_a_max_z < box_b_min_z || box_a_min_z > box_b_max_z) {
-            return false;
+        if (target_val > max_val) {
+            return max_val;
         }
-        return true;
+        return target_val;
+    }
+
+    // Line segment vs circle distance & push normal
+    // Returns push distance (0.0 if no collision) and outputs normal in push_vector
+    public static float32 test_wall_circle_collision(
+        float32 wall_start_x,
+        float32 wall_start_z,
+        float32 wall_end_x,
+        float32 wall_end_z,
+        float32 circle_center_x,
+        float32 circle_center_z,
+        float32 circle_radius,
+        float32[] push_vector_out
+    ) {
+        float32 segment_delta_x = wall_end_x - wall_start_x;
+        float32 segment_delta_z = wall_end_z - wall_start_z;
+        float32 segment_length_sq = (segment_delta_x * segment_delta_x) + (segment_delta_z * segment_delta_z);
+
+        if (segment_length_sq < (float32)0.0001) {
+            return (float32)0.0;
+        }
+
+        float32 circle_to_start_x = circle_center_x - wall_start_x;
+        float32 circle_to_start_z = circle_center_z - wall_start_z;
+
+        float32 dot_product = (circle_to_start_x * segment_delta_x) + (circle_to_start_z * segment_delta_z);
+        float32 projection_t = dot_product / segment_length_sq;
+        projection_t = DoomMath::clamp(projection_t, (float32)0.0, (float32)1.0);
+
+        float32 closest_point_x = wall_start_x + (projection_t * segment_delta_x);
+        float32 closest_point_z = wall_start_z + (projection_t * segment_delta_z);
+
+        float32 offset_to_circle_x = circle_center_x - closest_point_x;
+        float32 offset_to_circle_z = circle_center_z - closest_point_z;
+        float32 distance_to_line = (float32)Math::sqrt((float64)((offset_to_circle_x * offset_to_circle_x) + (offset_to_circle_z * offset_to_circle_z)));
+
+        if (distance_to_line < circle_radius && distance_to_line > (float32)0.0001) {
+            float32 penetration_depth = circle_radius - distance_to_line;
+            float32 normal_x = offset_to_circle_x / distance_to_line;
+            float32 normal_z = offset_to_circle_z / distance_to_line;
+
+            push_vector_out[0] = normal_x;
+            push_vector_out[1] = normal_z;
+            return penetration_depth;
+        }
+
+        return (float32)0.0;
     }
 }

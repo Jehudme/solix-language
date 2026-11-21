@@ -1,0 +1,63 @@
+package doom;
+
+public class DoomConstants {
+    public static int32 SCREEN_WIDTH = 1024;
+    public static int32 SCREEN_HEIGHT = 768;
+    public static int32 TARGET_FPS = 60;
+
+    public static float32 PLAYER_HEIGHT = (float32)1.6;
+    public static float32 PLAYER_RADIUS = (float32)0.45;
+    public static float32 WALK_SPEED = (float32)7.5;
+    public static float32 SPRINT_SPEED = (float32)14.0;
+    public static float32 MOUSE_SENSITIVITY = (float32)0.12;
+
+    public static float32 GRAVITY = (float32)18.0;
+}
+
+public class GameState {
+    public static int32 PLAYING = 0;
+    public static int32 PAUSED = 1;
+    public static int32 INTERMISSION = 2;
+    public static int32 GAME_OVER = 3;
+}
+
+public class EnemyKind {
+    public static int32 ZOMBIEMAN = 0;
+    public static int32 SHOTGUN_GUY = 1;
+    public static int32 IMP = 2;
+    public static int32 PINKY_DEMON = 3;
+}
+
+public class EnemyAiState {
+    public static int32 IDLE = 0;
+    public static int32 CHASE = 1;
+    public static int32 ATTACK = 2;
+    public static int32 PAIN = 3;
+    public static int32 DEAD = 4;
+}
+
+public class WeaponKind {
+    public static int32 FIST = 0;
+    public static int32 CHAINSAW = 1;
+    public static int32 PISTOL = 2;
+    public static int32 SHOTGUN = 3;
+    public static int32 CHAINGUN = 4;
+    public static int32 ROCKET_LAUNCHER = 5;
+}
+
+public class PickupKind {
+    public static int32 SHOTGUN = 0;
+    public static int32 CHAINGUN = 1;
+    public static int32 CHAINSAW = 2;
+    public static int32 AMMO_CLIP = 3;
+    public static int32 AMMO_SHELLS = 4;
+    public static int32 HEALTH_STIMPACK = 5;
+    public static int32 HEALTH_MEDIKIT = 6;
+    public static int32 HEALTH_POTION = 7;
+    public static int32 ARMOR_HELMET = 8;
+    public static int32 GREEN_ARMOR = 9;
+    public static int32 BLUE_KEY = 10;
+    public static int32 RED_KEY = 11;
+    public static int32 YELLOW_KEY = 12;
+    public static int32 BARREL = 13;
+}

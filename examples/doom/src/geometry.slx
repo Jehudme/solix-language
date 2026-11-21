@@ -1,0 +1,143 @@
+package doom;
+
+import raylib.*;
+import solix.math.Math;
+
+public class WallSegment {
+    public float32 start_x;
+    public float32 start_z;
+    public float32 end_x;
+    public float32 end_z;
+
+    public float32 floor_elevation;
+    public float32 ceil_elevation;
+    public int32 texture_id;
+
+    public bool is_door;
+    public int32 door_id;
+    public int32 door_state; // 0 = closed, 1 = opening, 2 = open, 3 = closing
+    public float32 door_offset_y;
+    public int32 door_stay_timer;
+    public int32 required_key; // 0 = none, 1 = blue, 2 = red, 3 = yellow
+    public bool is_solid;
+
+    public float32 wall_length;
+    public float32 wall_angle_deg;
+    public float32 center_pos_x;
+    public float32 center_pos_y;
+    public float32 center_pos_z;
+    public float32 wall_height;
+
+    public WallSegment(
+        float32 initial_start_x,
+        float32 initial_start_z,
+        float32 initial_end_x,
+        float32 initial_end_z,
+        float32 initial_floor,
+        float32 initial_ceil,
+        int32 initial_tex_id,
+        bool door_flag,
+        int32 door_index,
+        bool solid_flag,
+        int32 key_needed
+    ) {
+        this.start_x = initial_start_x;
+        this.start_z = initial_start_z;
+        this.end_x = initial_end_x;
+        this.end_z = initial_end_z;
+
+        this.floor_elevation = initial_floor;
+        this.ceil_elevation = initial_ceil;
+        this.texture_id = initial_tex_id;
+
+        this.is_door = door_flag;
+        this.door_id = door_index;
+        this.door_state = 0;
+        this.door_offset_y = (float32)0.0;
+        this.door_stay_timer = 0;
+        this.required_key = key_needed;
+        this.is_solid = solid_flag;
+
+        this.wall_length = DoomMath::distance_2d(initial_start_x, initial_start_z, initial_end_x, initial_end_z);
+        float32 delta_coord_x = initial_end_x - initial_start_x;
+        float32 delta_coord_z = initial_end_z - initial_start_z;
+        float64 angle_radians = Math::atan2((float64)delta_coord_z, (float64)delta_coord_x);
+        this.wall_angle_deg = (float32)(angle_radians * (180.0 / Math::PI));
+
+        this.center_pos_x = (initial_start_x + initial_end_x) * (float32)0.5;
+        this.center_pos_z = (initial_start_z + initial_end_z) * (float32)0.5;
+        this.center_pos_y = (initial_floor + initial_ceil) * (float32)0.5;
+        this.wall_height = initial_ceil - initial_floor;
+        if (this.wall_height < (float32)0.2) {
+            this.wall_height = (float32)0.2;
+        }
+    }
+
+    public void update_door(DoomAudio audio_manager) {
+        if (!this.is_door) {
+            return;
+        }
+
+        if (this.door_state == 1) { // Opening
+            this.door_offset_y = this.door_offset_y + (float32)0.08;
+            if (this.door_offset_y >= this.wall_height * (float32)0.95) {
+                this.door_offset_y = this.wall_height * (float32)0.95;
+                this.door_state = 2; // Fully open
+                this.door_stay_timer = 180; // Stay open for 3 seconds
+            }
+        } else if (this.door_state == 2) { // Open
+            this.door_stay_timer = this.door_stay_timer - 1;
+            if (this.door_stay_timer <= 0) {
+                this.door_state = 3; // Closing
+                audio_manager.play_sound(audio_manager.sound_door_open);
+            }
+        } else if (this.door_state == 3) { // Closing
+            this.door_offset_y = this.door_offset_y - (float32)0.08;
+            if (this.door_offset_y <= (float32)0.0) {
+                this.door_offset_y = (float32)0.0;
+                this.door_state = 0; // Fully closed
+            }
+        }
+    }
+
+    public bool try_open(bool has_blue, bool has_red, bool has_yellow, DoomAudio audio_manager) {
+        if (!this.is_door || this.door_state != 0) {
+            return false;
+        }
+
+        if (this.required_key == 1 && !has_blue) {
+            return false;
+        }
+        if (this.required_key == 2 && !has_red) {
+            return false;
+        }
+        if (this.required_key == 3 && !has_yellow) {
+            return false;
+        }
+
+        this.door_state = 1;
+        audio_manager.play_sound(audio_manager.sound_door_open);
+        return true;
+    }
+
+    public void draw_segment(DoomResources resources) {
+        if (resources == null || !resources.is_loaded) {
+            return;
+        }
+
+        float32 effective_center_y = this.center_pos_y + this.door_offset_y;
+        Vector3 wall_position = new Vector3(this.center_pos_x, effective_center_y, this.center_pos_z);
+        Vector3 rotation_axis = new Vector3((float32)0.0, (float32)1.0, (float32)0.0);
+        Vector3 wall_scale = new Vector3(this.wall_length, this.wall_height, (float32)0.1);
+
+        Model selected_model = resources.get_wall_model(this.texture_id);
+        Raylib::DrawModelEx(
+            selected_model,
+            wall_position,
+            rotation_axis,
+            -this.wall_angle_deg,
+            wall_scale,
+            Color::WHITE
+        );
+    }
+}
