@@ -1,42 +1,42 @@
 package doom;
 
 import raylib.*;
-import solix.math.Math;
 
 public class DoomGame {
     public int32 game_state;
-    public int32 current_level;
+    public bool show_automap;
 
-    public Player player;
+    public DoomPlayer player;
     public FpsCamera camera;
     public LevelMap level_map;
     public WeaponManager weapon_manager;
-    public DoomAudioManager audio_manager;
-    public DoomUserInterface user_interface;
-    public DoomParticlePool particle_pool;
-
-    public EnemyMonster[] enemies;
-    public int32 enemy_count;
-    public int32 total_enemies_spawned;
-    public int32 kills_count;
+    public DoomAudio audio_manager;
+    public DoomHUD user_interface;
+    public DoomResources resources;
 
     public Projectile[] projectiles;
     public int32 max_projectiles;
 
-    public float32 screen_shake;
-    public int32 acid_hazard_timer;
-
     public DoomGame() {
-        this.game_state = GameState::TITLE;
-        this.current_level = 1;
+        this.game_state = GameState::PLAYING;
+        this.show_automap = false;
 
-        this.audio_manager = new DoomAudioManager();
-        this.user_interface = new DoomUserInterface();
-        this.particle_pool = new DoomParticlePool();
-
+        this.resources = new DoomResources();
+        this.audio_manager = new DoomAudio();
+        this.user_interface = new DoomHUD();
         this.level_map = new LevelMap();
-        this.player = new Player(this.level_map.player_spawn_x, this.level_map.player_spawn_y, this.level_map.player_spawn_z);
-        this.camera = new FpsCamera(this.player.pos_x, this.player.pos_y, this.player.pos_z);
+
+        this.player = new DoomPlayer(
+            this.level_map.player_spawn_x,
+            this.level_map.player_spawn_y,
+            this.level_map.player_spawn_z
+        );
+        this.camera = new FpsCamera(
+            this.player.pos_x,
+            this.player.pos_y,
+            this.player.pos_z,
+            this.level_map.player_spawn_yaw
+        );
         this.weapon_manager = new WeaponManager();
 
         this.max_projectiles = 30;
@@ -44,219 +44,53 @@ public class DoomGame {
         for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
             this.projectiles[proj_idx] = new Projectile();
         }
-
-        this.screen_shake = 0.0;
-        this.acid_hazard_timer = 0;
-
-        this.setup_level_entities(1);
     }
 
-    public void setup_level_entities(int32 level_num) {
-        this.current_level = level_num;
-        this.level_map.load_level(level_num);
-        this.player.reset_player(this.level_map.player_spawn_x, this.level_map.player_spawn_y, this.level_map.player_spawn_z);
-        this.camera.update_position(this.player.pos_x, this.player.pos_y, this.player.pos_z, false);
-
-        for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
-            this.projectiles[proj_idx].is_active = false;
-        }
-
-        if (level_num == 1) {
-            // E1M1: Hangar Entities
-            this.enemy_count = 6;
-            this.total_enemies_spawned = 6;
-            this.kills_count = 0;
-            this.enemies = new EnemyMonster[6];
-
-            // 3 Zombiemen in corridor and U-room
-            this.enemies[0] = new EnemyMonster(EnemyKind::ZOMBIEMAN, 6.0, 0.0, 4.0);
-            this.enemies[1] = new EnemyMonster(EnemyKind::ZOMBIEMAN, 14.0, 0.0, 0.0);
-            this.enemies[2] = new EnemyMonster(EnemyKind::ZOMBIEMAN, 18.0, 0.0, 2.0);
-
-            // 2 Imps on the bridge over toxic slime
-            this.enemies[3] = new EnemyMonster(EnemyKind::IMP, 16.0, 0.0, -2.0);
-            this.enemies[4] = new EnemyMonster(EnemyKind::IMP, 14.0, 12.0, 0.0); // Inside Blue Key vault
-
-            // 1 Pinky Demon guarding the exit room
-            this.enemies[5] = new EnemyMonster(EnemyKind::PINKY_DEMON, 32.0, 0.0, 0.0);
-
-            // Grant player Blue Key pickup in Level 1
-            this.player.has_blue_key = false;
-        } else {
-            // E1M2: Nuclear Plant Entities
-            this.enemy_count = 8;
-            this.total_enemies_spawned = 8;
-            this.kills_count = 0;
-            this.enemies = new EnemyMonster[8];
-
-            this.enemies[0] = new EnemyMonster(EnemyKind::ZOMBIEMAN, 4.0, 0.0, 4.0);
-            this.enemies[1] = new EnemyMonster(EnemyKind::ZOMBIEMAN, -4.0, 0.0, 4.0);
-            this.enemies[2] = new EnemyMonster(EnemyKind::IMP, 12.0, 0.0, 2.0);
-            this.enemies[3] = new EnemyMonster(EnemyKind::IMP, 18.0, 0.0, -2.0);
-            this.enemies[4] = new EnemyMonster(EnemyKind::PINKY_DEMON, 22.0, 0.0, 0.0);
-            this.enemies[5] = new EnemyMonster(EnemyKind::PINKY_DEMON, 28.0, 0.0, 4.0);
-
-            // 2 Cacodemons in final vault
-            this.enemies[6] = new EnemyMonster(EnemyKind::CACODEMON, 36.0, 0.0, -2.0);
-            this.enemies[7] = new EnemyMonster(EnemyKind::CACODEMON, 38.0, 0.0, 2.0);
-
-            // Unlock Chaingun & Rocket Launcher for level 2
-            this.weapon_manager.unlocked_weapons[WeaponKind::CHAINGUN] = true;
-            this.weapon_manager.unlocked_weapons[WeaponKind::ROCKET_LAUNCHER] = true;
-            this.weapon_manager.ammo_bullets = 150;
-            this.weapon_manager.ammo_rockets = 12;
-            this.player.has_red_key = true; // Has red key for level 2
-        }
-    }
-
-    public void fire_weapon() {
-        if (!this.player.is_alive || this.weapon_manager.cooldown_ticks > 0) {
-            return;
-        }
-        if (!this.weapon_manager.has_ammo_for_current()) {
+    public void update() {
+        if (this.game_state != GameState::PLAYING) {
             return;
         }
 
-        this.weapon_manager.consume_ammo();
-
-        float32 forward_x = this.camera.get_forward_x();
-        float32 forward_z = this.camera.get_forward_z();
-
-        float64 pitch_rad = (float64)this.camera.pitch_angle * 0.017453292519943295;
-        float32 forward_y = (float32)Math::sin(pitch_rad);
-
-        if (this.weapon_manager.active_weapon_kind == WeaponKind::FIST) {
-            this.weapon_manager.cooldown_ticks = 18;
-            this.audio_manager.play_sound(this.audio_manager.sound_player_pain);
-            this.perform_melee_attack(25.0, 2.2);
-        } else if (this.weapon_manager.active_weapon_kind == WeaponKind::PISTOL) {
-            this.weapon_manager.cooldown_ticks = 14;
-            this.audio_manager.play_sound(this.audio_manager.sound_pistol);
-            this.perform_hitscan_trace(forward_x, forward_y, forward_z, 28.0, 0.02);
-        } else if (this.weapon_manager.active_weapon_kind == WeaponKind::SHOTGUN) {
-            this.weapon_manager.cooldown_ticks = 36;
-            this.screen_shake = 2.5;
-            this.audio_manager.play_sound(this.audio_manager.sound_shotgun);
-            // Fire 7 spread pellets
-            for (int32 pellet_index = 0; pellet_index < 7; pellet_index = pellet_index + 1) {
-                float32 spread_x = ((float32)(pellet_index % 3) - 1.0) * 0.035;
-                float32 spread_y = ((float32)(pellet_index / 3) - 1.0) * 0.035;
-                this.perform_hitscan_trace(forward_x + spread_x, forward_y + spread_y, forward_z, 14.0, 0.06);
-            }
-        } else if (this.weapon_manager.active_weapon_kind == WeaponKind::CHAINGUN) {
-            this.weapon_manager.cooldown_ticks = 7;
-            this.screen_shake = 0.8;
-            this.audio_manager.play_sound(this.audio_manager.sound_chaingun);
-            this.perform_hitscan_trace(forward_x, forward_y, forward_z, 20.0, 0.04);
-        } else if (this.weapon_manager.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
-            this.weapon_manager.cooldown_ticks = 45;
-            this.screen_shake = 3.5;
-            this.audio_manager.play_sound(this.audio_manager.sound_rocket_launch);
-
-            // Launch 3D rocket projectile
-            for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
-                if (!this.projectiles[proj_idx].is_active) {
-                    this.projectiles[proj_idx].launch(
-                        ProjectileKind::PLAYER_ROCKET,
-                        this.player.pos_x + (forward_x * 0.6),
-                        this.player.pos_y + DoomConstants::PLAYER_EYE_HEIGHT * 0.8,
-                        this.player.pos_z + (forward_z * 0.6),
-                        forward_x,
-                        forward_y,
-                        forward_z,
-                        0.48,
-                        120.0,
-                        4.5,
-                        true
-                    );
-                    return;
-                }
-            }
-        }
-    }
-
-    public void perform_melee_attack(float32 damage_val, float32 range_limit) {
-        for (int32 enemy_index = 0; enemy_index < this.enemy_count; enemy_index = enemy_index + 1) {
-            EnemyMonster monster = this.enemies[enemy_index];
-            if (monster.is_alive) {
-                float32 distance = DoomMath::distance_2d(this.player.pos_x, this.player.pos_z, monster.pos_x, monster.pos_z);
-                if (distance <= range_limit) {
-                    monster.take_damage(damage_val, this.audio_manager);
-                    if (!monster.is_alive) {
-                        this.kills_count = this.kills_count + 1;
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    public void perform_hitscan_trace(
-        float32 dir_x,
-        float32 dir_y,
-        float32 dir_z,
-        float32 damage_val,
-        float32 spread_factor
-    ) {
-        for (int32 enemy_index = 0; enemy_index < this.enemy_count; enemy_index = enemy_index + 1) {
-            EnemyMonster monster = this.enemies[enemy_index];
-            if (monster.is_alive) {
-                float32 diff_x = monster.pos_x - this.player.pos_x;
-                float32 diff_z = monster.pos_z - this.player.pos_z;
-                float32 distance = DoomMath::distance_2d(this.player.pos_x, this.player.pos_z, monster.pos_x, monster.pos_z);
-
-                if (distance < 24.0) {
-                    float32 normalized_dir_x = diff_x / distance;
-                    float32 normalized_dir_z = diff_z / distance;
-
-                    float32 dot_product = (dir_x * normalized_dir_x) + (dir_z * normalized_dir_z);
-                    if (dot_product > 0.94) { // Hit within cone of fire
-                        monster.take_damage(damage_val, this.audio_manager);
-                        this.particle_pool.spawn_burst(monster.pos_x, monster.pos_y + 1.0, monster.pos_z, Color::RED, 8);
-                        if (!monster.is_alive) {
-                            this.kills_count = this.kills_count + 1;
-                        }
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    public void update_playing() {
-        // Look input (Mouse or Arrow Keys)
+        // 1. Mouse & Keyboard Look Input
         Vector2 mouse_delta = Raylib::GetMouseDelta();
-        float32 mouse_sensitivity = 0.12;
         float32 delta_look_x = mouse_delta.x;
         float32 delta_look_y = mouse_delta.y;
 
         if (Raylib::IsKeyDown(KeyboardKey::KEY_LEFT)) {
-            delta_look_x = delta_look_x - 16.0;
+            delta_look_x = delta_look_x - (float32)18.0;
         }
         if (Raylib::IsKeyDown(KeyboardKey::KEY_RIGHT)) {
-            delta_look_x = delta_look_x + 16.0;
+            delta_look_x = delta_look_x + (float32)18.0;
         }
         if (Raylib::IsKeyDown(KeyboardKey::KEY_UP)) {
-            delta_look_y = delta_look_y - 10.0;
+            delta_look_y = delta_look_y - (float32)12.0;
         }
         if (Raylib::IsKeyDown(KeyboardKey::KEY_DOWN)) {
-            delta_look_y = delta_look_y + 10.0;
+            delta_look_y = delta_look_y + (float32)12.0;
         }
 
-        this.camera.update_look(delta_look_x, delta_look_y, mouse_sensitivity);
+        this.camera.update_look(delta_look_x, delta_look_y, DoomConstants::MOUSE_SENSITIVITY);
 
-        // Movement input
+        // 2. WASD Movement Input
         bool move_fwd = Raylib::IsKeyDown(KeyboardKey::KEY_W);
         bool move_bwd = Raylib::IsKeyDown(KeyboardKey::KEY_S);
         bool strafe_left = Raylib::IsKeyDown(KeyboardKey::KEY_A);
         bool strafe_right = Raylib::IsKeyDown(KeyboardKey::KEY_D);
-        bool is_sprint = Raylib::IsKeyDown(KeyboardKey::KEY_LEFT_SHIFT) || Raylib::IsKeyDown(KeyboardKey::KEY_RIGHT_SHIFT);
+        bool is_sprinting = Raylib::IsKeyDown(KeyboardKey::KEY_LEFT_SHIFT) || Raylib::IsKeyDown(KeyboardKey::KEY_RIGHT_SHIFT);
 
         bool is_moving = move_fwd || move_bwd || strafe_left || strafe_right;
-        this.player.update_movement(this.camera, this.level_map, move_fwd, move_bwd, strafe_left, strafe_right, is_sprint);
+        this.player.update_movement(
+            this.camera,
+            this.level_map,
+            move_fwd,
+            move_bwd,
+            strafe_left,
+            strafe_right,
+            is_sprinting
+        );
         this.camera.update_position(this.player.pos_x, this.player.pos_y, this.player.pos_z, is_moving);
 
-        // Weapon switching (1 to 5)
+        // 3. Weapon selection
         if (Raylib::IsKeyPressed(KeyboardKey::KEY_ONE)) {
             this.weapon_manager.select_weapon(WeaponKind::FIST);
         } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_TWO)) {
@@ -269,18 +103,18 @@ public class DoomGame {
             this.weapon_manager.select_weapon(WeaponKind::ROCKET_LAUNCHER);
         }
 
-        // Weapon fire
+        // 4. Weapon firing
         bool fire_input = Raylib::IsMouseButtonDown(MouseButton::MOUSE_BUTTON_LEFT) ||
                           Raylib::IsKeyDown(KeyboardKey::KEY_LEFT_CONTROL) ||
                           Raylib::IsKeyDown(KeyboardKey::KEY_SPACE);
         if (fire_input) {
-            this.fire_weapon();
+            this.weapon_manager.fire_weapon(this.player, this.camera, this.level_map, this.audio_manager);
         }
         this.weapon_manager.update();
 
-        // Use key (Open doors / press switches)
+        // 5. Use Key (Open Doors)
         if (Raylib::IsKeyPressed(KeyboardKey::KEY_E)) {
-            bool door_opened = this.level_map.test_door_interaction(
+            this.level_map.test_door_interaction(
                 this.player.pos_x,
                 this.player.pos_z,
                 this.player.has_blue_key,
@@ -288,182 +122,109 @@ public class DoomGame {
                 this.player.has_yellow_key,
                 this.audio_manager
             );
-
-            bool switch_pressed = this.level_map.test_exit_switch(
-                this.player.pos_x,
-                this.player.pos_z,
-                this.audio_manager
-            );
-            if (switch_pressed) {
-                this.game_state = GameState::INTERMISSION;
-            }
         }
 
-        // Toxic acid damage tick
-        if (this.level_map.check_toxic_hazard(this.player.pos_x, this.player.pos_z)) {
-            this.acid_hazard_timer = this.acid_hazard_timer + 1;
-            if (this.acid_hazard_timer >= 35) {
-                this.acid_hazard_timer = 0;
-                this.player.take_damage(8.0, this.audio_manager);
-            }
-        } else {
-            this.acid_hazard_timer = 0;
+        // 6. Automap toggle (TAB)
+        if (Raylib::IsKeyPressed(KeyboardKey::KEY_TAB)) {
+            this.show_automap = !this.show_automap;
         }
 
-        // Update map doors
+        // 7. Map & Door update
         this.level_map.update(this.audio_manager);
 
-        // Update enemies
-        for (int32 enemy_index = 0; enemy_index < this.enemy_count; enemy_index = enemy_index + 1) {
-            this.enemies[enemy_index].update(
-                this.player.pos_x,
-                this.player.pos_y,
-                this.player.pos_z,
-                this.level_map,
-                this.projectiles,
-                this.max_projectiles,
-                this.audio_manager
-            );
+        // 8. Pickup collection check
+        this.level_map.check_pickup_collection(this.player, this.weapon_manager, this.audio_manager);
 
-            // Melee damage check from Pinky Demon
-            if (this.enemies[enemy_index].is_alive && this.enemies[enemy_index].ai_state == EnemyAiState::ATTACK) {
-                float32 dist_to_player = DoomMath::distance_2d(this.player.pos_x, this.player.pos_z, this.enemies[enemy_index].pos_x, this.enemies[enemy_index].pos_z);
-                if (dist_to_player < 1.6) {
-                    this.player.take_damage(12.0, this.audio_manager);
+        // 9. Enemy Monster AI updates
+        for (int32 enemy_index = 0; enemy_index < this.level_map.enemy_count; enemy_index = enemy_index + 1) {
+            EnemyMonster monster = this.level_map.enemies[enemy_index];
+            if (monster != null) {
+                monster.update(
+                    this.player.pos_x,
+                    this.player.pos_y,
+                    this.player.pos_z,
+                    this.level_map,
+                    this.audio_manager
+                );
+
+                // Melee bite damage from Pinky
+                if (monster.is_alive && monster.ai_state == EnemyAiState::ATTACK && monster.kind == EnemyKind::PINKY_DEMON) {
+                    float32 dist_to_player = DoomMath::distance_2d(this.player.pos_x, this.player.pos_z, monster.pos_x, monster.pos_z);
+                    if (dist_to_player < (float32)1.2) {
+                        this.player.take_damage((float32)14.0, this.audio_manager);
+                    }
                 }
             }
         }
 
-        // Update projectiles
+        // 10. Projectile updates
         for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
             if (this.projectiles[proj_idx].is_active) {
-                this.projectiles[proj_idx].update(this.level_map, this.particle_pool, this.audio_manager);
-
-                // Projectile damage check against player or enemies
-                if (this.projectiles[proj_idx].is_from_player) {
-                    for (int32 enemy_idx = 0; enemy_idx < this.enemy_count; enemy_idx = enemy_idx + 1) {
-                        EnemyMonster monster = this.enemies[enemy_idx];
-                        if (monster.is_alive) {
-                            float32 dist_to_monster = DoomMath::distance_3d(
-                                this.projectiles[proj_idx].pos_x,
-                                this.projectiles[proj_idx].pos_y,
-                                this.projectiles[proj_idx].pos_z,
-                                monster.pos_x,
-                                monster.pos_y + 1.0,
-                                monster.pos_z
-                            );
-                            if (dist_to_monster <= 1.2) {
-                                monster.take_damage(this.projectiles[proj_idx].damage_value, this.audio_manager);
-                                this.projectiles[proj_idx].explode(this.particle_pool, this.audio_manager);
-                                if (!monster.is_alive) {
-                                    this.kills_count = this.kills_count + 1;
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Enemy fireball checking player
-                    float32 dist_to_player = DoomMath::distance_3d(
-                        this.projectiles[proj_idx].pos_x,
-                        this.projectiles[proj_idx].pos_y,
-                        this.projectiles[proj_idx].pos_z,
-                        this.player.pos_x,
-                        this.player.pos_y + 1.0,
-                        this.player.pos_z
-                    );
-                    if (dist_to_player <= 1.1) {
-                        this.player.take_damage(this.projectiles[proj_idx].damage_value, this.audio_manager);
-                        this.projectiles[proj_idx].explode(this.particle_pool, this.audio_manager);
-                    }
-                }
+                this.projectiles[proj_idx].update(this.level_map, this.audio_manager);
             }
-        }
-
-        // Update particle pool
-        this.particle_pool.update();
-
-        // Screen shake decay
-        if (this.screen_shake > 0.1) {
-            this.screen_shake = this.screen_shake * 0.88;
-        } else {
-            this.screen_shake = 0.0;
-        }
-
-        if (!this.player.is_alive) {
-            this.game_state = GameState::GAME_OVER;
         }
     }
 
     public void draw() {
         Raylib::ClearBackground(new Color(15, 15, 20, 255));
 
-        // ==========================================
-        // 3D RENDERING PHASE (BeginMode3D)
-        // ==========================================
+        // 3D Rendering Phase
         Raylib::BeginMode3D(this.camera.camera_instance);
 
-        // 1. Draw 3D map sectors, walls, toxic slime, and doors
-        this.level_map.draw();
+        // 1. Draw authentic E1M1 3D World (floors, textured walls, doors)
+        this.level_map.draw_world(this.resources);
 
-        // 2. Draw enemies in 3D
-        for (int32 enemy_index = 0; enemy_index < this.enemy_count; enemy_index = enemy_index + 1) {
-            this.enemies[enemy_index].draw();
-        }
-
-        // 3. Draw active 3D projectiles
-        for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
-            if (this.projectiles[proj_idx].is_active) {
-                this.projectiles[proj_idx].draw();
+        // 2. Draw 2.5D billboard monsters
+        for (int32 enemy_index = 0; enemy_index < this.level_map.enemy_count; enemy_index = enemy_index + 1) {
+            EnemyMonster monster = this.level_map.enemies[enemy_index];
+            if (monster != null) {
+                monster.draw_with_camera(this.camera.billboard_camera, this.resources);
             }
         }
 
-        // 4. Draw active 3D particles
-        this.particle_pool.draw();
+        // 3. Draw 2.5D billboard pickups & barrels
+        for (int32 item_index = 0; item_index < this.level_map.pickup_count; item_index = item_index + 1) {
+            PickupItem item = this.level_map.pickups[item_index];
+            if (item != null) {
+                item.draw_with_camera(this.camera.billboard_camera, this.resources);
+            }
+        }
+
+        // 4. Draw projectiles
+        for (int32 proj_idx = 0; proj_idx < this.max_projectiles; proj_idx = proj_idx + 1) {
+            if (this.projectiles[proj_idx].is_active) {
+                this.projectiles[proj_idx].draw_with_camera(this.camera.billboard_camera, this.resources);
+            }
+        }
 
         Raylib::EndMode3D();
 
-        // ==========================================
-        // 2D RENDERING PHASE (HUD & OVERLAYS)
-        // ==========================================
-        if (this.game_state == GameState::PLAYING) {
-            // 1. Crosshair
-            this.user_interface.draw_crosshair(DoomConstants::SCREEN_WIDTH, DoomConstants::SCREEN_HEIGHT);
-
-            // 2. First-person weapon view model
+        // 2D Phase
+        if (this.show_automap) {
+            this.user_interface.draw_automap(
+                this.level_map,
+                this.player,
+                DoomConstants::SCREEN_WIDTH,
+                DoomConstants::SCREEN_HEIGHT
+            );
+        } else {
+            // Authentic First-Person Weapon
             this.weapon_manager.draw_first_person_weapon(
                 DoomConstants::SCREEN_WIDTH,
                 DoomConstants::SCREEN_HEIGHT,
-                this.camera.bob_offset_y
+                this.camera.bob_offset_y,
+                this.resources
             );
 
-            // 3. Status Bar
-            this.user_interface.draw_status_bar(
+            // Authentic STBAR Status Bar with Doomguy face & font numbers
+            this.user_interface.draw_hud(
                 this.player,
                 this.weapon_manager,
                 DoomConstants::SCREEN_WIDTH,
                 DoomConstants::SCREEN_HEIGHT,
-                this.audio_manager.sound_muted
+                this.audio_manager.is_muted,
+                this.resources
             );
-
-            // 4. Fullscreen damage / pickup flashes
-            this.user_interface.draw_screen_flashes(
-                this.player.damage_flash_timer,
-                this.player.pickup_flash_timer,
-                DoomConstants::SCREEN_WIDTH,
-                DoomConstants::SCREEN_HEIGHT
-            );
-        } else if (this.game_state == GameState::TITLE) {
-            this.user_interface.render_title_screen(DoomConstants::SCREEN_WIDTH, DoomConstants::SCREEN_HEIGHT);
-        } else if (this.game_state == GameState::INTERMISSION) {
-            this.user_interface.render_intermission_screen(
-                this.current_level,
-                this.kills_count,
-                this.total_enemies_spawned,
-                DoomConstants::SCREEN_WIDTH,
-                DoomConstants::SCREEN_HEIGHT
-            );
-        } else if (this.game_state == GameState::GAME_OVER) {
-            this.user_interface.render_game_over_screen(DoomConstants::SCREEN_WIDTH, DoomConstants::SCREEN_HEIGHT);
         }
     }
 
@@ -471,52 +232,33 @@ public class DoomGame {
         Raylib::InitWindow(
             DoomConstants::SCREEN_WIDTH,
             DoomConstants::SCREEN_HEIGHT,
-            "Doom : Solix Edition — 3D Retro FPS Showcase"
+            "DOOM : Solix Edition — Authentic E1M1: Hangar"
         );
         Raylib::InitAudioDevice();
-        Raylib::SetTargetFPS(60);
+        Raylib::SetTargetFPS(DoomConstants::TARGET_FPS);
         Raylib::SetExitKey(0); // Free ESC key for pause menu
         Raylib::DisableCursor(); // Capture mouse for smooth FPS camera
 
         DoomGame game = new DoomGame();
+        game.resources.load();
+        game.audio_manager.load();
 
         while (!Raylib::WindowShouldClose()) {
-            // Mute toggle
             if (Raylib::IsKeyPressed(KeyboardKey::KEY_M)) {
                 game.audio_manager.toggle_mute();
             }
 
-            if (game.game_state == GameState::TITLE) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
-                    game.setup_level_entities(1);
-                    game.game_state = GameState::PLAYING;
-                }
-            } else if (game.game_state == GameState::PLAYING) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+            if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                if (game.game_state == GameState::PLAYING) {
                     game.game_state = GameState::PAUSED;
                     Raylib::EnableCursor();
-                } else {
-                    game.update_playing();
-                }
-            } else if (game.game_state == GameState::PAUSED) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                } else if (game.game_state == GameState::PAUSED) {
                     game.game_state = GameState::PLAYING;
                     Raylib::DisableCursor();
                 }
-            } else if (game.game_state == GameState::INTERMISSION) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
-                    // Advance to Level 2
-                    game.setup_level_entities(2);
-                    game.game_state = GameState::PLAYING;
-                }
-            } else if (game.game_state == GameState::GAME_OVER) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
-                    game.setup_level_entities(game.current_level);
-                    game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
-                    game.game_state = GameState::TITLE;
-                }
             }
+
+            game.update();
 
             Raylib::BeginDrawing();
             game.draw();
@@ -524,6 +266,7 @@ public class DoomGame {
         }
 
         Raylib::EnableCursor();
+        game.resources.unload();
         game.audio_manager.unload_all();
         Raylib::CloseAudioDevice();
         Raylib::CloseWindow();

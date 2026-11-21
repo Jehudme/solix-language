@@ -2,79 +2,87 @@ package doom;
 
 public class DoomTestRunner {
     public static int32 test() {
-        // 1. Verify Constants
-        if (DoomConstants::SCREEN_WIDTH != 1024 || DoomConstants::SCREEN_HEIGHT != 768) {
+        // 1. Verify E1M1 Map Data
+        LevelMap test_map = new LevelMap();
+        if (test_map.wall_count != 665) {
             return 1;
         }
-
-        // 2. Verify Math Distance & Box Collision
-        float32 dist_result = DoomMath::distance_3d(0.0, 0.0, 0.0, 3.0, 0.0, 4.0);
-        if (dist_result < 4.99 || dist_result > 5.01) {
+        if (test_map.enemy_count != 89) {
             return 2;
         }
-
-        bool boxes_overlap = DoomMath::test_box_overlap(0.0, 0.0, 2.0, 2.0, 1.0, 1.0, 3.0, 3.0);
-        if (!boxes_overlap) {
+        if (test_map.pickup_count != 87) {
             return 3;
         }
-
-        bool boxes_apart = DoomMath::test_box_overlap(0.0, 0.0, 1.0, 1.0, 5.0, 5.0, 6.0, 6.0);
-        if (boxes_apart) {
+        if (test_map.player_spawn_x != (float32)3.0 || test_map.player_spawn_z != (float32)8.5) {
             return 4;
         }
 
-        // 3. Verify LevelMap Architecture
-        LevelMap test_map = new LevelMap();
-        if (test_map.wall_count != 14 || test_map.sector_count != 6) {
+        // 2. Verify FPS Camera & Look Angles
+        FpsCamera test_camera = new FpsCamera(test_map.player_spawn_x, test_map.player_spawn_y, test_map.player_spawn_z, test_map.player_spawn_yaw);
+        test_camera.update_look((float32)15.0, (float32)10.0, (float32)0.12);
+        if (test_camera.yaw_angle <= (float32)0.0) {
             return 5;
         }
+        test_camera.update_position((float32)3.0, (float32)0.0, (float32)8.5, true);
 
-        // Test toxic acid hazard in sector 2 (x: 14.0, z: 6.0)
-        bool is_toxic = test_map.check_toxic_hazard(14.0, 6.0);
-        if (!is_toxic) {
+        // 3. Verify Player State & Collision
+        DoomPlayer test_player = new DoomPlayer(test_map.player_spawn_x, test_map.player_spawn_y, test_map.player_spawn_z);
+        if (test_player.health_val != (float32)100.0 || !test_player.is_alive) {
             return 6;
         }
+        test_player.update_movement(test_camera, test_map, true, false, false, false, false);
 
-        // Test safe zone in room 0 (x: 0.0, z: 0.0)
-        bool is_safe = test_map.check_toxic_hazard(0.0, 0.0);
-        if (is_safe) {
+        // 4. Verify Weapon System & Ammo
+        WeaponManager test_weapons = new WeaponManager();
+        if (test_weapons.selected_weapon != WeaponKind::PISTOL || test_weapons.ammo_bullets != 50) {
             return 7;
         }
-
-        // 4. Verify Player Stats & Armor Absorption
-        Player test_player = new Player(0.0, 0.0, 0.0);
-        if (test_player.health_val != 100.0 || test_player.armor_val != 25.0) {
+        if (!test_weapons.can_fire()) {
             return 8;
         }
+        test_weapons.update();
 
-        // 5. Verify Weapon System & Ammo Tracking
-        WeaponManager test_weapons = new WeaponManager();
-        if (test_weapons.ammo_bullets != 50 || test_weapons.ammo_shells != 16) {
+        // 5. Verify DoomMath Collision and Distance
+        float32 dist_result = DoomMath::distance_2d((float32)0.0, (float32)0.0, (float32)3.0, (float32)4.0);
+        if (dist_result < (float32)4.99 || dist_result > (float32)5.01) {
             return 9;
         }
-        test_weapons.select_weapon(WeaponKind::SHOTGUN);
-        test_weapons.consume_ammo();
-        if (test_weapons.ammo_shells != 15) {
+
+        float32[] push_vector = new float32[2];
+        float32 penetration = DoomMath::test_wall_circle_collision(
+            (float32)0.0, (float32)0.0,
+            (float32)10.0, (float32)0.0,
+            (float32)5.0, (float32)0.3,
+            (float32)0.5,
+            push_vector
+        );
+        if (penetration <= (float32)0.0) {
             return 10;
         }
 
-        // 6. Verify Enemy Monster Stats
-        EnemyMonster test_zombie = new EnemyMonster(EnemyKind::ZOMBIEMAN, 5.0, 0.0, 5.0);
-        if (test_zombie.max_health_val != 30.0 || !test_zombie.is_alive) {
+        // 6. Verify Entities (Monsters, Pickups, Projectiles)
+        EnemyMonster test_monster = new EnemyMonster(EnemyKind::ZOMBIEMAN, (float32)10.0, (float32)0.0, (float32)10.0);
+        if (test_monster.health_val != (float32)30.0 || !test_monster.is_alive) {
             return 11;
         }
 
-        EnemyMonster test_imp = new EnemyMonster(EnemyKind::IMP, 10.0, 0.0, 10.0);
-        if (test_imp.max_health_val != 60.0) {
+        PickupItem test_pickup = new PickupItem(PickupKind::SHOTGUN, (float32)5.0, (float32)0.0, (float32)5.0);
+        if (test_pickup.is_collected) {
             return 12;
         }
 
-        EnemyMonster test_pinky = new EnemyMonster(EnemyKind::PINKY_DEMON, 15.0, 0.0, 15.0);
-        if (test_pinky.max_health_val != 140.0) {
+        Projectile test_projectile = new Projectile();
+        test_projectile.launch((float32)0.0, (float32)1.0, (float32)0.0, (float32)0.1, (float32)0.0, (float32)0.0, (float32)20.0, true, false);
+        if (!test_projectile.is_active) {
             return 13;
         }
 
-        // All assertions passed cleanly
+        // 7. Verify HUD
+        DoomHUD test_hud = new DoomHUD();
+        if (test_hud.face_anim_timer != 0) {
+            return 14;
+        }
+
         return 0;
     }
 }

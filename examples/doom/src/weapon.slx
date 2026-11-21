@@ -4,178 +4,199 @@ import raylib.*;
 import solix.math.Math;
 
 public class WeaponManager {
-    public int32 active_weapon_kind;
-    public bool[] unlocked_weapons;
+    public int32 selected_weapon;
+    public bool has_shotgun;
+    public bool has_chaingun;
+    public bool has_chainsaw;
+    public bool has_rocket_launcher;
 
     public int32 ammo_bullets;
-    public int32 ammo_shells;
-    public int32 ammo_rockets;
-
     public int32 max_bullets;
+    public int32 ammo_shells;
     public int32 max_shells;
+    public int32 ammo_rockets;
     public int32 max_rockets;
 
-    public int32 cooldown_ticks;
-    public int32 animation_frame;
-    public float32 recoil_offset_y;
-    public float32 screen_shake_trigger;
+    public int32 fire_timer;
+    public int32 muzzle_flash_timer;
 
     public WeaponManager() {
-        this.active_weapon_kind = WeaponKind::PISTOL;
-        this.unlocked_weapons = new bool[5];
-        this.unlocked_weapons[WeaponKind::FIST] = true;
-        this.unlocked_weapons[WeaponKind::PISTOL] = true;
-        this.unlocked_weapons[WeaponKind::SHOTGUN] = true; // Start with shotgun for arcade showcase fun!
-        this.unlocked_weapons[WeaponKind::CHAINGUN] = false;
-        this.unlocked_weapons[WeaponKind::ROCKET_LAUNCHER] = false;
+        this.selected_weapon = WeaponKind::PISTOL;
+        this.has_shotgun = false;
+        this.has_chaingun = false;
+        this.has_chainsaw = false;
+        this.has_rocket_launcher = false;
 
         this.ammo_bullets = 50;
-        this.ammo_shells = 16;
-        this.ammo_rockets = 4;
-
         this.max_bullets = 200;
+        this.ammo_shells = 0;
         this.max_shells = 50;
+        this.ammo_rockets = 0;
         this.max_rockets = 50;
 
-        this.cooldown_ticks = 0;
-        this.animation_frame = 0;
-        this.recoil_offset_y = 0.0;
-        this.screen_shake_trigger = 0.0;
+        this.fire_timer = 0;
+        this.muzzle_flash_timer = 0;
     }
 
-    public void select_weapon(int32 slot_index) {
-        if (slot_index >= 0 && slot_index < 5) {
-            if (this.unlocked_weapons[slot_index]) {
-                this.active_weapon_kind = slot_index;
-                this.cooldown_ticks = 10;
-                this.animation_frame = 0;
-                this.recoil_offset_y = 0.0;
-            }
+    public void select_weapon(int32 weapon_id) {
+        if (weapon_id == WeaponKind::SHOTGUN && !this.has_shotgun) {
+            return;
         }
-    }
-
-    public bool has_ammo_for_current() {
-        if (this.active_weapon_kind == WeaponKind::FIST) {
-            return true;
-        } else if (this.active_weapon_kind == WeaponKind::PISTOL || this.active_weapon_kind == WeaponKind::CHAINGUN) {
-            return this.ammo_bullets > 0;
-        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
-            return this.ammo_shells > 0;
-        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
-            return this.ammo_rockets > 0;
+        if (weapon_id == WeaponKind::CHAINGUN && !this.has_chaingun) {
+            return;
         }
-        return false;
-    }
-
-    public int32 get_current_ammo_count() {
-        if (this.active_weapon_kind == WeaponKind::PISTOL || this.active_weapon_kind == WeaponKind::CHAINGUN) {
-            return this.ammo_bullets;
-        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
-            return this.ammo_shells;
-        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
-            return this.ammo_rockets;
+        if (weapon_id == WeaponKind::ROCKET_LAUNCHER && !this.has_rocket_launcher) {
+            return;
         }
-        return 999; // Fist
-    }
-
-    public void consume_ammo() {
-        if (this.active_weapon_kind == WeaponKind::PISTOL || this.active_weapon_kind == WeaponKind::CHAINGUN) {
-            this.ammo_bullets = this.ammo_bullets - 1;
-        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
-            this.ammo_shells = this.ammo_shells - 1;
-        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
-            this.ammo_rockets = this.ammo_rockets - 1;
-        }
+        this.selected_weapon = weapon_id;
     }
 
     public void update() {
-        if (this.cooldown_ticks > 0) {
-            this.cooldown_ticks = this.cooldown_ticks - 1;
-            if (this.cooldown_ticks > 12) {
-                this.animation_frame = 1; // Flash frame
-                this.recoil_offset_y = 18.0;
-            } else if (this.cooldown_ticks > 6) {
-                this.animation_frame = 2; // Recoil frame
-                this.recoil_offset_y = 10.0;
-            } else {
-                this.animation_frame = 3; // Pump / cycle frame
-                this.recoil_offset_y = 4.0;
-            }
-        } else {
-            this.animation_frame = 0; // Idle
-            this.recoil_offset_y = 0.0;
+        if (this.fire_timer > 0) {
+            this.fire_timer = this.fire_timer - 1;
+        }
+        if (this.muzzle_flash_timer > 0) {
+            this.muzzle_flash_timer = this.muzzle_flash_timer - 1;
         }
     }
 
-    public void draw_first_person_weapon(int32 screen_width, int32 screen_height, float32 bob_offset) {
-        int32 center_screen_x = screen_width / 2;
-        int32 base_screen_y = screen_height - 110 + (int32)(this.recoil_offset_y + (bob_offset * 60.0));
+    public bool can_fire() {
+        if (this.fire_timer > 0) {
+            return false;
+        }
+        if (this.selected_weapon == WeaponKind::PISTOL || this.selected_weapon == WeaponKind::CHAINGUN) {
+            return this.ammo_bullets > 0;
+        }
+        if (this.selected_weapon == WeaponKind::SHOTGUN) {
+            return this.ammo_shells > 0;
+        }
+        if (this.selected_weapon == WeaponKind::ROCKET_LAUNCHER) {
+            return this.ammo_rockets > 0;
+        }
+        return true; // Fist
+    }
 
-        if (this.active_weapon_kind == WeaponKind::FIST) {
-            // Draw Knuckled brass fist
-            Color skin_tan = new Color(220, 160, 130, 255);
-            Color brass_gold = new Color(240, 190, 40, 255);
-            Raylib::DrawRectangle(center_screen_x - 50, base_screen_y - 60, 100, 80, skin_tan);
-            Raylib::DrawRectangle(center_screen_x - 45, base_screen_y - 75, 90, 22, brass_gold);
-            Raylib::DrawRectangle(center_screen_x - 40, base_screen_y - 80, 80, 8, Color::BLACK);
-        } else if (this.active_weapon_kind == WeaponKind::PISTOL) {
-            // Draw standard issue Beretta 92FS / Walter PPK style
-            Color gun_metal = new Color(60, 65, 75, 255);
-            Color gun_slide = new Color(90, 95, 105, 255);
-            Color grip_brown = new Color(90, 50, 30, 255);
+    public void fire_weapon(
+        DoomPlayer player,
+        FpsCamera camera,
+        LevelMap level_map,
+        DoomAudio audio_manager
+    ) {
+        if (!this.can_fire()) {
+            return;
+        }
 
-            Raylib::DrawRectangle(center_screen_x - 14, base_screen_y - 100, 28, 80, gun_slide);
-            Raylib::DrawRectangle(center_screen_x - 18, base_screen_y - 50, 36, 60, grip_brown);
-            Raylib::DrawRectangle(center_screen_x - 8, base_screen_y - 115, 16, 20, gun_metal);
-
-            if (this.animation_frame == 1) {
-                // Muzzle flash
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 26.0, Color::YELLOW);
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 14.0, Color::WHITE);
+        if (this.selected_weapon == WeaponKind::FIST) {
+            this.fire_timer = 18;
+            this.muzzle_flash_timer = 8;
+            audio_manager.play_sound(audio_manager.sound_punch);
+            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)20.0, (float32)2.0);
+        } else if (this.selected_weapon == WeaponKind::PISTOL) {
+            this.ammo_bullets = this.ammo_bullets - 1;
+            this.fire_timer = 14;
+            this.muzzle_flash_timer = 6;
+            audio_manager.play_sound(audio_manager.sound_pistol);
+            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)15.0, (float32)25.0);
+        } else if (this.selected_weapon == WeaponKind::SHOTGUN) {
+            this.ammo_shells = this.ammo_shells - 1;
+            this.fire_timer = 40;
+            this.muzzle_flash_timer = 10;
+            audio_manager.play_sound(audio_manager.sound_shotgun);
+            // Shotgun fires 7 pellets
+            for (int32 pellet_index = 0; pellet_index < 7; pellet_index = pellet_index + 1) {
+                this.perform_hitscan(player, camera, level_map, audio_manager, (float32)12.0, (float32)25.0);
             }
-        } else if (this.active_weapon_kind == WeaponKind::SHOTGUN) {
-            // Draw iconic 12-gauge pump-action shotgun
-            Color steel_barrel = new Color(75, 80, 90, 255);
-            Color wood_stock = new Color(120, 65, 35, 255);
-            Color shadow_crevice = new Color(30, 35, 40, 255);
+        } else if (this.selected_weapon == WeaponKind::CHAINGUN) {
+            this.ammo_bullets = this.ammo_bullets - 1;
+            this.fire_timer = 6;
+            this.muzzle_flash_timer = 4;
+            audio_manager.play_sound(audio_manager.sound_pistol);
+            this.perform_hitscan(player, camera, level_map, audio_manager, (float32)12.0, (float32)25.0);
+        }
+    }
 
-            // Double / pump barrel
-            Raylib::DrawRectangle(center_screen_x - 22, base_screen_y - 140, 44, 110, steel_barrel);
-            Raylib::DrawRectangle(center_screen_x - 2, base_screen_y - 140, 4, 110, shadow_crevice);
-            // Wooden pump grip
-            Raylib::DrawRectangle(center_screen_x - 28, base_screen_y - 70, 56, 45, wood_stock);
+    public void perform_hitscan(
+        DoomPlayer player,
+        FpsCamera camera,
+        LevelMap level_map,
+        DoomAudio audio_manager,
+        float32 damage_amount,
+        float32 max_range
+    ) {
+        float32 best_dist = max_range;
+        int32 best_target_index = -1;
 
-            if (this.animation_frame == 1) {
-                // Massive shotgun muzzle blast
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 150, 42.0, Color::ORANGE);
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 150, 24.0, Color::YELLOW);
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 150, 12.0, Color::WHITE);
-            }
-        } else if (this.active_weapon_kind == WeaponKind::CHAINGUN) {
-            // Triple-barrel Gatling rotary gun
-            Color gun_gray = new Color(50, 55, 60, 255);
-            Color rotary_cylinder = new Color(85, 90, 100, 255);
+        float64 yaw_rad = (float64)camera.yaw_angle * (Math::PI / 180.0);
+        float32 dir_x = (float32)Math::cos(yaw_rad);
+        float32 dir_z = (float32)Math::sin(yaw_rad);
 
-            Raylib::DrawRectangle(center_screen_x - 35, base_screen_y - 130, 70, 100, rotary_cylinder);
-            Raylib::DrawRectangle(center_screen_x - 18, base_screen_y - 145, 36, 30, gun_gray);
+        for (int32 monster_idx = 0; monster_idx < level_map.enemy_count; monster_idx = monster_idx + 1) {
+            EnemyMonster monster = level_map.enemies[monster_idx];
+            if (monster != null && monster.is_alive) {
+                float32 diff_x = monster.pos_x - player.pos_x;
+                float32 diff_z = monster.pos_z - player.pos_z;
+                float32 dist = DoomMath::distance_2d(player.pos_x, player.pos_z, monster.pos_x, monster.pos_z);
 
-            if (this.animation_frame == 1) {
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 145, 30.0, Color::YELLOW);
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 145, 15.0, Color::WHITE);
-            }
-        } else if (this.active_weapon_kind == WeaponKind::ROCKET_LAUNCHER) {
-            // Heavy military bazooka muzzle
-            Color olive_drab = new Color(70, 85, 55, 255);
-            Color rocket_tube = new Color(40, 45, 40, 255);
+                if (dist < best_dist) {
+                    float32 norm_diff_x = diff_x / dist;
+                    float32 norm_diff_z = diff_z / dist;
 
-            Raylib::DrawRectangle(center_screen_x - 45, base_screen_y - 120, 90, 90, olive_drab);
-            Raylib::DrawCircle(center_screen_x, base_screen_y - 80, 32.0, rocket_tube);
-            Raylib::DrawCircle(center_screen_x, base_screen_y - 80, 18.0, Color::RED); // Warhead tip visible
-
-            if (this.animation_frame == 1) {
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 50.0, Color::ORANGE);
-                Raylib::DrawCircle(center_screen_x, base_screen_y - 120, 28.0, Color::WHITE);
+                    float32 dot_val = (dir_x * norm_diff_x) + (dir_z * norm_diff_z);
+                    if (dot_val > (float32)0.92) { // Within aim cone
+                        best_dist = dist;
+                        best_target_index = monster_idx;
+                    }
+                }
             }
         }
+
+        if (best_target_index >= 0) {
+            level_map.enemies[best_target_index].take_damage(damage_amount, audio_manager);
+        }
+    }
+
+    public void draw_first_person_weapon(
+        int32 screen_width,
+        int32 screen_height,
+        float32 bob_offset,
+        DoomResources resources
+    ) {
+        if (resources == null || !resources.is_loaded) {
+            return;
+        }
+
+        Texture2D current_texture = resources.tex_pistol_idle;
+        float32 weapon_scale = (float32)3.2;
+
+        if (this.selected_weapon == WeaponKind::FIST) {
+            current_texture = (this.muzzle_flash_timer > 0) ? resources.tex_fist_punch : resources.tex_fist_idle;
+        } else if (this.selected_weapon == WeaponKind::PISTOL) {
+            current_texture = (this.muzzle_flash_timer > 0) ? resources.tex_pistol_fire : resources.tex_pistol_idle;
+        } else if (this.selected_weapon == WeaponKind::SHOTGUN) {
+            if (this.muzzle_flash_timer > 0) {
+                current_texture = resources.tex_shotgun_fire;
+            } else if (this.fire_timer > 10) {
+                current_texture = resources.tex_shotgun_cock;
+            } else {
+                current_texture = resources.tex_shotgun_idle;
+            }
+        } else if (this.selected_weapon == WeaponKind::CHAINGUN) {
+            current_texture = (this.muzzle_flash_timer > 0) ? resources.tex_chaingun_fire : resources.tex_chaingun_idle;
+        } else if (this.selected_weapon == WeaponKind::ROCKET_LAUNCHER) {
+            current_texture = (this.muzzle_flash_timer > 0) ? resources.tex_rocket_fire : resources.tex_rocket_idle;
+        }
+
+        float32 dest_width = (float32)current_texture.width * weapon_scale;
+        float32 dest_height = (float32)current_texture.height * weapon_scale;
+
+        float32 screen_center_x = (float32)screen_width * (float32)0.5;
+        float32 dest_x = screen_center_x - (dest_width * (float32)0.5);
+        float32 dest_y = (float32)screen_height - dest_height - (float32)90.0 + (bob_offset * (float32)120.0);
+
+        Rectangle source_rect = new Rectangle((float32)0.0, (float32)0.0, (float32)current_texture.width, (float32)current_texture.height);
+        Rectangle dest_rect = new Rectangle(dest_x, dest_y, dest_width, dest_height);
+        Vector2 origin_vector = new Vector2((float32)0.0, (float32)0.0);
+
+        Raylib::DrawTexturePro(current_texture, source_rect, dest_rect, origin_vector, (float32)0.0, Color::WHITE);
     }
 }

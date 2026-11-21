@@ -2,323 +2,156 @@ package doom;
 
 import raylib.*;
 
-public class WallBlock {
-    public float32 center_x;
-    public float32 center_y;
-    public float32 center_z;
-    public float32 size_x;
-    public float32 size_y;
-    public float32 size_z;
-    public Color wall_color;
-    public bool is_door;
-    public int32 required_key; // 0 = none, 1 = blue, 2 = red, 3 = yellow
-    public int32 door_state;   // 0 = closed, 1 = opening, 2 = open, 3 = closing
-    public float32 door_height_offset;
-    public int32 door_stay_timer;
-
-    public WallBlock(
-        float32 initial_x,
-        float32 initial_y,
-        float32 initial_z,
-        float32 width_x,
-        float32 height_y,
-        float32 depth_z,
-        Color color_val,
-        bool door_flag,
-        int32 key_needed
-    ) {
-        this.center_x = initial_x;
-        this.center_y = initial_y;
-        this.center_z = initial_z;
-        this.size_x = width_x;
-        this.size_y = height_y;
-        this.size_z = depth_z;
-        this.wall_color = color_val;
-        this.is_door = door_flag;
-        this.required_key = key_needed;
-        this.door_state = 0;
-        this.door_height_offset = 0.0;
-        this.door_stay_timer = 0;
-    }
-
-    public void update_door(DoomAudioManager audio_manager) {
-        if (!this.is_door) {
-            return;
-        }
-        if (this.door_state == 1) { // Opening
-            this.door_height_offset = this.door_height_offset + 0.08;
-            if (this.door_height_offset >= this.size_y * 0.95) {
-                this.door_height_offset = this.size_y * 0.95;
-                this.door_state = 2; // Open
-                this.door_stay_timer = 180; // 3 seconds stay open
-            }
-        } else if (this.door_state == 2) { // Open
-            this.door_stay_timer = this.door_stay_timer - 1;
-            if (this.door_stay_timer <= 0) {
-                this.door_state = 3; // Closing
-                audio_manager.play_sound(audio_manager.sound_door_open);
-            }
-        } else if (this.door_state == 3) { // Closing
-            this.door_height_offset = this.door_height_offset - 0.08;
-            if (this.door_height_offset <= 0.0) {
-                this.door_height_offset = 0.0;
-                this.door_state = 0; // Closed
-            }
-        }
-    }
-
-    public bool try_open(bool has_blue, bool has_red, bool has_yellow, DoomAudioManager audio_manager) {
-        if (!this.is_door || this.door_state != 0) {
-            return false;
-        }
-        if (this.required_key == 1 && !has_blue) {
-            return false;
-        }
-        if (this.required_key == 2 && !has_red) {
-            return false;
-        }
-        if (this.required_key == 3 && !has_yellow) {
-            return false;
-        }
-        this.door_state = 1; // Start opening
-        audio_manager.play_sound(audio_manager.sound_door_open);
-        return true;
-    }
-
-    public void draw() {
-        float32 effective_y = this.center_y + this.door_height_offset;
-        Vector3 wall_pos = new Vector3(this.center_x, effective_y, this.center_z);
-        Vector3 wall_size = new Vector3(this.size_x, this.size_y, this.size_z);
-
-        Color render_color = this.wall_color;
-        if (this.is_door) {
-            if (this.required_key == 1) {
-                render_color = new Color(0, 140, 255, 255); // Blue key door
-            } else if (this.required_key == 2) {
-                render_color = new Color(255, 40, 40, 255);  // Red key door
-            } else if (this.required_key == 3) {
-                render_color = new Color(255, 214, 0, 255); // Yellow key door
-            }
-        }
-
-        Raylib::DrawCubeV(wall_pos, wall_size, render_color);
-        Raylib::DrawCubeWiresV(wall_pos, wall_size, Color::BLACK);
-    }
-}
-
-public class FloorSector {
-    public float32 center_x;
-    public float32 center_z;
-    public float32 size_x;
-    public float32 size_z;
-    public float32 floor_y;
-    public float32 ceiling_y;
-    public Color floor_color;
-    public Color ceiling_color;
-    public bool is_toxic_acid;
-
-    public FloorSector(
-        float32 initial_x,
-        float32 initial_z,
-        float32 width_x,
-        float32 depth_z,
-        float32 floor_height,
-        float32 ceiling_height,
-        Color color_floor,
-        Color color_ceiling,
-        bool acid_flag
-    ) {
-        this.center_x = initial_x;
-        this.center_z = initial_z;
-        this.size_x = width_x;
-        this.size_z = depth_z;
-        this.floor_y = floor_height;
-        this.ceiling_y = ceiling_height;
-        this.floor_color = color_floor;
-        this.ceiling_color = color_ceiling;
-        this.is_toxic_acid = acid_flag;
-    }
-
-    public void draw() {
-        // Draw floor
-        Vector3 floor_pos = new Vector3(this.center_x, this.floor_y, this.center_z);
-        Vector3 floor_size = new Vector3(this.size_x, 0.1, this.size_z);
-        Raylib::DrawCubeV(floor_pos, floor_size, this.floor_color);
-
-        // Draw ceiling
-        Vector3 ceiling_pos = new Vector3(this.center_x, this.ceiling_y, this.center_z);
-        Vector3 ceiling_size = new Vector3(this.size_x, 0.1, this.size_z);
-        Raylib::DrawCubeV(ceiling_pos, ceiling_size, this.ceiling_color);
-    }
-}
-
 public class LevelMap {
-    public int32 current_level;
-    public WallBlock[] walls;
+    public WallSegment[] walls;
     public int32 wall_count;
-    public FloorSector[] sectors;
-    public int32 sector_count;
+
+    public EnemyMonster[] enemies;
+    public int32 enemy_count;
+
+    public PickupItem[] pickups;
+    public int32 pickup_count;
 
     public float32 player_spawn_x;
     public float32 player_spawn_y;
     public float32 player_spawn_z;
-
-    public float32 exit_switch_x;
-    public float32 exit_switch_y;
-    public float32 exit_switch_z;
-    public bool exit_activated;
+    public float32 player_spawn_yaw;
 
     public LevelMap() {
-        this.current_level = 1;
-        this.exit_activated = false;
         this.load_level(1);
     }
 
     public void load_level(int32 level_number) {
-        this.current_level = level_number;
-        this.exit_activated = false;
-
-        if (level_number == 1) {
-            // ==========================================
-            // LEVEL 1: "E1M1 - HANGAR"
-            // ==========================================
-            this.player_spawn_x = 0.0;
-            this.player_spawn_y = 0.0;
-            this.player_spawn_z = 0.0;
-
-            this.exit_switch_x = 36.0;
-            this.exit_switch_y = 1.2;
-            this.exit_switch_z = 0.0;
-
-            this.sector_count = 6;
-            this.sectors = new FloorSector[6];
-
-            Color gray_floor = new Color(70, 75, 80, 255);
-            Color brown_ceiling = new Color(50, 45, 40, 255);
-            Color acid_slime = new Color(20, 180, 40, 255);
-
-            // 0: Spawn U-Room
-            this.sectors[0] = new FloorSector(0.0, 0.0, 16.0, 16.0, 0.0, 4.0, gray_floor, brown_ceiling, false);
-            // 1: Slime bridge corridor
-            this.sectors[1] = new FloorSector(14.0, 0.0, 12.0, 6.0, 0.0, 4.0, gray_floor, brown_ceiling, false);
-            // 2: Toxic Slime Pit (North)
-            this.sectors[2] = new FloorSector(14.0, 6.0, 12.0, 6.0, -0.4, 4.0, acid_slime, brown_ceiling, true);
-            // 3: Toxic Slime Pit (South)
-            this.sectors[3] = new FloorSector(14.0, -6.0, 12.0, 6.0, -0.4, 4.0, acid_slime, brown_ceiling, true);
-            // 4: Blue Key Vault (North alcove)
-            this.sectors[4] = new FloorSector(14.0, 12.0, 8.0, 6.0, 0.2, 3.5, gray_floor, brown_ceiling, false);
-            // 5: Exit chamber
-            this.sectors[5] = new FloorSector(32.0, 0.0, 14.0, 12.0, 0.0, 3.8, gray_floor, brown_ceiling, false);
-
-            this.wall_count = 14;
-            this.walls = new WallBlock[14];
-
-            Color metal_gray = new Color(110, 115, 125, 255);
-            Color dark_slate = new Color(85, 90, 100, 255);
-            Color blue_trim = new Color(0, 120, 220, 255);
-
-            // Perimeter walls of Room 0
-            this.walls[0] = new WallBlock(-8.0, 2.0, 0.0, 1.0, 4.0, 16.0, metal_gray, false, 0); // West
-            this.walls[1] = new WallBlock(0.0, 2.0, 8.0, 16.0, 4.0, 1.0, metal_gray, false, 0);  // North
-            this.walls[2] = new WallBlock(0.0, 2.0, -8.0, 16.0, 4.0, 1.0, metal_gray, false, 0); // South
-
-            // Central computer pillar in U-room
-            this.walls[3] = new WallBlock(0.0, 2.0, 0.0, 4.0, 4.0, 4.0, dark_slate, false, 0);
-
-            // Corridor dividing walls
-            this.walls[4] = new WallBlock(8.0, 2.0, 5.5, 1.0, 4.0, 5.0, metal_gray, false, 0);
-            this.walls[5] = new WallBlock(8.0, 2.0, -5.5, 1.0, 4.0, 5.0, metal_gray, false, 0);
-
-            // Toxic slime exterior walls
-            this.walls[6] = new WallBlock(14.0, 2.0, 15.0, 12.0, 4.0, 1.0, metal_gray, false, 0);
-            this.walls[7] = new WallBlock(14.0, 2.0, -9.0, 12.0, 4.0, 1.0, metal_gray, false, 0);
-
-            // Blue Key Vault Door
-            this.walls[8] = new WallBlock(14.0, 2.0, 9.0, 6.0, 4.0, 1.0, blue_trim, true, 1);
-
-            // Exit Gate Wall & Door
-            this.walls[9] = new WallBlock(25.0, 2.0, 4.0, 1.0, 4.0, 6.0, metal_gray, false, 0);
-            this.walls[10] = new WallBlock(25.0, 2.0, -4.0, 1.0, 4.0, 6.0, metal_gray, false, 0);
-            this.walls[11] = new WallBlock(25.0, 2.0, 0.0, 1.0, 4.0, 3.0, blue_trim, true, 0); // Normal door to exit room
-
-            // Exit room walls
-            this.walls[12] = new WallBlock(39.0, 2.0, 0.0, 1.0, 4.0, 12.0, dark_slate, false, 0); // East back wall
-            this.walls[13] = new WallBlock(32.0, 2.0, 6.0, 14.0, 4.0, 1.0, dark_slate, false, 0);
-        } else {
-            // ==========================================
-            // LEVEL 2: "E1M2 - NUCLEAR PLANT"
-            // ==========================================
-            this.player_spawn_x = 0.0;
-            this.player_spawn_y = 0.0;
-            this.player_spawn_z = 0.0;
-
-            this.exit_switch_x = 42.0;
-            this.exit_switch_y = 1.2;
-            this.exit_switch_z = 0.0;
-
-            this.sector_count = 5;
-            this.sectors = new FloorSector[5];
-
-            Color dark_metal = new Color(55, 60, 65, 255);
-            Color steel_roof = new Color(40, 40, 45, 255);
-            Color acid_slime = new Color(20, 180, 40, 255);
-
-            this.sectors[0] = new FloorSector(0.0, 0.0, 18.0, 18.0, 0.0, 4.5, dark_metal, steel_roof, false);
-            this.sectors[1] = new FloorSector(18.0, 0.0, 18.0, 12.0, 0.0, 4.5, dark_metal, steel_roof, false);
-            this.sectors[2] = new FloorSector(18.0, 10.0, 12.0, 8.0, -0.5, 4.5, acid_slime, steel_roof, true);
-            this.sectors[3] = new FloorSector(34.0, 0.0, 14.0, 14.0, 0.5, 5.0, dark_metal, steel_roof, false);
-            this.sectors[4] = new FloorSector(42.0, 0.0, 10.0, 10.0, 0.0, 4.0, dark_metal, steel_roof, false);
-
-            this.wall_count = 12;
-            this.walls = new WallBlock[12];
-
-            Color rusty_iron = new Color(130, 85, 60, 255);
-            Color red_trim = new Color(230, 40, 40, 255);
-
-            this.walls[0] = new WallBlock(-9.0, 2.2, 0.0, 1.0, 4.5, 18.0, rusty_iron, false, 0);
-            this.walls[1] = new WallBlock(0.0, 2.2, 9.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
-            this.walls[2] = new WallBlock(0.0, 2.2, -9.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
-
-            // Maze obstacles in chamber 1
-            this.walls[3] = new WallBlock(-2.0, 2.2, 2.0, 4.0, 4.5, 4.0, rusty_iron, false, 0);
-            this.walls[4] = new WallBlock(4.0, 2.2, -2.0, 4.0, 4.5, 4.0, rusty_iron, false, 0);
-
-            // Red Key Door
-            this.walls[5] = new WallBlock(9.0, 2.2, 0.0, 1.0, 4.5, 4.0, red_trim, true, 2);
-
-            // Nuclear chamber walls
-            this.walls[6] = new WallBlock(18.0, 2.2, -6.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
-            this.walls[7] = new WallBlock(18.0, 2.2, 14.0, 18.0, 4.5, 1.0, rusty_iron, false, 0);
-
-            // Gate to final vault
-            this.walls[8] = new WallBlock(27.0, 2.2, 0.0, 1.0, 4.5, 4.0, rusty_iron, true, 0);
-
-            // Exit chamber walls
-            this.walls[9] = new WallBlock(47.0, 2.0, 0.0, 1.0, 4.0, 10.0, rusty_iron, false, 0);
-            this.walls[10] = new WallBlock(42.0, 2.0, 5.0, 10.0, 4.0, 1.0, rusty_iron, false, 0);
-            this.walls[11] = new WallBlock(42.0, 2.0, -5.0, 10.0, 4.0, 1.0, rusty_iron, false, 0);
-        }
+        MapDataE1M1::populate_level(this);
     }
 
-    public void update(DoomAudioManager audio_manager) {
+    public void update(DoomAudio audio_manager) {
         for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
-            this.walls[wall_index].update_door(audio_manager);
+            WallSegment wall = this.walls[wall_index];
+            if (wall != null && wall.is_door) {
+                wall.update_door(audio_manager);
+            }
         }
     }
 
-    public bool check_toxic_hazard(float32 player_x, float32 player_z) {
-        for (int32 sector_index = 0; sector_index < this.sector_count; sector_index = sector_index + 1) {
-            FloorSector current_sector = this.sectors[sector_index];
-            if (current_sector.is_toxic_acid) {
-                float32 half_x = current_sector.size_x * 0.5;
-                float32 half_z = current_sector.size_z * 0.5;
-                if (player_x >= current_sector.center_x - half_x && player_x <= current_sector.center_x + half_x &&
-                    player_z >= current_sector.center_z - half_z && player_z <= current_sector.center_z + half_z) {
+    public bool check_sphere_collision(float32 center_coord_x, float32 center_coord_z, float32 check_radius) {
+        float32[] dummy_push_vector = new float32[2];
+        for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
+            WallSegment wall = this.walls[wall_index];
+            if (wall != null && (wall.is_solid || (wall.is_door && wall.door_state == 0))) {
+                float32 penetration = DoomMath::test_wall_circle_collision(
+                    wall.start_x,
+                    wall.start_z,
+                    wall.end_x,
+                    wall.end_z,
+                    center_coord_x,
+                    center_coord_z,
+                    check_radius,
+                    dummy_push_vector
+                );
+                if (penetration > (float32)0.0) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    public void resolve_player_collision(
+        DoomPlayer player,
+        float32 target_pos_x,
+        float32 target_pos_z,
+        float32 player_radius
+    ) {
+        float32 current_x = target_pos_x;
+        float32 current_z = target_pos_z;
+
+        float32[] push_vector = new float32[2];
+
+        // 3 collision resolution passes for seamless corner sliding
+        for (int32 iteration = 0; iteration < 3; iteration = iteration + 1) {
+            for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
+                WallSegment wall = this.walls[wall_index];
+                if (wall != null && (wall.is_solid || (wall.is_door && wall.door_state == 0))) {
+                    float32 penetration = DoomMath::test_wall_circle_collision(
+                        wall.start_x,
+                        wall.start_z,
+                        wall.end_x,
+                        wall.end_z,
+                        current_x,
+                        current_z,
+                        player_radius,
+                        push_vector
+                    );
+                    if (penetration > (float32)0.0) {
+                        current_x = current_x + (push_vector[0] * penetration);
+                        current_z = current_z + (push_vector[1] * penetration);
+                    }
+                }
+            }
+        }
+
+        player.pos_x = current_x;
+        player.pos_z = current_z;
+    }
+
+    public void check_pickup_collection(
+        DoomPlayer player,
+        WeaponManager weapons,
+        DoomAudio audio_manager
+    ) {
+        for (int32 item_index = 0; item_index < this.pickup_count; item_index = item_index + 1) {
+            PickupItem item = this.pickups[item_index];
+            if (item != null && !item.is_collected) {
+                float32 dist_to_item = DoomMath::distance_2d(player.pos_x, player.pos_z, item.pos_x, item.pos_z);
+                if (dist_to_item < (float32)1.1) {
+                    item.is_collected = true;
+                    player.pickup_flash_timer = 12;
+
+                    if (item.kind == PickupKind::SHOTGUN) {
+                        weapons.has_shotgun = true;
+                        weapons.ammo_shells = weapons.ammo_shells + 8;
+                        weapons.select_weapon(WeaponKind::SHOTGUN);
+                        audio_manager.play_sound(audio_manager.sound_weapon_pickup);
+                    } else if (item.kind == PickupKind::CHAINGUN) {
+                        weapons.has_chaingun = true;
+                        weapons.ammo_bullets = weapons.ammo_bullets + 20;
+                        weapons.select_weapon(WeaponKind::CHAINGUN);
+                        audio_manager.play_sound(audio_manager.sound_weapon_pickup);
+                    } else if (item.kind == PickupKind::AMMO_CLIP) {
+                        weapons.ammo_bullets = weapons.ammo_bullets + 10;
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::AMMO_SHELLS) {
+                        weapons.ammo_shells = weapons.ammo_shells + 4;
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::HEALTH_STIMPACK) {
+                        player.health_val = player.health_val + (float32)10.0;
+                        if (player.health_val > (float32)100.0) {
+                            player.health_val = (float32)100.0;
+                        }
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::HEALTH_MEDIKIT) {
+                        player.health_val = player.health_val + (float32)25.0;
+                        if (player.health_val > (float32)100.0) {
+                            player.health_val = (float32)100.0;
+                        }
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::GREEN_ARMOR) {
+                        player.armor_val = (float32)100.0;
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::BLUE_KEY) {
+                        player.has_blue_key = true;
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::RED_KEY) {
+                        player.has_red_key = true;
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    } else if (item.kind == PickupKind::YELLOW_KEY) {
+                        player.has_yellow_key = true;
+                        audio_manager.play_sound(audio_manager.sound_item_pickup);
+                    }
+                }
+            }
+        }
     }
 
     public bool test_door_interaction(
@@ -327,13 +160,13 @@ public class LevelMap {
         bool has_blue,
         bool has_red,
         bool has_yellow,
-        DoomAudioManager audio_manager
+        DoomAudio audio_manager
     ) {
         for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
-            WallBlock wall = this.walls[wall_index];
-            if (wall.is_door && wall.door_state == 0) {
-                float32 distance = DoomMath::distance_2d(player_x, player_z, wall.center_x, wall.center_z);
-                if (distance <= 3.2) {
+            WallSegment wall = this.walls[wall_index];
+            if (wall != null && wall.is_door) {
+                float32 dist_to_door = DoomMath::distance_2d(player_x, player_z, wall.center_pos_x, wall.center_pos_z);
+                if (dist_to_door < (float32)2.5) {
                     return wall.try_open(has_blue, has_red, has_yellow, audio_manager);
                 }
             }
@@ -341,50 +174,23 @@ public class LevelMap {
         return false;
     }
 
-    public bool test_exit_switch(float32 player_x, float32 player_z, DoomAudioManager audio_manager) {
-        float32 distance = DoomMath::distance_2d(player_x, player_z, this.exit_switch_x, this.exit_switch_z);
-        if (distance <= 2.2) {
-            this.exit_activated = true;
-            audio_manager.play_sound(audio_manager.sound_switch_click);
-            return true;
+    public void draw_world(DoomResources resources) {
+        if (resources == null || !resources.is_loaded) {
+            return;
         }
-        return false;
-    }
 
-    public bool test_wall_collision(float32 next_x, float32 next_z, float32 radius) {
+        // 1. Draw large floor plane
+        Vector3 floor_pos = new Vector3((float32)0.0, (float32)0.0, (float32)0.0);
+        Vector3 floor_scale = new Vector3((float32)300.0, (float32)1.0, (float32)300.0);
+        Vector3 rotation_axis = new Vector3((float32)0.0, (float32)1.0, (float32)0.0);
+        Raylib::DrawModelEx(resources.model_floor_flat, floor_pos, rotation_axis, (float32)0.0, floor_scale, Color::WHITE);
+
+        // 2. Draw all authentic wall segments
         for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
-            WallBlock wall = this.walls[wall_index];
-            // If door is open, player can walk through
-            if (wall.is_door && wall.door_height_offset > 2.0) {
-                continue;
-            }
-
-            float32 half_x = (wall.size_x * 0.5) + radius;
-            float32 half_z = (wall.size_z * 0.5) + radius;
-
-            if (next_x >= wall.center_x - half_x && next_x <= wall.center_x + half_x &&
-                next_z >= wall.center_z - half_z && next_z <= wall.center_z + half_z) {
-                return true; // Collision detected
+            WallSegment wall = this.walls[wall_index];
+            if (wall != null) {
+                wall.draw_segment(resources);
             }
         }
-        return false;
-    }
-
-    public void draw() {
-        // Draw sectors (floors & ceilings)
-        for (int32 sector_index = 0; sector_index < this.sector_count; sector_index = sector_index + 1) {
-            this.sectors[sector_index].draw();
-        }
-
-        // Draw walls and doors
-        for (int32 wall_index = 0; wall_index < this.wall_count; wall_index = wall_index + 1) {
-            this.walls[wall_index].draw();
-        }
-
-        // Draw exit switch pillar
-        Vector3 switch_pos = new Vector3(this.exit_switch_x, this.exit_switch_y, this.exit_switch_z);
-        Color switch_color = this.exit_activated ? Color::RED : Color::GREEN;
-        Raylib::DrawCube(switch_pos, 0.4, 0.8, 0.4, switch_color);
-        Raylib::DrawCubeWires(switch_pos, 0.4, 0.8, 0.4, Color::BLACK);
     }
 }

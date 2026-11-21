@@ -3,16 +3,13 @@ package doom;
 import raylib.*;
 import solix.math.Math;
 
-public class Player {
+public class DoomPlayer {
     public float32 pos_x;
     public float32 pos_y;
     public float32 pos_z;
-    public float32 velocity_x;
-    public float32 velocity_z;
 
     public float32 health_val;
     public float32 armor_val;
-    public bool is_alive;
 
     public bool has_blue_key;
     public bool has_red_key;
@@ -20,21 +17,19 @@ public class Player {
 
     public int32 damage_flash_timer;
     public int32 pickup_flash_timer;
+    public bool is_alive;
 
-    public int32 mugshot_expression; // 0 = idle, 1 = grin, 2 = pain, 3 = dead
-    public int32 mugshot_timer;
-    public int32 look_direction_tick;
+    public DoomPlayer(float32 spawn_x, float32 spawn_y, float32 spawn_z) {
+        this.reset_player(spawn_x, spawn_y, spawn_z);
+    }
 
-    public Player(float32 start_x, float32 start_y, float32 start_z) {
-        this.pos_x = start_x;
-        this.pos_y = start_y;
-        this.pos_z = start_z;
-        this.velocity_x = 0.0;
-        this.velocity_z = 0.0;
+    public void reset_player(float32 spawn_x, float32 spawn_y, float32 spawn_z) {
+        this.pos_x = spawn_x;
+        this.pos_y = spawn_y;
+        this.pos_z = spawn_z;
 
-        this.health_val = 100.0;
-        this.armor_val = 25.0;
-        this.is_alive = true;
+        this.health_val = (float32)100.0;
+        this.armor_val = (float32)0.0;
 
         this.has_blue_key = false;
         this.has_red_key = false;
@@ -42,154 +37,91 @@ public class Player {
 
         this.damage_flash_timer = 0;
         this.pickup_flash_timer = 0;
-
-        this.mugshot_expression = 0;
-        this.mugshot_timer = 0;
-        this.look_direction_tick = 0;
-    }
-
-    public void reset_player(float32 start_x, float32 start_y, float32 start_z) {
-        this.pos_x = start_x;
-        this.pos_y = start_y;
-        this.pos_z = start_z;
-        this.velocity_x = 0.0;
-        this.velocity_z = 0.0;
-        this.health_val = 100.0;
-        this.armor_val = 25.0;
         this.is_alive = true;
-        this.has_blue_key = false;
-        this.has_red_key = false;
-        this.has_yellow_key = false;
-        this.damage_flash_timer = 0;
-        this.pickup_flash_timer = 0;
-        this.mugshot_expression = 0;
-    }
-
-    public void take_damage(float32 damage_amount, DoomAudioManager audio_manager) {
-        if (!this.is_alive) {
-            return;
-        }
-
-        float32 armor_absorption = 0.0;
-        if (this.armor_val > 0.0) {
-            armor_absorption = damage_amount * 0.33;
-            if (armor_absorption > this.armor_val) {
-                armor_absorption = this.armor_val;
-            }
-            this.armor_val = this.armor_val - armor_absorption;
-        }
-
-        float32 effective_damage = damage_amount - armor_absorption;
-        this.health_val = this.health_val - effective_damage;
-
-        this.damage_flash_timer = 12;
-        this.mugshot_expression = 2; // Pain grimace
-        this.mugshot_timer = 20;
-
-        audio_manager.play_sound(audio_manager.sound_player_pain);
-
-        if (this.health_val <= 0.0) {
-            this.health_val = 0.0;
-            this.is_alive = false;
-            this.mugshot_expression = 3; // Dead
-        }
-    }
-
-    public void heal(float32 amount) {
-        this.health_val = this.health_val + amount;
-        if (this.health_val > 100.0) {
-            this.health_val = 100.0;
-        }
-        this.pickup_flash_timer = 8;
-        this.mugshot_expression = 1; // Grin
-        this.mugshot_timer = 30;
-    }
-
-    public void add_armor(float32 amount) {
-        this.armor_val = this.armor_val + amount;
-        if (this.armor_val > 100.0) {
-            this.armor_val = 100.0;
-        }
-        this.pickup_flash_timer = 8;
     }
 
     public void update_movement(
         FpsCamera camera,
-        LevelMap map,
+        LevelMap level_map,
         bool move_forward,
         bool move_backward,
-        bool move_left,
-        bool move_right,
+        bool strafe_left,
+        bool strafe_right,
         bool is_sprinting
     ) {
         if (!this.is_alive) {
             return;
         }
 
-        if (this.damage_flash_timer > 0) {
-            this.damage_flash_timer = this.damage_flash_timer - 1;
-        }
-        if (this.pickup_flash_timer > 0) {
-            this.pickup_flash_timer = this.pickup_flash_timer - 1;
-        }
+        float32 current_speed = is_sprinting ? DoomConstants::SPRINT_SPEED : DoomConstants::WALK_SPEED;
+        float32 move_step = current_speed * (float32)(1.0 / 60.0);
 
-        if (this.mugshot_timer > 0) {
-            this.mugshot_timer = this.mugshot_timer - 1;
-            if (this.mugshot_timer <= 0) {
-                this.mugshot_expression = 0; // Return to neutral
-            }
-        }
-        this.look_direction_tick = this.look_direction_tick + 1;
+        float64 yaw_rad = (float64)camera.yaw_angle * (Math::PI / 180.0);
+        float32 forward_dir_x = (float32)Math::cos(yaw_rad);
+        float32 forward_dir_z = (float32)Math::sin(yaw_rad);
 
-        float32 current_speed = is_sprinting ? DoomConstants::PLAYER_RUN_SPEED : DoomConstants::PLAYER_BASE_SPEED;
+        // Right vector is perpendicular to forward vector on horizontal XZ plane
+        float32 right_dir_x = -forward_dir_z;
+        float32 right_dir_z = forward_dir_x;
 
-        float32 forward_vector_x = camera.get_forward_x();
-        float32 forward_vector_z = camera.get_forward_z();
-
-        float32 right_vector_x = camera.get_right_x();
-        float32 right_vector_z = camera.get_right_z();
-
-        float32 move_dir_x = 0.0;
-        float32 move_dir_z = 0.0;
+        float32 wish_dir_x = (float32)0.0;
+        float32 wish_dir_z = (float32)0.0;
 
         if (move_forward) {
-            move_dir_x = move_dir_x + forward_vector_x;
-            move_dir_z = move_dir_z + forward_vector_z;
+            wish_dir_x = wish_dir_x + forward_dir_x;
+            wish_dir_z = wish_dir_z + forward_dir_z;
         }
         if (move_backward) {
-            move_dir_x = move_dir_x - forward_vector_x;
-            move_dir_z = move_dir_z - forward_vector_z;
+            wish_dir_x = wish_dir_x - forward_dir_x;
+            wish_dir_z = wish_dir_z - forward_dir_z;
         }
-        if (move_right) {
-            move_dir_x = move_dir_x + right_vector_x;
-            move_dir_z = move_dir_z + right_vector_z;
+        if (strafe_left) {
+            wish_dir_x = wish_dir_x - right_dir_x;
+            wish_dir_z = wish_dir_z - right_dir_z;
         }
-        if (move_left) {
-            move_dir_x = move_dir_x - right_vector_x;
-            move_dir_z = move_dir_z - right_vector_z;
-        }
-
-        // Apply friction
-        this.velocity_x = this.velocity_x * 0.78;
-        this.velocity_z = this.velocity_z * 0.78;
-
-        float64 dir_magnitude = Math::sqrt((float64)((move_dir_x * move_dir_x) + (move_dir_z * move_dir_z)));
-        if (dir_magnitude > 0.01) {
-            float32 normalized_x = (float32)((float64)move_dir_x / dir_magnitude);
-            float32 normalized_z = (float32)((float64)move_dir_z / dir_magnitude);
-            this.velocity_x = normalized_x * current_speed;
-            this.velocity_z = normalized_z * current_speed;
+        if (strafe_right) {
+            wish_dir_x = wish_dir_x + right_dir_x;
+            wish_dir_z = wish_dir_z + right_dir_z;
         }
 
-        // Slide along walls
-        float32 test_new_x = this.pos_x + this.velocity_x;
-        float32 test_new_z = this.pos_z + this.velocity_z;
+        float32 input_magnitude_sq = (wish_dir_x * wish_dir_x) + (wish_dir_z * wish_dir_z);
+        if (input_magnitude_sq > (float32)0.0001) {
+            float32 input_len = (float32)Math::sqrt((float64)input_magnitude_sq);
+            wish_dir_x = (wish_dir_x / input_len) * move_step;
+            wish_dir_z = (wish_dir_z / input_len) * move_step;
 
-        if (!map.test_wall_collision(test_new_x, this.pos_z, DoomConstants::PLAYER_RADIUS)) {
-            this.pos_x = test_new_x;
+            float32 target_x = this.pos_x + wish_dir_x;
+            float32 target_z = this.pos_z + wish_dir_z;
+
+            // Resolve smooth wall sliding across all solid wall segments
+            level_map.resolve_player_collision(this, target_x, target_z, DoomConstants::PLAYER_RADIUS);
         }
-        if (!map.test_wall_collision(this.pos_x, test_new_z, DoomConstants::PLAYER_RADIUS)) {
-            this.pos_z = test_new_z;
+    }
+
+    public void take_damage(float32 damage_amount, DoomAudio audio_manager) {
+        if (!this.is_alive) {
+            return;
+        }
+
+        float32 absorbed_by_armor = (float32)0.0;
+        if (this.armor_val > (float32)0.0) {
+            absorbed_by_armor = damage_amount * (float32)0.33;
+            if (absorbed_by_armor > this.armor_val) {
+                absorbed_by_armor = this.armor_val;
+            }
+            this.armor_val = this.armor_val - absorbed_by_armor;
+        }
+
+        float32 direct_health_damage = damage_amount - absorbed_by_armor;
+        this.health_val = this.health_val - direct_health_damage;
+        this.damage_flash_timer = 15;
+
+        if (this.health_val <= (float32)0.0) {
+            this.health_val = (float32)0.0;
+            this.is_alive = false;
+            audio_manager.play_sound(audio_manager.sound_player_death);
+        } else {
+            audio_manager.play_sound(audio_manager.sound_player_pain);
         }
     }
 }
