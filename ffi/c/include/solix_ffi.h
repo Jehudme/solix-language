@@ -18,9 +18,9 @@
 #include <string.h>
 
 #define SOLIX_FFI_VERSION_MAJOR 1
-#define SOLIX_FFI_VERSION_MINOR 8
+#define SOLIX_FFI_VERSION_MINOR 9
 #define SOLIX_FFI_VERSION_PATCH 0
-#define SOLIX_FFI_VERSION "1.8.0"
+#define SOLIX_FFI_VERSION "1.9.0"
 
 #ifdef __cplusplus
 extern "C" {
