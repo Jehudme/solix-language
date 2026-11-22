@@ -2,6 +2,24 @@
 
 All notable changes to the Solix C/C++ FFI SDK (`solix::ffi`) will be documented in this file.
 
+## [1.8.0] - 2026-11-22
+
+### Bug Fixes
+
+- *(doom)* Add working directory fallback for asset loading (#141)
+- *(doom)* Resolve player elevation, authentic sector floors/ceilings, and hitscan damage (#140)
+- *(build)* Isolate container cache directories and constrain raylib native platforms (#133)
+
+### Features
+
+- *(doom)* Authentic Doom 1 asset pipeline, textured 3D rendering & natural controls (#139)
+- *(examples)* Implement modern 3d retro doom fps showcase game (#137)
+- *(examples)* Implement modern modular arcade space invaders showcase game with audio (#135)
+
+### Miscellaneous Tasks
+
+- *(examples)* Remove doom showcase game and retain compiler reachability fix (#142)
+
 ## [1.7.0] - 2026-11-20
 
 ### Bug Fixes
