@@ -15,7 +15,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "1.8.0"
+version = "1.9.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Jehud Metellus"]
@@ -25,11 +25,11 @@ documentation = "https://github.com/Jehudme/solix-language/tree/master/docs"
 
 [workspace.dependencies]
 # Internal workspace crates
-solix-common = { path = "crates/solix-common", version = "1.8.0" }
-solix-compilation = { path = "crates/solix-compilation", version = "1.8.0" }
-solix-runtime = { path = "crates/solix-runtime", version = "1.8.0" }
-solix-lsp = { path = "crates/solix-lsp", version = "1.8.0" }
-solix-dap = { path = "crates/solix-dap", version = "1.8.0" }
+solix-common = { path = "crates/solix-common", version = "1.9.0" }
+solix-compilation = { path = "crates/solix-compilation", version = "1.9.0" }
+solix-runtime = { path = "crates/solix-runtime", version = "1.9.0" }
+solix-lsp = { path = "crates/solix-lsp", version = "1.9.0" }
+solix-dap = { path = "crates/solix-dap", version = "1.9.0" }
 
 # Error handling & logging
 thiserror = "2.0"
