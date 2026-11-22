@@ -209,23 +209,23 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                     os.environ["SOLIX_PKG_DIR"] = old_pkg_dir
 
     def test_merge_bundled_packages_combines_triples_and_recomputes_checksums(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            linux_dir = tmp / "bundled-packages-x86_64-unknown-linux-gnu" / "demo-release@1.0.0"
-            mac_dir = tmp / "bundled-packages-aarch64-apple-darwin" / "demo-release@1.0.0"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            linux_dir = temporary_root / "bundled-packages-x86_64-unknown-linux-gnu" / "demo-release@1.0.0"
+            mac_dir = temporary_root / "bundled-packages-aarch64-apple-darwin" / "demo-release@1.0.0"
             linux_dir.mkdir(parents=True)
             mac_dir.mkdir(parents=True)
-            out_dir = tmp / "universal"
+            output_directory = temporary_root / "universal"
 
             base_manifest = "[configuration]\nname = \"demo\"\nversion = \"1.0.0\"\n"
             with zipfile.ZipFile(linux_dir / "demo.slxarc", "w") as zip_handle:
                 zip_handle.writestr("manifest.toml", base_manifest)
-                zip_handle.writestr("lib/x86_64-unknown-linux-gnu/libdemo.so", b"linux-bytes")
+                zip_handle.writestr("bin/x86_64-unknown-linux-gnu/libdemo.so", b"linux-bytes")
             with zipfile.ZipFile(mac_dir / "demo.slxarc", "w") as zip_handle:
                 zip_handle.writestr("manifest.toml", base_manifest)
-                zip_handle.writestr("lib/aarch64-apple-darwin/libdemo.dylib", b"mac-bytes")
+                zip_handle.writestr("bin/aarch64-apple-darwin/libdemo.dylib", b"mac-bytes")
 
-            proc = subprocess.run(
+            merge_process = subprocess.run(
                 [
                     sys.executable,
                     str(SCRIPTS_DIR / "release" / "merge_bundled_packages.py"),
@@ -233,19 +233,19 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                     str(linux_dir.parent),
                     str(mac_dir.parent),
                     "--output-dir",
-                    str(out_dir),
+                    str(output_directory),
                 ],
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            merged_archive = out_dir / "demo-release@1.0.0" / "demo.slxarc"
+            self.assertEqual(merge_process.returncode, 0, merge_process.stderr)
+            merged_archive = output_directory / "demo-release@1.0.0" / "demo.slxarc"
             self.assertTrue(merged_archive.is_file())
             with zipfile.ZipFile(merged_archive, "r") as zip_handle:
                 names = set(zip_handle.namelist())
-                self.assertIn("lib/x86_64-unknown-linux-gnu/libdemo.so", names)
-                self.assertIn("lib/aarch64-apple-darwin/libdemo.dylib", names)
+                self.assertIn("bin/x86_64-unknown-linux-gnu/libdemo.so", names)
+                self.assertIn("bin/aarch64-apple-darwin/libdemo.dylib", names)
                 merged_manifest = zip_handle.read("manifest.toml").decode("utf-8")
                 self.assertIn("[native_library_checksums]", merged_manifest)
                 self.assertIn(
@@ -253,12 +253,12 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                     merged_manifest,
                 )
 
-            debug_dir = tmp / "bundled-packages-x86_64-unknown-linux-gnu" / "demo-debug@1.0.0"
+            debug_dir = temporary_root / "bundled-packages-x86_64-unknown-linux-gnu" / "demo-debug@1.0.0"
             debug_dir.mkdir(parents=True)
             with zipfile.ZipFile(debug_dir / "demo.slxarc", "w") as zip_handle:
                 zip_handle.writestr("manifest.toml", base_manifest)
-            out_release_only = tmp / "universal_release_only"
-            proc_rel = subprocess.run(
+            out_release_only = temporary_root / "universal_release_only"
+            release_process = subprocess.run(
                 [
                     sys.executable,
                     str(SCRIPTS_DIR / "release" / "merge_bundled_packages.py"),
@@ -274,18 +274,18 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            self.assertEqual(proc_rel.returncode, 0, proc_rel.stderr)
+            self.assertEqual(release_process.returncode, 0, release_process.stderr)
             self.assertFalse((out_release_only / "demo-debug@1.0.0").exists())
             self.assertTrue((out_release_only / "demo-release@1.0.0").exists())
 
     def test_merge_bundled_packages_supports_manifest_yaml(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            linux_dir = tmp / "bundled-packages-x86_64-unknown-linux-gnu" / "yamldemo-release@2.1.0"
-            mac_dir = tmp / "bundled-packages-aarch64-apple-darwin" / "yamldemo-release@2.1.0"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            linux_dir = temporary_root / "bundled-packages-x86_64-unknown-linux-gnu" / "yamldemo-release@2.1.0"
+            mac_dir = temporary_root / "bundled-packages-aarch64-apple-darwin" / "yamldemo-release@2.1.0"
             linux_dir.mkdir(parents=True)
             mac_dir.mkdir(parents=True)
-            out_dir = tmp / "universal_yaml"
+            output_directory = temporary_root / "universal_yaml"
 
             base_manifest = (
                 "configuration:\n"
@@ -297,12 +297,12 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
             )
             with zipfile.ZipFile(linux_dir / "yamldemo.slxarc", "w") as zip_handle:
                 zip_handle.writestr("manifest.yaml", base_manifest)
-                zip_handle.writestr("lib/x86_64-unknown-linux-gnu/libyamldemo.so", b"yaml-linux")
+                zip_handle.writestr("bin/x86_64-unknown-linux-gnu/libyamldemo.so", b"yaml-linux")
             with zipfile.ZipFile(mac_dir / "yamldemo.slxarc", "w") as zip_handle:
                 zip_handle.writestr("manifest.yaml", base_manifest)
-                zip_handle.writestr("lib/aarch64-apple-darwin/libyamldemo.dylib", b"yaml-mac")
+                zip_handle.writestr("bin/aarch64-apple-darwin/libyamldemo.dylib", b"yaml-mac")
 
-            proc = subprocess.run(
+            merge_process = subprocess.run(
                 [
                     sys.executable,
                     str(SCRIPTS_DIR / "release" / "merge_bundled_packages.py"),
@@ -310,20 +310,20 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                     str(linux_dir.parent),
                     str(mac_dir.parent),
                     "--output-dir",
-                    str(out_dir),
+                    str(output_directory),
                 ],
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            merged_archive = out_dir / "yamldemo-release@2.1.0" / "yamldemo.slxarc"
+            self.assertEqual(merge_process.returncode, 0, merge_process.stderr)
+            merged_archive = output_directory / "yamldemo-release@2.1.0" / "yamldemo.slxarc"
             self.assertTrue(merged_archive.is_file())
             with zipfile.ZipFile(merged_archive, "r") as zip_handle:
                 names = set(zip_handle.namelist())
                 self.assertIn("manifest.yaml", names)
-                self.assertIn("lib/x86_64-unknown-linux-gnu/libyamldemo.so", names)
-                self.assertIn("lib/aarch64-apple-darwin/libyamldemo.dylib", names)
+                self.assertIn("bin/x86_64-unknown-linux-gnu/libyamldemo.so", names)
+                self.assertIn("bin/aarch64-apple-darwin/libyamldemo.dylib", names)
                 merged_manifest = zip_handle.read("manifest.yaml").decode("utf-8")
                 self.assertIn("native_library_checksums:", merged_manifest)
                 self.assertIn("supported_platforms:", merged_manifest)
