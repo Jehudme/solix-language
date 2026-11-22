@@ -532,3 +532,230 @@ public class Main {
     // Even if execution encounters an instruction mismatch from corrupted byte, verification was bypassed
     let _ = run(run_tampered_yolo);
 }
+
+#[test]
+fn test_list_platforms_column_and_json_payload() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let package_store_directory = workspace.root_path().join("store");
+    fs::create_dir_all(&package_store_directory).expect("Failed to create store dir");
+    let store_str = package_store_directory.to_str().expect("valid path");
+
+    let source_file = workspace
+        .write_file(
+            "geometry.slx",
+            r#"
+public class Geometry {
+    public static int32 area(int32 width, int32 height) {
+        return width * height;
+    }
+}
+"#,
+        )
+        .expect("write geometry");
+
+    let binary_file = workspace.file_path("geometry.slxb");
+    let compile_cli = Cli::try_parse_from([
+        "solix",
+        "compile",
+        source_file.to_str().expect("valid path"),
+        "--name",
+        "geometry",
+        "--version",
+        "1.0.0",
+        "-o",
+        binary_file.to_str().expect("valid path"),
+        "--pkg-dir",
+        store_str,
+        "--install",
+    ])
+    .expect("compile geometry");
+    assert_eq!(run(compile_cli).expect("compile geometry"), 0);
+
+    // Verify registry record has platforms: ["universal"]
+    let registry = PackageRegistry::load_or_sync(&package_store_directory).expect("load registry");
+    let geometry_record = registry
+        .get("geometry", Some("1.0.0"))
+        .expect("record exists");
+    assert_eq!(geometry_record.platforms, vec!["universal".to_string()]);
+
+    // Test solix list --json
+    let list_json_cli = Cli::try_parse_from(["solix", "list", "--json", "--pkg-dir", store_str])
+        .expect("list json");
+    assert_eq!(run(list_json_cli).expect("list json must succeed"), 0);
+
+    // Test solix list plain table
+    let list_plain_cli =
+        Cli::try_parse_from(["solix", "list", "--pkg-dir", store_str]).expect("list plain");
+    assert_eq!(run(list_plain_cli).expect("list plain must succeed"), 0);
+}
+
+#[test]
+fn test_info_project_dir_inspection_and_json() {
+    let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
+    let project_directory = workspace.root_path().join("my_app");
+    fs::create_dir_all(project_directory.join("src")).expect("create my_app src");
+
+    fs::write(
+        project_directory.join("src").join("main.slx"),
+        r#"
+public class Main {
+    public static int32 main() {
+        return 0;
+    }
+}
+"#,
+    )
+    .expect("write main.slx");
+
+    fs::write(
+        project_directory.join("manifest.yaml"),
+        r#"configuration:
+  name: my_app
+  version: "0.2.0"
+  description: "Test application"
+profiles:
+  release:
+    entrypoint: Main::main
+    sources:
+      - src
+    platforms:
+      - all
+  debug:
+    entrypoint: Main::main
+    sources:
+      - src
+    platforms:
+      - host
+"#,
+    )
+    .expect("write manifest.yaml");
+
+    // solix info <project_directory>
+    let info_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        project_directory.to_str().expect("valid utf8"),
+    ])
+    .expect("info project dir");
+    assert_eq!(run(info_cli).expect("info project dir must succeed"), 0);
+
+    // solix info <project_directory> --json
+    let info_json_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        project_directory.to_str().expect("valid utf8"),
+        "--json",
+    ])
+    .expect("info project dir json");
+    assert_eq!(
+        run(info_json_cli).expect("info project dir json must succeed"),
+        0
+    );
+}
+
+#[test]
+fn test_consumer_with_platforms_all_succeeds_with_partial_native_dependency() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let package_store = workspace.root_path().join("pkg_store");
+    let package_store_str = package_store.to_str().expect("valid utf8");
+
+    // Package a host-only native dependency archive
+    let dependency_stage = workspace.root_path().join("dep_stage");
+    let host_triple = solix_common::project::host_target_triple();
+    let host_lib_name = if cfg!(windows) {
+        "demo_subset_native.dll"
+    } else if cfg!(target_os = "macos") {
+        "libdemo_subset_native.dylib"
+    } else {
+        "libdemo_subset_native.so"
+    };
+
+    fs::create_dir_all(dependency_stage.join("bin")).expect("create dep bin");
+    fs::create_dir_all(dependency_stage.join("lib").join(host_triple))
+        .expect("create dep host lib");
+    fs::write(
+        dependency_stage.join("manifest.yaml"),
+        r#"configuration:
+  name: subset_dep
+  version: "1.0.0"
+profiles:
+  release:
+    sources:
+      - src
+"#,
+    )
+    .expect("write dep manifest");
+    fs::write(
+        dependency_stage.join("bin").join("subset_dep.slxb"),
+        solix_common::BinaryProgram::new().to_bytes(),
+    )
+    .expect("write dep slxb");
+    fs::write(
+        dependency_stage
+            .join("lib")
+            .join(host_triple)
+            .join(host_lib_name),
+        b"host_native_binary_bytes",
+    )
+    .expect("write dep native lib");
+
+    let dependency_archive = workspace.file_path("subset_dep.slxarc");
+    solix_common::project::SlxarcArchive::pack_directory(&dependency_stage, &dependency_archive)
+        .expect("pack dep archive");
+
+    let install_cli = Cli::try_parse_from([
+        "solix",
+        "install",
+        dependency_archive.to_str().expect("valid utf8"),
+        "--profile",
+        "release",
+        "--pkg-dir",
+        package_store_str,
+    ])
+    .expect("parse dep install");
+    assert_eq!(run(install_cli).expect("install dep"), 0);
+
+    // Consumer declares `platforms: [all]`. Since it does not specify explicit CLI targets,
+    // it should bundle available host native libraries with an informative note instead of failing.
+    let consumer_root = workspace.root_path().join("consumer_all");
+    fs::create_dir_all(consumer_root.join("src")).expect("create consumer src");
+    fs::write(
+        consumer_root.join("src").join("main.slx"),
+        "public class Main {\n    public static int32 main() { return 0; }\n}\n",
+    )
+    .expect("write consumer main.slx");
+    fs::write(
+        consumer_root.join("manifest.yaml"),
+        r#"configuration:
+  name: consumer_all
+  version: "0.1.0"
+profiles:
+  release:
+    entrypoint: Main::main
+    static: true
+    sources:
+      - src
+    platforms:
+      - all
+    dependencies:
+      subset_dep:
+        version: "1.0.0"
+        profile: release
+"#,
+    )
+    .expect("write consumer manifest.yaml");
+
+    let build_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        consumer_root.to_str().expect("valid utf8"),
+        "--release",
+        "--pkg-dir",
+        package_store_str,
+    ])
+    .expect("parse consumer build cli");
+    assert_eq!(
+        run(build_cli).expect("consumer with platforms: [all] must build successfully"),
+        0
+    );
+}

@@ -76,6 +76,9 @@ solix info <binary> [options]
 
 ### Practical Examples
 ```bash
+# View summary of a project directory (profiles, platforms, dependencies, built artifacts)
+solix info ./libraries/raylib/
+
 # View summary of a binary container (classes, methods, static size)
 solix info bin/app.slxb
 

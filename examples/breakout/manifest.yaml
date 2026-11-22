@@ -15,8 +15,7 @@ profiles:
     sources:
       - src
     platforms:
-      - host
-      - windows
+      - all
     dependencies:
       raylib:
         version: "5.5.0"

@@ -59,6 +59,10 @@ pub fn execute_info(args: InfoArgs) -> Result<()> {
         }
     };
 
+    if target_path.is_dir() {
+        return execute_project_dir_info(&target_path, &args);
+    }
+
     let file_size_bytes = fs::metadata(&target_path)
         .map(|meta| meta.len())
         .unwrap_or(0);
@@ -574,4 +578,191 @@ fn format_info_summary(
     }
 
     out
+}
+
+fn execute_project_dir_info(dir_path: &Path, args: &InfoArgs) -> Result<()> {
+    let manifest_path = solix_common::project::find_manifest_path(dir_path).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Target directory '{}' does not contain a Solix project manifest (manifest.yaml / manifest.toml)",
+            dir_path.display()
+        )
+    })?;
+
+    let manifest =
+        solix_common::project::ProjectManifest::from_file(&manifest_path).with_context(|| {
+            format!(
+                "Failed to load project manifest at '{}'",
+                manifest_path.display()
+            )
+        })?;
+
+    let build_dir = dir_path.join("build");
+    let mut built_artifacts: Vec<serde_json::Value> = Vec::new();
+    let mut artifact_summaries: Vec<String> = Vec::new();
+    if build_dir.is_dir() {
+        for profile_name in ["release", "debug", "test"] {
+            let profile_dir = build_dir.join(profile_name);
+            if !profile_dir.is_dir() {
+                continue;
+            }
+            if let Ok(entries) = fs::read_dir(&profile_dir) {
+                for entry_result in entries.flatten() {
+                    let entry_path = entry_result.path();
+                    let extension = entry_path
+                        .extension()
+                        .and_then(|ext_val| ext_val.to_str())
+                        .unwrap_or("");
+                    if extension.eq_ignore_ascii_case("slxp")
+                        || extension.eq_ignore_ascii_case("slxarc")
+                        || extension.eq_ignore_ascii_case("slxb")
+                    {
+                        let size_bytes = fs::metadata(&entry_path)
+                            .map(|metadata_val| metadata_val.len())
+                            .unwrap_or(0);
+                        let sha256_digest = sha256_file(&entry_path).unwrap_or_default();
+                        let inspection =
+                            solix_common::project::SlxpPackage::inspect(&entry_path).ok();
+                        let supported = inspection
+                            .as_ref()
+                            .and_then(|insp| insp.manifest.as_ref())
+                            .map(|sub_manifest| sub_manifest.supported_platforms.clone())
+                            .unwrap_or_default();
+                        built_artifacts.push(serde_json::json!({
+                            "path": entry_path.display().to_string(),
+                            "profile": profile_name,
+                            "kind": extension,
+                            "size_bytes": size_bytes,
+                            "size_formatted": format_human_size(size_bytes),
+                            "sha256": sha256_digest,
+                            "supported_platforms": supported,
+                        }));
+                        let rel_path = entry_path
+                            .strip_prefix(dir_path)
+                            .unwrap_or(&entry_path)
+                            .display();
+                        let plat_desc = if supported.is_empty() {
+                            "universal".to_string()
+                        } else {
+                            supported.join(", ")
+                        };
+                        artifact_summaries.push(format!(
+                            "  • {} ({}, profile: {}, platforms: {})",
+                            rel_path,
+                            format_human_size(size_bytes),
+                            profile_name,
+                            plat_desc
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let content = if args.json {
+        let json_val = serde_json::json!({
+            "target": dir_path.display().to_string(),
+            "kind": "project",
+            "manifest_path": manifest_path.display().to_string(),
+            "configuration": manifest.configuration,
+            "profiles": manifest.profiles,
+            "supported_platforms": manifest.supported_platforms,
+            "built_artifacts": built_artifacts,
+        });
+        serde_json::to_string_pretty(&json_val)?
+    } else {
+        let mut out = String::new();
+        let _ = writeln!(out, "=== Solix Project Inspection ===");
+        let _ = writeln!(
+            out,
+            "Project:          {} v{}",
+            manifest.configuration.name, manifest.configuration.version
+        );
+        let _ = writeln!(out, "Directory:        {}", dir_path.display());
+        let _ = writeln!(out, "Manifest:         {}", manifest_path.display());
+        if let Some(ref description) = manifest.configuration.description {
+            let _ = writeln!(out, "Description:      {description}");
+        }
+        if let Some(ref license) = manifest.configuration.license {
+            let _ = writeln!(out, "License:          {license}");
+        }
+        if !manifest.configuration.authors.is_empty() {
+            let _ = writeln!(
+                out,
+                "Authors:          {}",
+                manifest.configuration.authors.join(", ")
+            );
+        }
+        let _ = writeln!(out, "\n--- Profiles ({}) ---", manifest.profiles.len());
+        for profile_name in manifest.profiles.keys() {
+            if let Ok(resolved) = manifest.resolve_profile(profile_name) {
+                let _ = writeln!(out, "  • {profile_name}:");
+                let _ = writeln!(out, "      Optimization: Level {}", resolved.opt_level);
+                let _ = writeln!(
+                    out,
+                    "      Inlining:     Threshold {}",
+                    resolved.inline_threshold
+                );
+                let expanded_targets =
+                    solix_common::project::expand_platform_list(&resolved.platforms);
+                let plat_str = if resolved.platforms.is_empty() {
+                    "universal".to_string()
+                } else {
+                    format!(
+                        "{} (expanded: {})",
+                        resolved.platforms.join(", "),
+                        expanded_targets.join(", ")
+                    )
+                };
+                let _ = writeln!(out, "      Platforms:    {plat_str}");
+                if let Some(ref entry) = resolved.entrypoint {
+                    let _ = writeln!(out, "      Entrypoint:   {entry}");
+                }
+                let _ = writeln!(out, "      Static:       {}", resolved.is_static);
+                if !resolved.sources.is_empty() {
+                    let _ = writeln!(out, "      Sources:      {}", resolved.sources.join(", "));
+                }
+                if !resolved.dependencies.is_empty() {
+                    let dep_strs: Vec<String> = resolved
+                        .dependencies
+                        .iter()
+                        .map(|(dep_name, dep_spec)| {
+                            format!("{dep_name}@{} ({})", dep_spec.version, dep_spec.profile)
+                        })
+                        .collect();
+                    let _ = writeln!(out, "      Dependencies: {}", dep_strs.join(", "));
+                }
+                if !resolved.natives.is_empty() {
+                    let native_strs: Vec<String> = resolved.natives.keys().cloned().collect();
+                    let _ = writeln!(out, "      Natives:      {}", native_strs.join(", "));
+                }
+            }
+        }
+
+        if !artifact_summaries.is_empty() {
+            let _ = writeln!(
+                out,
+                "\n--- Built Artifacts ({}) ---",
+                artifact_summaries.len()
+            );
+            for summary_line in &artifact_summaries {
+                let _ = writeln!(out, "{summary_line}");
+            }
+        }
+
+        out
+    };
+
+    if let Some(ref out_path) = args.output {
+        if let Some(parent) = out_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(out_path, content)?;
+        println!("Info written to {}", out_path.display());
+    } else {
+        println!("{content}");
+    }
+
+    Ok(())
 }
