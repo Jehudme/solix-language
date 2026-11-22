@@ -206,7 +206,15 @@ def main() -> None:
         # 4. Dual-backend example Solix build & execution for all profiles
         for profile in ("cmake_backend", "rust_backend", "release"):
             run_step(
-                [*solix_cmd, "build", str(dual_example_dir), "--profile", profile],
+                [
+                    *solix_cmd,
+                    "build",
+                    str(dual_example_dir),
+                    "--profile",
+                    profile,
+                    "--target",
+                    "host",
+                ],
                 cwd=repo_root,
                 label=f"examples/ffi_dual_backend: build [{profile}]",
             )

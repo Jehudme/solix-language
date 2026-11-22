@@ -53,6 +53,9 @@ pub struct PackageRecord {
     /// Author / maintainer names.
     #[serde(default)]
     pub authors: Vec<String>,
+    /// Target platforms supported by this package container (e.g. "universal" or canonical platform IDs).
+    #[serde(default)]
+    pub platforms: Vec<String>,
 }
 
 /// Package registry container representing `$SOLIX_PKG_DIR/registry.json`.
@@ -109,6 +112,40 @@ impl PackageRegistry {
                     )
                 })?;
             parsed_registry.registry_file_path = registry_path.clone();
+
+            for package_record in &mut parsed_registry.packages {
+                if package_record.platforms.is_empty() {
+                    if package_record.native_libraries.is_empty() {
+                        package_record.platforms = vec!["universal".to_string()];
+                    } else {
+                        let mut extracted_targets: Vec<String> = Vec::new();
+                        for library_key in package_record.native_libraries.keys() {
+                            let clean_key = library_key.trim_start_matches('/');
+                            let stripped_prefix = clean_key
+                                .strip_prefix("bin/")
+                                .or_else(|| clean_key.strip_prefix("lib/"));
+                            if let Some(tail_path) = stripped_prefix
+                                && let Some((target_segment, _)) = tail_path.split_once('/')
+                            {
+                                let normalized_target =
+                                    solix_common::project::normalize_platform_token(target_segment);
+                                if !normalized_target.is_empty()
+                                    && !extracted_targets.contains(&normalized_target)
+                                {
+                                    extracted_targets.push(normalized_target);
+                                }
+                            }
+                        }
+                        if extracted_targets.is_empty() {
+                            package_record.platforms = vec!["universal".to_string()];
+                        } else {
+                            extracted_targets.sort();
+                            package_record.platforms = extracted_targets;
+                        }
+                    }
+                }
+            }
+
             parsed_registry
         } else {
             Self {
@@ -451,6 +488,42 @@ fn backfill_package_from_dir(
             .as_ref()
             .map(|manifest| manifest.native_library_checksums.clone())
             .unwrap_or_default();
+        let supported_platforms = inspection
+            .manifest
+            .as_ref()
+            .map(|manifest| {
+                if !manifest.supported_platforms.is_empty() {
+                    manifest.supported_platforms.clone()
+                } else if !native_libraries.is_empty() {
+                    let mut extracted_targets: Vec<String> = Vec::new();
+                    for library_key in native_libraries.keys() {
+                        let clean_key = library_key.trim_start_matches('/');
+                        let stripped_prefix = clean_key
+                            .strip_prefix("bin/")
+                            .or_else(|| clean_key.strip_prefix("lib/"));
+                        if let Some(tail_path) = stripped_prefix
+                            && let Some((target_segment, _)) = tail_path.split_once('/')
+                        {
+                            let normalized_target =
+                                solix_common::project::normalize_platform_token(target_segment);
+                            if !normalized_target.is_empty()
+                                && !extracted_targets.contains(&normalized_target)
+                            {
+                                extracted_targets.push(normalized_target);
+                            }
+                        }
+                    }
+                    if extracted_targets.is_empty() {
+                        vec!["universal".to_string()]
+                    } else {
+                        extracted_targets.sort();
+                        extracted_targets
+                    }
+                } else {
+                    vec!["universal".to_string()]
+                }
+            })
+            .unwrap_or_else(|| vec!["universal".to_string()]);
 
         Some(PackageRecord {
             name: package_name.to_string(),
@@ -471,6 +544,7 @@ fn backfill_package_from_dir(
             description,
             license,
             authors,
+            platforms: supported_platforms,
         })
     } else if slxb_candidate.exists() {
         let file_metadata = fs::metadata(&slxb_candidate).ok()?;
@@ -499,6 +573,7 @@ fn backfill_package_from_dir(
             description: program.package_description.clone(),
             license: String::new(),
             authors: Vec::new(),
+            platforms: vec!["universal".to_string()],
         })
     } else {
         None

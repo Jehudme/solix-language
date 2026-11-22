@@ -208,6 +208,7 @@ pub(crate) fn install_package_artifact_with_options(
             description: program.package_description.clone(),
             license: String::new(),
             authors: Vec::new(),
+            platforms: vec!["universal".to_string()],
         };
 
         registry.register(record.clone())?;
@@ -316,6 +317,37 @@ pub(crate) fn install_package_artifact_with_options(
             );
         }
 
+        let record_platforms = if !manifest.supported_platforms.is_empty() {
+            manifest.supported_platforms.clone()
+        } else if !manifest.native_library_checksums.is_empty() {
+            let mut extracted_targets: Vec<String> = Vec::new();
+            for library_key in manifest.native_library_checksums.keys() {
+                let clean_key = library_key.trim_start_matches('/');
+                let stripped_prefix = clean_key
+                    .strip_prefix("bin/")
+                    .or_else(|| clean_key.strip_prefix("lib/"));
+                if let Some(tail_path) = stripped_prefix
+                    && let Some((target_segment, _)) = tail_path.split_once('/')
+                {
+                    let normalized_target =
+                        solix_common::project::normalize_platform_token(target_segment);
+                    if !normalized_target.is_empty()
+                        && !extracted_targets.contains(&normalized_target)
+                    {
+                        extracted_targets.push(normalized_target);
+                    }
+                }
+            }
+            if extracted_targets.is_empty() {
+                vec!["universal".to_string()]
+            } else {
+                extracted_targets.sort();
+                extracted_targets
+            }
+        } else {
+            vec!["universal".to_string()]
+        };
+
         let record = PackageRecord {
             name: package_name.to_string(),
             version: package_version.to_string(),
@@ -331,6 +363,7 @@ pub(crate) fn install_package_artifact_with_options(
             description: manifest.configuration.description.unwrap_or_default(),
             license: manifest.configuration.license.unwrap_or_default(),
             authors: manifest.configuration.authors,
+            platforms: record_platforms,
         };
 
         registry.register(record.clone())?;
@@ -517,6 +550,7 @@ pub fn execute_install_binaries(args: InstallBinariesArgs) -> Result<()> {
         description: program.package_description.clone(),
         license: String::new(),
         authors: Vec::new(),
+        platforms: vec!["universal".to_string()],
     };
 
     registry.register(record)?;
@@ -1055,13 +1089,13 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
         } else {
             let _ = writeln!(
                 output_content,
-                "{:<16} {:<10} {:<8} {:<8} {:<10} {:<20} {:<15} SOURCE",
-                "NAME", "VERSION", "KIND", "PROFILE", "SIZE", "INSTALLED AT", "SHA256"
+                "{:<16} {:<10} {:<8} {:<8} {:<28} {:<10} {:<20} {:<15} SOURCE",
+                "NAME", "VERSION", "KIND", "PROFILE", "PLATFORMS", "SIZE", "INSTALLED AT", "SHA256"
             );
             let _ = writeln!(
                 output_content,
-                "{:-<16} {:-<10} {:-<8} {:-<8} {:-<10} {:-<20} {:-<15} {:-<20}",
-                "", "", "", "", "", "", "", ""
+                "{:-<16} {:-<10} {:-<8} {:-<8} {:-<28} {:-<10} {:-<20} {:-<15} {:-<20}",
+                "", "", "", "", "", "", "", "", ""
             );
             for package in &filtered_packages {
                 let short_sha256 = if package.sha256.len() >= 12 {
@@ -1074,14 +1108,25 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
                     .source
                     .as_ref()
                     .map_or("-", |dir_path| dir_path.to_str().unwrap_or("-"));
+                let raw_platforms = if package.platforms.is_empty() {
+                    "universal".to_string()
+                } else {
+                    package.platforms.join(", ")
+                };
+                let platforms_display = if raw_platforms.len() > 28 {
+                    format!("{}...", &raw_platforms[..25])
+                } else {
+                    raw_platforms
+                };
 
                 let _ = writeln!(
                     output_content,
-                    "{:<16} {:<10} {:<8} {:<8} {:<10} {:<20} {:<15} {}",
+                    "{:<16} {:<10} {:<8} {:<8} {:<28} {:<10} {:<20} {:<15} {}",
                     package.name,
                     package.version,
                     package.kind,
                     package.build_profile,
+                    platforms_display,
                     size_display,
                     package.installed_at_iso8601,
                     short_sha256,

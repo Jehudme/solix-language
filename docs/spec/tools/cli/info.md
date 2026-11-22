@@ -16,7 +16,7 @@ solix info <target> [options]
 
 | Argument | Type | Required | Description |
 |---|---|---|---|
-| `<target>` | Path or String | **Yes** | Path to target compiled binary (`*.slxb`), package (`*.slxp`), or registered package specification (`<name>[:<profile>][@<version>]`). |
+| `<target>` | Path or String | **Yes** | Path to project directory containing `manifest.yaml`, compiled binary (`*.slxb`), package (`*.slxp`), archive (`*.slxarc`), or registered package specification (`<name>[:<profile>][@<version>]`). |
 
 ---
 
@@ -86,4 +86,17 @@ When inspecting a standalone `.slxb` container:
 
 ```bash
 solix info build/release/math_utils.slxb
+```
+
+### 3. Project Directory Inspection
+
+When `<target>` points to a Solix project root containing `manifest.yaml` (or `manifest.toml`):
+- Parses and validates project configuration, description, version, and declared profiles.
+- Displays resolved target platforms (`universal`, `all`, `host`, or explicit architectures), entry points, optimization levels, inline thresholds, declared dependencies, and native bindings for each profile.
+- Scans `build/<profile>/` directories and enumerates any built artifacts (`.slxp`, `.slxarc`, `.slxb`), showing file sizes and platform capabilities.
+- `--json`: Emits complete structured JSON containing project manifest configuration and built artifact metadata.
+
+```bash
+solix info ./libraries/raylib/
+solix info ./examples/breakout/ --json
 ```

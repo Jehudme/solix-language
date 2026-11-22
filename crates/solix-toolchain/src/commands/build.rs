@@ -262,11 +262,13 @@ fn execute_declarative_build(
         args.target.as_deref(),
         args.platform.as_deref(),
     );
+    let has_explicit_cli_target = args.target.is_some() || args.platform.is_some();
     stage_dependency_native_libraries(
         &mut resolved_profile,
         args.pkg_dir.as_deref(),
         &stage_lib_dir,
         &required_platforms,
+        has_explicit_cli_target,
     )?;
 
     copy_project_tree_filtered(&project_root.join("bin"), &stage_bin_dir, true)?;
@@ -1633,6 +1635,7 @@ fn stage_dependency_native_libraries(
     pkg_dir_override: Option<&Path>,
     stage_lib_dir: &Path,
     required_platforms: &[String],
+    has_explicit_cli_target: bool,
 ) -> Result<()> {
     if resolved_profile.dependencies.is_empty() {
         return Ok(());
@@ -1738,29 +1741,53 @@ fn stage_dependency_native_libraries(
             && !packaged_platforms.contains("universal")
             && !packaged_platforms.contains("all")
         {
+            let is_universal_all_requested = resolved_profile
+                .platforms
+                .iter()
+                .any(|plat| plat.eq_ignore_ascii_case("all"))
+                && !has_explicit_cli_target;
+
             let missing_platforms: Vec<String> = required_platforms
                 .iter()
                 .filter(|req_plat| !packaged_platforms.contains(*req_plat))
                 .cloned()
                 .collect();
+
+            let host_platform = host_platform_id();
+            let host_covered = packaged_platforms.contains(host_platform);
+
             if !missing_platforms.is_empty() {
-                let packaged_display = if packaged_platforms.is_empty() {
-                    "none".to_string()
+                if is_universal_all_requested && host_covered {
+                    println!(
+                        "  [platforms] Note: Dependency '{}@{}' covers [{}] (omitting unavailable targets: [{}])",
+                        req.name,
+                        req.version,
+                        packaged_platforms
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        missing_platforms.join(", ")
+                    );
                 } else {
-                    packaged_platforms
-                        .iter()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
-                bail!(
-                    "Dependency '{}@{}' (profile '{}') does not support requested target platform(s) [{}]: missing native shared library (.so/.dll/.dylib) (packaged platforms: [{}]). Run 'solix install --bundled --force' for universal bundled libraries or rebuild the dependency with matching 'platforms'.",
-                    req.name,
-                    req.version,
-                    req.profile.as_deref().unwrap_or("release"),
-                    missing_platforms.join(", "),
-                    packaged_display
-                );
+                    let packaged_display = if packaged_platforms.is_empty() {
+                        "none".to_string()
+                    } else {
+                        packaged_platforms
+                            .iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    bail!(
+                        "Dependency '{}@{}' (profile '{}') does not support requested target platform(s) [{}]: missing native shared library (.so/.dll/.dylib) (packaged platforms: [{}]). Run 'solix install --bundled --force' for universal bundled libraries or rebuild the dependency with matching 'platforms'.",
+                        req.name,
+                        req.version,
+                        req.profile.as_deref().unwrap_or("release"),
+                        missing_platforms.join(", "),
+                        packaged_display
+                    );
+                }
             }
         }
 

@@ -32,10 +32,10 @@ solix list [options]
 
 ```text
 Installed Solix Packages (/home/user/.solix/packages):
-NAME             VERSION    KIND     PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE
----------------- ---------- -------- -------- ---------- -------------------- --------------- --------------------
-solix            2.0.0      package  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
-raylib           1.2.0      package  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
+NAME             VERSION    KIND     PROFILE  PLATFORMS                    SIZE       INSTALLED AT         SHA256          SOURCE
+---------------- ---------- -------- -------- ---------------------------- ---------- -------------------- --------------- --------------------
+solix            2.0.0      package  release  universal                    681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
+raylib           5.5.0      package  release  linux-x86_64, windows-x86_64 1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
 ```
 
 ### 2. JSON Output (`--json`)
@@ -57,6 +57,9 @@ solix list --json
     "installed_at_iso8601": "2026-11-11T05:44:54Z",
     "source": "/home/user/solixlib",
     "artifact_path": "/home/user/.solix/packages/solix-release@2.0.0/solix.slxp",
+    "platforms": [
+      "universal"
+    ],
     "native_libraries": {
       "lib/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
     },

@@ -145,7 +145,7 @@ solix export binaries <path> --output <destination.slxb>
 
 ## 5. `solix list`
 
-Lists all packages and versions installed in the local package store, displaying kind as `package` or `binaries`:
+Lists all packages and versions installed in the local package store, displaying kind as `package` or `binaries`, along with platform compatibility (`universal`, `linux-x86_64, windows-x86_64`, etc.):
 
 ```bash
 solix list [options]

@@ -23,7 +23,8 @@ profiles:
     static: true
     sources:
       - src
-    platforms: *host_plat
+    platforms:
+      - all
     natives:
       cmake_backend:
         profile: release
