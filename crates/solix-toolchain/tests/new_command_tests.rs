@@ -454,12 +454,13 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
 
     let updated_manifest =
         ProjectManifest::from_file(project_root.join("manifest.yaml")).expect("reload manifest");
-    let release_cfg = updated_manifest
+    let release_configuration = updated_manifest
         .resolve_profile("release")
         .expect("release profile");
-    assert!(release_cfg.natives.contains_key("fastmath"));
-    assert!(release_cfg.natives.contains_key("calcc"));
-    assert!(release_cfg.natives.contains_key("calccpp"));
+    assert!(release_configuration.natives.contains_key("fastmath"));
+    assert!(release_configuration.natives.contains_key("calcc"));
+    assert!(release_configuration.natives.contains_key("calccpp"));
+    assert_eq!(release_configuration.platforms, vec!["host"]);
 
     // Wire Solix main.slx to call all three native libraries (Rust + C + C++)
     let combined_main = r#"
@@ -531,6 +532,8 @@ public class Main {
             "build",
             project_root.to_str().expect("valid path"),
             "--release",
+            "--target",
+            "host",
         ])
         .expect("parse solix build");
         assert_eq!(run(build_cli).expect("solix build release"), 0);

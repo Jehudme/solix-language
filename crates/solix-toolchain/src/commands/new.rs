@@ -1118,31 +1118,29 @@ fn register_native_in_manifest(
         );
     }
 
-    let platforms_opt = if requested_platforms.is_empty() {
-        None
-    } else {
-        Some(requested_platforms.to_vec())
-    };
-
-    for prof_name in &target_profiles {
-        let Some(profile_cfg) = manifest.profiles.get_mut(prof_name) else {
+    for target_profile_name in &target_profiles {
+        let Some(profile_configuration) = manifest.profiles.get_mut(target_profile_name) else {
             bail!(
                 "Profile '{}' does not exist in '{}'",
-                prof_name,
+                target_profile_name,
                 manifest_path.display()
             );
         };
-        let native_profile = if prof_name == "debug" || prof_name == "test" {
+        if !requested_platforms.is_empty() {
+            profile_configuration.platforms = Some(requested_platforms.to_vec());
+        }
+        let native_profile_name = if target_profile_name == "debug" || target_profile_name == "test"
+        {
             "debug"
         } else {
             "release"
         };
-        profile_cfg.natives.insert(
+        profile_configuration.natives.insert(
             package_name.to_string(),
             NativeTargetConfig {
                 path: custom_rel_path.clone(),
-                profile: Some(native_profile.to_string()),
-                platforms: platforms_opt.clone(),
+                profile: Some(native_profile_name.to_string()),
+                platforms: None,
                 flags: Vec::new(),
                 strategy: None,
                 docker: None,

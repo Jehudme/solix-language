@@ -203,7 +203,9 @@ fn filter_slxarc_for_target(
             continue;
         };
         let name = name_cow.as_ref();
-        let stripped_native = name.strip_prefix("bin/").or_else(|| name.strip_prefix("lib/"));
+        let stripped_native = name
+            .strip_prefix("bin/")
+            .or_else(|| name.strip_prefix("lib/"));
         if let Some(after_native) = stripped_native
             && let Some((subdir, rest)) = after_native.split_once('/')
             && !subdir.is_empty()
@@ -227,7 +229,9 @@ fn filter_slxarc_for_target(
                 continue;
             };
             let name = name_cow.as_ref();
-            let stripped_native = name.strip_prefix("bin/").or_else(|| name.strip_prefix("lib/"));
+            let stripped_native = name
+                .strip_prefix("bin/")
+                .or_else(|| name.strip_prefix("lib/"));
             if let Some(after_native) = stripped_native
                 && !after_native.contains('/')
                 && qualified_host_files
@@ -254,7 +258,9 @@ fn filter_slxarc_for_target(
         for idx in 0..zip_in.len() {
             let mut entry = zip_in.by_index(idx).ok()?;
             let name = entry.name().ok()?.into_owned();
-            let stripped_native = name.strip_prefix("bin/").or_else(|| name.strip_prefix("lib/"));
+            let stripped_native = name
+                .strip_prefix("bin/")
+                .or_else(|| name.strip_prefix("lib/"));
             if let Some(after_native) = stripped_native {
                 if let Some((subdir, _)) = after_native.split_once('/')
                     && !subdir.is_empty()

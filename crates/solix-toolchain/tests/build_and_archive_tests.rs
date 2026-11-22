@@ -2771,7 +2771,10 @@ profiles:
     ])
     .expect("parse info build dir");
     let build_result = run(info_build_cli);
-    assert!(build_result.is_err(), "solix info on build/ must be rejected");
+    assert!(
+        build_result.is_err(),
+        "solix info on build/ must be rejected"
+    );
     let build_err_msg = format!("{:#}", build_result.unwrap_err());
     assert!(
         build_err_msg.contains("'solix info' cannot be run on build or staging directories"),
@@ -2786,7 +2789,10 @@ profiles:
     ])
     .expect("parse info stage dir");
     let stage_result = run(info_stage_cli);
-    assert!(stage_result.is_err(), "solix info on stage/ must be rejected");
+    assert!(
+        stage_result.is_err(),
+        "solix info on stage/ must be rejected"
+    );
     let stage_err_msg = format!("{:#}", stage_result.unwrap_err());
     assert!(
         stage_err_msg.contains("'solix info' cannot be run on build or staging directories"),
@@ -2932,7 +2938,10 @@ profiles:
         store_str,
     ])
     .expect("parse build --install");
-    assert_eq!(run(build_install_cli).expect("build --install must succeed"), 0);
+    assert_eq!(
+        run(build_install_cli).expect("build --install must succeed"),
+        0
+    );
 
     let installed_package_dir = store_dir.join("build_install_demo-release@1.0.0");
     assert!(
