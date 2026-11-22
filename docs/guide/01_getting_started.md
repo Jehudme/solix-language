@@ -123,7 +123,7 @@ hello_solix/
 ├── tests/
 │   └── test_main.slx         # Automated test suite
 ├── resources/                # Static application assets
-├── lib/                      # Directory for precompiled native shared objects
+├── bin/                      # Directory for precompiled native shared objects across target architectures
 └── natives/
     └── hello_solix_bridge/   # Dual-mode Rust (`solix-ffi`) or C/C++ (`solix::ffi`) bridge
         ├── Cargo.toml        # (or CMakeLists.txt when using `--native c` / `--native cpp`)

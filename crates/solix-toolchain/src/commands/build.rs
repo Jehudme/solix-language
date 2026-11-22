@@ -200,7 +200,6 @@ fn execute_declarative_build(
     let profile_dir = build_root.join(&resolved_profile.name);
     let stage_dir = profile_dir.join("stage");
     let stage_bin_dir = stage_dir.join("bin");
-    let stage_lib_dir = stage_dir.join("lib");
     let stage_resources_dir = stage_dir.join("resources");
 
     if stage_dir.exists() {
@@ -213,7 +212,6 @@ fn execute_declarative_build(
     }
     fs::create_dir_all(&cache_dir)?;
     fs::create_dir_all(&stage_bin_dir)?;
-    fs::create_dir_all(&stage_lib_dir)?;
     fs::create_dir_all(&stage_resources_dir)?;
 
     let hook_env = build_hook_environment(
@@ -237,6 +235,28 @@ fn execute_declarative_build(
         )?;
     }
 
+    // Verify required external pre-compiled libraries if declared
+    if !resolved_profile.libraries.is_empty() {
+        let profile_targets = expand_platforms_to_triples(&resolved_profile.platforms);
+        for triple in &profile_targets {
+            let triple_bin_dir = project_root.join("bin").join(triple);
+            for library_name in &resolved_profile.libraries {
+                if resolved_profile.natives.contains_key(library_name) {
+                    continue;
+                }
+                if !check_precompiled_library_exists(&triple_bin_dir, library_name, triple) {
+                    bail!(
+                        "Profile '{}' requires pre-compiled library '{}' for target platform '{}', but no matching shared library was found in '{}'.",
+                        resolved_profile.name,
+                        library_name,
+                        triple,
+                        triple_bin_dir.display()
+                    );
+                }
+            }
+        }
+    }
+
     println!(
         "=== Building Solix Project: {} [{}] ===",
         manifest_data.configuration.name, resolved_profile.name
@@ -245,15 +265,15 @@ fn execute_declarative_build(
     for entry in &native_entries {
         match entry.backend {
             NativeBackend::Cargo => {
-                compile_cargo_native(entry, project_root, &cache_dir, &stage_lib_dir)?;
+                compile_cargo_native(entry, project_root, &cache_dir, &stage_bin_dir)?;
             }
             NativeBackend::Cmake => {
-                compile_cmake_native(entry, project_root, &cache_dir, &stage_lib_dir)?;
+                compile_cmake_native(entry, project_root, &cache_dir, &stage_bin_dir)?;
             }
         }
     }
 
-    copy_project_tree_filtered(&project_root.join("lib"), &stage_lib_dir, true)?;
+    copy_project_tree_filtered(&project_root.join("bin"), &stage_bin_dir, true)?;
     copy_project_tree_filtered(&project_root.join("resources"), &stage_resources_dir, false)?;
 
     let mut resolved_profile = resolved_profile.clone();
@@ -266,31 +286,53 @@ fn execute_declarative_build(
     stage_dependency_native_libraries(
         &mut resolved_profile,
         args.pkg_dir.as_deref(),
-        &stage_lib_dir,
+        &stage_bin_dir,
         &required_platforms,
         has_explicit_cli_target,
     )?;
-
-    copy_project_tree_filtered(&project_root.join("bin"), &stage_bin_dir, true)?;
-    copy_project_tree_filtered(&stage_lib_dir, &stage_bin_dir, true)?;
 
     let out_slxb = stage_dir.join("binaries.slxb");
     compile_solix_project_sources(
         project_root,
         manifest_data,
         &resolved_profile,
-        &stage_lib_dir,
+        &stage_bin_dir,
         &out_slxb,
         args.pkg_dir.as_deref(),
     )?;
     let legacy_slxb = stage_bin_dir.join(format!("{}.slxb", manifest_data.configuration.name));
     let _ = fs::copy(&out_slxb, &legacy_slxb);
 
-    let (checksums, supported_platforms) = collect_native_checksums_and_platforms(&stage_lib_dir)?;
+    let (checksums, supported_platforms) = collect_native_checksums_and_platforms(&stage_bin_dir)?;
     let mut staged_manifest = manifest_data.clone();
     staged_manifest.native_library_checksums = checksums;
     staged_manifest.supported_platforms = supported_platforms;
     staged_manifest.dynamic_libraries = resolved_profile.dynamic_libraries.clone();
+
+    // Optimize packaged manifest: keep clean metadata without internal compiler state and hooks
+    let mut clean_profiles = manifest_data.profiles.clone();
+    for profile_config in clean_profiles.values_mut() {
+        profile_config.pre_compile.clear();
+        profile_config.post_compile.clear();
+    }
+    let active_profile_config = clean_profiles
+        .entry(resolved_profile.name.clone())
+        .or_default();
+    active_profile_config.entrypoint = resolved_profile.entrypoint.clone();
+    active_profile_config.optimization_level = Some(resolved_profile.opt_level);
+    active_profile_config.inline_threshold = Some(resolved_profile.inline_threshold);
+    active_profile_config.debug_symbols = Some(resolved_profile.debug_symbols);
+    active_profile_config.is_static = Some(resolved_profile.is_static);
+    active_profile_config.link = Some(resolved_profile.link.clone());
+    active_profile_config.verify_checksum = Some(resolved_profile.verify_checksum);
+    active_profile_config.memory_limit_mb = resolved_profile.memory_limit_mb;
+    active_profile_config.platforms = Some(resolved_profile.platforms.clone());
+    active_profile_config.dynamic_libraries = resolved_profile.dynamic_libraries.clone();
+    active_profile_config.libraries = resolved_profile.libraries.clone();
+    active_profile_config.dependencies = resolved_profile.dependencies.clone();
+    active_profile_config.pre_compile.clear();
+    active_profile_config.post_compile.clear();
+    staged_manifest.profiles = clean_profiles;
 
     let staged_manifest_yaml = staged_manifest
         .to_yaml_string()
@@ -557,7 +599,12 @@ fn resolve_native_triples(
         return vec![resolved];
     }
 
-    let chosen_platforms = native_platforms.unwrap_or(profile_platforms);
+    if native_platforms.is_some() {
+        eprintln!(
+            "[warning] 'natives.<name>.platforms' is deprecated and ignored. Native targets inherit directly from 'profiles.<profile>.platforms'."
+        );
+    }
+    let chosen_platforms = profile_platforms;
     let all_triples = expand_platforms_to_triples(chosen_platforms);
 
     if let Some(platform_filter) = cli_platform {
@@ -850,7 +897,7 @@ fn compile_cargo_native(
     entry: &ResolvedNativeEntry,
     project_root: &Path,
     cache_dir: &Path,
-    stage_lib_dir: &Path,
+    stage_bin_dir: &Path,
 ) -> Result<()> {
     let host_triple = host_target_triple();
     let cargo_manifest = entry.directory.join("Cargo.toml");
@@ -1037,7 +1084,7 @@ fn compile_cargo_native(
         } else {
             cargo_target_dir.join(profile_subdir)
         };
-        let stage_triple_dir = stage_lib_dir.join(triple);
+        let stage_triple_dir = stage_bin_dir.join(triple);
         let staged_count = copy_shared_libs_flat(&emitted_dir, &stage_triple_dir)?;
         if staged_count == 0 {
             bail!(
@@ -1251,7 +1298,7 @@ fn compile_cmake_native(
     entry: &ResolvedNativeEntry,
     project_root: &Path,
     cache_dir: &Path,
-    stage_lib_dir: &Path,
+    stage_bin_dir: &Path,
 ) -> Result<()> {
     let cmake_exe = find_executable("cmake")
         .ok_or_else(|| anyhow::anyhow!("Required build tool 'cmake' not found in PATH"))?;
@@ -1277,7 +1324,7 @@ fn compile_cmake_native(
             triple,
             entry.is_docker_strategy(),
         );
-        let stage_triple_dir = stage_lib_dir.join(triple);
+        let stage_triple_dir = stage_bin_dir.join(triple);
         let archive_cache_dir = cache_dir.join("archives").join(&entry.name).join(triple);
         fs::create_dir_all(&cmake_build_dir)?;
         fs::create_dir_all(&stage_triple_dir)?;
@@ -1633,7 +1680,7 @@ fn resolve_required_platform_ids(
 fn stage_dependency_native_libraries(
     resolved_profile: &mut ResolvedProfile,
     pkg_dir_override: Option<&Path>,
-    stage_lib_dir: &Path,
+    stage_bin_dir: &Path,
     required_platforms: &[String],
     has_explicit_cli_target: bool,
 ) -> Result<()> {
@@ -1815,7 +1862,7 @@ fn stage_dependency_native_libraries(
                     {
                         continue;
                     }
-                    let dst_path = stage_lib_dir.join(&safe_rel);
+                    let dst_path = stage_bin_dir.join(&safe_rel);
                     if dst_path.exists() {
                         continue;
                     }
@@ -1865,7 +1912,7 @@ fn compile_solix_project_sources(
     project_root: &Path,
     manifest_data: &ProjectManifest,
     resolved_profile: &ResolvedProfile,
-    stage_lib_dir: &Path,
+    stage_bin_dir: &Path,
     output_slxb: &Path,
     pkg_dir_override: Option<&Path>,
 ) -> Result<()> {
@@ -1904,7 +1951,7 @@ fn compile_solix_project_sources(
     }
 
     let mut libs = Vec::new();
-    collect_slxb_libs_recursively(stage_lib_dir, &mut libs);
+    collect_slxb_libs_recursively(stage_bin_dir, &mut libs);
 
     let mut dep_specs = Vec::new();
     for (dep_name, dep_spec) in &resolved_profile.dependencies {
@@ -1977,26 +2024,25 @@ fn collect_slxb_libs_recursively(dir: &Path, collected: &mut Vec<PathBuf>) {
 }
 
 fn collect_native_checksums_and_platforms(
-    stage_lib_dir: &Path,
+    stage_bin_dir: &Path,
 ) -> Result<(std::collections::HashMap<String, String>, Vec<String>)> {
     let mut checksums = std::collections::HashMap::new();
     let mut platform_set: BTreeSet<String> = BTreeSet::new();
     let mut has_unqualified_native = false;
 
     let mut native_files = Vec::new();
-    collect_native_files_recursively(stage_lib_dir, &mut native_files);
+    collect_native_files_recursively(stage_bin_dir, &mut native_files);
     native_files.sort();
 
     for file_path in native_files {
         let rel_path = file_path
-            .strip_prefix(stage_lib_dir)
+            .strip_prefix(stage_bin_dir)
             .unwrap_or(&file_path)
             .to_string_lossy()
             .replace('\\', "/");
         let digest = sha256_file(&file_path)
             .with_context(|| format!("failed to hash native library '{}'", file_path.display()))?;
-        checksums.insert(format!("bin/{rel_path}"), digest.clone());
-        checksums.insert(format!("lib/{rel_path}"), digest);
+        checksums.insert(format!("bin/{rel_path}"), digest);
 
         let parts: Vec<&str> = rel_path.split('/').collect();
         if parts.len() > 1 {
@@ -2020,6 +2066,80 @@ fn collect_native_checksums_and_platforms(
     };
 
     Ok((checksums, supported_platforms))
+}
+
+fn check_precompiled_library_exists(
+    triple_bin_dir: &Path,
+    library_name: &str,
+    target_triple: &str,
+) -> bool {
+    if !triple_bin_dir.is_dir() {
+        return false;
+    }
+    if triple_bin_dir.join(library_name).is_file() {
+        return true;
+    }
+
+    let is_windows = target_triple.contains("windows");
+    let is_macos = target_triple.contains("apple") || target_triple.contains("darwin");
+    let is_linux = target_triple.contains("linux");
+
+    let clean_stem = library_name
+        .strip_suffix(".so")
+        .or_else(|| library_name.strip_suffix(".dll"))
+        .or_else(|| library_name.strip_suffix(".dylib"))
+        .unwrap_or(library_name);
+    let base_name = clean_stem.strip_prefix("lib").unwrap_or(clean_stem);
+
+    let candidates: Vec<String> = if is_windows {
+        vec![
+            format!("{base_name}.dll"),
+            format!("lib{base_name}.dll"),
+            format!("{clean_stem}.dll"),
+        ]
+    } else if is_macos {
+        vec![
+            format!("lib{base_name}.dylib"),
+            format!("{base_name}.dylib"),
+            format!("{clean_stem}.dylib"),
+        ]
+    } else if is_linux {
+        vec![
+            format!("lib{base_name}.so"),
+            format!("{base_name}.so"),
+            format!("{clean_stem}.so"),
+        ]
+    } else {
+        vec![
+            format!("lib{base_name}.so"),
+            format!("{base_name}.dll"),
+            format!("lib{base_name}.dylib"),
+        ]
+    };
+
+    for candidate in candidates {
+        if triple_bin_dir.join(&candidate).is_file() {
+            return true;
+        }
+    }
+
+    if let Ok(entries) = fs::read_dir(triple_bin_dir) {
+        for entry_result in entries.flatten() {
+            let path = entry_result.path();
+            if path.is_file()
+                && let Some(file_name) = path.file_name().and_then(|val| val.to_str())
+            {
+                let file_lower = file_name.to_ascii_lowercase();
+                if file_lower.starts_with(&format!("lib{base_name}.so"))
+                    || file_lower.starts_with(&format!("{base_name}.so"))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn collect_native_files_recursively(dir: &Path, collected: &mut Vec<PathBuf>) {

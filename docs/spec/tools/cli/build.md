@@ -30,8 +30,8 @@ solix build [path] [options]
 | `--test` | | Flag | `false` | Shorthand for `--profile test`. |
 | `--platform <platform>` | | String | None | Filters build and native compilation to a designated target platform or OS family (e.g. `linux`, `windows`, `macos`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
-| `--install` | | Flag | `false` | Automatically installs the built `.slxp` package into the package store. |
-| `--force` | | Flag | `false` | Overwrites existing installed package when paired with `--install`. |
+| `--install` | `-i` | Flag | `false` | Automatically installs the built `.slxp` package into the package store. |
+| `--force` | `-f` | Flag | `false` | Overwrites existing installed package when paired with `--install`. |
 | `--check-env` | `--verify-only` | Flag | `false` | Runs Phase 0 pre-flight environment and toolchain verification without compiling or packaging. |
 | `--target <triple>` | | String | `None` | Compiles native projects for a single target triple or `"host"` (also reads `SOLIX_TARGET_TRIPLE`). |
 
@@ -43,26 +43,32 @@ solix build [path] [options]
 flowchart TD
     BuildEntry["solix build [path]"] --> ResolveProfile["Load manifest.yaml & Resolve Profile"]
     ResolveProfile --> ExpandPlatforms["Expand OS platforms -> All Architectures"]
-    ExpandPlatforms --> PhaseZero["Phase 0: Verify Native Toolchains (cargo/rustc/cmake/zig)"]
+    ExpandPlatforms --> VerifyLibraries["Pre-Compile Matrix: Verify profiles.<profile>.libraries in bin/<target>/"]
+    VerifyLibraries --> PhaseZero["Phase 0: Verify Native Toolchains (cargo/rustc/cmake/zig)"]
     PhaseZero --> PhaseOne["Phase 1: Run pre_compile Command Hooks"]
-    PhaseOne --> PhaseTwo["Phase 2: Build Auto-Detected Cargo (solix-native) & CMake (SOLIX_NATIVE_BUILD=ON) Natives"]
-    PhaseTwo --> PhaseThree["Phase 3: Stage Resources, Root binaries.slxb, & Native Libs in bin/<target>/"]
+    PhaseOne --> PhaseTwo["Phase 2: Build Native Subprojects (Inheriting Profile Platforms)"]
+    PhaseTwo --> PhaseThree["Phase 3: Stage Resources, Root binaries.slxb, & Binaries in bin/<target>/"]
     PhaseThree --> PhaseFour["Phase 4: Compile .slx Sources -> stage/binaries.slxb"]
-    PhaseFour --> PhaseFive["Phase 5: Stamp manifest.yaml Checksums & Pack .slxp"]
+    PhaseFour --> PhaseFive["Phase 5: Optimize manifest.yaml Metadata & Pack .slxp"]
     PhaseFive --> PhaseSix["Phase 6: Run post_compile Command Hooks"]
+    PhaseSix --> AutoInstall["Optional Phase 7: Install to Store (--install / --force)"]
 ```
 
 ### Modernized Package Container Architecture (`.slxp`)
 * **Package Root Bytecode (`binaries.slxb`):** The primary compiled Solix bytecode is placed at the package root as `binaries.slxb`.
-* **Isolated Platform Directory (`bin/<target>/`):** Native modules targeting host or cross-compilation platforms are organized under `bin/<target_triple>/` (with fallback to `lib/<target_triple>/`).
+* **Standardized Binary Directory (`bin/<target>/`):** All native modules and pre-compiled external shared libraries targeting host or cross-compilation platforms are organized exclusively under `bin/<target_triple>/`. The legacy `lib/` directory is deprecated and eliminated.
 * **Modern Container Emission:** Emits standard `.slxp` (Solix Package) format containing root `binaries.slxb` and target-tripled `bin/<target>/` native shared libraries.
+* **Optimized Container Manifest Metadata:** Embedded `manifest.yaml` inside package archives retains pure declarative metadata for active profiles while stripping developer-only hooks (`pre_compile`, `post_compile`) and transient compiler internals.
 * **Cross-Platform Tool Invocation:** Native build toolchains (`cargo`, `cmake`, `zig`) are located respecting host executable formats and `PATHEXT` on Windows, ensuring `.cmd` and `.bat` wrappers are cleanly dispatched without error 193.
 * **Hermetic Zigbuild Toolchain Isolation:** When cross-compiling native modules via Zig (`cargo-zigbuild`), Solix generates isolated compiler wrappers (`zig-cc`, `zig-cxx`, `zig-ar`) and injects a dedicated CMake toolchain file configured with `CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY` and `CMAKE_FIND_ROOT_PATH "/__solix_no_sysroot__"`. This prevents cross-compilation targets from leaking host `/usr/include` headers (such as host glibc and X11 definitions).
 * **Containerized Target Directory Isolation:** When compiling native dependencies in containers (`strategy: docker`), Solix automatically segregates cargo and cmake build caches (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, avoiding dynamic linker mismatches between host and container glibc environments.
 
-### Dual-Mode Native Compilation & Dependency Platform Validation
+### Dual-Mode Native Compilation & Platform Inheritance
+* **Unified Platform Inheritance:** Native subprojects (`natives.<name>`) strictly inherit target platforms configured in `profiles.<profile>.platforms`. Separate platform overrides under `natives` are removed to guarantee unified multi-target builds.
 * **CMake (`CMakeLists.txt`):** `solix build` configures CMake with `-DSOLIX_NATIVE_BUILD=ON` and sets `SOLIX_NATIVE_BUILD=1`. When built outside `solix build`, the same CMake project builds cleanly as a standalone embeddable library.
 * **Cargo (`Cargo.toml`):** When `[features]` declares `solix-native`, `solix build` passes `--features solix-native` and sets `SOLIX_NATIVE_BUILD=1`.
+* **External Pre-Compiled Libraries Verification Matrix (`libraries`):** When `profiles.<profile>.libraries` declares shared libraries (e.g. `[libcustom_math, ext_engine]`), `solix build` verifies that matching `.so`, `.dll`, or `.dylib` files exist in `bin/<target_triple>/` for all target architectures required by the active profile prior to compilation.
+* **Strict Native Autoloading Convention (`__native_<name>`):** Shared libraries intended for automatic runtime registration and FFI symbol binding must follow the `__native_<name>.<extension>` (or `lib__native_<name>.<extension>`) naming prefix convention. Auxiliary dynamic dependencies without this prefix are packaged in `bin/<target_triple>/` for runtime linking without registering spurious native modules.
 * **Native Dependency Platform Check:** When a profile requests target `platforms` (such as `[all]` or `[linux, windows]`), `solix build` verifies that every native-backed dependency `.slxp` bundles `.so`/`.dll`/`.dylib` binaries for all requested platforms, failing explicitly if any target platform is missing.
 
 ---

@@ -79,6 +79,9 @@ solix info <binary> [options]
 # View summary of a project directory (profiles, platforms, dependencies, built artifacts)
 solix info ./libraries/raylib/
 
+# Note: solix info cannot be run directly on build/ or staging directories; run it on the project root or package container
+solix info build/release/my_game.slxp
+
 # View summary of a binary container (classes, methods, static size)
 solix info bin/app.slxb
 

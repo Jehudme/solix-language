@@ -193,11 +193,11 @@ pub struct BuildArgs {
     pub pkg_dir: Option<PathBuf>,
 
     /// Automatically install the built archive container into the local package store
-    #[arg(long, hide = true, visible_alias = "sync")]
+    #[arg(short = 'i', long, visible_alias = "sync")]
     pub install: bool,
 
     /// Force overwrite if package is already installed
-    #[arg(short, long, hide = true)]
+    #[arg(short = 'f', long)]
     pub force: bool,
 
     /// Run only pre-flight environment and toolchain verification without building

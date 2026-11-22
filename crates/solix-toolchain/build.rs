@@ -203,8 +203,9 @@ fn filter_slxarc_for_target(
             continue;
         };
         let name = name_cow.as_ref();
-        if let Some(after_lib) = name.strip_prefix("lib/")
-            && let Some((subdir, rest)) = after_lib.split_once('/')
+        let stripped_native = name.strip_prefix("bin/").or_else(|| name.strip_prefix("lib/"));
+        if let Some(after_native) = stripped_native
+            && let Some((subdir, rest)) = after_native.split_once('/')
             && !subdir.is_empty()
             && (!rest.is_empty() || entry.is_dir())
         {
@@ -226,11 +227,12 @@ fn filter_slxarc_for_target(
                 continue;
             };
             let name = name_cow.as_ref();
-            if let Some(after_lib) = name.strip_prefix("lib/")
-                && !after_lib.contains('/')
+            let stripped_native = name.strip_prefix("bin/").or_else(|| name.strip_prefix("lib/"));
+            if let Some(after_native) = stripped_native
+                && !after_native.contains('/')
                 && qualified_host_files
                     .iter()
-                    .any(|qualified_name| qualified_name == after_lib)
+                    .any(|qualified_name| qualified_name == after_native)
             {
                 has_duplicate_unqualified = true;
                 break;
@@ -252,17 +254,18 @@ fn filter_slxarc_for_target(
         for idx in 0..zip_in.len() {
             let mut entry = zip_in.by_index(idx).ok()?;
             let name = entry.name().ok()?.into_owned();
-            if let Some(after_lib) = name.strip_prefix("lib/") {
-                if let Some((subdir, _)) = after_lib.split_once('/')
+            let stripped_native = name.strip_prefix("bin/").or_else(|| name.strip_prefix("lib/"));
+            if let Some(after_native) = stripped_native {
+                if let Some((subdir, _)) = after_native.split_once('/')
                     && !subdir.is_empty()
                     && !target_matches_native_subdir(subdir, target_os, target_arch, target_env)
                 {
                     continue;
                 }
-                if !after_lib.contains('/')
+                if !after_native.contains('/')
                     && qualified_host_files
                         .iter()
-                        .any(|qualified_name| qualified_name == after_lib)
+                        .any(|qualified_name| qualified_name == after_native)
                 {
                     continue;
                 }

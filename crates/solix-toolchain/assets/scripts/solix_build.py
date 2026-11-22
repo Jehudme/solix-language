@@ -313,7 +313,6 @@ def prepare_staging_dirs(project_root: Path, profile: str) -> dict[str, Path]:
     build_output_directory = project_root / "build" / profile
 
     stage_bin_directory = stage_directory / "bin"
-    stage_lib_directory = stage_directory / "lib"
     stage_resources_directory = stage_directory / "resources"
 
     # Recreate stage directory cleanly
@@ -321,7 +320,6 @@ def prepare_staging_dirs(project_root: Path, profile: str) -> dict[str, Path]:
         shutil.rmtree(stage_directory)
 
     stage_bin_directory.mkdir(parents=True, exist_ok=True)
-    stage_lib_directory.mkdir(parents=True, exist_ok=True)
     stage_resources_directory.mkdir(parents=True, exist_ok=True)
     natives_cache_directory.mkdir(parents=True, exist_ok=True)
     cargo_target_directory.mkdir(parents=True, exist_ok=True)
@@ -336,7 +334,7 @@ def prepare_staging_dirs(project_root: Path, profile: str) -> dict[str, Path]:
         "cargo_target": cargo_target_directory,
         "stage": stage_directory,
         "stage_bin": stage_bin_directory,
-        "stage_lib": stage_lib_directory,
+        "stage_lib": stage_bin_directory,
         "stage_resources": stage_resources_directory,
         "build": build_output_directory,
     }
@@ -743,13 +741,18 @@ def compile_rust_project(
 
 
 def copy_project_libs(project_lib_directory: Path, stage_lib_directory: Path) -> None:
-    """Copies pre-existing external library files into stage/lib."""
+    """Copies pre-existing external library files and target subdirectories into stage/bin."""
     if not project_lib_directory.exists():
         return
 
-    for item_path in project_lib_directory.iterdir():
-        if item_path.is_file() and not item_path.name.startswith("."):
-            shutil.copy2(item_path, stage_lib_directory / item_path.name)
+    for root_dir, dir_names, file_names in os.walk(project_lib_directory):
+        rel_root = Path(root_dir).relative_to(project_lib_directory)
+        for file_name in file_names:
+            if not file_name.startswith("."):
+                src_file = Path(root_dir) / file_name
+                dst_file = stage_lib_directory / rel_root / file_name
+                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dst_file)
 
 
 def copy_project_resources(resources_directory: Path, stage_resources_directory: Path) -> None:
@@ -916,10 +919,10 @@ def _project_has_native_code(
     """Checks whether `project_root` builds `natives/` or links static dependencies with natives."""
     if detect_native_projects(project_root / "natives"):
         return True
-    lib_dir = project_root / "lib"
-    if lib_dir.exists() and any(
+    bin_dir = project_root / "bin"
+    if bin_dir.exists() and any(
         entry.suffix.lower() in (".so", ".dll", ".dylib")
-        for entry in lib_dir.rglob("*")
+        for entry in bin_dir.rglob("*")
         if entry.is_file()
     ):
         return True
@@ -939,7 +942,7 @@ def _project_has_native_code(
                 if archive is not None:
                     with zipfile.ZipFile(archive) as archive_file:
                         if any(
-                            name.startswith("lib/") and name.endswith((".so", ".dll", ".dylib"))
+                            (name.startswith("bin/") or name.startswith("lib/")) and name.endswith((".so", ".dll", ".dylib"))
                             for name in archive_file.namelist()
                         ):
                             return True
@@ -1258,17 +1261,21 @@ def stage_dependency_native_libraries(
             native_entries = [
                 archive_entry
                 for archive_entry in archive_file.infolist()
-                if archive_entry.filename.startswith("lib/")
+                if (archive_entry.filename.startswith("bin/") or archive_entry.filename.startswith("lib/"))
                 and archive_entry.filename.endswith((".so", ".dll", ".dylib"))
             ]
             qualified_basenames = {
                 Path(archive_entry.filename).name
                 for archive_entry in native_entries
-                if "/" in archive_entry.filename[len("lib/"):]
+                if "/" in (archive_entry.filename[len("bin/"):] if archive_entry.filename.startswith("bin/") else archive_entry.filename[len("lib/"):])
             }
             for archive_entry in native_entries:
                 entry_name = archive_entry.filename
-                relative_subpath = entry_name[len("lib/"):]
+                relative_subpath = (
+                    entry_name[len("bin/"):]
+                    if entry_name.startswith("bin/")
+                    else entry_name[len("lib/"):]
+                )
                 if (
                     not relative_subpath
                     or relative_subpath.startswith("/")
@@ -1584,7 +1591,7 @@ def auto_build(
     native_duration_ms = (time.perf_counter() - native_start_time) * 1000.0
 
     # Copy external libraries and static resources
-    copy_project_libs(project_root / "lib", staging["stage_lib"])
+    copy_project_libs(project_root / "bin", staging["stage_lib"])
     copy_project_resources(project_root / "resources", staging["stage_resources"])
 
     # Compile Solix sources
@@ -1617,7 +1624,7 @@ def auto_build(
     packaged_targets = sorted({
         key.split("/")[1]
         for key in native_checksums
-        if key.startswith("lib/") and key.count("/") >= 2
+        if (key.startswith("bin/") or key.startswith("lib/")) and key.count("/") >= 2
     })
     covered_native_platforms = sorted({
         triple_to_platform(triple_name)
@@ -1625,7 +1632,7 @@ def auto_build(
         if triple_to_platform(triple_name) is not None
     })
     if any(
-        key.startswith("lib/") and key.count("/") == 1
+        (key.startswith("bin/") or key.startswith("lib/")) and key.count("/") == 1
         for key in native_checksums
     ) and get_host_platform() not in covered_native_platforms:
         covered_native_platforms.append(get_host_platform())
