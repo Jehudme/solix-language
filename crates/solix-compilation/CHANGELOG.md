@@ -2,6 +2,12 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [1.9.0] - 2026-11-22
+
+### Features
+
+- *(toolchain)* Platform compatibility visibility and universal release target alignment (#144) (#145)
+
 ## [1.8.0] - 2026-11-22
 
 ### Bug Fixes
