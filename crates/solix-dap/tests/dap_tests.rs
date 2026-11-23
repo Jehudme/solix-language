@@ -125,6 +125,58 @@ fn test_evaluator_float_and_mixed_arithmetic() {
 }
 
 #[test]
+fn test_evaluator_logical_operators_and_compound_conditions() {
+    let runtime_options = RuntimeOptions::new();
+    let runtime_context = RuntimeContext::new(runtime_options).expect("RuntimeContext creation");
+    let virtual_machine = VirtualMachine::new(runtime_context);
+
+    // Direct logical conjunction (&&)
+    let and_true_result = evaluate_expression_in_frame("true && true", &virtual_machine, 0)
+        .expect("Evaluate true && true");
+    assert_eq!(and_true_result, Value::Bool(true));
+
+    let and_false_result = evaluate_expression_in_frame("true && false", &virtual_machine, 0)
+        .expect("Evaluate true && false");
+    assert_eq!(and_false_result, Value::Bool(false));
+
+    // Direct logical disjunction (||)
+    let or_true_result = evaluate_expression_in_frame("true || false", &virtual_machine, 0)
+        .expect("Evaluate true || false");
+    assert_eq!(or_true_result, Value::Bool(true));
+
+    let or_false_result = evaluate_expression_in_frame("false || false", &virtual_machine, 0)
+        .expect("Evaluate false || false");
+    assert_eq!(or_false_result, Value::Bool(false));
+
+    // Compound conditions (comparisons with logical operators)
+    let compound_and_result =
+        evaluate_expression_in_frame("10 > 5 && 20 < 30", &virtual_machine, 0)
+            .expect("Evaluate 10 > 5 && 20 < 30");
+    assert_eq!(compound_and_result, Value::Bool(true));
+
+    let compound_or_result = evaluate_expression_in_frame("10 < 5 || 20 < 30", &virtual_machine, 0)
+        .expect("Evaluate 10 < 5 || 20 < 30");
+    assert_eq!(compound_or_result, Value::Bool(true));
+
+    // Negative tests: non-boolean operands to logical operators
+    let invalid_and_result = evaluate_expression_in_frame("10 && 20", &virtual_machine, 0);
+    assert!(invalid_and_result.is_err());
+    assert!(
+        invalid_and_result
+            .unwrap_err()
+            .contains("requires boolean operands")
+    );
+
+    let invalid_or_result = evaluate_expression_in_frame("true || 5", &virtual_machine, 0);
+    assert!(invalid_or_result.is_err());
+    assert!(
+        invalid_or_result
+            .unwrap_err()
+            .contains("requires boolean operands")
+    );
+}
+
+#[test]
 fn test_hit_condition_parser() {
     // Direct threshold
     assert!(check_hit_condition(5, "5"));

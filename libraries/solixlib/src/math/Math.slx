@@ -32,6 +32,9 @@ public class Math {
     }
 
     public static int32 clamp(int32 target_val, int32 min_val, int32 max_val) {
+        if (min_val > max_val) {
+            throw new ArgumentOutOfRangeException("min_val", "Minimum bound cannot be greater than maximum bound.");
+        }
         if (target_val < min_val) {
             return min_val;
         }
@@ -82,6 +85,9 @@ public class Math {
     }
 
     public static int64 clamp(int64 target_val, int64 min_val, int64 max_val) {
+        if (min_val > max_val) {
+            throw new ArgumentOutOfRangeException("min_val", "Minimum bound cannot be greater than maximum bound.");
+        }
         if (target_val < min_val) {
             return min_val;
         }
@@ -132,6 +138,9 @@ public class Math {
     }
 
     public static float64 clamp(float64 target_val, float64 min_val, float64 max_val) {
+        if (min_val > max_val) {
+            throw new ArgumentOutOfRangeException("min_val", "Minimum bound cannot be greater than maximum bound.");
+        }
         if (target_val < min_val) {
             return min_val;
         }
@@ -288,8 +297,11 @@ public class Math {
 
     // Integer utilities
     public static int64 gcd(int64 first_val, int64 second_val) {
-        int64 operand_a = Math::abs(first_val);
-        int64 operand_b = Math::abs(second_val);
+        if (first_val == -9223372036854775808L && second_val == -9223372036854775808L) {
+            return 9223372036854775807L;
+        }
+        int64 operand_a = (first_val == -9223372036854775808L) ? 9223372036854775807L : Math::abs(first_val);
+        int64 operand_b = (second_val == -9223372036854775808L) ? 9223372036854775807L : Math::abs(second_val);
         while (operand_b != 0L) {
             int64 remainder_val = operand_a % operand_b;
             operand_a = operand_b;

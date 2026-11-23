@@ -625,7 +625,19 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
 
                         if left_type == Type::Error || right_type == Type::Error {
                             Type::Error
-                        } else if left_type.is_numeric() && right_type.is_numeric() {
+                        } else if (left_type.is_numeric() && right_type.is_numeric())
+                            || (left_type.unwrap_alias() == &Type::Primitive(PrimitiveKind::Char)
+                                && right_type.unwrap_alias()
+                                    == &Type::Primitive(PrimitiveKind::Char))
+                            || matches!(
+                                left_type.unwrap_alias(),
+                                Type::GenericParameter { .. } | Type::Unresolved(_)
+                            )
+                            || matches!(
+                                right_type.unwrap_alias(),
+                                Type::GenericParameter { .. } | Type::Unresolved(_)
+                            )
+                        {
                             Type::Primitive(PrimitiveKind::Bool)
                         } else {
                             self.errors.push(BindingError::BinaryOperatorTypeMismatch {
@@ -3820,23 +3832,43 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                     found: catch_type.to_string(),
                     span: catch_clause.exception_type.span().to_source_span(),
                 });
-            } else if let Some(sym_id) = catch_symbol_id {
-                if caught_symbols.contains(&sym_id) {
-                    self.errors.push(BindingError::DuplicateSymbol {
-                        symbol_name: format!("duplicate catch clause for type '{}'", catch_type),
+            } else if let Some(resolved_symbol_identifier) = catch_symbol_id {
+                let is_exception_subclass = if let Some(root_exception_identifier) = self
+                    .symbol_table
+                    .resolve_symbol(self.source_id, "Exception")
+                    .or_else(|| {
+                        self.symbol_table
+                            .resolve_symbol(self.source_id, "solix.core.Exception")
+                    }) {
+                    self.is_subclass_or_same(resolved_symbol_identifier, root_exception_identifier)
+                } else if let Some(symbol_entry) =
+                    self.symbol_table.get_symbol(resolved_symbol_identifier)
+                {
+                    symbol_entry.name.ends_with("Exception")
+                } else {
+                    false
+                };
+
+                if !is_exception_subclass {
+                    self.errors.push(BindingError::CatchTypeNotException {
+                        catch_type: catch_type.to_string(),
                         span: catch_clause.exception_type.span().to_source_span(),
                     });
-                } else if caught_symbols
-                    .iter()
-                    .any(|&prev| self.is_subclass_or_same(sym_id, prev))
-                {
+                } else if caught_symbols.contains(&resolved_symbol_identifier) {
+                    self.errors.push(BindingError::DuplicateSymbol {
+                        symbol_name: format!("duplicate catch clause for type '{catch_type}'"),
+                        span: catch_clause.exception_type.span().to_source_span(),
+                    });
+                } else if caught_symbols.iter().any(|&previous_symbol| {
+                    self.is_subclass_or_same(resolved_symbol_identifier, previous_symbol)
+                }) {
                     self.errors.push(BindingError::TypeMismatch {
                         expected: "unreachable catch clause: superclass already caught".to_string(),
                         found: catch_type.to_string(),
                         span: catch_clause.exception_type.span().to_source_span(),
                     });
                 }
-                caught_symbols.push(sym_id);
+                caught_symbols.push(resolved_symbol_identifier);
             }
 
             self.visit_catch_clause(catch_clause);

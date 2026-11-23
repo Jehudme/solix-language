@@ -289,3 +289,63 @@ fn test_verifier_rejects_get_static_global_pool_out_of_bounds() {
         }
     }
 }
+
+#[test]
+fn test_verifier_accepts_valid_pack_closure() {
+    let mut binary_program = BinaryProgram::new();
+    let mut main_function = CompiledFunction::new("main", 0, 0, 4);
+    let lambda_function = CompiledFunction::new("lambda_target", 1, 0, 2);
+
+    // PackClosure: closure_dst=0, target_function=1 (valid < 2 functions), capture_base=1, count=1
+    main_function
+        .instructions
+        .push(Instruction::format_call(OpCode::PackClosure, 0, 1, 1, 1));
+    main_function
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+    binary_program.functions.push(main_function);
+    binary_program.functions.push(lambda_function);
+    binary_program.entry_point_id = Some(0);
+
+    let runtime_options = RuntimeOptions::new().with_binary(binary_program);
+    let context_result = RuntimeContext::new(runtime_options);
+    assert!(
+        context_result.is_ok(),
+        "Expected valid PackClosure to pass AOT verifier"
+    );
+}
+
+#[test]
+fn test_verifier_rejects_pack_closure_target_function_out_of_bounds() {
+    let mut binary_program = BinaryProgram::new();
+    let mut main_function = CompiledFunction::new("main", 0, 0, 4);
+
+    // PackClosure: closure_dst=0, target_function=99 (exceeds total function count 1)
+    main_function
+        .instructions
+        .push(Instruction::format_call(OpCode::PackClosure, 0, 99, 1, 1));
+    main_function
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+    binary_program.functions.push(main_function);
+
+    let runtime_options = RuntimeOptions::new().with_binary(binary_program);
+    let context_result = RuntimeContext::new(runtime_options);
+
+    match context_result {
+        Err(RuntimeError::BinaryLoadError {
+            reason: error_reason,
+        }) => {
+            assert!(
+                error_reason
+                    .contains("closure target function ID 99 exceeds total function count 1"),
+                "Unexpected error message: {error_reason}"
+            );
+        }
+        other_result => {
+            panic!("Expected BinaryLoadError for out-of-bounds PackClosure, got: {other_result:?}");
+        }
+    }
+}

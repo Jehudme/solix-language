@@ -43,7 +43,7 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         }
         this.table = new HashMapEntry<K, V>[initial_capacity];
         this.entry_count = 0;
-        this.resize_threshold = initial_capacity * 3 / 4;
+        this.resize_threshold = (initial_capacity / 4) * 3;
         this.custom_hasher = null;
         this.key_equality_fn = null;
     }
@@ -62,7 +62,7 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         }
         this.table = new HashMapEntry<K, V>[initial_capacity];
         this.entry_count = 0;
-        this.resize_threshold = initial_capacity * 3 / 4;
+        this.resize_threshold = (initial_capacity / 4) * 3;
         this.custom_hasher = hasher;
         this.key_equality_fn = null;
     }
@@ -81,7 +81,7 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         }
         this.table = new HashMapEntry<K, V>[initial_capacity];
         this.entry_count = 0;
-        this.resize_threshold = initial_capacity * 3 / 4;
+        this.resize_threshold = (initial_capacity / 4) * 3;
         this.custom_hasher = hasher;
         this.key_equality_fn = key_equality;
     }
@@ -226,7 +226,7 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
             }
         }
         this.table = new_table;
-        this.resize_threshold = new_capacity * 3 / 4;
+        this.resize_threshold = (new_capacity / 4) * 3;
     }
 
     public V remove(K target_key) {

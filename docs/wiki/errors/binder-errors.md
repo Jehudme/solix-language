@@ -440,3 +440,44 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
       }
   }
   ```
+
+---
+
+### `E0315`: Catch Clause Type Not Exception Subclass
+* **Cause:** A `catch` clause specifies a class that does not inherit from `solix.core.Exception` (or `Exception`). Only Exception subclasses can be caught.
+* **Bad Code:**
+  ```solix
+  class PlainRecord {
+      public int32 payload_value;
+  }
+
+  class Main {
+      public static int32 main() {
+          try {
+              int32 computed_value = 100;
+          } catch (PlainRecord error_record) {
+              return 1;
+          }
+          return 0;
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class CustomException extends Exception {
+      public CustomException(string message) {
+          this.message = message;
+      }
+  }
+
+  class Main {
+      public static int32 main() {
+          try {
+              int32 computed_value = 100;
+          } catch (CustomException custom_error) {
+              return 1;
+          }
+          return 0;
+      }
+  }
+  ```
