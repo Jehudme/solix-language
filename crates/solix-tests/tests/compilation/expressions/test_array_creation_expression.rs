@@ -38,11 +38,23 @@ fn test_case_3_2_reference_type_array_allocation() {
 fn test_case_4_1_negative_size_at_runtime() {
     let code = r#"
         int32 main() {
+            int32 dynamic_length = -1;
+            int32[] bad = new int32[dynamic_length];
+            return 0;
+        }
+    "#;
+    assert_runtime_error(code, RuntimeErrorCode::IndexOutOfBounds);
+}
+
+#[test]
+fn test_case_4_1_negative_size_at_compile_time() {
+    let code = r#"
+        int32 main() {
             int32[] bad = new int32[-1];
             return 0;
         }
     "#;
-    assert_runtime_error(code, RuntimeErrorCode::OutOfMemory);
+    assert_compile_error(code, "E0299");
 }
 
 #[test]

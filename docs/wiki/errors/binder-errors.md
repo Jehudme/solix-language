@@ -132,3 +132,76 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
       throw new CustomException();
   }
   ```
+
+---
+
+### `E0204`: Cyclic Interface or Class Inheritance
+* **Cause:** An inheritance cycle was detected in class or interface `extends` declarations (e.g. `interface A extends B` and `interface B extends A`).
+* **Bad Code:**
+  ```solix
+  interface Alpha extends Beta {}
+  interface Beta extends Alpha {}
+  ```
+* **Fixed Code:**
+  ```solix
+  interface Alpha {}
+  interface Beta extends Alpha {}
+  ```
+
+---
+
+### `E0264`: Abstract Method in Non-Abstract Class
+* **Cause:** A method was declared `abstract` inside a non-abstract class declaration. Only abstract classes or interfaces may declare abstract methods.
+* **Bad Code:**
+  ```solix
+  class Worker {
+      public abstract void execute();
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  abstract class Worker {
+      public abstract void execute();
+  }
+  ```
+
+---
+
+### `E0297`: Generic Type Constraint Violation
+* **Cause:** A type argument supplied for a generic parameter does not satisfy the declared constraint or base class bound.
+* **Bad Code:**
+  ```solix
+  class Container<T extends Component> {}
+  Container<int32> container;
+  ```
+* **Fixed Code:**
+  ```solix
+  class Container<T extends Component> {}
+  Container<Widget> container;
+  ```
+
+---
+
+### `E0299`: Negative Array Length
+* **Cause:** An array creation expression specifies a compile-time constant negative dimension. Array dimensions must evaluate to non-negative integers.
+* **Bad Code:**
+  ```solix
+  int32[] buffer = new int32[-10];
+  ```
+* **Fixed Code:**
+  ```solix
+  int32[] buffer = new int32[10];
+  ```
+
+---
+
+### `E0301`: Assertion Message Expression Not String
+* **Cause:** The custom failure message in an `assert` statement (`assert condition : message;`) does not evaluate to type `string`.
+* **Bad Code:**
+  ```solix
+  assert value > 0 : 404;
+  ```
+* **Fixed Code:**
+  ```solix
+  assert value > 0 : "Value must be positive";
+  ```

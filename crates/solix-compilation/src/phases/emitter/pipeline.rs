@@ -66,23 +66,76 @@ const fn to_decl_modifier(modifier: Modifier) -> Option<DeclarationModifier> {
 fn evaluate_integer_constant(expression: &Expression) -> Option<i64> {
     match expression {
         Expression::Literal {
-            value: LiteralValue::Int(value),
+            value: LiteralValue::Int(literal_value),
             ..
-        } => Some(*value),
+        } => Some(*literal_value),
         Expression::Literal {
-            value: LiteralValue::UInt(value),
+            value: LiteralValue::UInt(literal_value),
             ..
-        } => Some(*value as i64),
+        } => Some(*literal_value as i64),
         Expression::Unary {
             operator: TokenKind::OperatorMinus,
             operand,
             ..
-        } => evaluate_integer_constant(operand).map(|val| -val),
+        } => {
+            evaluate_integer_constant(operand).and_then(|operand_value| operand_value.checked_neg())
+        }
         Expression::Unary {
             operator: TokenKind::OperatorPlus,
             operand,
             ..
         } => evaluate_integer_constant(operand),
+        Expression::Unary {
+            operator: TokenKind::OperatorBitwiseNot,
+            operand,
+            ..
+        } => evaluate_integer_constant(operand).map(|operand_value| !operand_value),
+        Expression::Binary {
+            operator,
+            left,
+            right,
+            ..
+        } => {
+            let left_value = evaluate_integer_constant(left)?;
+            let right_value = evaluate_integer_constant(right)?;
+            match operator {
+                TokenKind::OperatorPlus => left_value.checked_add(right_value),
+                TokenKind::OperatorMinus => left_value.checked_sub(right_value),
+                TokenKind::OperatorMultiply => left_value.checked_mul(right_value),
+                TokenKind::OperatorDivide => {
+                    if right_value == 0 {
+                        None
+                    } else {
+                        left_value.checked_div(right_value)
+                    }
+                }
+                TokenKind::OperatorModulo => {
+                    if right_value == 0 {
+                        None
+                    } else {
+                        left_value.checked_rem(right_value)
+                    }
+                }
+                TokenKind::OperatorShiftLeft => {
+                    if !(0..64).contains(&right_value) {
+                        None
+                    } else {
+                        left_value.checked_shl(right_value as u32)
+                    }
+                }
+                TokenKind::OperatorShiftRight => {
+                    if !(0..64).contains(&right_value) {
+                        None
+                    } else {
+                        left_value.checked_shr(right_value as u32)
+                    }
+                }
+                TokenKind::PunctuationAmpersand => Some(left_value & right_value),
+                TokenKind::OperatorBitwiseOr => Some(left_value | right_value),
+                TokenKind::OperatorBitwiseXor => Some(left_value ^ right_value),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
