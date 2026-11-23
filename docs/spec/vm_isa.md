@@ -34,6 +34,10 @@ The runtime enforces `#![forbid(unsafe_code)]` across all virtual machine execut
 
 Every instruction in the bytecode stream occupies exactly 8 bytes (`u64`), encoded in little-endian byte order:
 
+### Arithmetic & Logic Operations
+
+Arithmetic operations execute on Format A registers. Bitwise shift operations (`Shl`, `Shr`, `Lshr`) require non-negative shift counts; negative shift operands trap immediately with `RuntimeErrorCode::InvalidOperand` (exit code 26). Module static field initializers in `@init` evaluate in topological dependency order.
+
 ### Format A (Three Registers — Arithmetic & Logic)
 Used for binary operations, comparisons, and register moves:
 ```text

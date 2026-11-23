@@ -178,6 +178,8 @@ pub struct SymbolTable {
     pub local_symbols: Vec<LocalSymbolEntry>,
     /// Known package namespaces populated during symbol discovery.
     pub known_packages: HashSet<String>,
+    /// Individual package namespace segments (e.g., 'network' and 'http' for 'network::http') for collision detection.
+    pub package_namespace_segments: HashSet<String>,
     /// Set of package names explicitly linked via CLI dependency binaries (`-l` or positional CLI binaries).
     pub cli_linked_packages: HashSet<String>,
     /// Optional active enclosing package context overriding `file_packages` (e.g. while checking a qualified class).
@@ -207,6 +209,7 @@ impl SymbolTable {
             scope_stack: Vec::new(),
             local_symbols: Vec::new(),
             known_packages: HashSet::new(),
+            package_namespace_segments: HashSet::new(),
             cli_linked_packages: HashSet::new(),
             active_package: None,
         }

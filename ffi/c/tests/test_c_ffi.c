@@ -188,6 +188,12 @@ static const SolixNativeEntry TEST_ENTRIES[] = {
 SOLIX_REGISTER_MODULE(TEST_ENTRIES)
 
 int main(void) {
+    /* 0. Verify C-FFI Version Handshake */
+    TEST_CHECK(SOLIX_FFI_VERSION_MAJOR == 2);
+    TEST_CHECK(SOLIX_FFI_VERSION_MINOR == 0);
+    TEST_CHECK(SOLIX_FFI_VERSION_PATCH == 0);
+    TEST_CHECK(strcmp(SOLIX_FFI_VERSION, "2.0.0") == 0);
+
     /* 1. Verify SolixCValue encodings */
     TEST_CHECK(solix_cvalue_is_null(solix_cvalue_null()));
     TEST_CHECK(solix_cvalue_as_bool(solix_cvalue_bool(true)) == true);

@@ -414,7 +414,14 @@ fn bnot_slow(val_ref: &Value) -> Result<Value, VmTrap> {
 #[cold]
 #[inline(never)]
 fn shl_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
-    let shift = (read_i64_fast(right_ref)? & 63) as u32;
+    let right_signed = read_i64_fast(right_ref)?;
+    if right_signed < 0 {
+        return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+            operation: "bitwise shift left",
+            reason: "negative shift count is invalid".to_string(),
+        }));
+    }
+    let shift = (right_signed & 63) as u32;
     Ok(Value::I64(read_i64_fast(left_ref)?.wrapping_shl(shift)))
 }
 
@@ -1582,6 +1589,12 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
                     let res =
                         if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            if val_b < 0 {
+                                return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+                                    operation: "bitwise shift left",
+                                    reason: "negative shift count is invalid".to_string(),
+                                }));
+                            }
                             Value::I32(val_a.wrapping_shl((val_b & 31) as u32))
                         } else {
                             shl_slow(left_ref, right_ref)?
@@ -1595,6 +1608,12 @@ fn try_complete_scalar_for_loop<const TRACK_METRICS: bool>(
                     let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
                     let res =
                         if let (Value::I32(val_a), Value::I32(val_b)) = (*left_ref, *right_ref) {
+                            if val_b < 0 {
+                                return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+                                    operation: "bitwise shift right",
+                                    reason: "negative shift count is invalid".to_string(),
+                                }));
+                            }
                             Value::I32(val_a.wrapping_shr((val_b & 31) as u32))
                         } else {
                             shr_slow(left_ref, right_ref)?
@@ -1904,7 +1923,14 @@ fn read_u64_fast(operand: &Value) -> Result<u64, VmTrap> {
 #[cold]
 #[inline(never)]
 fn shr_slow(left_ref: &Value, right_ref: &Value) -> Result<Value, VmTrap> {
-    let shift = (read_i64_fast(right_ref)? & 63) as u32;
+    let right_signed = read_i64_fast(right_ref)?;
+    if right_signed < 0 {
+        return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+            operation: "bitwise shift right",
+            reason: "negative shift count is invalid".to_string(),
+        }));
+    }
+    let shift = (right_signed & 63) as u32;
     Ok(Value::I64(read_i64_fast(left_ref)?.wrapping_shr(shift)))
 }
 
@@ -2454,6 +2480,30 @@ impl VirtualMachine {
         }
 
         let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
+        if is_reference_element
+            && (elem_type_tag & 0x80) != 0
+            && let target_vtable_id = (elem_type_tag & 0x7F) as u32
+            && target_vtable_id > 0
+            && let Value::Ref(assigned_address) = val
+            && assigned_address > 0
+        {
+            let header = self
+                .heap
+                .read_header(assigned_address)
+                .map_err(VmTrap::from_error)?;
+            if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
+                let assigned_vtable_id = self
+                    .heap
+                    .read_u32(assigned_address)
+                    .map_err(VmTrap::from_error)?;
+                if !self.is_instance_of(assigned_vtable_id, target_vtable_id) {
+                    return Err(VmTrap::from_error(RuntimeError::ArrayStoreMismatch {
+                        assigned_class: assigned_vtable_id,
+                        array_element_class: target_vtable_id,
+                    }));
+                }
+            }
+        }
         // SAFETY: elem_offset + elem_size <= heap_len verified above.
         let elem_ptr = unsafe { buf_ptr.add(elem_offset) };
         let old_child = if is_reference_element {
@@ -3951,6 +4001,12 @@ impl VirtualMachine {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
                         if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            if rhs < 0 {
+                                return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+                                    operation: "bitwise shift left",
+                                    reason: "negative shift count is invalid".to_string(),
+                                }));
+                            }
                             let shift = (rhs & 31) as u32;
                             unsafe {
                                 *reg_base.add(inst.dst() as usize) =
@@ -3968,6 +4024,12 @@ impl VirtualMachine {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
                         if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            if rhs < 0 {
+                                return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+                                    operation: "bitwise shift right",
+                                    reason: "negative shift count is invalid".to_string(),
+                                }));
+                            }
                             let shift = (rhs & 31) as u32;
                             unsafe {
                                 *reg_base.add(inst.dst() as usize) =
@@ -3985,14 +4047,27 @@ impl VirtualMachine {
                         let left_ref = unsafe { &*reg_base.add(inst.src1() as usize) };
                         let right_ref = unsafe { &*reg_base.add(inst.src2() as usize) };
                         if let (Value::I32(lhs), Value::I32(rhs)) = (*left_ref, *right_ref) {
+                            if rhs < 0 {
+                                return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+                                    operation: "logical right shift",
+                                    reason: "negative shift count is invalid".to_string(),
+                                }));
+                            }
                             let shift = (rhs & 31) as u32;
                             unsafe {
                                 *reg_base.add(inst.dst() as usize) =
                                     Value::I32(((lhs as u32).wrapping_shr(shift)) as i32);
                             }
                         } else {
+                            let right_signed = read_i64_fast(right_ref)?;
+                            if right_signed < 0 {
+                                return Err(VmTrap::from_error(RuntimeError::InvalidOperand {
+                                    operation: "logical right shift",
+                                    reason: "negative shift count is invalid".to_string(),
+                                }));
+                            }
                             let val_a = read_u64_fast(left_ref)?;
-                            let shift = (read_u64_fast(right_ref)? & 63) as u32;
+                            let shift = (right_signed & 63) as u32;
                             unsafe {
                                 *reg_base.add(inst.dst() as usize) =
                                     Value::I64(val_a.wrapping_shr(shift) as i64);
@@ -5165,7 +5240,29 @@ impl VirtualMachine {
                                             buf_ptr.add(elem_offset).cast::<u32>(),
                                         ))
                                     };
-                                    if old_child == 0 {
+                                    let is_valid_store = if (elem_type_tag & 0x80) == 0 {
+                                        true
+                                    } else {
+                                        let target_vtable_id = (elem_type_tag & 0x7F) as u32;
+                                        if let Value::Ref(assigned_address) = *val_ref
+                                            && assigned_address > 0
+                                        {
+                                            if let Ok(assigned_vtable_id) =
+                                                self.heap.read_u32(assigned_address)
+                                            {
+                                                assigned_vtable_id == target_vtable_id
+                                                    || self.is_instance_of(
+                                                        assigned_vtable_id,
+                                                        target_vtable_id,
+                                                    )
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            true
+                                        }
+                                    };
+                                    if old_child == 0 && is_valid_store {
                                         let new_val = *val_ref;
                                         unsafe {
                                             *reg_base.add(val_idx) = Value::Null;

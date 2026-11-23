@@ -708,6 +708,18 @@ impl<'ctx> Emitter<'ctx> {
                     );
                     return Ok(dst);
                 }
+
+                if let Some(slot) = self
+                    .static_layout
+                    .and_then(|layout| layout.lookup_slot(&full_sym))
+                {
+                    let dst = self.resolve_dst(target_reg)?;
+                    self.emit_instruction(
+                        Instruction::format_b(OpCode::GetStatic, 0, dst, slot),
+                        Some(*span),
+                    );
+                    return Ok(dst);
+                }
                 if member_name == "length"
                     && (matches!(self.query_type(object.span()), Type::Array { .. })
                         || matches!(self.query_type(object.span()), Type::Tuple(_))

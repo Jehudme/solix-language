@@ -1155,6 +1155,33 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                             }
                             if let Some((method_id, ret_type)) = found_method {
                                 self.resolved_symbols.insert(*member_span, method_id);
+                                if self.is_inside_destructor {
+                                    let is_receiver_this = match &**object {
+                                        Expression::Identifier { span } => {
+                                            let start = span.start as usize;
+                                            let end = span.end as usize;
+                                            start <= end
+                                                && end <= self.source_text.len()
+                                                && &self.source_text[start..end] == "this"
+                                        }
+                                        _ => false,
+                                    };
+                                    if is_receiver_this
+                                        && let Some(target_method) =
+                                            self.symbol_table.get_symbol(method_id)
+                                        && (target_method.modifiers.contains(&Modifier::Virtual)
+                                            || target_method
+                                                .modifiers
+                                                .contains(&Modifier::Override))
+                                    {
+                                        self.errors.push(
+                                            BindingError::VirtualCallInDestructorForbidden {
+                                                method_name: target_method.name.clone(),
+                                                span: callee.span().to_source_span(),
+                                            },
+                                        );
+                                    }
+                                }
                                 return ret_type;
                             } else {
                                 let arg_str = evaluated_arg_types
@@ -3521,6 +3548,19 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
         if let Some(default_statements) = &node.default_case {
             for statement in default_statements {
                 self.visit_statement(statement);
+            }
+        } else if let Type::Enum { ref symbol_name } = discriminant_type {
+            let variant_count = self
+                .symbol_table
+                .resolve_symbol(self.source_id, symbol_name)
+                .and_then(|symbol_id| self.symbol_table.get_symbol(symbol_id))
+                .map(|entry| entry.members.len())
+                .unwrap_or(0);
+            if node.cases.len() < variant_count || variant_count == 0 {
+                self.errors.push(BindingError::InexhaustiveEnumSwitch {
+                    enum_name: symbol_name.clone(),
+                    span: node.span.to_source_span(),
+                });
             }
         }
         self.switch_depth -= 1;

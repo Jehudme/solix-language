@@ -1,4 +1,4 @@
-# Runtime Execution Errors (`R0001` – `R0024`)
+# Runtime Execution Errors (`R0001` – `R0027`)
 
 This section documents runtime trap codes and execution faults emitted by the Solix Virtual Machine ([`crates/solix-runtime/src/exceptions/errors.rs`](../../../crates/solix-runtime/src/exceptions/errors.rs)).
 
@@ -30,3 +30,6 @@ This section documents runtime trap codes and execution faults emitted by the So
 | **`R0022`** | 22 | `SharedLibraryError`| `dlopen` or `LoadLibrary` failed to link native extension in `natives/` |
 | **`R0023`** | 23 | `DependencyError` | Runtime dependency resolution or pinned SHA-256 verification failure |
 | **`R0024`** | 24 | `DuplicateSymbolDefinition` | Duplicate function, class, or static variable symbol collision across loaded modules |
+| **`R0025`** | 25 | `NativeLibraryChecksumMismatch` | SHA-256 verification of native shared library failed |
+| **`R0026`** | 26 | `InvalidOperand` | Invalid operand for operation (e.g., negative bitwise shift count) |
+| **`R0027`** | 27 | `ArrayStoreMismatch` | Attempted to store an incompatible object instance into a covariant reference array |

@@ -297,6 +297,7 @@ struct ParserState<'tokens, 'source> {
     has_parsed_package: bool,
     has_parsed_declaration: bool,
     destructors_in_class: usize,
+    expression_nesting_depth: usize,
 }
 
 impl<'tokens, 'source> ParserState<'tokens, 'source> {
@@ -315,6 +316,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             has_parsed_package: false,
             has_parsed_declaration: false,
             destructors_in_class: 0,
+            expression_nesting_depth: 0,
         }
     }
 
@@ -2649,7 +2651,16 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
     // =========================================================================
 
     fn parse_expression(&mut self) -> Result<Expression, ParsingError> {
-        self.parse_assignment()
+        const MAXIMUM_EXPRESSION_DEPTH: usize = 32;
+        if self.expression_nesting_depth >= MAXIMUM_EXPRESSION_DEPTH {
+            return Err(ParsingError::ExpressionNestingDepthExceeded {
+                span: self.cursor.current_span().to_source_span(),
+            });
+        }
+        self.expression_nesting_depth += 1;
+        let expression_result = self.parse_assignment();
+        self.expression_nesting_depth -= 1;
+        expression_result
     }
 
     fn parse_assignment(&mut self) -> Result<Expression, ParsingError> {
@@ -2986,8 +2997,17 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 | TokenKind::OperatorIncrement
                 | TokenKind::OperatorDecrement
         ) {
+            const MAXIMUM_EXPRESSION_DEPTH: usize = 32;
+            if self.expression_nesting_depth >= MAXIMUM_EXPRESSION_DEPTH {
+                return Err(ParsingError::ExpressionNestingDepthExceeded {
+                    span: self.cursor.current_span().to_source_span(),
+                });
+            }
             let op_token = self.cursor.advance().copied().unwrap_or_default();
-            let operand = self.parse_unary()?;
+            self.expression_nesting_depth += 1;
+            let operand_result = self.parse_unary();
+            self.expression_nesting_depth -= 1;
+            let operand = operand_result?;
 
             if matches!(
                 op_token.kind,

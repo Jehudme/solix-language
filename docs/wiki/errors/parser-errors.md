@@ -94,6 +94,20 @@ This section documents the syntax diagnostics emitted by [`crates/solix-compilat
 
 ---
 
+### `E0148`: Expression Nesting Depth Exceeded
+* **Cause:** An expression exceeds the maximum parser recursion depth ceiling (32 levels of nested sub-expressions or parenthesized clauses).
+* **Bad Code:**
+  ```solix
+  int32 result = (((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))));
+  ```
+* **Fixed Code:**
+  ```solix
+  int32 intermediate_value = 1;
+  int32 result = intermediate_value;
+  ```
+
+---
+
 ### `E0153`: Multi-Character Character Literal
 * **Cause:** A character literal contains more than a single character or has extra trailing characters after an escape sequence.
 * **Bad Code:**

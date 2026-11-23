@@ -103,6 +103,40 @@ pub fn execute_pass1_symbol_discovery(
     let mut accumulated_errors: Vec<(u16, BindingError)> = Vec::new();
     let mut raw_aliases = Vec::new();
 
+    // 0. Pre-register all package prefixes across all source files
+    for (source_index, ast_option) in source_asts.iter().enumerate() {
+        let source_text = source_texts
+            .get(source_index)
+            .map(|text| text.as_str())
+            .unwrap_or("");
+        if let Some(program_ast) = ast_option
+            && let Some(package_statement) = &program_ast.package
+        {
+            let segments: Vec<&str> = package_statement
+                .path
+                .iter()
+                .map(|span| {
+                    let start = span.start as usize;
+                    let end = span.end as usize;
+                    if end <= source_text.len() {
+                        &source_text[start..end]
+                    } else {
+                        ""
+                    }
+                })
+                .collect();
+            let full_prefix = segments.join("::");
+            register_known_package(symbol_table, &full_prefix);
+            for segment in segments {
+                if !segment.is_empty() {
+                    symbol_table
+                        .package_namespace_segments
+                        .insert(segment.to_string());
+                }
+            }
+        }
+    }
+
     for (source_index, ast_option) in source_asts.iter().enumerate() {
         let source_id = source_index as u16;
         let source_text = source_texts
@@ -292,6 +326,20 @@ pub fn execute_pass1_symbol_discovery(
                     } else {
                         format!("{effective_package}::{class_name}")
                     };
+
+                    if effective_package.is_empty()
+                        && (symbol_table.known_packages.contains(class_name)
+                            || symbol_table.package_namespace_segments.contains(class_name))
+                    {
+                        accumulated_errors.push((
+                            source_id,
+                            BindingError::SymbolCollidesWithPackageName {
+                                symbol_name: class_name.to_string(),
+                                package_name: class_name.to_string(),
+                                span: class_declaration.span.to_source_span(),
+                            },
+                        ));
+                    }
 
                     // If generic, register as blueprint
                     if !class_declaration.generic_params.is_empty() {
@@ -503,6 +551,22 @@ pub fn execute_pass1_symbol_discovery(
                         format!("{effective_package}::{interface_name}")
                     };
 
+                    if effective_package.is_empty()
+                        && (symbol_table.known_packages.contains(interface_name)
+                            || symbol_table
+                                .package_namespace_segments
+                                .contains(interface_name))
+                    {
+                        accumulated_errors.push((
+                            source_id,
+                            BindingError::SymbolCollidesWithPackageName {
+                                symbol_name: interface_name.to_string(),
+                                package_name: interface_name.to_string(),
+                                span: interface_declaration.span.to_source_span(),
+                            },
+                        ));
+                    }
+
                     if symbol_table
                         .global_names
                         .contains_key(&fully_qualified_name)
@@ -557,6 +621,20 @@ pub fn execute_pass1_symbol_discovery(
                     } else {
                         format!("{effective_package}::{enum_name}")
                     };
+
+                    if effective_package.is_empty()
+                        && (symbol_table.known_packages.contains(enum_name)
+                            || symbol_table.package_namespace_segments.contains(enum_name))
+                    {
+                        accumulated_errors.push((
+                            source_id,
+                            BindingError::SymbolCollidesWithPackageName {
+                                symbol_name: enum_name.to_string(),
+                                package_name: enum_name.to_string(),
+                                span: enum_declaration.span.to_source_span(),
+                            },
+                        ));
+                    }
 
                     if symbol_table
                         .global_names

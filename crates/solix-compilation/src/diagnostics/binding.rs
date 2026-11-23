@@ -1238,6 +1238,73 @@ pub enum BindingError {
         #[label("expected string message")]
         span: SourceSpan,
     },
+
+    #[error(
+        "Generic instantiation depth exceeded maximum threshold of {maximum_depth} for '{class_name}'"
+    )]
+    #[diagnostic(
+        code(solix::binder::generic_instantiation_depth_exceeded),
+        help("Avoid self-referential or infinitely expanding recursive generic definitions.")
+    )]
+    GenericInstantiationDepthExceeded {
+        class_name: String,
+        maximum_depth: usize,
+        #[label("generic instantiation recursion limit exceeded")]
+        span: SourceSpan,
+    },
+
+    #[error("Cyclic dependency detected in static field initializers: {cycle_path}")]
+    #[diagnostic(
+        code(solix::binder::cyclic_static_field_dependency),
+        help("Break the circular dependency between static field initializers.")
+    )]
+    CyclicStaticFieldDependency {
+        cycle_path: String,
+        #[label("cyclic static field dependency")]
+        span: SourceSpan,
+    },
+
+    #[error(
+        "Calling virtual or overridden method '{method_name}' on 'this' inside destructor is forbidden"
+    )]
+    #[diagnostic(
+        code(solix::binder::virtual_call_in_destructor_forbidden),
+        help(
+            "Only non-virtual, private, or static methods can be safely called during object destruction."
+        )
+    )]
+    VirtualCallInDestructorForbidden {
+        method_name: String,
+        #[label("virtual method call in destructor")]
+        span: SourceSpan,
+    },
+
+    #[error(
+        "Top-level declaration '{symbol_name}' collides with package namespace '{package_name}'"
+    )]
+    #[diagnostic(
+        code(solix::binder::symbol_collides_with_package_name),
+        help(
+            "Rename the top-level declaration to avoid collisions with package namespace segments."
+        )
+    )]
+    SymbolCollidesWithPackageName {
+        symbol_name: String,
+        package_name: String,
+        #[label("symbol collides with package namespace")]
+        span: SourceSpan,
+    },
+
+    #[error("Inexhaustive switch on enum '{enum_name}' requires an explicit 'default' branch")]
+    #[diagnostic(
+        code(solix::binder::inexhaustive_enum_switch),
+        help("Provide an explicit 'default' case to safely handle arbitrary or cast enum values.")
+    )]
+    InexhaustiveEnumSwitch {
+        enum_name: String,
+        #[label("switch on enum requires default branch")]
+        span: SourceSpan,
+    },
 }
 
 impl BindingError {
@@ -1347,6 +1414,11 @@ impl BindingError {
             Self::NegativeArrayLength { .. } => "E0299",
             Self::CyclicInterfaceInheritance { .. } => "E0204",
             Self::AssertMessageNotString { .. } => "E0301",
+            Self::GenericInstantiationDepthExceeded { .. } => "E0302",
+            Self::CyclicStaticFieldDependency { .. } => "E0303",
+            Self::VirtualCallInDestructorForbidden { .. } => "E0304",
+            Self::SymbolCollidesWithPackageName { .. } => "E0305",
+            Self::InexhaustiveEnumSwitch { .. } => "E0306",
         }
     }
 
@@ -1454,7 +1526,12 @@ impl BindingError {
             | Self::GenericTypeConstraintViolation { span, .. }
             | Self::CyclicInterfaceInheritance { span, .. }
             | Self::NegativeArrayLength { span }
-            | Self::AssertMessageNotString { span, .. } => *span,
+            | Self::AssertMessageNotString { span, .. }
+            | Self::GenericInstantiationDepthExceeded { span, .. }
+            | Self::CyclicStaticFieldDependency { span, .. }
+            | Self::VirtualCallInDestructorForbidden { span, .. }
+            | Self::SymbolCollidesWithPackageName { span, .. }
+            | Self::InexhaustiveEnumSwitch { span, .. } => *span,
         }
     }
 
