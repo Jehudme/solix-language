@@ -253,6 +253,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print `::warning` GitHub Actions workflow annotations",
     )
+    parser.add_argument(
+        "--step-summary",
+        action="store_true",
+        help="Write rendered Markdown advisory to GITHUB_STEP_SUMMARY",
+    )
     return parser.parse_args(argv)
 
 
@@ -286,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         args.markdown_out.write_text(markdown_report, encoding="utf-8")
 
     step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if step_summary_path:
+    if args.step_summary and step_summary_path:
         with Path(step_summary_path).open("a", encoding="utf-8") as summary_handle:
             summary_handle.write("\n" + markdown_report)
 
