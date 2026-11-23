@@ -42,6 +42,8 @@ pub struct GenericBlueprintRegistry {
     pub instantiated_classes: HashMap<String, SymbolId>,
     /// Instantiated monomorphized class ASTs synthesized at compile time.
     pub monomorphized_asts: Vec<ClassDeclaration>,
+    /// Current instantiation recursion depth to prevent compiler stack overflow.
+    pub current_instantiation_depth: usize,
 }
 
 impl GenericBlueprintRegistry {
@@ -100,6 +102,51 @@ impl GenericBlueprintRegistry {
     /// # Errors
     /// Returns [`BindingError`] if arity mismatches or blueprint is unknown.
     pub fn monomorphize_class(
+        &mut self,
+        base_name: &str,
+        type_arguments: &[Type],
+        symbol_table: &mut SymbolTable,
+        layouts: &mut HashMap<SymbolId, ClassLayout>,
+        source_texts: &[String],
+        next_vtable_id: &mut u32,
+    ) -> Result<SymbolId, Vec<BindingError>> {
+        let mangled_name = Self::mangle_name(base_name, type_arguments);
+        let dot_mangled = mangled_name.replace("::", ".");
+        let colon_mangled = mangled_name.replace('.', "::");
+
+        // Check if already monomorphized
+        if let Some(&existing_id) = self
+            .instantiated_classes
+            .get(&mangled_name)
+            .or_else(|| self.instantiated_classes.get(&dot_mangled))
+            .or_else(|| self.instantiated_classes.get(&colon_mangled))
+        {
+            return Ok(existing_id);
+        }
+
+        const MAXIMUM_GENERIC_INSTANTIATION_DEPTH: usize = 64;
+        if self.current_instantiation_depth >= MAXIMUM_GENERIC_INSTANTIATION_DEPTH {
+            return Err(vec![BindingError::GenericInstantiationDepthExceeded {
+                class_name: mangled_name,
+                maximum_depth: MAXIMUM_GENERIC_INSTANTIATION_DEPTH,
+                span: miette::SourceSpan::new(0.into(), 0),
+            }]);
+        }
+
+        self.current_instantiation_depth += 1;
+        let monomorphize_result = self.monomorphize_class_inner(
+            base_name,
+            type_arguments,
+            symbol_table,
+            layouts,
+            source_texts,
+            next_vtable_id,
+        );
+        self.current_instantiation_depth -= 1;
+        monomorphize_result
+    }
+
+    fn monomorphize_class_inner(
         &mut self,
         base_name: &str,
         type_arguments: &[Type],
@@ -605,14 +652,14 @@ impl GenericBlueprintRegistry {
                 if self.blueprints.contains_key(&dependent_name)
                     || self.blueprints.contains_key(simple_dep_name)
                 {
-                    let _ = self.monomorphize_class(
+                    self.monomorphize_class(
                         &dependent_name,
                         &dependent_arguments,
                         symbol_table,
                         layouts,
                         source_texts,
                         next_vtable_id,
-                    );
+                    )?;
                 }
             }
         }

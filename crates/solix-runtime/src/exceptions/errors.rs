@@ -135,6 +135,22 @@ pub enum RuntimeError {
         expected: String,
         actual: String,
     },
+
+    /// Invalid operand value encountered during instruction execution.
+    #[error("invalid operand for {operation}: {reason}")]
+    InvalidOperand {
+        operation: &'static str,
+        reason: String,
+    },
+
+    /// Array store check failure when assigning an incompatible subtype to an object array.
+    #[error(
+        "ArrayStoreMismatch: cannot store object of class {assigned_class} into array of element class {array_element_class}"
+    )]
+    ArrayStoreMismatch {
+        assigned_class: u32,
+        array_element_class: u32,
+    },
 }
 
 /// Canonical numerical error codes emitted on abnormal VM termination.
@@ -193,6 +209,10 @@ pub enum RuntimeErrorCode {
     DuplicateSymbolDefinition = 24,
     /// Native shared library checksum verification failure.
     NativeLibraryChecksumMismatch = 25,
+    /// Invalid operand for operation.
+    InvalidOperand = 26,
+    /// Array store check failure.
+    ArrayStoreMismatch = 27,
 }
 
 impl RuntimeErrorCode {
@@ -248,6 +268,8 @@ impl RuntimeError {
             Self::NativeLibraryChecksumMismatch { .. } => {
                 RuntimeErrorCode::NativeLibraryChecksumMismatch
             }
+            Self::InvalidOperand { .. } => RuntimeErrorCode::InvalidOperand,
+            Self::ArrayStoreMismatch { .. } => RuntimeErrorCode::ArrayStoreMismatch,
         }
     }
 }

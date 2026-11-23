@@ -718,6 +718,11 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("--remove-label", ci_text)
         self.assertIn("pr-benchmark:", ci_text)
         self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
+        self.assertIn("Publish benchmark report to Step Summary", ci_text)
+        self.assertIn(
+            "pr-benchmark:\n    name: PR Performance & Cross-Language Benchmark\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
+            ci_text,
+        )
 
 
 if __name__ == "__main__":

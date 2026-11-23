@@ -501,7 +501,7 @@ jobs:
 
   pr-benchmark:
     name: PR Performance & Cross-Language Benchmark
-    if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.fork == false
+    if: github.event_name == 'pull_request' && github.base_ref == 'dev'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -549,17 +549,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
         run: |
           mkdir -p "$RUNNER_TEMP/pr-bench" "$RUNNER_TEMP/prev_release"
-          LATEST_TAG=$(gh release list --exclude-drafts --limit 5 --json tagName --jq '.[0].tagName // empty')
-          PREV_BIN=""
+          LATEST_RELEASE_TAG=$(gh release list --repo "$REPO_NAME" --exclude-drafts --limit 5 --json tagName --jq '.[0].tagName // empty')
+          PREVIOUS_RELEASE_BINARY=""
 
-          if [ -n "$LATEST_TAG" ]; then
-            if gh release download "$LATEST_TAG" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.xz" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.gz" --dir "$RUNNER_TEMP/prev_release"; then
-              ARCHIVE=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f \( -name '*.tar.xz' -o -name '*.tar.gz' \) | head -n 1 || true)
-              if [ -n "$ARCHIVE" ]; then
-                tar -xf "$ARCHIVE" -C "$RUNNER_TEMP/prev_release"
-                PREV_BIN=$(find "$RUNNER_TEMP/prev_release" -type f -name 'solix' | head -n 1 || true)
+          if [ -n "$LATEST_RELEASE_TAG" ]; then
+            if gh release download "$LATEST_RELEASE_TAG" --repo "$REPO_NAME" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.xz" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.gz" --dir "$RUNNER_TEMP/prev_release"; then
+              ARCHIVE_FILE_PATH=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f \( -name '*.tar.xz' -o -name '*.tar.gz' \) | head -n 1 || true)
+              if [ -n "$ARCHIVE_FILE_PATH" ]; then
+                tar -xf "$ARCHIVE_FILE_PATH" -C "$RUNNER_TEMP/prev_release"
+                PREVIOUS_RELEASE_BINARY=$(find "$RUNNER_TEMP/prev_release" -type f -name 'solix' | head -n 1 || true)
               fi
             fi
           fi
@@ -572,20 +573,20 @@ jobs:
             --label "PR #${PR_NUMBER}" \
             --save-baseline "$RUNNER_TEMP/pr-bench/pr_baseline.json"
 
-          if [ -n "$PREV_BIN" ] && [ -x "$PREV_BIN" ]; then
+          if [ -n "$PREVIOUS_RELEASE_BINARY" ] && [ -x "$PREVIOUS_RELEASE_BINARY" ]; then
             python3 scripts/bench/solix_bench.py run \
               --pin-cpu \
               --warmup 2 \
               --iterations 5 \
-              --solix-bin "$PREV_BIN" \
+              --solix-bin "$PREVIOUS_RELEASE_BINARY" \
               --solix-only \
-              --label "$LATEST_TAG" \
+              --label "$LATEST_RELEASE_TAG" \
               --save-baseline "$RUNNER_TEMP/pr-bench/prev_baseline.json"
 
             python3 scripts/bench/solix_bench.py compare \
               --previous "$RUNNER_TEMP/pr-bench/prev_baseline.json" \
               --current "$RUNNER_TEMP/pr-bench/pr_baseline.json" \
-              --previous-tag "$LATEST_TAG" \
+              --previous-tag "$LATEST_RELEASE_TAG" \
               --current-tag "PR #${PR_NUMBER}" \
               --same-host \
               --cross-language \
@@ -600,7 +601,15 @@ jobs:
               --markdown-output "$RUNNER_TEMP/pr-bench/report.md"
           fi
 
+      - name: Publish benchmark report to Step Summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/pr-bench/report.md" ]; then
+            cat "$RUNNER_TEMP/pr-bench/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Post or update sticky PR benchmark comment
+        if: github.event.pull_request.head.repo.fork == false
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -610,30 +619,33 @@ jobs:
           import json, os, subprocess
           from pathlib import Path
 
-          report_md = (Path(os.environ["RUNNER_TEMP"]) / "pr-bench" / "report.md").read_text(encoding="utf-8")
-          body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report\n\n{report_md}"
-          repo = os.environ["REPO_NAME"]
-          pr_num = os.environ["PR_NUMBER"]
+          report_markdown = (Path(os.environ["RUNNER_TEMP"]) / "pr-bench" / "report.md").read_text(encoding="utf-8")
+          comment_body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report\n\n{report_markdown}"
+          repository_name = os.environ["REPO_NAME"]
+          pull_request_number = os.environ["PR_NUMBER"]
 
-          comments_raw = subprocess.check_output(
-              ["gh", "api", "--paginate", f"repos/{repo}/issues/{pr_num}/comments"],
-              text=True,
-          )
-          comments = json.loads(comments_raw)
-          existing_id = None
-          for comment in comments:
-              if "<!-- solix-pr-benchmark -->" in (comment.get("body") or ""):
-                  existing_id = comment["id"]
-                  break
+          try:
+              comments_raw = subprocess.check_output(
+                  ["gh", "api", "--paginate", f"repos/{repository_name}/issues/{pull_request_number}/comments"],
+                  text=True,
+              )
+              comments_payload = json.loads(comments_raw)
+              existing_comment_identifier = None
+              for current_comment in comments_payload:
+                  if "<!-- solix-pr-benchmark -->" in (current_comment.get("body") or ""):
+                      existing_comment_identifier = current_comment["id"]
+                      break
 
-          if existing_id:
-              subprocess.run(
-                  ["gh", "api", "--method", "PATCH", f"repos/{repo}/issues/comments/{existing_id}", "-f", f"body={body}"],
-                  check=True,
-              )
-          else:
-              subprocess.run(
-                  ["gh", "api", "--method", "POST", f"repos/{repo}/issues/{pr_num}/comments", "-f", f"body={body}"],
-                  check=True,
-              )
+              if existing_comment_identifier:
+                  subprocess.run(
+                      ["gh", "api", "--method", "PATCH", f"repos/{repository_name}/issues/comments/{existing_comment_identifier}", "-f", f"body={comment_body}"],
+                      check=True,
+                  )
+              else:
+                  subprocess.run(
+                      ["gh", "api", "--method", "POST", f"repos/{repository_name}/issues/{pull_request_number}/comments", "-f", f"body={comment_body}"],
+                      check=True,
+                  )
+          except subprocess.CalledProcessError as called_process_error:
+              print(f"[NOTICE] Unable to post pull request comment: {called_process_error}")
           PY

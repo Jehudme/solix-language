@@ -31,9 +31,12 @@ Hash table implementation using bucket chaining. Implements `IMap<K, V>` and `IS
 
 ### Constructors
 - `HashMap()`: Initializes empty hash map with default capacity of 16 and default load factor threshold.
-- `HashMap(int32 initial_capacity)`: Initializes empty hash map with specified bucket count.
+- `HashMap(int32 initial_capacity)`: Initializes empty hash map with specified bucket count. Throws `IllegalArgumentException` if `initial_capacity < 0` or exceeds `1073741824`.
 - `HashMap(int32(*)(K) hasher)`: Initializes hash map with custom key hasher function pointer.
 - `HashMap(int32 initial_capacity, int32(*)(K) hasher)`: Initializes hash map with initial capacity and custom hasher.
+
+### Capacity & Overflow Safeguards
+Capacity expansion doubles internal bucket allocation while below `1073741824`. Attempting to expand beyond `1073741824` throws `OutOfMemoryException`.
 
 ### Methods
 - `size() -> int32`: Returns number of key-value pairs stored.
