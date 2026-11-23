@@ -1275,8 +1275,7 @@ impl BindingError {
             Self::SuperUsedOutsideSubclass { .. } => "E0261",
             Self::StaticMethodAccessViaInstance { .. } => "E0262",
             Self::InstanceMethodAccessViaStatic { .. } => "E0263",
-            Self::AbstractMethodInNonAbstractClass { .. }
-            | Self::GenericTypeConstraintViolation { .. } => "E0264",
+            Self::AbstractMethodInNonAbstractClass { .. } => "E0264",
             Self::NonAbstractClassMissingAbstractImpl { .. } => "E0265",
             Self::InterfaceFieldNotConstant { .. } => "E0266",
             Self::FinalMethodOverridden { .. } => "E0267",
@@ -1309,6 +1308,7 @@ impl BindingError {
             Self::DuplicateSwitchCaseConstant { .. } => "E0294",
             Self::InvalidSwitchPatternTarget { .. } => "E0295",
             Self::TupleArityMismatchInCase { .. } => "E0296",
+            Self::GenericTypeConstraintViolation { .. } => "E0297",
             Self::CannotThrowNull { .. } => "E0298",
         }
     }

@@ -109,6 +109,13 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
 
 ---
 
+### `E0297`: Unsatisfied Generic Type Constraint
+* **Cause:** A generic type argument does not implement or inherit the declared bound.
+* **Fix:** Supply a type that satisfies the constraint. For example, a type argument for `T extends IPrintable`
+  must implement or inherit `IPrintable`.
+
+---
+
 ### `E0298`: Cannot Throw Null Literal
 * **Cause:** A `throw` statement directly specifies `null` or an expression statically typed as `null`. Throw expressions must evaluate to an instance of an `Exception` class.
 * **Bad Code:**

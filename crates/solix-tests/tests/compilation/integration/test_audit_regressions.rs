@@ -335,7 +335,7 @@ fn test_regression_generic_type_bounds_enforced_positive_and_negative() {
             }
         }
     "#;
-    assert_compile_error(invalid_code, "E0264");
+    assert_compile_error(invalid_code, "E0297");
 }
 
 #[test]
