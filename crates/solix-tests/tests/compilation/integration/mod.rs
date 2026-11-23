@@ -1,6 +1,7 @@
 //! Master integration test suites.
 
 pub mod test_audit_regressions;
+pub mod test_eighth_sweep_fixes;
 pub mod test_fifth_sweep_fixes;
 pub mod test_fourth_sweep_fixes;
 pub mod test_master_integration;

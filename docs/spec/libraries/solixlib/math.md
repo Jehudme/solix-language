@@ -20,7 +20,7 @@ A static utility class providing mathematical constants and functions.
 - `abs<T>(T v) -> T`: Generic template returning absolute value for any numeric type `T`.
 - `min<T>(T a, T b) -> T`: Generic template returning the lesser of two values.
 - `max<T>(T a, T b) -> T`: Generic template returning the greater of two values.
-- `clamp<T>(T val, T min_val, T max_val) -> T`: Generic template constraining `val` within `[min_val, max_val]`.
+- `clamp<T>(T val, T min_val, T max_val) -> T`: Generic template constraining `val` within `[min_val, max_val]`. Throws `ArgumentOutOfRangeException` if `min_val > max_val`.
 - `sign<T>(T v) -> int32`: Returns `-1`, `0`, or `1` depending on value sign.
 - `copy_sign<T>(T magnitude, T sign_val) -> T`: Composes magnitude of first with sign of second for type `T`.
 

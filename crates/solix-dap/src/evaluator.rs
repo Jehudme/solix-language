@@ -46,6 +46,48 @@ pub fn evaluate_expression_in_frame(
         return Ok(Value::F64(float_value));
     }
 
+    // Check logical disjunction (||)
+    if let Some(operator_position) = trimmed_expression.find("||") {
+        let left_operand_text = &trimmed_expression[..operator_position];
+        let right_operand_text = &trimmed_expression[operator_position + 2..];
+        let left_evaluated_value =
+            evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+        let right_evaluated_value =
+            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+
+        return match (left_evaluated_value, right_evaluated_value) {
+            (Value::Bool(left_boolean), Value::Bool(right_boolean)) => {
+                Ok(Value::Bool(left_boolean || right_boolean))
+            }
+            (left_value, right_value) => Err(format!(
+                "Logical operator '||' requires boolean operands, found '{}' and '{}'",
+                left_value.type_name(),
+                right_value.type_name()
+            )),
+        };
+    }
+
+    // Check logical conjunction (&&)
+    if let Some(operator_position) = trimmed_expression.find("&&") {
+        let left_operand_text = &trimmed_expression[..operator_position];
+        let right_operand_text = &trimmed_expression[operator_position + 2..];
+        let left_evaluated_value =
+            evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+        let right_evaluated_value =
+            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+
+        return match (left_evaluated_value, right_evaluated_value) {
+            (Value::Bool(left_boolean), Value::Bool(right_boolean)) => {
+                Ok(Value::Bool(left_boolean && right_boolean))
+            }
+            (left_value, right_value) => Err(format!(
+                "Logical operator '&&' requires boolean operands, found '{}' and '{}'",
+                left_value.type_name(),
+                right_value.type_name()
+            )),
+        };
+    }
+
     // Check binary comparison operators (==, !=, <=, >=, <, >)
     for comparison_operator in &["==", "!=", "<=", ">=", "<", ">"] {
         if let Some(operator_position) = trimmed_expression.find(comparison_operator) {

@@ -1063,6 +1063,17 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
+    #[error("Catch clause type '{catch_type}' does not inherit from 'solix.core.Exception'")]
+    #[diagnostic(
+        code(solix::binder::catch_type_not_exception),
+        help("Catch clauses can only target classes that extend 'solix.core.Exception'.")
+    )]
+    CatchTypeNotException {
+        catch_type: String,
+        #[label("type is not an Exception subclass")]
+        span: SourceSpan,
+    },
+
     #[error("Incompatible dependency version for package '{name}': {reason}")]
     #[diagnostic(
         code(solix::binder::incompatible_dependency_version),
@@ -1419,6 +1430,7 @@ impl BindingError {
             Self::VirtualCallInDestructorForbidden { .. } => "E0304",
             Self::SymbolCollidesWithPackageName { .. } => "E0305",
             Self::InexhaustiveEnumSwitch { .. } => "E0306",
+            Self::CatchTypeNotException { .. } => "E0315",
         }
     }
 
@@ -1426,7 +1438,8 @@ impl BindingError {
     #[must_use]
     pub const fn source_span(&self) -> SourceSpan {
         match self {
-            Self::UndefinedSymbol { span, .. }
+            Self::CatchTypeNotException { span, .. }
+            | Self::UndefinedSymbol { span, .. }
             | Self::DuplicateSymbol { span, .. }
             | Self::TypeMismatch { span, .. }
             | Self::CyclicInheritance { span, .. }

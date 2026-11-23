@@ -472,6 +472,14 @@ fn verify_instruction(
 
         OpCode::PackClosure => {
             check_reg(instruction.call_dst(), "closure_dst")?;
+            let target_function_id = instruction.call_target() as usize;
+            if target_function_id >= total_functions {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: closure target function ID {target_function_id} exceeds total function count {total_functions}"
+                    ),
+                });
+            }
             let capture_count = instruction.arg_count() as u16;
             if capture_count > 0 {
                 let capture_base = instruction.arg_base();

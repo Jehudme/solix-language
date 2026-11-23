@@ -19,7 +19,7 @@ public class BitSet implements IStringable {
         if (initial_bit_count < 0) {
             throw new IllegalArgumentException("initial_bit_count", "BitSet size cannot be negative");
         }
-        int32 required_word_count = (initial_bit_count + 63) / 64;
+        int32 required_word_count = (initial_bit_count / 64) + ((initial_bit_count % 64 != 0) ? 1 : 0);
         if (required_word_count < 1) {
             required_word_count = 1;
         }
