@@ -204,6 +204,46 @@ fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Opti
 }
 
 impl<'ctx> TypeCheckingVisitor<'ctx> {
+    fn is_read_only_symbol(&self, symbol_entry: &SymbolEntry) -> bool {
+        if self.symbol_table.scope_stack.iter().any(|lexical_scope| {
+            lexical_scope
+                .values()
+                .any(|&identifier_id| identifier_id == symbol_entry.id)
+        }) {
+            return false;
+        }
+
+        if self.layouts.contains_key(&symbol_entry.id) {
+            return true;
+        }
+
+        if let Some(parent_symbol_id) = symbol_entry.parent_symbol {
+            if let Some(class_layout) = self.layouts.get(&parent_symbol_id) {
+                if class_layout.method_slots.contains_key(&symbol_entry.name) {
+                    return true;
+                }
+                if class_layout.field_offsets.contains_key(&symbol_entry.name) {
+                    return false;
+                }
+            }
+            if symbol_entry.name == "constructor" || symbol_entry.name == "destructor" {
+                return true;
+            }
+        }
+
+        if matches!(symbol_entry.symbol_type, Type::FunctionPointer { .. }) {
+            return true;
+        }
+
+        if let Type::Enum { ref symbol_name } = symbol_entry.symbol_type
+            && (symbol_name == &symbol_entry.name || symbol_name.ends_with(&symbol_entry.name))
+        {
+            return true;
+        }
+
+        matches!(symbol_entry.symbol_type, Type::Alias { .. })
+    }
+
     pub fn class_implements_equality_operator(&self, symbol_name: &str) -> bool {
         let simple_name = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
         for candidate in [symbol_name, simple_name] {
@@ -1888,27 +1928,37 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
             Expression::Assignment { target, value, .. } => {
                 let target_type = self.evaluate_expression_type(target);
 
-                // Check const assignment
+                // Check const and L-value assignment
                 match &**target {
-                    Expression::Identifier { span: id_span } => {
-                        let id_name = if id_span.end as usize <= self.source_text.len() {
-                            &self.source_text[id_span.start as usize..id_span.end as usize]
-                        } else {
-                            ""
-                        };
-                        if id_name == "this" || id_name == "super" {
+                    Expression::Identifier {
+                        span: identifier_span,
+                    } => {
+                        let identifier_name =
+                            if identifier_span.end as usize <= self.source_text.len() {
+                                &self.source_text
+                                    [identifier_span.start as usize..identifier_span.end as usize]
+                            } else {
+                                ""
+                            };
+                        if identifier_name == "this" || identifier_name == "super" {
                             self.errors.push(BindingError::CannotAssignToReadOnly {
-                                name: id_name.to_string(),
-                                span: id_span.to_source_span(),
+                                name: identifier_name.to_string(),
+                                span: identifier_span.to_source_span(),
                             });
-                        } else if let Some(&sym_id) = self.resolved_symbols.get(id_span)
-                            && let Some(sym_entry) = self.symbol_table.get_symbol(sym_id)
-                            && sym_entry.is_const
+                        } else if let Some(&symbol_id) = self.resolved_symbols.get(identifier_span)
+                            && let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id)
                         {
-                            self.errors.push(BindingError::CannotAssignToConst {
-                                variable_name: id_name.to_string(),
-                                span: id_span.to_source_span(),
-                            });
+                            if symbol_entry.is_const {
+                                self.errors.push(BindingError::CannotAssignToConst {
+                                    variable_name: identifier_name.to_string(),
+                                    span: identifier_span.to_source_span(),
+                                });
+                            } else if self.is_read_only_symbol(symbol_entry) {
+                                self.errors.push(BindingError::CannotAssignToReadOnly {
+                                    name: identifier_name.to_string(),
+                                    span: identifier_span.to_source_span(),
+                                });
+                            }
                         }
                     }
                     Expression::MemberAccess { member_span, .. } => {
@@ -1917,17 +1967,29 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         } else {
                             ""
                         };
-                        if let Some(&sym_id) = self.resolved_symbols.get(member_span)
-                            && let Some(sym_entry) = self.symbol_table.get_symbol(sym_id)
-                            && sym_entry.is_const
+                        if let Some(&symbol_id) = self.resolved_symbols.get(member_span)
+                            && let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id)
                         {
-                            self.errors.push(BindingError::CannotAssignToConst {
-                                variable_name: member_name.to_string(),
-                                span: member_span.to_source_span(),
-                            });
+                            if symbol_entry.is_const {
+                                self.errors.push(BindingError::CannotAssignToConst {
+                                    variable_name: member_name.to_string(),
+                                    span: member_span.to_source_span(),
+                                });
+                            } else if self.is_read_only_symbol(symbol_entry) {
+                                self.errors.push(BindingError::CannotAssignToReadOnly {
+                                    name: member_name.to_string(),
+                                    span: member_span.to_source_span(),
+                                });
+                            }
                         }
                     }
-                    _ => {}
+                    Expression::ArrayAccess { .. } => {}
+                    _ => {
+                        self.errors.push(BindingError::CannotAssignToReadOnly {
+                            name: "<expression>".to_string(),
+                            span: target.span().to_source_span(),
+                        });
+                    }
                 }
 
                 let value_type = match &**value {

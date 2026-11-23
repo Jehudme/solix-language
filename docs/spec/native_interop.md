@@ -97,13 +97,13 @@ pub unsafe extern "C" fn solix_register_natives(
 ## 4. Host Memory Operations via `SolixVmContext`
 
 Native functions can read and write heap structures via VM helper callbacks:
-- `alloc_byte_array`: Allocates contiguous byte buffer on virtual heap.
+- `alloc_byte_array`: Allocates contiguous byte buffer on virtual heap using checked arithmetic.
 - `alloc_string`: Allocates immutable raw UTF-8 string buffer (`BlockTag::String`) and tracks its address for clean teardown upon runtime shutdown.
-- `alloc_chars`: Allocates unpacked `char[]` array buffer for Solix character slice operations.
-- `alloc_array`: Allocates typed array of specified length.
+- `alloc_chars`: Allocates unpacked `char[]` array buffer for Solix character slice operations using checked arithmetic.
+- `alloc_array`: Allocates typed array of specified length with checked capacity bounds.
 - `array_len`: Returns element count of heap array.
 - `array_get_u64` & `array_set_u64`: Accesses elements by index. For `float32[]` arrays (`type_tag == 9`), transparently normalizes between 32-bit heap bit-patterns and standard IEEE-754 64-bit float representations.
-- `alloc_object`: Allocates an object instance on the virtual heap, reserving `class_desc.instance_size.max(8 + field_count * 8)` bytes for proper field layout alignment.
+- `alloc_object`: Allocates an object instance on the virtual heap, reserving `class_descriptor.instance_size.max(8 + field_count * 8)` bytes via checked arithmetic to prevent integer overflow.
 - `get_class_vtable_id`: Resolves the unique virtual table index for a class by name (`*const c_char`), enabling typed object instantiation via `alloc_object`.
 - `read_field_u64`: Reads a field slot from a heap object using resolved field index or direct byte offset, adapting byte width and IEEE-754 bit-encoding according to class type tags (e.g. reading 32-bit `float32` bits without clobbering adjacent fields, and extracting untagged addresses from Tag 12 `Value::Ref`).
 - `write_field_u64`: Writes a field value to a heap object's slot according to resolved type tags, writing only the defined field size (1, 2, 4, or 8 bytes), storing `float32` bits into 4-byte slots, and applying `Value::TAG_REF` boxing for Tag 12 reference fields.

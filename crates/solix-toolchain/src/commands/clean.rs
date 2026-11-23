@@ -7,21 +7,27 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
-/// Computes the total byte size and file count in a directory recursively.
+/// Computes the total byte size and file count in a directory recursively without traversing symlinks.
 fn count_files_and_bytes(directory: &Path) -> (usize, u64) {
     let mut file_count: usize = 0;
     let mut total_bytes: u64 = 0;
 
     if let Ok(entries) = fs::read_dir(directory) {
         for entry_result in entries.flatten() {
-            let entry_path = entry_result.path();
-            if entry_path.is_dir() {
+            let file_type = match entry_result.file_type() {
+                Ok(resolved_type) => resolved_type,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() && !file_type.is_symlink() {
+                let entry_path = entry_result.path();
                 let (sub_count, sub_bytes) = count_files_and_bytes(&entry_path);
                 file_count += sub_count;
                 total_bytes += sub_bytes;
-            } else if entry_path.is_file() {
+            } else if file_type.is_file() {
                 file_count += 1;
                 total_bytes += entry_result.metadata().map_or(0, |metadata| metadata.len());
+            } else if file_type.is_symlink() {
+                file_count += 1;
             }
         }
     }
@@ -92,4 +98,36 @@ pub fn execute_clean(args: CleanArgs) -> Result<()> {
     );
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_count_files_and_bytes_avoids_recursing_into_symlinks() {
+        let temporary_root = tempfile::tempdir().expect("create temp dir");
+        let root_path = temporary_root.path();
+        let sub_directory = root_path.join("artifacts");
+        std::fs::create_dir_all(&sub_directory).expect("create artifacts dir");
+
+        let sample_file = sub_directory.join("payload.bin");
+        std::fs::write(&sample_file, b"test content bytes").expect("write payload");
+
+        #[cfg(unix)]
+        {
+            let recursive_symlink = sub_directory.join("loop");
+            let _ = std::os::unix::fs::symlink(root_path, &recursive_symlink);
+        }
+
+        let (file_count, total_bytes) = count_files_and_bytes(root_path);
+        assert!(
+            file_count >= 1,
+            "Must count files without overflowing stack on symlinks"
+        );
+        assert!(
+            total_bytes >= 18,
+            "Must sum byte count of actual regular files"
+        );
+    }
 }
