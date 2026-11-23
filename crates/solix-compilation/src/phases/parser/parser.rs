@@ -4262,6 +4262,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             });
         }
         let mut parameters = Vec::new();
+        let mut has_encountered_default_parameter = false;
 
         if !self.cursor.check(TokenKind::PunctuationCloseParen) {
             loop {
@@ -4296,6 +4297,14 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 } else {
                     None
                 };
+
+                if default_value.is_some() {
+                    has_encountered_default_parameter = true;
+                } else if has_encountered_default_parameter && !is_variadic {
+                    self.record_error(ParsingError::RequiredParameterAfterDefaultParameter {
+                        span: name_span.to_source_span(),
+                    });
+                }
 
                 let span = start_span.combine(
                     default_value

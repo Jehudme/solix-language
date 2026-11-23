@@ -79,6 +79,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
   - Constructs constant tables for strings, 64-bit floats, and large integers.
   - Performs whole-program reachability analysis and static linking (`--link static`): relocates constant pool references (`LoadConst`, `LoadF64`, `CallExtern`, `CallSymbol`, `AllocObjectExtern`, `GetStaticGlobal`, `SetStaticGlobal`), remaps `CallDirect` / `TailCallDirect` / `PackClosure`, imports dependency classes with collision-free vtable IDs and arity-matched constructor overloads, preserves all dependency class descriptors for runtime native FFI reflection (`solix_vm_get_class_vtable_id`), merges dependency static spaces and `@init` initializers, and preserves exported library functions when compiling library containers without an executable entrypoint.
   - Preserves namespace-qualified class identifiers during method and constructor emission: extracts enclosing class paths using reverse delimiter splitting (`rsplit_once("::")`) rather than truncating to root package segments, ensuring precise class layout resolution, field offset binding, and conflict-free overload registration.
+  - Pre-evaluates enum declarations and collects variant values using signed 64-bit integer tracking with wrapping increments, safely accommodating negative explicit values and auto-increment sequences without arithmetic overflow.
 
 ### 2.6. Binary Packaging & Serialization
 - **Input**: `CompiledProgram` and manifest configuration (`manifest.toml`).

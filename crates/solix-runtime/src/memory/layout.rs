@@ -224,5 +224,8 @@ impl BlockHeader {
 /// Aligns a byte size up to the nearest multiple of `ALIGNMENT` (8 bytes).
 #[must_use]
 pub const fn align_up(size: usize) -> usize {
-    (size + ALIGNMENT - 1) & !(ALIGNMENT - 1)
+    match size.checked_add(ALIGNMENT - 1) {
+        Some(aligned) => aligned & !(ALIGNMENT - 1),
+        None => usize::MAX,
+    }
 }

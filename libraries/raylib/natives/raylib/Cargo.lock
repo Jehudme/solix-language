@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "raylib_native"
+name = "__native_raylib"
 version = "5.5.0"

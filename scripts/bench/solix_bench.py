@@ -21,6 +21,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -380,9 +381,44 @@ class BenchmarkRunner:
             errors="replace",
             cwd=str(self.root_dir),
         )
+        measured_peak_rss_kilobytes = 0
+        stop_sampling_event = threading.Event()
+
+        def sample_memory_telemetry() -> None:
+            nonlocal measured_peak_rss_kilobytes
+            if OS_NAME != "Linux" or process.pid is None:
+                return
+            status_file_path = Path(f"/proc/{process.pid}/status")
+            while not stop_sampling_event.is_set():
+                try:
+                    if status_file_path.is_file():
+                        for status_line in status_file_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        ).splitlines():
+                            if status_line.startswith(("VmHWM:", "VmRSS:")):
+                                status_parts = status_line.split()
+                                if len(status_parts) >= 2:
+                                    status_value = int(status_parts[1])
+                                    if status_value > measured_peak_rss_kilobytes:
+                                        measured_peak_rss_kilobytes = status_value
+                except Exception:
+                    break
+                time.sleep(0.001)
+
+        sampler_thread = threading.Thread(
+            target=sample_memory_telemetry, daemon=True
+        )
+        sampler_thread.start()
+
         stdout, _stderr = process.communicate()
         duration_ms = (time.perf_counter() - start_time) * 1000.0
-        rss_kb = get_peak_rss_kb(process.pid)
+        stop_sampling_event.set()
+        sampler_thread.join(timeout=0.01)
+        rss_kb = (
+            measured_peak_rss_kilobytes
+            if measured_peak_rss_kilobytes > 0
+            else get_peak_rss_kb(process.pid)
+        )
         return process.returncode, stdout.strip(), duration_ms, rss_kb
 
     def extract_result_checksum(self, output: str) -> Optional[str]:

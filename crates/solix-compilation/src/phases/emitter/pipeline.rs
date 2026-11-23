@@ -262,18 +262,18 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 match declaration {
                     Declaration::Enum(enum_decl) => {
                         let enum_name = get_span_text(enum_decl.name_span, code);
-                        let mut current_variant_value = 0u32;
+                        let mut current_variant_value = 0i64;
                         for (variant_index, variant) in enum_decl.variants.iter().enumerate() {
                             let variant_name = get_span_text(variant.name_span, code);
                             if let Some(explicit) = &variant.explicit_value {
                                 if let Some(integer_value) = evaluate_integer_constant(explicit) {
-                                    current_variant_value = integer_value as u32;
+                                    current_variant_value = integer_value;
                                 }
                             } else if variant_index > 0 {
-                                current_variant_value += 1;
+                                current_variant_value = current_variant_value.wrapping_add(1);
                             }
                             let full_symbol = format!("{enum_name}::{variant_name}");
-                            enum_variants.insert(full_symbol, current_variant_value);
+                            enum_variants.insert(full_symbol, current_variant_value as u32);
                         }
                     }
                     Declaration::Class(class_decl) => {
@@ -281,7 +281,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         for member in &class_decl.members {
                             if let ClassMember::Enum(enum_decl) = member {
                                 let enum_name = get_span_text(enum_decl.name_span, code);
-                                let mut current_variant_value = 0u32;
+                                let mut current_variant_value = 0i64;
                                 for (variant_index, variant) in
                                     enum_decl.variants.iter().enumerate()
                                 {
@@ -290,17 +290,18 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                                         if let Some(integer_value) =
                                             evaluate_integer_constant(explicit)
                                         {
-                                            current_variant_value = integer_value as u32;
+                                            current_variant_value = integer_value;
                                         }
                                     } else if variant_index > 0 {
-                                        current_variant_value += 1;
+                                        current_variant_value =
+                                            current_variant_value.wrapping_add(1);
                                     }
                                     let full_symbol =
                                         format!("{class_name}::{enum_name}::{variant_name}");
-                                    enum_variants.insert(full_symbol, current_variant_value);
+                                    enum_variants.insert(full_symbol, current_variant_value as u32);
                                     enum_variants.insert(
                                         format!("{enum_name}::{variant_name}"),
-                                        current_variant_value,
+                                        current_variant_value as u32,
                                     );
                                 }
                             }

@@ -312,6 +312,16 @@ pub enum ParsingError {
         span: SourceSpan,
     },
 
+    #[error("Required parameter cannot follow optional parameter with default value")]
+    #[diagnostic(
+        code(solix::parser::required_parameter_after_default),
+        help("Move optional parameters with default values after all required parameters.")
+    )]
+    RequiredParameterAfterDefaultParameter {
+        #[label("required parameter following optional parameter")]
+        span: SourceSpan,
+    },
+
     #[error("Class cannot declare multiple destructors")]
     #[diagnostic(
         code(solix::parser::multiple_destructors_in_class),
@@ -1084,6 +1094,7 @@ impl ParsingError {
             Self::MalformedAlias { .. } => "E0146",
             Self::UnexpectedToken { .. } => "E0147",
             Self::ExpressionNestingDepthExceeded { .. } => "E0148",
+            Self::RequiredParameterAfterDefaultParameter { .. } => "E0149",
             Self::IntegerLiteralOverflow { .. } => "E0150",
             Self::InvalidEscapeSequence { .. } => "E0151",
             Self::EmptyCharacterLiteral { .. } => "E0152",
@@ -1188,6 +1199,7 @@ impl ParsingError {
             | Self::MalformedAlias { span }
             | Self::UnexpectedToken { span }
             | Self::ExpressionNestingDepthExceeded { span }
+            | Self::RequiredParameterAfterDefaultParameter { span }
             | Self::IntegerLiteralOverflow { span }
             | Self::InvalidEscapeSequence { span }
             | Self::EmptyCharacterLiteral { span }
