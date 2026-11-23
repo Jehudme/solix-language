@@ -336,20 +336,25 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
 ---
 
 ### `E0253`: Cannot Assign To Read-Only Target
-* **Cause:** Attempted to reassign an intrinsic read-only reference such as `this` or `super`.
+* **Cause:** Attempted to reassign an intrinsic read-only reference (`this`, `super`), or assign to a non-assignable symbol (such as a method, free function, class, interface, enum, or expression).
 * **Bad Code:**
   ```solix
   class State {
+      public void execute() {}
+
       public void replace() {
           this = new State();
+          this.execute = 10;
       }
   }
   ```
 * **Fixed Code:**
   ```solix
   class State {
-      public void copy_from(State other) {
-          // Mutate fields instead of reassigning this
+      public int32 counter = 0;
+
+      public void update(int32 next_value) {
+          this.counter = next_value;
       }
   }
   ```

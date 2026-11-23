@@ -63,3 +63,7 @@ If no `build/` directory or `build/.cache/` directory exists, `solix clean` comp
 ```text
 No build directory found at '/path/to/project/build'. Nothing to clean.
 ```
+
+### 4. Symlink Traversal Safety
+
+When calculating the file count and byte footprint of the cleanup target, `solix clean` inspects filesystem metadata without following directory symlinks. This prevents infinite recursive descent or stack exhaustion when projects contain cyclic directory links.

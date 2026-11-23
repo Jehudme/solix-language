@@ -744,7 +744,13 @@ pub unsafe extern "C" fn solix_vm_alloc_chars(
         Some(resolved_instance) => resolved_instance,
         None => return 0,
     };
-    let payload_size = 8 + (char_count as usize) * 8;
+    let payload_size = match (char_count as usize)
+        .checked_mul(8)
+        .and_then(|computed_bytes| computed_bytes.checked_add(8))
+    {
+        Some(calculated_size) if calculated_size <= u32::MAX as usize => calculated_size,
+        _ => return 0,
+    };
     let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
         Ok(allocated_address) => allocated_address,
         Err(_) => return 0,
@@ -757,7 +763,14 @@ pub unsafe extern "C" fn solix_vm_alloc_chars(
         let source_slice =
             unsafe { std::slice::from_raw_parts(source_pointer, char_count as usize) };
         for (character_index, &character_byte) in source_slice.iter().enumerate() {
-            let slot_address = array_address + 8 + (character_index as u32 * 8);
+            let offset_bytes = match (character_index as u32)
+                .checked_mul(8)
+                .and_then(|relative_offset| relative_offset.checked_add(8))
+            {
+                Some(computed_offset) => computed_offset,
+                None => break,
+            };
+            let slot_address = array_address + offset_bytes;
             let _ = vm_instance
                 .heap
                 .write_u64(slot_address, character_byte as u64);
@@ -781,7 +794,13 @@ pub unsafe extern "C" fn solix_vm_alloc_byte_array(
         Some(resolved_instance) => resolved_instance,
         None => return 0,
     };
-    let payload_size = 8 + (byte_count as usize) * 8;
+    let payload_size = match (byte_count as usize)
+        .checked_mul(8)
+        .and_then(|computed_bytes| computed_bytes.checked_add(8))
+    {
+        Some(calculated_size) if calculated_size <= u32::MAX as usize => calculated_size,
+        _ => return 0,
+    };
     let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
         Ok(allocated_address) => allocated_address,
         Err(_) => return 0,
@@ -794,7 +813,14 @@ pub unsafe extern "C" fn solix_vm_alloc_byte_array(
         let source_slice =
             unsafe { std::slice::from_raw_parts(source_pointer, byte_count as usize) };
         for (byte_index, &raw_byte) in source_slice.iter().enumerate() {
-            let slot_address = array_address + 8 + (byte_index as u32 * 8);
+            let offset_bytes = match (byte_index as u32)
+                .checked_mul(8)
+                .and_then(|relative_offset| relative_offset.checked_add(8))
+            {
+                Some(computed_offset) => computed_offset,
+                None => break,
+            };
+            let slot_address = array_address + offset_bytes;
             let _ = vm_instance
                 .heap
                 .write_u64(slot_address, (raw_byte as i8 as i64) as u64);
@@ -817,7 +843,13 @@ pub unsafe extern "C" fn solix_vm_alloc_array(
         Some(resolved_instance) => resolved_instance,
         None => return 0,
     };
-    let payload_size = 8 + (element_count as usize) * 8;
+    let payload_size = match (element_count as usize)
+        .checked_mul(8)
+        .and_then(|computed_bytes| computed_bytes.checked_add(8))
+    {
+        Some(calculated_size) if calculated_size <= u32::MAX as usize => calculated_size,
+        _ => return 0,
+    };
     let array_address = match vm_instance.heap.allocate(payload_size, BlockTag::ArrayRef) {
         Ok(allocated_address) => allocated_address,
         Err(_) => return 0,
@@ -956,7 +988,13 @@ pub unsafe extern "C" fn solix_vm_alloc_object(
         Some(resolved_instance) => resolved_instance,
         None => return 0,
     };
-    let min_size = 8 + (field_count as usize) * 8;
+    let min_size = match (field_count as usize)
+        .checked_mul(8)
+        .and_then(|computed_bytes| computed_bytes.checked_add(8))
+    {
+        Some(calculated_size) if calculated_size <= u32::MAX as usize => calculated_size,
+        _ => return 0,
+    };
     let class_descriptor = vm_instance.context.get_class_by_vtable_id(class_vtable_id);
     let payload_size = class_descriptor.map_or(min_size, |target_class| {
         target_class.instance_size.max(min_size)

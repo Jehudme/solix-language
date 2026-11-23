@@ -294,14 +294,74 @@ fn verify_instruction(
             }
         }
 
-        OpCode::CallVirtual
-        | OpCode::CallInterface
-        | OpCode::CallSymbol
-        | OpCode::CallCallable
-        | OpCode::CallExtern
-        | OpCode::CallNativeDirect
-        | OpCode::CallVirtualDirect => {
+        OpCode::CallNativeDirect => {
             check_reg(instruction.call_dst(), "call_dst")?;
+            let target_id = instruction.call_target() as usize;
+            if target_id >= total_functions {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: call target function ID {target_id} exceeds total function count {total_functions}"
+                    ),
+                });
+            }
+            let argument_count = instruction.arg_count() as u16;
+            if argument_count > 0 {
+                let argument_base = instruction.arg_base();
+                let argument_limit = argument_base.saturating_add(argument_count);
+                if argument_limit > register_count {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: call argument window [{argument_base}..{argument_limit}] exceeds allocated register count {register_count}"
+                        ),
+                    });
+                }
+            }
+        }
+
+        OpCode::CallSymbol | OpCode::CallExtern => {
+            check_reg(instruction.call_dst(), "call_dst")?;
+            let pool_index = instruction.call_target() as usize;
+            if pool_index >= constant_pool_len {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: constant pool index {pool_index} exceeds constant pool size {constant_pool_len}"
+                    ),
+                });
+            }
+            let argument_count = instruction.arg_count() as u16;
+            if argument_count > 0 {
+                let argument_base = instruction.arg_base();
+                let argument_limit = argument_base.saturating_add(argument_count);
+                if argument_limit > register_count {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: call argument window [{argument_base}..{argument_limit}] exceeds allocated register count {register_count}"
+                        ),
+                    });
+                }
+            }
+        }
+
+        OpCode::CallCallable => {
+            check_reg(instruction.call_dst(), "call_dst")?;
+            check_reg(instruction.call_target(), "callee_reg")?;
+            let argument_count = instruction.arg_count() as u16;
+            if argument_count > 0 {
+                let argument_base = instruction.arg_base();
+                let argument_limit = argument_base.saturating_add(argument_count);
+                if argument_limit > register_count {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: call argument window [{argument_base}..{argument_limit}] exceeds allocated register count {register_count}"
+                        ),
+                    });
+                }
+            }
+        }
+
+        OpCode::CallVirtual | OpCode::CallInterface | OpCode::CallVirtualDirect => {
+            check_reg(instruction.call_dst(), "call_dst")?;
+            check_reg(instruction.arg_base(), "receiver_reg")?;
             let argument_count = instruction.arg_count() as u16;
             if argument_count > 0 {
                 let argument_base = instruction.arg_base();
@@ -422,9 +482,15 @@ fn verify_instruction(
             }
         }
 
-        OpCode::Instanceof | OpCode::CastCheck | OpCode::TupleInstanceof => {
+        OpCode::Instanceof | OpCode::CastCheck => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "instance_reg")?;
+        }
+
+        OpCode::TupleInstanceof => {
+            check_reg(instruction.dst(), "dst")?;
+            check_reg(instruction.src1(), "tuple_reg")?;
+            check_reg(instruction.src2(), "index_reg")?;
         }
 
         OpCode::Throw => {

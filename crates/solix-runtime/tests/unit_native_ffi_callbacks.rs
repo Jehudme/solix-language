@@ -467,3 +467,57 @@ fn test_call_symbol_does_not_quicken_native_wrapper_stub_into_self_recursion() {
         vec!["hello_once".to_string(), "hello_twice".to_string()]
     );
 }
+
+#[test]
+fn test_ffi_allocators_checked_arithmetic_overflow_guards() {
+    let options = RuntimeOptions::new().with_binary(BinaryProgram::new());
+    let context = RuntimeContext::new(options).expect("construct runtime context");
+    let mut virtual_machine = VirtualMachine::new(context);
+    let vm_pointer = &mut virtual_machine as *mut VirtualMachine as *mut c_void;
+
+    let sample_bytes = [65u8, 66u8, 67u8];
+    // Positive checks
+    let valid_chars = unsafe {
+        solix_vm_alloc_chars(vm_pointer, sample_bytes.as_ptr(), sample_bytes.len() as u32)
+    };
+    assert!(valid_chars > 0, "Valid char allocation must succeed");
+
+    let valid_byte_array = unsafe {
+        solix_vm_alloc_byte_array(vm_pointer, sample_bytes.as_ptr(), sample_bytes.len() as u32)
+    };
+    assert!(
+        valid_byte_array > 0,
+        "Valid byte array allocation must succeed"
+    );
+
+    let valid_array = unsafe { solix_vm_alloc_array(vm_pointer, 10, 4) };
+    assert!(valid_array > 0, "Valid array allocation must succeed");
+
+    let valid_object = unsafe { solix_vm_alloc_object(vm_pointer, 0, 4) };
+    assert!(valid_object > 0, "Valid object allocation must succeed");
+
+    // Negative overflow checks
+    let overflow_count = u32::MAX;
+    let overflow_chars =
+        unsafe { solix_vm_alloc_chars(vm_pointer, std::ptr::null(), overflow_count) };
+    assert_eq!(overflow_chars, 0, "Overflowing char count must return null");
+
+    let overflow_byte_array =
+        unsafe { solix_vm_alloc_byte_array(vm_pointer, std::ptr::null(), (u32::MAX / 8) + 10) };
+    assert_eq!(
+        overflow_byte_array, 0,
+        "Overflowing byte count must return null"
+    );
+
+    let overflow_array = unsafe { solix_vm_alloc_array(vm_pointer, (u32::MAX / 8) + 10, 1) };
+    assert_eq!(
+        overflow_array, 0,
+        "Overflowing array count must return null"
+    );
+
+    let overflow_object = unsafe { solix_vm_alloc_object(vm_pointer, 0, (u32::MAX / 8) + 10) };
+    assert_eq!(
+        overflow_object, 0,
+        "Overflowing object count must return null"
+    );
+}

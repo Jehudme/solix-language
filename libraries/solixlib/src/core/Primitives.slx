@@ -82,6 +82,9 @@ public class Primitives {
         if (value <= 1) {
             return 1;
         }
+        if (value >= 1073741824) {
+            return 1073741824;
+        }
         value = value - 1;
         value = value | (value >> 1);
         value = value | (value >> 2);

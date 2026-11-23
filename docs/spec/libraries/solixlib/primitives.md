@@ -58,6 +58,7 @@ Class `solix.core.Primitives` provides native bit manipulation, floating-point q
 - `static count_trailing_zeros(int32 val) -> int32`: Fast native trailing zero count (`ctz`).
 - `static bit_count(int32 val) -> int32`: Population count (`popcount`).
 - `static reverse_bytes(int32 val) -> int32`: Byte reversal (`bswap32`).
+- `static next_power_of_two32(int32 value) -> int32`: Smallest power of two greater than or equal to `value`, clamping at `1073741824` for values `>= 1073741824` to prevent signed overflow.
 - `MIN_INT`: `-2147483648`
 - `MAX_INT`: `2147483647`
 
