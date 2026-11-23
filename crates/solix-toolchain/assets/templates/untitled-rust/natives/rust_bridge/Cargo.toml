@@ -1,9 +1,10 @@
 [package]
-name = "rust_bridge"
+name = "__native_rust_bridge"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
 
 [lib]
+name = "__native_rust_bridge"
 crate-type = ["cdylib"]

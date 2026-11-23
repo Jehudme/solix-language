@@ -607,9 +607,8 @@ fn test_positive_native_package_cache_hit_and_parallel_safety() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
     let stage_dir = temp_dir.path().join("stage");
     let bin_dir = stage_dir.join("bin");
-    let lib_dir = stage_dir.join("lib");
+    let lib_dir = stage_dir.join("bin");
     std::fs::create_dir_all(&bin_dir).expect("create bin dir");
-    std::fs::create_dir_all(&lib_dir).expect("create lib dir");
 
     let manifest_content = r#"
 [configuration]
@@ -621,11 +620,11 @@ version = "1.0.0"
     std::fs::write(stage_dir.join("manifest.toml"), manifest_content).expect("write manifest");
 
     #[cfg(target_os = "windows")]
-    let host_lib_name = "libnativepkg.dll";
+    let host_lib_name = "__native_nativepkg.dll";
     #[cfg(target_os = "macos")]
-    let host_lib_name = "libnativepkg.dylib";
+    let host_lib_name = "lib__native_nativepkg.dylib";
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let host_lib_name = "libnativepkg.so";
+    let host_lib_name = "lib__native_nativepkg.so";
 
     let lib_bytes = b"simulated_native_library_payload_for_atomic_cache_test";
     let lib_path = lib_dir.join(host_lib_name);
@@ -635,7 +634,7 @@ version = "1.0.0"
     let mut program = BinaryProgram::new();
     program
         .native_library_checksums
-        .insert(format!("lib/{host_lib_name}"), expected_hash.clone());
+        .insert(format!("bin/{host_lib_name}"), expected_hash.clone());
     std::fs::write(bin_dir.join("nativepkg.slxb"), program.to_bytes()).expect("write binary");
 
     let store_dir = temp_dir.path().join("packages");

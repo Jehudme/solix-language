@@ -1,11 +1,12 @@
 [package]
-name = "raylib_native"
+name = "__native_raylib"
 version = "5.5.0"
 edition = "2021"
 
 [workspace]
 
 [lib]
+name = "__native_raylib"
 crate-type = ["cdylib"]
 
 [dependencies]

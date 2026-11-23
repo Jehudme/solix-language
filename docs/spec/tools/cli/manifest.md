@@ -142,6 +142,7 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 | `post_compile` | List of Strings | `[]` | Shell/tool commands run sequentially after `.slxp` package packaging. |
 | `dependencies` | Mapping | `{}` | Profile-scoped dependency map (`name -> { version, profile }`). |
 | `natives` | Mapping | `{}` | Native subprojects compiled automatically for this profile. |
+| `libraries` | List of Strings | `[]` | External pre-compiled shared libraries (`.so`, `.dll`, `.dylib`) verified across all profile target platforms under `bin/<target_triple>/`. |
 
 ---
 
@@ -168,15 +169,20 @@ Under `profiles.<name>.natives.<key>`, each native entry omits any explicit `typ
 1. If `Cargo.toml` exists in the native directory -> built with Cargo. When `[features]` defines `solix-native`, `solix build` automatically enables `--features solix-native` and sets `SOLIX_NATIVE_BUILD=1`.
 2. Else if `CMakeLists.txt` exists in the native directory -> built with CMake. `solix build` automatically configures `-DSOLIX_NATIVE_BUILD=ON` and sets `SOLIX_NATIVE_BUILD=1` (plus `SOLIX_FFI_SOURCE_DIR` if a local checkout `ffi/c` exists).
 
+Native subprojects strictly inherit the parent profile's `platforms` setting. All built and pre-compiled native shared libraries are staged exclusively into `bin/<target_triple>/`.
+
 | Native Key Field | Type | Default | Description |
 |---|---|---|---|
 | `path` | String | `natives/<key>` | Relative path from project root to the native Cargo or CMake directory. |
 | `profile` | String | Parent Solix profile | Native optimization profile (`debug` or `release`). |
-| `platforms` | List of Strings | Parent profile `platforms` | Optional override of OS/target platforms for this native crate. |
 | `flags` | List of Strings | `[]` | Extra CMake (`-D...`) or Cargo (`--features ...`) flags. |
 | `strategy` | String | Auto-detected | Compilation strategy (`"host"`, `"zigbuild"`, `"docker"` / `"container"`). |
 | `docker` | Boolean | `false` | Shorthand to force containerized cross-compilation (`cross` for Rust, `dockcross` for CMake). |
 | `docker_image` | String | Standard image | Custom Docker container image override. |
+
+> [!NOTE]
+> **Native Autoloading Convention (`__native_<name>`):**
+> Solix automatically registers native FFI modules whose library filenames begin with `__native_<name>.<extension>` (or `lib__native_<name>.<extension>`). Auxiliary shared libraries packaged in `bin/<target_triple>/` that do not follow this prefix are copied for dynamic linking but are not registered as Solix FFI modules.
 
 > [!NOTE]
 > **Containerized Cross-Compilation (`strategy: docker`):**

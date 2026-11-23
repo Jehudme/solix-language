@@ -65,12 +65,12 @@ License:          Apache-2.0
   • test: TestRunner::test
 
 --- Native Shared Libraries (1) ---
-  • lib/libsolixlib_native.so [SHA-256: af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44]
+  • bin/x86_64-unknown-linux-gnu/libsolixlib_native.so [SHA-256: af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44]
 
 --- Contained Files (3) ---
-  • manifest.toml (size: 335B, compressed: 238B)
+  • manifest.yaml (size: 335B, compressed: 238B)
   • bin/solix.slxb (size: 1568252B, compressed: 346873B)
-  • lib/libsolixlib_native.so (size: 936336B, compressed: 350746B)
+  • bin/x86_64-unknown-linux-gnu/libsolixlib_native.so (size: 936336B, compressed: 350746B)
 
 --- Compiled Binaries (1) ---
   • bin/solix.slxb (profile: release, functions: 1872, classes: 134, static: 25B, SHA-256: 7251b9e23dfbb39087b5e6e8f4f37e9715b697e2f1d8cc395ac67cff6acd2b92)
@@ -95,6 +95,9 @@ When `<target>` points to a Solix project root containing `manifest.yaml` (or `m
 - Displays resolved target platforms (`universal`, `all`, `host`, or explicit architectures), entry points, optimization levels, inline thresholds, declared dependencies, and native bindings for each profile.
 - Scans `build/<profile>/` directories and enumerates any built artifacts (`.slxp`, `.slxarc`, `.slxb`), showing file sizes and platform capabilities.
 - `--json`: Emits complete structured JSON containing project manifest configuration and built artifact metadata.
+
+> [!IMPORTANT]
+> `solix info` cannot be run directly on `build/` or staging directories (`build/<profile>/stage`). It must be executed on the project root directory or on a compiled package container (`.slxp`, `.slxarc`, `.slxb`). Passing a build directory produces an immediate rejection error.
 
 ```bash
 solix info ./libraries/raylib/

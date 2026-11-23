@@ -104,6 +104,27 @@ fn test_solix_new_default_application() {
     assert!(bridge_dir.join("Cargo.toml").exists());
     assert!(bridge_dir.join("src").join("lib.rs").exists());
 
+    for triple in &[
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ] {
+        assert!(
+            target_project_directory
+                .join("bin")
+                .join(triple)
+                .join(".gitkeep")
+                .exists(),
+            "Pre-populated bin/{triple}/.gitkeep must exist"
+        );
+    }
+    assert!(
+        !target_project_directory.join("lib").exists(),
+        "Legacy lib/ directory must not be created"
+    );
+
     // Build debug profile via pure-Rust builder
     let build_arguments = BuildArgs {
         path: target_project_directory.clone(),
@@ -360,8 +381,8 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
     let cargo_toml_content =
         fs::read_to_string(rust_dir.join("Cargo.toml")).expect("read rust Cargo.toml");
     assert!(
-        cargo_toml_content.contains("name = \"native_fastmath\""),
-        "Generated Cargo.toml must name the library native_fastmath"
+        cargo_toml_content.contains("name = \"__native_fastmath\""),
+        "Generated Cargo.toml must name the library __native_fastmath"
     );
     // Standalone Cargo unit tests pass without --features solix-native
     let cargo_test_status = Command::new("cargo")
@@ -416,8 +437,8 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
     )
     .expect("read C CMakeLists.txt");
     assert!(
-        c_cmakelists.contains("add_library(native_calcc SHARED"),
-        "C CMakeLists.txt must create library native_calcc"
+        c_cmakelists.contains("add_library(__native_calcc SHARED"),
+        "C CMakeLists.txt must create library __native_calcc"
     );
     let cpp_cmakelists = fs::read_to_string(
         project_root
@@ -427,18 +448,19 @@ fn test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode() {
     )
     .expect("read C++ CMakeLists.txt");
     assert!(
-        cpp_cmakelists.contains("add_library(native_calccpp SHARED"),
-        "C++ CMakeLists.txt must create library native_calccpp"
+        cpp_cmakelists.contains("add_library(__native_calccpp SHARED"),
+        "C++ CMakeLists.txt must create library __native_calccpp"
     );
 
     let updated_manifest =
         ProjectManifest::from_file(project_root.join("manifest.yaml")).expect("reload manifest");
-    let release_cfg = updated_manifest
+    let release_configuration = updated_manifest
         .resolve_profile("release")
         .expect("release profile");
-    assert!(release_cfg.natives.contains_key("fastmath"));
-    assert!(release_cfg.natives.contains_key("calcc"));
-    assert!(release_cfg.natives.contains_key("calccpp"));
+    assert!(release_configuration.natives.contains_key("fastmath"));
+    assert!(release_configuration.natives.contains_key("calcc"));
+    assert!(release_configuration.natives.contains_key("calccpp"));
+    assert_eq!(release_configuration.platforms, vec!["host"]);
 
     // Wire Solix main.slx to call all three native libraries (Rust + C + C++)
     let combined_main = r#"
@@ -510,6 +532,8 @@ public class Main {
             "build",
             project_root.to_str().expect("valid path"),
             "--release",
+            "--target",
+            "host",
         ])
         .expect("parse solix build");
         assert_eq!(run(build_cli).expect("solix build release"), 0);

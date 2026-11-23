@@ -362,6 +362,9 @@ pub struct ProfileConfig {
     /// Declared dynamic shared library dependencies required by this profile.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_libraries: Vec<String>,
+    /// External pre-compiled shared libraries required by this profile.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub libraries: Vec<String>,
 }
 
 /// Fully resolved, self-contained profile configuration (no cross-profile inheritance).
@@ -395,6 +398,8 @@ pub struct ResolvedProfile {
     pub platforms: Vec<String>,
     /// Declared dynamic shared library dependencies.
     pub dynamic_libraries: Vec<String>,
+    /// Pre-compiled external shared libraries.
+    pub libraries: Vec<String>,
     /// Commands executed sequentially before native and Solix compilation.
     pub pre_compile: Vec<String>,
     /// Commands executed sequentially after packaging.
@@ -424,6 +429,7 @@ impl ResolvedProfile {
             sources: vec!["src".to_string()],
             platforms: vec!["all".to_string()],
             dynamic_libraries: Vec::new(),
+            libraries: Vec::new(),
             pre_compile: Vec::new(),
             post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
@@ -449,6 +455,7 @@ impl ResolvedProfile {
             sources: vec!["src".to_string()],
             platforms: vec!["host".to_string()],
             dynamic_libraries: Vec::new(),
+            libraries: Vec::new(),
             pre_compile: Vec::new(),
             post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
@@ -474,6 +481,7 @@ impl ResolvedProfile {
             sources: vec!["src".to_string(), "tests".to_string()],
             platforms: vec!["host".to_string()],
             dynamic_libraries: Vec::new(),
+            libraries: Vec::new(),
             pre_compile: Vec::new(),
             post_compile: Vec::new(),
             dependencies: std::collections::BTreeMap::new(),
@@ -840,11 +848,21 @@ impl ProjectManifest {
             resolved.post_compile = user_config.post_compile.clone();
             resolved.dependencies = user_config.dependencies.clone();
             resolved.natives = user_config.natives.clone();
+            if !user_config.libraries.is_empty() {
+                resolved.libraries = user_config.libraries.clone();
+            } else if !user_config.dynamic_libraries.is_empty() {
+                resolved.libraries = user_config.dynamic_libraries.clone();
+            }
             if !user_config.dynamic_libraries.is_empty() {
                 resolved.dynamic_libraries = user_config.dynamic_libraries.clone();
+            } else if !user_config.libraries.is_empty() {
+                resolved.dynamic_libraries = user_config.libraries.clone();
             }
         }
 
+        if resolved.libraries.is_empty() && !self.dynamic_libraries.is_empty() {
+            resolved.libraries = self.dynamic_libraries.clone();
+        }
         if resolved.dynamic_libraries.is_empty() && !self.dynamic_libraries.is_empty() {
             resolved.dynamic_libraries = self.dynamic_libraries.clone();
         }
@@ -889,18 +907,13 @@ fn strip_library_extension(name_str: &str) -> &str {
     }
 }
 
-/// Returns `true` if the shared library filename corresponds to a Solix native module (`native_*` or `libnative_*`).
+/// Returns `true` if the shared library filename corresponds to a Solix native module (`__native_*` or `lib__native_*`).
 #[must_use]
 pub fn is_solix_native_module_name(file_name: &str) -> bool {
     let lower_name = file_name.to_ascii_lowercase();
     let stem = strip_library_extension(&lower_name);
     let base = stem.strip_prefix("lib").unwrap_or(stem);
-    base.starts_with("native")
-        || base.ends_with("native")
-        || base.contains("_native_")
-        || base.starts_with("bridge")
-        || base.ends_with("bridge")
-        || base.contains("_bridge_")
+    base.starts_with("__native_")
 }
 
 /// Returns `true` if `file_name` matches a declared dynamic library specification,
@@ -1941,11 +1954,11 @@ version = "0.1.0"
         fs::write(bin_dir.join("pack_test.slxb"), &binary_bytes).unwrap();
 
         #[cfg(target_os = "windows")]
-        let host_lib_name = "native_test_lib.dll";
+        let host_lib_name = "__native_test_lib.dll";
         #[cfg(target_os = "macos")]
-        let host_lib_name = "libnative_test_lib.dylib";
+        let host_lib_name = "lib__native_test_lib.dylib";
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        let host_lib_name = "libnative_test_lib.so";
+        let host_lib_name = "lib__native_test_lib.so";
 
         fs::write(lib_dir.join(host_lib_name), b"dummy_so_bytes").unwrap();
 
@@ -2063,19 +2076,19 @@ version = "0.1.0"
         let (host_sub, wrong_sub, host_lib) = (
             "x86_64-pc-windows-msvc",
             "aarch64-pc-windows-msvc",
-            "native_test_lib.dll",
+            "__native_test_lib.dll",
         );
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         let (host_sub, wrong_sub, host_lib) = (
             "aarch64-apple-darwin",
             "x86_64-apple-darwin",
-            "libnative_test_lib.dylib",
+            "lib__native_test_lib.dylib",
         );
         #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
         let (host_sub, wrong_sub, host_lib) = (
             "x86_64-apple-darwin",
             "aarch64-apple-darwin",
-            "libnative_test_lib.dylib",
+            "lib__native_test_lib.dylib",
         );
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         let (host_sub, wrong_sub, host_lib) = (
@@ -2089,7 +2102,7 @@ version = "0.1.0"
             } else {
                 "aarch64-unknown-linux-gnu"
             },
-            "libnative_test_lib.so",
+            "lib__native_test_lib.so",
         );
 
         fs::create_dir_all(&bin_dir).unwrap();
@@ -2259,5 +2272,19 @@ version = "0.1.0"
             extract_result.is_err(),
             "Mismatched native library SHA-256 checksum MUST abort archive loading"
         );
+    }
+
+    #[test]
+    fn test_is_solix_native_module_name_requires_double_underscore_native_prefix() {
+        assert!(is_solix_native_module_name("__native_raylib.so"));
+        assert!(is_solix_native_module_name("lib__native_raylib.so"));
+        assert!(is_solix_native_module_name("__native_physics.dll"));
+        assert!(is_solix_native_module_name("lib__native_engine.dylib"));
+
+        assert!(!is_solix_native_module_name("raylib_native.so"));
+        assert!(!is_solix_native_module_name("libraylib_native.so"));
+        assert!(!is_solix_native_module_name("libglfw.so"));
+        assert!(!is_solix_native_module_name("openal.dll"));
+        assert!(!is_solix_native_module_name("cblas.dylib"));
     }
 }

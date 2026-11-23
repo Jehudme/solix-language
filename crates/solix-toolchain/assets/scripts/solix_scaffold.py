@@ -134,15 +134,27 @@ sources = ["tests"]
     src_dir = target_path / "src"
     tests_dir = target_path / "tests"
     resources_dir = target_path / "resources"
-    lib_dir = target_path / "lib"
+    bin_dir = target_path / "bin"
     natives_dir = target_path / "natives"
 
     scripts_dir.mkdir(parents=True, exist_ok=True)
     src_dir.mkdir(parents=True, exist_ok=True)
     tests_dir.mkdir(parents=True, exist_ok=True)
     resources_dir.mkdir(parents=True, exist_ok=True)
-    lib_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
     natives_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-populate all target platform subdirectories under bin/
+    for target_triple in (
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ):
+        target_platform_dir = bin_dir / target_triple
+        target_platform_dir.mkdir(parents=True, exist_ok=True)
+        (target_platform_dir / ".gitkeep").touch()
 
     # 5. Write scripts/build.py
     build_py_content = """#!/usr/bin/env python3
@@ -248,7 +260,7 @@ public class {pascal_name} {{
     if no_native:
         (natives_dir / ".gitkeep").touch()
     else:
-        bridge_name = f"{snake_name}_bridge"
+        bridge_name = f"__native_{snake_name}"
         bridge_dir = natives_dir / bridge_name
         bridge_src_dir = bridge_dir / "src"
         bridge_src_dir.mkdir(parents=True, exist_ok=True)
@@ -268,6 +280,7 @@ edition = "2024"
 [workspace]
 
 [lib]
+name = "{bridge_name}"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -299,9 +312,8 @@ solix_export!(
 """
         (bridge_src_dir / "lib.rs").write_text(bridge_lib_content, encoding="utf-8")
 
-    # 10. Placeholders for resources and lib
+    # 10. Placeholders for resources
     (resources_dir / ".gitkeep").touch()
-    (lib_dir / ".gitkeep").touch()
 
     print(f"Initialized Solix project '{project_name}' at '{target_path}'")
     return target_path

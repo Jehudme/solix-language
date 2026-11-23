@@ -88,10 +88,15 @@ my_app/
 ├── tests/
 │   └── test_main.slx         # Automated test entrypoint
 ├── resources/                # Application assets directory
-├── lib/                      # Optional prebuilt native shared libraries directory
+├── bin/                      # Pre-populated platform targets (x86_64, aarch64, windows, macos)
+│   ├── x86_64-unknown-linux-gnu/.gitkeep
+│   ├── aarch64-unknown-linux-gnu/.gitkeep
+│   ├── x86_64-pc-windows-msvc/.gitkeep
+│   ├── x86_64-apple-darwin/.gitkeep
+│   └── aarch64-apple-darwin/.gitkeep
 └── natives/
-    └── my_app_bridge/        # Dual-mode native bridge (Cargo or CMake)
-        ├── Cargo.toml        # Declares [features] solix-native
+    └── __native_my_app/      # Dual-mode native bridge (Cargo or CMake with __native_* prefix)
+        ├── Cargo.toml        # Declares [lib] name = "__native_my_app" and [features] solix-native
         └── src/lib.rs        # Core Rust API + #[cfg(feature = "solix-native")] bridge
 ```
 

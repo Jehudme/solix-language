@@ -69,11 +69,16 @@ solix build [path] [options]
 * `--release`: Shorthand for `--profile release` (optimizations enabled).
 * `--test`: Shorthand for `--profile test` (includes `tests/` sources and fixtures).
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
-* `--install`: Automatically installs the built `.slxp` into `~/.solix/packages`.
-* `--force`: Overwrites existing installed package when paired with `--install`.
+* `-i, --install`: Automatically installs the built `.slxp` into `~/.solix/packages`.
+* `-f, --force`: Overwrites existing installed package when paired with `--install`.
 * `--check-env` / `--verify-only`: Runs only Phase 0 pre-flight environment & toolchain verification without compiling.
 * `--target <triple>`: Compiles native subprojects for a single target triple or `"host"`.
 * `--platform <name>`: Builds all target architectures for the specified platform (`linux`, `windows`, `macos`, or `all`).
+
+### Project Binary Directory Layout & Native Naming
+* All pre-compiled and built native shared libraries reside under `bin/<target_triple>/`. The legacy `lib/` directory is deprecated and eliminated.
+* Solix runtime autoloading automatically discovers modules whose library filenames match `__native_<name>.<extension>` (or `lib__native_<name>.<extension>`).
+* Profiles can specify external pre-compiled shared libraries with `libraries: [lib01, lib02]`, which are verified across all active profile targets under `bin/<target_triple>/` before compilation.
 
 ### Practical Examples
 ```bash
@@ -89,8 +94,8 @@ solix build --test
 # Build all targets for Linux
 solix build --platform linux
 
-# Build a project located in another directory with static linking
-solix build ../my_game --release --static
+# Build and auto-install into local package store, overwriting any previous version
+solix build --release --install --force
 ```
 
 ---

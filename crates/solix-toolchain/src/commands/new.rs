@@ -168,8 +168,18 @@ pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
     fs::create_dir_all(target_path.join("src"))?;
     fs::create_dir_all(target_path.join("tests"))?;
     fs::create_dir_all(target_path.join("resources"))?;
-    fs::create_dir_all(target_path.join("lib"))?;
-    fs::write(target_path.join("lib").join(".gitkeep"), "")?;
+    let bin_dir = target_path.join("bin");
+    for triple in &[
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ] {
+        let triple_dir = bin_dir.join(triple);
+        fs::create_dir_all(&triple_dir)?;
+        fs::write(triple_dir.join(".gitkeep"), "")?;
+    }
     fs::write(
         target_path.join("resources").join("config.txt"),
         format!("# Solix resources directory for {project_name}\n"),
@@ -666,7 +676,7 @@ license = "{lic}"
 [workspace]
 
 [lib]
-name = "native_{pkg}"
+name = "__native_{pkg}"
 crate-type = ["cdylib", "rlib"]
 
 [features]
@@ -790,14 +800,14 @@ option(BUILD_TESTING "Build standalone unit tests" ON)
 if(SOLIX_NATIVE_BUILD)
 {fetch_block}
 
-    add_library(native_{pkg} SHARED
+    add_library(__native_{pkg} SHARED
         src/{pkg}.c
         src/solix_bridge.c
     )
-    set_target_properties(native_{pkg} PROPERTIES OUTPUT_NAME "native_{pkg}")
-    target_link_libraries(native_{pkg} PRIVATE solix::ffi)
-    target_compile_definitions(native_{pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
-    target_include_directories(native_{pkg} PUBLIC
+    set_target_properties(__native_{pkg} PROPERTIES OUTPUT_NAME "__native_{pkg}")
+    target_link_libraries(__native_{pkg} PRIVATE solix::ffi)
+    target_compile_definitions(__native_{pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
+    target_include_directories(__native_{pkg} PUBLIC
         "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
     )
 else()
@@ -932,14 +942,14 @@ option(BUILD_TESTING "Build standalone unit tests" ON)
 if(SOLIX_NATIVE_BUILD)
 {fetch_block}
 
-    add_library(native_{pkg} SHARED
+    add_library(__native_{pkg} SHARED
         src/{pkg}.cpp
         src/solix_bridge.cpp
     )
-    set_target_properties(native_{pkg} PROPERTIES OUTPUT_NAME "native_{pkg}")
-    target_link_libraries(native_{pkg} PRIVATE solix::ffi)
-    target_compile_definitions(native_{pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
-    target_include_directories(native_{pkg} PUBLIC
+    set_target_properties(__native_{pkg} PROPERTIES OUTPUT_NAME "__native_{pkg}")
+    target_link_libraries(__native_{pkg} PRIVATE solix::ffi)
+    target_compile_definitions(__native_{pkg} PRIVATE SOLIX_NATIVE_BUILD=1)
+    target_include_directories(__native_{pkg} PUBLIC
         "${{CMAKE_CURRENT_SOURCE_DIR}}/include"
     )
 else()
@@ -1108,31 +1118,29 @@ fn register_native_in_manifest(
         );
     }
 
-    let platforms_opt = if requested_platforms.is_empty() {
-        None
-    } else {
-        Some(requested_platforms.to_vec())
-    };
-
-    for prof_name in &target_profiles {
-        let Some(profile_cfg) = manifest.profiles.get_mut(prof_name) else {
+    for target_profile_name in &target_profiles {
+        let Some(profile_configuration) = manifest.profiles.get_mut(target_profile_name) else {
             bail!(
                 "Profile '{}' does not exist in '{}'",
-                prof_name,
+                target_profile_name,
                 manifest_path.display()
             );
         };
-        let native_profile = if prof_name == "debug" || prof_name == "test" {
+        if !requested_platforms.is_empty() {
+            profile_configuration.platforms = Some(requested_platforms.to_vec());
+        }
+        let native_profile_name = if target_profile_name == "debug" || target_profile_name == "test"
+        {
             "debug"
         } else {
             "release"
         };
-        profile_cfg.natives.insert(
+        profile_configuration.natives.insert(
             package_name.to_string(),
             NativeTargetConfig {
                 path: custom_rel_path.clone(),
-                profile: Some(native_profile.to_string()),
-                platforms: platforms_opt.clone(),
+                profile: Some(native_profile_name.to_string()),
+                platforms: None,
                 flags: Vec::new(),
                 strategy: None,
                 docker: None,

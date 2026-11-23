@@ -581,6 +581,17 @@ fn format_info_summary(
 }
 
 fn execute_project_dir_info(dir_path: &Path, args: &InfoArgs) -> Result<()> {
+    let is_build_or_stage = dir_path.components().any(|component| {
+        let component_name = component.as_os_str().to_string_lossy();
+        component_name.eq_ignore_ascii_case("build") || component_name.eq_ignore_ascii_case("stage")
+    });
+    if is_build_or_stage {
+        bail!(
+            "'solix info' cannot be run on build or staging directories ('{}'). Run 'solix info' on the project root directory or on a compiled package container (.slxp, .slxarc, .slxb).",
+            dir_path.display()
+        );
+    }
+
     let manifest_path = solix_common::project::find_manifest_path(dir_path).ok_or_else(|| {
         anyhow::anyhow!(
             "Target directory '{}' does not contain a Solix project manifest (manifest.yaml / manifest.toml)",

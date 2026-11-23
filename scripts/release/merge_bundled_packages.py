@@ -178,15 +178,19 @@ def merge_package_group(
                         manifest_filename = entry_name
                     continue
 
-                if entry_name.startswith("lib/") and entry_name.endswith(NATIVE_EXTENSIONS):
-                    relative_lib_path = entry_name[len("lib/"):]
+                is_native = (entry_name.startswith("bin/") or entry_name.startswith("lib/")) and entry_name.endswith(NATIVE_EXTENSIONS)
+                if is_native:
+                    prefix_len = len("bin/") if entry_name.startswith("bin/") else len("lib/")
+                    relative_lib_path = entry_name[prefix_len:]
                     if "/" in relative_lib_path:
-                        archive_qualified[entry_name] = payload
+                        canonical_key = f"bin/{relative_lib_path}"
+                        archive_qualified[canonical_key] = payload
                     else:
                         archive_unqualified[entry_name] = payload
                     continue
 
-                static_entries.setdefault(entry_name, payload)
+                if not entry_name.startswith("lib/"):
+                    static_entries.setdefault(entry_name, payload)
 
         for entry_name, payload in archive_qualified.items():
             qualified_natives.setdefault(entry_name, payload)
@@ -196,7 +200,7 @@ def merge_package_group(
             if not archive_qualified and inferred_triple:
                 for entry_name, payload in archive_unqualified.items():
                     file_name = Path(entry_name).name
-                    qualified_natives.setdefault(f"lib/{inferred_triple}/{file_name}", payload)
+                    qualified_natives.setdefault(f"bin/{inferred_triple}/{file_name}", payload)
             else:
                 for entry_name, payload in archive_unqualified.items():
                     unqualified_natives.setdefault(entry_name, payload)
@@ -213,7 +217,7 @@ def merge_package_group(
     present_targets = {
         entry_name.split("/")[1]
         for entry_name in retained_natives
-        if entry_name.startswith("lib/") and entry_name.count("/") >= 2
+        if (entry_name.startswith("bin/") or entry_name.startswith("lib/")) and entry_name.count("/") >= 2
     }
     missing_required = [target for target in required_targets if target not in present_targets]
     if missing_required:

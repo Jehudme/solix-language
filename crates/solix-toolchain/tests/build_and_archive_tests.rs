@@ -315,12 +315,12 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
             .iter()
             .any(|item| item.path == "bin/untitled.slxb")
     );
-    let expected_cdylib_name = host_cdylib_filename("rust_bridge");
+    let expected_cdylib_name = host_cdylib_filename("__native_rust_bridge");
     assert!(
         debug_inspection
             .file_entries
             .iter()
-            .any(|item| item.path.starts_with("lib/") && item.path.ends_with(&expected_cdylib_name))
+            .any(|item| item.path.starts_with("bin/") && item.path.ends_with(&expected_cdylib_name))
     );
     assert!(
         debug_inspection
@@ -422,14 +422,27 @@ fn test_run_with_direct_native_library_flag() {
     .expect("Failed to parse build CLI");
     assert_eq!(run(build_cli).expect("Build must succeed"), 0);
 
-    // Locate the emitted native cdylib in build/.cache/stage/debug/lib
-    let native_lib_path = project_root
+    // Locate the emitted native cdylib in build/.cache/stage/debug/bin
+    let candidate_flat = project_root
         .join("build")
         .join(".cache")
         .join("stage")
         .join("debug")
-        .join("lib")
-        .join(host_cdylib_filename("rust_bridge"));
+        .join("bin")
+        .join(host_cdylib_filename("__native_rust_bridge"));
+    let candidate_triple = project_root
+        .join("build")
+        .join(".cache")
+        .join("stage")
+        .join("debug")
+        .join("bin")
+        .join(solix_common::project::host_target_triple())
+        .join(host_cdylib_filename("__native_rust_bridge"));
+    let native_lib_path = if candidate_flat.exists() {
+        candidate_flat
+    } else {
+        candidate_triple
+    };
     assert!(
         native_lib_path.exists(),
         "Native bridge library must exist at '{}'",
@@ -1304,7 +1317,7 @@ public class TestRunner {
     assert!(release_archive.exists(), "release archive must exist");
 
     let inspection = SlxarcArchive::inspect(&release_archive).expect("inspect static release");
-    let expected_native = host_cdylib_filename("rust_bridge");
+    let expected_native = host_cdylib_filename("__native_rust_bridge");
     assert!(
         inspection
             .native_libraries
@@ -1580,16 +1593,16 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
         let input_root = workspace.root_path().join(format!("in_{triple}"));
         let stage_dir = workspace.root_path().join(format!("stage_{triple}"));
         let bin_dir = stage_dir.join("bin");
-        let target_lib_dir = stage_dir.join("lib").join(triple);
+        let target_bin_dir = stage_dir.join("bin").join(triple);
         fs::create_dir_all(&bin_dir).expect("create bin dir");
-        fs::create_dir_all(&target_lib_dir).expect("create target lib dir");
+        fs::create_dir_all(&target_bin_dir).expect("create target bin dir");
 
         let plat_id =
             solix_common::project::triple_to_platform_id(triple).unwrap_or("linux-x86_64");
         fs::write(
             stage_dir.join("manifest.yaml"),
             format!(
-                "configuration:\n  name: demo\n  version: \"1.0.0\"\nprofiles:\n  release:\n    sources:\n      - src\nsupported_platforms:\n- {plat_id}\nnative_library_checksums:\n  \"lib/{triple}/{lib_filename}\": \"0000\"\n"
+                "configuration:\n  name: demo\n  version: \"1.0.0\"\nprofiles:\n  release:\n    sources:\n      - src\nsupported_platforms:\n- {plat_id}\nnative_library_checksums:\n  \"bin/{triple}/{lib_filename}\": \"0000\"\n"
             ),
         )
         .expect("write serde-saphyr-formatted manifest.yaml");
@@ -1598,9 +1611,9 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
             solix_common::BinaryProgram::new().to_bytes(),
         )
         .expect("write bytecode");
-        fs::write(stage_dir.join("lib").join(lib_filename), b"unqualified_dup")
+        fs::write(stage_dir.join("bin").join(lib_filename), b"unqualified_dup")
             .expect("write unqualified dup");
-        fs::write(target_lib_dir.join(lib_filename), lib_payload).expect("write target lib");
+        fs::write(target_bin_dir.join(lib_filename), lib_payload).expect("write target lib");
 
         let pkg_dir = input_root.join("demo-release@1.0.0");
         fs::create_dir_all(&pkg_dir).expect("create pkg dir");
@@ -1634,7 +1647,7 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
 
     let inspection = SlxarcArchive::inspect(&universal_archive).expect("inspect universal archive");
     for (triple, lib_filename, _) in &platform_targets {
-        let expected_entry = format!("lib/{triple}/{lib_filename}");
+        let expected_entry = format!("bin/{triple}/{lib_filename}");
         assert!(
             inspection
                 .native_libraries
@@ -1648,7 +1661,7 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
         !inspection
             .native_libraries
             .iter()
-            .any(|entry| entry == "lib/libdemo_native.so"),
+            .any(|entry| entry == "bin/libdemo_native.so"),
         "Unqualified duplicate must be stripped when target-qualified entries exist"
     );
 
@@ -1732,7 +1745,7 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
     let consumer_inspection =
         SlxarcArchive::inspect(&consumer_archive).expect("inspect consumer release");
     for (triple, lib_filename, _) in &platform_targets {
-        let expected_entry = format!("lib/{triple}/{lib_filename}");
+        let expected_entry = format!("bin/{triple}/{lib_filename}");
         assert!(
             consumer_inspection
                 .native_libraries
@@ -2439,11 +2452,11 @@ profiles:
         .expect("write root binaries.slxb");
 
     #[cfg(target_os = "windows")]
-    let native_module_name = "native_calc.dll";
+    let native_module_name = "__native_calc.dll";
     #[cfg(target_os = "macos")]
-    let native_module_name = "libnative_calc.dylib";
+    let native_module_name = "lib__native_calc.dylib";
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let native_module_name = "libnative_calc.so";
+    let native_module_name = "lib__native_calc.so";
 
     #[cfg(target_os = "windows")]
     let transitive_lib_name = "glfw3.dll";
@@ -2731,4 +2744,240 @@ fn test_docker_and_host_cache_directories_are_strictly_isolated() {
             .join("x86_64-unknown-linux-gnu")
     );
     assert_ne!(host_cmake_target_dir, docker_cmake_target_dir);
+}
+
+#[test]
+fn test_solix_info_rejects_build_and_stage_directories() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let project_root = workspace.root_path().join("info_rejection_demo");
+    let build_dir = project_root.join("build");
+    let stage_dir = build_dir.join("release").join("stage");
+    fs::create_dir_all(&stage_dir).expect("create stage dir");
+
+    let manifest_yaml = r#"configuration:
+  name: info_rejection_demo
+  version: "0.1.0"
+profiles:
+  release:
+    entrypoint: Main::main
+"#;
+    fs::write(project_root.join("manifest.yaml"), manifest_yaml).expect("write manifest");
+
+    // 1. Invoking solix info directly on build/ must fail
+    let info_build_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        build_dir.to_str().expect("valid utf8 path"),
+    ])
+    .expect("parse info build dir");
+    let build_result = run(info_build_cli);
+    assert!(
+        build_result.is_err(),
+        "solix info on build/ must be rejected"
+    );
+    let build_err_msg = format!("{:#}", build_result.unwrap_err());
+    assert!(
+        build_err_msg.contains("'solix info' cannot be run on build or staging directories"),
+        "Unexpected error message: {build_err_msg}"
+    );
+
+    // 2. Invoking solix info directly on build/release/stage must also fail
+    let info_stage_cli = Cli::try_parse_from([
+        "solix",
+        "info",
+        stage_dir.to_str().expect("valid utf8 path"),
+    ])
+    .expect("parse info stage dir");
+    let stage_result = run(info_stage_cli);
+    assert!(
+        stage_result.is_err(),
+        "solix info on stage/ must be rejected"
+    );
+    let stage_err_msg = format!("{:#}", stage_result.unwrap_err());
+    assert!(
+        stage_err_msg.contains("'solix info' cannot be run on build or staging directories"),
+        "Unexpected error message: {stage_err_msg}"
+    );
+}
+
+#[test]
+fn test_solix_build_precompiled_libraries_matrix_verification() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let project_root = workspace.root_path().join("precompiled_libs_demo");
+    let src_dir = project_root.join("src");
+    let bin_dir = project_root.join("bin");
+    fs::create_dir_all(&src_dir).expect("create src dir");
+    fs::create_dir_all(&bin_dir).expect("create bin dir");
+
+    let main_slx = r#"
+public class Main {
+    public static int32 main() {
+        return 0;
+    }
+}
+"#;
+    fs::write(src_dir.join("main.slx"), main_slx).expect("write main.slx");
+
+    let host_triple = solix_common::project::host_target_triple();
+    let host_triple_bin = bin_dir.join(host_triple);
+    fs::create_dir_all(&host_triple_bin).expect("create host triple bin");
+
+    let manifest_yaml = r#"configuration:
+  name: precompiled_libs_demo
+  version: "1.0.0"
+profiles:
+  release:
+    entrypoint: Main::main
+    sources:
+      - src
+    platforms:
+      - host
+    libraries:
+      - libsample_ext
+"#;
+    fs::write(project_root.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+    // Case A: Missing precompiled library fails build with clear error
+    let build_fail_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid utf8 path"),
+    ])
+    .expect("parse build fail cli");
+    let fail_result = run(build_fail_cli);
+    assert!(
+        fail_result.is_err(),
+        "Build must fail when declared precompiled library is missing"
+    );
+    let fail_err_msg = format!("{:#}", fail_result.unwrap_err());
+    assert!(
+        fail_err_msg.contains("requires pre-compiled library 'libsample_ext'"),
+        "Error message must specify missing library: {fail_err_msg}"
+    );
+
+    // Case B: Providing precompiled library allows build to succeed and package it
+    #[cfg(target_os = "windows")]
+    let ext_lib_filename = "libsample_ext.dll";
+    #[cfg(target_os = "macos")]
+    let ext_lib_filename = "libsample_ext.dylib";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let ext_lib_filename = "libsample_ext.so";
+
+    fs::write(
+        host_triple_bin.join(ext_lib_filename),
+        b"SAMPLE_PRECOMPILED_BYTES",
+    )
+    .expect("write precompiled dummy shared library");
+
+    let build_success_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid utf8 path"),
+    ])
+    .expect("parse build success cli");
+    let success_exit = run(build_success_cli).expect("build with precompiled library must succeed");
+    assert_eq!(success_exit, 0);
+
+    let output_archive = project_root
+        .join("build")
+        .join("release")
+        .join("precompiled_libs_demo.slxp");
+    assert!(output_archive.is_file(), "Emitted .slxp package must exist");
+
+    let inspection = SlxarcArchive::inspect(&output_archive).expect("inspect emitted package");
+    let expected_rel_path = format!("bin/{host_triple}/{ext_lib_filename}");
+    assert!(
+        inspection
+            .file_entries
+            .iter()
+            .any(|entry| entry.path == expected_rel_path),
+        "Emitted package must bundle '{expected_rel_path}', found {:?}",
+        inspection.file_entries
+    );
+}
+
+#[test]
+fn test_solix_build_install_and_force_flags() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let project_root = workspace.root_path().join("build_install_demo");
+    let src_dir = project_root.join("src");
+    fs::create_dir_all(&src_dir).expect("create src dir");
+
+    let main_slx = r#"
+public class Main {
+    public static int32 main() {
+        return 0;
+    }
+}
+"#;
+    fs::write(src_dir.join("main.slx"), main_slx).expect("write main.slx");
+
+    let manifest_yaml = r#"configuration:
+  name: build_install_demo
+  version: "1.0.0"
+profiles:
+  release:
+    entrypoint: Main::main
+    sources:
+      - src
+    platforms:
+      - host
+"#;
+    fs::write(project_root.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+    let store_dir = workspace.root_path().join("custom_pkg_store");
+    let store_str = store_dir.to_str().expect("valid utf8");
+
+    // 1. Initial build with --install
+    let build_install_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid utf8 path"),
+        "--install",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse build --install");
+    assert_eq!(
+        run(build_install_cli).expect("build --install must succeed"),
+        0
+    );
+
+    let installed_package_dir = store_dir.join("build_install_demo-release@1.0.0");
+    assert!(
+        installed_package_dir.is_dir(),
+        "Package directory must exist in package store"
+    );
+
+    // 2. Re-building with --install without --force must fail because package already exists
+    let build_reinstall_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid utf8 path"),
+        "--install",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse build reinstall cli");
+    let reinstall_result = run(build_reinstall_cli);
+    assert!(
+        reinstall_result.is_err(),
+        "build --install without --force must fail when package is already installed"
+    );
+
+    // 3. Re-building with --install --force must succeed
+    let build_force_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        project_root.to_str().expect("valid utf8 path"),
+        "--install",
+        "--force",
+        "--pkg-dir",
+        store_str,
+    ])
+    .expect("parse build --install --force");
+    assert_eq!(
+        run(build_force_cli).expect("build --install --force must succeed"),
+        0
+    );
 }
