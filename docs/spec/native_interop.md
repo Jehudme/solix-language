@@ -59,7 +59,7 @@ pub struct SolixCValue {
 Every native method called from Solix bytecode implements `NativeCFunctionPtr`:
 
 ```rust
-pub type NativeCFunctionPtr = unsafe extern "C" fn(
+pub type NativeCFunctionPtr = unsafe extern "C-unwind" fn(
     vm_context: *mut std::ffi::c_void,
     args: *const SolixCValue,
     arg_count: u32,
@@ -72,6 +72,8 @@ pub type NativeCFunctionPtr = unsafe extern "C" fn(
 2. **`args`**: Contiguous array of `SolixCValue` structures representing call arguments left-to-right.
 3. **`arg_count`**: Number of passed arguments.
 4. **`out_error`**: Error output slot. If set to non-zero `tag`, the runtime raises `RuntimeError::NativeFunctionError`.
+
+Native invocations in `invoke_c_native` are protected via `std::panic::catch_unwind(std::panic::AssertUnwindSafe(...))`. If a foreign plugin written in Rust panics, the exception is caught across the boundary and converted cleanly into `RuntimeError::NativeFunctionError` without aborting the host runtime.
 
 ### 3.2. Batch Registration Hook & Registry Representation
 `NativeRegistry` stores dynamic C callbacks under `NativeCallback::CAbi(NativeCFunctionPtr)` alongside host `NativeCallback::Rust(NativeFunction)` builtins, resolving `*mut c_void` runtime contexts safely through checked helpers in [`crates/solix-runtime/src/native/ffi.rs`](../../crates/solix-runtime/src/native/ffi.rs).

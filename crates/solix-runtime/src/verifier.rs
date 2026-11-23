@@ -347,7 +347,7 @@ fn verify_instruction(
         OpCode::GetStaticDirect | OpCode::SetStaticDirect => {
             check_reg(instruction.dst(), "dst")?;
             let slot = instruction.imm32();
-            if slot >= total_static_space && total_static_space > 0 {
+            if slot >= total_static_space {
                 return Err(RuntimeError::BinaryLoadError {
                     reason: format!(
                         "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: static slot {slot} exceeds total static space {total_static_space}"

@@ -192,7 +192,7 @@ pub struct SolixVmContext {
 }
 
 /// Stable C-ABI native function pointer signature.
-pub type NativeCFunctionPtr = unsafe extern "C" fn(
+pub type NativeCFunctionPtr = unsafe extern "C-unwind" fn(
     vm_context: *mut c_void,
     args: *const SolixCValue,
     arg_count: u32,
@@ -277,13 +277,23 @@ pub fn invoke_c_native(
     };
     let context_wrapper_ptr = &mut context_wrapper as *mut SolixVmContext as *mut c_void;
 
-    let result = unsafe {
+    let execution_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         function_ptr(
             context_wrapper_ptr,
             converted_arguments.as_ptr(),
             converted_arguments.len() as u32,
             &mut out_error,
         )
+    }));
+
+    let result = match execution_result {
+        Ok(call_result) => call_result,
+        Err(_) => {
+            return Err(RuntimeError::NativeFunctionError {
+                name: "native_c_call".to_string(),
+                reason: "native callback panicked across C-ABI boundary".to_string(),
+            });
+        }
     };
 
     if out_error.tag != 0 {
@@ -1191,4 +1201,39 @@ pub unsafe extern "C" fn solix_vm_set_cycle_threshold(vm_context: *mut c_void, t
         None => return,
     };
     vm_instance.cycle_threshold = threshold.max(1) as usize;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::RuntimeContext;
+    use crate::options::RuntimeOptions;
+
+    unsafe extern "C-unwind" fn panicking_native_function(
+        _context: *mut c_void,
+        _arguments: *const SolixCValue,
+        _count: u32,
+        _error_out: *mut SolixCValue,
+    ) -> SolixCValue {
+        panic!("simulated unhandled panic inside foreign native plugin");
+    }
+
+    #[test]
+    fn test_invoke_c_native_catches_unwind_safely() {
+        let mut virtual_machine = VirtualMachine::new(
+            RuntimeContext::new(RuntimeOptions::new())
+                .expect("Context initialization must succeed"),
+        );
+
+        let invocation_result =
+            invoke_c_native(panicking_native_function, &mut virtual_machine, &[]);
+
+        assert!(
+            matches!(
+                invocation_result,
+                Err(RuntimeError::NativeFunctionError { .. })
+            ),
+            "Foreign plugin panic must be caught cleanly and converted to NativeFunctionError"
+        );
+    }
 }

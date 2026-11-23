@@ -30,6 +30,7 @@ Any class implementing `IStringable` can be passed seamlessly to standard input/
 ### Constructors
 - `new String()`: Constructs an empty string.
 - `new String(char[] characters)`: Constructs a string by copying characters from the provided array.
+- `new String(char[] characters, int32 offset, int32 count)`: Constructs a string from an array slice. Validates `offset` and `count` using overflow-safe bounds checks (`count > characters.length - offset`), throwing `IndexOutOfBoundsException` on out-of-bounds or wrapping indices.
 - `new String(int32 value)`: Constructs a string representing the specified 32-bit integer.
 - `new String(int64 value)`: Constructs a string representing the specified 64-bit integer.
 - `new String(float64 value)`: Constructs a string representing the specified 64-bit floating point number.
@@ -52,8 +53,8 @@ Any class implementing `IStringable` can be passed seamlessly to standard input/
 - `ends_with(String suffix) -> bool`: Returns `true` if the string ends with `suffix`.
 
 ### Substring & Transformations
-- `substring(int32 start, int32 end) -> String`: Returns substring `[start, end)`. Throws `IndexOutOfBoundsException` on invalid indices.
-- `substring(int32 start) -> String`: Returns substring from `start` to `length()`.
+- `substring(int32 start_index, int32 count_length) -> String`: Returns substring of length `count_length` starting at `start_index`. Validates indices using overflow-safe bounds checks (`count_length > length() - start_index`), throwing `IndexOutOfBoundsException` on out-of-bounds or wrapping ranges.
+- `substring(int32 start_index) -> String`: Returns substring from `start_index` to `length()`.
 - `concat(String other) -> String`: Returns newly allocated string combining both.
 - `to_upper_case() -> String`: Returns uppercase version via native ASCII/UTF-8 transformation.
 - `to_lower_case() -> String`: Returns lowercase version.

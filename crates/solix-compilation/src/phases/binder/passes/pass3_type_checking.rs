@@ -97,6 +97,54 @@ fn evaluate_integer_constant(expression: &Expression) -> Option<i64> {
     }
 }
 
+fn is_constant_expression(expression: &Expression) -> bool {
+    match expression {
+        Expression::Literal { .. } => true,
+        Expression::Identifier { .. } => true,
+        Expression::Sizeof { .. } => true,
+        Expression::Default { .. } => true,
+        Expression::Cast {
+            expression: inner_expression,
+            ..
+        } => is_constant_expression(inner_expression),
+        Expression::MemberAccess {
+            object: inner_object,
+            ..
+        } => is_constant_expression(inner_object),
+        Expression::Unary {
+            operand: operand_expression,
+            ..
+        } => is_constant_expression(operand_expression),
+        Expression::Binary {
+            left: left_operand,
+            right: right_operand,
+            operator,
+            ..
+        } => {
+            if matches!(
+                operator,
+                TokenKind::OperatorDivide | TokenKind::OperatorModulo
+            ) && let Some(right_constant_value) = evaluate_integer_constant(right_operand)
+                && right_constant_value == 0
+            {
+                return false;
+            }
+            is_constant_expression(left_operand) && is_constant_expression(right_operand)
+        }
+        Expression::Ternary {
+            condition: condition_expression,
+            then_branch: then_branch_expression,
+            else_branch: else_branch_expression,
+            ..
+        } => {
+            is_constant_expression(condition_expression)
+                && is_constant_expression(then_branch_expression)
+                && is_constant_expression(else_branch_expression)
+        }
+        _ => false,
+    }
+}
+
 /// Active lambda context tracking expected and actual return types within lambda bodies.
 #[derive(Debug, Clone)]
 pub struct LambdaContext {
@@ -2612,6 +2660,31 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             &node.field_type,
             self.symbol_table,
         );
+        if node.modifiers.contains(&Modifier::Const) {
+            if let Some(initializer) = &node.initializer {
+                if !is_constant_expression(initializer) {
+                    let expression_text =
+                        if initializer.span().end as usize <= self.source_text.len() {
+                            self.source_text
+                                [initializer.span().start as usize..initializer.span().end as usize]
+                                .to_string()
+                        } else {
+                            "expression".to_string()
+                        };
+                    self.errors
+                        .push(BindingError::InvalidExpressionInConstantContext {
+                            reason: expression_text,
+                            span: initializer.span().to_source_span(),
+                        });
+                }
+            } else {
+                self.errors
+                    .push(BindingError::InvalidExpressionInConstantContext {
+                        reason: field_name.to_string(),
+                        span: node.name_span.to_source_span(),
+                    });
+            }
+        }
         if let Some(initializer) = &node.initializer {
             let init_type = self.evaluate_expression_with_expected(initializer, Some(&field_type));
             let is_compatible = init_type
@@ -3159,6 +3232,31 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             self.errors.extend(errors);
         }
 
+        if node.is_const {
+            if let Some(initializer) = &node.initializer {
+                if !is_constant_expression(initializer) {
+                    let expression_text =
+                        if initializer.span().end as usize <= self.source_text.len() {
+                            self.source_text
+                                [initializer.span().start as usize..initializer.span().end as usize]
+                                .to_string()
+                        } else {
+                            "expression".to_string()
+                        };
+                    self.errors
+                        .push(BindingError::InvalidExpressionInConstantContext {
+                            reason: expression_text,
+                            span: initializer.span().to_source_span(),
+                        });
+                }
+            } else {
+                self.errors
+                    .push(BindingError::InvalidExpressionInConstantContext {
+                        reason: var_name.to_string(),
+                        span: node.name_span.to_source_span(),
+                    });
+            }
+        }
         if let Some(initializer) = &node.initializer {
             let initializer_type = match initializer {
                 Expression::Lambda {
@@ -3550,13 +3648,28 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 self.visit_statement(statement);
             }
         } else if let Type::Enum { ref symbol_name } = discriminant_type {
-            let variant_count = self
+            let variant_symbols: std::collections::HashSet<SymbolId> = self
                 .symbol_table
                 .resolve_symbol(self.source_id, symbol_name)
                 .and_then(|symbol_id| self.symbol_table.get_symbol(symbol_id))
-                .map(|entry| entry.members.len())
-                .unwrap_or(0);
-            if node.cases.len() < variant_count || variant_count == 0 {
+                .map(|entry| entry.members.iter().copied().collect())
+                .unwrap_or_default();
+            let mut covered_variant_symbols = std::collections::HashSet::new();
+            for case_clause in &node.cases {
+                let resolved_member_id = match &case_clause.case_value {
+                    Expression::MemberAccess { member_span, .. } => {
+                        self.resolved_symbols.get(member_span).copied()
+                    }
+                    Expression::Identifier { span, .. } => self.resolved_symbols.get(span).copied(),
+                    _ => None,
+                };
+                if let Some(symbol_id) = resolved_member_id
+                    && variant_symbols.contains(&symbol_id)
+                {
+                    covered_variant_symbols.insert(symbol_id);
+                }
+            }
+            if covered_variant_symbols.len() < variant_symbols.len() || variant_symbols.is_empty() {
                 self.errors.push(BindingError::InexhaustiveEnumSwitch {
                     enum_name: symbol_name.clone(),
                     span: node.span.to_source_span(),

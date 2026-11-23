@@ -52,7 +52,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (characters == null) {
             throw new ArgumentNullException("characters", "Character array cannot be null");
         }
-        if (offset < 0 || count < 0 || offset + count > characters.length) {
+        if (offset < 0 || count < 0 || offset > characters.length || count > characters.length - offset) {
             throw new IndexOutOfBoundsException("Sub-array range is out of bounds", offset, 0, characters.length);
         }
         char[] slice_buffer = new char[count];
@@ -122,7 +122,7 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     }
 
     public String substring(int32 start_index, int32 count) {
-        if (start_index < 0 || count < 0 || start_index + count > this.data.length) {
+        if (start_index < 0 || count < 0 || start_index > this.data.length || count > this.data.length - start_index) {
             throw new IndexOutOfBoundsException("Substring range out of bounds", start_index, 0, this.data.length);
         }
         char[] result_buffer = new char[count];

@@ -767,6 +767,18 @@ class SolixBenchCliTests(unittest.TestCase):
             self.assertIn("cold_start_ms", solix_stats)
             self.assertGreater(solix_stats["compile_ms"], 0.0)
 
+    def test_execute_command_measures_independent_child_memory(self) -> None:
+        benchmark_runner = solix_bench.BenchmarkRunner(REPO_ROOT)
+        exit_code, standard_output, duration_milliseconds, peak_rss_kilobytes = (
+            benchmark_runner.execute_command(
+                ["python3", "-c", "import sys; sys.stdout.write('memory_isolation_test')"]
+            )
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(standard_output, "memory_isolation_test")
+        self.assertGreater(duration_milliseconds, 0.0)
+        self.assertGreaterEqual(peak_rss_kilobytes, 0)
+
     def test_render_markdown_comparison_table_includes_column_glossary(self) -> None:
         sample_comparison = {
             "workloads": [

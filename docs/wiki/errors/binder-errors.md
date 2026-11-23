@@ -90,6 +90,24 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
 
 ---
 
+### `E0287`: Invalid Expression in Constant Context
+* **Cause:** A `const` variable or field declaration contains a non-constant initializer expression (such as dynamic method invocations, runtime allocations, or non-constant identifier references). Constant initializers accept literals, compile-time arithmetic, explicit type casts, member lookups, `sizeof`, and `default` expressions.
+* **Bad Code:**
+  ```solix
+  class Configuration {
+      public const int32 DYNAMIC_PORT = NetworkService.resolve_port();
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class Configuration {
+      public const int32 FIXED_PORT = 8080;
+      public const float32 NORMALIZED_SCALE = (float32)1.0;
+  }
+  ```
+
+---
+
 ### `E0288`: Bitwise Operator on Non-Integer
 * **Cause:** A bitwise operator (`&`, `|`, `^`, `<<`, `>>`) was applied to a floating-point or reference type.
 * **Bad Code:**

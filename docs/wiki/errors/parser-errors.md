@@ -108,6 +108,23 @@ This section documents the syntax diagnostics emitted by [`crates/solix-compilat
 
 ---
 
+### `E0149`: Required Parameter After Default Parameter
+* **Cause:** A required formal parameter follows an optional parameter with a default initializer in a function or method signature.
+* **Bad Code:**
+  ```solix
+  public static int32 compute(int32 base_multiplier = 2, int32 value_operand) {
+      return base_multiplier * value_operand;
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  public static int32 compute(int32 value_operand, int32 base_multiplier = 2) {
+      return value_operand * base_multiplier;
+  }
+  ```
+
+---
+
 ### `E0153`: Multi-Character Character Literal
 * **Cause:** A character literal contains more than a single character or has extra trailing characters after an escape sequence.
 * **Bad Code:**
