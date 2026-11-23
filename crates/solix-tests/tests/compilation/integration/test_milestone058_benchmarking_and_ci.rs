@@ -348,7 +348,10 @@ fn test_benchmark_runner_verify_command() {
 
     assert!(
         command_output.status.success(),
-        "runner.py --verify must complete with success exit code"
+        "runner.py --verify must complete with success exit code.\nStatus: {:?}\nSTDOUT:\n{}\nSTDERR:\n{}",
+        command_output.status,
+        String::from_utf8_lossy(&command_output.stdout),
+        String::from_utf8_lossy(&command_output.stderr)
     );
 
     let standard_output = String::from_utf8_lossy(&command_output.stdout);

@@ -452,7 +452,11 @@ fn alloc_array_trap(
     elem_size: usize,
     type_tag: u8,
 ) -> Result<u32, VmTrap> {
-    let payload_size = 8 + array_len * elem_size;
+    let payload_size = array_len
+        .checked_mul(elem_size)
+        .and_then(|bytes| bytes.checked_add(8))
+        .filter(|&total_size| total_size <= u32::MAX as usize)
+        .ok_or_else(|| VmTrap::out_of_memory(usize::MAX, heap.buffer.len()))?;
     let payload_addr = heap
         .allocate(payload_size, BlockTag::ArrayRef)
         .map_err(VmTrap::from_error)?;
@@ -2285,6 +2289,13 @@ impl VirtualMachine {
         val: Value,
         is_move: bool,
     ) -> Result<bool, VmTrap> {
+        let tuple_len = self
+            .heap
+            .read_u32(arr_offset as u32)
+            .map_err(VmTrap::from_error)? as usize;
+        if index_usize >= tuple_len {
+            return Err(VmTrap::index_out_of_bounds(index_usize as i64, tuple_len));
+        }
         let elem_offset = arr_offset + 8 + (index_usize * 16);
         if elem_offset + 16 > self.heap.buffer.len() {
             return Err(VmTrap::null_reference());
@@ -2883,7 +2894,11 @@ impl VirtualMachine {
 
     #[inline(never)]
     fn execute_alloc_tuple(&mut self, tuple_count: usize) -> Result<Value, VmTrap> {
-        let payload_size = 8 + tuple_count * 16;
+        let payload_size = tuple_count
+            .checked_mul(16)
+            .and_then(|bytes| bytes.checked_add(8))
+            .filter(|&total_size| total_size <= u32::MAX as usize)
+            .ok_or_else(|| VmTrap::out_of_memory(usize::MAX, self.heap.buffer.len()))?;
         let payload_addr = self
             .heap
             .allocate(payload_size, BlockTag::Tuple)
