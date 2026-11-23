@@ -20,6 +20,7 @@ pub enum DeclarationModifier {
     Weak,
     Inline,
     Extern,
+    Final,
 }
 
 impl DeclarationModifier {
@@ -38,6 +39,7 @@ impl DeclarationModifier {
             Self::Weak => "weak",
             Self::Inline => "inline",
             Self::Extern => "extern",
+            Self::Final => "final",
         }
     }
 }

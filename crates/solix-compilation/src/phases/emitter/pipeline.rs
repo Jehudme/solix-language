@@ -57,6 +57,7 @@ const fn to_decl_modifier(modifier: Modifier) -> Option<DeclarationModifier> {
         Modifier::Abstract => Some(DeclarationModifier::Abstract),
         Modifier::Weak => Some(DeclarationModifier::Weak),
         Modifier::Inline => Some(DeclarationModifier::Inline),
+        Modifier::Final => Some(DeclarationModifier::Final),
         Modifier::Extern => Some(DeclarationModifier::Extern),
         Modifier::Internal => Some(DeclarationModifier::Private),
         Modifier::Native => None,

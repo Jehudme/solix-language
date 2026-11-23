@@ -1075,6 +1075,12 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                     } else {
                         ""
                     };
+                    if member_name.starts_with('~') {
+                        self.errors.push(BindingError::DestructorInvocationDirect {
+                            span: member_span.to_source_span(),
+                        });
+                        return Type::Error;
+                    }
                     let obj_type = self
                         .node_types
                         .get(&object.span())
@@ -1890,7 +1896,12 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         } else {
                             ""
                         };
-                        if let Some(&sym_id) = self.resolved_symbols.get(id_span)
+                        if id_name == "this" || id_name == "super" {
+                            self.errors.push(BindingError::CannotAssignToReadOnly {
+                                name: id_name.to_string(),
+                                span: id_span.to_source_span(),
+                            });
+                        } else if let Some(&sym_id) = self.resolved_symbols.get(id_span)
                             && let Some(sym_entry) = self.symbol_table.get_symbol(sym_id)
                             && sym_entry.is_const
                         {

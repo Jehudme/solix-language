@@ -317,3 +317,94 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
       case State.Completed: return 3;
   }
   ```
+
+---
+
+### `E0235`: Cannot Inherit From Final Class
+* **Cause:** Attempted to extend a class that is declared with the `final` modifier.
+* **Bad Code:**
+  ```solix
+  final class ImmutableBase {}
+  class Derived extends ImmutableBase {}
+  ```
+* **Fixed Code:**
+  ```solix
+  class OpenBase {}
+  class Derived extends OpenBase {}
+  ```
+
+---
+
+### `E0253`: Cannot Assign To Read-Only Target
+* **Cause:** Attempted to reassign an intrinsic read-only reference such as `this` or `super`.
+* **Bad Code:**
+  ```solix
+  class State {
+      public void replace() {
+          this = new State();
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class State {
+      public void copy_from(State other) {
+          // Mutate fields instead of reassigning this
+      }
+  }
+  ```
+
+---
+
+### `E0267`: Final Method Overridden
+* **Cause:** Attempted to override a method that is declared with the `final` modifier in a base class.
+* **Bad Code:**
+  ```solix
+  class Base {
+      public final int32 compute() { return 1; }
+  }
+  class Derived extends Base {
+      public override int32 compute() { return 2; }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class Base {
+      public virtual int32 compute() { return 1; }
+  }
+  class Derived extends Base {
+      public override int32 compute() { return 2; }
+  }
+  ```
+
+---
+
+### `E0284`: Direct Destructor Invocation
+* **Cause:** Destructors are managed automatically by ARC and cannot be invoked explicitly using member access syntax.
+* **Bad Code:**
+  ```solix
+  class Buffer {
+      ~Buffer() {}
+  }
+  class Main {
+      public static int32 main() {
+          Buffer buf = new Buffer();
+          buf.~Buffer();
+          return 0;
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class Buffer {
+      public void clear() {}
+      ~Buffer() {}
+  }
+  class Main {
+      public static int32 main() {
+          Buffer buf = new Buffer();
+          buf.clear();
+          return 0;
+      }
+  }
+  ```

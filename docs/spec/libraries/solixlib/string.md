@@ -86,16 +86,16 @@ A mutable character buffer designed for efficient concatenation.
 
 ### Methods
 - `length() -> int32`: Current number of characters stored.
-- `capacity() -> int32`: Current allocated capacity.
-- `append(String s) -> StringBuilder`: Appends string content; returns `this` for chaining.
-- `append(char ch) -> StringBuilder`: Appends single character.
-- `append(int32 val) -> StringBuilder`: Appends decimal integer.
-- `append(float64 val) -> StringBuilder`: Appends floating-point value.
-- `append(bool val) -> StringBuilder`: Appends `"true"` or `"false"`.
-- `append_line(String s) -> StringBuilder`: Appends string followed by newline `\n`.
-- `insert(int32 index, String s) -> StringBuilder`: Inserts string at specified index.
-- `insert(int32 index, char ch) -> StringBuilder`: Inserts character at index.
-- `delete(int32 start, int32 end) -> StringBuilder`: Deletes range `[start, end)`.
+- `capacity() -> int32`: Current allocated capacity (clamped to a safe upper bound of 1,073,741,824 characters with overflow protection).
+- `append(String target_text) -> StringBuilder`: Appends string content; returns `this` for chaining.
+- `append(char character) -> StringBuilder`: Appends single character.
+- `append(int32 numeric_value) -> StringBuilder`: Appends decimal integer.
+- `append(float64 numeric_value) -> StringBuilder`: Appends floating-point value.
+- `append(bool boolean_value) -> StringBuilder`: Appends `"true"` or `"false"`.
+- `append_line(String target_text) -> StringBuilder`: Appends string followed by newline `\n`.
+- `insert(int32 index, String target_text) -> StringBuilder`: Inserts string at specified index.
+- `insert(int32 index, char character) -> StringBuilder`: Inserts character at index.
+- `delete(int32 start_index, int32 end_index) -> StringBuilder`: Deletes range `[start_index, end_index)`.
 - `delete_char_at(int32 index) -> StringBuilder`: Deletes character at index.
 - `reverse() -> StringBuilder`: Inverts buffer in-place.
 - `clear() -> StringBuilder`: Clears buffer (resets length to 0).

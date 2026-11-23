@@ -2412,29 +2412,31 @@ impl VirtualMachine {
 
         match field_type_tag {
             Some(1) | Some(2) => {
-                let _ = self.heap.write_u8(field_addr, read_i32_fast(&val)? as u8);
+                self.heap.write_u8(field_addr, read_i32_fast(&val)? as u8)?;
             }
             Some(3) | Some(4) => {
-                let _ = self.heap.write_u16(field_addr, read_i32_fast(&val)? as u16);
+                self.heap
+                    .write_u16(field_addr, read_i32_fast(&val)? as u16)?;
             }
             Some(5) | Some(6) => {
-                let _ = self.heap.write_u32(field_addr, read_i32_fast(&val)? as u32);
+                self.heap
+                    .write_u32(field_addr, read_i32_fast(&val)? as u32)?;
             }
             Some(7) | Some(8) => {
-                let _ = self.heap.write_u64(field_addr, read_i64_fast(&val)? as u64);
+                self.heap
+                    .write_u64(field_addr, read_i64_fast(&val)? as u64)?;
             }
             Some(9) => {
                 let bits = (read_f64_fast(&val)? as f32).to_bits();
-                let _ = self.heap.write_u32(field_addr, bits);
+                self.heap.write_u32(field_addr, bits)?;
             }
             Some(10) => {
                 let bits = read_f64_fast(&val)?.to_bits();
-                let _ = self.heap.write_u64(field_addr, bits);
+                self.heap.write_u64(field_addr, bits)?;
             }
             Some(11) => {
-                let _ = self
-                    .heap
-                    .write_u8(field_addr, if read_bool_fast(&val)? { 1 } else { 0 });
+                self.heap
+                    .write_u8(field_addr, if read_bool_fast(&val)? { 1 } else { 0 })?;
             }
             _ => {
                 let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
