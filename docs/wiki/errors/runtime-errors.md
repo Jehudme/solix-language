@@ -8,9 +8,9 @@ This section documents runtime trap codes and execution faults emitted by the So
 | :---: | :---: | :--- | :--- |
 | **`R0001`** | 1 | `OutOfMemory` | `VirtualHeap` exhausted available memory during dynamic allocation |
 | **`R0002`** | 2 | `StackOverflow` | Call frame depth exceeded maximum recursion ceiling (default: 10,000 frames) |
-| **`R0003`** | 3 | `DivideByZero` | Integer division or modulo by zero (`x / 0` or `x % 0`) |
+| **`R0003`** | 3 | `DivideByZero` | Integer division or modulo by zero (`numerator / 0` or `numerator % 0`) |
 | **`R0004`** | 4 | `IndexOutOfBounds` | Array, string, or collection indexed with negative or out-of-range index |
-| **`R0005`** | 5 | `NullReferenceAccess`| Attempted field read, write, or method call on a `null` reference object |
+| **`R0005`** | 5 | `NullReferenceAccess`| Attempted field read, write, method invocation on null, or throw of a null reference |
 | **`R0006`** | 6 | `InvalidCast` | Object reference downcast failed dynamic type check at runtime |
 | **`R0007`** | 7 | `FunctionNotFound` | Dynamic linker failed to resolve target function index |
 | **`R0008`** | 8 | `EntryPointNotFound` | Compiled `.slxb` container does not define a valid entry point (`main()`) |

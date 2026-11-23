@@ -1,4 +1,4 @@
-# Binder & Semantic Error Codes (`E0201` – `E0290`)
+# Binder & Semantic Error Codes (`E0201` – `E0298`)
 
 This section documents semantic binding diagnostics emitted by [`crates/solix-compilation/src/phases/binder/`](../../../crates/solix-compilation/src/phases/binder).
 
@@ -106,3 +106,22 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
 ### `E0291`: Dependency Checksum Mismatch
 * **Cause:** A resolved package artifact's SHA-256 digest does not match the pinned checksum recorded at compile time.
 * **Fix:** Rebuild the dependency or compile with `--no-verify` (`--ignore-checksum`) if intentionally hot-swapping code.
+
+---
+
+### `E0298`: Cannot Throw Null Literal
+* **Cause:** A `throw` statement directly specifies `null` or an expression statically typed as `null`. Throw expressions must evaluate to an instance of an `Exception` class.
+* **Bad Code:**
+  ```solix
+  void faulty() {
+      throw null;
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class CustomException extends Exception {}
+
+  void faulty() {
+      throw new CustomException();
+  }
+  ```

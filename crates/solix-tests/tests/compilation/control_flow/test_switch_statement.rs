@@ -82,3 +82,27 @@ fn test_case_4_4_switch_statement_placed_directly_in_class_body() {
     "#;
     assert_compile_error(code, "class");
 }
+
+#[test]
+fn test_switch_continue_inside_loop() {
+    let source_code = r#"
+        int32 main() {
+            int32 loop_counter = 0;
+            int32 accumulated_value = 0;
+            while (loop_counter < 5) {
+                loop_counter = loop_counter + 1;
+                switch (loop_counter) {
+                    case 2:
+                        continue;
+                    case 4:
+                        continue;
+                    default:
+                        accumulated_value = accumulated_value + loop_counter;
+                }
+            }
+            return accumulated_value;
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(9));
+}

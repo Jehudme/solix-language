@@ -87,11 +87,39 @@ impl<'ctx> Emitter<'ctx> {
     /// # Errors
     /// Returns `EmissionError` if finally block compilation fails.
     pub fn emit_active_finally_blocks(&mut self) -> Result<(), EmissionError> {
-        let active = self.finally_stack.clone();
-        for block in active.iter().rev() {
-            let mut loop_stack = Vec::new();
-            self.emit_block_statement(block, &mut loop_stack)?;
+        self.emit_active_finally_blocks_up_to(0)
+    }
+
+    /// Emits active finally blocks down to `target_depth` in LIFO order.
+    ///
+    /// Temporarily truncates `finally_stack` during recursive emission to prevent re-entrant emission
+    /// and compiler stack overflows when finally blocks contain `return`, `break`, or `continue`.
+    ///
+    /// # Errors
+    /// Returns `EmissionError` if finally block compilation fails.
+    pub fn emit_active_finally_blocks_up_to(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<(), EmissionError> {
+        let current_depth = self.finally_stack.len();
+        if current_depth <= target_depth {
+            return Ok(());
         }
+
+        let blocks_to_emit: Vec<_> = self.finally_stack[target_depth..current_depth].to_vec();
+        self.finally_stack.truncate(target_depth);
+
+        for block_statement in blocks_to_emit.iter().rev() {
+            let mut inner_loop_stack = Vec::new();
+            if let Err(emission_error) =
+                self.emit_block_statement(block_statement, &mut inner_loop_stack)
+            {
+                self.finally_stack.extend(blocks_to_emit);
+                return Err(emission_error);
+            }
+        }
+
+        self.finally_stack.extend(blocks_to_emit);
         Ok(())
     }
 

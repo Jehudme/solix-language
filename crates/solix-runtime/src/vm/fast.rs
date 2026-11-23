@@ -3005,8 +3005,23 @@ impl VirtualMachine {
         exc_reg: Option<u16>,
         target_depth: usize,
     ) -> Result<(), VmTrap> {
+        let mut exc_val = exc_val;
         if exc_val.is_null() {
-            return Err(VmTrap::null_reference());
+            if let Some(target_class) = self.context.all_classes.iter().find(|candidate| {
+                candidate.symbol == "NullReferenceException"
+                    || candidate.symbol.ends_with(".NullReferenceException")
+                    || candidate.symbol.ends_with("::NullReferenceException")
+            }) {
+                let payload_addr = alloc_object_trap(
+                    &mut self.heap,
+                    target_class.instance_size,
+                    BlockTag::Object,
+                    target_class.vtable_id,
+                )?;
+                exc_val = Value::Ref(payload_addr);
+            } else {
+                return Err(VmTrap::null_reference());
+            }
         }
 
         // Determine whether the throwing frame already holds an independent owned reference for `exc_val`:

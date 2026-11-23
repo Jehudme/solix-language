@@ -90,3 +90,14 @@ fn test_case_4_4_subscript_access_on_null_reference_at_runtime() {
     "#;
     assert_runtime_error(code, RuntimeErrorCode::NullReferenceAccess);
 }
+
+#[test]
+fn test_case_4_5_tuple_index_out_of_bounds_compile_time_error() {
+    let source_code = r#"
+        void test_method() {
+            (int32, string) tuple_value = (10, "test");
+            int32 invalid_element = tuple_value[5];
+        }
+    "#;
+    assert_compile_error(source_code, "E0252");
+}

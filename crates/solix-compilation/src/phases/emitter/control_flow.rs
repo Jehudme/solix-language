@@ -22,6 +22,10 @@ pub struct LoopContext {
     pub continue_patches: Vec<usize>,
     /// Scope depth in the allocator when this loop context was pushed.
     pub scope_depth: usize,
+    /// Active finally stack depth at loop entry.
+    pub finally_depth: usize,
+    /// Indicates whether this context represents a switch statement rather than a loop.
+    pub is_switch: bool,
 }
 
 impl<'ctx> Emitter<'ctx> {
@@ -42,7 +46,11 @@ impl<'ctx> Emitter<'ctx> {
             Statement::For(for_stmt) => self.emit_for_statement(for_stmt, loop_stack),
             Statement::Switch(switch_stmt) => self.emit_switch_statement(switch_stmt, loop_stack),
             Statement::Break(break_stmt) => {
-                self.emit_active_finally_blocks()?;
+                let target_finally_depth = loop_stack
+                    .last()
+                    .map(|context_item| context_item.finally_depth)
+                    .unwrap_or(0);
+                self.emit_active_finally_blocks_up_to(target_finally_depth)?;
 
                 if let Some(active_loop) = loop_stack.last() {
                     let loop_depth = active_loop.scope_depth;
@@ -66,9 +74,19 @@ impl<'ctx> Emitter<'ctx> {
                 Ok(())
             }
             Statement::Continue(continue_stmt) => {
-                self.emit_active_finally_blocks()?;
+                let target_finally_depth = loop_stack
+                    .iter()
+                    .rev()
+                    .find(|context_item| !context_item.is_switch)
+                    .map(|context_item| context_item.finally_depth)
+                    .unwrap_or(0);
+                self.emit_active_finally_blocks_up_to(target_finally_depth)?;
 
-                if let Some(active_loop) = loop_stack.last() {
+                if let Some(active_loop) = loop_stack
+                    .iter()
+                    .rev()
+                    .find(|context_item| !context_item.is_switch)
+                {
                     let loop_depth = active_loop.scope_depth;
                     for register in self.allocator.scopes_allocated_from(loop_depth) {
                         if self.function.reference_registers.contains(&register) {
@@ -84,7 +102,11 @@ impl<'ctx> Emitter<'ctx> {
                     Instruction::format_c(OpCode::Jump, 0, 0, 0),
                     Some(continue_stmt.span),
                 );
-                if let Some(active_loop) = loop_stack.last_mut() {
+                if let Some(active_loop) = loop_stack
+                    .iter_mut()
+                    .rev()
+                    .find(|context_item| !context_item.is_switch)
+                {
                     active_loop.continue_patches.push(patch_pc as usize);
                 }
                 Ok(())
@@ -253,6 +275,8 @@ impl<'ctx> Emitter<'ctx> {
             break_patches: Vec::new(),
             continue_patches: Vec::new(),
             scope_depth: self.allocator.scope_depth(),
+            finally_depth: self.finally_stack.len(),
+            is_switch: false,
         });
 
         let r_cond = self.emit_expression(&while_stmt.condition, None)?;
@@ -303,6 +327,8 @@ impl<'ctx> Emitter<'ctx> {
             break_patches: Vec::new(),
             continue_patches: Vec::new(),
             scope_depth: self.allocator.scope_depth(),
+            finally_depth: self.finally_stack.len(),
+            is_switch: false,
         });
 
         self.emit_statement(&do_while.body, loop_stack)?;
@@ -349,6 +375,8 @@ impl<'ctx> Emitter<'ctx> {
             break_patches: Vec::new(),
             continue_patches: Vec::new(),
             scope_depth: self.allocator.scope_depth(),
+            finally_depth: self.finally_stack.len(),
+            is_switch: false,
         });
 
         let exit_jump_pc = if let Some(cond) = &for_stmt.condition {
@@ -410,6 +438,8 @@ impl<'ctx> Emitter<'ctx> {
             break_patches: Vec::new(),
             continue_patches: Vec::new(),
             scope_depth: self.allocator.scope_depth(),
+            finally_depth: self.finally_stack.len(),
+            is_switch: true,
         };
 
         loop_stack.push(switch_break_context);
@@ -778,49 +808,61 @@ impl<'ctx> Emitter<'ctx> {
         &mut self,
         return_stmt: &ReturnStatement,
     ) -> Result<(), EmissionError> {
-        self.emit_active_finally_blocks()?;
-
-        if let Some(val) = &return_stmt.value {
-            let mut r_val = self.emit_expression(val, None)?;
-            let val_type = self.query_type(val.span());
+        if let Some(return_value_expression) = &return_stmt.value {
+            let mut evaluated_return_register =
+                self.emit_expression(return_value_expression, None)?;
+            let expression_type = self.query_type(return_value_expression.span());
             if self.function.return_type.is_floating_point()
-                && (val_type.is_signed_integer() || val_type.is_unsigned_integer())
+                && (expression_type.is_signed_integer() || expression_type.is_unsigned_integer())
             {
-                let converted_reg = self.allocator.alloc_temp()?;
+                let converted_register = self.allocator.alloc_temp()?;
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::ConvIToF, 0, converted_reg, r_val, 0),
+                    Instruction::format_a(
+                        OpCode::ConvIToF,
+                        0,
+                        converted_register,
+                        evaluated_return_register,
+                        0,
+                    ),
                     Some(return_stmt.span),
                 );
-                self.allocator.free_temp(r_val);
-                r_val = converted_reg;
+                self.allocator.free_temp(evaluated_return_register);
+                evaluated_return_register = converted_register;
             }
-            let returning_owned_local = matches!(
-                val,
+            let is_returning_owned_local = matches!(
+                return_value_expression,
                 Expression::Identifier { span }
-                    if self.allocator.lookup_local(self.get_lexeme(*span)) == Some(r_val)
-                        && self.function.reference_registers.contains(&r_val)
+                    if self.allocator.lookup_local(self.get_lexeme(*span))
+                        == Some(evaluated_return_register)
+                        && self.function.reference_registers.contains(&evaluated_return_register)
             );
-            if !returning_owned_local
-                && (self.query_type(val.span()).is_reference_type()
+            if !is_returning_owned_local
+                && (self
+                    .query_type(return_value_expression.span())
+                    .is_reference_type()
                     || matches!(
-                        self.query_type(val.span()),
+                        self.query_type(return_value_expression.span()),
                         solix_common::types::Type::GenericParameter { .. }
                             | solix_common::types::Type::Unresolved(_)
                     ))
-                && self.is_borrowed_reference(val)
+                && self.is_borrowed_reference(return_value_expression)
             {
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::IncRef, 0, r_val, 0, 0),
+                    Instruction::format_a(OpCode::IncRef, 0, evaluated_return_register, 0, 0),
                     Some(return_stmt.span),
                 );
             }
-            self.emit_return_arc_cleanup(Some(r_val));
+
+            self.emit_active_finally_blocks_up_to(0)?;
+
+            self.emit_return_arc_cleanup(Some(evaluated_return_register));
             self.emit_instruction(
-                Instruction::format_a(OpCode::ReturnValue, 0, r_val, 0, 0),
+                Instruction::format_a(OpCode::ReturnValue, 0, evaluated_return_register, 0, 0),
                 Some(return_stmt.span),
             );
-            self.allocator.free_temp(r_val);
+            self.allocator.free_temp(evaluated_return_register);
         } else {
+            self.emit_active_finally_blocks_up_to(0)?;
             self.emit_return_arc_cleanup(None);
             self.emit_instruction(
                 Instruction::format_a(OpCode::Return, 0, 0, 0, 0),

@@ -1180,6 +1180,16 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
+    #[error("Cannot throw 'null' literal")]
+    #[diagnostic(
+        code(solix::binder::cannot_throw_null),
+        help("Throw expressions must evaluate to a non-null instance of an Exception class.")
+    )]
+    CannotThrowNull {
+        #[label("null expression in throw")]
+        span: SourceSpan,
+    },
+
     #[error(
         "Generic type constraint violation: type '{actual}' does not satisfy constraint '{expected}' for parameter '{type_param}'"
     )]
@@ -1299,6 +1309,7 @@ impl BindingError {
             Self::DuplicateSwitchCaseConstant { .. } => "E0294",
             Self::InvalidSwitchPatternTarget { .. } => "E0295",
             Self::TupleArityMismatchInCase { .. } => "E0296",
+            Self::CannotThrowNull { .. } => "E0298",
         }
     }
 
@@ -1402,6 +1413,7 @@ impl BindingError {
             | Self::DuplicateSwitchCaseConstant { span, .. }
             | Self::InvalidSwitchPatternTarget { span, .. }
             | Self::TupleArityMismatchInCase { span, .. }
+            | Self::CannotThrowNull { span }
             | Self::GenericTypeConstraintViolation { span, .. } => *span,
         }
     }

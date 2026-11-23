@@ -185,3 +185,41 @@ fn test_case_2_3_lambda_signature_incompatible_with_target_function_pointer() {
     "#;
     assert_compile_error(code, "mismatch");
 }
+
+#[test]
+fn test_lambda_block_body_return_inference() {
+    let source_code = r#"
+        int32 invoke_function(int32(*)(int32) callback, int32 argument_value) {
+            return callback(argument_value);
+        }
+
+        int32 main() {
+            int32(*)(int32) doubler = (int32 input_value) => {
+                return input_value * 2;
+            };
+            return invoke_function(doubler, 21);
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+}
+
+#[test]
+fn test_lambda_returned_from_function() {
+    let source_code = r#"
+        class Factory {
+            public static int32(*)(int32) make_adder(int32 increment_amount) {
+                return [increment_amount](int32 base_value) => {
+                    return base_value + increment_amount;
+                };
+            }
+
+            public static int32 main() {
+                int32(*)(int32) add_ten = Factory::make_adder(10);
+                return add_ten(32);
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+}
