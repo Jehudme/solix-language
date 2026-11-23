@@ -18,7 +18,84 @@ use crate::phases::parser::statements::expressions::*;
 use crate::phases::parser::statements::types::TypeAnnotation;
 use crate::phases::parser::visitor::AstVisitor;
 use solix_common::{PrimitiveKind, Type};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+fn evaluate_integer_constant(expression: &Expression) -> Option<i64> {
+    match expression {
+        Expression::Literal {
+            value: LiteralValue::Int(literal_value),
+            ..
+        } => Some(*literal_value),
+        Expression::Literal {
+            value: LiteralValue::UInt(literal_value),
+            ..
+        } => Some(*literal_value as i64),
+        Expression::Unary {
+            operator: TokenKind::OperatorMinus,
+            operand,
+            ..
+        } => {
+            evaluate_integer_constant(operand).and_then(|operand_value| operand_value.checked_neg())
+        }
+        Expression::Unary {
+            operator: TokenKind::OperatorPlus,
+            operand,
+            ..
+        } => evaluate_integer_constant(operand),
+        Expression::Unary {
+            operator: TokenKind::OperatorBitwiseNot,
+            operand,
+            ..
+        } => evaluate_integer_constant(operand).map(|operand_value| !operand_value),
+        Expression::Binary {
+            operator,
+            left,
+            right,
+            ..
+        } => {
+            let left_value = evaluate_integer_constant(left)?;
+            let right_value = evaluate_integer_constant(right)?;
+            match operator {
+                TokenKind::OperatorPlus => left_value.checked_add(right_value),
+                TokenKind::OperatorMinus => left_value.checked_sub(right_value),
+                TokenKind::OperatorMultiply => left_value.checked_mul(right_value),
+                TokenKind::OperatorDivide => {
+                    if right_value == 0 {
+                        None
+                    } else {
+                        left_value.checked_div(right_value)
+                    }
+                }
+                TokenKind::OperatorModulo => {
+                    if right_value == 0 {
+                        None
+                    } else {
+                        left_value.checked_rem(right_value)
+                    }
+                }
+                TokenKind::OperatorShiftLeft => {
+                    if !(0..64).contains(&right_value) {
+                        None
+                    } else {
+                        left_value.checked_shl(right_value as u32)
+                    }
+                }
+                TokenKind::OperatorShiftRight => {
+                    if !(0..64).contains(&right_value) {
+                        None
+                    } else {
+                        left_value.checked_shr(right_value as u32)
+                    }
+                }
+                TokenKind::PunctuationAmpersand => Some(left_value & right_value),
+                TokenKind::OperatorBitwiseOr => Some(left_value | right_value),
+                TokenKind::OperatorBitwiseXor => Some(left_value ^ right_value),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
 
 /// Active lambda context tracking expected and actual return types within lambda bodies.
 #[derive(Debug, Clone)]
@@ -311,6 +388,10 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                                 || right_type == Type::Primitive(PrimitiveKind::UInt64)
                             {
                                 Type::Primitive(PrimitiveKind::UInt64)
+                            } else if left_type == Type::Primitive(PrimitiveKind::UInt32)
+                                || right_type == Type::Primitive(PrimitiveKind::UInt32)
+                            {
+                                Type::Primitive(PrimitiveKind::UInt32)
                             } else {
                                 Type::Primitive(PrimitiveKind::Int32)
                             }
@@ -777,8 +858,12 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                     };
 
                     if let Some(mut current_class_id) = resolved_class_id {
+                        let mut visited_class_identifiers = HashSet::new();
                         while let Some(class_entry) = self.symbol_table.get_symbol(current_class_id)
                         {
+                            if !visited_class_identifiers.insert(current_class_id) {
+                                break;
+                            }
                             for &child_id in &class_entry.members {
                                 if let Some(child_entry) = self.symbol_table.get_symbol(child_id)
                                     && child_entry.name == member_name
@@ -999,9 +1084,13 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
 
                         if let Some(mut current_class_id) = cls_id {
                             let mut found_method: Option<(SymbolId, Type)> = None;
+                            let mut visited_class_identifiers = HashSet::new();
                             while let Some(class_entry) =
                                 self.symbol_table.get_symbol(current_class_id)
                             {
+                                if !visited_class_identifiers.insert(current_class_id) {
+                                    break;
+                                }
                                 for &child_id in &class_entry.members {
                                     if let Some(child_entry) =
                                         self.symbol_table.get_symbol(child_id)
@@ -1469,6 +1558,12 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                 {
                     self.errors.push(BindingError::ArrayLengthNotInteger {
                         found: size_type.to_string(),
+                        span: size.span().to_source_span(),
+                    });
+                } else if let Some(constant_length) = evaluate_integer_constant(size)
+                    && constant_length < 0
+                {
+                    self.errors.push(BindingError::NegativeArrayLength {
                         span: size.span().to_source_span(),
                     });
                 }
@@ -1945,10 +2040,15 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
         if current == target {
             return true;
         }
+        let mut visited_symbols = HashSet::new();
+        visited_symbols.insert(current);
         while let Some(entry) = self.symbol_table.get_symbol(current) {
             if let Some(parent) = entry.parent_symbol {
                 if parent == target {
                     return true;
+                }
+                if !visited_symbols.insert(parent) {
+                    break;
                 }
                 current = parent;
             } else {
@@ -1958,23 +2058,23 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
         false
     }
 
-    pub fn check_is_subtype(&self, src_name: &str, tgt_name: &str) -> bool {
-        if src_name == tgt_name {
+    pub fn check_is_subtype(&self, source_name: &str, target_name: &str) -> bool {
+        if source_name == target_name {
             return true;
         }
-        let src_clean = src_name.rsplit(['.', ':']).next().unwrap_or(src_name);
-        let tgt_clean = tgt_name.rsplit(['.', ':']).next().unwrap_or(tgt_name);
-        if src_clean == tgt_clean {
+        let source_clean = source_name.rsplit(['.', ':']).next().unwrap_or(source_name);
+        let target_clean = target_name.rsplit(['.', ':']).next().unwrap_or(target_name);
+        if source_clean == target_clean {
             return true;
         }
 
-        let src_id = match self
+        let source_id = match self
             .blueprint_registry
             .instantiated_classes
-            .get(src_name)
+            .get(source_name)
             .copied()
             .or_else(|| {
-                if let Some(base) = src_name.split('<').next() {
+                if let Some(base) = source_name.split('<').next() {
                     let base_clean = base.rsplit(['.', ':']).next().unwrap_or(base);
                     self.symbol_table
                         .resolve_symbol(self.source_id, base)
@@ -1983,38 +2083,49 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                     None
                 }
             })
-            .or_else(|| self.symbol_table.resolve_symbol(self.source_id, src_name))
-            .or_else(|| self.symbol_table.resolve_symbol(self.source_id, src_clean))
-        {
-            Some(id) => id,
+            .or_else(|| {
+                self.symbol_table
+                    .resolve_symbol(self.source_id, source_name)
+            })
+            .or_else(|| {
+                self.symbol_table
+                    .resolve_symbol(self.source_id, source_clean)
+            }) {
+            Some(identifier) => identifier,
             None => return false,
         };
-        let tgt_id = match self
+        let target_id = match self
             .symbol_table
-            .resolve_symbol(self.source_id, tgt_name)
-            .or_else(|| self.symbol_table.resolve_symbol(self.source_id, tgt_clean))
-        {
-            Some(id) => id,
+            .resolve_symbol(self.source_id, target_name)
+            .or_else(|| {
+                self.symbol_table
+                    .resolve_symbol(self.source_id, target_clean)
+            }) {
+            Some(identifier) => identifier,
             None => return false,
         };
 
-        if self.is_subclass_or_same(src_id, tgt_id) {
+        if self.is_subclass_or_same(source_id, target_id) {
             return true;
         }
 
         // Interface conformance check
-        let mut curr_id = Some(src_id);
-        while let Some(cid) = curr_id {
-            if let Some(layout) = self.layouts.get(&cid)
-                && (layout.itable_methods.contains_key(tgt_name)
-                    || layout.itable_methods.contains_key(tgt_clean))
+        let mut current_symbol_identifier = Some(source_id);
+        let mut visited_identifiers = HashSet::new();
+        while let Some(current_class_identifier) = current_symbol_identifier {
+            if !visited_identifiers.insert(current_class_identifier) {
+                break;
+            }
+            if let Some(layout) = self.layouts.get(&current_class_identifier)
+                && (layout.itable_methods.contains_key(target_name)
+                    || layout.itable_methods.contains_key(target_clean))
             {
                 return true;
             }
-            curr_id = self
+            current_symbol_identifier = self
                 .symbol_table
-                .get_symbol(cid)
-                .and_then(|sym_entry| sym_entry.parent_symbol);
+                .get_symbol(current_class_identifier)
+                .and_then(|symbol_entry| symbol_entry.parent_symbol);
         }
 
         false
@@ -3547,16 +3658,31 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
     }
 
     fn visit_assert_statement(&mut self, node: &AssertStatement) {
-        let cond_type = self.evaluate_expression_type(&node.condition);
-        if cond_type != Type::Primitive(PrimitiveKind::Bool) && cond_type != Type::Error {
+        let condition_type = self.evaluate_expression_type(&node.condition);
+        if condition_type != Type::Primitive(PrimitiveKind::Bool) && condition_type != Type::Error {
             self.errors.push(BindingError::TypeMismatch {
                 expected: "bool".to_string(),
-                found: cond_type.to_string(),
+                found: condition_type.to_string(),
                 span: node.condition.span().to_source_span(),
             });
         }
         if let Some(message) = &node.message {
-            self.evaluate_expression_type(message);
+            let message_type = self.evaluate_expression_type(message);
+            let is_string = match &message_type {
+                Type::Class { symbol_name, .. } => {
+                    symbol_name == "std::string"
+                        || symbol_name == "std.string"
+                        || symbol_name == "string"
+                        || symbol_name == "solix.core.String"
+                }
+                _ => false,
+            };
+            if !is_string && message_type != Type::Error {
+                self.errors.push(BindingError::AssertMessageNotString {
+                    found: message_type.to_string(),
+                    span: message.span().to_source_span(),
+                });
+            }
         }
     }
 

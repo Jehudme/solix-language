@@ -200,11 +200,16 @@ fn verify_instruction(
         | OpCode::DivF64
         | OpCode::ModI32
         | OpCode::ModI64
+        | OpCode::DivU32
+        | OpCode::DivU64
+        | OpCode::ModU32
+        | OpCode::ModU64
         | OpCode::Band
         | OpCode::Bor
         | OpCode::Bxor
         | OpCode::Shl
         | OpCode::Shr
+        | OpCode::Lshr
         | OpCode::EqI32
         | OpCode::EqI64
         | OpCode::EqF64
@@ -228,7 +233,15 @@ fn verify_instruction(
         | OpCode::GtF64
         | OpCode::GteI32
         | OpCode::GteI64
-        | OpCode::GteF64 => {
+        | OpCode::GteF64
+        | OpCode::LtU32
+        | OpCode::LteU32
+        | OpCode::GtU32
+        | OpCode::GteU32
+        | OpCode::LtU64
+        | OpCode::LteU64
+        | OpCode::GtU64
+        | OpCode::GteU64 => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "src1")?;
             check_reg(instruction.src2(), "src2")?;

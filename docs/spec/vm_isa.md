@@ -116,8 +116,13 @@ Used for static, direct, and virtual function dispatch:
 | `0x24` | `Bnot` | A | `dst, src1` | Bitwise NOT (preserves `I32` when input is `I32`). |
 | `0x25` | `Shl` | A | `dst, src1, src2` | Bitwise left shift (preserves `I32` when inputs are `I32`). |
 | `0x26` | `Shr` | A | `dst, src1, src2` | Arithmetic right shift (preserves `I32` when inputs are `I32`). |
+| `0x27` | `DivU32` | A | `dst, src1, src2` | Unsigned 32-bit division (traps on divide by zero). |
+| `0x28` | `DivU64` | A | `dst, src1, src2` | Unsigned 64-bit division (traps on divide by zero). |
+| `0x29` | `ModU32` | A | `dst, src1, src2` | Unsigned 32-bit modulo remainder (traps on divide by zero). |
+| `0x2A` | `ModU64` | A | `dst, src1, src2` | Unsigned 64-bit modulo remainder (traps on divide by zero). |
+| `0x2B` | `Lshr` | A | `dst, src1, src2` | Logical right shift (zero-fill right shift). |
 
-### 3.4. Relational & Equality Comparisons (`0x30` .. `0x47`)
+### 3.4. Relational & Equality Comparisons (`0x30` .. `0x4F`, `0xEE`)
 | Opcode Hex | Name | Format | Operands | Description |
 |---|---|---|---|---|
 | `0x30` | `EqI32` | A | `dst, src1, src2` | `dst = (src1 == src2)`. |
@@ -133,6 +138,14 @@ Used for static, direct, and virtual function dispatch:
 | `0x3F` | `LteI32`| A | `dst, src1, src2` | `dst = (src1 <= src2)`. |
 | `0x42` | `GtI32` | A | `dst, src1, src2` | `dst = (src1 > src2)`. |
 | `0x45` | `GteI32`| A | `dst, src1, src2` | `dst = (src1 >= src2)`. |
+| `0x49` | `LtU32` | A | `dst, src1, src2` | `dst = (src1 < src2)` unsigned 32-bit. |
+| `0x4A` | `LteU32`| A | `dst, src1, src2` | `dst = (src1 <= src2)` unsigned 32-bit. |
+| `0x4B` | `GtU32` | A | `dst, src1, src2` | `dst = (src1 > src2)` unsigned 32-bit. |
+| `0x4C` | `GteU32`| A | `dst, src1, src2` | `dst = (src1 >= src2)` unsigned 32-bit. |
+| `0x4D` | `LtU64` | A | `dst, src1, src2` | `dst = (src1 < src2)` unsigned 64-bit. |
+| `0x4E` | `LteU64`| A | `dst, src1, src2` | `dst = (src1 <= src2)` unsigned 64-bit. |
+| `0x4F` | `GtU64` | A | `dst, src1, src2` | `dst = (src1 > src2)` unsigned 64-bit. |
+| `0xEE` | `GteU64`| A | `dst, src1, src2` | `dst = (src1 >= src2)` unsigned 64-bit. |
 
 ### 3.5. Memory & Object Allocation (`0x60` .. `0x6F`)
 | Opcode Hex | Name | Format | Operands | Description |

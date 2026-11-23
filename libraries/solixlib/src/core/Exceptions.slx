@@ -375,3 +375,11 @@ public class OutOfMemoryException extends RuntimeException {
     public OutOfMemoryException(string message, Exception cause) : super(message, cause) {}
     public OutOfMemoryException(String message, Exception cause) : super(message, cause) {}
 }
+
+public class AssertionError extends RuntimeException {
+    public AssertionError() : super("Assertion failed.") {}
+    public AssertionError(string message) : super(message) {}
+    public AssertionError(String message) : super(message) {}
+    public AssertionError(string message, Exception cause) : super(message, cause) {}
+    public AssertionError(String message, Exception cause) : super(message, cause) {}
+}

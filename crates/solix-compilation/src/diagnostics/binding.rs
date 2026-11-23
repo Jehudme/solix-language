@@ -1204,6 +1204,40 @@ pub enum BindingError {
         #[label("constraint violation")]
         span: SourceSpan,
     },
+
+    #[error("Cyclic inheritance detected in interface '{interface_name}'")]
+    #[diagnostic(
+        code(solix::binder::cyclic_interface_inheritance),
+        help("Break the cyclic dependency in interface inheritance.")
+    )]
+    CyclicInterfaceInheritance {
+        interface_name: String,
+        #[label("cyclic interface inheritance loop")]
+        span: SourceSpan,
+    },
+
+    #[error("Array dimension length cannot be negative")]
+    #[diagnostic(
+        code(solix::binder::negative_array_length),
+        help("Array length expressions must evaluate to a non-negative integer.")
+    )]
+    NegativeArrayLength {
+        #[label("negative array length")]
+        span: SourceSpan,
+    },
+
+    #[error("Assertion message expression must be of type 'string', found '{found}'")]
+    #[diagnostic(
+        code(solix::binder::assert_message_not_string),
+        help(
+            "Provide an expression that evaluates to a string for the assertion failure message."
+        )
+    )]
+    AssertMessageNotString {
+        found: String,
+        #[label("expected string message")]
+        span: SourceSpan,
+    },
 }
 
 impl BindingError {
@@ -1275,8 +1309,7 @@ impl BindingError {
             Self::SuperUsedOutsideSubclass { .. } => "E0261",
             Self::StaticMethodAccessViaInstance { .. } => "E0262",
             Self::InstanceMethodAccessViaStatic { .. } => "E0263",
-            Self::AbstractMethodInNonAbstractClass { .. }
-            | Self::GenericTypeConstraintViolation { .. } => "E0264",
+            Self::AbstractMethodInNonAbstractClass { .. } => "E0264",
             Self::NonAbstractClassMissingAbstractImpl { .. } => "E0265",
             Self::InterfaceFieldNotConstant { .. } => "E0266",
             Self::FinalMethodOverridden { .. } => "E0267",
@@ -1309,7 +1342,11 @@ impl BindingError {
             Self::DuplicateSwitchCaseConstant { .. } => "E0294",
             Self::InvalidSwitchPatternTarget { .. } => "E0295",
             Self::TupleArityMismatchInCase { .. } => "E0296",
+            Self::GenericTypeConstraintViolation { .. } => "E0297",
             Self::CannotThrowNull { .. } => "E0298",
+            Self::NegativeArrayLength { .. } => "E0299",
+            Self::CyclicInterfaceInheritance { .. } => "E0204",
+            Self::AssertMessageNotString { .. } => "E0301",
         }
     }
 
@@ -1414,7 +1451,10 @@ impl BindingError {
             | Self::InvalidSwitchPatternTarget { span, .. }
             | Self::TupleArityMismatchInCase { span, .. }
             | Self::CannotThrowNull { span }
-            | Self::GenericTypeConstraintViolation { span, .. } => *span,
+            | Self::GenericTypeConstraintViolation { span, .. }
+            | Self::CyclicInterfaceInheritance { span, .. }
+            | Self::NegativeArrayLength { span }
+            | Self::AssertMessageNotString { span, .. } => *span,
         }
     }
 

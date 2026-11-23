@@ -24,12 +24,12 @@ Exception
 │   ├── NotSupportedException
 │   ├── TimeoutException
 │   ├── NoSuchElementException
-│   └── KeyNotFoundException
+│   ├── KeyNotFoundException
+│   └── AssertionError
 ├── IOException
 │   ├── FileNotFoundException
 │   ├── DirectoryNotFoundException
 │   └── SocketException
-└── AssertionError
 ```
 
 ---
@@ -162,19 +162,22 @@ Thrown when a network socket or connection error occurs.
 ## 5. Assertion Errors
 
 ### `solix.exceptions.AssertionError`
-Thrown by language assertion expressions (`assert cond;`) when a verified condition fails.
-- Extends: `Exception`
+Thrown by language assertion statements (`assert(condition, message);`) when a verified condition evaluates to false.
+- Extends: `RuntimeException`
+- **Constructors**:
+  - `public AssertionError()`: Initializes with default assertion failure message.
+  - `public AssertionError(string message)`: Initializes with a custom explanatory message.
 
 ---
 
 ## 6. Catching and Polymorphism Semantics
 
 1. Catch clauses in Solix evaluate polymorphic inheritance from top to bottom.
-2. Catching a base type like `RuntimeException` catches all derived exceptions (`IllegalArgumentException`, `IndexOutOfBoundsException`, etc.).
+2. Catching a base type like `RuntimeException` catches all derived exceptions (`IllegalArgumentException`, `IndexOutOfBoundsException`, `AssertionError`, etc.).
 3. Placing a more general catch block before a specific catch block results in a compilation error:
    ```solix
    try { ... }
-   catch (Exception e) { ... }
-   catch (IOException e) { ... } // Compiler error: Unreachable catch clause
+   catch (Exception general_exception) { ... }
+   catch (IOException io_exception) { ... } // Compiler error: Unreachable catch clause
    ```
 4. `finally` blocks are guaranteed to execute during stack unwinding regardless of whether an exception was caught or rethrown.

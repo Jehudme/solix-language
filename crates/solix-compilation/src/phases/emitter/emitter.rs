@@ -2413,10 +2413,27 @@ impl<'ctx> Emitter<'ctx> {
                 TokenKind::OperatorGreaterEqual => OpCode::GteF64,
                 _ => OpCode::AddF64,
             }
-        } else if matches!(
-            operand_type,
-            Type::Primitive(PrimitiveKind::Int64 | PrimitiveKind::UInt64)
-        ) {
+        } else if matches!(operand_type, Type::Primitive(PrimitiveKind::UInt64)) {
+            match operator {
+                TokenKind::OperatorPlus => OpCode::AddI64,
+                TokenKind::OperatorMinus => OpCode::SubI64,
+                TokenKind::OperatorMultiply => OpCode::MulI64,
+                TokenKind::OperatorDivide => OpCode::DivU64,
+                TokenKind::OperatorModulo => OpCode::ModU64,
+                TokenKind::PunctuationAmpersand => OpCode::Band,
+                TokenKind::OperatorBitwiseOr => OpCode::Bor,
+                TokenKind::OperatorBitwiseXor => OpCode::Bxor,
+                TokenKind::OperatorShiftLeft => OpCode::Shl,
+                TokenKind::OperatorShiftRight => OpCode::Lshr,
+                TokenKind::OperatorEqual => OpCode::EqI64,
+                TokenKind::OperatorNotEqual => OpCode::NeqI64,
+                TokenKind::OperatorLessThan => OpCode::LtU64,
+                TokenKind::OperatorLessEqual => OpCode::LteU64,
+                TokenKind::OperatorGreaterThan => OpCode::GtU64,
+                TokenKind::OperatorGreaterEqual => OpCode::GteU64,
+                _ => OpCode::AddI64,
+            }
+        } else if matches!(operand_type, Type::Primitive(PrimitiveKind::Int64)) {
             match operator {
                 TokenKind::OperatorPlus => OpCode::AddI64,
                 TokenKind::OperatorMinus => OpCode::SubI64,
@@ -2457,6 +2474,27 @@ impl<'ctx> Emitter<'ctx> {
                 OpCode::NeqBool
             } else {
                 OpCode::NeqI32
+            }
+        } else if matches!(
+            operand_type,
+            Type::Primitive(PrimitiveKind::UInt8 | PrimitiveKind::UInt16 | PrimitiveKind::UInt32)
+        ) {
+            match operator {
+                TokenKind::OperatorPlus => OpCode::AddI32,
+                TokenKind::OperatorMinus => OpCode::SubI32,
+                TokenKind::OperatorMultiply => OpCode::MulI32,
+                TokenKind::OperatorDivide => OpCode::DivU32,
+                TokenKind::OperatorModulo => OpCode::ModU32,
+                TokenKind::PunctuationAmpersand => OpCode::Band,
+                TokenKind::OperatorBitwiseOr => OpCode::Bor,
+                TokenKind::OperatorBitwiseXor => OpCode::Bxor,
+                TokenKind::OperatorShiftLeft => OpCode::Shl,
+                TokenKind::OperatorShiftRight => OpCode::Lshr,
+                TokenKind::OperatorLessThan => OpCode::LtU32,
+                TokenKind::OperatorLessEqual => OpCode::LteU32,
+                TokenKind::OperatorGreaterThan => OpCode::GtU32,
+                TokenKind::OperatorGreaterEqual => OpCode::GteU32,
+                _ => OpCode::AddI32,
             }
         } else {
             // Default 32-bit integer arithmetic and bitwise
