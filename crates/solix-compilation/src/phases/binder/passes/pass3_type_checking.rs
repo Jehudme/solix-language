@@ -100,22 +100,46 @@ fn evaluate_integer_constant(expression: &Expression) -> Option<i64> {
 fn is_constant_expression(expression: &Expression) -> bool {
     match expression {
         Expression::Literal { .. } => true,
-        Expression::Unary { operand, .. } => is_constant_expression(operand),
+        Expression::Identifier { .. } => true,
+        Expression::Sizeof { .. } => true,
+        Expression::Default { .. } => true,
+        Expression::Cast {
+            expression: inner_expression,
+            ..
+        } => is_constant_expression(inner_expression),
+        Expression::MemberAccess {
+            object: inner_object,
+            ..
+        } => is_constant_expression(inner_object),
+        Expression::Unary {
+            operand: operand_expression,
+            ..
+        } => is_constant_expression(operand_expression),
         Expression::Binary {
-            left,
-            right,
+            left: left_operand,
+            right: right_operand,
             operator,
             ..
         } => {
             if matches!(
                 operator,
                 TokenKind::OperatorDivide | TokenKind::OperatorModulo
-            ) && let Some(right_val) = evaluate_integer_constant(right)
-                && right_val == 0
+            ) && let Some(right_constant_value) = evaluate_integer_constant(right_operand)
+                && right_constant_value == 0
             {
                 return false;
             }
-            is_constant_expression(left) && is_constant_expression(right)
+            is_constant_expression(left_operand) && is_constant_expression(right_operand)
+        }
+        Expression::Ternary {
+            condition: condition_expression,
+            then_branch: then_branch_expression,
+            else_branch: else_branch_expression,
+            ..
+        } => {
+            is_constant_expression(condition_expression)
+                && is_constant_expression(then_branch_expression)
+                && is_constant_expression(else_branch_expression)
         }
         _ => false,
     }
