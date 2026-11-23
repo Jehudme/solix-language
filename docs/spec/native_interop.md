@@ -4,8 +4,9 @@
 
 * **Specification ID:** SPEC-0011
 * **Scope:** Native Interoperability, FFI SDKs (`ffi/c`, `ffi/rust`), ABI & Dynamic Shared Libraries (`crates/solix-runtime/src/native/`)
-* **Status:** Final Normative Standard (SDK Release `1.6.0`+)
+* **Status:** Final Normative Standard (SDK Release `2.0.0`+)
 * **Implementation Source:** [`crates/solix-runtime/src/native/ffi.rs`](../../crates/solix-runtime/src/native/ffi.rs)
+* **SDK Version Constant:** `SOLIX_FFI_VERSION` (`2.0.0`), `SOLIX_FFI_VERSION_MAJOR` (2)
 
 ---
 

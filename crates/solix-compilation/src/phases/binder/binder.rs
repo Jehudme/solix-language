@@ -141,6 +141,8 @@ pub fn bind_context(
         }
     }
 
+    validate_static_field_dependencies(&context.ast, &context.sources, &mut accumulated_errors);
+
     let symbols_count = symbol_table.symbols.len();
     let classes_count = layouts.len();
     let monomorphized_count = blueprint_registry.monomorphized_asts.len();
@@ -372,4 +374,244 @@ pub fn bind_incremental(
 ) -> Result<BindingMetaData, Vec<BindingError>> {
     // For soundness, execute full multi-pass binding across all active valid ASTs
     bind_context(context)
+}
+
+fn collect_static_field_references(
+    expression: &crate::phases::parser::statements::expressions::Expression,
+    source_text: &str,
+    referenced_symbols: &mut Vec<String>,
+) {
+    use crate::phases::parser::statements::expressions::Expression;
+    match expression {
+        Expression::MemberAccess {
+            object,
+            member_span,
+            ..
+        } => {
+            let start_offset = member_span.start as usize;
+            let end_offset = member_span.end as usize;
+            let member_name = if start_offset <= end_offset && end_offset <= source_text.len() {
+                &source_text[start_offset..end_offset]
+            } else {
+                ""
+            };
+            if let Expression::Identifier { span: target_span } = &**object {
+                let object_start = target_span.start as usize;
+                let object_end = target_span.end as usize;
+                let object_name = if object_start <= object_end && object_end <= source_text.len() {
+                    &source_text[object_start..object_end]
+                } else {
+                    ""
+                };
+                if !object_name.is_empty() && !member_name.is_empty() {
+                    referenced_symbols.push(format!("{object_name}::{member_name}"));
+                }
+            }
+            collect_static_field_references(object, source_text, referenced_symbols);
+        }
+        Expression::Binary { left, right, .. } => {
+            collect_static_field_references(left, source_text, referenced_symbols);
+            collect_static_field_references(right, source_text, referenced_symbols);
+        }
+        Expression::Unary { operand, .. } => {
+            collect_static_field_references(operand, source_text, referenced_symbols);
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_static_field_references(target, source_text, referenced_symbols);
+            collect_static_field_references(value, source_text, referenced_symbols);
+        }
+        Expression::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            collect_static_field_references(condition, source_text, referenced_symbols);
+            collect_static_field_references(then_branch, source_text, referenced_symbols);
+            collect_static_field_references(else_branch, source_text, referenced_symbols);
+        }
+        Expression::MethodCall {
+            callee, arguments, ..
+        } => {
+            collect_static_field_references(callee, source_text, referenced_symbols);
+            for argument in arguments {
+                collect_static_field_references(argument, source_text, referenced_symbols);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn detect_static_dependency_cycle(
+    current_node: &str,
+    dependency_graph: &std::collections::HashMap<String, Vec<String>>,
+    visiting_nodes: &mut std::collections::HashSet<String>,
+    visited_nodes: &mut std::collections::HashSet<String>,
+    current_path: &mut Vec<String>,
+) -> Option<Vec<String>> {
+    visiting_nodes.insert(current_node.to_string());
+    current_path.push(current_node.to_string());
+
+    if let Some(dependencies) = dependency_graph.get(current_node) {
+        for dependency in dependencies {
+            if visiting_nodes.contains(dependency) {
+                let start_index = current_path
+                    .iter()
+                    .position(|node| node == dependency)
+                    .unwrap_or(0);
+                let mut cycle = current_path[start_index..].to_vec();
+                cycle.push(dependency.clone());
+                return Some(cycle);
+            }
+            if !visited_nodes.contains(dependency)
+                && let Some(cycle) = detect_static_dependency_cycle(
+                    dependency,
+                    dependency_graph,
+                    visiting_nodes,
+                    visited_nodes,
+                    current_path,
+                )
+            {
+                return Some(cycle);
+            }
+        }
+    }
+
+    current_path.pop();
+    visiting_nodes.remove(current_node);
+    visited_nodes.insert(current_node.to_string());
+    None
+}
+
+fn validate_static_field_dependencies(
+    ast_list: &[Option<crate::phases::parser::statements::ProgramAst>],
+    sources: &[String],
+    accumulated_errors: &mut Vec<(u16, BindingError)>,
+) {
+    use crate::phases::parser::statements::declarations::{ClassMember, Declaration, Modifier};
+    let mut declared_static_fields: std::collections::HashMap<String, (u16, Span)> =
+        std::collections::HashMap::new();
+    let mut field_dependencies: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+
+    for (source_index, ast_option) in ast_list.iter().enumerate() {
+        let source_id = source_index as u16;
+        let source_text = sources
+            .get(source_index)
+            .map(|text| text.as_str())
+            .unwrap_or("");
+        if let Some(program_ast) = ast_option {
+            let package_prefix = program_ast
+                .package
+                .as_ref()
+                .map(|package_decl| {
+                    let segments: Vec<&str> = package_decl
+                        .path
+                        .iter()
+                        .map(|span| {
+                            let start = span.start as usize;
+                            let end = span.end as usize;
+                            if start <= end && end <= source_text.len() {
+                                &source_text[start..end]
+                            } else {
+                                ""
+                            }
+                        })
+                        .collect();
+                    segments.join("::")
+                })
+                .unwrap_or_default();
+
+            for declaration in &program_ast.declarations {
+                if let Declaration::Class(class_decl) = declaration {
+                    let class_name = if class_decl.name_span.end as usize <= source_text.len() {
+                        &source_text
+                            [class_decl.name_span.start as usize..class_decl.name_span.end as usize]
+                    } else {
+                        "class"
+                    };
+                    for member in &class_decl.members {
+                        if let ClassMember::Field(field_decl) = member
+                            && field_decl.modifiers.contains(&Modifier::Static)
+                        {
+                            let field_name =
+                                if field_decl.name_span.end as usize <= source_text.len() {
+                                    &source_text[field_decl.name_span.start as usize
+                                        ..field_decl.name_span.end as usize]
+                                } else {
+                                    "field"
+                                };
+                            let full_symbol = if package_prefix.is_empty() {
+                                format!("{class_name}::{field_name}")
+                            } else {
+                                format!("{package_prefix}::{class_name}::{field_name}")
+                            };
+                            let simple_symbol = format!("{class_name}::{field_name}");
+
+                            declared_static_fields
+                                .insert(full_symbol.clone(), (source_id, field_decl.span));
+                            declared_static_fields
+                                .insert(simple_symbol.clone(), (source_id, field_decl.span));
+
+                            let mut references = Vec::new();
+                            if let Some(initializer) = &field_decl.initializer {
+                                collect_static_field_references(
+                                    initializer,
+                                    source_text,
+                                    &mut references,
+                                );
+                            }
+                            field_dependencies.insert(full_symbol, references.clone());
+                            field_dependencies.insert(simple_symbol, references);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut filtered_graph: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (field_symbol, references) in &field_dependencies {
+        let valid_targets: Vec<String> = references
+            .iter()
+            .filter(|target| declared_static_fields.contains_key(*target))
+            .cloned()
+            .collect();
+        if !valid_targets.is_empty() {
+            filtered_graph.insert(field_symbol.clone(), valid_targets);
+        }
+    }
+
+    let mut visiting_nodes = std::collections::HashSet::new();
+    let mut visited_nodes = std::collections::HashSet::new();
+    let mut reported_cycles = std::collections::HashSet::new();
+
+    for field_symbol in filtered_graph.keys() {
+        if !visited_nodes.contains(field_symbol) {
+            let mut current_path = Vec::new();
+            if let Some(cycle) = detect_static_dependency_cycle(
+                field_symbol,
+                &filtered_graph,
+                &mut visiting_nodes,
+                &mut visited_nodes,
+                &mut current_path,
+            ) {
+                let cycle_path = cycle.join(" -> ");
+                if reported_cycles.insert(cycle_path.clone()) {
+                    let (source_id, span) = declared_static_fields
+                        .get(field_symbol)
+                        .copied()
+                        .unwrap_or((0, Span::default()));
+                    accumulated_errors.push((
+                        source_id,
+                        BindingError::CyclicStaticFieldDependency {
+                            cycle_path,
+                            span: span.to_source_span(),
+                        },
+                    ));
+                }
+            }
+        }
+    }
 }

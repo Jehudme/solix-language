@@ -302,6 +302,16 @@ pub enum ParsingError {
         span: SourceSpan,
     },
 
+    #[error("Expression nesting depth exceeded maximum limit of 512")]
+    #[diagnostic(
+        code(solix::parser::expression_nesting_depth_exceeded),
+        help("Simplify the expression by breaking it into intermediate variables.")
+    )]
+    ExpressionNestingDepthExceeded {
+        #[label("expression nesting depth exceeded limit")]
+        span: SourceSpan,
+    },
+
     #[error("Class cannot declare multiple destructors")]
     #[diagnostic(
         code(solix::parser::multiple_destructors_in_class),
@@ -1073,6 +1083,7 @@ impl ParsingError {
             Self::MalformedDoWhile { .. } => "E0145",
             Self::MalformedAlias { .. } => "E0146",
             Self::UnexpectedToken { .. } => "E0147",
+            Self::ExpressionNestingDepthExceeded { .. } => "E0148",
             Self::IntegerLiteralOverflow { .. } => "E0150",
             Self::InvalidEscapeSequence { .. } => "E0151",
             Self::EmptyCharacterLiteral { .. } => "E0152",
@@ -1176,6 +1187,7 @@ impl ParsingError {
             | Self::MalformedDoWhile { span }
             | Self::MalformedAlias { span }
             | Self::UnexpectedToken { span }
+            | Self::ExpressionNestingDepthExceeded { span }
             | Self::IntegerLiteralOverflow { span }
             | Self::InvalidEscapeSequence { span }
             | Self::EmptyCharacterLiteral { span }

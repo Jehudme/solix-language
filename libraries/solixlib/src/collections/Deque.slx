@@ -4,6 +4,7 @@ import solix.core.IStringable;
 import solix.core.String;
 import solix.core.IndexOutOfBoundsException;
 import solix.core.NoSuchElementException;
+import solix.core.OutOfMemoryException;
 
 public class DequeIterator<T> implements IIterator<T> {
     private Deque<T> deque_reference;
@@ -72,6 +73,9 @@ public class Deque<T> implements IDeque<T>, ICollection<T>, IIterable<T>, IStrin
 
     private void ensure_capacity() {
         if (this.count == this.buffer.length) {
+            if (this.buffer.length >= 1073741824) {
+                throw new OutOfMemoryException("Deque maximum capacity exceeded");
+            }
             int32 new_capacity = this.buffer.length * 2;
             T[] new_buffer = new T[new_capacity];
             int32 copy_index = 0;

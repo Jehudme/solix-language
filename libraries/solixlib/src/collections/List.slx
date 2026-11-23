@@ -6,6 +6,7 @@ import solix.core.Optional;
 import solix.core.IndexOutOfBoundsException;
 import solix.core.IllegalArgumentException;
 import solix.core.NoSuchElementException;
+import solix.core.OutOfMemoryException;
 
 public class ListIterator<T> implements IIterator<T> {
     private T[] data;
@@ -133,10 +134,19 @@ public class List<T> implements IList<T>, ICollection<T>, IIterable<T>, IStringa
     }
 
     public void ensure_capacity(int32 minimum_capacity) {
+        if (minimum_capacity < 0) {
+            throw new OutOfMemoryException("Requested capacity exceeds maximum allowable size");
+        }
         if (minimum_capacity > this.data.length) {
             int32 new_capacity = this.data.length * 2;
+            if (new_capacity < 0 || new_capacity > 1073741824) {
+                new_capacity = 1073741824;
+            }
             if (new_capacity < minimum_capacity) {
                 new_capacity = minimum_capacity;
+            }
+            if (new_capacity < 0) {
+                throw new OutOfMemoryException("List capacity overflow");
             }
             T[] new_array = new T[new_capacity];
             int32 copy_index = 0;

@@ -54,7 +54,7 @@ All sensitive categories emit a single **`sensitive`** label via [`scripts/ci/pr
 
 ### 2.2 Non-Blocking Auditor (`scripts/ci/pr_risk_audit.py`)
 * [`scripts/ci/pr_risk_audit.py`](../../scripts/ci/pr_risk_audit.py) **MUST ALWAYS** exit `0` so valid improvements never fail CI solely for touching protected files.
-* When sensitive files change, the job attaches the single `sensitive` label and upserts a concise `## Sensitive Paths Modified` table; when subsequent PR commits revert all sensitive changes, CI automatically removes the `sensitive` label and deletes the sticky notice. Both `pr-risk-audit` and `pr-benchmark` avoid checking out untrusted fork code in privileged `pull_request_target` jobs.
+* When sensitive files change, the job attaches the single `sensitive` label and upserts a concise `## Sensitive Paths Modified` table; when subsequent PR commits revert all sensitive changes, CI automatically removes the `sensitive` label and deletes the sticky notice. Both `pr-risk-audit` and `pr-benchmark` avoid checking out untrusted fork code in privileged `pull_request_target` jobs. `pr-benchmark` executes across all pull requests targeting `dev` (including external fork contributions), publishing back-to-back benchmark comparisons directly to the GitHub Step Summary and updating sticky PR comments when write token permissions permit.
 
 ---
 

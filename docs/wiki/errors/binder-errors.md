@@ -205,3 +205,104 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
   ```solix
   assert value > 0 : "Value must be positive";
   ```
+
+---
+
+### `E0302`: Generic Instantiation Depth Exceeded
+* **Cause:** Monomorphization depth of a generic class or self-referential generic expansion exceeded the recursion limit of 64 levels.
+* **Bad Code:**
+  ```solix
+  class RecursiveNode<T> {
+      public RecursiveNode<RecursiveNode<T>> next_child;
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class RecursiveNode<T> {
+      public RecursiveNode<T> next_child;
+  }
+  ```
+
+---
+
+### `E0303`: Cyclic Static Field Dependency
+* **Cause:** Static field initializers form a cyclic initialization dependency between classes or fields.
+* **Bad Code:**
+  ```solix
+  class FirstClass {
+      public static int32 first_val = SecondClass.second_val + 1;
+  }
+  class SecondClass {
+      public static int32 second_val = FirstClass.first_val + 1;
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class FirstClass {
+      public static int32 first_val = 10;
+  }
+  class SecondClass {
+      public static int32 second_val = FirstClass.first_val + 1;
+  }
+  ```
+
+---
+
+### `E0304`: Virtual Call in Destructor Forbidden
+* **Cause:** Calling a virtual or overridden instance method on `this` inside a class destructor (`~ClassName()`) is forbidden to prevent uninitialized or torn vtable dispatch during object teardown.
+* **Bad Code:**
+  ```solix
+  class Resource {
+      public virtual void teardown() {}
+      ~Resource() {
+          this.teardown();
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class Resource {
+      public void teardown_non_virtual() {}
+      ~Resource() {
+          this.teardown_non_virtual();
+      }
+  }
+  ```
+
+---
+
+### `E0305`: Symbol Collides with Package Name
+* **Cause:** A top-level class, interface, or enum declaration identifier collides with a namespace segment of a declared package.
+* **Bad Code:**
+  ```solix
+  package network.http;
+  class Client {}
+
+  // In another file:
+  class network {}
+  ```
+* **Fixed Code:**
+  ```solix
+  class NetworkManager {}
+  ```
+
+---
+
+### `E0306`: Inexhaustive Enum Switch
+* **Cause:** A switch statement on an enum type does not cover all declared enum variants and lacks a `default` case clause.
+* **Bad Code:**
+  ```solix
+  enum State { Pending, Active, Completed }
+  switch (current_state) {
+      case State.Pending: return 1;
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  enum State { Pending, Active, Completed }
+  switch (current_state) {
+      case State.Pending: return 1;
+      case State.Active: return 2;
+      case State.Completed: return 3;
+  }
+  ```

@@ -30,12 +30,21 @@ public class BitSet implements IStringable {
     }
 
     private void ensure_word_capacity(int32 required_words) {
+        if (required_words < 0) {
+            throw new IllegalArgumentException("required_words", "Required capacity cannot be negative");
+        }
         if (required_words <= this.storage_words.length) {
             return;
         }
         int32 new_word_count = this.storage_words.length * 2;
+        if (new_word_count < 0 || new_word_count > 1073741824) {
+            new_word_count = 1073741824;
+        }
         if (new_word_count < required_words) {
             new_word_count = required_words;
+        }
+        if (new_word_count < 0) {
+            throw new IllegalArgumentException("required_words", "BitSet capacity overflow");
         }
         int64[] new_storage = new int64[new_word_count];
         for (int32 word_index = 0; word_index < this.storage_words.length; word_index = word_index + 1) {

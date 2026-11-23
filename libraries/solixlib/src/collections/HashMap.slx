@@ -6,6 +6,7 @@ import solix.core.StringBuilder;
 import solix.core.Primitives;
 import solix.core.KeyNotFoundException;
 import solix.core.IllegalArgumentException;
+import solix.core.OutOfMemoryException;
 
 class HashMapEntry<K, V> {
     public K key;
@@ -205,6 +206,9 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         this.table[bucket_idx] = new HashMapEntry<K, V>(insert_key, insert_value, hash_val, this.table[bucket_idx]);
         this.entry_count = this.entry_count + 1;
         if (this.entry_count >= this.resize_threshold) {
+            if (this.table.length >= 1073741824) {
+                throw new OutOfMemoryException("HashMap maximum capacity exceeded");
+            }
             this.resize(this.table.length * 2);
         }
     }
