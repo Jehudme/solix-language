@@ -17,26 +17,79 @@ use crate::phases::parser::statements::expressions::{Expression, LiteralValue};
 use solix_common::{PrimitiveKind, TokenKind, Type};
 use std::collections::{HashMap, HashSet};
 
-fn evaluate_integer_constant(expr: &Expression) -> Option<i64> {
-    match expr {
+fn evaluate_integer_constant(expression: &Expression) -> Option<i64> {
+    match expression {
         Expression::Literal {
-            value: LiteralValue::Int(value),
+            value: LiteralValue::Int(literal_value),
             ..
-        } => Some(*value),
+        } => Some(*literal_value),
         Expression::Literal {
-            value: LiteralValue::UInt(value),
+            value: LiteralValue::UInt(literal_value),
             ..
-        } => Some(*value as i64),
+        } => Some(*literal_value as i64),
         Expression::Unary {
             operator: TokenKind::OperatorMinus,
             operand,
             ..
-        } => evaluate_integer_constant(operand).map(|val| -val),
+        } => {
+            evaluate_integer_constant(operand).and_then(|operand_value| operand_value.checked_neg())
+        }
         Expression::Unary {
             operator: TokenKind::OperatorPlus,
             operand,
             ..
         } => evaluate_integer_constant(operand),
+        Expression::Unary {
+            operator: TokenKind::OperatorBitwiseNot,
+            operand,
+            ..
+        } => evaluate_integer_constant(operand).map(|operand_value| !operand_value),
+        Expression::Binary {
+            operator,
+            left,
+            right,
+            ..
+        } => {
+            let left_value = evaluate_integer_constant(left)?;
+            let right_value = evaluate_integer_constant(right)?;
+            match operator {
+                TokenKind::OperatorPlus => left_value.checked_add(right_value),
+                TokenKind::OperatorMinus => left_value.checked_sub(right_value),
+                TokenKind::OperatorMultiply => left_value.checked_mul(right_value),
+                TokenKind::OperatorDivide => {
+                    if right_value == 0 {
+                        None
+                    } else {
+                        left_value.checked_div(right_value)
+                    }
+                }
+                TokenKind::OperatorModulo => {
+                    if right_value == 0 {
+                        None
+                    } else {
+                        left_value.checked_rem(right_value)
+                    }
+                }
+                TokenKind::OperatorShiftLeft => {
+                    if !(0..64).contains(&right_value) {
+                        None
+                    } else {
+                        left_value.checked_shl(right_value as u32)
+                    }
+                }
+                TokenKind::OperatorShiftRight => {
+                    if !(0..64).contains(&right_value) {
+                        None
+                    } else {
+                        left_value.checked_shr(right_value as u32)
+                    }
+                }
+                TokenKind::PunctuationAmpersand => Some(left_value & right_value),
+                TokenKind::OperatorBitwiseOr => Some(left_value | right_value),
+                TokenKind::OperatorBitwiseXor => Some(left_value ^ right_value),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -544,7 +597,7 @@ pub fn execute_pass2_type_hierarchy(
                     }
                 }
                 let mut seen_values = HashSet::new();
-                let mut current_val = 0i64;
+                let mut current_value = 0i64;
                 for (variant_index, variant) in enum_declaration.variants.iter().enumerate() {
                     let variant_name = if variant.name_span.end as usize <= source_text.len() {
                         &source_text
@@ -553,19 +606,36 @@ pub fn execute_pass2_type_hierarchy(
                         "variant"
                     };
                     if let Some(explicit) = &variant.explicit_value {
-                        if let Some(int_val) = evaluate_integer_constant(explicit) {
-                            current_val = int_val;
+                        if let Some(integer_value) = evaluate_integer_constant(explicit) {
+                            current_value = integer_value;
                         } else {
+                            let found_description = if variant.span.end as usize
+                                <= source_text.len()
+                            {
+                                source_text[variant.span.start as usize..variant.span.end as usize]
+                                    .to_string()
+                            } else {
+                                "non-constant expression".to_string()
+                            };
                             accumulated_errors.push(BindingError::EnumExplicitValueNotInteger {
                                 variant_name: variant_name.to_string(),
-                                found: format!("{explicit:?}"),
+                                found: found_description,
                                 span: variant.span.to_source_span(),
                             });
                         }
                     } else if variant_index > 0 {
-                        current_val += 1;
+                        if let Some(next_value) = current_value.checked_add(1) {
+                            current_value = next_value;
+                        } else {
+                            accumulated_errors.push(BindingError::EnumExplicitValueNotInteger {
+                                variant_name: variant_name.to_string(),
+                                found: "integer overflow exceeding maximum 64-bit bounds"
+                                    .to_string(),
+                                span: variant.span.to_source_span(),
+                            });
+                        }
                     }
-                    if !seen_values.insert(current_val) {
+                    if !seen_values.insert(current_value) {
                         accumulated_errors.push(BindingError::DuplicateEnumVariant {
                             variant_name: variant_name.to_string(),
                             enum_name: enum_name.to_string(),
@@ -580,7 +650,7 @@ pub fn execute_pass2_type_hierarchy(
                     if let Some(variant_sym_id) = variant_sym_id_opt
                         && let Some(variant_entry) = symbol_table.get_symbol_mut(variant_sym_id)
                     {
-                        variant_entry.slot_index = Some(current_val as u32);
+                        variant_entry.slot_index = Some(current_value as u32);
                     }
                 }
 
@@ -821,6 +891,7 @@ pub fn execute_pass2_type_hierarchy(
     }
 
     // 2. Detect cyclic inheritance
+    let mut cyclic_class_ids = Vec::new();
     for &class_id in class_inheritance_edges.keys() {
         let mut visited = HashSet::new();
         let mut current_id = class_id;
@@ -841,15 +912,76 @@ pub fn execute_pass2_type_hierarchy(
                     class_name,
                     span: span.to_source_span(),
                 });
+                cyclic_class_ids.push(class_id);
                 break;
             }
             visited.insert(super_id);
             current_id = super_id;
         }
     }
+    for cyclic_id in cyclic_class_ids {
+        class_inheritance_edges.remove(&cyclic_id);
+    }
+
+    // Detect cyclic interface inheritance
+    let mut interface_cycles = HashSet::new();
+    for (iface_name, &(source_file_id, iface_decl)) in &interface_by_name {
+        let mut visited_interfaces = HashSet::new();
+        let mut queue = Vec::new();
+        let source_text_slice = source_texts
+            .get(source_file_id as usize)
+            .map(|text| text.as_str())
+            .unwrap_or("");
+        for super_annotation in &iface_decl.super_interfaces {
+            let super_resolution = resolve_type_annotation(
+                source_file_id,
+                source_text_slice,
+                super_annotation,
+                symbol_table,
+            );
+            if let Type::Interface {
+                ref symbol_name, ..
+            } = super_resolution
+            {
+                queue.push(symbol_name.clone());
+            }
+        }
+        while let Some(current) = queue.pop() {
+            if current == *iface_name {
+                accumulated_errors.current_source_id = source_file_id;
+                accumulated_errors.push(BindingError::CyclicInterfaceInheritance {
+                    interface_name: iface_name.clone(),
+                    span: iface_decl.span.to_source_span(),
+                });
+                interface_cycles.insert(iface_name.clone());
+                break;
+            }
+            if visited_interfaces.insert(current.clone())
+                && let Some(&(super_src, super_decl)) = interface_by_name.get(&current)
+            {
+                let super_text = source_texts
+                    .get(super_src as usize)
+                    .map(|text| text.as_str())
+                    .unwrap_or("");
+                for super_super in &super_decl.super_interfaces {
+                    let res =
+                        resolve_type_annotation(super_src, super_text, super_super, symbol_table);
+                    if let Type::Interface {
+                        ref symbol_name, ..
+                    } = res
+                    {
+                        queue.push(symbol_name.clone());
+                    }
+                }
+            }
+        }
+    }
 
     // Transitively inherit methods from super-interfaces into interface symbols
     for (iface_name, &(source_file_id, iface_decl)) in &interface_by_name {
+        if interface_cycles.contains(iface_name) {
+            continue;
+        }
         accumulated_errors.current_source_id = source_file_id;
         if let Some(iface_id) = symbol_table.resolve_symbol(source_file_id, iface_name) {
             let mut visited_interfaces = HashSet::new();
@@ -1830,7 +1962,7 @@ pub fn execute_pass2_type_hierarchy(
                     child_symbol_ids.push(enum_id);
 
                     let mut seen_values = HashSet::new();
-                    let mut current_val = 0i64;
+                    let mut current_value = 0i64;
                     for (variant_index, variant) in enum_declaration.variants.iter().enumerate() {
                         let variant_name = if variant.name_span.end as usize <= source_text.len() {
                             &source_text
@@ -1839,21 +1971,40 @@ pub fn execute_pass2_type_hierarchy(
                             "variant"
                         };
                         if let Some(explicit) = &variant.explicit_value {
-                            if let Some(int_val) = evaluate_integer_constant(explicit) {
-                                current_val = int_val;
+                            if let Some(integer_value) = evaluate_integer_constant(explicit) {
+                                current_value = integer_value;
                             } else {
+                                let found_description =
+                                    if variant.span.end as usize <= source_text.len() {
+                                        source_text
+                                            [variant.span.start as usize..variant.span.end as usize]
+                                            .to_string()
+                                    } else {
+                                        "non-constant expression".to_string()
+                                    };
                                 accumulated_errors.push(
                                     BindingError::EnumExplicitValueNotInteger {
                                         variant_name: variant_name.to_string(),
-                                        found: "non-integer".to_string(),
+                                        found: found_description,
                                         span: variant.span.to_source_span(),
                                     },
                                 );
                             }
                         } else if variant_index > 0 {
-                            current_val += 1;
+                            if let Some(next_value) = current_value.checked_add(1) {
+                                current_value = next_value;
+                            } else {
+                                accumulated_errors.push(
+                                    BindingError::EnumExplicitValueNotInteger {
+                                        variant_name: variant_name.to_string(),
+                                        found: "integer overflow exceeding maximum 64-bit bounds"
+                                            .to_string(),
+                                        span: variant.span.to_source_span(),
+                                    },
+                                );
+                            }
                         }
-                        if !seen_values.insert(current_val) {
+                        if !seen_values.insert(current_value) {
                             accumulated_errors.push(BindingError::DuplicateEnumVariant {
                                 variant_name: variant_name.to_string(),
                                 enum_name: enum_name.to_string(),
@@ -1874,7 +2025,7 @@ pub fn execute_pass2_type_hierarchy(
                             members: Vec::new(),
                             is_static: true,
                             is_const: true,
-                            slot_index: Some(current_val as u32),
+                            slot_index: Some(current_value as u32),
                             parameter_names: Vec::new(),
                         };
                         let variant_id = symbol_table.insert_symbol(variant_symbol);

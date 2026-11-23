@@ -171,6 +171,16 @@ struct IntermediateInstruction {
 /// closure specialization, dead closure elimination, constant propagation, CSE,
 /// redundant ARC/null field elimination, convergent peephole fusion with liveness analysis,
 /// and loop-invariant constant/expression hoisting.
+#[inline(always)]
+fn is_unsigned_comparison_opcode(raw_opcode_value: u8) -> bool {
+    (raw_opcode_value >= OpCode::LtU32 as u8 && raw_opcode_value <= OpCode::GtU64 as u8)
+        || raw_opcode_value == OpCode::GteU64 as u8
+}
+
+/// Optimizes a single compiled function by running scalar replacement, ARC elision,
+/// closure specialization, dead closure elimination, constant propagation, CSE,
+/// redundant ARC/null field elimination, convergent peephole fusion with liveness analysis,
+/// and loop-invariant constant/expression hoisting.
 fn optimize_function(
     function: &mut CompiledFunction,
     classes: &[solix_common::bytecode::CompiledClass],
@@ -357,6 +367,19 @@ fn is_guaranteed_non_heap_write(inst: Instruction, immortal_arrays: &HashSet<u16
             | OpCode::GteI32
             | OpCode::GteI64
             | OpCode::GteF64
+            | OpCode::DivU32
+            | OpCode::DivU64
+            | OpCode::ModU32
+            | OpCode::ModU64
+            | OpCode::Lshr
+            | OpCode::LtU32
+            | OpCode::LteU32
+            | OpCode::GtU32
+            | OpCode::GteU32
+            | OpCode::LtU64
+            | OpCode::LteU64
+            | OpCode::GtU64
+            | OpCode::GteU64
             | OpCode::Not
             | OpCode::ArrayLength
             | OpCode::Instanceof
@@ -1066,6 +1089,15 @@ fn is_pure_diamond_setup_inst(inst: Instruction) -> bool {
         | OpCode::Bnot
         | OpCode::Shl
         | OpCode::Shr
+        | OpCode::Lshr
+        | OpCode::LtU32
+        | OpCode::LteU32
+        | OpCode::GtU32
+        | OpCode::GteU32
+        | OpCode::LtU64
+        | OpCode::LteU64
+        | OpCode::GtU64
+        | OpCode::GteU64
         | OpCode::NegI32
         | OpCode::NegI64
         | OpCode::NegF64
@@ -1800,6 +1832,19 @@ fn is_pure_leaf_arith_inst(inst: Instruction, param_count: u16) -> bool {
             | OpCode::GteI32
             | OpCode::GteI64
             | OpCode::GteF64
+            | OpCode::DivU32
+            | OpCode::DivU64
+            | OpCode::ModU32
+            | OpCode::ModU64
+            | OpCode::Lshr
+            | OpCode::LtU32
+            | OpCode::LteU32
+            | OpCode::GtU32
+            | OpCode::GteU32
+            | OpCode::LtU64
+            | OpCode::LteU64
+            | OpCode::GtU64
+            | OpCode::GteU64
             | OpCode::Not
             | OpCode::AddI32Imm
             | OpCode::SubI32Imm
@@ -1871,7 +1916,8 @@ fn remap_leaf_instruction(inst: Instruction, remap_reg: &dyn Fn(u16) -> u16) -> 
             remap_reg(inst.src2()),
         );
     }
-    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+    if ((OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw))
         && let Some(opcode) = OpCode::from_raw_u8(raw)
     {
         return Instruction::format_a(
@@ -4093,6 +4139,7 @@ fn opcode_writes_only_non_reference(raw: u8) -> bool {
         || raw == OpCode::LoadBool as u8
         || raw == OpCode::LoadNull as u8
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
@@ -4652,6 +4699,7 @@ fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     let raw = instruction.raw_opcode();
     if (OpCode::Mov as u8..=OpCode::LoadConst as u8).contains(&raw)
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
@@ -4925,7 +4973,9 @@ fn rewrite_instruction_read_register(
         ));
     }
 
-    if raw == OpCode::GetArray as u8 || (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+    if raw == OpCode::GetArray as u8
+        || (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
     {
         let new_src1 = if instruction.src1() == from_reg {
             to_reg
@@ -5113,6 +5163,8 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
     let reads_new_dst = instruction_reads_register(instruction, new_dst);
     let pure_alu_or_load = (OpCode::AddI32 as u8..=OpCode::MulF64 as u8).contains(&raw)
         || (OpCode::NegI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
+        || raw == OpCode::Lshr as u8
         || raw == OpCode::Not as u8
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
@@ -5136,6 +5188,7 @@ fn can_change_instruction_destination(instruction: &Instruction, new_dst: u16) -
 
     // Format A instructions that write to dst
     if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
@@ -5354,7 +5407,9 @@ fn instruction_reads_register(instruction: &Instruction, target_reg: u16) -> boo
     }
 
     // Format A: Binary operations read src1 and src2
-    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw) {
+    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
+    {
         return instruction.src1() == target_reg || instruction.src2() == target_reg;
     }
 

@@ -8,3 +8,4 @@ pub mod test_milestone057_cycle_collector;
 pub mod test_milestone058_benchmarking_and_ci;
 pub mod test_milestone061_domination;
 pub mod test_milestone071_system_regressions;
+pub mod test_second_sweep_fixes;

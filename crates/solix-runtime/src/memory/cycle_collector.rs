@@ -93,26 +93,31 @@ pub fn get_outgoing_references(
 
 /// Phase 1: MarkGray (Trial Deletion)
 ///
-/// Recursively simulates removing candidate roots by decrementing reference counts
+/// Iteratively simulates removing candidate roots by decrementing reference counts
 /// on internal outgoing pointers, painting traversed nodes Gray.
 pub fn mark_gray(
     heap: &mut VirtualHeap,
     context: &RuntimeContext,
-    address: u32,
+    start_address: u32,
 ) -> Result<(), RuntimeError> {
-    let mut header = heap.read_header(address)?;
-    if header.color != GcColor::Gray {
-        header.color = GcColor::Gray;
-        heap.write_header(address, header)?;
+    let mut worklist = vec![start_address];
+    while let Some(current_address) = worklist.pop() {
+        let mut header = heap.read_header(current_address)?;
+        if header.color != GcColor::Gray {
+            header.color = GcColor::Gray;
+            heap.write_header(current_address, header)?;
 
-        let child_pointers = get_outgoing_references(heap, context, address);
-        for child_address in child_pointers {
-            let mut child_header = heap.read_header(child_address)?;
-            if child_header.ref_count != MAX_REF_COUNT && child_header.ref_count > 0 {
-                child_header.ref_count -= 1;
-                heap.write_header(child_address, child_header)?;
+            let child_pointers = get_outgoing_references(heap, context, current_address);
+            for child_address in child_pointers {
+                let mut child_header = heap.read_header(child_address)?;
+                if child_header.ref_count != MAX_REF_COUNT && child_header.ref_count > 0 {
+                    child_header.ref_count -= 1;
+                    heap.write_header(child_address, child_header)?;
+                }
+                if child_header.color != GcColor::Gray {
+                    worklist.push(child_address);
+                }
             }
-            mark_gray(heap, context, child_address)?;
         }
     }
     Ok(())
@@ -120,50 +125,58 @@ pub fn mark_gray(
 
 /// Phase 2: Scan (Detect True Cycles)
 ///
-/// Scans the candidate subgraph. If reference count > 0, an external reference exists,
+/// Scans the candidate subgraph iteratively. If reference count > 0, an external reference exists,
 /// so node and reachable children are repainted Black and counts are restored.
 /// If reference count == 0, paints node White (confirmed garbage cycle).
 pub fn scan(
     heap: &mut VirtualHeap,
     context: &RuntimeContext,
-    address: u32,
+    start_address: u32,
 ) -> Result<(), RuntimeError> {
-    let mut header = heap.read_header(address)?;
-    if header.color == GcColor::Gray {
-        if header.ref_count > 0 {
-            scan_black(heap, context, address)?;
-        } else {
-            header.color = GcColor::White;
-            heap.write_header(address, header)?;
+    let mut worklist = vec![start_address];
+    while let Some(current_address) = worklist.pop() {
+        let mut header = heap.read_header(current_address)?;
+        if header.color == GcColor::Gray {
+            if header.ref_count > 0 {
+                scan_black(heap, context, current_address)?;
+            } else {
+                header.color = GcColor::White;
+                heap.write_header(current_address, header)?;
 
-            let child_pointers = get_outgoing_references(heap, context, address);
-            for child_address in child_pointers {
-                scan(heap, context, child_address)?;
+                let child_pointers = get_outgoing_references(heap, context, current_address);
+                for child_address in child_pointers {
+                    worklist.push(child_address);
+                }
             }
         }
     }
     Ok(())
 }
 
-/// Restores reference counts decremented during trial deletion and repaints nodes Black.
+/// Restores reference counts decremented during trial deletion and repaints nodes Black iteratively.
 pub fn scan_black(
     heap: &mut VirtualHeap,
     context: &RuntimeContext,
-    address: u32,
+    start_address: u32,
 ) -> Result<(), RuntimeError> {
-    let mut header = heap.read_header(address)?;
+    let mut worklist = vec![start_address];
+    let mut header = heap.read_header(start_address)?;
     header.color = GcColor::Black;
-    heap.write_header(address, header)?;
+    heap.write_header(start_address, header)?;
 
-    let child_pointers = get_outgoing_references(heap, context, address);
-    for child_address in child_pointers {
-        let mut child_header = heap.read_header(child_address)?;
-        if child_header.ref_count != MAX_REF_COUNT {
-            child_header.ref_count += 1;
-            heap.write_header(child_address, child_header)?;
-        }
-        if child_header.color != GcColor::Black {
-            scan_black(heap, context, child_address)?;
+    while let Some(current_address) = worklist.pop() {
+        let child_pointers = get_outgoing_references(heap, context, current_address);
+        for child_address in child_pointers {
+            let mut child_header = heap.read_header(child_address)?;
+            if child_header.ref_count != MAX_REF_COUNT {
+                child_header.ref_count += 1;
+                heap.write_header(child_address, child_header)?;
+            }
+            if child_header.color != GcColor::Black {
+                child_header.color = GcColor::Black;
+                heap.write_header(child_address, child_header)?;
+                worklist.push(child_address);
+            }
         }
     }
     Ok(())
@@ -171,31 +184,44 @@ pub fn scan_black(
 
 /// Phase 3: CollectWhite (Reclamation)
 ///
-/// Sweeps confirmed White cyclic garbage, repainting nodes Black and returning heap memory.
+/// Sweeps confirmed White cyclic garbage iteratively, repainting nodes Black and returning heap memory.
 pub fn collect_white(
     heap: &mut VirtualHeap,
     context: &RuntimeContext,
-    address: u32,
+    start_address: u32,
     freed_addresses: &mut HashSet<u32>,
 ) -> Result<u64, RuntimeError> {
-    let mut header = heap.read_header(address)?;
-    if header.color == GcColor::White && !freed_addresses.contains(&address) {
-        header.color = GcColor::Black;
-        heap.write_header(address, header)?;
+    let mut worklist = vec![start_address];
+    let mut to_deallocate = Vec::new();
 
-        let mut collected_total = 0u64;
-        let child_pointers = get_outgoing_references(heap, context, address);
-        for child_address in child_pointers {
-            collected_total += collect_white(heap, context, child_address, freed_addresses)?;
+    while let Some(current_address) = worklist.pop() {
+        if freed_addresses.contains(&current_address) {
+            continue;
         }
+        let Ok(mut header) = heap.read_header(current_address) else {
+            continue;
+        };
+        if header.color == GcColor::White {
+            header.color = GcColor::Black;
+            heap.write_header(current_address, header)?;
+            freed_addresses.insert(current_address);
+            to_deallocate.push(current_address);
 
-        freed_addresses.insert(address);
-        heap.force_deallocate(address)?;
-        collected_total += 1;
-        Ok(collected_total)
-    } else {
-        Ok(0)
+            let child_pointers = get_outgoing_references(heap, context, current_address);
+            for child_address in child_pointers {
+                if !freed_addresses.contains(&child_address) {
+                    worklist.push(child_address);
+                }
+            }
+        }
     }
+
+    let mut collected_total = 0u64;
+    for block_address in to_deallocate {
+        heap.force_deallocate(block_address)?;
+        collected_total += 1;
+    }
+    Ok(collected_total)
 }
 
 /// Orchestrates Bacon & Rajan (2001) Synchronous Cycle Collection across suspect purple roots.

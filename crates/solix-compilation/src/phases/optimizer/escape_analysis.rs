@@ -223,12 +223,21 @@ fn decode_branch_target(
     None
 }
 
+#[inline(always)]
+fn is_unsigned_comparison_opcode(raw_opcode_value: u8) -> bool {
+    (raw_opcode_value >= OpCode::LtU32 as u8 && raw_opcode_value <= OpCode::GtU64 as u8)
+        || raw_opcode_value == OpCode::GteU64 as u8
+}
+
 /// Returns `Some(reg)` if `instruction` overwrites a single destination register `reg`.
 #[must_use]
 pub fn instruction_write_dst(instruction: &Instruction) -> Option<u16> {
     let raw = instruction.raw_opcode();
     if (OpCode::Mov as u8..=OpCode::LoadConst as u8).contains(&raw)
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
+        || is_unsigned_comparison_opcode(raw)
+        || is_unsigned_comparison_opcode(raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
@@ -373,7 +382,9 @@ pub fn instruction_reads_reg(instruction: &Instruction, target_reg: u16) -> bool
             || instruction.src1() == target_reg
             || instruction.src2() == target_reg;
     }
-    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw) {
+    if (OpCode::AddI32 as u8..=OpCode::GteF64 as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
+    {
         return instruction.src1() == target_reg || instruction.src2() == target_reg;
     }
     if raw == OpCode::SetStatic as u8
@@ -492,6 +503,8 @@ fn rewrite_any_write_dst(instruction: &Instruction, new_dst: u16) -> Option<Inst
     let raw = instruction.raw_opcode();
     if (OpCode::Mov as u8..=OpCode::LoadConst as u8).contains(&raw)
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
+        || is_unsigned_comparison_opcode(raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8
@@ -1321,6 +1334,7 @@ fn instruction_can_write_reference(raw: u8) -> bool {
         || raw == OpCode::LoadBool as u8
         || raw == OpCode::LoadNull as u8
         || (OpCode::AddI32 as u8..=OpCode::Not as u8).contains(&raw)
+        || is_unsigned_comparison_opcode(raw)
         || raw == OpCode::AddI32Imm as u8
         || raw == OpCode::SubI32Imm as u8
         || raw == OpCode::MulI32Imm as u8

@@ -171,35 +171,81 @@ impl<'ctx> Emitter<'ctx> {
         &mut self,
         assert_stmt: &crate::phases::parser::statements::control_flow::AssertStatement,
     ) -> Result<(), EmissionError> {
-        let r_cond = self.emit_expression(&assert_stmt.condition, None)?;
+        let condition_register = self.emit_expression(&assert_stmt.condition, None)?;
         let jump_patch_pc = self.emit_instruction(
-            Instruction::format_c(OpCode::JumpIfTrue, 0, r_cond, 0),
+            Instruction::format_c(OpCode::JumpIfTrue, 0, condition_register, 0),
             Some(assert_stmt.span),
         );
-        self.allocator.free_temp(r_cond);
+        self.allocator.free_temp(condition_register);
 
-        let r_err = self.allocator.alloc_temp()?;
-        if let Some(msg_expr) = &assert_stmt.message {
-            let r_msg = self.emit_expression(msg_expr, Some(r_err))?;
-            if r_msg != r_err {
+        let error_register = self.allocator.alloc_temp()?;
+        if let Some(message_expression) = &assert_stmt.message {
+            if let Expression::Literal {
+                value: LiteralValue::String(literal_string),
+                span: literal_span,
+            } = message_expression
+            {
+                let formatted_message = format!("AssertionError: {literal_string}");
+                let constant_index = self.pool.add_string(&formatted_message)?;
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::Mov, 0, r_err, r_msg, 0),
+                    Instruction::format_b(
+                        OpCode::LoadConst,
+                        0,
+                        error_register,
+                        constant_index as u32,
+                    ),
+                    Some(*literal_span),
+                );
+            } else {
+                let message_temp = self.emit_expression(message_expression, None)?;
+                let prefix_index = self.pool.add_string("AssertionError: ")?;
+                let prefix_register = self.allocator.alloc_temp()?;
+                self.emit_instruction(
+                    Instruction::format_b(
+                        OpCode::LoadConst,
+                        0,
+                        prefix_register,
+                        prefix_index as u32,
+                    ),
                     Some(assert_stmt.span),
                 );
-                self.allocator.free_temp(r_msg);
+                let window_size = 2;
+                let argument_base = self.allocator.alloc_window(window_size)?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, argument_base, prefix_register, 0),
+                    Some(assert_stmt.span),
+                );
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, argument_base + 1, message_temp, 0),
+                    Some(assert_stmt.span),
+                );
+                let symbol_index = self.pool.add_string("__builtin_str_concat")?;
+                self.emit_instruction(
+                    Instruction::format_call(
+                        OpCode::CallSymbol,
+                        error_register,
+                        symbol_index,
+                        argument_base,
+                        window_size as u8,
+                    ),
+                    Some(assert_stmt.span),
+                );
+                self.allocator.free_window(argument_base, window_size);
+                self.allocator.free_temp(prefix_register);
+                self.allocator.free_temp(message_temp);
             }
         } else {
-            let const_idx = self.pool.add_string("Assertion failed")?;
+            let constant_index = self.pool.add_string("AssertionError: Assertion failed")?;
             self.emit_instruction(
-                Instruction::format_b(OpCode::LoadConst, 0, r_err, const_idx as u32),
+                Instruction::format_b(OpCode::LoadConst, 0, error_register, constant_index as u32),
                 Some(assert_stmt.span),
             );
         }
         self.emit_instruction(
-            Instruction::format_a(OpCode::Throw, 0, r_err, 0, 0),
+            Instruction::format_a(OpCode::Throw, 0, error_register, 0, 0),
             Some(assert_stmt.span),
         );
-        self.allocator.free_temp(r_err);
+        self.allocator.free_temp(error_register);
 
         let pass_pc = self.function.instructions.len() as i32;
         let offset = pass_pc - jump_patch_pc as i32;
@@ -661,6 +707,7 @@ impl<'ctx> Emitter<'ctx> {
                                 ),
                                 Some(case_clause.span),
                             );
+                            self.allocator.free_window(arg_base, window_size);
                         } else if let Some(function_id) = not_equal_function_id {
                             let window_size = 2;
                             let arg_base = self.allocator.alloc_window(window_size)?;
@@ -694,6 +741,7 @@ impl<'ctx> Emitter<'ctx> {
                                 ),
                                 Some(case_clause.span),
                             );
+                            self.allocator.free_window(arg_base, window_size);
                             self.emit_instruction(
                                 Instruction::format_a(OpCode::Not, 0, reg_compare, reg_compare, 0),
                                 Some(case_clause.span),
