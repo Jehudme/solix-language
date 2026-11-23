@@ -62,6 +62,15 @@ jobs:
             --emit-annotations
           printf '%s\n' "$PR_NUMBER" > "$RUNNER_TEMP/risk-audit/pr_number.txt"
 
+      - name: Upload risk audit artifact for discussion sync
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pr-risk-audit
+          path: ${{ runner.temp }}/risk-audit/
+          if-no-files-found: ignore
+          retention-days: 1
+
       - name: Publish sticky sensitive-path notice and label for same-repo PRs
         if: github.event.pull_request.head.repo.fork == false
         env:
@@ -607,6 +616,21 @@ jobs:
           if [ -f "$RUNNER_TEMP/pr-bench/report.md" ]; then
             cat "$RUNNER_TEMP/pr-bench/report.md" >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Stage benchmark PR number
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr-bench"
+          printf '%s\n' "${{ github.event.pull_request.number }}" > "$RUNNER_TEMP/pr-bench/pr_number.txt"
+
+      - name: Upload benchmark report artifact for discussion sync
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pr-benchmark-report
+          path: ${{ runner.temp }}/pr-bench/
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Post or update sticky PR benchmark comment
         if: github.event.pull_request.head.repo.fork == false

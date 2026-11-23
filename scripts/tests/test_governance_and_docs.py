@@ -724,6 +724,20 @@ class SolixBenchCliTests(unittest.TestCase):
             ci_text,
         )
 
+    def test_pr_discussion_sync_workflow_handles_artifacts_and_comments(self) -> None:
+        ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("name: pr-risk-audit", ci_text)
+        self.assertIn("name: pr-benchmark-report", ci_text)
+
+        sync_workflow_path = REPO_ROOT / ".github" / "workflows" / "pr-discussion-sync.yml"
+        self.assertTrue(sync_workflow_path.is_file())
+        sync_text = sync_workflow_path.read_text(encoding="utf-8")
+        self.assertIn("workflow_run:", sync_text)
+        self.assertIn("Solix Continuous Integration", sync_text)
+        self.assertIn("gh run download", sync_text)
+        self.assertIn("<!-- solix-pr-risk-audit -->", sync_text)
+        self.assertIn("<!-- solix-pr-benchmark -->", sync_text)
+
 
 if __name__ == "__main__":
     unittest.main()
