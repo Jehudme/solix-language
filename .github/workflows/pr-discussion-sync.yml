@@ -1,0 +1,162 @@
+name: Pull Request Discussion Sync
+
+run-name: "PR Discussion Sync | Run #${{ github.event.workflow_run.id }}"
+
+on:
+  # zizmor: ignore[dangerous-triggers]
+  workflow_run:
+    workflows:
+      - Solix Continuous Integration
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  sync-pr-discussion:
+    name: Sync PR Discussion Comments & Labels
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Download workflow run artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_RUN_IDENTIFIER: ${{ github.event.workflow_run.id }}
+          TARGET_DIRECTORY: ${{ runner.temp }}/artifacts
+        run: |
+          mkdir -p "$TARGET_DIRECTORY"
+          gh run download "$WORKFLOW_RUN_IDENTIFIER" --dir "$TARGET_DIRECTORY" || true
+
+      - name: Post or update sticky PR discussion comments and labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY_NAME: ${{ github.repository }}
+          ARTIFACTS_DIRECTORY: ${{ runner.temp }}/artifacts
+          FALLBACK_PULL_REQUEST_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          repository_name = os.environ["REPOSITORY_NAME"]
+          artifacts_root_directory = Path(os.environ["ARTIFACTS_DIRECTORY"])
+          fallback_pull_request_number = os.environ.get("FALLBACK_PULL_REQUEST_NUMBER", "").strip()
+
+          pull_request_number = None
+          for candidate_file in artifacts_root_directory.glob("**/pr_number.txt"):
+              try:
+                  candidate_content = candidate_file.read_text(encoding="utf-8").strip()
+                  if candidate_content and candidate_content.isdigit():
+                      pull_request_number = candidate_content
+                      break
+              except OSError:
+                  pass
+
+          if not pull_request_number and fallback_pull_request_number.isdigit():
+              pull_request_number = fallback_pull_request_number
+
+          if not pull_request_number:
+              print("[NOTICE] No pull request number discovered; skipping discussion synchronization.")
+              raise SystemExit(0)
+
+          try:
+              comments_raw = subprocess.check_output(
+                  ["gh", "api", "--paginate", f"repos/{repository_name}/issues/{pull_request_number}/comments"],
+                  text=True,
+              )
+              comments_payload = json.loads(comments_raw)
+          except (subprocess.CalledProcessError, json.JSONDecodeError) as query_error:
+              print(f"[ERROR] Failed to query existing comments: {query_error}")
+              raise SystemExit(0)
+
+          def upsert_sticky_comment(marker_tag: str, comment_body: str) -> None:
+              existing_identifier = None
+              for current_comment in comments_payload:
+                  if marker_tag in (current_comment.get("body") or ""):
+                      existing_identifier = current_comment["id"]
+                      break
+
+              try:
+                  if existing_identifier:
+                      subprocess.run(
+                          [
+                              "gh", "api", "--method", "PATCH",
+                              f"repos/{repository_name}/issues/comments/{existing_identifier}",
+                              "-f", f"body={comment_body}",
+                          ],
+                          check=True,
+                      )
+                      print(f"[SUCCESS] Updated sticky comment with marker {marker_tag}")
+                  else:
+                      subprocess.run(
+                          [
+                              "gh", "api", "--method", "POST",
+                              f"repos/{repository_name}/issues/{pull_request_number}/comments",
+                              "-f", f"body={comment_body}",
+                          ],
+                          check=True,
+                      )
+                      print(f"[SUCCESS] Created sticky comment with marker {marker_tag}")
+              except subprocess.CalledProcessError as mutation_error:
+                  print(f"[ERROR] Failed to upsert comment with marker {marker_tag}: {mutation_error}")
+
+          def delete_sticky_comment_if_exists(marker_tag: str) -> None:
+              for current_comment in comments_payload:
+                  if marker_tag in (current_comment.get("body") or ""):
+                      try:
+                          subprocess.run(
+                              [
+                                  "gh", "api", "--method", "DELETE",
+                                  f"repos/{repository_name}/issues/comments/{current_comment['id']}",
+                              ],
+                              check=True,
+                          )
+                          print(f"[SUCCESS] Deleted obsolete sticky comment with marker {marker_tag}")
+                      except subprocess.CalledProcessError as deletion_error:
+                          print(f"[WARNING] Failed to delete sticky comment {current_comment['id']}: {deletion_error}")
+
+          risk_audit_directory = artifacts_root_directory / "pr-risk-audit"
+          risk_report_path = risk_audit_directory / "report.json"
+          risk_advisory_path = risk_audit_directory / "advisory.md"
+
+          if risk_report_path.is_file() and risk_advisory_path.is_file():
+              try:
+                  risk_report_payload = json.loads(risk_report_path.read_text(encoding="utf-8"))
+                  risk_advisory_markdown = risk_advisory_path.read_text(encoding="utf-8")
+                  has_sensitive_changes = bool(risk_report_payload.get("has_sensitive_changes"))
+
+                  for risk_label in risk_report_payload.get("labels", []):
+                      if has_sensitive_changes:
+                          subprocess.run(
+                              ["gh", "pr", "edit", pull_request_number, "--repo", repository_name, "--add-label", risk_label],
+                              check=False,
+                          )
+                      else:
+                          subprocess.run(
+                              ["gh", "pr", "edit", pull_request_number, "--repo", repository_name, "--remove-label", risk_label],
+                              check=False,
+                          )
+
+                  if has_sensitive_changes:
+                      upsert_sticky_comment("<!-- solix-pr-risk-audit -->", risk_advisory_markdown)
+                  else:
+                      delete_sticky_comment_if_exists("<!-- solix-pr-risk-audit -->")
+              except Exception as risk_processing_error:
+                  print(f"[ERROR] Failed to process risk audit artifact: {risk_processing_error}")
+
+          benchmark_directory = artifacts_root_directory / "pr-benchmark-report"
+          benchmark_report_path = benchmark_directory / "report.md"
+
+          if benchmark_report_path.is_file():
+              try:
+                  benchmark_markdown = benchmark_report_path.read_text(encoding="utf-8")
+                  benchmark_comment_body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report\n\n{benchmark_markdown}"
+                  upsert_sticky_comment("<!-- solix-pr-benchmark -->", benchmark_comment_body)
+              except Exception as benchmark_processing_error:
+                  print(f"[ERROR] Failed to process benchmark report artifact: {benchmark_processing_error}")
+          PY
