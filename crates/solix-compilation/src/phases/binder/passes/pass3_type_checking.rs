@@ -20,6 +20,15 @@ use crate::phases::parser::visitor::AstVisitor;
 use solix_common::{PrimitiveKind, Type};
 use std::collections::HashMap;
 
+/// Active lambda context tracking expected and actual return types within lambda bodies.
+#[derive(Debug, Clone)]
+pub struct LambdaContext {
+    /// Return types collected from return statements within the lambda body.
+    pub return_types: Vec<Type>,
+    /// Expected return type propagated from contextual type hints, if available.
+    pub expected_return: Option<Type>,
+}
+
 /// Semantic type checking and expression evaluation visitor traversing the parsed AST.
 pub struct TypeCheckingVisitor<'ctx> {
     pub source_id: u16,
@@ -38,6 +47,7 @@ pub struct TypeCheckingVisitor<'ctx> {
     pub is_inside_destructor: bool,
     pub loop_depth: usize,
     pub switch_depth: usize,
+    pub lambda_stack: Vec<LambdaContext>,
     pub next_vtable_id: &'ctx mut u32,
     pub source_texts: &'ctx [String],
 }
@@ -106,7 +116,18 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
         {
             return target_type.clone();
         }
-        let evaluated_type = self.evaluate_expression_type_internal(expression);
+        let evaluated_type = match expression {
+            Expression::Lambda {
+                captures,
+                parameters,
+                body,
+                ..
+            } => {
+                self.validate_lambda_captures(captures);
+                self.evaluate_lambda_with_expected(parameters, body, expected_type)
+            }
+            _ => self.evaluate_expression_type_internal(expression),
+        };
         self.node_types.insert(span, evaluated_type.clone());
         evaluated_type
     }
@@ -566,23 +587,37 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         }
                     }
                     Type::Tuple(elements) => {
-                        let idx_opt = match &**index {
-                            Expression::Literal {
-                                value: LiteralValue::Int(int_val),
-                                ..
-                            } => Some(*int_val as usize),
-                            Expression::Literal {
-                                value: LiteralValue::UInt(uint_val),
-                                ..
-                            } => Some(*uint_val as usize),
-                            _ => None,
-                        };
-                        match idx_opt {
-                            Some(idx) if idx < elements.len() => elements[idx].clone(),
-                            _ => elements
-                                .first()
-                                .cloned()
-                                .unwrap_or(Type::Primitive(PrimitiveKind::Void)),
+                        if elements.is_empty() {
+                            Type::Primitive(PrimitiveKind::Int32)
+                        } else {
+                            let extracted_index = match &**index {
+                                Expression::Literal {
+                                    value: LiteralValue::Int(integer_value),
+                                    ..
+                                } => Some(*integer_value as usize),
+                                Expression::Literal {
+                                    value: LiteralValue::UInt(unsigned_integer_value),
+                                    ..
+                                } => Some(*unsigned_integer_value as usize),
+                                _ => None,
+                            };
+                            match extracted_index {
+                                Some(element_index) if element_index < elements.len() => {
+                                    elements[element_index].clone()
+                                }
+                                Some(element_index) => {
+                                    self.errors.push(BindingError::TupleIndexOutOfRange {
+                                        index: element_index,
+                                        size: elements.len(),
+                                        span: index.span().to_source_span(),
+                                    });
+                                    Type::Error
+                                }
+                                None => elements
+                                    .first()
+                                    .cloned()
+                                    .unwrap_or(Type::Primitive(PrimitiveKind::Void)),
+                            }
                         }
                     }
                     Type::Primitive(PrimitiveKind::TuplePrimitive) => {
@@ -1427,7 +1462,16 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                     element_type,
                     self.symbol_table,
                 );
-                self.evaluate_expression_type(size);
+                let size_type = self.evaluate_expression_type(size);
+                if !size_type.is_signed_integer()
+                    && !size_type.is_unsigned_integer()
+                    && size_type != Type::Error
+                {
+                    self.errors.push(BindingError::ArrayLengthNotInteger {
+                        found: size_type.to_string(),
+                        span: size.span().to_source_span(),
+                    });
+                }
                 match resolved_element {
                     Type::Array {
                         element_type: inner_element,
@@ -1849,6 +1893,11 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
             self.current_method_return_type = Some(expected_ret.clone());
         }
 
+        self.lambda_stack.push(LambdaContext {
+            return_types: Vec::new(),
+            expected_return: expected_return.clone(),
+        });
+
         let return_type = match body {
             LambdaBody::Expression(expr) => {
                 let expr_type = self.evaluate_expression_type(expr);
@@ -1865,10 +1914,24 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
             }
             LambdaBody::Block(block) => {
                 self.visit_block_statement(block);
-                expected_return.unwrap_or(Type::Primitive(PrimitiveKind::Void))
+                if let Some(expected_ret) = &expected_return {
+                    expected_ret.clone()
+                } else {
+                    let active_lambda = self.lambda_stack.last();
+                    active_lambda
+                        .and_then(|lambda_context| {
+                            lambda_context
+                                .return_types
+                                .iter()
+                                .find(|candidate| **candidate != Type::Error)
+                                .cloned()
+                        })
+                        .unwrap_or(Type::Primitive(PrimitiveKind::Void))
+                }
             }
         };
 
+        self.lambda_stack.pop();
         self.current_method_return_type = previous_return;
         self.symbol_table.exit_scope();
 
@@ -3038,6 +3101,42 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             return;
         }
 
+        if !self.lambda_stack.is_empty() {
+            let lambda_index = self.lambda_stack.len() - 1;
+            let expected_return_opt = self.lambda_stack[lambda_index].expected_return.clone();
+            let returned_type = if let Some(expr) = &node.value {
+                self.evaluate_expression_with_expected(expr, expected_return_opt.as_ref())
+            } else {
+                Type::Primitive(PrimitiveKind::Void)
+            };
+
+            if let Some(expected_return) = &expected_return_opt {
+                let is_compatible = returned_type
+                    .is_assignable_to(expected_return, &|src, tgt| self.check_is_subtype(src, tgt))
+                    || node
+                        .value
+                        .as_ref()
+                        .is_some_and(|expr| is_literal_compatible_with_type(expr, expected_return));
+
+                if is_compatible {
+                    if let Some(expr) = &node.value {
+                        coerce_literal_node_type(self.node_types, expr, expected_return);
+                    }
+                } else if *expected_return != Type::Error && returned_type != Type::Error {
+                    self.errors.push(BindingError::ReturnTypeMismatch {
+                        expected: expected_return.to_string(),
+                        found: returned_type.to_string(),
+                        span: node.span.to_source_span(),
+                    });
+                }
+            }
+
+            if let Some(active_lambda) = self.lambda_stack.last_mut() {
+                active_lambda.return_types.push(returned_type);
+            }
+            return;
+        }
+
         let expected_return_opt = self.current_method_return_type.clone();
 
         let returned_type = if let Some(expr) = &node.value {
@@ -3400,7 +3499,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             parent_symbol: None,
             members: Vec::new(),
             is_static: false,
-            is_const: false,
+            is_const: true,
             slot_index: None,
             parameter_names: Vec::new(),
         };
@@ -3413,7 +3512,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             decl_span: node.variable_name,
             scope_span: node.block.span,
             source_id: self.source_id,
-            is_const: false,
+            is_const: true,
             symbol_id: exception_id,
         });
         self.resolved_symbols
@@ -3476,7 +3575,26 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
     }
 
     fn visit_throw_statement(&mut self, node: &ThrowStatement) {
+        if matches!(
+            &node.expression,
+            Expression::Literal {
+                value: LiteralValue::Null,
+                ..
+            }
+        ) {
+            self.errors.push(BindingError::CannotThrowNull {
+                span: node.expression.span().to_source_span(),
+            });
+            return;
+        }
+
         let expr_type = self.evaluate_expression_type(&node.expression);
+        if expr_type == Type::Null {
+            self.errors.push(BindingError::CannotThrowNull {
+                span: node.expression.span().to_source_span(),
+            });
+            return;
+        }
         if let Expression::Identifier { span } = &node.expression
             && let Some(&sym_id) = self.resolved_symbols.get(span)
             && let Some(sym_entry) = self.symbol_table.get_symbol(sym_id)

@@ -129,6 +129,7 @@ pub fn bind_context(
                 is_inside_destructor: false,
                 loop_depth: 0,
                 switch_depth: 0,
+                lambda_stack: Vec::new(),
                 next_vtable_id: &mut next_vtable_id,
                 source_texts: &context.sources,
             };

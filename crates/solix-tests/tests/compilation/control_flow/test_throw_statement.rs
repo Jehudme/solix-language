@@ -101,3 +101,34 @@ fn test_case_4_5_throw_statement_placed_directly_in_class_body() {
     "#;
     assert_compile_error(code, "class");
 }
+
+#[test]
+fn test_throw_null_rejected_at_compile_time() {
+    let source_code = r#"
+        void test_method() {
+            throw null;
+        }
+    "#;
+    assert_compile_error(source_code, "E0298");
+}
+
+#[test]
+fn test_throw_null_wrapped_in_null_reference_exception_at_runtime() {
+    let source_code = r#"
+        class Exception {}
+        class NullReferenceException extends Exception {}
+
+        int32 main() {
+            int32 caught_signal = 0;
+            try {
+                Exception null_exception = null;
+                throw null_exception;
+            } catch (NullReferenceException null_error) {
+                caught_signal = 42;
+            }
+            return caught_signal;
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+}

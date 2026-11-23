@@ -135,3 +135,103 @@ fn test_case_4_5_try_catch_statement_placed_directly_in_class_body() {
     "#;
     assert_compile_error(code, "class");
 }
+
+#[test]
+fn test_finally_with_return_override_and_no_stack_overflow() {
+    let source_code = r#"
+        int32 compute_value() {
+            try {
+                return 10;
+            } finally {
+                return 20;
+            }
+        }
+
+        int32 main() {
+            return compute_value();
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(20));
+}
+
+#[test]
+fn test_return_expression_evaluated_before_finally() {
+    let source_code = r#"
+        class Main {
+            public static int32 side_effect_counter = 0;
+
+            public static int32 compute() {
+                try {
+                    return Main::side_effect_counter;
+                } finally {
+                    Main::side_effect_counter = Main::side_effect_counter + 100;
+                }
+            }
+
+            public static int32 main() {
+                int32 returned_value = Main::compute();
+                if (returned_value == 0 && Main::side_effect_counter == 100) {
+                    return 42;
+                }
+                return 0;
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(42));
+}
+
+#[test]
+fn test_loop_break_and_continue_only_unwinds_inner_finally() {
+    let source_code = r#"
+        class Main {
+            public static int32 outer_finally_counter = 0;
+            public static int32 inner_finally_counter = 0;
+
+            public static int32 main() {
+                try {
+                    int32 loop_counter = 0;
+                    while (loop_counter < 3) {
+                        try {
+                            loop_counter = loop_counter + 1;
+                            if (loop_counter == 1) {
+                                continue;
+                            }
+                            if (loop_counter == 2) {
+                                break;
+                            }
+                        } finally {
+                            Main::inner_finally_counter = Main::inner_finally_counter + 1;
+                        }
+                    }
+                } finally {
+                    Main::outer_finally_counter = Main::outer_finally_counter + 1;
+                }
+
+                if (Main::inner_finally_counter == 2 && Main::outer_finally_counter == 1) {
+                    return 55;
+                }
+                return 0;
+            }
+        }
+    "#;
+    let (execution_result, _) = compile_and_run(source_code);
+    assert_eq!(execution_result, Value::I32(55));
+}
+
+#[test]
+fn test_catch_variable_reassignment_rejected() {
+    let source_code = r#"
+        class Exception {}
+
+        void test_method() {
+            try {
+                throw new Exception();
+            } catch (Exception caught_exception) {
+                caught_exception = new Exception();
+            }
+        }
+    "#;
+    assert_compile_error(source_code, "E0210");
+}

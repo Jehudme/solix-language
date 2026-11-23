@@ -72,6 +72,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
 - **Responsibilities**:
   - Allocates virtual registers via liveness-aware scratch reuse and register allocation (`register_allocator.rs`), strictly guarding parameter indices (`0..param_count`) against recycled temporary reuse to guarantee zero argument overlap under register pressure.
   - Emits statement expressions and loop updates directly into target/discarded registers when values are unused (`control_flow.rs`), avoiding redundant trailing `Mov` instructions.
+  - Manages lexical finally stack unwinding and control flow routing: truncates the active finally stack during recursive emission to prevent compiler recursion overflows when finally blocks contain returns or jumps, evaluates return expressions before executing finally blocks to guarantee exception safety, and routes continue statements within switch blocks directly to the enclosing loop target.
   - Devirtualizes non-overridden concrete instance method calls directly to `OpCode::CallDirect` via class hierarchy analysis, while keeping `CallVirtual` for `virtual` and `override` dispatch.
   - Generates 64-bit fixed-width register instructions (`Format A`, `Format B`, `Format C`, `Format Call`).
   - Generates zero-cost exception tables (`ExceptionHandlerEntry`) recording PC ranges and `try_ref_regs`.

@@ -12,6 +12,6 @@ Per [`GL-0012`](../../guidelines/authoring-features-and-wiki.md), each entry spe
 | :--- | :--- | :--- |
 | [**`E0000` – `E0015`**](lexer-errors.md) | **Lexical Analyzer** | Unterminated literals, invalid escapes, unexpected characters. |
 | [**`E0101` – `E0200`**](parser-errors.md) | **Recursive-Descent Parser** | Grammar syntax errors, mismatched delimiters, misplaced statements. |
-| [**`E0201` – `E0290`**](binder-errors.md) | **Semantic Type Binder** | Type mismatches, undefined symbols, static `::` vs `.`, VTable conflicts. |
+| [**`E0201` – `E0298`**](binder-errors.md) | **Semantic Type Binder** | Type mismatches, undefined symbols, static `::` vs `.`, VTable conflicts. |
 | [**`E0300` – `E0350`**](emission-errors.md) | **Bytecode Emitter** | Register overflow, corrupt container structure, pool limits. |
 | [**`R0001` – `R0024`**](runtime-errors.md) | **Virtual Machine Runtime** | Runtime traps, null dereferences, invalid casts, process exit codes. |

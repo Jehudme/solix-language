@@ -55,3 +55,13 @@ fn test_case_4_2_array_creation_with_missing_size() {
     "#;
     assert_compile_error(code, "size");
 }
+
+#[test]
+fn test_case_4_3_array_creation_with_non_integer_size() {
+    let source_code = r#"
+        void test_method() {
+            int32[] invalid_array = new int32["five"];
+        }
+    "#;
+    assert_compile_error(source_code, "E0250");
+}
