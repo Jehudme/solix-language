@@ -386,8 +386,20 @@ fn verify_instruction(
             check_reg(instruction.dst(), "exit_code")?;
         }
 
-        OpCode::AllocObject | OpCode::AllocObjectExtern => {
+        OpCode::AllocObject => {
             check_reg(instruction.dst(), "dst")?;
+        }
+
+        OpCode::AllocObjectExtern => {
+            check_reg(instruction.dst(), "dst")?;
+            let pool_index = instruction.imm32() as usize;
+            if pool_index >= constant_pool_len {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: AllocObjectExtern constant pool index {pool_index} exceeds pool length {constant_pool_len}"
+                    ),
+                });
+            }
         }
 
         OpCode::GetField | OpCode::GetFieldI32 | OpCode::GetFieldF64 => {
@@ -400,17 +412,16 @@ fn verify_instruction(
             check_reg(instruction.src1(), "object_reg")?;
         }
 
-        OpCode::GetStatic | OpCode::SetStatic => {
+        OpCode::GetStatic
+        | OpCode::SetStatic
+        | OpCode::GetStaticDirect
+        | OpCode::SetStaticDirect => {
             check_reg(instruction.dst(), "dst")?;
-        }
-
-        OpCode::GetStaticDirect | OpCode::SetStaticDirect => {
-            check_reg(instruction.dst(), "dst")?;
-            let slot = instruction.imm32();
-            if slot >= total_static_space {
+            let slot_index = instruction.imm32();
+            if slot_index >= total_static_space {
                 return Err(RuntimeError::BinaryLoadError {
                     reason: format!(
-                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: static slot {slot} exceeds total static space {total_static_space}"
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: static slot {slot_index} exceeds total static space {total_static_space}"
                     ),
                 });
             }
@@ -418,6 +429,14 @@ fn verify_instruction(
 
         OpCode::GetStaticGlobal | OpCode::SetStaticGlobal => {
             check_reg(instruction.dst(), "dst")?;
+            let pool_index = instruction.imm32() as usize;
+            if pool_index >= constant_pool_len {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: global static constant pool index {pool_index} exceeds pool length {constant_pool_len}"
+                    ),
+                });
+            }
         }
 
         OpCode::AllocArray => {

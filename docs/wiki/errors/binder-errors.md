@@ -413,3 +413,30 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
       }
   }
   ```
+
+---
+
+### `E0248`: Binary Operator Type Mismatch
+* **Cause:** A relational comparison operator (`<`, `<=`, `>`, `>=`) is applied to incompatible operand types, such as non-numeric types, boolean values, or user classes that do not declare an overloaded comparison operator.
+* **Bad Code:**
+  ```solix
+  class Main {
+      public static int32 main() {
+          int32 numeric_value = 10;
+          string text_value = "hello";
+          bool comparison_result = numeric_value < text_value;
+          return 0;
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class Main {
+      public static int32 main() {
+          int32 numeric_value = 10;
+          int32 boundary_limit = 20;
+          bool comparison_result = numeric_value < boundary_limit;
+          return 0;
+      }
+  }
+  ```

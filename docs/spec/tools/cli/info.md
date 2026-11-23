@@ -97,7 +97,7 @@ When `<target>` points to a Solix project root containing `manifest.yaml` (or `m
 - `--json`: Emits complete structured JSON containing project manifest configuration and built artifact metadata.
 
 > [!IMPORTANT]
-> `solix info` cannot be run directly on `build/` or staging directories (`build/<profile>/stage`). It must be executed on the project root directory or on a compiled package container (`.slxp`, `.slxarc`, `.slxb`). Passing a build directory produces an immediate rejection error.
+> `solix info` cannot be run directly on `build/` or staging directories (`build/<profile>/stage`). It must be executed on the project root directory or on a compiled package container (`.slxp`, `.slxarc`, `.slxb`). Passing a directory named `build` or `stage` produces an immediate rejection error, while projects situated within ancestor paths containing `build` or `stage` are cleanly accepted.
 
 ```bash
 solix info ./libraries/raylib/

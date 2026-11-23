@@ -91,6 +91,40 @@ fn test_evaluator_literals_and_arithmetic() {
 }
 
 #[test]
+fn test_evaluator_float_and_mixed_arithmetic() {
+    let runtime_options = RuntimeOptions::new();
+    let runtime_context = RuntimeContext::new(runtime_options).expect("RuntimeContext creation");
+    let virtual_machine = VirtualMachine::new(runtime_context);
+
+    // Floating-point arithmetic
+    let float_add_result =
+        evaluate_expression_in_frame("1.5 + 2.5", &virtual_machine, 0).expect("Evaluate 1.5 + 2.5");
+    assert_eq!(float_add_result, Value::F64(4.0));
+
+    let float_mul_result = evaluate_expression_in_frame("10.0 * 0.5", &virtual_machine, 0)
+        .expect("Evaluate 10.0 * 0.5");
+    assert_eq!(float_mul_result, Value::F64(5.0));
+
+    // Mixed numeric arithmetic
+    let mixed_long_int_result =
+        evaluate_expression_in_frame("10L + 5", &virtual_machine, 0).expect("Evaluate 10L + 5");
+    assert_eq!(mixed_long_int_result, Value::I64(15));
+
+    let mixed_float_int_result =
+        evaluate_expression_in_frame("1.5 * 2", &virtual_machine, 0).expect("Evaluate 1.5 * 2");
+    assert_eq!(mixed_float_int_result, Value::F64(3.0));
+
+    // Mixed comparisons
+    let mixed_compare_less =
+        evaluate_expression_in_frame("10 < 20L", &virtual_machine, 0).expect("Evaluate 10 < 20L");
+    assert_eq!(mixed_compare_less, Value::Bool(true));
+
+    let mixed_compare_greater =
+        evaluate_expression_in_frame("15.5 > 10", &virtual_machine, 0).expect("Evaluate 15.5 > 10");
+    assert_eq!(mixed_compare_greater, Value::Bool(true));
+}
+
+#[test]
 fn test_hit_condition_parser() {
     // Direct threshold
     assert!(check_hit_condition(5, "5"));

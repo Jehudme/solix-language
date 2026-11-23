@@ -34,6 +34,14 @@ pub fn evaluate_expression_in_frame(
     if let Ok(long_value) = trimmed_expression.parse::<i64>() {
         return Ok(Value::I64(long_value));
     }
+    if let Some(stripped_long) = trimmed_expression
+        .strip_suffix('L')
+        .or_else(|| trimmed_expression.strip_suffix('l'))
+    {
+        if let Ok(long_value) = stripped_long.trim().parse::<i64>() {
+            return Ok(Value::I64(long_value));
+        }
+    }
     if let Ok(float_value) = trimmed_expression.parse::<f64>() {
         return Ok(Value::F64(float_value));
     }
@@ -175,6 +183,32 @@ fn evaluate_binary_comparison(
             ">=" => left_float >= right_float,
             _ => false,
         }),
+        (Value::I32(left_int), Value::I64(_)) => evaluate_binary_comparison(
+            &Value::I64(i64::from(*left_int)),
+            operator_string,
+            right_value,
+        ),
+        (Value::I64(_), Value::I32(right_int)) => evaluate_binary_comparison(
+            left_value,
+            operator_string,
+            &Value::I64(i64::from(*right_int)),
+        ),
+        (Value::I32(left_int), Value::F64(_)) => evaluate_binary_comparison(
+            &Value::F64(f64::from(*left_int)),
+            operator_string,
+            right_value,
+        ),
+        (Value::F64(_), Value::I32(right_int)) => evaluate_binary_comparison(
+            left_value,
+            operator_string,
+            &Value::F64(f64::from(*right_int)),
+        ),
+        (Value::I64(left_long), Value::F64(_)) => {
+            evaluate_binary_comparison(&Value::F64(*left_long as f64), operator_string, right_value)
+        }
+        (Value::F64(_), Value::I64(right_long)) => {
+            evaluate_binary_comparison(left_value, operator_string, &Value::F64(*right_long as f64))
+        }
         (Value::Bool(left_bool), Value::Bool(right_bool)) => Ok(match operator_string {
             "==" => left_bool == right_bool,
             "!=" => left_bool != right_bool,
@@ -255,6 +289,52 @@ fn evaluate_binary_arithmetic(
             }
             _ => Err(format!("Unsupported operator '{operator_string}'")),
         },
+        (Value::F64(left_float), Value::F64(right_float)) => match operator_string {
+            "+" => Ok(Value::F64(left_float + right_float)),
+            "-" => Ok(Value::F64(left_float - right_float)),
+            "*" => Ok(Value::F64(left_float * right_float)),
+            "/" => {
+                if *right_float == 0.0 {
+                    Err("Division by zero".to_string())
+                } else {
+                    Ok(Value::F64(left_float / right_float))
+                }
+            }
+            "%" => {
+                if *right_float == 0.0 {
+                    Err("Modulo by zero".to_string())
+                } else {
+                    Ok(Value::F64(left_float % right_float))
+                }
+            }
+            _ => Err(format!("Unsupported operator '{operator_string}'")),
+        },
+        (Value::I32(left_int), Value::I64(_)) => evaluate_binary_arithmetic(
+            &Value::I64(i64::from(*left_int)),
+            operator_string,
+            right_value,
+        ),
+        (Value::I64(_), Value::I32(right_int)) => evaluate_binary_arithmetic(
+            left_value,
+            operator_string,
+            &Value::I64(i64::from(*right_int)),
+        ),
+        (Value::I32(left_int), Value::F64(_)) => evaluate_binary_arithmetic(
+            &Value::F64(f64::from(*left_int)),
+            operator_string,
+            right_value,
+        ),
+        (Value::F64(_), Value::I32(right_int)) => evaluate_binary_arithmetic(
+            left_value,
+            operator_string,
+            &Value::F64(f64::from(*right_int)),
+        ),
+        (Value::I64(left_long), Value::F64(_)) => {
+            evaluate_binary_arithmetic(&Value::F64(*left_long as f64), operator_string, right_value)
+        }
+        (Value::F64(_), Value::I64(right_long)) => {
+            evaluate_binary_arithmetic(left_value, operator_string, &Value::F64(*right_long as f64))
+        }
         _ => Err(format!(
             "Cannot perform arithmetic on '{}' and '{}'",
             left_value.type_name(),

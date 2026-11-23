@@ -194,3 +194,98 @@ fn test_verifier_rejects_static_slot_out_of_bounds() {
         other => panic!("Expected BinaryLoadError for static slot out of bounds, got: {other:?}"),
     }
 }
+
+#[test]
+fn test_verifier_rejects_get_static_out_of_bounds() {
+    let mut binary_program = BinaryProgram::new();
+    binary_program.static_space_size = 1;
+    let mut compiled_function = CompiledFunction::new("main", 0, 0, 2);
+
+    // GetStatic with imm32 = 5 exceeding total static space 1
+    compiled_function
+        .instructions
+        .push(Instruction::format_b(OpCode::GetStatic, 0, 0, 5));
+    compiled_function
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+    binary_program.functions.push(compiled_function);
+
+    let runtime_options = RuntimeOptions::new().with_binary(binary_program);
+    let context_result = RuntimeContext::new(runtime_options);
+
+    match context_result {
+        Err(RuntimeError::BinaryLoadError {
+            reason: error_reason,
+        }) => {
+            assert!(error_reason.contains("static slot 5 exceeds total static space 1"));
+        }
+        other_result => panic!("Expected BinaryLoadError for GetStatic, got: {other_result:?}"),
+    }
+}
+
+#[test]
+fn test_verifier_rejects_alloc_object_extern_pool_out_of_bounds() {
+    let mut binary_program = BinaryProgram::new();
+    // Constant pool has 0 elements
+    let mut compiled_function = CompiledFunction::new("main", 0, 0, 2);
+
+    // AllocObjectExtern with pool index 99 exceeding pool length 0
+    compiled_function
+        .instructions
+        .push(Instruction::format_b(OpCode::AllocObjectExtern, 0, 0, 99));
+    compiled_function
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+    binary_program.functions.push(compiled_function);
+
+    let runtime_options = RuntimeOptions::new().with_binary(binary_program);
+    let context_result = RuntimeContext::new(runtime_options);
+
+    match context_result {
+        Err(RuntimeError::BinaryLoadError {
+            reason: error_reason,
+        }) => {
+            assert!(
+                error_reason
+                    .contains("AllocObjectExtern constant pool index 99 exceeds pool length 0")
+            );
+        }
+        other_result => {
+            panic!("Expected BinaryLoadError for AllocObjectExtern, got: {other_result:?}")
+        }
+    }
+}
+
+#[test]
+fn test_verifier_rejects_get_static_global_pool_out_of_bounds() {
+    let mut binary_program = BinaryProgram::new();
+    let mut compiled_function = CompiledFunction::new("main", 0, 0, 2);
+
+    // GetStaticGlobal with pool index 50 exceeding pool length 0
+    compiled_function
+        .instructions
+        .push(Instruction::format_b(OpCode::GetStaticGlobal, 0, 0, 50));
+    compiled_function
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+    binary_program.functions.push(compiled_function);
+
+    let runtime_options = RuntimeOptions::new().with_binary(binary_program);
+    let context_result = RuntimeContext::new(runtime_options);
+
+    match context_result {
+        Err(RuntimeError::BinaryLoadError {
+            reason: error_reason,
+        }) => {
+            assert!(
+                error_reason.contains("global static constant pool index 50 exceeds pool length 0")
+            );
+        }
+        other_result => {
+            panic!("Expected BinaryLoadError for GetStaticGlobal, got: {other_result:?}")
+        }
+    }
+}

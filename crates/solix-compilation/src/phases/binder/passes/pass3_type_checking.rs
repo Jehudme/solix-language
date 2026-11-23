@@ -528,17 +528,9 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                             Type::Error
                         }
                     }
-                    // Relational comparisons
-                    TokenKind::OperatorEqual
-                    | TokenKind::OperatorNotEqual
-                    | TokenKind::OperatorLessThan
-                    | TokenKind::OperatorLessEqual
-                    | TokenKind::OperatorGreaterThan
-                    | TokenKind::OperatorGreaterEqual => {
-                        let is_null_comparison = matches!(
-                            operator,
-                            TokenKind::OperatorEqual | TokenKind::OperatorNotEqual
-                        ) && (left_type == Type::Null
+                    // Equality comparisons
+                    TokenKind::OperatorEqual | TokenKind::OperatorNotEqual => {
+                        let is_null_comparison = left_type == Type::Null
                             || right_type == Type::Null
                             || matches!(
                                 left.as_ref(),
@@ -553,15 +545,15 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                                     value: LiteralValue::Null,
                                     ..
                                 }
-                            ));
+                            );
 
-                        // Check if left class implements operator == or != or < etc.
+                        // Check if left class implements operator == or !=
                         if !is_null_comparison
                             && let Type::Class {
                                 ref symbol_name, ..
                             } = left_type
                         {
-                            let op_name = format!("operator_{}", operator.as_static_str());
+                            let operator_name = format!("operator_{}", operator.as_static_str());
                             if let Some(class_id) = self
                                 .symbol_table
                                 .resolve_symbol(self.source_id, symbol_name)
@@ -570,7 +562,7 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                                 for &child_id in &class_entry.members {
                                     if let Some(child_entry) =
                                         self.symbol_table.get_symbol(child_id)
-                                        && child_entry.name == op_name
+                                        && child_entry.name == operator_name
                                         && let Type::FunctionPointer {
                                             ref return_type, ..
                                         } = child_entry.symbol_type
@@ -600,6 +592,50 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         }
 
                         Type::Primitive(PrimitiveKind::Bool)
+                    }
+                    // Relational ordering comparisons
+                    TokenKind::OperatorLessThan
+                    | TokenKind::OperatorLessEqual
+                    | TokenKind::OperatorGreaterThan
+                    | TokenKind::OperatorGreaterEqual => {
+                        // Check if left class implements operator <, <=, >, or >=
+                        if let Type::Class {
+                            ref symbol_name, ..
+                        } = left_type
+                        {
+                            let operator_name = format!("operator_{}", operator.as_static_str());
+                            if let Some(class_id) = self
+                                .symbol_table
+                                .resolve_symbol(self.source_id, symbol_name)
+                                && let Some(class_entry) = self.symbol_table.get_symbol(class_id)
+                            {
+                                for &child_id in &class_entry.members {
+                                    if let Some(child_entry) =
+                                        self.symbol_table.get_symbol(child_id)
+                                        && child_entry.name == operator_name
+                                        && let Type::FunctionPointer {
+                                            ref return_type, ..
+                                        } = child_entry.symbol_type
+                                    {
+                                        return *return_type.clone();
+                                    }
+                                }
+                            }
+                        }
+
+                        if left_type == Type::Error || right_type == Type::Error {
+                            Type::Error
+                        } else if left_type.is_numeric() && right_type.is_numeric() {
+                            Type::Primitive(PrimitiveKind::Bool)
+                        } else {
+                            self.errors.push(BindingError::BinaryOperatorTypeMismatch {
+                                operator: operator.as_static_str().to_string(),
+                                left_type: left_type.to_string(),
+                                right_type: right_type.to_string(),
+                                span: span.to_source_span(),
+                            });
+                            Type::Error
+                        }
                     }
                     // Logical operations
                     TokenKind::OperatorLogicalAnd | TokenKind::OperatorLogicalOr => {

@@ -581,11 +581,11 @@ fn format_info_summary(
 }
 
 fn execute_project_dir_info(dir_path: &Path, args: &InfoArgs) -> Result<()> {
-    let is_build_or_stage = dir_path.components().any(|component| {
-        let component_name = component.as_os_str().to_string_lossy();
-        component_name.eq_ignore_ascii_case("build") || component_name.eq_ignore_ascii_case("stage")
+    let directory_name = dir_path.file_name().map(|name| name.to_string_lossy());
+    let is_build_or_stage_target = directory_name.as_ref().is_some_and(|name| {
+        name.eq_ignore_ascii_case("build") || name.eq_ignore_ascii_case("stage")
     });
-    if is_build_or_stage {
+    if is_build_or_stage_target {
         bail!(
             "'solix info' cannot be run on build or staging directories ('{}'). Run 'solix info' on the project root directory or on a compiled package container (.slxp, .slxarc, .slxb).",
             dir_path.display()

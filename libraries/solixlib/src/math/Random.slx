@@ -49,8 +49,13 @@ public class Random {
         if (lower_bound >= upper_bound) {
             throw new IllegalArgumentException("lower_bound", "Minimum bound must be strictly less than maximum bound");
         }
-        int32 range_span = upper_bound - lower_bound;
-        return lower_bound + this.next_int32(range_span);
+        int64 range_span = (int64)upper_bound - (int64)lower_bound;
+        if (range_span <= 2147483647L) {
+            return lower_bound + this.next_int32((int32)range_span);
+        }
+        int64 positive_bits = this.next_int64() & (int64)0x7FFFFFFFFFFFFFFFL;
+        int64 offset_value = positive_bits % range_span;
+        return (int32)((int64)lower_bound + offset_value);
     }
 
     // Compatibility aliases
