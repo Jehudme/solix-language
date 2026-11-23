@@ -48,6 +48,9 @@ A static utility class providing mathematical constants and functions.
 - `round(float64 v) -> float64`: Rounds to nearest integer.
 - `trunc(float64 v) -> float64`: Truncates towards zero.
 
+### Combinatorics & Discrete
+- `factorial(int32 target_number) -> int64`: Computes $n!$ for $n \in [0, 20]$. Throws `ArgumentOutOfRangeException` if `target_number < 0` or if `target_number > 20` (64-bit integer overflow protection).
+
 ---
 
 ## 2. Class: `solix.math.Random`
@@ -61,7 +64,7 @@ Deterministic pseudo-random number generator backed by 64-bit Mersenne Twister e
 ### Methods
 - `next_int() -> int32`: Generates non-negative 32-bit random integer.
 - `next_int(int32 max) -> int32`: Generates integer in `[0, max)`. Throws `IllegalArgumentException` if `max <= 0`.
-- `next_int(int32 min, int32 max) -> int32`: Generates integer in `[min, max)`. Throws `IllegalArgumentException` if `min >= max`.
+- `next_int(int32 min, int32 max) -> int32`: Generates integer in `[min, max)`. Throws `IllegalArgumentException` if `min >= max`. Safely computes span with 64-bit arithmetic to prevent 32-bit signed overflow when spans exceed `2147483647`.
 - `next_int64() -> int64`: Generates full 64-bit random integer.
 - `next_double() -> float64`: Generates uniform floating-point value in `[0.0, 1.0)`.
 - `next_bool() -> bool`: Generates pseudo-random boolean.
