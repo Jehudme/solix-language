@@ -38,9 +38,15 @@ public class StringBuilder implements IStringable {
     }
 
     public void ensure_capacity(int32 minimum_capacity) {
+        if (minimum_capacity <= 0) {
+            return;
+        }
+        if (minimum_capacity > 1073741824) {
+            minimum_capacity = 1073741824;
+        }
         if (minimum_capacity > this.buffer.length) {
             int32 new_capacity = this.buffer.length * 2;
-            if (new_capacity < minimum_capacity) {
+            if (new_capacity < minimum_capacity || new_capacity <= 0 || new_capacity > 1073741824) {
                 new_capacity = minimum_capacity;
             }
             char[] new_buffer = new char[new_capacity];
@@ -58,7 +64,7 @@ public class StringBuilder implements IStringable {
             return this;
         }
         string raw_text = text.data;
-        if (raw_text.length == 0) {
+        if (raw_text.length == 0 || this.count > 1073741824 - raw_text.length) {
             return this;
         }
         this.ensure_capacity(this.count + raw_text.length);
@@ -72,7 +78,7 @@ public class StringBuilder implements IStringable {
     }
 
     public StringBuilder append(string text) {
-        if (text == null || text.length == 0) {
+        if (text == null || text.length == 0 || this.count > 1073741824 - text.length) {
             return this;
         }
         this.ensure_capacity(this.count + text.length);
@@ -86,7 +92,7 @@ public class StringBuilder implements IStringable {
     }
 
     public StringBuilder append(char[] characters) {
-        if (characters == null || characters.length == 0) {
+        if (characters == null || characters.length == 0 || this.count > 1073741824 - characters.length) {
             return this;
         }
         this.ensure_capacity(this.count + characters.length);
@@ -100,6 +106,9 @@ public class StringBuilder implements IStringable {
     }
 
     public StringBuilder append_char(char character) {
+        if (this.count >= 1073741824) {
+            return this;
+        }
         this.ensure_capacity(this.count + 1);
         this.buffer[this.count] = character;
         this.count = this.count + 1;
@@ -151,6 +160,9 @@ public class StringBuilder implements IStringable {
             return this;
         }
         int32 text_length = text.length;
+        if (this.count > 1073741824 - text_length) {
+            return this;
+        }
         this.ensure_capacity(this.count + text_length);
         int32 shift_index = this.count - 1;
         while (shift_index >= index) {

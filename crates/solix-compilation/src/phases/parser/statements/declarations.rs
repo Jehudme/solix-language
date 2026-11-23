@@ -37,6 +37,8 @@ pub enum Modifier {
     Abstract,
     /// Extern declaration for dynamic linking (`extern`).
     Extern,
+    /// Non-extensible class or non-overridable method (`final`).
+    Final,
 }
 
 impl Modifier {
@@ -57,6 +59,7 @@ impl Modifier {
             Self::Weak => "weak",
             Self::Abstract => "abstract",
             Self::Extern => "extern",
+            Self::Final => "final",
         }
     }
 }

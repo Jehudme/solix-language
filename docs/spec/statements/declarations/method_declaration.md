@@ -16,6 +16,8 @@ A `MethodDeclaration` defines a callable member function or package-level free f
 
 ### 2.2 Class Member Methods
 - Functions declared inside a class may be instance methods or marked with `static` to denote static member functions.
+- Methods marked `virtual` can be overridden by subclasses using the `override` keyword.
+- Methods marked `final` cannot be overridden in derived classes; attempting to override a `final` method triggers compiler diagnostic `E0267` (`FinalMethodOverridden`).
 - When an entry point function is defined inside a class, it must be declared `public static`.
 
 ### 2.3 Entry Point Resolution & Ambiguity Detection

@@ -45,8 +45,8 @@ pub fn get_outgoing_references(
         BlockTag::ArrayRef => {
             let element_count = heap.read_u32(address).unwrap_or(0);
             let element_type_tag = heap.read_u8(address + 7).unwrap_or(0);
-            if element_type_tag == 13 || element_type_tag >= 0x80 {
-                let element_byte_size = heap.read_u8(address + 4).unwrap_or(8) as usize;
+            let element_byte_size = heap.read_u8(address + 4).unwrap_or(8) as usize;
+            if (element_type_tag == 0 || element_type_tag >= 13) && element_byte_size == 8 {
                 for element_index in 0..element_count {
                     let element_slot_address =
                         address + 8 + (element_index as usize * element_byte_size) as u32;

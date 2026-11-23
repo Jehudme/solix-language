@@ -108,7 +108,7 @@ The Solix compilation pipeline enforces zero tolerance for cascading compiler fa
 |---|---|---|
 | **Lexing $\to$ Parsing** | Unrecognized token, unterminated literal, or invalid escape | Compiler halts; parser never instantiated |
 | **Parsing $\to$ Binding** | Syntax grammar violation, missing semicolon, unmatched bracket | Compiler halts; binder never instantiated |
-| **Binding $\to$ Emitting** | Type mismatch, unknown identifier, cyclic inheritance, invalid cast | Compiler halts; emitter never instantiated |
+| **Binding $\to$ Emitting** | Type mismatch, unknown identifier, cyclic inheritance, invalid cast, or final modifier violations | Compiler halts; emitter never instantiated |
 | **Emitting $\to$ Packaging** | Register exhaustion (> 65,535 registers) or jump offset overflow | Packaging aborted; no binary emitted |
 
 ---

@@ -82,7 +82,7 @@ Arrays in the byte-addressed heap have a standardized memory header:
   - Stride 4: `uint32[]`, `int32[]`, `float32[]`
   - Stride 8: `uint64[]`, `int64[]`, `float64[]`, object references (`ARRAY_REF`)
 
-Opcodes accessing arrays compute offset via `effective_address = base_address + 8 + (element_index * stride)`. Boundary checks against `length` are enforced before every read or write operation, raising `RuntimeError::IndexOutOfBounds` on invalid indices.
+Opcodes accessing arrays compute offset via `effective_address = base_address + 8 + (element_index * stride)`. Boundary checks against `length` are enforced before every read or write operation, raising `RuntimeError::IndexOutOfBounds` on invalid indices. Primitive field writes in slow execution paths (`execute_set_field_slow`) strictly propagate heap bounds errors via `RuntimeError` traps instead of silent error drops. Cycle collection traces outgoing reference arrays across all object and reference tags (`tag == 0 || tag >= 13`) with 8-byte element size.
 
 ---
 

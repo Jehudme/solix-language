@@ -822,6 +822,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 TokenKind::KeywordOverride => Some(Modifier::Override),
                 TokenKind::KeywordWeak => Some(Modifier::Weak),
                 TokenKind::KeywordAbstract => Some(Modifier::Abstract),
+                TokenKind::KeywordFinal => Some(Modifier::Final),
                 TokenKind::KeywordExtern => Some(Modifier::Extern),
                 _ => None,
             };
@@ -936,6 +937,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 Modifier::Public,
                 Modifier::Internal,
                 Modifier::Abstract,
+                Modifier::Final,
                 Modifier::Extern,
             ],
             "class",
@@ -1403,6 +1405,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 Modifier::Virtual,
                 Modifier::Override,
                 Modifier::Abstract,
+                Modifier::Final,
                 Modifier::Inline,
                 Modifier::Native,
                 Modifier::Extern,
@@ -3166,9 +3169,19 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 };
             } else if let Some(dot_token) = self.cursor.match_token(TokenKind::PunctuationDot) {
                 let dot_span = dot_token.span;
+                let tilde_token = self
+                    .cursor
+                    .match_token(TokenKind::OperatorBitwiseNot)
+                    .copied();
                 // Member access
                 let member_span = match self.consume_identifier() {
-                    Ok(ident_span) => ident_span,
+                    Ok(ident_span) => {
+                        if let Some(tilde) = tilde_token {
+                            tilde.span.combine(ident_span)
+                        } else {
+                            ident_span
+                        }
+                    }
                     Err(parsing_error) => {
                         self.errors.push(parsing_error);
                         Span::new(dot_span.id, dot_span.end, dot_span.end)

@@ -101,6 +101,8 @@ pub enum TokenKind {
     KeywordCatch,
     /// Guaranteed cleanup `finally` clause keyword.
     KeywordFinally,
+    /// Non-extensible class or non-overridable method `final` keyword.
+    KeywordFinal,
     /// Exception raise `throw` keyword.
     KeywordThrow,
     /// Static lifetime member `static` keyword.
@@ -281,6 +283,7 @@ impl TokenKind {
                     | Self::KeywordTry
                     | Self::KeywordCatch
                     | Self::KeywordFinally
+                    | Self::KeywordFinal
                     | Self::KeywordThrow
                     | Self::KeywordStatic
                     | Self::KeywordInline
@@ -440,6 +443,7 @@ impl TokenKind {
             Self::KeywordTry => "try",
             Self::KeywordCatch => "catch",
             Self::KeywordFinally => "finally",
+            Self::KeywordFinal => "final",
             Self::KeywordThrow => "throw",
             Self::KeywordStatic => "static",
             Self::KeywordInline => "inline",
@@ -563,6 +567,7 @@ pub static KEYWORDS: LazyLock<HashMap<&'static str, TokenKind>> = LazyLock::new(
     keyword_mapping.insert("try", TokenKind::KeywordTry);
     keyword_mapping.insert("catch", TokenKind::KeywordCatch);
     keyword_mapping.insert("finally", TokenKind::KeywordFinally);
+    keyword_mapping.insert("final", TokenKind::KeywordFinal);
     keyword_mapping.insert("throw", TokenKind::KeywordThrow);
     keyword_mapping.insert("const", TokenKind::KeywordConst);
     keyword_mapping.insert("class", TokenKind::KeywordClass);
@@ -659,9 +664,10 @@ mod tests {
 
     #[test]
     fn test_positive_all_keywords_registered_in_hashmap() {
-        assert_eq!(KEYWORDS.len(), 57);
+        assert_eq!(KEYWORDS.len(), 58);
 
         // Spot check primitive types
+        assert_eq!(lookup_keyword("final"), Some(TokenKind::KeywordFinal));
         assert_eq!(lookup_keyword("void"), Some(TokenKind::PrimitiveVoid));
         assert_eq!(lookup_keyword("bool"), Some(TokenKind::PrimitiveBool));
         assert_eq!(lookup_keyword("int32"), Some(TokenKind::PrimitiveInt32));

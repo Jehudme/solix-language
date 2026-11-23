@@ -144,12 +144,12 @@ fn verify_instruction(
         }
     };
 
-    let check_branch_target = |offset: i32| -> Result<(), RuntimeError> {
-        let target_pc = (instruction_index as i32) + offset;
-        if target_pc < 0 || (target_pc as usize) > instruction_count {
+    let check_branch_target = |instruction_offset: i32| -> Result<(), RuntimeError> {
+        let target_program_counter = (instruction_index as i32) + instruction_offset;
+        if target_program_counter < 0 || (target_program_counter as usize) > instruction_count {
             Err(RuntimeError::BinaryLoadError {
                 reason: format!(
-                    "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: branch target {target_pc} is out of bounds (instruction count: {instruction_count})"
+                    "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: branch target {target_program_counter} is out of bounds (instruction count: {instruction_count})"
                 ),
             })
         } else {

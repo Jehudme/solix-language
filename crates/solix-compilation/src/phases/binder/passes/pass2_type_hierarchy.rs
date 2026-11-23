@@ -842,6 +842,17 @@ pub fn execute_pass2_type_hierarchy(
                             if let Some(super_symbol_id) =
                                 symbol_table.resolve_symbol(source_id, &symbol_name)
                             {
+                                if let Some(super_symbol_entry) =
+                                    symbol_table.get_symbol(super_symbol_id)
+                                    && super_symbol_entry.modifiers.contains(&Modifier::Final)
+                                {
+                                    accumulated_errors.push(
+                                        BindingError::CannotInheritFromFinalClass {
+                                            class_name: symbol_name.clone(),
+                                            span: super_annotation.span().to_source_span(),
+                                        },
+                                    );
+                                }
                                 class_inheritance_edges.insert(class_symbol_id, super_symbol_id);
                             } else {
                                 accumulated_errors.push(BindingError::undefined_symbol(
@@ -1535,6 +1546,13 @@ pub fn execute_pass2_type_hierarchy(
                                     .and_then(|parent_id| symbol_table.get_symbol(parent_id))
                                     .map(|parent_sym| parent_sym.name.clone())
                                     .unwrap_or_else(|| "Base".to_string());
+                                if base_entry.modifiers.contains(&Modifier::Final) {
+                                    accumulated_errors.push(BindingError::FinalMethodOverridden {
+                                        method_name: method_name.to_string(),
+                                        base_class: base_class_name.clone(),
+                                        span: method_declaration.span.to_source_span(),
+                                    });
+                                }
                                 if !is_virtual_or_abstract {
                                     accumulated_errors.push(
                                         BindingError::OverrideNonVirtualMethod {
@@ -1583,6 +1601,18 @@ pub fn execute_pass2_type_hierarchy(
                             method_name,
                         )
                     {
+                        if base_entry.modifiers.contains(&Modifier::Final) {
+                            let base_class_name = base_entry
+                                .parent_symbol
+                                .and_then(|parent_id| symbol_table.get_symbol(parent_id))
+                                .map(|parent_sym| parent_sym.name.clone())
+                                .unwrap_or_else(|| "Base".to_string());
+                            accumulated_errors.push(BindingError::FinalMethodOverridden {
+                                method_name: method_name.to_string(),
+                                base_class: base_class_name,
+                                span: method_declaration.span.to_source_span(),
+                            });
+                        }
                         let is_virtual = base_entry.modifiers.contains(&Modifier::Virtual);
                         if is_virtual
                             && let Type::FunctionPointer {

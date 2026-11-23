@@ -38,9 +38,20 @@ a.speak();
 ALLOC_DYNAMIC 16            // Allocates header + fields
 SET_VTABLE <Dog_vtable_id>  // Sets vtable pointer
 CALL Dog.init()             // Runs constructor (ref_count = 1)
-Mov r1, r7                 // Stored into 'a'
+Mov r1, r7                 // Stored into 'dog_instance'
 
 // 2. Virtual Method Dispatch
-// (Register r1 holds local variable)                 // Load 'a'
+// (Register r1 holds local variable)                 // Load 'dog_instance'
 CALL_VIRTUAL <speak_slot_id>// Dynamic dispatch queries Dog VTable!
 ```
+
+---
+
+## 4. Class Modifiers & Inheritance Constraints
+
+Classes support the following declaration modifiers:
+- `public`: Class is visible across all packages and compilation units.
+- `internal`: Class is accessible only within the current compilation package.
+- `abstract`: Class cannot be directly instantiated and may contain abstract method declarations.
+- `final`: Class is closed and cannot be extended. Subclassing a `final` class emits diagnostic `E0235` (`CannotInheritFromFinalClass`).
+- `extern`: Dynamic library external class boundary.
