@@ -30,6 +30,7 @@ import merge_bundled_packages  # noqa: E402
 import pr_risk_audit  # noqa: E402
 import prepare_release_train  # noqa: E402
 import re  # noqa: E402
+import render_coverage_summary  # noqa: E402
 import solix_bench  # noqa: E402
 import sync_github_wiki  # noqa: E402
 import verify_docs  # noqa: E402
@@ -86,6 +87,59 @@ class PrRiskAuditTests(unittest.TestCase):
             payload = json.loads(json_out.read_text(encoding="utf-8"))
             self.assertEqual(payload["labels"], ["sensitive"])
             self.assertIn("Sensitive Paths Modified", md_out.read_text(encoding="utf-8"))
+
+    def test_cli_invocation_step_summary_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            fake_summary_path = tmp / "step_summary.md"
+            import os
+            original_environment_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+            try:
+                os.environ["GITHUB_STEP_SUMMARY"] = str(fake_summary_path)
+                exit_code_without_flag = pr_risk_audit.main(
+                    ["--files", ".github/workflows/release.yml", "Cargo.toml"]
+                )
+                self.assertEqual(exit_code_without_flag, 0)
+                self.assertFalse(fake_summary_path.exists())
+
+                exit_code_with_flag = pr_risk_audit.main(
+                    ["--files", ".github/workflows/release.yml", "Cargo.toml", "--step-summary"]
+                )
+                self.assertEqual(exit_code_with_flag, 0)
+                self.assertTrue(fake_summary_path.exists())
+                self.assertIn("Sensitive Paths Modified", fake_summary_path.read_text(encoding="utf-8"))
+            finally:
+                if original_environment_summary is not None:
+                    os.environ["GITHUB_STEP_SUMMARY"] = original_environment_summary
+                else:
+                    os.environ.pop("GITHUB_STEP_SUMMARY", None)
+
+
+class CoverageSummaryRendererTests(unittest.TestCase):
+    """Tests `scripts/ci/render_coverage_summary.py` parsing and markdown rendering."""
+
+    def test_render_coverage_summary_parses_subsystems_and_renders_markdown(self) -> None:
+        sample_output = (
+            "Filename                                                                        Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover\n"
+            "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "crates/solix-common/src/bytecode/binary.rs                                          761                73    90.41%          32                 1    96.88%         571                18    96.85%           0                 0         -\n"
+            "crates/solix-runtime/src/vm/fast.rs                                                4780              1543    67.72%         165                49    70.30%        4089              1063    74.00%           0                 0         -\n"
+            "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "TOTAL                                                                              5541              1616    70.84%         197                50    74.62%        4660              1081    76.80%           0                 0         -\n"
+        )
+        parsed = render_coverage_summary.parse_coverage_summary(sample_output)
+        self.assertIsNotNone(parsed["total"])
+        self.assertEqual(parsed["total"]["total_lines"], 4660)
+        self.assertEqual(parsed["total"]["missed_lines"], 1081)
+        self.assertEqual(parsed["total"]["line_coverage_percentage"], 76.80)
+
+        markdown = render_coverage_summary.render_markdown_coverage_report(parsed, sample_output)
+        self.assertIn("## Workspace Code Coverage Report", markdown)
+        self.assertIn("Overall Workspace Line Coverage", markdown)
+        self.assertIn("76.80%", markdown)
+        self.assertIn("crates/solix-common", markdown)
+        self.assertIn("crates/solix-runtime", markdown)
+        self.assertIn("Subsystem Coverage Breakdown", markdown)
 
 
 class StaticDocsAndWikiPortalTests(unittest.TestCase):
@@ -712,6 +766,37 @@ class SolixBenchCliTests(unittest.TestCase):
             self.assertIn("compile_ms", solix_stats)
             self.assertIn("cold_start_ms", solix_stats)
             self.assertGreater(solix_stats["compile_ms"], 0.0)
+
+    def test_render_markdown_comparison_table_includes_column_glossary(self) -> None:
+        sample_comparison = {
+            "workloads": [
+                {
+                    "workload": "01_fib_recursive",
+                    "previous_ms": 10.0,
+                    "current_ms": 9.5,
+                    "speedup_pct": 5.0,
+                    "speedup_ratio": 1.05,
+                    "memory_diff_mb": -1.2,
+                    "badge": "FASTER",
+                }
+            ],
+            "summary": {
+                "geometric_mean_speedup": 1.05,
+                "total_memory_diff_mb": -1.2,
+                "faster_count": 1,
+                "stable_count": 0,
+                "regressed_count": 0,
+            },
+        }
+        markdown = solix_bench.render_markdown_comparison_table(
+            sample_comparison,
+            previous_tag_label="v1.9.0",
+            current_tag_label="PR #182",
+        )
+        self.assertIn("Column Glossary", markdown)
+        self.assertIn("**Workload:**", markdown)
+        self.assertIn("**Speedup:**", markdown)
+        self.assertIn("**Memory Diff:**", markdown)
 
     def test_ci_workflow_removes_sensitive_label_and_includes_pr_benchmark(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

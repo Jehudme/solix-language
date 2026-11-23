@@ -1363,6 +1363,22 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
                 f"| `{wname}` | {compile_str} | **{solix_ms:.2f}** | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {speedup_str} | {rss_kb} |"
             )
 
+        lines.append("")
+        lines.append(
+            "> [!TIP]\n"
+            "> **Cross-Language Column Glossary:**\n"
+            "> - **Workload:** Standardized algorithm executed across all language runtimes.\n"
+            "> - **Precompile (ms):** Solix compilation latency (`solix compile`) from source code to bytecode.\n"
+            "> - **Solix (ms):** Median execution time of the compiled Solix binary on the fast register Virtual Machine.\n"
+            "> - **Cold (ms):** Cold-start execution time (clean process invocation including compilation and execution).\n"
+            "> - **Python (ms):** Median execution time of CPython 3.12.\n"
+            "> - **Lua (ms):** Median execution time of the standard Lua 5.4 interpreter.\n"
+            "> - **LuaJIT (ms):** Median execution time of the LuaJIT 2.1 JIT compiler.\n"
+            "> - **C (ms):** Median execution time of native C compiled with GCC `-O3`.\n"
+            "> - **Speedup vs Python:** Speedup ratio of Solix relative to CPython (`Python / Solix`).\n"
+            "> - **RSS (KB):** Peak Resident Set Size memory consumption in kilobytes."
+        )
+
     return "\n".join(lines)
 
 
@@ -1437,6 +1453,17 @@ def render_markdown_comparison_table(
             f"across {len(workload_rows)} suites. "
             f"Total memory delta: **{mem_sign}{total_mem:.1f} MB**. "
             f"Distribution: {faster} faster, {stable} stable, {regressed} regressed.{host_note}"
+        )
+        markdown_lines.append("")
+        markdown_lines.append(
+            "> [!TIP]\n"
+            "> **Column Glossary:**\n"
+            "> - **Workload:** Standardized benchmark workload evaluating compiler and runtime performance.\n"
+            "> - **Previous (ms):** Median wall-clock execution time (in milliseconds) of the baseline release.\n"
+            "> - **Current (ms):** Median wall-clock execution time (in milliseconds) of the current pull request branch.\n"
+            "> - **Speedup:** Execution ratio relative to previous baseline (`Previous / Current`); positive indicates faster execution.\n"
+            "> - **Memory Diff:** Resident Set Size memory consumption delta compared to baseline (`Current - Previous`).\n"
+            "> - **Status:** Performance classification (`FASTER` = speedup above threshold, `STABLE` = within ±5% margin, `SLOWER` = regressed)."
         )
     else:
         markdown_lines.append(f"### Performance Baseline ({current_tag_label})\n")
@@ -1542,6 +1569,16 @@ def render_multi_baseline_markdown(
         lines.append(
             f"> [!NOTE]\n> **Geometric Mean Speedup vs `{labels[0]}`:** {geomean_text}."
         )
+
+    lines.append("")
+    lines.append(
+        "> [!TIP]\n"
+        "> **Multi-Baseline Column Glossary:**\n"
+        "> - **Workload:** Standard benchmark suite evaluating compiler and runtime performance.\n"
+        "> - **Labels (ms):** Median execution time in milliseconds across evaluated releases or branches.\n"
+        "> - **Speedup vs First:** Relative execution speed ratio compared to the earliest baseline release.\n"
+        "> - **Latest Status:** Current performance health categorization (`FASTER`, `STABLE`, or `SLOWER`)."
+    )
 
     if cross_language_data:
         cross_md = render_cross_language_markdown(cross_language_data)

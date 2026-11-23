@@ -53,7 +53,7 @@ All sensitive categories emit a single **`sensitive`** label via [`scripts/ci/pr
 | **Runtime Security, Archives & FFI** | `crates/solix-common/src/project.rs`, `crates/solix-common/src/hash.rs`, `crates/solix-runtime/src/native/**`, `ffi/**` | Safeguards Zip-Slip archive checks, SHA-256 verification, `.slxp` `supported_platforms` host enforcement, and `unsafe` C-ABI boundaries. |
 
 ### 2.2 Non-Blocking Auditor (`scripts/ci/pr_risk_audit.py`)
-* [`scripts/ci/pr_risk_audit.py`](../../scripts/ci/pr_risk_audit.py) **MUST ALWAYS** exit `0` so valid improvements never fail CI solely for touching protected files.
+* [`scripts/ci/pr_risk_audit.py`](../../scripts/ci/pr_risk_audit.py) **MUST ALWAYS** exit `0` so valid improvements never fail CI solely for touching protected files. Writing to `$GITHUB_STEP_SUMMARY` is guarded by an explicit `--step-summary` flag, ensuring unit test executions never pollute CI job step summaries.
 * When sensitive files change, the job attaches the single `sensitive` label and upserts a concise `## Sensitive Paths Modified` table; when subsequent PR commits revert all sensitive changes, CI automatically removes the `sensitive` label and deletes the sticky notice. Both `pr-risk-audit` and `pr-benchmark` avoid checking out untrusted fork code in privileged `pull_request_target` jobs. `pr-benchmark` executes across all pull requests targeting `dev` (including external fork contributions), publishing back-to-back benchmark comparisons directly to the GitHub Step Summary. To ensure discussion comments are reliably delivered across all pull requests (including external forks where PR event tokens are read-only), `pr-risk-audit` and `pr-benchmark` stage output artifacts (`pr-risk-audit` and `pr-benchmark-report`), which [`pr-discussion-sync.yml`](../../.github/workflows/pr-discussion-sync.yml) consumes on `workflow_run` to synchronize sticky comments and sensitive labels with full repository write permissions without executing untrusted code.
 
 ---
@@ -64,7 +64,7 @@ Every PR targeting `dev`, push to `dev`, and scheduled weekly security run execu
 1. **`cargo-deny`** ([`deny.toml`](../../deny.toml)): Validates compatible open-source licenses, blocks unapproved registries/git sources, and checks RustSec advisories.
 2. **`cargo-audit` (`--deny warnings`):** Scans `Cargo.lock` against RustSec vulnerability, yanked-crate, and soundness advisories.
 3. **`actionlint` & `zizmor`**: Statically analyzes `.github/workflows/*.yml` for YAML issues, script injection, overly permissive tokens, and unpinned actions.
-4. **`cargo-llvm-cov` Coverage Gate**: Enforces a minimum workspace line coverage floor (`55%`) in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) using `llvm-tools-preview`.
+4. **`cargo-llvm-cov` Coverage Gate**: Enforces a minimum workspace line coverage floor (`55%`) in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) using `llvm-tools-preview`. [`scripts/ci/render_coverage_summary.py`](../../scripts/ci/render_coverage_summary.py) formats llvm-cov summary metrics into a structured GitHub Flavored Markdown table aggregating total, executed, and missed lines and function coverage percentages by crate subsystem alongside collapsible raw details.
 5. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` **MUST** pin full 40-character commit SHAs alongside version comments, with top-level `permissions: contents: read`.
 
 ---

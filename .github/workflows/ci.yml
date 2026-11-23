@@ -59,7 +59,8 @@ jobs:
             --files-json "$RUNNER_TEMP/risk-audit/changed_files.json" \
             --json-out "$RUNNER_TEMP/risk-audit/report.json" \
             --markdown-out "$RUNNER_TEMP/risk-audit/advisory.md" \
-            --emit-annotations
+            --emit-annotations \
+            --step-summary
           printf '%s\n' "$PR_NUMBER" > "$RUNNER_TEMP/risk-audit/pr_number.txt"
 
       - name: Upload risk audit artifact for discussion sync
@@ -500,13 +501,9 @@ jobs:
           SOLIX_BIN="$(pwd)/target/debug/solix"
           export SOLIX_BIN
           cargo llvm-cov --workspace --all-targets --ignore-filename-regex '(/rustc/|/tests/)' --fail-under-lines 55 --summary-only | tee "$RUNNER_TEMP/coverage_summary.txt"
-          {
-            echo "## Workspace Code Coverage Report"
-            echo ""
-            echo '```text'
-            tail -n 30 "$RUNNER_TEMP/coverage_summary.txt"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/ci/render_coverage_summary.py \
+            --input "$RUNNER_TEMP/coverage_summary.txt" \
+            --step-summary
 
   pr-benchmark:
     name: PR Performance & Cross-Language Benchmark
