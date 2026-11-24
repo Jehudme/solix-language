@@ -6,6 +6,7 @@ import solix.core.IComparable;
 import solix.core.ICloneable;
 import solix.core.String;
 import solix.core.StringBuilder;
+import solix.core.ArithmeticException;
 
 public class Duration implements IStringable, IEquatable<Duration>, IComparable<Duration>, ICloneable<Duration> {
     public int64 nanoseconds;
@@ -93,7 +94,10 @@ public class Duration implements IStringable, IEquatable<Duration>, IComparable<
 
     public Duration divide(int64 divisor_factor) {
         if (divisor_factor == 0L) {
-            return new Duration(0L);
+            throw new ArithmeticException("Division by zero in Duration::divide");
+        }
+        if (divisor_factor == -1L && this.nanoseconds == -9223372036854775808L) {
+            throw new ArithmeticException("Arithmetic overflow in Duration::divide");
         }
         return new Duration(this.nanoseconds / divisor_factor);
     }
@@ -169,6 +173,9 @@ public class Duration implements IStringable, IEquatable<Duration>, IComparable<
         int64 rem_nanos = this.nanoseconds % 1000000000L;
         if (rem_nanos < 0L) {
             rem_nanos = -rem_nanos;
+        }
+        if (this.nanoseconds < 0L && total_sec == 0L) {
+            string_builder.append_char('-');
         }
         string_builder.append_long(total_sec);
         string_builder.append_char('.');

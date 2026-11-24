@@ -2263,8 +2263,11 @@ impl VirtualMachine {
         if (index_i64 as u64) >= (tuple_len as u64) {
             return Err(VmTrap::index_out_of_bounds(index_i64, tuple_len));
         }
-        let elem_offset = arr_offset + 8 + ((index_i64 as usize) * 16);
-        if elem_offset + 16 > self.heap.buffer.len() {
+        let elem_offset = (index_i64 as usize)
+            .checked_mul(16)
+            .and_then(|offset| arr_offset.checked_add(8)?.checked_add(offset))
+            .ok_or_else(VmTrap::null_reference)?;
+        if elem_offset.checked_add(16).is_none() || elem_offset + 16 > self.heap.buffer.len() {
             return Err(VmTrap::null_reference());
         }
         let tag_raw = u64::from_le_bytes(
@@ -2487,8 +2490,11 @@ impl VirtualMachine {
         // SAFETY: Caller verified arr_offset >= 8 && arr_offset + 8 <= heap_len.
         let elem_size = unsafe { (*buf_ptr.add(arr_offset + 4) as usize).max(1) };
         let elem_type_tag = unsafe { *buf_ptr.add(arr_offset + 7) };
-        let elem_offset = arr_offset + 8 + (index_usize * elem_size);
-        if elem_offset + elem_size > heap_len {
+        let elem_offset = index_usize
+            .checked_mul(elem_size)
+            .and_then(|offset| arr_offset.checked_add(8)?.checked_add(offset))
+            .ok_or_else(VmTrap::null_reference)?;
+        if elem_offset.checked_add(elem_size).is_none() || elem_offset + elem_size > heap_len {
             return Err(VmTrap::null_reference());
         }
 
@@ -2924,7 +2930,13 @@ impl VirtualMachine {
         if slot_idx >= tuple_len {
             return Err(VmTrap::index_out_of_bounds(slot_idx as i64, tuple_len));
         }
-        let elem_addr = tuple_addr + 8 + (slot_idx * 16) as u32;
+        let elem_offset = (slot_idx as u32)
+            .checked_mul(16)
+            .ok_or_else(|| VmTrap::index_out_of_bounds(slot_idx as i64, tuple_len))?;
+        let elem_addr = tuple_addr
+            .checked_add(8)
+            .and_then(|base_addr| base_addr.checked_add(elem_offset))
+            .ok_or_else(VmTrap::null_reference)?;
         let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
         let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
         Ok(Value::from_tagged_parts(tag_raw, payload_raw))
@@ -2946,7 +2958,14 @@ impl VirtualMachine {
         if index_i64 < 0 || (index_i64 as usize) >= tuple_len {
             return Err(VmTrap::index_out_of_bounds(index_i64, tuple_len));
         }
-        let elem_addr = tuple_addr + 8 + (index_i64 as usize * 16) as u32;
+        let slot_index_u32 = (index_i64 as usize) as u32;
+        let elem_offset = slot_index_u32
+            .checked_mul(16)
+            .ok_or_else(|| VmTrap::index_out_of_bounds(index_i64, tuple_len))?;
+        let elem_addr = tuple_addr
+            .checked_add(8)
+            .and_then(|base_addr| base_addr.checked_add(elem_offset))
+            .ok_or_else(VmTrap::null_reference)?;
         let tag_raw = self.heap.read_u64(elem_addr).unwrap_or(0);
         let payload_raw = self.heap.read_u64(elem_addr + 8).unwrap_or(0);
         let val = Value::from_tagged_parts(tag_raw, payload_raw);

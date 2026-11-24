@@ -2,6 +2,7 @@ package solix.io;
 
 import solix.core.IOException;
 import solix.core.ArgumentOutOfRangeException;
+import solix.core.ArgumentNullException;
 
 public class MemoryStream implements IStream {
     private int8[] internal_buffer;
@@ -62,7 +63,10 @@ public class MemoryStream implements IStream {
             throw new IOException("Stream is closed");
         }
         if (destination_buffer == null) {
-            return 0;
+            throw new ArgumentNullException("destination_buffer");
+        }
+        if (target_offset < 0 || bytes_to_read < 0 || target_offset + bytes_to_read > destination_buffer.length) {
+            throw new ArgumentOutOfRangeException("target_offset or bytes_to_read out of bounds");
         }
         if (this.stream_position >= this.stream_length) {
             return 0;
@@ -81,7 +85,13 @@ public class MemoryStream implements IStream {
         if (this.closed_flag) {
             throw new IOException("Stream is closed");
         }
-        if (source_buffer == null || bytes_to_write <= 0) {
+        if (source_buffer == null) {
+            throw new ArgumentNullException("source_buffer");
+        }
+        if (source_offset < 0 || bytes_to_write < 0 || source_offset + bytes_to_write > source_buffer.length) {
+            throw new ArgumentOutOfRangeException("source_offset or bytes_to_write out of bounds");
+        }
+        if (bytes_to_write == 0) {
             return;
         }
 
@@ -134,8 +144,8 @@ public class MemoryStream implements IStream {
         } else if (seek_origin == SeekOrigin.END) {
             new_calculated_position = (int64)this.stream_length + byte_offset;
         }
-        if (new_calculated_position < 0L) {
-            throw new ArgumentOutOfRangeException("Seek position cannot be negative");
+        if (new_calculated_position < 0L || new_calculated_position > 2147483647L) {
+            throw new ArgumentOutOfRangeException("Seek position out of bounds for MemoryStream");
         }
         this.stream_position = (int32)new_calculated_position;
         return (int64)this.stream_position;

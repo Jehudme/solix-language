@@ -45,6 +45,15 @@ public class TreeMap<K, V> implements IMap<K, V>, IStringable {
         if (this.custom_comparator != null) {
             return this.custom_comparator(first_key, second_key);
         }
+        if (first_key == null && second_key == null) {
+            return 0;
+        }
+        if (first_key == null) {
+            return -1;
+        }
+        if (second_key == null) {
+            return 1;
+        }
         if (first_key < second_key) {
             return -1;
         }

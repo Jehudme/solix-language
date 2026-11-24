@@ -463,8 +463,14 @@ pub unsafe extern "C" fn filestream_native_read(
     }
     let stream_handle = unsafe { (*args.add(0)).as_i64() };
     let buffer_address = unsafe { (*args.add(1)).as_ref() };
-    let offset = unsafe { (*args.add(2)).as_i32() } as usize;
-    let count = unsafe { (*args.add(3)).as_i32() } as usize;
+    let raw_offset = unsafe { (*args.add(2)).as_i32() };
+    let raw_count = unsafe { (*args.add(3)).as_i32() };
+
+    if raw_offset < 0 || raw_count <= 0 {
+        return SolixCValue::i32_val(0);
+    }
+    let offset = raw_offset as usize;
+    let count = (raw_count as usize).min(64 * 1024 * 1024);
 
     let mut temp_bytes = vec![0u8; count];
     let bytes_read_count = {
@@ -506,8 +512,14 @@ pub unsafe extern "C" fn filestream_native_write(
     }
     let stream_handle = unsafe { (*args.add(0)).as_i64() };
     let buffer_address = unsafe { (*args.add(1)).as_ref() };
-    let offset = unsafe { (*args.add(2)).as_i32() } as usize;
-    let count = unsafe { (*args.add(3)).as_i32() } as usize;
+    let raw_offset = unsafe { (*args.add(2)).as_i32() };
+    let raw_count = unsafe { (*args.add(3)).as_i32() };
+
+    if raw_offset < 0 || raw_count <= 0 {
+        return SolixCValue::i32_val(0);
+    }
+    let offset = raw_offset as usize;
+    let count = (raw_count as usize).min(64 * 1024 * 1024);
 
     let mut temp_bytes = vec![0u8; count];
     if !vm_context.is_null() {
