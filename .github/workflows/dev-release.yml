@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - dev
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,6 +38,7 @@ jobs:
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
+          components: llvm-tools-preview
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -55,16 +57,23 @@ jobs:
 
       - name: Install cargo-llvm-cov
         run: |
-          mkdir -p "$HOME/.cache/solix-ci-tools/cargo-llvm-cov"
-          if [ ! -x "$HOME/.cache/solix-ci-tools/cargo-llvm-cov/cargo-llvm-cov" ]; then
-            cargo install cargo-llvm-cov --locked --root "$HOME/.cache/solix-ci-tools/cargo-llvm-cov"
+          mkdir -p ~/.cache/solix-ci-tools/cargo-llvm-cov
+          if [ ! -x ~/.cache/solix-ci-tools/cargo-llvm-cov/cargo-llvm-cov ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL \
+              "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz" \
+              -o "$RUNNER_TEMP/cargo-llvm-cov.tar.gz"
+            printf 'b3f68e625481fed9b16444174f3fa5ebcdbde4a1878803a35eabe2dcefcdc41a  %s\n' \
+              "$RUNNER_TEMP/cargo-llvm-cov.tar.gz" | sha256sum -c -
+            tar -xzf "$RUNNER_TEMP/cargo-llvm-cov.tar.gz" -C ~/.cache/solix-ci-tools/cargo-llvm-cov cargo-llvm-cov
           fi
-          echo "$HOME/.cache/solix-ci-tools/cargo-llvm-cov/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cache/solix-ci-tools/cargo-llvm-cov" >> "$GITHUB_PATH"
 
-      - name: Build release Solix binaries and stage default packages
+      - name: Build release and debug Solix binaries and stage default packages
         run: |
-          cargo build --release --bin solix --bin solix-lsp
-          python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
+          python3 scripts/docs/build_docs_site.py
+          cargo build --release --bin solix
+          cargo build --bin solix
+          python3 scripts/release/build_default_libraries.py --profiles release,debug --target host --solix-binary target/release/solix
 
       - name: Package standalone binary archives and distribution artifacts
         run: |
@@ -74,12 +83,17 @@ jobs:
           mkdir -p "$PACKAGE_DIR/bin" "$PACKAGE_DIR/packages"
 
           cp target/release/solix "$PACKAGE_DIR/bin/"
-          cp target/release/solix-lsp "$PACKAGE_DIR/bin/"
           cp -r crates/solix-toolchain/assets/packages/* "$PACKAGE_DIR/packages/" || true
           cp README.md LICENSE "$PACKAGE_DIR/"
 
           tar -czf "$RUNNER_TEMP/dev-artifacts/solix-toolchain-${TARGET_TRIPLE}.tar.gz" -C "$RUNNER_TEMP" "solix-toolchain-${TARGET_TRIPLE}"
           tar -cJf "$RUNNER_TEMP/dev-artifacts/solix-toolchain-${TARGET_TRIPLE}.tar.xz" -C "$RUNNER_TEMP" "solix-toolchain-${TARGET_TRIPLE}"
+
+          (
+            cd "$RUNNER_TEMP/dev-artifacts"
+            sha256sum "solix-toolchain-${TARGET_TRIPLE}.tar.gz" > "solix-toolchain-${TARGET_TRIPLE}.tar.gz.sha256"
+            sha256sum "solix-toolchain-${TARGET_TRIPLE}.tar.xz" > "solix-toolchain-${TARGET_TRIPLE}.tar.xz.sha256"
+          )
 
           # Standalone shell installer pointing to rolling dev tag
           cat << 'INSTALLER_EOF' > "$RUNNER_TEMP/dev-artifacts/solix-toolchain-installer.sh"
@@ -115,7 +129,6 @@ jobs:
           REPO_NAME: ${{ github.repository }}
         run: |
           mkdir -p "$RUNNER_TEMP/telemetry" "$RUNNER_TEMP/prev_release"
-          DEV_SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)
 
           # Find latest official stable (non-prerelease) release tag
@@ -216,7 +229,7 @@ jobs:
 
           # Update the git tag 'dev' to point to current commit
           git tag -f dev HEAD
-          git push origin refs/tags/dev --force
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO_NAME}.git" refs/tags/dev --force
 
           # Re-create or update release notes and upload assets
           if gh release view dev --repo "$REPO_NAME" >/dev/null 2>&1; then
