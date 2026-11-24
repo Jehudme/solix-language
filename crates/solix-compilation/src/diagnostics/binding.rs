@@ -1074,6 +1074,17 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
+    #[error("Throw statement type '{throw_type}' does not inherit from 'solix.core.Exception'")]
+    #[diagnostic(
+        code(solix::binder::throw_type_not_exception),
+        help("Throw statements can only throw classes that extend 'solix.core.Exception'.")
+    )]
+    ThrowTypeNotException {
+        throw_type: String,
+        #[label("type is not an Exception subclass")]
+        span: SourceSpan,
+    },
+
     #[error("Incompatible dependency version for package '{name}': {reason}")]
     #[diagnostic(
         code(solix::binder::incompatible_dependency_version),
@@ -1431,6 +1442,7 @@ impl BindingError {
             Self::SymbolCollidesWithPackageName { .. } => "E0305",
             Self::InexhaustiveEnumSwitch { .. } => "E0306",
             Self::CatchTypeNotException { .. } => "E0315",
+            Self::ThrowTypeNotException { .. } => "E0316",
         }
     }
 
@@ -1438,7 +1450,8 @@ impl BindingError {
     #[must_use]
     pub const fn source_span(&self) -> SourceSpan {
         match self {
-            Self::CatchTypeNotException { span, .. }
+            Self::ThrowTypeNotException { span, .. }
+            | Self::CatchTypeNotException { span, .. }
             | Self::UndefinedSymbol { span, .. }
             | Self::DuplicateSymbol { span, .. }
             | Self::TypeMismatch { span, .. }
@@ -1604,6 +1617,12 @@ mod tests {
             span: dummy_span,
         };
         assert_eq!(error_bitwise.error_code(), "E0288");
+
+        let error_throw = BindingError::ThrowTypeNotException {
+            throw_type: "Widget".to_string(),
+            span: dummy_span,
+        };
+        assert_eq!(error_throw.error_code(), "E0316");
     }
 
     #[test]

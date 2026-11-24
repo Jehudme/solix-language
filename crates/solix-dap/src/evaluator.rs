@@ -5,13 +5,73 @@
 use solix_runtime::value::Value;
 use solix_runtime::vm::engine::VirtualMachine;
 
+/// Strips matching balanced outer parentheses from an expression string.
+fn strip_enclosing_parentheses(input_text: &str) -> &str {
+    let mut current_slice = input_text.trim();
+    while current_slice.starts_with('(') && current_slice.ends_with(')') {
+        let mut nesting_depth = 0i32;
+        let mut matched_outermost = false;
+        for (byte_index, character) in current_slice.char_indices() {
+            if character == '(' {
+                nesting_depth += 1;
+            } else if character == ')' {
+                nesting_depth -= 1;
+                if nesting_depth == 0 {
+                    if byte_index == current_slice.len() - 1 {
+                        matched_outermost = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if matched_outermost {
+            current_slice = current_slice[1..current_slice.len() - 1].trim();
+        } else {
+            break;
+        }
+    }
+    current_slice
+}
+
+/// Finds the byte offset of an operator token occurring strictly at parenthesis depth zero.
+fn find_operator_at_zero_depth(
+    input_text: &str,
+    operator_token: &str,
+    from_right: bool,
+) -> Option<usize> {
+    let mut nesting_depth = 0i32;
+    if from_right {
+        for (byte_index, character) in input_text.char_indices().rev() {
+            if character == ')' {
+                nesting_depth += 1;
+            } else if character == '(' {
+                nesting_depth -= 1;
+            } else if nesting_depth == 0 && input_text[byte_index..].starts_with(operator_token) {
+                return Some(byte_index);
+            }
+        }
+    } else {
+        for (byte_index, character) in input_text.char_indices() {
+            if character == '(' {
+                nesting_depth += 1;
+            } else if character == ')' {
+                nesting_depth -= 1;
+            } else if nesting_depth == 0 && input_text[byte_index..].starts_with(operator_token) {
+                return Some(byte_index);
+            }
+        }
+    }
+    None
+}
+
 /// Evaluates a user expression in the context of an active stack frame.
 pub fn evaluate_expression_in_frame(
     expression_text: &str,
     virtual_machine: &VirtualMachine,
     frame_index: usize,
 ) -> Result<Value, String> {
-    let trimmed_expression = expression_text.trim();
+    let stripped_expression = strip_enclosing_parentheses(expression_text);
+    let trimmed_expression = stripped_expression.trim();
     if trimmed_expression.is_empty() {
         return Err("Empty expression".to_string());
     }
@@ -46,8 +106,8 @@ pub fn evaluate_expression_in_frame(
         return Ok(Value::F64(float_value));
     }
 
-    // Check logical disjunction (||)
-    if let Some(operator_position) = trimmed_expression.find("||") {
+    // Check logical disjunction (||) at depth zero
+    if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "||", false) {
         let left_operand_text = &trimmed_expression[..operator_position];
         let right_operand_text = &trimmed_expression[operator_position + 2..];
         let left_evaluated_value =
@@ -67,8 +127,8 @@ pub fn evaluate_expression_in_frame(
         };
     }
 
-    // Check logical conjunction (&&)
-    if let Some(operator_position) = trimmed_expression.find("&&") {
+    // Check logical conjunction (&&) at depth zero
+    if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "&&", false) {
         let left_operand_text = &trimmed_expression[..operator_position];
         let right_operand_text = &trimmed_expression[operator_position + 2..];
         let left_evaluated_value =
@@ -88,9 +148,24 @@ pub fn evaluate_expression_in_frame(
         };
     }
 
-    // Check binary comparison operators (==, !=, <=, >=, <, >)
+    // Check unary logical negation (!)
+    if let Some(stripped_not) = trimmed_expression.strip_prefix('!') {
+        let operand_value =
+            evaluate_expression_in_frame(stripped_not, virtual_machine, frame_index)?;
+        return match operand_value {
+            Value::Bool(boolean_value) => Ok(Value::Bool(!boolean_value)),
+            other_value => Err(format!(
+                "Unary operator '!' requires boolean operand, found '{}'",
+                other_value.type_name()
+            )),
+        };
+    }
+
+    // Check binary comparison operators (==, !=, <=, >=, <, >) at depth zero
     for comparison_operator in &["==", "!=", "<=", ">=", "<", ">"] {
-        if let Some(operator_position) = trimmed_expression.find(comparison_operator) {
+        if let Some(operator_position) =
+            find_operator_at_zero_depth(trimmed_expression, comparison_operator, false)
+        {
             let left_operand_text = &trimmed_expression[..operator_position];
             let right_operand_text =
                 &trimmed_expression[operator_position + comparison_operator.len()..];
@@ -108,13 +183,14 @@ pub fn evaluate_expression_in_frame(
         }
     }
 
-    // Check binary arithmetic operators (+, -, *, /, %)
-    for arithmetic_operator in &["+", "-", "*", "/", "%"] {
-        // Skip leading negative sign on literals
+    // Check low-precedence binary arithmetic operators (+, -) at depth zero
+    for arithmetic_operator in &["+", "-"] {
         if *arithmetic_operator == "-" && trimmed_expression.starts_with('-') {
             continue;
         }
-        if let Some(operator_position) = trimmed_expression.rfind(arithmetic_operator) {
+        if let Some(operator_position) =
+            find_operator_at_zero_depth(trimmed_expression, arithmetic_operator, true)
+        {
             let left_operand_text = &trimmed_expression[..operator_position];
             let right_operand_text =
                 &trimmed_expression[operator_position + arithmetic_operator.len()..];
@@ -133,8 +209,31 @@ pub fn evaluate_expression_in_frame(
         }
     }
 
-    // Check member access (e.g. `origin_point.coordinate_x` or `this.field`)
-    if let Some(dot_position) = trimmed_expression.find('.') {
+    // Check high-precedence binary arithmetic operators (*, /, %) at depth zero
+    for arithmetic_operator in &["*", "/", "%"] {
+        if let Some(operator_position) =
+            find_operator_at_zero_depth(trimmed_expression, arithmetic_operator, true)
+        {
+            let left_operand_text = &trimmed_expression[..operator_position];
+            let right_operand_text =
+                &trimmed_expression[operator_position + arithmetic_operator.len()..];
+            if !left_operand_text.trim().is_empty() && !right_operand_text.trim().is_empty() {
+                let left_evaluated_value =
+                    evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+                let right_evaluated_value =
+                    evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+
+                return evaluate_binary_arithmetic(
+                    &left_evaluated_value,
+                    arithmetic_operator,
+                    &right_evaluated_value,
+                );
+            }
+        }
+    }
+
+    // Check member access (e.g. `origin_point.coordinate_x` or `this.field`) at depth zero
+    if let Some(dot_position) = find_operator_at_zero_depth(trimmed_expression, ".", false) {
         let object_expression = &trimmed_expression[..dot_position];
         let field_identifier = trimmed_expression[dot_position + 1..].trim();
         let target_object_value =

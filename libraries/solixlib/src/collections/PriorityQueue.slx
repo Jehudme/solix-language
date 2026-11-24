@@ -47,6 +47,15 @@ public class PriorityQueue<T> implements IReadOnlyCollection<T>, IIterable<T>, I
             int32 compare_result = this.custom_comparator(first_item, second_item);
             return compare_result < 0;
         }
+        if (first_item == null && second_item == null) {
+            return false;
+        }
+        if (first_item == null) {
+            return false;
+        }
+        if (second_item == null) {
+            return true;
+        }
         return first_item < second_item;
     }
 

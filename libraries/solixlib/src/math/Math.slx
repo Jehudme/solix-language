@@ -314,8 +314,17 @@ public class Math {
         if (first_val == 0L || second_val == 0L) {
             return 0L;
         }
+        if (first_val == -9223372036854775808L || second_val == -9223372036854775808L) {
+            throw new ArithmeticException("Arithmetic overflow in Math::lcm");
+        }
         int64 gcd_val = Math::gcd(first_val, second_val);
-        return Math::abs((first_val / gcd_val) * second_val);
+        int64 divided_val = first_val / gcd_val;
+        int64 abs_divided = Math::abs(divided_val);
+        int64 abs_second = Math::abs(second_val);
+        if (abs_second != 0L && abs_divided > 9223372036854775807L / abs_second) {
+            throw new ArithmeticException("Arithmetic overflow in Math::lcm");
+        }
+        return abs_divided * abs_second;
     }
 
     public static int64 factorial(int32 target_number) {

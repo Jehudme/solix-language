@@ -370,10 +370,14 @@ fn find_symbol_declaration_by_name(
 }
 
 fn get_span_text(source: &str, span: Span) -> &str {
-    let start = span.start as usize;
-    let end = span.end as usize;
-    if start <= end && end <= source.len() {
-        &source[start..end]
+    let start_offset = span.start as usize;
+    let end_offset = span.end as usize;
+    if start_offset <= end_offset
+        && end_offset <= source.len()
+        && source.is_char_boundary(start_offset)
+        && source.is_char_boundary(end_offset)
+    {
+        &source[start_offset..end_offset]
     } else {
         ""
     }

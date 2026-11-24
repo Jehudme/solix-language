@@ -15,4 +15,5 @@ pub mod test_ninth_sweep_fixes;
 pub mod test_second_sweep_fixes;
 pub mod test_seventh_sweep_fixes;
 pub mod test_sixth_sweep_fixes;
+pub mod test_tenth_sweep_fixes;
 pub mod test_third_sweep_fixes;

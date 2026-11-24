@@ -585,7 +585,11 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
         if (String::native_try_parse_int(text.data, out_box) != 1) {
             throw new NumberFormatException("Failed to parse integer from '" + text.data + "'");
         }
-        return (int32)out_box[0];
+        int64 parsed_value = out_box[0];
+        if (parsed_value < -2147483648L || parsed_value > 2147483647L) {
+            throw new NumberFormatException("Integer value out of 32-bit signed range: '" + text.data + "'");
+        }
+        return (int32)parsed_value;
     }
 
     public static float64 parse_double(String text) {

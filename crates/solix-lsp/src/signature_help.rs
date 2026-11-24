@@ -189,7 +189,10 @@ fn find_enclosing_call_lexical(
     source_text: &str,
     target_offset: usize,
 ) -> Option<(String, Option<String>, usize)> {
-    let clamped_offset = target_offset.min(source_text.len());
+    let mut clamped_offset = target_offset.min(source_text.len());
+    while clamped_offset > 0 && !source_text.is_char_boundary(clamped_offset) {
+        clamped_offset = clamped_offset.saturating_sub(1);
+    }
     let prefix_text = &source_text[..clamped_offset];
 
     let mut paren_depth = 0i32;
@@ -214,6 +217,9 @@ fn find_enclosing_call_lexical(
     }
 
     let paren_byte_offset = open_paren_offset?;
+    if !source_text.is_char_boundary(paren_byte_offset) {
+        return None;
+    }
     let before_paren = source_text[..paren_byte_offset].trim_end();
 
     let mut identifier_start = before_paren.len();
@@ -234,16 +240,36 @@ fn find_enclosing_call_lexical(
 
     let qualifier_name = if let Some(stripped) = before_callee.strip_suffix("::") {
         let trimmed_qualifier = stripped.trim_end();
-        let qualifier_start = trimmed_qualifier
-            .rfind(|character: char| !character.is_alphanumeric() && character != '_')
-            .map_or(0, |index| index + 1);
-        Some(trimmed_qualifier[qualifier_start..].to_string())
+        let mut qualifier_start = 0;
+        for (byte_index, character) in trimmed_qualifier.char_indices().rev() {
+            if !character.is_alphanumeric() && character != '_' {
+                qualifier_start = byte_index + character.len_utf8();
+                break;
+            }
+        }
+        if qualifier_start <= trimmed_qualifier.len()
+            && trimmed_qualifier.is_char_boundary(qualifier_start)
+        {
+            Some(trimmed_qualifier[qualifier_start..].to_string())
+        } else {
+            None
+        }
     } else if let Some(stripped) = before_callee.strip_suffix('.') {
         let trimmed_qualifier = stripped.trim_end();
-        let qualifier_start = trimmed_qualifier
-            .rfind(|character: char| !character.is_alphanumeric() && character != '_')
-            .map_or(0, |index| index + 1);
-        Some(trimmed_qualifier[qualifier_start..].to_string())
+        let mut qualifier_start = 0;
+        for (byte_index, character) in trimmed_qualifier.char_indices().rev() {
+            if !character.is_alphanumeric() && character != '_' {
+                qualifier_start = byte_index + character.len_utf8();
+                break;
+            }
+        }
+        if qualifier_start <= trimmed_qualifier.len()
+            && trimmed_qualifier.is_char_boundary(qualifier_start)
+        {
+            Some(trimmed_qualifier[qualifier_start..].to_string())
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -353,10 +379,14 @@ fn find_enclosing_call_in_expression(
 }
 
 fn get_span_text(source: &str, span: Span) -> &str {
-    let start = span.start as usize;
-    let end = span.end as usize;
-    if start <= end && end <= source.len() {
-        &source[start..end]
+    let start_offset = span.start as usize;
+    let end_offset = span.end as usize;
+    if start_offset <= end_offset
+        && end_offset <= source.len()
+        && source.is_char_boundary(start_offset)
+        && source.is_char_boundary(end_offset)
+    {
+        &source[start_offset..end_offset]
     } else {
         ""
     }

@@ -158,6 +158,39 @@ fn test_evaluator_logical_operators_and_compound_conditions() {
         .expect("Evaluate 10 < 5 || 20 < 30");
     assert_eq!(compound_or_result, Value::Bool(true));
 
+    // Parenthesized expressions and precedence
+    let parenthesized_arithmetic_result =
+        evaluate_expression_in_frame("(10 + 20) * 2", &virtual_machine, 0)
+            .expect("Evaluate (10 + 20) * 2");
+    assert_eq!(parenthesized_arithmetic_result, Value::I32(60));
+
+    let standard_precedence_result =
+        evaluate_expression_in_frame("10 + 20 * 2", &virtual_machine, 0)
+            .expect("Evaluate 10 + 20 * 2");
+    assert_eq!(standard_precedence_result, Value::I32(50));
+
+    let parenthesized_logical_result =
+        evaluate_expression_in_frame("(10 > 5) && (20 < 30)", &virtual_machine, 0)
+            .expect("Evaluate (10 > 5) && (20 < 30)");
+    assert_eq!(parenthesized_logical_result, Value::Bool(true));
+
+    let double_parentheses_result =
+        evaluate_expression_in_frame("((42))", &virtual_machine, 0).expect("Evaluate ((42))");
+    assert_eq!(double_parentheses_result, Value::I32(42));
+
+    // Unary logical NOT operator (!)
+    let unary_not_false_result =
+        evaluate_expression_in_frame("!false", &virtual_machine, 0).expect("Evaluate !false");
+    assert_eq!(unary_not_false_result, Value::Bool(true));
+
+    let unary_not_true_result =
+        evaluate_expression_in_frame("!true", &virtual_machine, 0).expect("Evaluate !true");
+    assert_eq!(unary_not_true_result, Value::Bool(false));
+
+    let unary_not_expression_result =
+        evaluate_expression_in_frame("!(10 < 5)", &virtual_machine, 0).expect("Evaluate !(10 < 5)");
+    assert_eq!(unary_not_expression_result, Value::Bool(true));
+
     // Negative tests: non-boolean operands to logical operators
     let invalid_and_result = evaluate_expression_in_frame("10 && 20", &virtual_machine, 0);
     assert!(invalid_and_result.is_err());
