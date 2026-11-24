@@ -1002,11 +1002,42 @@ fn test_auto_bootstrap_overrides_stale_preexisting_bundled_package() {
     fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
     fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
 
-    // Pre-seed a stale/incomplete `raylib-release@5.5.0/raylib.slxarc` without the current
+    // Pre-seed a stale/incomplete bundled package archive without the current
     // `.bundled_bootstrapped_v<version>` marker, simulating an upgrade from an older toolchain.
-    let stale_pkg_dir = solix_home.join("packages").join("raylib-release@5.5.0");
+    let bundled_directory = solix_toolchain::assets::resolve_bundled_packages_dir()
+        .expect("bundled packages directory must exist");
+    let manifest_path = bundled_directory.join("bundled_manifest.json");
+    let (target_folder, target_archive_name) = if manifest_path.exists() {
+        let manifest_content = fs::read_to_string(&manifest_path).expect("read bundled_manifest.json");
+        let manifest_json: serde_json::Value =
+            serde_json::from_str(&manifest_content).expect("parse bundled_manifest.json");
+        let first_package = &manifest_json["packages"][0];
+        let relative_archive_path = first_package["archive_rel_path"]
+            .as_str()
+            .expect("archive_rel_path in manifest");
+        let archive_path = std::path::Path::new(relative_archive_path);
+        let folder_name = archive_path.parent().expect("parent folder").to_string_lossy().to_string();
+        let file_name = archive_path.file_name().expect("archive filename").to_string_lossy().to_string();
+        (folder_name, file_name)
+    } else {
+        let package_entry = fs::read_dir(&bundled_directory)
+            .expect("read bundled dir")
+            .flatten()
+            .find(|entry| entry.path().is_dir())
+            .expect("bundled package subdirectory");
+        let folder_name = package_entry.file_name().to_string_lossy().to_string();
+        let archive_entry = fs::read_dir(package_entry.path())
+            .expect("read package dir")
+            .flatten()
+            .find(|entry| entry.path().extension().is_some_and(|extension| extension == "slxarc"))
+            .expect("slxarc archive in package dir");
+        let file_name = archive_entry.file_name().to_string_lossy().to_string();
+        (folder_name, file_name)
+    };
+
+    let stale_pkg_dir = solix_home.join("packages").join(&target_folder);
     fs::create_dir_all(&stale_pkg_dir).expect("create stale pkg dir");
-    let stale_archive = stale_pkg_dir.join("raylib.slxarc");
+    let stale_archive = stale_pkg_dir.join(&target_archive_name);
     fs::write(&stale_archive, b"stale_placeholder_archive").expect("write stale archive");
 
     let mut list_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
