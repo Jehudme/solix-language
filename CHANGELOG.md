@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.0] - 2026-11-24
+
+### Bug Fixes
+
+- *(release)* Synchronize post-bump bundled library build and dynamic test assertion (#242)
+- *(ci)* Fix dev release workflow binary targets and actionlint shellcheck warnings (#241)
+- *(compiler)* Resolve tenth-sweep binder, LSP, DAP, VM, and stdlib edge cases (#229-#234) (#235)
+- *(compiler)* Resolve ninth-sweep binder, LSP, VM, and stdlib edge cases (#223-#227) (#228)
+- *(compiler)* Resolve eighth-sweep verifier, binder, DAP, and stdlib edge cases (#217-#221) (#222)
+- *(compiler)* Resolve seventh-sweep verifier, binder, toolchain, DAP, and stdlib edge cases (#210-#215) (#216)
+- *(compiler)* Resolve sixth-sweep verifier, binder, FFI, and stdlib edge cases (#203-#207) (#209)
+- *(compiler)* Resolve fifth-sweep OOP, verifier, cycle collector, and stdlib edge cases (#194-#201) (#202)
+- *(compiler)* Resolve fourth-sweep memory safety, arithmetic, and parser edge cases (#183-#192) (#193)
+- *(compiler)* Resolve third-sweep compiler, runtime, and stdlib edge cases (#171-#180) (#181)
+- *(compiler)* Resolve second-sweep architectural and safety edge cases (#170)
+- *(compiler)* Resolve control flow, finally scoping, and lambda inference bugs (#160)
+
+### Features
+
+- *(ci)* Implement independent versioning, VS Code compatibility, PR telemetry, and dev releases (#236-#239) (#240)
+- *(ci)* Synchronize PR discussion comments and labels for external forks (#182)
+- *(toolchain)* Unify native platforms, eliminate lib/ directory, and add pre-compiled library verification (#151)
+
+### Miscellaneous Tasks
+
+- *(deps)* Bump @vscode/vsce from 4.1.0 to 4.1.1 in /editors/vscode (#208)
+
 ## [1.9.0] - 2026-11-22
 
 ### Features
