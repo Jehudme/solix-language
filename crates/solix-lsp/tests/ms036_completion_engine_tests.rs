@@ -365,3 +365,36 @@ fn test_single_colon_completion_suppression() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_ms036_chained_call_and_indexing_dot_completion() {
+    let (workspace, uri) = create_test_workspace();
+    let source_text = "class Item {\n    public int32 weight;\n}\nclass Container {\n    public Item[] get_items() {\n        return null;\n    }\n}\nvoid main() {\n    Container container = new Container();\n    container.get_items()[0].\n}\n";
+
+    let snapshot = workspace.did_open(uri.clone(), 1, source_text.to_string());
+
+    let completion_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 29,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let completion_list = completions(&workspace, &snapshot, &completion_params);
+    let proposed_labels: Vec<&str> = completion_list
+        .items
+        .iter()
+        .map(|item| item.label.as_str())
+        .collect();
+
+    assert!(
+        proposed_labels.contains(&"weight"),
+        "Chained method call with array indexing dot completion must propose 'weight', got: {proposed_labels:?}"
+    );
+}

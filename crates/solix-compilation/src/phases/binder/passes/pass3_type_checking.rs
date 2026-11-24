@@ -3845,6 +3845,9 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                     self.symbol_table.get_symbol(resolved_symbol_identifier)
                 {
                     symbol_entry.name.ends_with("Exception")
+                        || symbol_entry.name.ends_with("Error")
+                        || symbol_entry.name.ends_with("Err")
+                        || symbol_entry.name.ends_with("Fault")
                 } else {
                     false
                 };

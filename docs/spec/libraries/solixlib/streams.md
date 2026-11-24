@@ -59,7 +59,7 @@ File-backed stream implementation implementing `IStream`.
 - `public FileStream(String path, int32 mode)`: Opens the file at `path` using the specified `FileMode`.
 
 ### Methods
-- Implements all methods of `IStream` (`read`, `read_byte`, `write`, `write_byte`, `seek`, `flush`, `close`, `length`, `position`).
+- Implements all methods of `IStream` (`read`, `read_byte`, `write`, `write_byte`, `seek`, `flush`, `close`, `length`, `position`). Validates non-null destination and source buffers and non-negative offsets and counts within buffer bounds, throwing `ArgumentNullException` and `ArgumentOutOfRangeException` on invalid arguments.
 
 ---
 

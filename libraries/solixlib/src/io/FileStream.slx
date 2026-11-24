@@ -3,6 +3,8 @@ package solix.io;
 import solix.core.String;
 import solix.core.IOException;
 import solix.core.FileNotFoundException;
+import solix.core.ArgumentNullException;
+import solix.core.ArgumentOutOfRangeException;
 
 public class FileStream implements IStream {
     private int64 os_handle;
@@ -45,12 +47,24 @@ public class FileStream implements IStream {
         if (this.closed_flag || this.os_handle < 0L) {
             throw new IOException("Stream is closed");
         }
+        if (buffer == null) {
+            throw new ArgumentNullException("buffer");
+        }
+        if (offset < 0 || count < 0 || offset + count > buffer.length) {
+            throw new ArgumentOutOfRangeException("offset or count out of bounds");
+        }
         return (int32)FileStream::native_read(this.os_handle, buffer, offset, count);
     }
 
     public void write(int8[] buffer, int32 offset, int32 count) {
         if (this.closed_flag || this.os_handle < 0L) {
             throw new IOException("Stream is closed");
+        }
+        if (buffer == null) {
+            throw new ArgumentNullException("buffer");
+        }
+        if (offset < 0 || count < 0 || offset + count > buffer.length) {
+            throw new ArgumentOutOfRangeException("offset or count out of bounds");
         }
         FileStream::native_write(this.os_handle, buffer, offset, count);
     }

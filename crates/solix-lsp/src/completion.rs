@@ -406,15 +406,23 @@ fn resolve_receiver_type(
         None
     };
 
+    fn parse_segment_name_call_index(segment_text: &str) -> (&str, bool, bool) {
+        match (segment_text.find('('), segment_text.find('[')) {
+            (Some(parenthesis_index), Some(bracket_index)) => {
+                if parenthesis_index < bracket_index {
+                    (&segment_text[..parenthesis_index], true, true)
+                } else {
+                    (&segment_text[..bracket_index], true, true)
+                }
+            }
+            (Some(parenthesis_index), None) => (&segment_text[..parenthesis_index], true, false),
+            (None, Some(bracket_index)) => (&segment_text[..bracket_index], false, true),
+            (None, None) => (segment_text, false, false),
+        }
+    }
+
     let resolve_member_on_type = |parent_type: &Type, member_segment: &str| -> Option<Type> {
-        let (member_name, is_call, is_index) = if let Some(bracket_index) = member_segment.find('[')
-        {
-            (&member_segment[..bracket_index], false, true)
-        } else if let Some(paren_index) = member_segment.find('(') {
-            (&member_segment[..paren_index], true, false)
-        } else {
-            (member_segment, false, false)
-        };
+        let (member_name, is_call, is_index) = parse_segment_name_call_index(member_segment);
 
         let member_type = match parent_type {
             Type::Class { symbol_name, .. } => {
@@ -479,13 +487,7 @@ fn resolve_receiver_type(
 
         let first_segment = segments[0];
         let (first_name, first_is_call, first_is_index) =
-            if let Some(bracket_index) = first_segment.find('[') {
-                (&first_segment[..bracket_index], false, true)
-            } else if let Some(paren_index) = first_segment.find('(') {
-                (&first_segment[..paren_index], true, false)
-            } else {
-                (first_segment, false, false)
-            };
+            parse_segment_name_call_index(first_segment);
 
         let mut current_type = resolve_simple_ident(first_name)?;
         if first_is_call {
@@ -509,13 +511,7 @@ fn resolve_receiver_type(
 
         Some(current_type)
     } else {
-        let (base_name, is_call, is_index) = if let Some(bracket_index) = receiver_expr.find('[') {
-            (&receiver_expr[..bracket_index], false, true)
-        } else if let Some(paren_index) = receiver_expr.find('(') {
-            (&receiver_expr[..paren_index], true, false)
-        } else {
-            (receiver_expr, false, false)
-        };
+        let (base_name, is_call, is_index) = parse_segment_name_call_index(receiver_expr);
 
         let mut base_type = resolve_simple_ident(base_name)?;
         if is_call {

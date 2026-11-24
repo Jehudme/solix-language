@@ -444,7 +444,7 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
 ---
 
 ### `E0315`: Catch Clause Type Not Exception Subclass
-* **Cause:** A `catch` clause specifies a class that does not inherit from `solix.core.Exception` (or `Exception`). Only Exception subclasses can be caught.
+* **Cause:** A `catch` clause specifies a class that does not inherit from `solix.core.Exception` (or `Exception`). Only Exception subclasses can be caught. In standalone or no-std environments where the standard library is not in scope, classes named with `*Error` or `*Exception` suffixes (such as `CustomError`, `SpecialError`, `AssertionError`) are recognized as valid error types; arbitrary non-error user classes are strictly rejected.
 * **Bad Code:**
   ```solix
   class PlainRecord {
