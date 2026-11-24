@@ -1,6 +1,6 @@
 configuration:
   name: breakout
-  version: "0.1.0"
+  version: "0.2.0"
   description: Modern neon Breakout showcase game built with Solix and Raylib
   license: Apache-2.0
   authors: []
@@ -18,7 +18,7 @@ profiles:
       - all
     dependencies:
       raylib:
-        version: "5.5.0"
+        version: "5.6.0"
         profile: release
 
   debug:
@@ -33,7 +33,7 @@ profiles:
       - host
     dependencies:
       raylib:
-        version: "5.5.0"
+        version: "5.6.0"
         profile: release
 
   test:
@@ -48,5 +48,5 @@ profiles:
       - host
     dependencies:
       raylib:
-        version: "5.5.0"
+        version: "5.6.0"
         profile: release
