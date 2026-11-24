@@ -481,3 +481,37 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
       }
   }
   ```
+
+---
+
+### `E0316`: Throw Statement Type Not Exception Subclass
+* **Cause:** A `throw` statement specifies an instance of a class that does not inherit from `solix.core.Exception` (or `Exception`), or attempts to throw a non-class composite type (such as an array or tuple). In standalone environments where standard libraries are unlinked, error classes named with `*Error`, `*Exception`, `*Err`, or `*Fault` are accepted; arbitrary business objects or primitives are strictly rejected.
+* **Bad Code:**
+  ```solix
+  class CoordinatePoint {
+      public int32 coordinate_x;
+      public int32 coordinate_y;
+  }
+
+  class Main {
+      public static void main() {
+          CoordinatePoint failure_point = new CoordinatePoint();
+          throw failure_point;
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class CustomException extends Exception {
+      public CustomException(string error_message) {
+          this.message = error_message;
+      }
+  }
+
+  class Main {
+      public static void main() {
+          CustomException error_instance = new CustomException("invalid state");
+          throw error_instance;
+      }
+  }
+  ```

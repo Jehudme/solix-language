@@ -1396,3 +1396,25 @@ fn test_semantic_tokens_pascal_case_method_call_classification() {
         panic!("Expected full semantic tokens result");
     }
 }
+
+#[test]
+fn test_lsp_signature_help_utf8_mid_character_offset_safety() {
+    let (test_workspace, test_document_uri) = create_test_workspace();
+    let test_source_code = "fn compute(int32 alpha_value, int32 beta_value) {}\n// 🌍 Multi-byte world comment\ncompute(10, ";
+    let emoji_character_offset = match test_source_code.find('🌍') {
+        Some(found_offset) => found_offset + 1,
+        None => 0,
+    };
+
+    let document_snapshot =
+        test_workspace.did_open(test_document_uri, 1, test_source_code.to_string());
+    let signature_help_result = signature_help(
+        &document_snapshot,
+        Position {
+            line: 1,
+            character: emoji_character_offset as u32,
+        },
+    );
+    // Verified that calling signature help at mid-codepoint offset does not panic
+    let _ = signature_help_result;
+}

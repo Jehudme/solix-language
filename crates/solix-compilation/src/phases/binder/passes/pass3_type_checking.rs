@@ -4045,6 +4045,51 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 found: format!("primitive {expr_type} in throw"),
                 span: node.expression.span().to_source_span(),
             });
+            return;
+        }
+        if let Type::Class { symbol_name, .. } = &expr_type {
+            let is_exception_subclass = if let Some(resolved_symbol_identifier) = self
+                .symbol_table
+                .resolve_symbol(self.source_id, symbol_name)
+            {
+                if let Some(root_exception_identifier) = self
+                    .symbol_table
+                    .resolve_symbol(self.source_id, "Exception")
+                    .or_else(|| {
+                        self.symbol_table
+                            .resolve_symbol(self.source_id, "solix.core.Exception")
+                    })
+                {
+                    self.is_subclass_or_same(resolved_symbol_identifier, root_exception_identifier)
+                } else if let Some(symbol_entry) =
+                    self.symbol_table.get_symbol(resolved_symbol_identifier)
+                {
+                    symbol_entry.name.ends_with("Exception")
+                        || symbol_entry.name.ends_with("Error")
+                        || symbol_entry.name.ends_with("Err")
+                        || symbol_entry.name.ends_with("Fault")
+                } else {
+                    false
+                }
+            } else {
+                symbol_name.ends_with("Exception")
+                    || symbol_name.ends_with("Error")
+                    || symbol_name.ends_with("Err")
+                    || symbol_name.ends_with("Fault")
+            };
+
+            if !is_exception_subclass {
+                self.errors.push(BindingError::ThrowTypeNotException {
+                    throw_type: symbol_name.clone(),
+                    span: node.expression.span().to_source_span(),
+                });
+            }
+        } else {
+            self.errors.push(BindingError::TypeMismatch {
+                expected: "throw target must be an Exception class instance".to_string(),
+                found: format!("{expr_type} in throw"),
+                span: node.expression.span().to_source_span(),
+            });
         }
     }
 }

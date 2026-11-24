@@ -1166,10 +1166,14 @@ fn insert_namespace_and_ancestors(
 }
 
 fn get_span_text_workspace(source: &str, span: Span) -> &str {
-    let start_index = span.start as usize;
-    let end_index = span.end as usize;
-    if start_index <= end_index && end_index <= source.len() {
-        &source[start_index..end_index]
+    let start_offset = span.start as usize;
+    let end_offset = span.end as usize;
+    if start_offset <= end_offset
+        && end_offset <= source.len()
+        && source.is_char_boundary(start_offset)
+        && source.is_char_boundary(end_offset)
+    {
+        &source[start_offset..end_offset]
     } else {
         ""
     }

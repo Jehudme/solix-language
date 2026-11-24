@@ -69,7 +69,7 @@ Any class implementing `IStringable` can be passed seamlessly to standard input/
 - `static value_of(float64 val) -> String`: Converts floating-point value to string.
 - `static value_of(bool val) -> String`: Returns `"true"` or `"false"`.
 - `static value_of(char val) -> String`: Converts single character to `String`.
-- `static parse_int(String s) -> int32`: Parses decimal integer. Throws `FormatException` on error.
+- `static parse_int(String text_string) -> int32`: Parses decimal integer, enforcing signed 32-bit limits. Throws `NumberFormatException` on syntax error or out-of-range overflow.
 - `static parse_double(String s) -> float64`: Parses floating-point number. Throws `FormatException` on error.
 - `static parse_bool(String s) -> bool`: Parses boolean (`"true"` / `"false"`). Throws `FormatException` on error.
 

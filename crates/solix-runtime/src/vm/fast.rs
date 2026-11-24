@@ -3138,6 +3138,61 @@ impl VirtualMachine {
         Ok(Value::Ref(obj_addr))
     }
 
+    /// Formats an uncaught exception value into a human-readable diagnostic message.
+    pub fn format_exception_message(&self, exception_value: Value) -> String {
+        match exception_value {
+            Value::Null => "NullReferenceException".to_string(),
+            Value::Ref(object_address) if object_address > 0 => {
+                let header = match self.heap.read_header(object_address) {
+                    Ok(header_val) => header_val,
+                    Err(_) => return format!("ref({object_address})"),
+                };
+                match header.tag {
+                    BlockTag::String => self
+                        .heap
+                        .read_string(object_address)
+                        .unwrap_or_else(|_| format!("ref({object_address})")),
+                    BlockTag::Object | BlockTag::ObjectPod => {
+                        let header_vtable_id =
+                            read_heap_u32_fast(&self.heap.buffer, object_address).unwrap_or(0);
+                        let class_name = self
+                            .context
+                            .vtable_lookup
+                            .get(header_vtable_id as usize)
+                            .and_then(|class_option| class_option.as_ref())
+                            .map(|compiled_class| compiled_class.symbol.clone())
+                            .unwrap_or_else(|| {
+                                self.context
+                                    .all_classes
+                                    .iter()
+                                    .find(|candidate_class| {
+                                        candidate_class.vtable_id == header_vtable_id
+                                    })
+                                    .map(|candidate_class| candidate_class.symbol.clone())
+                                    .unwrap_or_else(|| format!("Object[vtable={header_vtable_id}]"))
+                            });
+
+                        if let Ok(fields) = self.inspect_object_fields(object_address) {
+                            for (field_name, _field_type, field_value) in fields {
+                                if (field_name == "message" || field_name == "error_message")
+                                    && let Value::Ref(message_address) = field_value
+                                    && message_address > 0
+                                    && let Ok(message_string) =
+                                        self.heap.read_string(message_address)
+                                {
+                                    return format!("{class_name}: {message_string}");
+                                }
+                            }
+                        }
+                        class_name
+                    }
+                    _ => format!("ref({object_address})"),
+                }
+            }
+            other_value => format!("{other_value}"),
+        }
+    }
+
     #[cold]
     #[inline(never)]
     fn execute_throw(
@@ -3201,15 +3256,7 @@ impl VirtualMachine {
 
         loop {
             if self.call_frames.is_empty() {
-                let message = if let Value::Ref(exception_address) = exc_val
-                    && exception_address > 0
-                {
-                    self.heap
-                        .read_string(exception_address)
-                        .unwrap_or_else(|_| format!("{exc_val}"))
-                } else {
-                    format!("{exc_val}")
-                };
+                let message = self.format_exception_message(exc_val);
                 if let Some(exc_addr) = exc_flight_addr {
                     let _ = self.release_reference(exc_addr);
                 }
@@ -3351,7 +3398,7 @@ impl VirtualMachine {
             let _frame = self.call_frames.pop().ok_or_else(VmTrap::null_reference)?;
 
             if self.call_frames.len() <= target_depth {
-                let message = format!("{exc_val}");
+                let message = self.format_exception_message(exc_val);
                 if let Some(exc_addr) = exc_flight_addr {
                     let _ = self.release_reference(exc_addr);
                 }
