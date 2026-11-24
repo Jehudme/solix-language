@@ -418,6 +418,21 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_lock_sync:
             sync_cargo_lock(repo_root)
 
+        bump_solix_script = repo_root / "scripts" / "release" / "bump_solix_projects.py"
+        if bump_solix_script.is_file():
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(bump_solix_script),
+                    "--base-ref",
+                    args.base_ref,
+                    "--head-ref",
+                    args.head_ref,
+                    "--write",
+                ],
+                check=False,
+            )
+
     payload = {
         "has_changes": bool(commits),
         "current_version": current_version,

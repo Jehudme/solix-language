@@ -1,0 +1,244 @@
+# Automated Rolling Dev (Nightly) Pre-Release Pipeline for Solix Toolchain
+# Triggered on every merge/push to dev. Builds release binaries, bundled packages,
+# cross-language telemetry, coverage, sensitive path audit, and updates the rolling 'dev' pre-release.
+
+name: Dev Release
+
+run-name: "Dev Release | ${{ github.sha }}"
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish-dev-release:
+    name: Build Artifacts & Update Rolling Dev Pre-Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Checkout integration trunk (dev)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ci-linux
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux build and benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev lua5.4 luajit gcc
+
+      - name: Install cargo-llvm-cov
+        run: |
+          mkdir -p "$HOME/.cache/solix-ci-tools/cargo-llvm-cov"
+          if [ ! -x "$HOME/.cache/solix-ci-tools/cargo-llvm-cov/cargo-llvm-cov" ]; then
+            cargo install cargo-llvm-cov --locked --root "$HOME/.cache/solix-ci-tools/cargo-llvm-cov"
+          fi
+          echo "$HOME/.cache/solix-ci-tools/cargo-llvm-cov/bin" >> "$GITHUB_PATH"
+
+      - name: Build release Solix binaries and stage default packages
+        run: |
+          cargo build --release --bin solix --bin solix-lsp
+          python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
+
+      - name: Package standalone binary archives and distribution artifacts
+        run: |
+          mkdir -p "$RUNNER_TEMP/dev-artifacts" target/distrib
+          TARGET_TRIPLE="x86_64-unknown-linux-gnu"
+          PACKAGE_DIR="$RUNNER_TEMP/solix-toolchain-${TARGET_TRIPLE}"
+          mkdir -p "$PACKAGE_DIR/bin" "$PACKAGE_DIR/packages"
+
+          cp target/release/solix "$PACKAGE_DIR/bin/"
+          cp target/release/solix-lsp "$PACKAGE_DIR/bin/"
+          cp -r crates/solix-toolchain/assets/packages/* "$PACKAGE_DIR/packages/" || true
+          cp README.md LICENSE "$PACKAGE_DIR/"
+
+          tar -czf "$RUNNER_TEMP/dev-artifacts/solix-toolchain-${TARGET_TRIPLE}.tar.gz" -C "$RUNNER_TEMP" "solix-toolchain-${TARGET_TRIPLE}"
+          tar -cJf "$RUNNER_TEMP/dev-artifacts/solix-toolchain-${TARGET_TRIPLE}.tar.xz" -C "$RUNNER_TEMP" "solix-toolchain-${TARGET_TRIPLE}"
+
+          # Standalone shell installer pointing to rolling dev tag
+          cat << 'INSTALLER_EOF' > "$RUNNER_TEMP/dev-artifacts/solix-toolchain-installer.sh"
+          #!/bin/sh
+          set -eu
+          REPO="Jehudme/solix-language"
+          TAG="dev"
+          ARCH="$(uname -m)"
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
+          if [ "$ARCH" = "x86_64" ] && [ "$OS" = "linux" ]; then
+              TARGET="x86_64-unknown-linux-gnu"
+          else
+              echo "[ERROR] Pre-built dev binaries currently available for x86_64 Linux. Detected: $OS $ARCH"
+              exit 1
+          fi
+
+          DEST_DIR="${HOME}/.solix"
+          mkdir -p "$DEST_DIR"
+          URL="https://github.com/${REPO}/releases/download/${TAG}/solix-toolchain-${TARGET}.tar.gz"
+          echo "Downloading Solix dev channel from ${URL}..."
+          curl -sSL "$URL" | tar -xz -C "$DEST_DIR" --strip-components=1
+
+          echo "Solix dev binary installed to ${DEST_DIR}/bin/solix."
+          echo "Add to PATH: export PATH=\"${DEST_DIR}/bin:\$PATH\""
+          INSTALLER_EOF
+          sed -i 's/^          //' "$RUNNER_TEMP/dev-artifacts/solix-toolchain-installer.sh"
+          chmod +x "$RUNNER_TEMP/dev-artifacts/solix-toolchain-installer.sh"
+
+      - name: Generate comprehensive Dev Release Telemetry Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/telemetry" "$RUNNER_TEMP/prev_release"
+          DEV_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          # Find latest official stable (non-prerelease) release tag
+          LATEST_STABLE_TAG=$(gh release list --repo "$REPO_NAME" --exclude-drafts --limit 10 --json tagName,isPrerelease --jq '[.[] | select(.isPrerelease == false)][0].tagName // empty' || true)
+
+          echo "Evaluating dev (${SHORT_SHA}) against latest stable release: ${LATEST_STABLE_TAG:-none}"
+
+          # 1. Benchmark current dev
+          python3 scripts/bench/solix_bench.py run \
+            --pin-cpu \
+            --warmup 2 \
+            --iterations 5 \
+            --solix-bin target/release/solix \
+            --label "dev (${SHORT_SHA})" \
+            --save-baseline "$RUNNER_TEMP/telemetry/dev_baseline.json"
+
+          PREV_BINARY=""
+          if [ -n "$LATEST_STABLE_TAG" ]; then
+            if gh release download "$LATEST_STABLE_TAG" --repo "$REPO_NAME" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.xz" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.gz" --dir "$RUNNER_TEMP/prev_release"; then
+              ARCHIVE_PATH=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f \( -name '*.tar.xz' -o -name '*.tar.gz' \) | head -n 1 || true)
+              if [ -n "$ARCHIVE_PATH" ]; then
+                tar -xf "$ARCHIVE_PATH" -C "$RUNNER_TEMP/prev_release"
+                PREV_BINARY=$(find "$RUNNER_TEMP/prev_release" -type f -name 'solix' | head -n 1 || true)
+              fi
+            fi
+          fi
+
+          if [ -n "$PREV_BINARY" ] && [ -x "$PREV_BINARY" ]; then
+            python3 scripts/bench/solix_bench.py run \
+              --pin-cpu \
+              --warmup 2 \
+              --iterations 5 \
+              --solix-bin "$PREV_BINARY" \
+              --solix-only \
+              --label "$LATEST_STABLE_TAG" \
+              --save-baseline "$RUNNER_TEMP/telemetry/prev_baseline.json"
+
+            python3 scripts/bench/solix_bench.py compare \
+              --previous "$RUNNER_TEMP/telemetry/prev_baseline.json" \
+              --current "$RUNNER_TEMP/telemetry/dev_baseline.json" \
+              --previous-tag "$LATEST_STABLE_TAG" \
+              --current-tag "dev (${SHORT_SHA})" \
+              --same-host \
+              --cross-language \
+              --min-delta-ms 0.5 \
+              --markdown-output "$RUNNER_TEMP/telemetry/benchmark_report.md"
+          else
+            python3 scripts/bench/solix_bench.py compare \
+              --current "$RUNNER_TEMP/telemetry/dev_baseline.json" \
+              --current-tag "dev (${SHORT_SHA})" \
+              --no-fallback \
+              --cross-language \
+              --markdown-output "$RUNNER_TEMP/telemetry/benchmark_report.md"
+          fi
+
+          # 2. Cumulative Code Coverage
+          export PATH="$HOME/.cache/solix-ci-tools/cargo-llvm-cov/bin:$PATH"
+          SOLIX_BIN="$(pwd)/target/debug/solix"
+          export SOLIX_BIN
+          cargo llvm-cov --workspace --all-targets --ignore-filename-regex '(/rustc/|/tests/)' --fail-under-lines 55 --summary-only | tee "$RUNNER_TEMP/coverage_summary.txt"
+          python3 scripts/ci/render_coverage_summary.py \
+            --input "$RUNNER_TEMP/coverage_summary.txt" \
+            --output "$RUNNER_TEMP/telemetry/coverage_report.md"
+
+          # 3. Sensitive Path Risk Audit since latest stable tag
+          if [ -n "$LATEST_STABLE_TAG" ]; then
+            python3 scripts/ci/pr_risk_audit.py \
+              --base-ref "$LATEST_STABLE_TAG" \
+              --head-ref "HEAD" \
+              --advisory-out "$RUNNER_TEMP/telemetry/sensitive_audit.md" || true
+          fi
+
+          # 4. Cumulative Changelog since latest stable tag
+          BASE_REF="${LATEST_STABLE_TAG:-HEAD~10}"
+          export SHORT_SHA
+          export LATEST_STABLE_TAG
+          CHANGELOG_PREVIEW=$(git log --no-merges --format='- %s (%h)' "${BASE_REF}..HEAD" | head -n 40 || true)
+          export CHANGELOG_PREVIEW
+
+          # 5. Assemble Full Dev Release Notes
+          python3 scripts/release/assemble_dev_release_notes.py \
+            --repo-name "$REPO_NAME" \
+            --short-sha "$SHORT_SHA" \
+            --latest-stable-tag "${LATEST_STABLE_TAG:-}" \
+            --benchmark-report "$RUNNER_TEMP/telemetry/benchmark_report.md" \
+            --coverage-report "$RUNNER_TEMP/telemetry/coverage_report.md" \
+            --sensitive-audit "$RUNNER_TEMP/telemetry/sensitive_audit.md" \
+            --changelog-preview "${CHANGELOG_PREVIEW:-}" \
+            --output "$RUNNER_TEMP/dev_release_notes.md"
+
+      - name: Publish or update rolling GitHub Pre-Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Update the git tag 'dev' to point to current commit
+          git tag -f dev HEAD
+          git push origin refs/tags/dev --force
+
+          # Re-create or update release notes and upload assets
+          if gh release view dev --repo "$REPO_NAME" >/dev/null 2>&1; then
+            echo "Updating existing rolling dev release..."
+            gh release edit dev \
+              --repo "$REPO_NAME" \
+              --title "Solix Dev (Nightly) Build" \
+              --prerelease \
+              --notes-file "$RUNNER_TEMP/dev_release_notes.md"
+
+            gh release upload dev \
+              --repo "$REPO_NAME" \
+              --clobber \
+              "$RUNNER_TEMP"/dev-artifacts/*
+          else
+            echo "Creating new rolling dev release..."
+            gh release create dev \
+              --repo "$REPO_NAME" \
+              --title "Solix Dev (Nightly) Build" \
+              --prerelease \
+              --notes-file "$RUNNER_TEMP/dev_release_notes.md" \
+              "$RUNNER_TEMP"/dev-artifacts/*
+          fi
+
+          echo "Successfully published Solix Dev Pre-Release."

@@ -501,12 +501,38 @@ jobs:
           SOLIX_BIN="$(pwd)/target/debug/solix"
           export SOLIX_BIN
           cargo llvm-cov --workspace --all-targets --ignore-filename-regex '(/rustc/|/tests/)' --fail-under-lines 55 --summary-only | tee "$RUNNER_TEMP/coverage_summary.txt"
+
+          mkdir -p "$RUNNER_TEMP/pr-coverage"
+          CHANGED_FILES=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin dev:origin/dev --depth=20 || git fetch origin dev || true
+            CHANGED_FILES=$(git diff --name-only origin/dev...HEAD | tr '\n' ',' || true)
+          fi
+
           python3 scripts/ci/render_coverage_summary.py \
             --input "$RUNNER_TEMP/coverage_summary.txt" \
+            --output "$RUNNER_TEMP/pr-coverage/coverage.md" \
+            --json-output "$RUNNER_TEMP/pr-coverage/coverage.json" \
+            --changed-files "$CHANGED_FILES" \
             --step-summary
 
+      - name: Stage coverage PR number
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p "$RUNNER_TEMP/pr-coverage"
+          printf '%s\n' "${{ github.event.pull_request.number }}" > "$RUNNER_TEMP/pr-coverage/pr_number.txt"
+
+      - name: Upload coverage report artifact for discussion sync
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: pr-coverage-report
+          path: ${{ runner.temp }}/pr-coverage/
+          if-no-files-found: ignore
+          retention-days: 1
+
   pr-benchmark:
-    name: PR Performance & Cross-Language Benchmark
+    name: PR Performance Benchmark (vs dev)
     if: github.event_name == 'pull_request' && github.base_ref == 'dev'
     runs-on: ubuntu-latest
     permissions:
@@ -517,6 +543,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
@@ -551,61 +578,48 @@ jobs:
           cargo build --release --bin solix
           python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
 
-      - name: Benchmark PR head vs latest GitHub release on same host
+      - name: Benchmark PR head vs current dev branch on same host
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO_NAME: ${{ github.repository }}
         run: |
-          mkdir -p "$RUNNER_TEMP/pr-bench" "$RUNNER_TEMP/prev_release"
-          LATEST_RELEASE_TAG=$(gh release list --repo "$REPO_NAME" --exclude-drafts --limit 5 --json tagName --jq '.[0].tagName // empty')
-          PREVIOUS_RELEASE_BINARY=""
+          mkdir -p "$RUNNER_TEMP/pr-bench"
+          git fetch origin dev:origin/dev --depth=20 || git fetch origin dev || true
 
-          if [ -n "$LATEST_RELEASE_TAG" ]; then
-            if gh release download "$LATEST_RELEASE_TAG" --repo "$REPO_NAME" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.xz" --pattern "solix-toolchain-x86_64-unknown-linux-gnu.tar.gz" --dir "$RUNNER_TEMP/prev_release"; then
-              ARCHIVE_FILE_PATH=$(find "$RUNNER_TEMP/prev_release" -maxdepth 1 -type f \( -name '*.tar.xz' -o -name '*.tar.gz' \) | head -n 1 || true)
-              if [ -n "$ARCHIVE_FILE_PATH" ]; then
-                tar -xf "$ARCHIVE_FILE_PATH" -C "$RUNNER_TEMP/prev_release"
-                PREVIOUS_RELEASE_BINARY=$(find "$RUNNER_TEMP/prev_release" -type f -name 'solix' | head -n 1 || true)
-              fi
-            fi
-          fi
-
+          # 1. Benchmark PR head
           python3 scripts/bench/solix_bench.py run \
             --pin-cpu \
             --warmup 2 \
             --iterations 5 \
             --solix-bin target/release/solix \
+            --solix-only \
             --label "PR #${PR_NUMBER}" \
             --save-baseline "$RUNNER_TEMP/pr-bench/pr_baseline.json"
 
-          if [ -n "$PREVIOUS_RELEASE_BINARY" ] && [ -x "$PREVIOUS_RELEASE_BINARY" ]; then
-            python3 scripts/bench/solix_bench.py run \
-              --pin-cpu \
-              --warmup 2 \
-              --iterations 5 \
-              --solix-bin "$PREVIOUS_RELEASE_BINARY" \
-              --solix-only \
-              --label "$LATEST_RELEASE_TAG" \
-              --save-baseline "$RUNNER_TEMP/pr-bench/prev_baseline.json"
+          # 2. Build dev binary on the same runner via temporary worktree
+          git worktree add "$RUNNER_TEMP/dev_worktree" origin/dev
+          cargo build --manifest-path "$RUNNER_TEMP/dev_worktree/Cargo.toml" --release --bin solix
 
-            python3 scripts/bench/solix_bench.py compare \
-              --previous "$RUNNER_TEMP/pr-bench/prev_baseline.json" \
-              --current "$RUNNER_TEMP/pr-bench/pr_baseline.json" \
-              --previous-tag "$LATEST_RELEASE_TAG" \
-              --current-tag "PR #${PR_NUMBER}" \
-              --same-host \
-              --cross-language \
-              --min-delta-ms 0.5 \
-              --markdown-output "$RUNNER_TEMP/pr-bench/report.md"
-          else
-            python3 scripts/bench/solix_bench.py compare \
-              --current "$RUNNER_TEMP/pr-bench/pr_baseline.json" \
-              --current-tag "PR #${PR_NUMBER}" \
-              --no-fallback \
-              --cross-language \
-              --markdown-output "$RUNNER_TEMP/pr-bench/report.md"
-          fi
+          python3 scripts/bench/solix_bench.py run \
+            --pin-cpu \
+            --warmup 2 \
+            --iterations 5 \
+            --solix-bin "$RUNNER_TEMP/dev_worktree/target/release/solix" \
+            --solix-only \
+            --label "dev" \
+            --save-baseline "$RUNNER_TEMP/pr-bench/dev_baseline.json"
+
+          git worktree remove --force "$RUNNER_TEMP/dev_worktree" || true
+
+          # 3. Compare without --cross-language (Solix workloads only)
+          python3 scripts/bench/solix_bench.py compare \
+            --previous "$RUNNER_TEMP/pr-bench/dev_baseline.json" \
+            --current "$RUNNER_TEMP/pr-bench/pr_baseline.json" \
+            --previous-tag "dev" \
+            --current-tag "PR #${PR_NUMBER}" \
+            --same-host \
+            --min-delta-ms 0.5 \
+            --markdown-output "$RUNNER_TEMP/pr-bench/report.md"
 
       - name: Publish benchmark report to Step Summary
         if: always()

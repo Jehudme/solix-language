@@ -264,6 +264,16 @@
                     ],
                     "description": "Arguments passed when launching the Solix language server binary."
                 },
+                "solix.toolchain.compatibleMajor": {
+                    "type": "number",
+                    "default": 2,
+                    "description": "Expected major version of the Solix toolchain."
+                },
+                "solix.toolchain.minVersion": {
+                    "type": "string",
+                    "default": "1.9.0",
+                    "description": "Minimum required SemVer version for the Solix toolchain."
+                },
                 "solix.trace.server": {
                     "type": "string",
                     "enum": [
