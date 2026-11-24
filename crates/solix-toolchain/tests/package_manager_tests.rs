@@ -1008,7 +1008,8 @@ fn test_auto_bootstrap_overrides_stale_preexisting_bundled_package() {
         .expect("bundled packages directory must exist");
     let manifest_path = bundled_directory.join("bundled_manifest.json");
     let (target_folder, target_archive_name) = if manifest_path.exists() {
-        let manifest_content = fs::read_to_string(&manifest_path).expect("read bundled_manifest.json");
+        let manifest_content =
+            fs::read_to_string(&manifest_path).expect("read bundled_manifest.json");
         let manifest_json: serde_json::Value =
             serde_json::from_str(&manifest_content).expect("parse bundled_manifest.json");
         let first_package = &manifest_json["packages"][0];
@@ -1016,8 +1017,16 @@ fn test_auto_bootstrap_overrides_stale_preexisting_bundled_package() {
             .as_str()
             .expect("archive_rel_path in manifest");
         let archive_path = std::path::Path::new(relative_archive_path);
-        let folder_name = archive_path.parent().expect("parent folder").to_string_lossy().to_string();
-        let file_name = archive_path.file_name().expect("archive filename").to_string_lossy().to_string();
+        let folder_name = archive_path
+            .parent()
+            .expect("parent folder")
+            .to_string_lossy()
+            .to_string();
+        let file_name = archive_path
+            .file_name()
+            .expect("archive filename")
+            .to_string_lossy()
+            .to_string();
         (folder_name, file_name)
     } else {
         let package_entry = fs::read_dir(&bundled_directory)
@@ -1029,7 +1038,12 @@ fn test_auto_bootstrap_overrides_stale_preexisting_bundled_package() {
         let archive_entry = fs::read_dir(package_entry.path())
             .expect("read package dir")
             .flatten()
-            .find(|entry| entry.path().extension().is_some_and(|extension| extension == "slxarc"))
+            .find(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "slxarc")
+            })
             .expect("slxarc archive in package dir");
         let file_name = archive_entry.file_name().to_string_lossy().to_string();
         (folder_name, file_name)
