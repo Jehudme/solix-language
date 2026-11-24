@@ -42,6 +42,11 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Jehudme/solix-language/
 irm https://github.com/Jehudme/solix-language/releases/latest/download/solix-toolchain-installer.ps1 | iex
 ```
 
+### Dev / Nightly Channel (Bleeding-Edge from `dev` merge)
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Jehudme/solix-language/releases/download/dev/solix-toolchain-installer.sh | sh
+```
+
 ### Build from Source (Cargo)
 ```bash
 git clone https://github.com/jehudme/solix-language.git

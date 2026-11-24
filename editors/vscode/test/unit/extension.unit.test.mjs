@@ -356,6 +356,49 @@ test('Layer 1: activate registers all commands, providers, and tasks with mocked
 
         await extModule.deactivate();
         assert.strictEqual(state.clientInstances[0].isRunning(), false);
+
+        // Verify Issue #237: Toolchain Semantic Version Compatibility Checker
+        assert.ok(typeof extModule.parseToolchainVersionOutput === 'function', 'Must export parseToolchainVersionOutput');
+        assert.ok(typeof extModule.checkToolchainCompatibility === 'function', 'Must export checkToolchainCompatibility');
+
+        // Test positive version parsing
+        const parsedV2 = extModule.parseToolchainVersionOutput('solix 2.0.0');
+        assert.deepStrictEqual(parsedV2, {
+            majorVersion: 2,
+            minorVersion: 0,
+            patchVersion: 0,
+            rawVersionString: '2.0.0',
+        });
+
+        const parsedV1 = extModule.parseToolchainVersionOutput('solix-toolchain v1.9.3-rc1');
+        assert.deepStrictEqual(parsedV1, {
+            majorVersion: 1,
+            minorVersion: 9,
+            patchVersion: 3,
+            rawVersionString: '1.9.3',
+        });
+
+        // Test unparseable string
+        const parsedInvalid = extModule.parseToolchainVersionOutput('unknown toolchain banner');
+        assert.strictEqual(parsedInvalid, undefined);
+
+        // Test compatibility: matching major 2.x
+        const compatMatched = extModule.checkToolchainCompatibility('solix 2.0.0', 2, '1.9.0');
+        assert.strictEqual(compatMatched.isCompatible, true);
+        assert.strictEqual(compatMatched.isMajorMismatch, false);
+        assert.strictEqual(compatMatched.warningMessage, undefined);
+
+        // Test compatibility: major mismatch (e.g. toolchain 1.x vs target 2.x)
+        const compatMismatched = extModule.checkToolchainCompatibility('solix 1.9.0', 2, '2.0.0');
+        assert.strictEqual(compatMismatched.isCompatible, false);
+        assert.strictEqual(compatMismatched.isMajorMismatch, true);
+        assert.ok(compatMismatched.warningMessage.includes('major version 2.x, but found v1.9.0'));
+
+        // Test compatibility: below minimum minor version (e.g. 2.0.0 vs min 2.1.0)
+        const compatBelowMin = extModule.checkToolchainCompatibility('solix 2.0.1', 2, '2.1.0');
+        assert.strictEqual(compatBelowMin.isCompatible, true);
+        assert.strictEqual(compatBelowMin.isMajorMismatch, false);
+        assert.ok(compatBelowMin.warningMessage.includes('older than recommended minimum v2.1.0'));
     } finally {
         Module._load = origLoad;
         if (prevHeadless === undefined) {

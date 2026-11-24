@@ -2,16 +2,21 @@
 """Coverage Summary Formatter for GitHub Actions CI and Step Summary.
 
 Parses cargo-llvm-cov summary text output and renders structured, readable
-GitHub Flavored Markdown reports with per-subsystem aggregation and gate verification.
+GitHub Flavored Markdown reports with per-subsystem aggregation, delta comparison against
+base branches, and pull request discussion comments (GL-0014).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+
+MARKER_COMMENT_TAG = "<!-- solix-pr-coverage -->"
 
 
 def classify_subsystem(file_path: str) -> str:
@@ -105,16 +110,52 @@ def parse_coverage_summary(raw_summary_text: str) -> Dict[str, Any]:
     }
 
 
+def compute_subsystem_percentages(
+    subsystem_metrics: Dict[str, int],
+) -> Tuple[float, float]:
+    """Calculates (line_coverage_percentage, function_coverage_percentage)."""
+    total_lines = subsystem_metrics.get("total_lines", 0)
+    missed_lines = subsystem_metrics.get("missed_lines", 0)
+    covered_lines = total_lines - missed_lines
+    line_percentage = (covered_lines / total_lines * 100.0) if total_lines > 0 else 100.0
+
+    total_functions = subsystem_metrics.get("total_functions", 0)
+    missed_functions = subsystem_metrics.get("missed_functions", 0)
+    covered_functions = total_functions - missed_functions
+    function_percentage = (
+        (covered_functions / total_functions * 100.0) if total_functions > 0 else 100.0
+    )
+
+    return line_percentage, function_percentage
+
+
+def extract_changed_subsystems(changed_file_paths: List[str]) -> Set[str]:
+    """Maps a collection of changed file paths to unique subsystem names."""
+    identified_subsystems: Set[str] = set()
+    for file_path in changed_file_paths:
+        subsystem_identifier = classify_subsystem(file_path)
+        if subsystem_identifier != "workspace-other":
+            identified_subsystems.add(subsystem_identifier)
+    return identified_subsystems
+
+
 def render_markdown_coverage_report(
     parsed_summary: Dict[str, Any],
     raw_summary_text: str,
     minimum_coverage_floor: float = 55.0,
+    base_summary: Optional[Dict[str, Any]] = None,
+    changed_files_list: Optional[List[str]] = None,
+    is_pr_mode: bool = False,
 ) -> str:
-    """Formats parsed coverage statistics into a clean, GitHub Flavored Markdown document."""
+    """Formats parsed coverage statistics into structured GitHub Flavored Markdown."""
     overall_total = parsed_summary.get("total")
-    subsystems: Dict[str, Dict[str, int]] = parsed_summary.get("subsystems", {})
+    current_subsystems: Dict[str, Dict[str, int]] = parsed_summary.get("subsystems", {})
+    base_subsystems: Dict[str, Dict[str, int]] = (
+        base_summary.get("subsystems", {}) if base_summary else {}
+    )
+    base_total = base_summary.get("total") if base_summary else None
 
-    markdown_lines: List[str] = ["## Workspace Code Coverage Report", ""]
+    markdown_lines: List[str] = [MARKER_COMMENT_TAG, "## Workspace Code Coverage Report", ""]
 
     if overall_total is None:
         markdown_lines.append("> [!WARNING]")
@@ -136,9 +177,17 @@ def render_markdown_coverage_report(
     gate_status = "PASSED" if line_coverage_percentage >= minimum_coverage_floor else "FAILED"
     alert_level = "NOTE" if gate_status == "PASSED" else "CAUTION"
 
+    total_delta_annotation = ""
+    if base_total and "line_coverage_percentage" in base_total:
+        base_line_percentage = base_total["line_coverage_percentage"]
+        workspace_delta = line_coverage_percentage - base_line_percentage
+        sign_prefix = "+" if workspace_delta >= 0.0 else ""
+        total_delta_annotation = f" ({sign_prefix}{workspace_delta:.2f}% vs dev)"
+
     markdown_lines.append(f"> [!{alert_level}]")
     markdown_lines.append(
-        f"> **Overall Workspace Line Coverage:** **{line_coverage_percentage:.2f}%** "
+        f"> **Overall Workspace Line Coverage:** **{line_coverage_percentage:.2f}%**"
+        f"{total_delta_annotation} "
         f"(Gate: `>= {minimum_coverage_floor:.1f}%` required — **{gate_status}**)"
     )
     markdown_lines.append(
@@ -148,6 +197,49 @@ def render_markdown_coverage_report(
         f"> • **Functions Executed:** {executed_functions:,} / {total_functions:,} ({function_coverage_percentage:.2f}%)"
     )
     markdown_lines.append("")
+
+    changed_subsystems: Set[str] = set()
+    if changed_files_list:
+        changed_subsystems = extract_changed_subsystems(changed_files_list)
+
+    if is_pr_mode and changed_files_list:
+        markdown_lines.append("### Modified Subsystems Coverage & Delta")
+        markdown_lines.append("")
+
+        if not changed_subsystems:
+            markdown_lines.append("> *No core Rust crate subsystems were modified in this pull request.*")
+            markdown_lines.append("")
+        else:
+            markdown_lines.append(
+                "| Modified Subsystem / Crate | dev Base Coverage | PR Coverage | Delta | Status |"
+            )
+            markdown_lines.append("| :--- | :---: | :---: | :---: | :---: |")
+
+            for subsystem_name in sorted(changed_subsystems):
+                current_metrics = current_subsystems.get(subsystem_name, {})
+                current_line_pct, _ = compute_subsystem_percentages(current_metrics)
+
+                base_metrics = base_subsystems.get(subsystem_name, {})
+                base_line_pct, _ = compute_subsystem_percentages(base_metrics)
+
+                subsystem_delta = current_line_pct - base_line_pct
+                delta_sign = "+" if subsystem_delta >= 0.0 else ""
+
+                if subsystem_delta > 0.05:
+                    status_indicator = "IMPROVED"
+                elif subsystem_delta < -0.05:
+                    status_indicator = "REGRESSED"
+                else:
+                    status_indicator = "UNCHANGED"
+
+                base_display = f"{base_line_pct:.2f}%" if base_metrics else "N/A"
+                markdown_lines.append(
+                    f"| `{subsystem_name}` | {base_display} | {current_line_pct:.2f}% | "
+                    f"**{delta_sign}{subsystem_delta:.2f}%** | {status_indicator} |"
+                )
+
+            markdown_lines.append("")
+
     markdown_lines.append("### Subsystem Coverage Breakdown")
     markdown_lines.append("")
     markdown_lines.append(
@@ -155,24 +247,11 @@ def render_markdown_coverage_report(
     )
     markdown_lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: |")
 
-    for subsystem_name, metrics in sorted(subsystems.items()):
+    for subsystem_name, metrics in sorted(current_subsystems.items()):
         subsystem_total_lines = metrics["total_lines"]
         subsystem_missed_lines = metrics["missed_lines"]
         subsystem_covered_lines = subsystem_total_lines - subsystem_missed_lines
-        subsystem_line_percentage = (
-            (subsystem_covered_lines / subsystem_total_lines * 100.0)
-            if subsystem_total_lines > 0
-            else 100.0
-        )
-
-        subsystem_total_functions = metrics["total_functions"]
-        subsystem_missed_functions = metrics["missed_functions"]
-        subsystem_covered_functions = subsystem_total_functions - subsystem_missed_functions
-        subsystem_function_percentage = (
-            (subsystem_covered_functions / subsystem_total_functions * 100.0)
-            if subsystem_total_functions > 0
-            else 100.0
-        )
+        subsystem_line_percentage, subsystem_function_percentage = compute_subsystem_percentages(metrics)
 
         subsystem_status = "PASS" if subsystem_line_percentage >= minimum_coverage_floor else "WARN"
         markdown_lines.append(
@@ -217,6 +296,29 @@ def parse_arguments(arguments_list: Optional[List[str]] = None) -> argparse.Name
         help="Optional destination path to write rendered Markdown coverage report",
     )
     parser.add_argument(
+        "--json-output",
+        type=Path,
+        default=None,
+        help="Optional destination path to write parsed JSON coverage telemetry",
+    )
+    parser.add_argument(
+        "--base-input",
+        type=Path,
+        default=None,
+        help="Optional path to base branch coverage summary text or JSON file for delta calculation",
+    )
+    parser.add_argument(
+        "--changed-files",
+        type=str,
+        default="",
+        help="Optional comma- or newline-separated list of modified repository file paths",
+    )
+    parser.add_argument(
+        "--pr-mode",
+        action="store_true",
+        help="Enable pull request mode focusing on modified modules and delta breakdown",
+    )
+    parser.add_argument(
         "--step-summary",
         action="store_true",
         help="Append rendered report to GITHUB_STEP_SUMMARY environment variable if present",
@@ -241,15 +343,45 @@ def main(arguments_list: Optional[List[str]] = None) -> int:
 
     raw_summary_text = input_file_path.read_text(encoding="utf-8")
     parsed_summary = parse_coverage_summary(raw_summary_text)
+
+    base_summary: Optional[Dict[str, Any]] = None
+    if parsed_arguments.base_input and parsed_arguments.base_input.is_file():
+        try:
+            base_content = parsed_arguments.base_input.read_text(encoding="utf-8")
+            if base_content.strip().startswith("{"):
+                base_summary = json.loads(base_content)
+            else:
+                base_summary = parse_coverage_summary(base_content)
+        except Exception as error_reading_base:
+            print(f"[WARNING] Could not parse base coverage file: {error_reading_base}", file=sys.stderr)
+
+    changed_files_list: List[str] = []
+    if parsed_arguments.changed_files:
+        changed_files_list = [
+            path_item.strip()
+            for path_item in re.split(r"[,\n\r]+", parsed_arguments.changed_files)
+            if path_item.strip()
+        ]
+
     rendered_markdown = render_markdown_coverage_report(
         parsed_summary,
         raw_summary_text,
         minimum_coverage_floor=parsed_arguments.minimum_coverage_floor,
+        base_summary=base_summary,
+        changed_files_list=changed_files_list,
+        is_pr_mode=parsed_arguments.pr_mode or bool(changed_files_list),
     )
 
     if parsed_arguments.output is not None:
         parsed_arguments.output.parent.mkdir(parents=True, exist_ok=True)
         parsed_arguments.output.write_text(rendered_markdown, encoding="utf-8")
+
+    if parsed_arguments.json_output is not None:
+        parsed_arguments.json_output.parent.mkdir(parents=True, exist_ok=True)
+        parsed_arguments.json_output.write_text(
+            json.dumps(parsed_summary, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     if parsed_arguments.step_summary:
         step_summary_environment_path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -257,7 +389,10 @@ def main(arguments_list: Optional[List[str]] = None) -> int:
             with Path(step_summary_environment_path).open("a", encoding="utf-8") as summary_file_handle:
                 summary_file_handle.write("\n" + rendered_markdown + "\n")
 
-    print(f"[SUCCESS] Parsed coverage report. Total lines: {parsed_summary.get('total', {}).get('total_lines', 'unknown')}")
+    print(
+        f"[SUCCESS] Parsed coverage report. Total lines: "
+        f"{parsed_summary.get('total', {}).get('total_lines', 'unknown')}"
+    )
     return 0
 
 

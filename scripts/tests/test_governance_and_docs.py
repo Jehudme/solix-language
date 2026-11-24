@@ -24,7 +24,9 @@ REPO_ROOT = SCRIPTS_DIR.parent
 for _subdir in ("ci", "docs", "release", "bench"):
     sys.path.insert(0, str(SCRIPTS_DIR / _subdir))
 
+import assemble_dev_release_notes  # noqa: E402
 import build_docs_site  # noqa: E402
+import bump_solix_projects  # noqa: E402
 import doc_sync_check  # noqa: E402
 import merge_bundled_packages  # noqa: E402
 import pr_risk_audit  # noqa: E402
@@ -140,6 +142,57 @@ class CoverageSummaryRendererTests(unittest.TestCase):
         self.assertIn("crates/solix-common", markdown)
         self.assertIn("crates/solix-runtime", markdown)
         self.assertIn("Subsystem Coverage Breakdown", markdown)
+
+    def test_render_coverage_summary_pr_mode_and_changed_files_delta(self) -> None:
+        sample_current = (
+            "Filename                                                                        Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover\n"
+            "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "crates/solix-runtime/src/vm/fast.rs                                                4780              1543    67.72%         165                49    70.30%        4000              1000    75.00%           0                 0         -\n"
+            "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "TOTAL                                                                              4780              1543    67.72%         165                49    70.30%        4000              1000    75.00%           0                 0         -\n"
+        )
+        sample_base = (
+            "Filename                                                                        Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover\n"
+            "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "crates/solix-runtime/src/vm/fast.rs                                                4780              1543    67.72%         165                49    70.30%        4000              1200    70.00%           0                 0         -\n"
+            "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "TOTAL                                                                              4780              1543    67.72%         165                49    70.30%        4000              1200    70.00%           0                 0         -\n"
+        )
+        parsed_current = render_coverage_summary.parse_coverage_summary(sample_current)
+        parsed_base = render_coverage_summary.parse_coverage_summary(sample_base)
+
+        markdown = render_coverage_summary.render_markdown_coverage_report(
+            parsed_current,
+            sample_current,
+            base_summary=parsed_base,
+            changed_files_list=["crates/solix-runtime/src/vm/fast.rs"],
+            is_pr_mode=True,
+        )
+        self.assertIn("Modified Subsystems Coverage & Delta", markdown)
+        self.assertIn("crates/solix-runtime", markdown)
+        self.assertIn("IMPROVED", markdown)
+        self.assertIn("+5.00%", markdown)
+
+    def test_bump_solix_projects_discovers_packages(self) -> None:
+        discovered_projects = bump_solix_projects.discover_solix_projects(REPO_ROOT)
+        project_names = [project.project_name for project in discovered_projects]
+        self.assertIn("solix", project_names)
+        self.assertIn("raylib", project_names)
+        self.assertIn("breakout", project_names)
+
+    def test_assemble_dev_release_notes_renders_comprehensive_sections(self) -> None:
+        notes_content = assemble_dev_release_notes.assemble_dev_release_notes(
+            repository_name="Jehudme/solix-language",
+            commit_short_hash="abc1234",
+            latest_stable_tag="v1.9.0",
+            changelog_preview="- Test commit description",
+        )
+        self.assertIn("Solix Dev (Nightly) Build — `abc1234`", notes_content)
+        self.assertIn("Performance & Cross-Language Benchmarks", notes_content)
+        self.assertIn("Cumulative Test Coverage", notes_content)
+        self.assertIn("Sensitive Paths Modified Since v1.9.0", notes_content)
+        self.assertIn("Commits on `dev` since v1.9.0", notes_content)
+        self.assertIn("- Test commit description", notes_content)
 
 
 class StaticDocsAndWikiPortalTests(unittest.TestCase):
@@ -817,7 +870,7 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
         self.assertIn("Publish benchmark report to Step Summary", ci_text)
         self.assertIn(
-            "pr-benchmark:\n    name: PR Performance & Cross-Language Benchmark\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
+            "pr-benchmark:\n    name: PR Performance Benchmark (vs dev)\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
             ci_text,
         )
 
@@ -825,6 +878,7 @@ class SolixBenchCliTests(unittest.TestCase):
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("name: pr-risk-audit", ci_text)
         self.assertIn("name: pr-benchmark-report", ci_text)
+        self.assertIn("name: pr-coverage-report", ci_text)
 
         sync_workflow_path = REPO_ROOT / ".github" / "workflows" / "pr-discussion-sync.yml"
         self.assertTrue(sync_workflow_path.is_file())
@@ -834,6 +888,7 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("gh run download", sync_text)
         self.assertIn("<!-- solix-pr-risk-audit -->", sync_text)
         self.assertIn("<!-- solix-pr-benchmark -->", sync_text)
+        self.assertIn("<!-- solix-pr-coverage -->", sync_text)
 
 
 if __name__ == "__main__":

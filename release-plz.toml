@@ -1,0 +1,48 @@
+[workspace]
+allow_dirty = false
+dependencies_update = true
+git_release_enable = true
+pr_branch_prefix = "release-plz-"
+pr_labels = ["release"]
+semver_check = false
+
+[[package]]
+name = "solix-common"
+changelog_path = "crates/solix-common/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-compilation"
+changelog_path = "crates/solix-compilation/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-runtime"
+changelog_path = "crates/solix-runtime/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-toolchain"
+changelog_path = "crates/solix-toolchain/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-lsp"
+changelog_path = "crates/solix-lsp/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-dap"
+changelog_path = "crates/solix-dap/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-ffi"
+changelog_path = "ffi/rust/CHANGELOG.md"
+changelog_update = true
+
+[[package]]
+name = "solix-tests"
+publish = false
+release = false
+changelog_update = false

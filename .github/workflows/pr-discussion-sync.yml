@@ -155,8 +155,18 @@ jobs:
           if benchmark_report_path.is_file():
               try:
                   benchmark_markdown = benchmark_report_path.read_text(encoding="utf-8")
-                  benchmark_comment_body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report\n\n{benchmark_markdown}"
+                  benchmark_comment_body = f"<!-- solix-pr-benchmark -->\n## PR Benchmark Report (vs dev)\n\n{benchmark_markdown}"
                   upsert_sticky_comment("<!-- solix-pr-benchmark -->", benchmark_comment_body)
               except Exception as benchmark_processing_error:
                   print(f"[ERROR] Failed to process benchmark report artifact: {benchmark_processing_error}")
+
+          coverage_directory = artifacts_root_directory / "pr-coverage-report"
+          coverage_report_path = coverage_directory / "coverage.md"
+
+          if coverage_report_path.is_file():
+              try:
+                  coverage_markdown = coverage_report_path.read_text(encoding="utf-8")
+                  upsert_sticky_comment("<!-- solix-pr-coverage -->", coverage_markdown)
+              except Exception as coverage_processing_error:
+                  print(f"[ERROR] Failed to process coverage report artifact: {coverage_processing_error}")
           PY

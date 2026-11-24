@@ -29,4 +29,6 @@ The extension requires the Solix toolchain (`solix` or `solix-lsp`) installed an
 
 * `solix.lsp.path`: Custom path to the `solix` or `solix-lsp` executable.
 * `solix.lsp.arguments`: Arguments passed to the server [default: `["lsp", "--stdio"]`].
+* `solix.toolchain.compatibleMajor`: Target major version of the Solix toolchain [default: `2`].
+* `solix.toolchain.minVersion`: Minimum required SemVer version for the Solix toolchain [default: `"1.9.0"`].
 * `solix.trace.server`: Traces JSON-RPC communication between VS Code and the Solix Language Server.

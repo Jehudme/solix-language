@@ -27,6 +27,89 @@ interface DiscoveredBinaries {
     readonly toolchainBinaryPath: string;
 }
 
+export interface ToolchainVersionInfo {
+    readonly majorVersion: number;
+    readonly minorVersion: number;
+    readonly patchVersion: number;
+    readonly rawVersionString: string;
+}
+
+export interface ToolchainCompatibilityStatus {
+    readonly isCompatible: boolean;
+    readonly versionInfo?: ToolchainVersionInfo;
+    readonly warningMessage?: string;
+    readonly isMajorMismatch: boolean;
+}
+
+/**
+ * Parses raw version command output into structured SemVer components.
+ */
+export function parseToolchainVersionOutput(versionOutput: string): ToolchainVersionInfo | undefined {
+    const semverPattern = /(?:solix(?:-toolchain)?\s+)?v?(\d+)\.(\d+)\.(\d+)/i;
+    const match = semverPattern.exec(versionOutput.trim());
+    if (!match) {
+        return undefined;
+    }
+    return {
+        majorVersion: parseInt(match[1], 10),
+        minorVersion: parseInt(match[2], 10),
+        patchVersion: parseInt(match[3], 10),
+        rawVersionString: `${match[1]}.${match[2]}.${match[3]}`
+    };
+}
+
+/**
+ * Validates whether the discovered Solix toolchain version satisfies extension constraints.
+ */
+export function checkToolchainCompatibility(
+    versionOutput: string,
+    expectedMajorVersion: number,
+    minimumVersionString: string
+): ToolchainCompatibilityStatus {
+    const versionInfo = parseToolchainVersionOutput(versionOutput);
+    if (!versionInfo) {
+        return {
+            isCompatible: false,
+            warningMessage: `Failed to parse Solix toolchain version from output: "${versionOutput.trim()}"`,
+            isMajorMismatch: false,
+        };
+    }
+
+    if (versionInfo.majorVersion !== expectedMajorVersion) {
+        return {
+            isCompatible: false,
+            versionInfo,
+            warningMessage: `Solix extension requires toolchain major version ${expectedMajorVersion}.x, but found v${versionInfo.rawVersionString}. Please update your Solix toolchain.`,
+            isMajorMismatch: true,
+        };
+    }
+
+    const minVersionParsed = parseToolchainVersionOutput(minimumVersionString);
+    if (minVersionParsed) {
+        const isBelowMinimum =
+            versionInfo.majorVersion < minVersionParsed.majorVersion ||
+            (versionInfo.majorVersion === minVersionParsed.majorVersion &&
+                (versionInfo.minorVersion < minVersionParsed.minorVersion ||
+                    (versionInfo.minorVersion === minVersionParsed.minorVersion &&
+                        versionInfo.patchVersion < minVersionParsed.patchVersion)));
+
+        if (isBelowMinimum) {
+            return {
+                isCompatible: true,
+                versionInfo,
+                warningMessage: `Installed Solix toolchain (v${versionInfo.rawVersionString}) is older than recommended minimum v${minimumVersionString}. Some language features may be unavailable.`,
+                isMajorMismatch: false,
+            };
+        }
+    }
+
+    return {
+        isCompatible: true,
+        versionInfo,
+        isMajorMismatch: false,
+    };
+}
+
 /**
  * Checks whether a candidate binary is an LSP-capable toolchain by invoking `lsp --help`.
  */
@@ -201,6 +284,56 @@ export async function activate(extensionContext: vscode.ExtensionContext): Promi
     outputChannel.appendLine('Activating Solix Language Extension...');
 
     const { lspBinaryPath, isToolchain, toolchainBinaryPath } = findSolixBinaries(outputChannel);
+
+    // Verify toolchain semantic version compatibility
+    const expectedMajorVersion =
+        vscode.workspace.getConfiguration('solix').get<number>('toolchain.compatibleMajor') ?? 2;
+    const minimumVersionString =
+        vscode.workspace.getConfiguration('solix').get<string>('toolchain.minVersion') ?? '1.9.0';
+
+    try {
+        const versionProcessResult = childProcess.spawnSync(toolchainBinaryPath, ['--version'], {
+            encoding: 'utf8',
+            timeout: 3000,
+        });
+
+        if (versionProcessResult.status === 0 && versionProcessResult.stdout) {
+            const compatibilityStatus = checkToolchainCompatibility(
+                versionProcessResult.stdout,
+                expectedMajorVersion,
+                minimumVersionString
+            );
+
+            if (compatibilityStatus.warningMessage) {
+                outputChannel.appendLine(`[Toolchain Compatibility] ${compatibilityStatus.warningMessage}`);
+                if (compatibilityStatus.isMajorMismatch) {
+                    void vscode.window
+                        .showWarningMessage(
+                            compatibilityStatus.warningMessage,
+                            'View Installation Guide',
+                            'Dismiss'
+                        )
+                        .then((userSelection) => {
+                            if (userSelection === 'View Installation Guide') {
+                                void vscode.env.openExternal(
+                                    vscode.Uri.parse(
+                                        'https://github.com/Jehudme/solix-language#installation'
+                                    )
+                                );
+                            }
+                        });
+                }
+            } else if (compatibilityStatus.versionInfo) {
+                outputChannel.appendLine(
+                    `Verified compatible Solix toolchain v${compatibilityStatus.versionInfo.rawVersionString} (target major: ${expectedMajorVersion}.x)`
+                );
+            }
+        }
+    } catch (versionCheckError) {
+        outputChannel.appendLine(
+            `[Toolchain Compatibility] Could not determine toolchain version: ${versionCheckError}`
+        );
+    }
 
     // Prepare language server execution arguments
     const serverArguments = isToolchain
