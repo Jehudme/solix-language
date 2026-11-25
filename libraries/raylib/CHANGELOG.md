@@ -2,6 +2,12 @@
 
 All notable changes to this Solix package are documented in this file.
 
+## [5.6.1] - 2026-11-25
+
+### Bug Fixes
+
+- *(compiler)* Resolve eleventh-sweep binder, LSP, DAP, VM, fmt, and stdlib edge cases (#251-#260) (#261)
+
 ## [5.6.0] - 2026-11-24
 
 ### Bug Fixes

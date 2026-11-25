@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.1] - 2026-11-25
+
+### Bug Fixes
+
+- *(tests)* Synchronize C-FFI header version assertions dynamically with package version (#262)
+- *(compiler)* Resolve eleventh-sweep binder, LSP, DAP, VM, fmt, and stdlib edge cases (#251-#260) (#261)
+
 ## [2.0.0] - 2026-11-24
 
 ### Bug Fixes
