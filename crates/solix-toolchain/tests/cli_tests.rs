@@ -2221,3 +2221,124 @@ fn test_new_package_explicit_solix_dep_override() {
         "Manifest must honor explicit solix version override"
     );
 }
+
+#[test]
+fn test_solix_build_malformed_manifest_dependency_missing_version_displays_rich_diagnostics() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_dir = workspace.root_path().join("broken_manifest_project");
+    std::fs::create_dir_all(&target_dir).expect("create target dir");
+
+    let malformed_manifest = r#"configuration:
+  name: broken_dep_app
+  version: "1.0.0"
+profiles:
+  release:
+    entrypoint: Main::main
+  debug:
+    dependencies:
+      raylib:
+        profile: debug
+"#;
+    std::fs::write(target_dir.join("manifest.yaml"), malformed_manifest).expect("write manifest");
+
+    let build_cli = Cli::try_parse_from([
+        "solix",
+        "build",
+        target_dir.to_str().expect("valid path"),
+        "--debug",
+    ])
+    .expect("parse build cli");
+
+    let execution_result = run(build_cli);
+    assert!(
+        execution_result.is_err(),
+        "Build must fail on malformed manifest"
+    );
+    let error_text = format!("{:?}", execution_result.unwrap_err());
+    assert!(
+        error_text.contains(
+            "missing required field `version` for dependency 'raylib' in profile 'debug'"
+        ),
+        "Expected dependency contextual breadcrumbs in: {error_text}"
+    );
+    assert!(
+        error_text.contains("manifest.yaml:10:9") || error_text.contains("manifest.yaml:10:"),
+        "Expected exact line location in: {error_text}"
+    );
+    assert!(
+        error_text.contains("raylib:"),
+        "Expected visual snippet in: {error_text}"
+    );
+}
+
+#[test]
+fn test_solix_build_unknown_field_in_profile_displays_rich_diagnostics() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_dir = workspace.root_path().join("unknown_field_project");
+    std::fs::create_dir_all(&target_dir).expect("create target dir");
+
+    let malformed_manifest = r#"configuration:
+  name: unknown_field_app
+  version: "1.0.0"
+profiles:
+  release:
+    entrypoint: Main::main
+    non_existent_key: 123
+"#;
+    std::fs::write(target_dir.join("manifest.yaml"), malformed_manifest).expect("write manifest");
+
+    let build_cli =
+        Cli::try_parse_from(["solix", "build", target_dir.to_str().expect("valid path")])
+            .expect("parse build cli");
+
+    let execution_result = run(build_cli);
+    assert!(
+        execution_result.is_err(),
+        "Build must fail on unknown field"
+    );
+    let error_text = format!("{:?}", execution_result.unwrap_err());
+    assert!(
+        error_text.contains("unknown field `non_existent_key` in profile 'release'"),
+        "Expected unknown field diagnostic in: {error_text}"
+    );
+    assert!(
+        error_text.contains("manifest.yaml:7:5") || error_text.contains("manifest.yaml:7:"),
+        "Expected exact line location in: {error_text}"
+    );
+}
+
+#[test]
+fn test_solix_build_deprecated_inherits_displays_rich_diagnostics() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_dir = workspace.root_path().join("inherits_project");
+    std::fs::create_dir_all(&target_dir).expect("create target dir");
+
+    let malformed_manifest = r#"configuration:
+  name: inherits_app
+  version: "1.0.0"
+profiles:
+  release: {}
+  debug:
+    inherits: release
+"#;
+    std::fs::write(target_dir.join("manifest.yaml"), malformed_manifest).expect("write manifest");
+
+    let build_cli =
+        Cli::try_parse_from(["solix", "build", target_dir.to_str().expect("valid path")])
+            .expect("parse build cli");
+
+    let execution_result = run(build_cli);
+    assert!(
+        execution_result.is_err(),
+        "Build must fail on deprecated inherits"
+    );
+    let error_text = format!("{:?}", execution_result.unwrap_err());
+    assert!(
+        error_text.contains("profile 'debug' uses 'inherits', which has been removed"),
+        "Expected inherits deprecation diagnostic in: {error_text}"
+    );
+    assert!(
+        error_text.contains("manifest.yaml:7:5"),
+        "Expected exact line location in: {error_text}"
+    );
+}
