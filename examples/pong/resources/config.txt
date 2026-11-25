@@ -1,0 +1,1 @@
+# Solix resources directory for pong

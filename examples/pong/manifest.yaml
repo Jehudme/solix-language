@@ -1,0 +1,56 @@
+vars:
+  dependencies: &dependencies
+   raylib:
+    profile: release
+    version: 5.5.0
+   
+   solix:
+    profile: release
+    version: 2.1.0
+
+configuration:
+  name: pong
+  version: 0.1.0
+  description: "A Solix package"
+  license: "Apache-2.0"
+  authors: []
+
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms: 
+      - all
+    dependencies: *dependencies
+
+  debug:
+    entrypoint: Main::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms: 
+      - host
+    dependencies: *dependencies
+
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+      - tests
+    platforms: 
+      - host
+    dependencies: *dependencies
+

@@ -1,0 +1,31 @@
+# Configuration for cross-compiling Raylib native bridge across all platforms via cross-rs containers.
+
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev"
+]
+
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
+pre-build = [
+    "dpkg --add-architecture arm64",
+    "apt-get update && apt-get install --assume-yes cmake libgl1-mesa-dev:arm64 libx11-dev:arm64 libxcursor-dev:arm64 libxrandr-dev:arm64 libxinerama-dev:arm64 libxi-dev:arm64"
+]
+
+[target.x86_64-pc-windows-gnu]
+image = "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
+pre-build = [
+    "apt-get update && apt-get install --assume-yes cmake"
+]
+
+[target.x86_64-apple-darwin]
+image = "ghcr.io/cross-rs/x86_64-apple-darwin:edge"
+pre-build = [
+    "apt-get update && apt-get install --assume-yes cmake"
+]
+
+[target.aarch64-apple-darwin]
+image = "ghcr.io/cross-rs/aarch64-apple-darwin:edge"
+pre-build = [
+    "apt-get update && apt-get install --assume-yes cmake"
+]

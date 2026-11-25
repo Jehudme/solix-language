@@ -20,6 +20,7 @@ profiles:
     natives:
       raylib:
         profile: release
+        docker: true
 
   debug:
     optimization_level: 0

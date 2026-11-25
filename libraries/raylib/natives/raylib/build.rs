@@ -2,6 +2,21 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn resolve_in_path(executable_name: &str) -> String {
+    if executable_name.contains('/') || executable_name.contains('\\') {
+        return executable_name.to_string();
+    }
+    if let Some(paths) = env::var_os("PATH") {
+        for directory in env::split_paths(&paths) {
+            let candidate = directory.join(executable_name);
+            if candidate.is_file() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+    executable_name.to_string()
+}
+
 fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
     if cfg!(windows) {
         if let Some(raw_text) = path.to_str() {
@@ -122,7 +137,7 @@ fn main() {
             let toolchain_file_env = env::var(format!("CMAKE_TOOLCHAIN_FILE_{underscored_triple}"))
                 .or_else(|_| env::var("CMAKE_TOOLCHAIN_FILE"))
                 .ok()
-                .filter(|val| !val.trim().is_empty());
+                .filter(|val| !val.trim().is_empty() && val != "/opt/toolchain.cmake");
             if let Some(ref toolchain_path) = toolchain_file_env {
                 if Path::new(toolchain_path).exists() {
                     cmake_cmd.arg(format!("-DCMAKE_TOOLCHAIN_FILE={toolchain_path}"));
@@ -142,9 +157,14 @@ fn main() {
                     cmake_cmd.arg("-DCMAKE_SYSTEM_NAME=Linux");
                     if target_triple.starts_with("aarch64-") {
                         cmake_cmd.arg("-DCMAKE_SYSTEM_PROCESSOR=aarch64");
+                        cmake_cmd.arg("-DCMAKE_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu");
                     } else if target_triple.starts_with("x86_64-") {
                         cmake_cmd.arg("-DCMAKE_SYSTEM_PROCESSOR=x86_64");
+                        cmake_cmd.arg("-DCMAKE_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu");
                     }
+                    cmake_cmd.arg("-DCMAKE_FIND_ROOT_PATH=/");
+                    cmake_cmd.arg("-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH");
+                    cmake_cmd.arg("-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH");
                 } else if target_triple.contains("-apple-darwin") {
                     cmake_cmd.arg("-DCMAKE_SYSTEM_NAME=Darwin");
                 }
@@ -155,28 +175,32 @@ fn main() {
                 .ok()
                 .filter(|val| !val.trim().is_empty());
             if let Some(c_compiler) = target_cc {
-                cmake_cmd.arg(format!("-DCMAKE_C_COMPILER={c_compiler}"));
+                let resolved_tool_path = resolve_in_path(&c_compiler);
+                cmake_cmd.arg(format!("-DCMAKE_C_COMPILER={resolved_tool_path}"));
             }
             let target_cxx = env::var(format!("CXX_{underscored_triple}"))
                 .or_else(|_| env::var("TARGET_CXX"))
                 .ok()
                 .filter(|val| !val.trim().is_empty());
             if let Some(cxx_compiler) = target_cxx {
-                cmake_cmd.arg(format!("-DCMAKE_CXX_COMPILER={cxx_compiler}"));
+                let resolved_tool_path = resolve_in_path(&cxx_compiler);
+                cmake_cmd.arg(format!("-DCMAKE_CXX_COMPILER={resolved_tool_path}"));
             }
             let target_ar = env::var(format!("AR_{underscored_triple}"))
                 .or_else(|_| env::var("TARGET_AR"))
                 .ok()
                 .filter(|val| !val.trim().is_empty());
             if let Some(archiver) = target_ar {
-                cmake_cmd.arg(format!("-DCMAKE_AR={archiver}"));
+                let resolved_tool_path = resolve_in_path(&archiver);
+                cmake_cmd.arg(format!("-DCMAKE_AR={resolved_tool_path}"));
             }
             let target_ranlib = env::var(format!("RANLIB_{underscored_triple}"))
                 .or_else(|_| env::var("TARGET_RANLIB"))
                 .ok()
                 .filter(|val| !val.trim().is_empty());
             if let Some(ranlib_tool) = target_ranlib {
-                cmake_cmd.arg(format!("-DCMAKE_RANLIB={ranlib_tool}"));
+                let resolved_tool_path = resolve_in_path(&ranlib_tool);
+                cmake_cmd.arg(format!("-DCMAKE_RANLIB={resolved_tool_path}"));
             }
 
             if target_triple == "x86_64-apple-darwin" {
