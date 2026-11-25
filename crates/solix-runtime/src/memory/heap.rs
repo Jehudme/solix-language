@@ -261,11 +261,11 @@ impl VirtualHeap {
     /// Returns `RuntimeError::NullReferenceAccess` if the address is 0 or unrecognized.
     pub fn deallocate(&mut self, payload_addr: u32) -> Result<(), RuntimeError> {
         if payload_addr == 0 {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
         let addr = payload_addr as usize;
         if addr < self.static_size + HEADER_SIZE || addr > self.buffer.len() {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
 
         let header = self.read_header(payload_addr)?;
@@ -274,7 +274,7 @@ impl VirtualHeap {
         let block_offset = block_abs_addr - self.static_size;
 
         if header.ref_count == 0 {
-            return Err(RuntimeError::NullReferenceAccess);
+            return Err(Self::null_reference_error());
         }
 
         // Clear payload and mark header dead

@@ -46,6 +46,14 @@ public class HashSet<T> implements ISet<T>, IReadOnlyCollection<T>, IIterable<T>
         this.internal_map = new HashMap<T, bool>(initial_capacity, hasher);
     }
 
+    public HashSet(int32(*)(T) hasher, bool(*)(T, T) key_equality) {
+        this.internal_map = new HashMap<T, bool>(hasher, key_equality);
+    }
+
+    public HashSet(int32 initial_capacity, int32(*)(T) hasher, bool(*)(T, T) key_equality) {
+        this.internal_map = new HashMap<T, bool>(initial_capacity, hasher, key_equality);
+    }
+
     public HashSet(T[] items) {
         this.internal_map = new HashMap<T, bool>();
         if (items != null) {

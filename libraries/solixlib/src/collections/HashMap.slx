@@ -1,6 +1,8 @@
 package solix.collections;
 
 import solix.core.IStringable;
+import solix.core.IHashable;
+import solix.core.IEquatable;
 import solix.core.String;
 import solix.core.StringBuilder;
 import solix.core.Primitives;
@@ -99,6 +101,25 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         if (first_key instanceof String && second_key instanceof String) {
             return ((String)first_key).equals((String)second_key);
         }
+        if (first_key instanceof IEquatable) {
+            return ((IEquatable<K>)first_key).equals(second_key);
+        }
+        return false;
+    }
+
+    private bool check_values_equal(V first_value, V second_value) {
+        if (first_value == second_value) {
+            return true;
+        }
+        if (first_value == null || second_value == null) {
+            return false;
+        }
+        if (first_value instanceof String && second_value instanceof String) {
+            return ((String)first_value).equals((String)second_value);
+        }
+        if (first_value instanceof IEquatable) {
+            return ((IEquatable<V>)first_value).equals(second_value);
+        }
         return false;
     }
 
@@ -112,6 +133,9 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         }
         if (lookup_key instanceof String) {
             return ((String)lookup_key).hash_code() & 0x7FFFFFFF;
+        }
+        if (lookup_key instanceof IHashable) {
+            return ((IHashable)lookup_key).hash_code() & 0x7FFFFFFF;
         }
         int32 default_hash = Primitives::hash_any<K>(lookup_key);
         return default_hash & 0x7FFFFFFF;
@@ -157,7 +181,7 @@ public class HashMap<K, V> implements IMap<K, V>, IStringable {
         for (int32 bucket_index = 0; bucket_index < this.table.length; bucket_index = bucket_index + 1) {
             HashMapEntry<K, V> current_entry = this.table[bucket_index];
             while (current_entry != null) {
-                if (current_entry.value == target_value) {
+                if (this.check_values_equal(current_entry.value, target_value)) {
                     return true;
                 }
                 current_entry = current_entry.next_entry;

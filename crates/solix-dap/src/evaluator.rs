@@ -161,6 +161,42 @@ pub fn evaluate_expression_in_frame(
         };
     }
 
+    // Check logical OR (||) at depth zero
+    if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "||", false) {
+        let left_operand_text = &trimmed_expression[..operator_position];
+        let right_operand_text = &trimmed_expression[operator_position + 2..];
+        let left_evaluated_value =
+            evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+        let right_evaluated_value =
+            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+        return match (left_evaluated_value, right_evaluated_value) {
+            (Value::Bool(left_bool), Value::Bool(right_bool)) => Ok(Value::Bool(left_bool || right_bool)),
+            (first_operand, second_operand) => Err(format!(
+                "Operator '||' requires boolean operands, found '{}' and '{}'",
+                first_operand.type_name(),
+                second_operand.type_name()
+            )),
+        };
+    }
+
+    // Check logical AND (&&) at depth zero
+    if let Some(operator_position) = find_operator_at_zero_depth(trimmed_expression, "&&", false) {
+        let left_operand_text = &trimmed_expression[..operator_position];
+        let right_operand_text = &trimmed_expression[operator_position + 2..];
+        let left_evaluated_value =
+            evaluate_expression_in_frame(left_operand_text, virtual_machine, frame_index)?;
+        let right_evaluated_value =
+            evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
+        return match (left_evaluated_value, right_evaluated_value) {
+            (Value::Bool(left_bool), Value::Bool(right_bool)) => Ok(Value::Bool(left_bool && right_bool)),
+            (first_operand, second_operand) => Err(format!(
+                "Operator '&&' requires boolean operands, found '{}' and '{}'",
+                first_operand.type_name(),
+                second_operand.type_name()
+            )),
+        };
+    }
+
     // Check binary comparison operators (==, !=, <=, >=, <, >) at depth zero
     for comparison_operator in &["==", "!=", "<=", ">=", "<", ">"] {
         if let Some(operator_position) =
@@ -253,6 +289,53 @@ pub fn evaluate_expression_in_frame(
         return Err(format!(
             "Cannot read field '{field_identifier}' on non-object"
         ));
+    }
+
+    // Check array indexing (e.g. `items[0]` or `matrix[row]`) at depth zero
+    if trimmed_expression.ends_with(']') {
+        if let Some(open_bracket_index) = find_matching_open_bracket(trimmed_expression) {
+            let target_array_text = trimmed_expression[..open_bracket_index].trim();
+            let index_expression_text =
+                trimmed_expression[open_bracket_index + 1..trimmed_expression.len() - 1].trim();
+            if !target_array_text.is_empty() && !index_expression_text.is_empty() {
+                let target_array_value =
+                    evaluate_expression_in_frame(target_array_text, virtual_machine, frame_index)?;
+                let index_value = evaluate_expression_in_frame(
+                    index_expression_text,
+                    virtual_machine,
+                    frame_index,
+                )?;
+                let index_integer = match index_value {
+                    Value::I32(val) if val >= 0 => val as usize,
+                    Value::I64(val) if val >= 0 => val as usize,
+                    Value::I32(_) | Value::I64(_) => {
+                        return Err("Array index cannot be negative".to_string());
+                    }
+                    other => {
+                        return Err(format!(
+                            "Array index must be an integer, found '{}'",
+                            other.type_name()
+                        ));
+                    }
+                };
+                if let Value::Ref(array_heap_address) = target_array_value {
+                    let array_elements = virtual_machine
+                        .inspect_array_elements(array_heap_address)
+                        .map_err(|runtime_error| runtime_error.message())?;
+                    if index_integer < array_elements.len() {
+                        return Ok(array_elements[index_integer].2);
+                    }
+                    return Err(format!(
+                        "Array index out of bounds: index {index_integer} >= length {}",
+                        array_elements.len()
+                    ));
+                }
+                return Err(format!(
+                    "Cannot index non-array value of type '{}'",
+                    target_array_value.type_name()
+                ));
+            }
+        }
     }
 
     // Check register lookup (e.g. `r0`, `r1`)
@@ -503,6 +586,12 @@ pub fn check_hit_condition(hit_count: u64, condition_text: &str) -> bool {
         }
     }
 
+    if let Some(stripped_condition) = trimmed_condition.strip_prefix("<=") {
+        if let Ok(target_number) = stripped_condition.trim().parse::<u64>() {
+            return hit_count <= target_number;
+        }
+    }
+
     if let Some(stripped_condition) = trimmed_condition.strip_prefix("==") {
         if let Ok(target_number) = stripped_condition.trim().parse::<u64>() {
             return hit_count == target_number;
@@ -512,6 +601,12 @@ pub fn check_hit_condition(hit_count: u64, condition_text: &str) -> bool {
     if let Some(stripped_condition) = trimmed_condition.strip_prefix('>') {
         if let Ok(target_number) = stripped_condition.trim().parse::<u64>() {
             return hit_count > target_number;
+        }
+    }
+
+    if let Some(stripped_condition) = trimmed_condition.strip_prefix('<') {
+        if let Ok(target_number) = stripped_condition.trim().parse::<u64>() {
+            return hit_count < target_number;
         }
     }
 
@@ -574,4 +669,24 @@ pub fn interpolate_log_template(
     }
 
     rendered_output
+}
+
+fn find_matching_open_bracket(expression_text: &str) -> Option<usize> {
+    if !expression_text.ends_with(']') {
+        return None;
+    }
+    let mut bracket_depth = 0;
+    for (byte_index, character) in expression_text.char_indices().rev() {
+        match character {
+            ']' => bracket_depth += 1,
+            '[' => {
+                bracket_depth -= 1;
+                if bracket_depth == 0 {
+                    return Some(byte_index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

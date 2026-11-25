@@ -5,6 +5,14 @@
 use crate::cli::FmtArgs;
 use std::path::{Path, PathBuf};
 
+const IGNORED_DIRECTORY_NAMES: &[&str] = &[
+    ".git",
+    "build",
+    "target",
+    ".cache",
+    "node_modules",
+];
+
 /// Executes the Solix formatter over specified files or directories.
 ///
 /// # Errors
@@ -20,21 +28,21 @@ pub fn execute_fmt(args: FmtArgs) -> anyhow::Result<i32> {
     }
 
     if files_to_format.is_empty() {
-        let current_dir = std::env::current_dir()?;
-        collect_slx_files(&current_dir, &mut files_to_format)?;
+        let current_working_directory = std::env::current_dir()?;
+        collect_slx_files(&current_working_directory, &mut files_to_format)?;
     }
 
     let mut unformatted_count = 0;
 
     for file_path in &files_to_format {
-        let content = std::fs::read_to_string(file_path)?;
-        let formatted = solix_lsp::format_source(&content);
-        if content != formatted {
+        let file_content = std::fs::read_to_string(file_path)?;
+        let formatted_content = solix_lsp::format_source(&file_content);
+        if file_content != formatted_content {
             unformatted_count += 1;
             if args.check {
                 println!("Would format: {}", file_path.display());
             } else {
-                std::fs::write(file_path, &formatted)?;
+                std::fs::write(file_path, &formatted_content)?;
                 println!("Formatted: {}", file_path.display());
             }
         }
@@ -47,14 +55,28 @@ pub fn execute_fmt(args: FmtArgs) -> anyhow::Result<i32> {
     }
 }
 
-fn collect_slx_files(dir: &Path, result: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_slx_files(&path, result)?;
-        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "slx") {
-            result.push(path);
+fn collect_slx_files(
+    source_directory: &Path,
+    collected_files: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    for directory_entry_result in std::fs::read_dir(source_directory)? {
+        let directory_entry = directory_entry_result?;
+        let entry_path = directory_entry.path();
+        if entry_path.is_dir() {
+            if let Some(directory_name) = entry_path.file_name().and_then(|name| name.to_str()) {
+                if directory_name.starts_with('.')
+                    || IGNORED_DIRECTORY_NAMES.contains(&directory_name)
+                {
+                    continue;
+                }
+            }
+            collect_slx_files(&entry_path, collected_files)?;
+        } else if entry_path.is_file()
+            && entry_path
+                .extension()
+                .is_some_and(|file_extension| file_extension == "slx")
+        {
+            collected_files.push(entry_path);
         }
     }
     Ok(())

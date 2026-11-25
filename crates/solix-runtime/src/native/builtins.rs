@@ -23,12 +23,35 @@ pub fn register_all_builtins(registry: &mut NativeRegistry) {
 fn format_vm_value(vm: &VirtualMachine, val: &Value) -> String {
     match val {
         Value::Ref(addr) if *addr > 0 => {
-            if let Ok(header) = vm.heap.read_header(*addr)
-                && header.tag == crate::memory::BlockTag::String
-            {
-                vm.heap
-                    .read_string(*addr)
-                    .unwrap_or_else(|_| format!("{val}"))
+            if let Ok(header) = vm.heap.read_header(*addr) {
+                if header.tag == crate::memory::BlockTag::String {
+                    return vm.heap
+                        .read_string(*addr)
+                        .unwrap_or_else(|_| format!("{val}"));
+                }
+                if header.tag == crate::memory::BlockTag::Object
+                    || header.tag == crate::memory::BlockTag::ObjectPod
+                {
+                    if let Ok(vtable_id) = vm.heap.read_u32(*addr)
+                        && let Some(class_def) = vm.context.get_class_by_vtable_id(vtable_id)
+                    {
+                        if class_def.symbol.ends_with("String")
+                            && let Ok(raw_field) = vm.heap.read_u64(*addr + 8)
+                        {
+                            let inner_val = Value::from_raw_u64(raw_field);
+                            if let Value::Ref(str_addr) = inner_val
+                                && str_addr > 0
+                                && let Ok(str_header) = vm.heap.read_header(str_addr)
+                                && str_header.tag == crate::memory::BlockTag::String
+                            {
+                                return vm.heap
+                                    .read_string(str_addr)
+                                    .unwrap_or_else(|_| format!("{val}"));
+                            }
+                        }
+                    }
+                }
+                format!("{val} (tag={:?})", header.tag)
             } else {
                 format!("{val}")
             }
@@ -114,6 +137,5 @@ pub fn builtin_str_concat(vm: &mut VirtualMachine, args: &[Value]) -> Result<Val
         .heap
         .allocate(string_bytes.len(), crate::memory::BlockTag::String)?;
     vm.heap.write_bytes(allocated_address, string_bytes)?;
-    vm.interned_string_addrs.push(allocated_address);
     Ok(Value::Ref(allocated_address))
 }

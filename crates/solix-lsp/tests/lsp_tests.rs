@@ -11,7 +11,7 @@ use solix_lsp::code_lens::code_lenses;
 use solix_lsp::completion::{completions, resolve_completion_item};
 use solix_lsp::diagnostics::{binding_error_to_diagnostic, parsing_error_to_diagnostic};
 use solix_lsp::folding::folding_ranges;
-use solix_lsp::formatter::format_source;
+use solix_lsp::formatter::{compute_indent_level_at_line, format_range, format_source};
 use solix_lsp::hierarchy::{
     incoming_calls, prepare_call_hierarchy, prepare_type_hierarchy, subtypes,
 };
@@ -975,6 +975,35 @@ fn test_ms029_formatter_compound_operators_and_else_block() {
     assert!(
         formatted_output.contains("} else {"),
         "Expected '}} else {{' on single indented line: {formatted_output}"
+    );
+}
+
+#[test]
+fn test_format_range_preserves_method_base_indentation() {
+    let (workspace, test_uri) = create_test_workspace();
+    let sample_source = "class Service {\n    void execute() {\nint32 counter=10;\ncounter+=5;\n    }\n}\n";
+    let snapshot = workspace.did_open(test_uri, 1, sample_source.to_string());
+
+    // Selection covering lines 2 and 3 (the unindented lines inside execute())
+    let selected_range = Range {
+        start: Position { line: 2, character: 0 },
+        end: Position { line: 4, character: 0 },
+    };
+
+    let computed_indent = compute_indent_level_at_line(&snapshot.source_text, 2);
+    assert_eq!(computed_indent, 2, "Expected 2 indentation levels (8 spaces) inside execute()");
+
+    let edits = format_range(&snapshot, selected_range);
+    assert_eq!(edits.len(), 1);
+    assert!(
+        edits[0].new_text.contains("        int32 counter = 10;"),
+        "Expected 8-space indentation in range edit: {:?}",
+        edits[0].new_text
+    );
+    assert!(
+        edits[0].new_text.contains("        counter += 5;"),
+        "Expected 8-space indentation in range edit: {:?}",
+        edits[0].new_text
     );
 }
 

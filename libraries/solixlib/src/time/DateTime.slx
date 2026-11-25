@@ -182,9 +182,34 @@ public class DateTime implements IStringable, IEquatable<DateTime>, IComparable<
         return new DateTime(this.epoch_millis_val, this.is_utc_flag);
     }
 
+    private static String pad_digits(int32 number_value, int32 total_digits) {
+        String number_string = new String("" + number_value);
+        while (number_string.length() < total_digits) {
+            number_string = new String("0" + number_string);
+        }
+        return number_string;
+    }
+
     public String to_iso_string() {
-        char[] chars_result = DateTime::native_iso8601(this.epoch_millis_val);
-        return new String(chars_result);
+        if (this.is_utc_flag) {
+            char[] chars_result = DateTime::native_iso8601(this.epoch_millis_val);
+            return new String(chars_result);
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append(DateTime::pad_digits(this.year_component, 4));
+        builder.append("-");
+        builder.append(DateTime::pad_digits(this.month_component, 2));
+        builder.append("-");
+        builder.append(DateTime::pad_digits(this.day_component, 2));
+        builder.append("T");
+        builder.append(DateTime::pad_digits(this.hour_component, 2));
+        builder.append(":");
+        builder.append(DateTime::pad_digits(this.minute_component, 2));
+        builder.append(":");
+        builder.append(DateTime::pad_digits(this.second_component, 2));
+        builder.append(".");
+        builder.append(DateTime::pad_digits(this.millisecond_component, 3));
+        return builder.to_string();
     }
 
     public String to_string() {

@@ -55,21 +55,25 @@ public class TestIo {
 
         String combined_text = combined_path.to_string();
         if (!combined_text.equals(new String("/var/log/solix.log"))) {
+            Console::println("FAILED ON COMBINED_TEXT");
             return false;
         }
 
         String directory_name = Path::get_directory_name(combined_text);
         if (!directory_name.equals(new String("/var/log"))) {
+            Console::println("FAILED ON DIRECTORY_NAME");
             return false;
         }
 
         String file_name = Path::get_file_name(combined_text);
         if (!file_name.equals(new String("solix.log"))) {
+            Console::println("FAILED ON FILE_NAME");
             return false;
         }
 
         String file_extension = Path::get_extension(combined_text);
         if (!file_extension.equals(new String(".log"))) {
+            Console::println("FAILED ON FILE_EXTENSION");
             return false;
         }
 

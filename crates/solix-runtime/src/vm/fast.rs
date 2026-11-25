@@ -29,6 +29,7 @@ impl VmTrap {
     #[cold]
     #[inline(never)]
     pub(crate) fn null_reference() -> Self {
+        eprintln!("TRAP null_reference:\n{}", std::backtrace::Backtrace::force_capture());
         Self(Box::new(RuntimeError::NullReferenceAccess))
     }
 
@@ -451,6 +452,7 @@ fn alloc_array_trap(
     array_len: usize,
     elem_size: usize,
     type_tag: u8,
+    vtable_id: u16,
 ) -> Result<u32, VmTrap> {
     let payload_size = array_len
         .checked_mul(elem_size)
@@ -463,6 +465,8 @@ fn alloc_array_trap(
     heap.write_u32(payload_addr, array_len as u32)
         .map_err(VmTrap::from_error)?;
     heap.write_u8(payload_addr + 4, elem_size as u8)
+        .map_err(VmTrap::from_error)?;
+    heap.write_u16(payload_addr + 5, vtable_id)
         .map_err(VmTrap::from_error)?;
     heap.write_u8(payload_addr + 7, type_tag)
         .map_err(VmTrap::from_error)?;
@@ -2369,20 +2373,32 @@ impl VirtualMachine {
                 let raw = self.heap.read_u64(field_addr).unwrap_or(0);
                 if raw == 0 || raw == Value::TAG_NULL {
                     Value::Null
+                } else if (raw & Value::TAG_MASK) == Value::TAG_REF {
+                    Value::Ref(raw as u32)
+                } else if (raw & Value::TAG_MASK) == 0 {
+                    Value::Ref((raw & 0xFFFF_FFFF) as u32)
                 } else {
                     Value::from_raw_u64(raw)
                 }
             }
             _ => {
                 let raw = self.heap.read_u64(field_addr).unwrap_or(0);
-                if raw == 0 {
-                    let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
-                    let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
-                    let is_ref = maybe_class.is_some_and(|cls| {
-                        cls.reference_field_offsets.contains(&offset)
-                            || cls.weak_field_offsets.contains(&offset)
-                    });
+                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                let maybe_class = self.context.get_class_by_vtable_id(vtable_id);
+                let is_ref = maybe_class.is_some_and(|cls| {
+                    cls.reference_field_offsets.contains(&offset)
+                        || cls.weak_field_offsets.contains(&offset)
+                });
+                if raw == 0 || (is_ref && raw == Value::TAG_NULL) {
                     if is_ref { Value::Null } else { Value::I32(0) }
+                } else if is_ref {
+                    if (raw & Value::TAG_MASK) == Value::TAG_REF {
+                        Value::Ref(raw as u32)
+                    } else if (raw & Value::TAG_MASK) == 0 {
+                        Value::Ref((raw & 0xFFFF_FFFF) as u32)
+                    } else {
+                        Value::from_raw_u64(raw)
+                    }
                 } else {
                     Value::from_raw_u64(raw)
                 }
@@ -2501,25 +2517,35 @@ impl VirtualMachine {
         let is_reference_element = elem_type_tag == 13 || elem_type_tag >= 0x80;
         if is_reference_element
             && (elem_type_tag & 0x80) != 0
-            && let target_vtable_id = (elem_type_tag & 0x7F) as u32
-            && target_vtable_id > 0
             && let Value::Ref(assigned_address) = val
             && assigned_address > 0
         {
-            let header = self
-                .heap
-                .read_header(assigned_address)
-                .map_err(VmTrap::from_error)?;
-            if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
-                let assigned_vtable_id = self
+            let target_vtable_id = {
+                let vtable_u16 = unsafe {
+                    u16::from_le(std::ptr::read_unaligned(buf_ptr.add(arr_offset + 5).cast::<u16>()))
+                } as u32;
+                if vtable_u16 > 0 {
+                    vtable_u16
+                } else {
+                    (elem_type_tag & 0x7F) as u32
+                }
+            };
+            if target_vtable_id > 0 {
+                let header = self
                     .heap
-                    .read_u32(assigned_address)
+                    .read_header(assigned_address)
                     .map_err(VmTrap::from_error)?;
-                if !self.is_instance_of(assigned_vtable_id, target_vtable_id) {
-                    return Err(VmTrap::from_error(RuntimeError::ArrayStoreMismatch {
-                        assigned_class: assigned_vtable_id,
-                        array_element_class: target_vtable_id,
-                    }));
+                if header.tag == BlockTag::Object || header.tag == BlockTag::ObjectPod {
+                    let assigned_vtable_id = self
+                        .heap
+                        .read_u32(assigned_address)
+                        .map_err(VmTrap::from_error)?;
+                    if !self.is_instance_of(assigned_vtable_id, target_vtable_id) {
+                        return Err(VmTrap::from_error(RuntimeError::ArrayStoreMismatch {
+                            assigned_class: assigned_vtable_id,
+                            array_element_class: target_vtable_id,
+                        }));
+                    }
                 }
             }
         }
@@ -4895,6 +4921,11 @@ impl VirtualMachine {
                                     unsafe {
                                         if raw == 0 || raw == Value::TAG_NULL {
                                             *reg_base.add(dst_idx) = Value::Null;
+                                        } else if (raw & Value::TAG_MASK) == Value::TAG_REF {
+                                            *reg_base.add(dst_idx) = Value::Ref(raw as u32);
+                                        } else if (raw & Value::TAG_MASK) == 0 {
+                                            *reg_base.add(dst_idx) =
+                                                Value::Ref((raw & 0xFFFF_FFFF) as u32);
                                         } else {
                                             *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
                                         }
@@ -5092,9 +5123,14 @@ impl VirtualMachine {
                             }));
                         }
                         let array_len = raw_len as usize;
-                        let elem_size = (inst.src2() as usize).max(1);
+                        let type_tag = inst.flags();
+                        let (elem_size, vtable_id) = if type_tag >= 0x80 {
+                            (8, inst.src2())
+                        } else {
+                            ((inst.src2() as usize).max(1), 0)
+                        };
                         let payload_addr =
-                            alloc_array_trap(&mut self.heap, array_len, elem_size, inst.flags())?;
+                            alloc_array_trap(&mut self.heap, array_len, elem_size, type_tag, vtable_id)?;
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
                         }

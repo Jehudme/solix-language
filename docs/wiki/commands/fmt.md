@@ -15,6 +15,7 @@ solix fmt [files...] [options]
 ## 2. Key Options & Flags
 
 * `[files...]`: List of `.slx` source files or project directories to format. If omitted, recursively formats all `.slx` files in the current directory and its subdirectories.
+* `Directory Exclusions`: Directory-level scanning automatically ignores common build caches and VCS metadata folders (`.git`, `build`, `target`, `.cache`).
 * `--check`: Runs formatter in verification mode. Exits with status code `1` if any file requires formatting without writing changes to disk (ideal for CI pipelines).
 * `-h, --help`: Prints command help information.
 

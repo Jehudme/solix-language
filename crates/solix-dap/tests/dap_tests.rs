@@ -221,6 +221,15 @@ fn test_hit_condition_parser() {
     assert!(check_hit_condition(15, ">= 10"));
     assert!(!check_hit_condition(9, ">= 10"));
 
+    // Less than or equal
+    assert!(check_hit_condition(5, "<= 5"));
+    assert!(check_hit_condition(3, "<= 5"));
+    assert!(!check_hit_condition(6, "<= 5"));
+
+    // Strictly less than
+    assert!(check_hit_condition(4, "< 5"));
+    assert!(!check_hit_condition(5, "< 5"));
+
     // Exact hit
     assert!(check_hit_condition(7, "== 7"));
     assert!(!check_hit_condition(8, "== 7"));
@@ -229,6 +238,34 @@ fn test_hit_condition_parser() {
     assert!(check_hit_condition(10, "% 5 == 0"));
     assert!(check_hit_condition(15, "% 5 == 0"));
     assert!(!check_hit_condition(12, "% 5 == 0"));
+}
+
+#[test]
+fn test_evaluator_logical_operators_and_compound_expressions() {
+    let runtime_options = RuntimeOptions::new();
+    let runtime_context = RuntimeContext::new(runtime_options).expect("RuntimeContext creation");
+    let virtual_machine = VirtualMachine::new(runtime_context);
+
+    // Logical AND
+    let and_result = evaluate_expression_in_frame("true && false", &virtual_machine, 0).expect("evaluate AND");
+    assert_eq!(and_result, Value::Bool(false));
+
+    let and_true = evaluate_expression_in_frame("true && true", &virtual_machine, 0).expect("evaluate AND");
+    assert_eq!(and_true, Value::Bool(true));
+
+    // Logical OR
+    let or_result = evaluate_expression_in_frame("false || true", &virtual_machine, 0).expect("evaluate OR");
+    assert_eq!(or_result, Value::Bool(true));
+
+    let or_false = evaluate_expression_in_frame("false || false", &virtual_machine, 0).expect("evaluate OR");
+    assert_eq!(or_false, Value::Bool(false));
+
+    // Compound comparison with AND / OR
+    let compound_result = evaluate_expression_in_frame("10 > 5 && 2 < 4", &virtual_machine, 0).expect("evaluate compound");
+    assert_eq!(compound_result, Value::Bool(true));
+
+    let compound_or = evaluate_expression_in_frame("10 < 5 || 20 == 20", &virtual_machine, 0).expect("evaluate compound OR");
+    assert_eq!(compound_or, Value::Bool(true));
 }
 
 #[test]

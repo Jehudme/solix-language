@@ -357,7 +357,7 @@ public class Math {
             return false;
         }
         int64 test_factor = 5L;
-        while (test_factor * test_factor <= candidate) {
+        while (test_factor <= candidate / test_factor) {
             if ((candidate % test_factor) == 0L || (candidate % (test_factor + 2L)) == 0L) {
                 return false;
             }

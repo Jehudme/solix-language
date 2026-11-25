@@ -184,12 +184,21 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 .layouts
                 .values()
                 .flat_map(|layout| {
-                    let simple = layout
+                    let base_name = layout
                         .class_name
+                        .split('<')
+                        .next()
+                        .unwrap_or(&layout.class_name);
+                    let simple_base = base_name
                         .rsplit(['.', ':'])
                         .next()
-                        .unwrap_or(&layout.class_name)
-                        .to_string();
+                        .unwrap_or(base_name);
+                    let generic_part = layout
+                        .class_name
+                        .split_once('<')
+                        .map(|(_, args)| format!("<{args}"))
+                        .unwrap_or_default();
+                    let simple = format!("{simple_base}{generic_part}");
                     vec![
                         (layout.class_name.clone(), layout.clone()),
                         (simple, layout.clone()),
@@ -363,13 +372,9 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     if let Some(artifacts) = &context.binding_artifacts {
         let mut iface_to_id = HashMap::new();
         for layout in artifacts.layouts.values() {
-            let simple = layout
-                .class_name
-                .rsplit(['.', ':'])
-                .next()
-                .unwrap_or(&layout.class_name);
+            let simple = extract_simple_class_name(&layout.class_name);
             iface_to_id.insert(layout.class_name.clone(), layout.vtable_id);
-            iface_to_id.insert(simple.to_string(), layout.vtable_id);
+            iface_to_id.insert(simple, layout.vtable_id);
         }
 
         for layout in artifacts.layouts.values() {
@@ -379,7 +384,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 continue;
             }
             let class_name = &layout.class_name;
-            let simple = class_name.rsplit(['.', ':']).next().unwrap_or(class_name);
+            let simple = extract_simple_class_name(class_name);
             let dtor_sym = format!("{class_name}::~destructor");
             let dtor_sym_simple = format!("{simple}::~destructor");
             let dtor_id = function_ids
@@ -2115,6 +2120,21 @@ fn resolve_annotation_type(
     }
 }
 
+fn extract_simple_class_name(name: &str) -> String {
+    let base_name = name.split('<').next().unwrap_or(name);
+    let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
+    let generic_part = name.split_once('<').map(|(_, args)| format!("<{args}")).unwrap_or_default();
+    format!("{simple_base}{generic_part}")
+}
+
+fn extract_class_name_from_method_symbol(symbol: &str) -> &str {
+    let symbol_without_params = symbol.split('(').next().unwrap_or(symbol);
+    symbol_without_params
+        .rsplit_once("::")
+        .map(|(class_prefix, _)| class_prefix)
+        .unwrap_or("")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_single_method(
     symbol: &str,
@@ -2151,10 +2171,7 @@ fn compile_single_method(
 
     if is_instance {
         let this_register = allocator.alloc_param("this")?;
-        let class_identifier = symbol
-            .rsplit_once("::")
-            .map(|(class_prefix, _)| class_prefix)
-            .unwrap_or("Object");
+        let class_identifier = extract_class_name_from_method_symbol(symbol);
         func.local_variables
             .push(solix_common::bytecode::LocalVariableDebugInfo {
                 register: this_register,
@@ -2197,10 +2214,7 @@ fn compile_single_method(
     allocator.enter_scope();
 
     if let Some(body) = &method_decl.body {
-        let cls_name = symbol
-            .rsplit_once("::")
-            .map(|(class_prefix, _)| class_prefix)
-            .unwrap_or("");
+        let cls_name = extract_class_name_from_method_symbol(symbol);
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2302,10 +2316,7 @@ fn compile_constructor(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol
-            .rsplit_once("::")
-            .map(|(class_prefix, _)| class_prefix)
-            .unwrap_or("");
+        let cls_name = extract_class_name_from_method_symbol(symbol);
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2322,21 +2333,18 @@ fn compile_constructor(
 
         // Superclass constructor chaining: super(...)
         if let Some(super_args) = &ctor.super_call_args {
-            let cls_name = symbol
-                .rsplit_once("::")
-                .map(|(class_prefix, _)| class_prefix)
-                .unwrap_or("");
-            let simple_cls = cls_name.rsplit(['.', ':']).next().unwrap_or(cls_name);
+            let cls_name = extract_class_name_from_method_symbol(symbol);
+            let simple_cls = extract_simple_class_name(cls_name);
             if let Some(layout) = class_layouts
                 .get(cls_name)
-                .or_else(|| class_layouts.get(simple_cls))
+                .or_else(|| class_layouts.get(&simple_cls))
                 && let Some(base_vtable_id) = layout.base_vtable_id
                 && let Some(base_cls) = class_layouts
                     .values()
                     .find(|layout| layout.vtable_id == base_vtable_id)
             {
                 let base_name = &base_cls.class_name;
-                let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
+                let simple_base = extract_simple_class_name(base_name);
                 let super_sym = format!("{base_name}::constructor");
                 let super_sym_simple = format!("{simple_base}::constructor");
                 if let Some(&super_func_id) = function_ids
@@ -2415,10 +2423,7 @@ fn compile_default_constructor(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol
-            .rsplit_once("::")
-            .map(|(class_prefix, _)| class_prefix)
-            .unwrap_or("");
+        let cls_name = extract_class_name_from_method_symbol(symbol);
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2430,17 +2435,17 @@ fn compile_default_constructor(
             .with_synthesized_functions(synthesized_lambdas)
             .with_enclosing_class(cls_name);
 
-        let simple_cls = cls_name.rsplit(['.', ':']).next().unwrap_or(cls_name);
+        let simple_cls = extract_simple_class_name(cls_name);
         if let Some(layout) = class_layouts
             .get(cls_name)
-            .or_else(|| class_layouts.get(simple_cls))
+            .or_else(|| class_layouts.get(&simple_cls))
             && let Some(base_vtable_id) = layout.base_vtable_id
             && let Some(base_cls) = class_layouts
                 .values()
                 .find(|layout| layout.vtable_id == base_vtable_id)
         {
             let base_name = &base_cls.class_name;
-            let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
+            let simple_base = extract_simple_class_name(base_name);
             let super_sym = format!("{base_name}::constructor");
             let super_sym_simple = format!("{simple_base}::constructor");
             if let Some(&super_func_id) = function_ids
@@ -2483,7 +2488,7 @@ fn compile_default_constructor(
                 );
                 let offset = if let Some(layout) = class_layouts
                     .get(cls_name)
-                    .or_else(|| class_layouts.get(simple_cls))
+                    .or_else(|| class_layouts.get(&simple_cls))
                 {
                     layout.field_offsets.get(field_name).copied().unwrap_or(0) as u16
                 } else {
@@ -2540,10 +2545,7 @@ fn compile_destructor(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol
-            .rsplit_once("::")
-            .map(|(class_prefix, _)| class_prefix)
-            .unwrap_or("");
+        let cls_name = extract_class_name_from_method_symbol(symbol);
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2559,17 +2561,17 @@ fn compile_destructor(
         let mut loop_stack = Vec::<LoopContext>::new();
         emitter.emit_block_statement(&dtor.body, &mut loop_stack)?;
 
-        let simple_cls = cls_name.rsplit(['.', ':']).next().unwrap_or(cls_name);
+        let simple_cls = extract_simple_class_name(cls_name);
         if let Some(layout) = class_layouts
             .get(cls_name)
-            .or_else(|| class_layouts.get(simple_cls))
+            .or_else(|| class_layouts.get(&simple_cls))
             && let Some(base_vtable_id) = layout.base_vtable_id
             && let Some(base_cls) = class_layouts
                 .values()
                 .find(|layout| layout.vtable_id == base_vtable_id)
         {
             let base_name = &base_cls.class_name;
-            let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
+            let simple_base = extract_simple_class_name(base_name);
             let super_dtor = format!("{base_name}::~destructor");
             let super_dtor_simple = format!("{simple_base}::~destructor");
             if let Some(&super_func_id) = function_ids
@@ -2656,10 +2658,7 @@ fn compile_operator(
     allocator.enter_scope();
 
     {
-        let cls_name = symbol
-            .rsplit_once("::")
-            .map(|(class_prefix, _)| class_prefix)
-            .unwrap_or("");
+        let cls_name = extract_class_name_from_method_symbol(symbol);
         let mut emitter = Emitter::new(&mut func, &mut allocator, pool)
             .with_sources(sources)
             .with_class_layouts(class_layouts)
@@ -2721,11 +2720,7 @@ fn index_monomorphized_class_symbols(
                 "GenericClass".to_string()
             }
         });
-    let simple_name = mangled_name
-        .rsplit(['.', ':'])
-        .next()
-        .unwrap_or(&mangled_name)
-        .to_string();
+    let simple_name = extract_simple_class_name(&mangled_name);
 
     let source_id = mono_cls.name_span.id;
     let code = sources

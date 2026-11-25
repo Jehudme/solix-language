@@ -591,15 +591,29 @@ impl<'ctx> Emitter<'ctx> {
                     ref symbol_name, ..
                 } = result_type
                 {
+                    let base_name = symbol_name.split('<').next().unwrap_or(symbol_name);
+                    let simple = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
                     let vtable_id = self
                         .class_layouts
-                        .and_then(|layouts| layouts.get(symbol_name))
+                        .and_then(|layouts| {
+                            layouts
+                                .get(symbol_name)
+                                .or_else(|| layouts.get(base_name))
+                                .or_else(|| layouts.get(simple))
+                        })
                         .map(|layout| layout.vtable_id as u16)
                         .unwrap_or(0);
-                    self.emit_instruction(
-                        Instruction::format_a(OpCode::CastCheck, 0, dst, src, vtable_id),
-                        Some(*span),
-                    );
+                    if vtable_id > 0 {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::CastCheck, 0, dst, src, vtable_id),
+                            Some(*span),
+                        );
+                    } else {
+                        self.emit_instruction(
+                            Instruction::format_a(OpCode::Mov, 0, dst, src, 0),
+                            Some(*span),
+                        );
+                    }
                 } else if matches!(
                     result_type,
                     Type::GenericParameter { .. } | Type::Unresolved(_)
@@ -801,34 +815,49 @@ impl<'ctx> Emitter<'ctx> {
             } => {
                 let r_size = self.emit_expression(size, None)?;
                 let dst = self.resolve_dst(target_reg)?;
+                let element_lexeme = self.get_lexeme(element_type.span());
+                let generic_substitutions = self.get_enclosing_generic_substitutions();
+                let mut resolved_element_name = element_lexeme.to_string();
+                if !generic_substitutions.is_empty() {
+                    if let Some(substituted) = generic_substitutions.get(element_lexeme) {
+                        resolved_element_name = substituted.clone();
+                    } else if resolved_element_name.contains('<')
+                        && let Some((base_name, args_part)) = resolved_element_name.split_once('<')
+                        && let Some(args_string) = args_part.strip_suffix('>')
+                    {
+                        let substituted_args: Vec<String> = split_top_level_generic_arguments(args_string)
+                            .into_iter()
+                            .map(|arg| {
+                                generic_substitutions
+                                    .get(arg)
+                                    .cloned()
+                                    .unwrap_or_else(|| arg.to_string())
+                            })
+                            .collect();
+                        resolved_element_name = format!("{base_name}<{}>", substituted_args.join(", "));
+                    }
+                }
                 let array_type = self.query_type(*span);
-                let type_tag = match array_type {
+                let (type_tag, vtable_id) = match array_type {
                     Type::Array {
                         element_type: ref array_element_type,
                         depth: 1,
                     } => {
                         let inner_tag = self.resolve_type_tag_for_type(array_element_type);
+                        let vtable = self.resolve_vtable_id_for_type(array_element_type);
                         if inner_tag == 0x80 {
-                            let element_lexeme = self.get_lexeme(element_type.span());
-                            let generic_substitutions = self.get_enclosing_generic_substitutions();
-                            let resolved_name = generic_substitutions
-                                .get(element_lexeme)
-                                .map(|name| name.as_str())
-                                .unwrap_or(element_lexeme);
-                            self.resolve_type_tag(resolved_name)
+                            let tag = self.resolve_type_tag(&resolved_element_name);
+                            let vtable_from_name = self.resolve_vtable_id(&resolved_element_name);
+                            (tag, if vtable > 0 { vtable } else { vtable_from_name })
                         } else {
-                            inner_tag
+                            (inner_tag, vtable)
                         }
                     }
-                    Type::Array { depth, .. } if depth > 1 => 0x80,
+                    Type::Array { depth, .. } if depth > 1 => (0x80, 0),
                     _ => {
-                        let element_lexeme = self.get_lexeme(element_type.span());
-                        let generic_substitutions = self.get_enclosing_generic_substitutions();
-                        let resolved_name = generic_substitutions
-                            .get(element_lexeme)
-                            .map(|name| name.as_str())
-                            .unwrap_or(element_lexeme);
-                        self.resolve_type_tag(resolved_name)
+                        let tag = self.resolve_type_tag(&resolved_element_name);
+                        let vtable = self.resolve_vtable_id(&resolved_element_name);
+                        (tag, vtable)
                     }
                 };
                 let elem_size: u16 = match type_tag {
@@ -837,8 +866,13 @@ impl<'ctx> Emitter<'ctx> {
                     3 | 7 | 9 => 4,
                     _ => 8,
                 };
+                let src2_val: u16 = if type_tag >= 0x80 && vtable_id > 0 {
+                    vtable_id as u16
+                } else {
+                    elem_size
+                };
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_size, elem_size),
+                    Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_size, src2_val),
                     Some(*span),
                 );
                 self.allocator.free_temp(r_size);
@@ -855,13 +889,13 @@ impl<'ctx> Emitter<'ctx> {
                 let array_type = self.query_type(*span);
                 let type_tag = match array_type {
                     Type::Array {
-                        element_type,
+                        ref element_type,
                         depth,
                     } => {
                         if depth > 1 {
                             0x80
                         } else {
-                            self.resolve_type_tag_for_type(&element_type)
+                            self.resolve_type_tag_for_type(element_type)
                         }
                     }
                     _ => 0x80,
@@ -872,8 +906,24 @@ impl<'ctx> Emitter<'ctx> {
                     3 | 7 | 9 => 4,
                     _ => 8,
                 };
+                let src2_val: u16 = if type_tag >= 0x80 {
+                    let vtable_id = match array_type {
+                        Type::Array {
+                            ref element_type,
+                            depth: 1,
+                        } => self.resolve_vtable_id_for_type(element_type),
+                        _ => 0,
+                    };
+                    if vtable_id > 0 {
+                        vtable_id as u16
+                    } else {
+                        elem_size
+                    }
+                } else {
+                    elem_size
+                };
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_len, elem_size),
+                    Instruction::format_a(OpCode::AllocArray, type_tag, dst, r_len, src2_val),
                     Some(*span),
                 );
                 self.allocator.free_temp(r_len);
@@ -1007,14 +1057,13 @@ impl<'ctx> Emitter<'ctx> {
                         && let Some((base_name, args_part)) = resolved_class_name.split_once('<')
                         && let Some(args_string) = args_part.strip_suffix('>')
                     {
-                        let substituted_arguments: Vec<String> = args_string
-                            .split(',')
+                        let substituted_arguments: Vec<String> = split_top_level_generic_arguments(args_string)
+                            .into_iter()
                             .map(|argument| {
-                                let trimmed_argument = argument.trim();
                                 generic_substitutions
-                                    .get(trimmed_argument)
+                                    .get(argument)
                                     .cloned()
-                                    .unwrap_or_else(|| trimmed_argument.to_string())
+                                    .unwrap_or_else(|| argument.to_string())
                             })
                             .collect();
                         resolved_class_name =
@@ -1030,14 +1079,40 @@ impl<'ctx> Emitter<'ctx> {
                 {
                     resolved_class_name = format!("{enclosing_base}<{enclosing_args}");
                 }
-                let simple = resolved_class_name
-                    .rsplit(['.', ':'])
+                let base_name = resolved_class_name
+                    .split('<')
                     .next()
                     .unwrap_or(&resolved_class_name);
+                let simple_base = base_name
+                    .rsplit(['.', ':'])
+                    .next()
+                    .unwrap_or(base_name);
+                let generic_part = resolved_class_name
+                    .split_once('<')
+                    .map(|(_, args)| format!("<{args}"))
+                    .unwrap_or_default();
+                let simple = format!("{simple_base}{generic_part}");
+                let enclosing_pkg = self
+                    .enclosing_class
+                    .as_deref()
+                    .and_then(|cls| {
+                        let base = cls.split('<').next().unwrap_or(cls);
+                        base.rsplit_once("::").map(|(pkg, _)| pkg)
+                    });
+                let qualified_simple = enclosing_pkg
+                    .map(|pkg| format!("{pkg}::{simple}"))
+                    .unwrap_or_default();
                 let layout_info = self.class_layouts.and_then(|layouts| {
                     layouts
                         .get(&resolved_class_name)
-                        .or_else(|| layouts.get(simple))
+                        .or_else(|| layouts.get(&simple))
+                        .or_else(|| {
+                            if !qualified_simple.is_empty() {
+                                layouts.get(&qualified_simple)
+                            } else {
+                                None
+                            }
+                        })
                 });
 
                 let dst = self.resolve_dst(target_reg)?;
@@ -1074,20 +1149,42 @@ impl<'ctx> Emitter<'ctx> {
                 }
 
                 let arity = arguments.len();
-                let arg_sig = arguments
+                let argument_signatures = arguments
                     .iter()
                     .map(|argument| self.query_type(argument.span()).to_string())
                     .collect::<Vec<_>>()
                     .join(",");
-                let ctor_sym_signature = if arg_sig.is_empty() {
+                let argument_simple_signatures = arguments
+                    .iter()
+                    .map(|argument| {
+                        let type_name = self.query_type(argument.span()).to_string();
+                        type_name
+                            .rsplit([':', '.'])
+                            .next()
+                            .unwrap_or(&type_name)
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let ctor_sym_signature = if argument_signatures.is_empty() {
                     format!("{resolved_class_name}::constructor")
                 } else {
-                    format!("{resolved_class_name}::constructor({arg_sig})")
+                    format!("{resolved_class_name}::constructor({argument_signatures})")
                 };
-                let ctor_sym_simple_signature = if arg_sig.is_empty() {
+                let ctor_sym_signature_simple = if argument_simple_signatures.is_empty() {
+                    format!("{resolved_class_name}::constructor")
+                } else {
+                    format!("{resolved_class_name}::constructor({argument_simple_signatures})")
+                };
+                let ctor_sym_simple_signature = if argument_signatures.is_empty() {
                     format!("{simple}::constructor")
                 } else {
-                    format!("{simple}::constructor({arg_sig})")
+                    format!("{simple}::constructor({argument_signatures})")
+                };
+                let ctor_sym_simple_signature_simple = if argument_simple_signatures.is_empty() {
+                    format!("{simple}::constructor")
+                } else {
+                    format!("{simple}::constructor({argument_simple_signatures})")
                 };
                 let ctor_sym_arity = format!("{resolved_class_name}::constructor/{arity}");
                 let ctor_sym_simple_arity = format!("{simple}::constructor/{arity}");
@@ -1097,11 +1194,35 @@ impl<'ctx> Emitter<'ctx> {
                     .function_ids
                     .and_then(|ids| {
                         ids.get(&ctor_sym_signature)
+                            .or_else(|| ids.get(&ctor_sym_signature_simple))
                             .or_else(|| ids.get(&ctor_sym_simple_signature))
+                            .or_else(|| ids.get(&ctor_sym_simple_signature_simple))
+                            .or_else(|| {
+                                if !qualified_simple.is_empty() {
+                                    ids.get(&format!("{qualified_simple}::constructor({argument_signatures})"))
+                                        .or_else(|| ids.get(&format!("{qualified_simple}::constructor({argument_simple_signatures})")))
+                                } else {
+                                    None
+                                }
+                            })
                             .or_else(|| ids.get(&ctor_sym_arity))
                             .or_else(|| ids.get(&ctor_sym_simple_arity))
+                            .or_else(|| {
+                                if !qualified_simple.is_empty() {
+                                    ids.get(&format!("{qualified_simple}::constructor/{arity}"))
+                                } else {
+                                    None
+                                }
+                            })
                             .or_else(|| ids.get(&ctor_sym))
                             .or_else(|| ids.get(&ctor_sym_simple))
+                            .or_else(|| {
+                                if !qualified_simple.is_empty() {
+                                    ids.get(&format!("{qualified_simple}::constructor"))
+                                } else {
+                                    None
+                                }
+                            })
                     })
                     .copied();
 
@@ -1303,6 +1424,8 @@ impl<'ctx> Emitter<'ctx> {
                         let candidate_simple_simple_typed =
                             format!("{symbol_simple}({argument_simple_signatures})");
 
+                        let raw_symbol_full = format!("{object_name}::{method_name}");
+                        let raw_symbol_simple = format!("{simple_object}::{method_name}");
                         let func_id_opt = self
                             .function_ids
                             .and_then(|ids| {
@@ -1312,6 +1435,8 @@ impl<'ctx> Emitter<'ctx> {
                                     .or_else(|| ids.get(&candidate_simple_simple_typed))
                                     .or_else(|| ids.get(&symbol_full))
                                     .or_else(|| ids.get(&symbol_simple))
+                                    .or_else(|| ids.get(&raw_symbol_full))
+                                    .or_else(|| ids.get(&raw_symbol_simple))
                             })
                             .copied();
 
@@ -2466,7 +2591,7 @@ impl<'ctx> Emitter<'ctx> {
                 _ => OpCode::AddI64,
             }
         } else if matches!(operator, TokenKind::OperatorEqual) {
-            if matches!(operand_type, Type::Class { symbol_name, .. } if symbol_name == "std::string" || symbol_name == "std.string")
+            if matches!(operand_type, Type::Class { symbol_name, .. } if symbol_name == "std::string" || symbol_name == "std.string" || symbol_name == "string")
             {
                 OpCode::EqString
             } else if operand_type.is_reference_type() {
@@ -2477,7 +2602,7 @@ impl<'ctx> Emitter<'ctx> {
                 OpCode::EqI32
             }
         } else if matches!(operator, TokenKind::OperatorNotEqual) {
-            if matches!(operand_type, Type::Class { symbol_name, .. } if symbol_name == "std::string" || symbol_name == "std.string")
+            if matches!(operand_type, Type::Class { symbol_name, .. } if symbol_name == "std::string" || symbol_name == "std.string" || symbol_name == "string")
             {
                 OpCode::NeqString
             } else if operand_type.is_reference_type() {
@@ -3611,9 +3736,13 @@ impl<'ctx> Emitter<'ctx> {
         if obj_name == "this"
             && let Some(ref cls) = self.enclosing_class
         {
-            let simple = cls.rsplit(['.', ':']).next().unwrap_or(cls);
+            let base_cls = cls.split('<').next().unwrap_or(cls);
+            let simple = base_cls.rsplit(['.', ':']).next().unwrap_or(base_cls);
             if let Some(layouts) = self.class_layouts
-                && let Some(layout) = layouts.get(cls).or_else(|| layouts.get(simple))
+                && let Some(layout) = layouts
+                    .get(cls)
+                    .or_else(|| layouts.get(base_cls))
+                    .or_else(|| layouts.get(simple))
                 && let Some(&offset) = layout.field_offsets.get(member_name)
             {
                 return layout.weak_field_offsets.contains(&offset);
@@ -3671,9 +3800,13 @@ impl<'ctx> Emitter<'ctx> {
         if obj_name == "this"
             && let Some(ref cls) = self.enclosing_class
         {
-            let simple = cls.rsplit(['.', ':']).next().unwrap_or(cls);
+            let base_cls = cls.split('<').next().unwrap_or(cls);
+            let simple = base_cls.rsplit(['.', ':']).next().unwrap_or(base_cls);
             if let Some(layouts) = self.class_layouts
-                && let Some(layout) = layouts.get(cls).or_else(|| layouts.get(simple))
+                && let Some(layout) = layouts
+                    .get(cls)
+                    .or_else(|| layouts.get(base_cls))
+                    .or_else(|| layouts.get(simple))
                 && let Some(&offset) = layout.field_offsets.get(member_name)
                 && let Some(&tag) = layout.field_types.get(&offset)
             {
@@ -3753,6 +3886,103 @@ impl<'ctx> Emitter<'ctx> {
         }
     }
 
+    pub(crate) fn resolve_vtable_id(&self, type_name: &str) -> u32 {
+        if let Some(layouts) = self.class_layouts {
+            if let Some(layout) = layouts.get(type_name) {
+                return layout.vtable_id;
+            }
+            let base_name = type_name.split('<').next().unwrap_or(type_name);
+            let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
+            let generic_part = type_name
+                .split_once('<')
+                .map(|(_, args)| format!("<{args}"))
+                .unwrap_or_default();
+            let simple = format!("{simple_base}{generic_part}");
+            if let Some(layout) = layouts.get(&simple) {
+                return layout.vtable_id;
+            }
+            let enclosing_pkg = self.enclosing_class.as_deref().and_then(|cls| {
+                let base = cls.split('<').next().unwrap_or(cls);
+                base.rsplit_once("::").map(|(pkg, _)| pkg)
+            });
+            if let Some(pkg) = enclosing_pkg {
+                let qualified_simple = format!("{pkg}::{simple}");
+                if let Some(layout) = layouts.get(&qualified_simple) {
+                    return layout.vtable_id;
+                }
+            }
+        }
+        0
+    }
+
+    fn resolve_vtable_id_for_type(&self, ty: &Type) -> u32 {
+        match ty.unwrap_alias() {
+            Type::Class { symbol_name, type_arguments } => {
+                if !type_arguments.is_empty() {
+                    let mut specialized_name = if !symbol_name.contains('<') {
+                        format!(
+                            "{symbol_name}<{}>",
+                            type_arguments
+                                .iter()
+                                .map(|arg| arg.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    } else {
+                        symbol_name.clone()
+                    };
+                    let generic_substitutions = self.get_enclosing_generic_substitutions();
+                    if !generic_substitutions.is_empty() {
+                        if let Some(sub) = generic_substitutions.get(&specialized_name) {
+                            specialized_name = sub.clone();
+                        } else if specialized_name.contains('<')
+                            && let Some((base_name, args_part)) = specialized_name.split_once('<')
+                            && let Some(args_string) = args_part.strip_suffix('>')
+                        {
+                            let substituted_args: Vec<String> = split_top_level_generic_arguments(args_string)
+                                .into_iter()
+                                .map(|arg| {
+                                    generic_substitutions
+                                        .get(arg)
+                                        .cloned()
+                                        .unwrap_or_else(|| arg.to_string())
+                                })
+                                .collect();
+                            specialized_name = format!("{base_name}<{}>", substituted_args.join(", "));
+                        }
+                    }
+                    let specialized_vtable = self.resolve_vtable_id(&specialized_name);
+                    if specialized_vtable > 0 {
+                        return specialized_vtable;
+                    }
+                }
+                self.resolve_vtable_id(symbol_name)
+            }
+            Type::Interface { symbol_name, .. } => self.resolve_vtable_id(symbol_name),
+            Type::GenericParameter { name, .. } => {
+                let substitutions = self.get_enclosing_generic_substitutions();
+                if let Some(sub) = substitutions.get(name.as_str()) {
+                    let vtable = self.resolve_vtable_id(sub);
+                    if vtable > 0 {
+                        return vtable;
+                    }
+                }
+                0
+            }
+            Type::Unresolved(name) => {
+                let substitutions = self.get_enclosing_generic_substitutions();
+                if let Some(sub) = substitutions.get(name.as_str()) {
+                    let vtable = self.resolve_vtable_id(sub);
+                    if vtable > 0 {
+                        return vtable;
+                    }
+                }
+                self.resolve_vtable_id(name)
+            }
+            _ => 0,
+        }
+    }
+
     pub(crate) fn resolve_type_tag(&self, type_name: &str) -> u8 {
         match type_name {
             "int8" | "i8" => 1,
@@ -3767,12 +3997,11 @@ impl<'ctx> Emitter<'ctx> {
             "float64" | "f64" => 10,
             "bool" => 11,
             "char" => 12,
-            "string" | "std.string" => 13,
+            "string" | "std.string" | "String" | "solix.core.String" | "solix::core::String" => 13,
             _ => {
-                if let Some(layouts) = self.class_layouts
-                    && let Some(layout) = layouts.get(type_name)
-                {
-                    return ((layout.vtable_id as u8) & 0x7F) | 0x80;
+                let vtable_id = self.resolve_vtable_id(type_name);
+                if vtable_id > 0 {
+                    return ((vtable_id as u8) & 0x7F) | 0x80;
                 }
                 0x80
             }
@@ -3785,10 +4014,7 @@ impl<'ctx> Emitter<'ctx> {
             && let Some((_base_name, args_part)) = enclosing_class_name.split_once('<')
             && let Some(args_string) = args_part.strip_suffix('>')
         {
-            let concrete_arguments: Vec<&str> = args_string
-                .split(',')
-                .map(|argument| argument.trim())
-                .collect();
+            let concrete_arguments = split_top_level_generic_arguments(args_string);
             if concrete_arguments.len() == 1 {
                 substitutions.insert("T".to_string(), concrete_arguments[0].to_string());
                 substitutions.insert("K".to_string(), concrete_arguments[0].to_string());
@@ -3800,6 +4026,12 @@ impl<'ctx> Emitter<'ctx> {
                 substitutions.insert("T".to_string(), concrete_arguments[0].to_string());
                 substitutions.insert("U".to_string(), concrete_arguments[1].to_string());
                 substitutions.insert("E".to_string(), concrete_arguments[1].to_string());
+            } else if concrete_arguments.len() >= 3 {
+                substitutions.insert("T".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("U".to_string(), concrete_arguments[1].to_string());
+                substitutions.insert("V".to_string(), concrete_arguments[2].to_string());
+                substitutions.insert("K".to_string(), concrete_arguments[0].to_string());
+                substitutions.insert("E".to_string(), concrete_arguments[2].to_string());
             }
         }
         substitutions
@@ -3822,9 +4054,56 @@ impl<'ctx> Emitter<'ctx> {
                 PrimitiveKind::Char => 12,
                 _ => 3,
             },
-            Type::Class { symbol_name, .. } => self.resolve_type_tag(symbol_name),
+            Type::Class { symbol_name, type_arguments } => {
+                if !type_arguments.is_empty() {
+                    let mut specialized_name = if !symbol_name.contains('<') {
+                        format!(
+                            "{symbol_name}<{}>",
+                            type_arguments
+                                .iter()
+                                .map(|arg| arg.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    } else {
+                        symbol_name.clone()
+                    };
+                    let generic_substitutions = self.get_enclosing_generic_substitutions();
+                    if !generic_substitutions.is_empty() {
+                        if let Some(sub) = generic_substitutions.get(&specialized_name) {
+                            specialized_name = sub.clone();
+                        } else if specialized_name.contains('<')
+                            && let Some((base_name, args_part)) = specialized_name.split_once('<')
+                            && let Some(args_string) = args_part.strip_suffix('>')
+                        {
+                            let substituted_args: Vec<String> = split_top_level_generic_arguments(args_string)
+                                .into_iter()
+                                .map(|arg| {
+                                    generic_substitutions
+                                        .get(arg)
+                                        .cloned()
+                                        .unwrap_or_else(|| arg.to_string())
+                                })
+                                .collect();
+                            specialized_name = format!("{base_name}<{}>", substituted_args.join(", "));
+                        }
+                    }
+                    let specialized_tag = self.resolve_type_tag(&specialized_name);
+                    if specialized_tag != 0x80 {
+                        return specialized_tag;
+                    }
+                }
+                self.resolve_type_tag(symbol_name)
+            }
             Type::Interface { symbol_name, .. } => self.resolve_type_tag(symbol_name),
-            Type::GenericParameter { .. } => {
+            Type::GenericParameter { name, .. } => {
+                let substitutions = self.get_enclosing_generic_substitutions();
+                if let Some(sub) = substitutions.get(name.as_str()) {
+                    let tag = self.resolve_type_tag(sub);
+                    if tag != 0x80 {
+                        return tag;
+                    }
+                }
                 if let Some(ref enclosing) = self.enclosing_class
                     && let Some(pos) = enclosing.find('<')
                 {
@@ -3834,6 +4113,13 @@ impl<'ctx> Emitter<'ctx> {
                 0x80
             }
             Type::Unresolved(name) => {
+                let substitutions = self.get_enclosing_generic_substitutions();
+                if let Some(sub) = substitutions.get(name.as_str()) {
+                    let tag = self.resolve_type_tag(sub);
+                    if tag != 0x80 {
+                        return tag;
+                    }
+                }
                 let direct_tag = self.resolve_type_tag(name);
                 if direct_tag != 0x80 {
                     return direct_tag;
@@ -4043,4 +4329,30 @@ fn is_static_non_null_literal_or_alloc(expr: &Expression) -> bool {
                 ..
             }
     )
+}
+
+/// Splits generic arguments at top-level commas, respecting nested angle brackets.
+fn split_top_level_generic_arguments(arguments_string: &str) -> Vec<&str> {
+    let mut split_arguments = Vec::new();
+    let mut nesting_depth: usize = 0;
+    let mut slice_start_index: usize = 0;
+    for (char_index, character) in arguments_string.char_indices() {
+        match character {
+            '<' => nesting_depth += 1,
+            '>' => {
+                if nesting_depth > 0 {
+                    nesting_depth -= 1;
+                }
+            }
+            ',' if nesting_depth == 0 => {
+                split_arguments.push(arguments_string[slice_start_index..char_index].trim());
+                slice_start_index = char_index + 1;
+            }
+            _ => {}
+        }
+    }
+    if slice_start_index < arguments_string.len() {
+        split_arguments.push(arguments_string[slice_start_index..].trim());
+    }
+    split_arguments
 }

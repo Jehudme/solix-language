@@ -79,6 +79,12 @@ public class TestMath {
         if (Math::is_prime(30L)) {
             return false;
         }
+        if (!Math::is_prime(2147483647L)) {
+            return false;
+        }
+        if (Math::is_prime(9223372036854775807L)) {
+            return false;
+        }
         return true;
     }
 

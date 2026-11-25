@@ -1341,13 +1341,23 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         }
                     }
                     if let Type::Interface {
-                        ref symbol_name, ..
+                        ref symbol_name,
+                        ref type_arguments,
+                        ..
                     } = obj_type
                         && let Some(iface_id) = self
                             .symbol_table
                             .resolve_symbol(self.source_id, symbol_name)
                         && let Some(iface_entry) = self.symbol_table.get_symbol(iface_id)
                     {
+                        let mut interface_substitutions = HashMap::new();
+                        for (param_name, arg_type) in
+                            iface_entry.parameter_names.iter().zip(type_arguments)
+                        {
+                            interface_substitutions
+                                .insert(param_name.clone(), arg_type.clone());
+                        }
+
                         let mut found_method: Option<(SymbolId, Type, Vec<Type>)> = None;
                         for &child_id in &iface_entry.members {
                             if let Some(child_entry) = self.symbol_table.get_symbol(child_id)
@@ -1357,8 +1367,27 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                                     ref return_type,
                                 } = child_entry.symbol_type
                             {
+                                let effective_params: Vec<Type> =
+                                    if interface_substitutions.is_empty() {
+                                        parameter_types.clone()
+                                    } else {
+                                        parameter_types
+                                            .iter()
+                                            .map(|param_type| {
+                                                Self::substitute_type(
+                                                    param_type,
+                                                    &interface_substitutions,
+                                                )
+                                            })
+                                            .collect()
+                                    };
+                                let effective_return = if interface_substitutions.is_empty() {
+                                    *return_type.clone()
+                                } else {
+                                    Self::substitute_type(return_type, &interface_substitutions)
+                                };
                                 found_method =
-                                    Some((child_id, *return_type.clone(), parameter_types.clone()));
+                                    Some((child_id, effective_return, effective_params));
                                 break;
                             }
                         }

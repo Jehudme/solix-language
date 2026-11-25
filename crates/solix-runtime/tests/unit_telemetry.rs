@@ -183,3 +183,69 @@ fn test_vm_telemetry_quickened_instruction_tracking() {
         telemetry.quickened_instructions_count
     );
 }
+
+#[test]
+fn test_dynamic_string_concatenation_does_not_leak_interned_strings() {
+    let mut program = BinaryProgram::new();
+
+    let first_string_index = program
+        .constant_pool
+        .add_string("Hello, ")
+        .expect("Constant pool add string should succeed");
+    let second_string_index = program
+        .constant_pool
+        .add_string("World!")
+        .expect("Constant pool add string should succeed");
+    let concat_symbol_index = program
+        .constant_pool
+        .add_string("__builtin_str_concat")
+        .expect("Constant pool add string should succeed");
+
+    let mut main_function = CompiledFunction::new("main", 0, 0, 3);
+    main_function.instructions.push(Instruction::format_c(
+        OpCode::LoadConst,
+        0,
+        first_string_index,
+        0,
+    ));
+    main_function.instructions.push(Instruction::format_c(
+        OpCode::LoadConst,
+        0,
+        second_string_index,
+        1,
+    ));
+    main_function.instructions.push(Instruction::format_call(
+        OpCode::CallSymbol,
+        2,
+        concat_symbol_index,
+        0,
+        2,
+    ));
+    main_function.instructions.push(Instruction::format_a(
+        OpCode::ReturnValue,
+        0,
+        0,
+        2,
+        0,
+    ));
+    program.functions.push(main_function);
+    program.entry_point_id = Some(0);
+
+    let runtime_options = RuntimeOptions::new().with_binary(program);
+    let runtime_context =
+        RuntimeContext::new(runtime_options).expect("Runtime context construction should succeed");
+    let mut virtual_machine = VirtualMachine::new(runtime_context);
+
+    // Initial interned strings in VM should only reflect the 3 strings from constant pool
+    assert_eq!(virtual_machine.interned_string_addrs.len(), 3);
+
+    let execution_result = virtual_machine.run().expect("VM run should succeed");
+    assert!(matches!(execution_result, Value::Ref(_)));
+
+    // Dynamic string concatenation must NOT push to interned_string_addrs
+    assert_eq!(
+        virtual_machine.interned_string_addrs.len(),
+        3,
+        "Dynamic string concatenation should not leak into interned_string_addrs"
+    );
+}

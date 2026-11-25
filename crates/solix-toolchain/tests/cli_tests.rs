@@ -2054,3 +2054,41 @@ fn test_cli_build_platform_option() {
         0
     );
 }
+
+#[test]
+fn test_cli_fmt_skips_ignored_directories() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let src_file = workspace
+        .write_file("src/main.slx", "class Main{int32 value_one=1;}")
+        .expect("write src");
+    let build_file = workspace
+        .write_file("build/release/stage/generated.slx", "class Generated{int32 value_two=2;}")
+        .expect("write build");
+    let git_file = workspace
+        .write_file(".git/hooks/hook.slx", "class Hook{int32 value_three=3;}")
+        .expect("write git");
+
+    let fmt_cli = Cli::try_parse_from([
+        "solix",
+        "fmt",
+        workspace.root_path().to_str().expect("valid path"),
+    ])
+    .expect("parse fmt cli");
+
+    assert_eq!(run(fmt_cli).expect("fmt succeeds"), 0);
+
+    let src_content = std::fs::read_to_string(&src_file).expect("read src");
+    assert!(src_content.contains("class Main {"), "Expected src/main.slx to be formatted");
+
+    let build_content = std::fs::read_to_string(&build_file).expect("read build");
+    assert_eq!(
+        build_content, "class Generated{int32 value_two=2;}",
+        "Expected build/ file to be untouched"
+    );
+
+    let git_content = std::fs::read_to_string(&git_file).expect("read git");
+    assert_eq!(
+        git_content, "class Hook{int32 value_three=3;}",
+        "Expected .git/ file to be untouched"
+    );
+}
