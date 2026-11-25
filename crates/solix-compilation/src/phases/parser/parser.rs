@@ -364,6 +364,99 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
     }
 
+    fn synchronize_in_block(&mut self) {
+        let mut inner_brace_depth: usize = 0;
+
+        while !self.cursor.is_at_end() {
+            let current_kind = self.cursor.peek_kind();
+
+            if current_kind == TokenKind::PunctuationOpenBrace {
+                inner_brace_depth += 1;
+                self.cursor.advance();
+                continue;
+            }
+
+            if current_kind == TokenKind::PunctuationCloseBrace {
+                if inner_brace_depth > 0 {
+                    inner_brace_depth -= 1;
+                    self.cursor.advance();
+                    if inner_brace_depth == 0 {
+                        if self.cursor.check(TokenKind::PunctuationSemicolon) {
+                            self.cursor.advance();
+                        }
+                        return;
+                    }
+                    continue;
+                } else {
+                    return;
+                }
+            }
+
+            if inner_brace_depth == 0 {
+                if current_kind == TokenKind::PunctuationSemicolon {
+                    self.cursor.advance();
+                    return;
+                }
+
+                if matches!(
+                    current_kind,
+                    TokenKind::KeywordIf
+                        | TokenKind::KeywordWhile
+                        | TokenKind::KeywordDo
+                        | TokenKind::KeywordFor
+                        | TokenKind::KeywordSwitch
+                        | TokenKind::KeywordTry
+                        | TokenKind::KeywordThrow
+                        | TokenKind::KeywordReturn
+                        | TokenKind::KeywordBreak
+                        | TokenKind::KeywordContinue
+                        | TokenKind::KeywordConst
+                        | TokenKind::KeywordAssert
+                        | TokenKind::KeywordExit
+                ) {
+                    return;
+                }
+            }
+
+            self.cursor.advance();
+        }
+    }
+
+    /// Computes the Levenshtein edit distance between two string slices.
+    fn levenshtein_distance(source: &str, target: &str) -> usize {
+        let source_chars: Vec<char> = source.chars().collect();
+        let target_chars: Vec<char> = target.chars().collect();
+        let source_length = source_chars.len();
+        let target_length = target_chars.len();
+
+        let mut distance_matrix = vec![vec![0usize; target_length + 1]; source_length + 1];
+
+        for (source_index, row) in distance_matrix.iter_mut().enumerate() {
+            row[0] = source_index;
+        }
+        for (target_index, cell) in distance_matrix[0].iter_mut().enumerate() {
+            *cell = target_index;
+        }
+
+        for source_index in 1..=source_length {
+            for target_index in 1..=target_length {
+                let substitution_cost =
+                    if source_chars[source_index - 1] == target_chars[target_index - 1] {
+                        0
+                    } else {
+                        1
+                    };
+                distance_matrix[source_index][target_index] = (distance_matrix[source_index - 1]
+                    [target_index]
+                    + 1)
+                .min(distance_matrix[source_index][target_index - 1] + 1)
+                .min(distance_matrix[source_index - 1][target_index - 1] + substitution_cost);
+            }
+        }
+
+        distance_matrix[source_length][target_length]
+    }
+
     fn parse_program(&mut self) -> ProgramAst {
         let file_span = self.cursor.current_span();
         let mut program = ProgramAst::new(self.source_id, file_span);
@@ -1447,7 +1540,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             }
         }
 
-        let body = if self.cursor.check(TokenKind::PunctuationOpenBrace) {
+        let (body, has_syntax_errors) = if self.cursor.check(TokenKind::PunctuationOpenBrace) {
             if is_abstract_or_native {
                 self.record_error(ParsingError::AbstractOrNativeMethodWithBody {
                     span: name_span.to_source_span(),
@@ -1461,10 +1554,13 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     span: name_span.to_source_span(),
                 });
             }
-            Some(self.parse_block()?)
+            let errors_before_body = self.errors.len();
+            let parsed_block = self.parse_block()?;
+            let body_had_errors = self.errors.len() > errors_before_body;
+            (Some(parsed_block), body_had_errors)
         } else {
             self.consume_semicolon()?;
-            None
+            (None, false)
         };
 
         let span = return_type
@@ -1481,6 +1577,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             parameters,
             body,
             resolved_symbol_id: None,
+            has_syntax_errors,
         })
     }
 
@@ -1842,17 +1939,83 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                     had_modifier = true;
                 }
 
-                if self.is_constructor_lookahead() {
-                    let name_span = self
-                        .cursor
-                        .advance()
-                        .map(|token| token.span)
-                        .unwrap_or_default();
-                    let ctor = self.parse_constructor_declaration(Vec::new(), name_span)?;
-                    self.record_error(ParsingError::ConstructorOutsideClass {
-                        span: ctor.span.to_source_span(),
-                    });
-                    return Ok(vec![Statement::Block(ctor.body)]);
+                if self.cursor.check(TokenKind::Identifier)
+                    && self.cursor.check_next(TokenKind::PunctuationOpenParen)
+                {
+                    let ident_span = self.cursor.current_span();
+                    let ident_text = self.get_lexeme(ident_span);
+                    let control_flow_keywords = ["while", "if", "for", "switch"];
+
+                    let mut best_keyword = None;
+                    let mut best_distance = usize::MAX;
+                    for candidate in control_flow_keywords {
+                        let distance = Self::levenshtein_distance(ident_text, candidate);
+                        if distance < best_distance {
+                            best_distance = distance;
+                            best_keyword = Some(candidate);
+                        }
+                    }
+
+                    let has_trailing_block = {
+                        let mut scan = self.cursor.position + 2;
+                        let mut paren_depth = 1;
+                        while scan < self.cursor.tokens.len() && paren_depth > 0 {
+                            match self.cursor.tokens[scan].kind {
+                                TokenKind::PunctuationOpenParen => paren_depth += 1,
+                                TokenKind::PunctuationCloseParen => paren_depth -= 1,
+                                _ => {}
+                            }
+                            scan += 1;
+                        }
+                        paren_depth == 0
+                            && scan < self.cursor.tokens.len()
+                            && self.cursor.tokens[scan].kind == TokenKind::PunctuationOpenBrace
+                    };
+
+                    if has_trailing_block
+                        && best_distance <= 2
+                        && let Some(suggestion) = best_keyword
+                    {
+                        self.record_error(ParsingError::UnknownControlFlowKeyword {
+                            identifier: ident_text.to_string(),
+                            suggestion: suggestion.to_string(),
+                            span: ident_span.to_source_span(),
+                        });
+                        self.cursor.advance();
+
+                        let _ = self.cursor.match_token(TokenKind::PunctuationOpenParen);
+                        let mut paren_depth = 1;
+                        while !self.cursor.is_at_end() && paren_depth > 0 {
+                            if self.cursor.check(TokenKind::PunctuationOpenParen) {
+                                paren_depth += 1;
+                            } else if self.cursor.check(TokenKind::PunctuationCloseParen) {
+                                paren_depth -= 1;
+                            }
+                            self.cursor.advance();
+                        }
+
+                        let block = self.parse_block()?;
+                        if self.cursor.check(TokenKind::PunctuationSemicolon) {
+                            self.cursor.advance();
+                        }
+                        return Ok(vec![Statement::Block(block)]);
+                    } else if has_trailing_block
+                        && ident_text
+                            .chars()
+                            .next()
+                            .is_some_and(|character| character.is_ascii_uppercase())
+                    {
+                        let name_span = self
+                            .cursor
+                            .advance()
+                            .map(|token| token.span)
+                            .unwrap_or_default();
+                        let ctor = self.parse_constructor_declaration(Vec::new(), name_span)?;
+                        self.record_error(ParsingError::ConstructorOutsideClass {
+                            span: ctor.span.to_source_span(),
+                        });
+                        return Ok(vec![Statement::Block(ctor.body)]);
+                    }
                 }
 
                 // Check for typed variable declaration: int32 x = 5;
@@ -1973,7 +2136,7 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 Ok(stmts) => statements.extend(stmts),
                 Err(error) => {
                     self.record_error(error);
-                    self.synchronize();
+                    self.synchronize_in_block();
                 }
             }
         }
@@ -4664,6 +4827,17 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             || !self.cursor.check_next(TokenKind::PunctuationOpenParen)
         {
             return false;
+        }
+
+        if self.inside_class {
+            if self.scope_depth > 1 {
+                return false;
+            }
+            let ident_span = self.cursor.current_span();
+            let ident_name = self.get_lexeme(ident_span);
+            if self.enclosing_class_name.as_deref() != Some(ident_name) {
+                return false;
+            }
         }
 
         let mut scan = self.cursor.position + 2;

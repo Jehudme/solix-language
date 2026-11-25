@@ -409,3 +409,44 @@ test('Layer 1: activate registers all commands, providers, and tasks with mocked
         fs.rmSync(tempWs, { recursive: true, force: true });
     }
 });
+
+test('Issue #249: findSolixBinaries and findToolchainBinary never probe workspace target/ directory', async () => {
+    const tempWs = fs.mkdtempSync(path.join(os.tmpdir(), 'solix-target-probe-'));
+    const debugSolix = path.join(tempWs, 'target', 'debug', 'solix');
+    const releaseSolix = path.join(tempWs, 'target', 'release', 'solix');
+    fs.mkdirSync(path.dirname(debugSolix), { recursive: true });
+    fs.mkdirSync(path.dirname(releaseSolix), { recursive: true });
+    fs.writeFileSync(debugSolix, '#!/bin/sh\necho "target debug"\n', { mode: 0o755 });
+    fs.writeFileSync(releaseSolix, '#!/bin/sh\necho "target release"\n', { mode: 0o755 });
+
+    const { vscodeMock, languageClientMock } = createVscodeMock(tempWs);
+    const origLoad = Module._load;
+    Module._load = function patchedLoad(request, parent, isMain) {
+        if (request === 'vscode') {
+            return vscodeMock;
+        }
+        if (request === 'vscode-languageclient/node') {
+            return languageClientMock;
+        }
+        return origLoad.call(this, request, parent, isMain);
+    };
+
+    try {
+        const extModule = await import(`file://${path.join(unitBuildDir, 'extension.js')}?t=${Date.now()}`);
+        const logChannel = { appendLine: () => {} };
+
+        // Test 1: Workspace target artifacts must NOT be selected by default
+        const discovered = extModule.findSolixBinaries(logChannel);
+        assert.notStrictEqual(discovered.lspBinaryPath, debugSolix);
+        assert.notStrictEqual(discovered.lspBinaryPath, releaseSolix);
+        assert.notStrictEqual(discovered.toolchainBinaryPath, debugSolix);
+        assert.notStrictEqual(discovered.toolchainBinaryPath, releaseSolix);
+
+        const toolchainOnly = extModule.findToolchainBinary(logChannel);
+        assert.notStrictEqual(toolchainOnly, debugSolix);
+        assert.notStrictEqual(toolchainOnly, releaseSolix);
+    } finally {
+        Module._load = origLoad;
+        fs.rmSync(tempWs, { recursive: true, force: true });
+    }
+});

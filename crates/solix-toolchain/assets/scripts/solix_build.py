@@ -965,7 +965,7 @@ def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> di
         "static": True,
         "emit_disassembly": False,
         "warnings_as_errors": False,
-        "verify_checksum": True,
+        "verify_checksum": None,
         "link": "static",
         "sources": ["src"],
         "platforms": ["all"],
@@ -1037,6 +1037,12 @@ def resolve_profile_options(manifest: dict[str, Any], target_profile: str) -> di
         if "dependencies" in step_config and isinstance(step_config["dependencies"], dict):
             for raw_dep_key, raw_dep_spec in step_config["dependencies"].items():
                 resolved_options["dependencies"][raw_dep_key] = raw_dep_spec
+
+    if resolved_options.get("verify_checksum") is None:
+        if resolved_options.get("static") or target_profile in ("debug", "test"):
+            resolved_options["verify_checksum"] = False
+        else:
+            resolved_options["verify_checksum"] = True
 
     return resolved_options
 

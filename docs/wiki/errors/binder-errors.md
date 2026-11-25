@@ -515,3 +515,30 @@ This section documents semantic binding diagnostics emitted by [`crates/solix-co
       }
   }
   ```
+
+---
+
+### `E0212`: Non-Void Method Must Return A Value
+* **Cause:** A non-void method execution path does not terminate with an explicit `return` statement or `throw` expression. When syntax or parse errors occur within the method body, this diagnostic is suppressed to avoid false cascading errors.
+* **Bad Code:**
+  ```solix
+  class Calculator {
+      public static int32 compute(int32 operand) {
+          if (operand > 0) {
+              return operand * 2;
+          }
+      }
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  class Calculator {
+      public static int32 compute(int32 operand) {
+          if (operand > 0) {
+              return operand * 2;
+          }
+          return 0;
+      }
+  }
+  ```
+

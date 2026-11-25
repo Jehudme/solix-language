@@ -1039,6 +1039,18 @@ pub enum ParsingError {
         #[label("'.' not allowed in type path; use '::'")]
         span: SourceSpan,
     },
+
+    #[error("Unknown statement or identifier '{identifier}'")]
+    #[diagnostic(
+        code(solix::parser::unknown_control_flow_keyword),
+        help("Did you mean '{suggestion}'?")
+    )]
+    UnknownControlFlowKeyword {
+        identifier: String,
+        suggestion: String,
+        #[label("unknown statement or keyword")]
+        span: SourceSpan,
+    },
 }
 
 impl ParsingError {
@@ -1145,6 +1157,7 @@ impl ParsingError {
             Self::InvalidFreeFunctionModifier { .. } => "E0199",
             Self::InvalidOperatorModifier { .. } => "E0200",
             Self::DotNotAllowedInTypePath { .. } => "E0201",
+            Self::UnknownControlFlowKeyword { .. } => "E0202",
         }
     }
 
@@ -1249,6 +1262,7 @@ impl ParsingError {
             | Self::InvalidEnumModifier { span, .. }
             | Self::InvalidFreeFunctionModifier { span, .. }
             | Self::InvalidOperatorModifier { span, .. }
+            | Self::UnknownControlFlowKeyword { span, .. }
             | Self::DotNotAllowedInTypePath { span } => *span,
         }
     }
@@ -1290,6 +1304,13 @@ mod tests {
 
         let error_dot_in_type = ParsingError::DotNotAllowedInTypePath { span: dummy_span };
         assert_eq!(error_dot_in_type.error_code(), "E0201");
+
+        let error_unknown_control = ParsingError::UnknownControlFlowKeyword {
+            identifier: "whilje".to_string(),
+            suggestion: "while".to_string(),
+            span: dummy_span,
+        };
+        assert_eq!(error_unknown_control.error_code(), "E0202");
     }
 
     #[test]

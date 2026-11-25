@@ -4,6 +4,7 @@
 
 use solix_common::bytecode::BinaryProgram;
 use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_compilation::CompilationDiagnostic;
 use solix_runtime::exceptions::errors::RuntimeErrorCode;
 use solix_runtime::native::builtins::{builtin_print, builtin_println};
 use solix_runtime::{RuntimeContext, RuntimeOptions, Value, VirtualMachine};
@@ -113,6 +114,16 @@ pub fn compile_and_run_multi(sources: &[(&str, &str)]) -> (Value, VirtualMachine
 pub fn compile_and_run_entry(source_code: &str, entry_point: &str) -> (Value, VirtualMachine) {
     let program = compile_source(source_code);
     run_binary(program, Some(entry_point))
+}
+
+/// Compiles a single Solix source file and returns any emitted compilation diagnostics.
+pub fn compile_source_get_diagnostics(source_code: &str) -> Vec<CompilationDiagnostic> {
+    let options = CompilationOptions::new().with_source("diagnostic_test.slx", source_code);
+    let mut context = CompilationContext::new(options);
+    match context.execute() {
+        Ok(_) => Vec::new(),
+        Err(diagnostics) => diagnostics,
+    }
 }
 
 /// Asserts that compiling `source_code` fails with a diagnostic containing `expected_error_or_code`.

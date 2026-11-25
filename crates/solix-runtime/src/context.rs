@@ -670,7 +670,9 @@ impl RuntimeContext {
                     .map(str::to_string)
                 });
 
-                if let Some(expected) = expected_checksum {
+                if options.verify_checksums
+                    && let Some(expected) = expected_checksum
+                {
                     let actual =
                         solix_common::hash::sha256_file(library_path).map_err(|io_error| {
                             RuntimeError::SharedLibraryError {
@@ -1158,27 +1160,21 @@ fn verify_and_resolve_runtime_dependencies(
                     ),
                 });
             }
-            if !requirement.sha256.is_empty()
+            if options.verify_checksums
+                && !requirement.sha256.is_empty()
                 && let Some(existing_binary) = options.binaries.get(*existing_idx)
             {
                 let actual_sha256 = existing_binary.compute_sha256();
                 if requirement.sha256 != actual_sha256 {
-                    if options.verify_checksums {
-                        return Err(RuntimeError::DependencyError {
-                            reason: format!(
-                                "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
-                                requirement.name,
-                                requirement.version,
-                                requirement.sha256,
-                                actual_sha256
-                            ),
-                        });
-                    } else {
-                        eprintln!(
-                            "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
-                            requirement.name, requirement.version
-                        );
-                    }
+                    return Err(RuntimeError::DependencyError {
+                        reason: format!(
+                            "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
+                            requirement.name,
+                            requirement.version,
+                            requirement.sha256,
+                            actual_sha256
+                        ),
+                    });
                 }
             }
         } else if let Some(solver) = &options.solver {
@@ -1201,25 +1197,18 @@ fn verify_and_resolve_runtime_dependencies(
                         });
                     }
 
-                    if !requirement.sha256.is_empty() {
+                    if options.verify_checksums && !requirement.sha256.is_empty() {
                         let actual_sha256 = solved_package.program.compute_sha256();
                         if requirement.sha256 != actual_sha256 {
-                            if options.verify_checksums {
-                                return Err(RuntimeError::DependencyError {
-                                    reason: format!(
-                                        "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
-                                        requirement.name,
-                                        requirement.version,
-                                        requirement.sha256,
-                                        actual_sha256
-                                    ),
-                                });
-                            } else {
-                                eprintln!(
-                                    "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
-                                    requirement.name, requirement.version
-                                );
-                            }
+                            return Err(RuntimeError::DependencyError {
+                                reason: format!(
+                                    "Dependency checksum mismatch for '{}@{}': expected {}, found {}",
+                                    requirement.name,
+                                    requirement.version,
+                                    requirement.sha256,
+                                    actual_sha256
+                                ),
+                            });
                         }
                     }
 

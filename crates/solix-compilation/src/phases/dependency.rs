@@ -98,9 +98,9 @@ pub fn run_dependency_resolution(
                 continue;
             }
 
-            let actual_sha256 = existing_program.compute_sha256();
-            if !requirement.sha256.is_empty() && requirement.sha256 != actual_sha256 {
-                if context.options.verify_checksums {
+            if context.options.verify_checksums && !requirement.sha256.is_empty() {
+                let actual_sha256 = existing_program.compute_sha256();
+                if requirement.sha256 != actual_sha256 {
                     accumulated_diagnostics.push(CompilationDiagnostic::from(
                         BindingError::DependencyChecksumMismatch {
                             name: requirement.name.clone(),
@@ -111,11 +111,6 @@ pub fn run_dependency_resolution(
                         },
                     ));
                     continue;
-                } else {
-                    eprintln!(
-                        "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
-                        requirement.name, requirement.version
-                    );
                 }
             }
 
@@ -174,9 +169,9 @@ pub fn run_dependency_resolution(
                     let program = solved_package.program.clone();
                     let version = solved_package.version;
 
-                    let actual_sha256 = program.compute_sha256();
-                    if !requirement.sha256.is_empty() && requirement.sha256 != actual_sha256 {
-                        if context.options.verify_checksums {
+                    if context.options.verify_checksums && !requirement.sha256.is_empty() {
+                        let actual_sha256 = program.compute_sha256();
+                        if requirement.sha256 != actual_sha256 {
                             accumulated_diagnostics.push(CompilationDiagnostic::from(
                                 BindingError::DependencyChecksumMismatch {
                                     name: requirement.name.clone(),
@@ -187,11 +182,6 @@ pub fn run_dependency_resolution(
                                 },
                             ));
                             continue;
-                        } else {
-                            eprintln!(
-                                "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
-                                requirement.name, requirement.version
-                            );
                         }
                     }
 
@@ -484,25 +474,18 @@ fn resolve_transitive_requirement(
             )]
         })?;
 
-    if !requirement.sha256.is_empty() {
+    if context.options.verify_checksums && !requirement.sha256.is_empty() {
         let actual_sha256 = solved_package.program.compute_sha256();
         if requirement.sha256 != actual_sha256 {
-            if context.options.verify_checksums {
-                return Err(vec![CompilationDiagnostic::from(
-                    BindingError::DependencyChecksumMismatch {
-                        name: requirement.name.clone(),
-                        version: requirement.version.to_string(),
-                        expected_sha256: requirement.sha256.clone(),
-                        actual_sha256,
-                        span: import_span.to_source_span(),
-                    },
-                )]);
-            } else {
-                eprintln!(
-                    "warning: checksum verification bypassed (--no-verify); loading unverified dependency '{}@{}'",
-                    requirement.name, requirement.version
-                );
-            }
+            return Err(vec![CompilationDiagnostic::from(
+                BindingError::DependencyChecksumMismatch {
+                    name: requirement.name.clone(),
+                    version: requirement.version.to_string(),
+                    expected_sha256: requirement.sha256.clone(),
+                    actual_sha256,
+                    span: import_span.to_source_span(),
+                },
+            )]);
         }
     }
 
