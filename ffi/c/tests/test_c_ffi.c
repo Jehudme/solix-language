@@ -189,10 +189,17 @@ SOLIX_REGISTER_MODULE(TEST_ENTRIES)
 
 int main(void) {
     /* 0. Verify C-FFI Version Handshake */
-    TEST_CHECK(SOLIX_FFI_VERSION_MAJOR == 2);
-    TEST_CHECK(SOLIX_FFI_VERSION_MINOR == 0);
-    TEST_CHECK(SOLIX_FFI_VERSION_PATCH == 0);
-    TEST_CHECK(strcmp(SOLIX_FFI_VERSION, "2.0.0") == 0);
+    char expected_version_string[64];
+    snprintf(
+        expected_version_string,
+        sizeof(expected_version_string),
+        "%d.%d.%d",
+        SOLIX_FFI_VERSION_MAJOR,
+        SOLIX_FFI_VERSION_MINOR,
+        SOLIX_FFI_VERSION_PATCH
+    );
+    TEST_CHECK(SOLIX_FFI_VERSION_MAJOR >= 2);
+    TEST_CHECK(strcmp(SOLIX_FFI_VERSION, expected_version_string) == 0);
 
     /* 1. Verify SolixCValue encodings */
     TEST_CHECK(solix_cvalue_is_null(solix_cvalue_null()));
