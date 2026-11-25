@@ -27,6 +27,7 @@ fn test_solix_new_default_application() {
         lib: false,
         native: None,
         no_native: false,
+        no_std: false,
         deps: vec![],
         force: false,
     };
@@ -178,6 +179,7 @@ fn test_solix_new_library_no_native_and_deps() {
         lib: true,
         native: None,
         no_native: true,
+        no_std: false,
         deps: vec!["solix@2.0.0".to_string(), "extra_helpers:0.5.1".to_string()],
         force: false,
     };
@@ -253,6 +255,7 @@ fn test_solix_new_existing_directory_force_flag() {
         lib: false,
         native: None,
         no_native: true,
+        no_std: false,
         deps: vec![],
         force: false,
     };
@@ -284,6 +287,7 @@ fn test_solix_new_existing_directory_force_flag() {
         lib: false,
         native: None,
         no_native: true,
+        no_std: false,
         deps: vec![],
         force: true,
     };
@@ -319,6 +323,7 @@ fn test_solix_new_explicit_native_flag() {
         lib: false,
         native: Some("rust".to_string()),
         no_native: false,
+        no_std: false,
         deps: vec![],
         force: false,
     };

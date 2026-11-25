@@ -1721,6 +1721,7 @@ fn test_merge_bundled_packages_script_unifies_all_platforms_and_checksums() {
         "--name",
         "consumer_app",
         "--no-native",
+        "--no-std",
         "--deps",
         "demo@1.0.0",
     ])

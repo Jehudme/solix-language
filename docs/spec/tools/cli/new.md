@@ -35,6 +35,7 @@ solix new native <name> [options]
 | `--lib` | | Flag | `false` | Scaffolds a reusable library project (`src/lib.slx`) instead of an executable application. |
 | `--native [LANG]` | | String (Optional Value) | `"rust"` | Scaffolds a dual-mode native bridge in `natives/` (`rust`, `c`, or `cpp`). |
 | `--no-native` | | Flag | `false` | Omits the native bridge subproject and creates an empty `natives/.gitkeep`. |
+| `--no-std` | `--no-default-deps` | Flag | `false` | Omits the automatic standard library dependency (`solix`). |
 | `--deps <pkg@ver>` | `-d` | String (Repeated) | `[]` | Declares a `profiles.release.dependencies` package requirement (e.g. `-d raylib@5.5.0`). |
 | `--force` | | Flag | `false` | Overwrites an existing `manifest.yaml` (or `manifest.toml`) if present. |
 
@@ -103,16 +104,9 @@ my_app/
 #### Generated `manifest.yaml`
 
 ```yaml
-vars:
-  project_version: &proj_version "0.1.0"
-  default_platforms: &host_platform
-    - host
-  release_platforms: &release_platforms
-    - all
-
 configuration:
   name: my_app
-  version: *proj_version
+  version: "0.1.0"
   description: "A Solix project"
   license: "Apache-2.0"
   authors: []
@@ -126,9 +120,14 @@ profiles:
     static: true
     sources:
       - src
-    platforms: *release_platforms
+    platforms:
+      - all
     natives:
       my_app_bridge:
+        profile: release
+    dependencies:
+      solix:
+        version: "2.0.1"
         profile: release
 
   debug:
@@ -139,10 +138,15 @@ profiles:
     static: false
     sources:
       - src
-    platforms: *host_platform
+    platforms:
+      - host
     natives:
       my_app_bridge:
         profile: debug
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release
 
   test:
     entrypoint: TestRunner::test
@@ -153,10 +157,15 @@ profiles:
     sources:
       - src
       - tests
-    platforms: *host_platform
+    platforms:
+      - host
     natives:
       my_app_bridge:
         profile: debug
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release
 ```
 
 ---

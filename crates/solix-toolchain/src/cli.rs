@@ -1166,6 +1166,10 @@ pub struct NewPackageArgs {
     #[arg(long, conflicts_with = "native")]
     pub no_native: bool,
 
+    /// Do not automatically add standard library dependency ('solix')
+    #[arg(long = "no-std", alias = "no-default-deps")]
+    pub no_std: bool,
+
     /// Add dependency in pkg@ver format (can be repeated)
     #[arg(short = 'd', long = "deps")]
     pub deps: Vec<String>,
@@ -1292,6 +1296,10 @@ pub struct NewArgs {
     /// Do not create a native bridge subproject
     #[arg(long, conflicts_with = "native")]
     pub no_native: bool,
+
+    /// Do not automatically add standard library dependency ('solix')
+    #[arg(long = "no-std", alias = "no-default-deps")]
+    pub no_std: bool,
 
     /// Add dependency in pkg@ver format (can be repeated)
     #[arg(short = 'd', long = "deps")]

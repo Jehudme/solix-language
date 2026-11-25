@@ -512,6 +512,7 @@ fn test_subcommands_install_and_uninstall_package_and_binaries() {
         "--version",
         "1.0.0",
         "--no-native",
+        "--no-std",
     ])
     .expect("new package cli");
     assert_eq!(run(new_package_cli).expect("new package project"), 0);
