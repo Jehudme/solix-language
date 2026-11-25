@@ -1,0 +1,63 @@
+configuration:
+  name: untitled
+  version: "0.1.0"
+  description: "An untitled Solix project with Rust native interoperability"
+  license: "Apache-2.0"
+  authors:
+    - "Jehud Metellus"
+
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    platforms:
+      - all
+    sources:
+      - src
+    natives:
+      rust_bridge:
+        profile: release
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release
+
+  debug:
+    entrypoint: Main::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    platforms:
+      - host
+    sources:
+      - src
+    natives:
+      rust_bridge:
+        profile: debug
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release
+
+  test:
+    entrypoint: TestRunner::test
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    platforms:
+      - host
+    sources:
+      - src
+      - tests
+    natives:
+      rust_bridge:
+        profile: debug
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release

@@ -271,34 +271,164 @@ def get_host_target_triple() -> str:
     return "x86_64-unknown-linux-gnu"
 
 
+def _parse_yaml_scalar_fallback(raw_scalar: str) -> Any:
+    cleaned = raw_scalar.strip()
+    if not cleaned or cleaned.startswith("#"):
+        return ""
+    if cleaned == "[]":
+        return []
+    if cleaned == "{}":
+        return {}
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (
+        cleaned.startswith("'") and cleaned.endswith("'")
+    ):
+        return cleaned[1:-1]
+    if " #" in cleaned:
+        cleaned = cleaned.split(" #", 1)[0].strip()
+    if cleaned.lower() == "true":
+        return True
+    if cleaned.lower() == "false":
+        return False
+    try:
+        return int(cleaned)
+    except ValueError:
+        pass
+    if cleaned.startswith("[") and cleaned.endswith("]"):
+        return [
+            item_entry.strip().strip("'\"")
+            for item_entry in cleaned[1:-1].split(",")
+            if item_entry.strip()
+        ]
+    return cleaned.strip("'\"")
+
+
+def _parse_yaml_list_item_fallback(item_lines: list[str]) -> Any:
+    first_line = item_lines[0].strip()
+    remaining_val = first_line[2:].strip()
+    if len(item_lines) == 1:
+        return _parse_yaml_scalar_or_block_fallback(remaining_val, [])
+    reformatted_first = "  " + remaining_val
+    return _parse_yaml_lines_fallback([reformatted_first] + item_lines[1:])
+
+
+def _parse_yaml_scalar_or_block_fallback(val_part: str, child_lines: list[str]) -> Any:
+    if child_lines:
+        return _parse_yaml_lines_fallback(child_lines)
+    return _parse_yaml_scalar_fallback(val_part)
+
+
+def _parse_yaml_lines_fallback(raw_lines: list[str]) -> Any:
+    first_non_empty_line: str | None = None
+    for line_entry in raw_lines:
+        stripped_line = line_entry.strip()
+        if stripped_line and not stripped_line.startswith("#"):
+            first_non_empty_line = stripped_line
+            break
+    if first_non_empty_line is None:
+        return {}
+
+    if first_non_empty_line.startswith("- "):
+        parsed_items: list[Any] = []
+        current_item_lines: list[str] = []
+        base_indent_level: int | None = None
+        for line_entry in raw_lines:
+            stripped_line = line_entry.strip()
+            if not stripped_line or stripped_line.startswith("#"):
+                continue
+            indent_level = len(line_entry) - len(line_entry.lstrip(" "))
+            if base_indent_level is None:
+                base_indent_level = indent_level
+            if indent_level == base_indent_level and stripped_line.startswith("- "):
+                if current_item_lines:
+                    parsed_items.append(_parse_yaml_list_item_fallback(current_item_lines))
+                    current_item_lines = []
+                current_item_lines.append(line_entry)
+            else:
+                current_item_lines.append(line_entry)
+        if current_item_lines:
+            parsed_items.append(_parse_yaml_list_item_fallback(current_item_lines))
+        return parsed_items
+    else:
+        parsed_mapping: dict[str, Any] = {}
+        current_field_key: str | None = None
+        current_field_val: str = ""
+        current_child_lines: list[str] = []
+        base_indent_level: int | None = None
+        for line_entry in raw_lines:
+            stripped_line = line_entry.strip()
+            if not stripped_line or stripped_line.startswith("#"):
+                continue
+            indent_level = len(line_entry) - len(line_entry.lstrip(" "))
+            if base_indent_level is None:
+                base_indent_level = indent_level
+            if (
+                indent_level == base_indent_level
+                and ":" in stripped_line
+                and not stripped_line.startswith("- ")
+            ):
+                if current_field_key is not None:
+                    parsed_mapping[current_field_key] = _parse_yaml_scalar_or_block_fallback(
+                        current_field_val, current_child_lines
+                    )
+                    current_child_lines = []
+                key_token, val_token = stripped_line.split(":", 1)
+                current_field_key = key_token.strip().strip("'\"")
+                current_field_val = val_token.strip()
+            else:
+                current_child_lines.append(line_entry)
+        if current_field_key is not None:
+            parsed_mapping[current_field_key] = _parse_yaml_scalar_or_block_fallback(
+                current_field_val, current_child_lines
+            )
+        return parsed_mapping
+
+
 def load_manifest(project_root: Path) -> dict[str, Any]:
-    """Parses manifest.toml from the project root directory."""
-    manifest_path = project_root / "manifest.toml"
-    if not manifest_path.exists():
+    """Parses manifest.yaml, manifest.yml, or legacy manifest.toml from the project root directory."""
+    manifest_yaml = project_root / "manifest.yaml"
+    manifest_yml = project_root / "manifest.yml"
+    manifest_toml = project_root / "manifest.toml"
+
+    if manifest_yaml.exists():
+        manifest_path = manifest_yaml
+    elif manifest_yml.exists():
+        manifest_path = manifest_yml
+    elif manifest_toml.exists():
+        manifest_path = manifest_toml
+    else:
         raise BuildError(
             phase="Manifest Loading",
-            message=f"manifest.toml not found at '{manifest_path}'",
+            message=f"manifest.yaml (or manifest.toml) not found at '{project_root}'",
             cwd=project_root,
             hint="Ensure that you are running the build from a valid Solix project directory.",
         )
 
     try:
-        with open(manifest_path, "rb") as manifest_file:
-            manifest_data = tomllib.load(manifest_file)
+        if manifest_path.suffix in (".yaml", ".yml"):
+            try:
+                import yaml
+                with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                    manifest_data = yaml.safe_load(manifest_file) or {}
+            except (ImportError, ModuleNotFoundError):
+                manifest_text = manifest_path.read_text(encoding="utf-8")
+                manifest_data = _parse_yaml_lines_fallback(manifest_text.splitlines())
+        else:
+            with open(manifest_path, "rb") as manifest_file:
+                manifest_data = tomllib.load(manifest_file)
     except Exception as parse_error:
         raise BuildError(
             phase="Manifest Parsing",
-            message=f"Failed to parse manifest.toml: {parse_error}",
+            message=f"Failed to parse {manifest_path.name}: {parse_error}",
             cwd=project_root,
-            hint="Ensure manifest.toml is valid TOML syntax.",
+            hint=f"Ensure {manifest_path.name} is valid syntax.",
         ) from parse_error
 
     if "configuration" not in manifest_data or "name" not in manifest_data["configuration"]:
         raise BuildError(
             phase="Manifest Validation",
-            message="manifest.toml must contain a valid [configuration] section with 'name'",
+            message=f"{manifest_path.name} must contain a valid [configuration] section with 'name'",
             cwd=project_root,
-            hint="Add [configuration] section with name = \"<package_name>\" to manifest.toml.",
+            hint=f"Add [configuration] section with name = \"<package_name>\" to {manifest_path.name}.",
         )
 
     return manifest_data

@@ -12,16 +12,9 @@ The `manifest.yaml` file is the declarative configuration descriptor for Solix p
 A complete `manifest.yaml` document structure:
 
 ```yaml
-vars:
-  project_version: &app_version "0.1.0"
-  default_platforms: &all_desktop
-    - linux
-    - macos
-    - windows
-
 configuration:
   name: my_project
-  version: *app_version
+  version: "0.1.0"
   description: High-performance Solix application with native bindings
   license: Apache-2.0
   authors:
@@ -35,9 +28,10 @@ profiles:
     inline_threshold: 16
     debug_symbols: false
     static: true
+    platforms:
+      - all
     sources:
       - src
-    platforms: *all_desktop
     pre_compile:
       - cmake --version
     post_compile: []
@@ -46,10 +40,10 @@ profiles:
         profile: release
     dependencies:
       solix:
-        version: "2.0.0"
+        version: "2.0.1"
         profile: release
       raylib:
-        version: "5.5.0"
+        version: "5.6.1"
         profile: release
 
   debug:
