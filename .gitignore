@@ -26,3 +26,5 @@ benchmarks/workloads/*/*
 !benchmarks/workloads/*/*.py
 !benchmarks/workloads/*/*.lua
 !benchmarks/workloads/*/*.c
+!benchmarks/workloads/*/*.java
+*.class
