@@ -597,6 +597,40 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
             self.assertIn("#define SOLIX_FFI_VERSION_MINOR 5", updated_header)
             self.assertIn('#define SOLIX_FFI_VERSION "1.5.0"', updated_header)
 
+    def test_vscode_extension_version_synchronized_during_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo_root_temp = Path(temporary_directory)
+            vscode_temp_dir = repo_root_temp / "editors" / "vscode"
+            vscode_temp_dir.mkdir(parents=True, exist_ok=True)
+            package_json_temp = vscode_temp_dir / "package.json"
+            package_lock_temp = vscode_temp_dir / "package-lock.json"
+
+            package_json_temp.write_text(
+                json.dumps({"name": "solix", "version": "1.3.1"}, indent=4) + "\n",
+                encoding="utf-8",
+            )
+            package_lock_temp.write_text(
+                json.dumps(
+                    {
+                        "name": "solix",
+                        "version": "1.3.1",
+                        "packages": {"": {"name": "solix", "version": "1.3.1"}},
+                    },
+                    indent=4,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            prepare_release_train.update_vscode_extension_version(repo_root_temp, "2.0.1")
+
+            updated_package_data = json.loads(package_json_temp.read_text(encoding="utf-8"))
+            self.assertEqual(updated_package_data["version"], "2.0.1")
+
+            updated_lock_data = json.loads(package_lock_temp.read_text(encoding="utf-8"))
+            self.assertEqual(updated_lock_data["version"], "2.0.1")
+            self.assertEqual(updated_lock_data["packages"][""]["version"], "2.0.1")
+
     def test_doc_sync_ignores_lsp_cargo_toml_and_scripts_are_emoji_free(self) -> None:
         self.assertEqual(doc_sync_check.check_trigger_matrix(["crates/solix-lsp/Cargo.toml"]), [])
         lsp_src_violations = doc_sync_check.check_trigger_matrix(["crates/solix-lsp/src/server.rs"])

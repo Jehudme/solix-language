@@ -85,6 +85,12 @@ The simplest and recommended method to install the official extension into Visua
 solix install --vscode
 ```
 
+To force reinstallation or overwrite an existing installation (e.g. when reinstalling or downgrading), pass the `--force` flag:
+
+```bash
+solix install --vscode --force
+```
+
 This command inspects your environment, detects any installed editor command-line tools (`code`, `codium`, `cursor`), and automatically installs the bundled extension archive with zero external downloads required.
 
 ### Option B: Install Pre-packaged `.vsix` via Editor CLI

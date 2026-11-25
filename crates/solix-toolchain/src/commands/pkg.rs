@@ -574,7 +574,7 @@ pub fn execute_install(args: InstallArgs) -> Result<()> {
         };
     }
     if args.vscode {
-        return execute_install_vscode();
+        return execute_install_vscode(args.force);
     }
 
     if args.bundled {
@@ -1157,7 +1157,11 @@ pub fn execute_list(args: ListArgs) -> Result<()> {
 ///
 /// # Errors
 /// Returns an error if the bundled `.vsix` cannot be located or installation fails.
-pub fn execute_install_vscode() -> Result<()> {
+/// Discovers supported editor CLIs (`code`, `codium`, `cursor`) and installs the Solix extension.
+///
+/// # Errors
+/// Returns an error if the bundled `.vsix` cannot be located or installation fails.
+pub fn execute_install_vscode(force_overwrite: bool) -> Result<()> {
     let extension_path = crate::assets::resolve_bundled_vscode_extension_path().ok_or_else(|| {
         anyhow::anyhow!(
             "Could not locate bundled Solix VS Code extension (.vsix) on disk or embedded in this binary.\n\
@@ -1202,20 +1206,53 @@ pub fn execute_install_vscode() -> Result<()> {
 
         println!("Installing extension using '{editor_display}'...");
         let mut install_command = crate::process::create_process_command(editor_executable);
-        let installation_status = install_command
+        install_command
             .arg("--install-extension")
-            .arg(&extension_path)
-            .status();
+            .arg(&extension_path);
+        if force_overwrite {
+            install_command.arg("--force");
+        }
+        let installation_output = install_command.output();
 
-        match installation_status {
-            Ok(status) if status.success() => {
-                println!("Successfully installed Solix extension into '{editor_display}'!");
-                installed_count += 1;
+        match installation_output {
+            Ok(output) if output.status.success() => {
+                let stdout_text = String::from_utf8_lossy(&output.stdout);
+                let stderr_text = String::from_utf8_lossy(&output.stderr);
+                if !stdout_text.is_empty() {
+                    print!("{stdout_text}");
+                }
+                if !stderr_text.is_empty() {
+                    eprint!("{stderr_text}");
+                }
+
+                let combined_output = format!("{stdout_text}\n{stderr_text}");
+                let is_downgrade_rejected = !force_overwrite
+                    && (combined_output.contains("Use '--force' option to downgrade")
+                        || (combined_output.contains("is already installed")
+                            && !combined_output.contains("successfully installed")));
+
+                if is_downgrade_rejected {
+                    eprintln!(
+                        "Notice: '{editor_display}' skipped installation because an existing newer extension is already present.\n\
+                         Pass '--force' to overwrite or downgrade: solix install --vscode --force"
+                    );
+                } else {
+                    println!("Successfully installed Solix extension into '{editor_display}'!");
+                    installed_count += 1;
+                }
             }
-            Ok(status) => {
+            Ok(output) => {
+                let stdout_text = String::from_utf8_lossy(&output.stdout);
+                let stderr_text = String::from_utf8_lossy(&output.stderr);
+                if !stdout_text.is_empty() {
+                    print!("{stdout_text}");
+                }
+                if !stderr_text.is_empty() {
+                    eprint!("{stderr_text}");
+                }
                 eprintln!(
                     "Warning: '{editor_display} --install-extension' exited with code {:?}",
-                    status.code()
+                    output.status.code()
                 );
             }
             Err(error_details) => {
@@ -1227,6 +1264,10 @@ pub fn execute_install_vscode() -> Result<()> {
     if installed_count > 0 {
         println!(
             "\nExtension installation complete. Restart your editor or run 'Developer: Reload Window' to activate."
+        );
+    } else {
+        println!(
+            "\nNo extensions were updated. Use '--force' if you wish to overwrite existing installations."
         );
     }
 
