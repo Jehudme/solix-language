@@ -981,17 +981,27 @@ fn test_ms029_formatter_compound_operators_and_else_block() {
 #[test]
 fn test_format_range_preserves_method_base_indentation() {
     let (workspace, test_uri) = create_test_workspace();
-    let sample_source = "class Service {\n    void execute() {\nint32 counter=10;\ncounter+=5;\n    }\n}\n";
+    let sample_source =
+        "class Service {\n    void execute() {\nint32 counter=10;\ncounter+=5;\n    }\n}\n";
     let snapshot = workspace.did_open(test_uri, 1, sample_source.to_string());
 
     // Selection covering lines 2 and 3 (the unindented lines inside execute())
     let selected_range = Range {
-        start: Position { line: 2, character: 0 },
-        end: Position { line: 4, character: 0 },
+        start: Position {
+            line: 2,
+            character: 0,
+        },
+        end: Position {
+            line: 4,
+            character: 0,
+        },
     };
 
     let computed_indent = compute_indent_level_at_line(&snapshot.source_text, 2);
-    assert_eq!(computed_indent, 2, "Expected 2 indentation levels (8 spaces) inside execute()");
+    assert_eq!(
+        computed_indent, 2,
+        "Expected 2 indentation levels (8 spaces) inside execute()"
+    );
 
     let edits = format_range(&snapshot, selected_range);
     assert_eq!(edits.len(), 1);

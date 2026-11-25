@@ -189,10 +189,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                         .split('<')
                         .next()
                         .unwrap_or(&layout.class_name);
-                    let simple_base = base_name
-                        .rsplit(['.', ':'])
-                        .next()
-                        .unwrap_or(base_name);
+                    let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
                     let generic_part = layout
                         .class_name
                         .split_once('<')
@@ -2123,7 +2120,10 @@ fn resolve_annotation_type(
 fn extract_simple_class_name(name: &str) -> String {
     let base_name = name.split('<').next().unwrap_or(name);
     let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
-    let generic_part = name.split_once('<').map(|(_, args)| format!("<{args}")).unwrap_or_default();
+    let generic_part = name
+        .split_once('<')
+        .map(|(_, args)| format!("<{args}"))
+        .unwrap_or_default();
     format!("{simple_base}{generic_part}")
 }
 

@@ -1354,8 +1354,7 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         for (param_name, arg_type) in
                             iface_entry.parameter_names.iter().zip(type_arguments)
                         {
-                            interface_substitutions
-                                .insert(param_name.clone(), arg_type.clone());
+                            interface_substitutions.insert(param_name.clone(), arg_type.clone());
                         }
 
                         let mut found_method: Option<(SymbolId, Type, Vec<Type>)> = None;
@@ -1386,8 +1385,7 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                                 } else {
                                     Self::substitute_type(return_type, &interface_substitutions)
                                 };
-                                found_method =
-                                    Some((child_id, effective_return, effective_params));
+                                found_method = Some((child_id, effective_return, effective_params));
                                 break;
                             }
                         }

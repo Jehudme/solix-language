@@ -2062,7 +2062,10 @@ fn test_cli_fmt_skips_ignored_directories() {
         .write_file("src/main.slx", "class Main{int32 value_one=1;}")
         .expect("write src");
     let build_file = workspace
-        .write_file("build/release/stage/generated.slx", "class Generated{int32 value_two=2;}")
+        .write_file(
+            "build/release/stage/generated.slx",
+            "class Generated{int32 value_two=2;}",
+        )
         .expect("write build");
     let git_file = workspace
         .write_file(".git/hooks/hook.slx", "class Hook{int32 value_three=3;}")
@@ -2078,7 +2081,10 @@ fn test_cli_fmt_skips_ignored_directories() {
     assert_eq!(run(fmt_cli).expect("fmt succeeds"), 0);
 
     let src_content = std::fs::read_to_string(&src_file).expect("read src");
-    assert!(src_content.contains("class Main {"), "Expected src/main.slx to be formatted");
+    assert!(
+        src_content.contains("class Main {"),
+        "Expected src/main.slx to be formatted"
+    );
 
     let build_content = std::fs::read_to_string(&build_file).expect("read build");
     assert_eq!(

@@ -5,13 +5,7 @@
 use crate::cli::FmtArgs;
 use std::path::{Path, PathBuf};
 
-const IGNORED_DIRECTORY_NAMES: &[&str] = &[
-    ".git",
-    "build",
-    "target",
-    ".cache",
-    "node_modules",
-];
+const IGNORED_DIRECTORY_NAMES: &[&str] = &[".git", "build", "target", ".cache", "node_modules"];
 
 /// Executes the Solix formatter over specified files or directories.
 ///
@@ -63,12 +57,11 @@ fn collect_slx_files(
         let directory_entry = directory_entry_result?;
         let entry_path = directory_entry.path();
         if entry_path.is_dir() {
-            if let Some(directory_name) = entry_path.file_name().and_then(|name| name.to_str()) {
-                if directory_name.starts_with('.')
-                    || IGNORED_DIRECTORY_NAMES.contains(&directory_name)
-                {
-                    continue;
-                }
+            if let Some(directory_name) = entry_path.file_name().and_then(|name| name.to_str())
+                && (directory_name.starts_with('.')
+                    || IGNORED_DIRECTORY_NAMES.contains(&directory_name))
+            {
+                continue;
             }
             collect_slx_files(&entry_path, collected_files)?;
         } else if entry_path.is_file()

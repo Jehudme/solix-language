@@ -935,7 +935,8 @@ fn compile_cargo_native(
             if let Some(cross_executable) = find_executable("cross") {
                 let mut cross_command = crate::process::create_process_command(&cross_executable);
                 cross_command.arg("build");
-                cross_command.arg("--manifest-path")
+                cross_command
+                    .arg("--manifest-path")
                     .arg(&cargo_manifest)
                     .arg("--target-dir")
                     .arg(&cargo_target_dir);

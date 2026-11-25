@@ -533,8 +533,8 @@ impl RuntimeContext {
                             {
                                 let old_vtable_id = inst.flags() & 0x7F;
                                 if old_vtable_id > 0 {
-                                    let new_flags =
-                                        0x80 | (((old_vtable_id as u32 + vtable_offset) as u8) & 0x7F);
+                                    let new_flags = 0x80
+                                        | (((old_vtable_id as u32 + vtable_offset) as u8) & 0x7F);
                                     *inst = Instruction::format_a(
                                         OpCode::TupleInstanceof,
                                         new_flags,
@@ -553,8 +553,7 @@ impl RuntimeContext {
                                 };
                                 if old_vtable_id > 0 {
                                     let new_vtable_id = (old_vtable_id + vtable_offset) as u16;
-                                    let new_flags =
-                                        0x80 | ((new_vtable_id as u8) & 0x7F);
+                                    let new_flags = 0x80 | ((new_vtable_id as u8) & 0x7F);
                                     *inst = Instruction::format_a(
                                         OpCode::AllocArray,
                                         new_flags,

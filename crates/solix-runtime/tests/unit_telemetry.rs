@@ -221,13 +221,9 @@ fn test_dynamic_string_concatenation_does_not_leak_interned_strings() {
         0,
         2,
     ));
-    main_function.instructions.push(Instruction::format_a(
-        OpCode::ReturnValue,
-        0,
-        0,
-        2,
-        0,
-    ));
+    main_function
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 0, 2, 0));
     program.functions.push(main_function);
     program.entry_point_id = Some(0);
 

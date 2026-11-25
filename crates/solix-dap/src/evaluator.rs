@@ -170,7 +170,9 @@ pub fn evaluate_expression_in_frame(
         let right_evaluated_value =
             evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
         return match (left_evaluated_value, right_evaluated_value) {
-            (Value::Bool(left_bool), Value::Bool(right_bool)) => Ok(Value::Bool(left_bool || right_bool)),
+            (Value::Bool(left_bool), Value::Bool(right_bool)) => {
+                Ok(Value::Bool(left_bool || right_bool))
+            }
             (first_operand, second_operand) => Err(format!(
                 "Operator '||' requires boolean operands, found '{}' and '{}'",
                 first_operand.type_name(),
@@ -188,7 +190,9 @@ pub fn evaluate_expression_in_frame(
         let right_evaluated_value =
             evaluate_expression_in_frame(right_operand_text, virtual_machine, frame_index)?;
         return match (left_evaluated_value, right_evaluated_value) {
-            (Value::Bool(left_bool), Value::Bool(right_bool)) => Ok(Value::Bool(left_bool && right_bool)),
+            (Value::Bool(left_bool), Value::Bool(right_bool)) => {
+                Ok(Value::Bool(left_bool && right_bool))
+            }
             (first_operand, second_operand) => Err(format!(
                 "Operator '&&' requires boolean operands, found '{}' and '{}'",
                 first_operand.type_name(),

@@ -29,7 +29,10 @@ impl VmTrap {
     #[cold]
     #[inline(never)]
     pub(crate) fn null_reference() -> Self {
-        eprintln!("TRAP null_reference:\n{}", std::backtrace::Backtrace::force_capture());
+        eprintln!(
+            "TRAP null_reference:\n{}",
+            std::backtrace::Backtrace::force_capture()
+        );
         Self(Box::new(RuntimeError::NullReferenceAccess))
     }
 
@@ -2522,7 +2525,9 @@ impl VirtualMachine {
         {
             let target_vtable_id = {
                 let vtable_u16 = unsafe {
-                    u16::from_le(std::ptr::read_unaligned(buf_ptr.add(arr_offset + 5).cast::<u16>()))
+                    u16::from_le(std::ptr::read_unaligned(
+                        buf_ptr.add(arr_offset + 5).cast::<u16>(),
+                    ))
                 } as u32;
                 if vtable_u16 > 0 {
                     vtable_u16
@@ -5129,8 +5134,13 @@ impl VirtualMachine {
                         } else {
                             ((inst.src2() as usize).max(1), 0)
                         };
-                        let payload_addr =
-                            alloc_array_trap(&mut self.heap, array_len, elem_size, type_tag, vtable_id)?;
+                        let payload_addr = alloc_array_trap(
+                            &mut self.heap,
+                            array_len,
+                            elem_size,
+                            type_tag,
+                            vtable_id,
+                        )?;
                         unsafe {
                             *reg_base.add(inst.dst() as usize) = Value::Ref(payload_addr);
                         }

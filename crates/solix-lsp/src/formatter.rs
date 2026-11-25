@@ -60,8 +60,14 @@ pub fn compute_indent_level_at_line(source_text: &str, target_line_index: u32) -
             indent_level = indent_level.saturating_sub(1);
         }
 
-        let open_brace_count = trimmed_line.chars().filter(|&character| character == '{').count();
-        let close_brace_count = trimmed_line.chars().filter(|&character| character == '}').count();
+        let open_brace_count = trimmed_line
+            .chars()
+            .filter(|&character| character == '{')
+            .count();
+        let close_brace_count = trimmed_line
+            .chars()
+            .filter(|&character| character == '}')
+            .count();
 
         if starts_with_closing_brace {
             let remaining_close_count = close_brace_count.saturating_sub(1);
@@ -96,11 +102,9 @@ pub fn format_range(snapshot: &AnalysisSnapshot, range: Range) -> Vec<TextEdit> 
     }
     let clamped_end_line = (end_line as usize).min(document_lines.len().saturating_sub(1));
 
-    let initial_indent_level =
-        compute_indent_level_at_line(&snapshot.source_text, start_line);
+    let initial_indent_level = compute_indent_level_at_line(&snapshot.source_text, start_line);
     let selected_slice = document_lines[start_line as usize..=clamped_end_line].join("\n");
-    let formatted_text =
-        format_source_with_base_indent(&selected_slice, initial_indent_level);
+    let formatted_text = format_source_with_base_indent(&selected_slice, initial_indent_level);
 
     let start_offset = position_to_byte_offset(
         &snapshot.source_text,
@@ -130,9 +134,7 @@ pub fn format_range(snapshot: &AnalysisSnapshot, range: Range) -> Vec<TextEdit> 
     };
 
     let original_slice = &snapshot.source_text[start_offset..end_offset];
-    if original_slice == formatted_text.trim_end_matches('\n')
-        || original_slice == formatted_text
-    {
+    if original_slice == formatted_text.trim_end_matches('\n') || original_slice == formatted_text {
         return Vec::new();
     }
 

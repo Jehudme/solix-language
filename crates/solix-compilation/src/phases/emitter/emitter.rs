@@ -825,16 +825,18 @@ impl<'ctx> Emitter<'ctx> {
                         && let Some((base_name, args_part)) = resolved_element_name.split_once('<')
                         && let Some(args_string) = args_part.strip_suffix('>')
                     {
-                        let substituted_args: Vec<String> = split_top_level_generic_arguments(args_string)
-                            .into_iter()
-                            .map(|arg| {
-                                generic_substitutions
-                                    .get(arg)
-                                    .cloned()
-                                    .unwrap_or_else(|| arg.to_string())
-                            })
-                            .collect();
-                        resolved_element_name = format!("{base_name}<{}>", substituted_args.join(", "));
+                        let substituted_args: Vec<String> =
+                            split_top_level_generic_arguments(args_string)
+                                .into_iter()
+                                .map(|arg| {
+                                    generic_substitutions
+                                        .get(arg)
+                                        .cloned()
+                                        .unwrap_or_else(|| arg.to_string())
+                                })
+                                .collect();
+                        resolved_element_name =
+                            format!("{base_name}<{}>", substituted_args.join(", "));
                     }
                 }
                 let array_type = self.query_type(*span);
@@ -1057,15 +1059,16 @@ impl<'ctx> Emitter<'ctx> {
                         && let Some((base_name, args_part)) = resolved_class_name.split_once('<')
                         && let Some(args_string) = args_part.strip_suffix('>')
                     {
-                        let substituted_arguments: Vec<String> = split_top_level_generic_arguments(args_string)
-                            .into_iter()
-                            .map(|argument| {
-                                generic_substitutions
-                                    .get(argument)
-                                    .cloned()
-                                    .unwrap_or_else(|| argument.to_string())
-                            })
-                            .collect();
+                        let substituted_arguments: Vec<String> =
+                            split_top_level_generic_arguments(args_string)
+                                .into_iter()
+                                .map(|argument| {
+                                    generic_substitutions
+                                        .get(argument)
+                                        .cloned()
+                                        .unwrap_or_else(|| argument.to_string())
+                                })
+                                .collect();
                         resolved_class_name =
                             format!("{base_name}<{}>", substituted_arguments.join(", "));
                     }
@@ -1083,22 +1086,16 @@ impl<'ctx> Emitter<'ctx> {
                     .split('<')
                     .next()
                     .unwrap_or(&resolved_class_name);
-                let simple_base = base_name
-                    .rsplit(['.', ':'])
-                    .next()
-                    .unwrap_or(base_name);
+                let simple_base = base_name.rsplit(['.', ':']).next().unwrap_or(base_name);
                 let generic_part = resolved_class_name
                     .split_once('<')
                     .map(|(_, args)| format!("<{args}"))
                     .unwrap_or_default();
                 let simple = format!("{simple_base}{generic_part}");
-                let enclosing_pkg = self
-                    .enclosing_class
-                    .as_deref()
-                    .and_then(|cls| {
-                        let base = cls.split('<').next().unwrap_or(cls);
-                        base.rsplit_once("::").map(|(pkg, _)| pkg)
-                    });
+                let enclosing_pkg = self.enclosing_class.as_deref().and_then(|cls| {
+                    let base = cls.split('<').next().unwrap_or(cls);
+                    base.rsplit_once("::").map(|(pkg, _)| pkg)
+                });
                 let qualified_simple = enclosing_pkg
                     .map(|pkg| format!("{pkg}::{simple}"))
                     .unwrap_or_default();
@@ -3917,7 +3914,10 @@ impl<'ctx> Emitter<'ctx> {
 
     fn resolve_vtable_id_for_type(&self, ty: &Type) -> u32 {
         match ty.unwrap_alias() {
-            Type::Class { symbol_name, type_arguments } => {
+            Type::Class {
+                symbol_name,
+                type_arguments,
+            } => {
                 if !type_arguments.is_empty() {
                     let mut specialized_name = if !symbol_name.contains('<') {
                         format!(
@@ -3939,16 +3939,18 @@ impl<'ctx> Emitter<'ctx> {
                             && let Some((base_name, args_part)) = specialized_name.split_once('<')
                             && let Some(args_string) = args_part.strip_suffix('>')
                         {
-                            let substituted_args: Vec<String> = split_top_level_generic_arguments(args_string)
-                                .into_iter()
-                                .map(|arg| {
-                                    generic_substitutions
-                                        .get(arg)
-                                        .cloned()
-                                        .unwrap_or_else(|| arg.to_string())
-                                })
-                                .collect();
-                            specialized_name = format!("{base_name}<{}>", substituted_args.join(", "));
+                            let substituted_args: Vec<String> =
+                                split_top_level_generic_arguments(args_string)
+                                    .into_iter()
+                                    .map(|arg| {
+                                        generic_substitutions
+                                            .get(arg)
+                                            .cloned()
+                                            .unwrap_or_else(|| arg.to_string())
+                                    })
+                                    .collect();
+                            specialized_name =
+                                format!("{base_name}<{}>", substituted_args.join(", "));
                         }
                     }
                     let specialized_vtable = self.resolve_vtable_id(&specialized_name);
@@ -4054,7 +4056,10 @@ impl<'ctx> Emitter<'ctx> {
                 PrimitiveKind::Char => 12,
                 _ => 3,
             },
-            Type::Class { symbol_name, type_arguments } => {
+            Type::Class {
+                symbol_name,
+                type_arguments,
+            } => {
                 if !type_arguments.is_empty() {
                     let mut specialized_name = if !symbol_name.contains('<') {
                         format!(
@@ -4076,16 +4081,18 @@ impl<'ctx> Emitter<'ctx> {
                             && let Some((base_name, args_part)) = specialized_name.split_once('<')
                             && let Some(args_string) = args_part.strip_suffix('>')
                         {
-                            let substituted_args: Vec<String> = split_top_level_generic_arguments(args_string)
-                                .into_iter()
-                                .map(|arg| {
-                                    generic_substitutions
-                                        .get(arg)
-                                        .cloned()
-                                        .unwrap_or_else(|| arg.to_string())
-                                })
-                                .collect();
-                            specialized_name = format!("{base_name}<{}>", substituted_args.join(", "));
+                            let substituted_args: Vec<String> =
+                                split_top_level_generic_arguments(args_string)
+                                    .into_iter()
+                                    .map(|arg| {
+                                        generic_substitutions
+                                            .get(arg)
+                                            .cloned()
+                                            .unwrap_or_else(|| arg.to_string())
+                                    })
+                                    .collect();
+                            specialized_name =
+                                format!("{base_name}<{}>", substituted_args.join(", "));
                         }
                     }
                     let specialized_tag = self.resolve_type_tag(&specialized_name);
@@ -4340,9 +4347,7 @@ fn split_top_level_generic_arguments(arguments_string: &str) -> Vec<&str> {
         match character {
             '<' => nesting_depth += 1,
             '>' => {
-                if nesting_depth > 0 {
-                    nesting_depth -= 1;
-                }
+                nesting_depth = nesting_depth.saturating_sub(1);
             }
             ',' if nesting_depth == 0 => {
                 split_arguments.push(arguments_string[slice_start_index..char_index].trim());

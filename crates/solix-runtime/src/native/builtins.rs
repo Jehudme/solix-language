@@ -25,30 +25,28 @@ fn format_vm_value(vm: &VirtualMachine, val: &Value) -> String {
         Value::Ref(addr) if *addr > 0 => {
             if let Ok(header) = vm.heap.read_header(*addr) {
                 if header.tag == crate::memory::BlockTag::String {
-                    return vm.heap
+                    return vm
+                        .heap
                         .read_string(*addr)
                         .unwrap_or_else(|_| format!("{val}"));
                 }
-                if header.tag == crate::memory::BlockTag::Object
-                    || header.tag == crate::memory::BlockTag::ObjectPod
+                if (header.tag == crate::memory::BlockTag::Object
+                    || header.tag == crate::memory::BlockTag::ObjectPod)
+                    && let Ok(vtable_id) = vm.heap.read_u32(*addr)
+                    && let Some(class_def) = vm.context.get_class_by_vtable_id(vtable_id)
+                    && class_def.symbol.ends_with("String")
+                    && let Ok(raw_field) = vm.heap.read_u64(*addr + 8)
                 {
-                    if let Ok(vtable_id) = vm.heap.read_u32(*addr)
-                        && let Some(class_def) = vm.context.get_class_by_vtable_id(vtable_id)
+                    let inner_val = Value::from_raw_u64(raw_field);
+                    if let Value::Ref(str_addr) = inner_val
+                        && str_addr > 0
+                        && let Ok(str_header) = vm.heap.read_header(str_addr)
+                        && str_header.tag == crate::memory::BlockTag::String
                     {
-                        if class_def.symbol.ends_with("String")
-                            && let Ok(raw_field) = vm.heap.read_u64(*addr + 8)
-                        {
-                            let inner_val = Value::from_raw_u64(raw_field);
-                            if let Value::Ref(str_addr) = inner_val
-                                && str_addr > 0
-                                && let Ok(str_header) = vm.heap.read_header(str_addr)
-                                && str_header.tag == crate::memory::BlockTag::String
-                            {
-                                return vm.heap
-                                    .read_string(str_addr)
-                                    .unwrap_or_else(|_| format!("{val}"));
-                            }
-                        }
+                        return vm
+                            .heap
+                            .read_string(str_addr)
+                            .unwrap_or_else(|_| format!("{val}"));
                     }
                 }
                 format!("{val} (tag={:?})", header.tag)
