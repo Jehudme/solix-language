@@ -123,6 +123,9 @@ When the virtual machine executes within an interactive Debug Adapter Protocol (
 - **Default Execution**: If `vm.output_sink` is `None`, strings are formatted and output to standard host console output (`println!`/`print!`).
 - **DAP Supervised Execution**: If `vm.output_sink` is configured (`Some(sink_handler)`), standard output stream writes are routed into the thread-safe `OutputSink` callback closure, emitting DAP `Event::Output` packets with `category: OutputEventCategory::Stdout`. This prevents guest stdout pollution or pipe corruption across the JSON-RPC wire channel.
 
+### Dynamic FFI String Allocation Memory Management
+Dynamic native FFI string allocations (`solix_vm_alloc_string`) create heap-allocated `BlockTag::String` buffers without leaking entries into the immutable constant pool. Each dynamic string is managed directly by automatic reference counting and cycle collection on the guest heap.
+
 ---
 
 ## 6. Native Dynamic Library Loader Isolation & Filter Policy

@@ -398,6 +398,10 @@ Type deduction fails if the argument types are ambiguous or do not uniquely dete
 
 `T[]` is the canonical built-in generic type representing an array parameterized over element type `T`. It follows the same subtype rules: `Dog[] <: Animal[]` if `Dog <: Animal`.
 
+### Interface Generic Parameter Substitution
+
+When a generic class implements a parameterized interface (such as `class Box<T> implements IEquatable<Box<T>>`), the type binder performs full generic parameter substitution across implemented interface hierarchies. Inherited interface method signatures substitute enclosing class type parameters systematically during symbol discovery and virtual method table synthesis.
+
 ---
 
 ## 11. Type Resolution Order
