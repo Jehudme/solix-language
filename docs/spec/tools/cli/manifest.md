@@ -202,3 +202,29 @@ native_library_checksums:
 ```
 
 When installing or loading an `.slxp` (`solix install`, `ClientModuleSolver`, `RuntimeContext::new`, or `SlxpPackage::extract_and_load`), Solix verifies both that the host `<os>-<arch>` is included in `supported_platforms` (or `"universal"`) and that extracted native libraries match their SHA-256 digests (checksum verification can be bypassed with `--no-verify` / `--ignore-checksum`). Companion native shared libraries must follow the `native_*` naming convention for dynamic loading into the VM FFI table.
+
+---
+
+### 6. Diagnostics & Validation Error Reporting
+
+Solix provides compiler-grade diagnostic reporting for all `manifest.yaml` syntax and schema validation errors. Diagnostics include:
+1. **Precise Source Locations:** 1-indexed line and column numbers pointing directly to the offending key or value.
+2. **Hierarchical Breadcrumbs:** Schema evaluation breadcrumb paths (e.g., `profiles.<profile>.dependencies.<dependency>` or `profiles.<profile>.natives.<target>`) enriching standard Serde validation messages.
+3. **Formatted Source Snippets:** Visual terminal snippets showing line gutters and pointer carets highlighting the exact syntax error or missing field.
+
+```text
+Error: Failed to parse manifest.yaml: missing required field `version` for dependency 'raylib' in profile 'debug'
+  --> manifest.yaml:10:9
+   |
+ 8 |     dependencies:
+ 9 |       raylib:
+10 |         profile: debug
+   |         ^ missing field `version`
+```
+
+#### Validation Rules:
+* **Mandatory Profiles:** Every `manifest.yaml` must define at least a `profiles.release` profile (`E0403`).
+* **Profile Inheritance Deprecation:** The `inherits:` keyword has been removed; configuring profiles with `inherits` produces a formatted deprecation diagnostic pointing to the offending profile (`E0402`). Use YAML anchors and aliases instead.
+* **Root-Level Unknown Field Protection:** Top-level fields outside `configuration`, `profiles`, `supported_platforms`, `native_library_checksums`, and `dynamic_libraries` are rejected unless prefixed with `x-` or declared in `vars:` (`E0404`).
+* **Dependency Version Enforcement:** Every dependency under `profiles.<name>.dependencies.<dep>` must declare an explicit `version` string (`E0401`).
+

@@ -124,6 +124,16 @@ pub enum EmissionError {
         help("Check project structure, manifest.toml, or archive container integrity.")
     )]
     ContainerSerializationFailed { reason: String },
+
+    #[error("{0}")]
+    #[diagnostic(transparent)]
+    Manifest(Box<crate::diagnostics::manifest::ManifestError>),
+}
+
+impl From<crate::diagnostics::manifest::ManifestError> for EmissionError {
+    fn from(error: crate::diagnostics::manifest::ManifestError) -> Self {
+        Self::Manifest(Box::new(error))
+    }
 }
 
 impl EmissionError {
@@ -145,6 +155,7 @@ impl EmissionError {
             Self::SymbolNotFound { .. } => "E0312",
             Self::MalformedExportManifest { .. } => "E0313",
             Self::ContainerSerializationFailed { .. } => "E0314",
+            Self::Manifest(manifest_error) => manifest_error.error_code(),
         }
     }
 }

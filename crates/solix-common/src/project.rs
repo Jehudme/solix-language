@@ -4,6 +4,10 @@
 
 use crate::bytecode::BinaryProgram;
 use crate::diagnostics::EmissionError;
+use crate::diagnostics::manifest::{
+    ManifestError, enrich_manifest_error_message, extract_yaml_breadcrumb_path,
+    render_source_snippet,
+};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -248,6 +252,7 @@ pub fn validate_archive_host_compatibility(
 
 /// User-editable project identity metadata declared in the `[configuration]` table of `manifest.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectConfiguration {
     /// Package or project canonical identifier name.
     pub name: String,
@@ -263,6 +268,9 @@ pub struct ProjectConfiguration {
     /// List of project authors and contributors.
     #[serde(default)]
     pub authors: Vec<String>,
+    /// Optional legacy entrypoint retained for backwards compatibility.
+    #[serde(default, skip_serializing)]
+    pub entrypoint: Option<String>,
 }
 
 /// Backwards compatibility alias for `ProjectConfiguration`.
@@ -353,11 +361,14 @@ pub struct ProfileConfig {
     /// Commands executed sequentially after archive packaging.
     #[serde(default)]
     pub post_compile: Vec<String>,
+    /// Removed inheritance property retained for helpful diagnostic error reporting.
+    #[serde(default, skip_serializing)]
+    pub inherits: Option<serde_json::Value>,
     /// Profile-scoped dependencies mapped as `name => specification`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_profile_dependencies")]
     pub dependencies: std::collections::BTreeMap<String, DependencySpec>,
     /// Profile-scoped native subprojects mapped as `name => native_config`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_profile_natives")]
     pub natives: std::collections::BTreeMap<String, NativeTargetConfig>,
     /// Declared dynamic shared library dependencies required by this profile.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -551,13 +562,13 @@ pub struct ResolvedDependency {
     pub build_profile: String,
 }
 
-/// Unified, user-editable project manifest contract parsed from `manifest.toml`.
+/// Unified, user-editable project manifest contract parsed from `manifest.toml` or `manifest.yaml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProjectManifest {
     /// Unified project identity and metadata.
     pub configuration: ProjectConfiguration,
-    /// First-class profiles table mapped as `[profiles.<name>]`.
+    /// First-class profiles table mapped as `profiles.<name>`.
+    #[serde(default, deserialize_with = "deserialize_manifest_profiles")]
     pub profiles: std::collections::BTreeMap<String, ProfileConfig>,
     /// Verified target platforms embedded into `.slxarc` archives during packaging.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -568,6 +579,12 @@ pub struct ProjectManifest {
     /// Declared dynamic shared library dependencies required by this project.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dynamic_libraries: Vec<String>,
+    /// Optional top-level variable definitions for YAML anchor targets.
+    #[serde(default, skip_serializing)]
+    pub vars: Option<serde_json::Value>,
+    /// Unrecognized top-level vendor fields (e.g. `x-*`).
+    #[serde(flatten)]
+    pub extra_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl ProjectManifest {
@@ -623,62 +640,129 @@ impl ProjectManifest {
     ///
     /// Supports YAML anchors/aliases (`&` / `*`), YAML 1.1 merge keys (`<<:`), and an optional
     /// top-level `vars:` section ignored by schema deserialization. Profile inheritance via
-    /// `inherits` is explicitly rejected.
+    /// `inherits` is explicitly rejected with formatted diagnostics.
     pub fn from_yaml_str(yaml_content: &str) -> Result<Self, EmissionError> {
-        let mut yaml_value: serde_json::Value =
-            serde_saphyr::from_str(yaml_content).map_err(|parse_error| {
-                EmissionError::ContainerSerializationFailed {
-                    reason: format!("failed to parse manifest.yaml: {parse_error}"),
-                }
-            })?;
+        Self::from_yaml_str_with_filename(yaml_content, "manifest.yaml")
+    }
 
-        if let serde_json::Value::Object(ref mut root_map) = yaml_value {
-            if let Some(serde_json::Value::Object(profiles_map)) = root_map.get_mut("profiles") {
-                for (profile_name, profile_body_val) in profiles_map.iter_mut() {
-                    if profile_body_val.is_null() {
-                        *profile_body_val = serde_json::Value::Object(serde_json::Map::new());
+    /// Parses a YAML manifest with a designated filename for compiler-grade source diagnostics.
+    pub fn from_yaml_str_with_filename(
+        yaml_content: &str,
+        filename: &str,
+    ) -> Result<Self, EmissionError> {
+        let manifest: Self = match serde_saphyr::from_str(yaml_content) {
+            Ok(parsed_manifest) => parsed_manifest,
+            Err(parse_error) => {
+                let line_option = parse_error
+                    .location()
+                    .map(|location| location.line() as usize);
+                let col_option = parse_error
+                    .location()
+                    .map(|location| location.column() as usize);
+                let breadcrumbs = line_option
+                    .map(|target_line| extract_yaml_breadcrumb_path(yaml_content, target_line))
+                    .unwrap_or_default();
+                let raw_message = parse_error.to_string();
+                let clean_message = if let Some(colon_pos) = raw_message.find("error: line ") {
+                    if let Some(msg_start) = raw_message[colon_pos..].find(": ") {
+                        &raw_message[colon_pos + msg_start + 2..]
+                    } else {
+                        &raw_message
                     }
-                    if let serde_json::Value::Object(profile_map) = profile_body_val {
-                        if profile_map.contains_key("inherits") {
-                            return Err(EmissionError::ContainerSerializationFailed {
-                                reason: format!(
-                                    "manifest.yaml profile '{profile_name}' uses 'inherits', which has been removed; configure each profile explicitly or use YAML anchors (& / *)"
-                                ),
-                            });
-                        }
-                        if let Some(serde_json::Value::Object(natives_map)) =
-                            profile_map.get_mut("natives")
-                        {
-                            for (_native_name, native_val) in natives_map.iter_mut() {
-                                if native_val.is_null() {
-                                    *native_val = serde_json::Value::Object(serde_json::Map::new());
-                                }
-                            }
-                        }
-                    }
+                } else {
+                    &raw_message
+                };
+                let first_line = clean_message.lines().next().unwrap_or(clean_message).trim();
+                let (enriched_message, field_path) =
+                    enrich_manifest_error_message(first_line, &breadcrumbs);
+
+                let rendered_full =
+                    parse_error.render_with_options(serde_saphyr::render_options! {
+                        source_name: Some(filename),
+                    });
+                let visual_snippet = rendered_full
+                    .lines()
+                    .skip_while(|line_str| !line_str.trim_start().starts_with("-->"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                return Err(ManifestError::ParseFailed {
+                    filename: filename.to_string(),
+                    line: line_option,
+                    column: col_option,
+                    field_path,
+                    message: enriched_message,
+                    snippet: visual_snippet,
                 }
+                .into());
             }
+        };
 
-            let retained_keys: Vec<String> = root_map
-                .keys()
-                .filter(|key_str| *key_str == "vars" || key_str.starts_with("x-"))
-                .cloned()
-                .collect();
-            for ignored_key in retained_keys {
-                root_map.remove(&ignored_key);
+        // Validate extra root fields (only x-* vendor extensions and vars allowed)
+        for extra_key in manifest.extra_fields.keys() {
+            if !extra_key.starts_with("x-") && extra_key != "vars" {
+                let (line_num, col_num) = find_key_location(yaml_content, extra_key);
+                let snippet = render_source_snippet(
+                    yaml_content,
+                    filename,
+                    line_num,
+                    col_num,
+                    &format!("unknown field `{extra_key}`"),
+                );
+                return Err(ManifestError::UnknownRootField {
+                    filename: filename.to_string(),
+                    field_name: extra_key.clone(),
+                    expected: "`configuration`, `profiles`, `supported_platforms`, `native_library_checksums`, `dynamic_libraries`",
+                    line: Some(line_num),
+                    column: Some(col_num),
+                    snippet,
+                }
+                .into());
             }
         }
 
-        let manifest: Self = serde_json::from_value(yaml_value).map_err(|parse_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!("failed to parse manifest.yaml: {parse_error}"),
+        // Validate removed inherits keyword
+        for (profile_name, profile_config) in &manifest.profiles {
+            if profile_config.inherits.is_some() {
+                let (line_num, col_num) =
+                    find_keyword_in_profile(yaml_content, profile_name, "inherits");
+                let snippet = render_source_snippet(
+                    yaml_content,
+                    filename,
+                    line_num,
+                    col_num,
+                    &format!(
+                        "profile '{profile_name}' uses 'inherits', which has been removed; configure each profile explicitly or use YAML anchors (& / *)"
+                    ),
+                );
+                return Err(ManifestError::DeprecatedInherits {
+                    filename: filename.to_string(),
+                    profile_name: profile_name.clone(),
+                    line: Some(line_num),
+                    column: Some(col_num),
+                    snippet,
+                }
+                .into());
             }
-        })?;
+        }
 
+        // Validate mandatory release profile
         if !manifest.profiles.contains_key("release") {
-            return Err(EmissionError::ContainerSerializationFailed {
-                reason: "manifest.yaml must define mandatory profiles.release profile".to_string(),
-            });
+            let (line_num, col_num) = find_key_location(yaml_content, "profiles");
+            let snippet = render_source_snippet(
+                yaml_content,
+                filename,
+                line_num,
+                col_num,
+                "manifest must define mandatory profiles.release profile",
+            );
+            return Err(ManifestError::MissingReleaseProfile {
+                filename: filename.to_string(),
+                line: Some(line_num),
+                column: Some(col_num),
+                snippet,
+            }
+            .into());
         }
 
         Ok(manifest)
@@ -688,20 +772,24 @@ impl ProjectManifest {
     /// for backwards compatibility with previously built `.slxarc` archives.
     pub fn from_toml_str(toml_content: &str) -> Result<Self, EmissionError> {
         let mut raw_toml: toml::Value = toml::from_str(toml_content).map_err(|parse_error| {
-            if toml_content.contains("[info]")
+            let message = if toml_content.contains("[info]")
                 || toml_content.contains("[entrypoints]")
                 || toml_content.contains("[build]")
                 || toml_content.contains("[profile.")
             {
-                EmissionError::ContainerSerializationFailed {
-                    reason: format!(
-                        "failed to parse manifest.toml: legacy manifest sections ([info], [entrypoints], [build], [profile.<name>]) are no longer supported; please migrate to manifest.yaml: {parse_error}"
-                    ),
-                }
+                format!(
+                    "legacy manifest sections ([info], [entrypoints], [build], [profile.<name>]) are no longer supported; please migrate to manifest.yaml: {parse_error}"
+                )
             } else {
-                EmissionError::ContainerSerializationFailed {
-                    reason: format!("failed to parse manifest.toml: {parse_error}"),
-                }
+                parse_error.to_string()
+            };
+            ManifestError::ParseFailed {
+                filename: "manifest.toml".to_string(),
+                line: None,
+                column: None,
+                field_path: None,
+                message,
+                snippet: String::new(),
             }
         })?;
 
@@ -716,17 +804,26 @@ impl ProjectManifest {
             }
         }
 
-        let manifest: Self = raw_toml.try_into().map_err(|parse_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!("failed to parse manifest.toml: {parse_error}"),
-            }
-        })?;
+        let manifest: Self =
+            raw_toml
+                .try_into()
+                .map_err(|parse_error| ManifestError::ParseFailed {
+                    filename: "manifest.toml".to_string(),
+                    line: None,
+                    column: None,
+                    field_path: None,
+                    message: parse_error.to_string(),
+                    snippet: String::new(),
+                })?;
 
         if !manifest.profiles.contains_key("release") {
-            return Err(EmissionError::ContainerSerializationFailed {
-                reason: "manifest.toml must define mandatory [profiles.release] profile"
-                    .to_string(),
-            });
+            return Err(ManifestError::MissingReleaseProfile {
+                filename: "manifest.toml".to_string(),
+                line: None,
+                column: None,
+                snippet: String::new(),
+            }
+            .into());
         }
 
         Ok(manifest)
@@ -735,14 +832,11 @@ impl ProjectManifest {
     /// Reads and parses either `manifest.yaml` (preferred) or legacy `manifest.toml` from disk.
     pub fn from_file(file_path: impl AsRef<Path>) -> Result<Self, EmissionError> {
         let path_reference = file_path.as_ref();
-        let content = fs::read_to_string(path_reference).map_err(|io_error| {
-            EmissionError::ContainerSerializationFailed {
-                reason: format!(
-                    "failed to read manifest at '{}': {io_error}",
-                    path_reference.display()
-                ),
-            }
-        })?;
+        let content =
+            fs::read_to_string(path_reference).map_err(|io_error| ManifestError::IoError {
+                path: path_reference.display().to_string(),
+                reason: io_error.to_string(),
+            })?;
         let is_toml = path_reference
             .extension()
             .and_then(|ext| ext.to_str())
@@ -750,7 +844,11 @@ impl ProjectManifest {
         if is_toml {
             Self::from_toml_str(&content)
         } else {
-            Self::from_yaml_str(&content)
+            let filename = path_reference
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("manifest.yaml");
+            Self::from_yaml_str_with_filename(&content, filename)
         }
     }
 
@@ -905,6 +1003,165 @@ fn strip_library_extension(name_str: &str) -> &str {
     } else {
         name_str
     }
+}
+
+fn deserialize_profile_dependencies<'de, DeserializerType>(
+    deserializer: DeserializerType,
+) -> Result<std::collections::BTreeMap<String, DependencySpec>, DeserializerType::Error>
+where
+    DeserializerType: serde::Deserializer<'de>,
+{
+    struct DependencyMapVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for DependencyMapVisitor {
+        type Value = std::collections::BTreeMap<String, DependencySpec>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a mapping of dependency names to dependency specifications")
+        }
+
+        fn visit_map<MapAccessType>(
+            self,
+            mut access: MapAccessType,
+        ) -> Result<Self::Value, MapAccessType::Error>
+        where
+            MapAccessType: serde::de::MapAccess<'de>,
+        {
+            let mut dependencies_map = std::collections::BTreeMap::new();
+            while let Some(dependency_key) = access.next_key::<String>()? {
+                let dependency_value: Option<DependencySpec> = access.next_value()?;
+                if let Some(specification) = dependency_value {
+                    dependencies_map.insert(dependency_key, specification);
+                } else {
+                    return Err(serde::de::Error::custom("missing field `version`"));
+                }
+            }
+            Ok(dependencies_map)
+        }
+    }
+
+    deserializer.deserialize_map(DependencyMapVisitor)
+}
+
+fn deserialize_profile_natives<'de, DeserializerType>(
+    deserializer: DeserializerType,
+) -> Result<std::collections::BTreeMap<String, NativeTargetConfig>, DeserializerType::Error>
+where
+    DeserializerType: serde::Deserializer<'de>,
+{
+    struct NativeMapVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for NativeMapVisitor {
+        type Value = std::collections::BTreeMap<String, NativeTargetConfig>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a mapping of native target names to native configurations")
+        }
+
+        fn visit_map<MapAccessType>(
+            self,
+            mut access: MapAccessType,
+        ) -> Result<Self::Value, MapAccessType::Error>
+        where
+            MapAccessType: serde::de::MapAccess<'de>,
+        {
+            let mut natives_map = std::collections::BTreeMap::new();
+            while let Some(native_key) = access.next_key::<String>()? {
+                let native_value: Option<NativeTargetConfig> = access.next_value()?;
+                natives_map.insert(native_key, native_value.unwrap_or_default());
+            }
+            Ok(natives_map)
+        }
+    }
+
+    deserializer.deserialize_map(NativeMapVisitor)
+}
+
+fn deserialize_manifest_profiles<'de, DeserializerType>(
+    deserializer: DeserializerType,
+) -> Result<std::collections::BTreeMap<String, ProfileConfig>, DeserializerType::Error>
+where
+    DeserializerType: serde::Deserializer<'de>,
+{
+    struct ProfileMapVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for ProfileMapVisitor {
+        type Value = std::collections::BTreeMap<String, ProfileConfig>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a mapping of profile names to profile configurations")
+        }
+
+        fn visit_map<MapAccessType>(
+            self,
+            mut access: MapAccessType,
+        ) -> Result<Self::Value, MapAccessType::Error>
+        where
+            MapAccessType: serde::de::MapAccess<'de>,
+        {
+            let mut profiles_map = std::collections::BTreeMap::new();
+            while let Some(profile_key) = access.next_key::<String>()? {
+                let profile_value: Option<ProfileConfig> = access.next_value()?;
+                profiles_map.insert(profile_key, profile_value.unwrap_or_default());
+            }
+            Ok(profiles_map)
+        }
+    }
+
+    deserializer.deserialize_map(ProfileMapVisitor)
+}
+
+fn find_key_location(yaml_content: &str, target_key: &str) -> (usize, usize) {
+    let key_pattern = format!("{target_key}:");
+    for (line_index, line_content) in yaml_content.lines().enumerate() {
+        let trimmed = line_content.trim();
+        if trimmed.starts_with(&key_pattern) {
+            let column = line_content
+                .find(target_key)
+                .map(|index| index + 1)
+                .unwrap_or(1);
+            return (line_index + 1, column);
+        }
+    }
+    (1, 1)
+}
+
+fn find_keyword_in_profile(
+    yaml_content: &str,
+    profile_name: &str,
+    keyword: &str,
+) -> (usize, usize) {
+    let profile_pattern = format!("{profile_name}:");
+    let keyword_pattern = format!("{keyword}:");
+    let mut in_profile = false;
+    let mut profile_indent = 0;
+
+    for (line_index, line_content) in yaml_content.lines().enumerate() {
+        let trimmed = line_content.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let line_indent = line_content.len() - line_content.trim_start().len();
+
+        if in_profile {
+            if line_indent <= profile_indent && !trimmed.is_empty() {
+                in_profile = false;
+            } else if trimmed.starts_with(&keyword_pattern) {
+                let column = line_content
+                    .find(keyword)
+                    .map(|index| index + 1)
+                    .unwrap_or(1);
+                return (line_index + 1, column);
+            }
+        }
+
+        if !in_profile && trimmed.starts_with(&profile_pattern) {
+            in_profile = true;
+            profile_indent = line_indent;
+        }
+    }
+
+    find_key_location(yaml_content, keyword)
 }
 
 /// Returns `true` if the shared library filename corresponds to a Solix native module (`__native_*` or `lib__native_*`).
@@ -1902,6 +2159,173 @@ profiles:
             ProjectManifest::from_yaml_str(rejected_inherits).is_err(),
             "inherits in manifest.yaml must be rejected"
         );
+    }
+
+    #[test]
+    fn test_manifest_yaml_missing_version_in_dependency_has_precise_diagnostics() {
+        let malformed_yaml = r#"configuration:
+  name: test_app
+  version: "1.0.0"
+profiles:
+  release:
+    entrypoint: Main::main
+  debug:
+    dependencies:
+      raylib:
+        profile: debug
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(malformed_yaml);
+        assert!(parse_result.is_err());
+        let error = parse_result.unwrap_err();
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains(
+                "missing required field `version` for dependency 'raylib' in profile 'debug'"
+            ),
+            "Error was: {error_message}"
+        );
+        assert!(
+            error_message.contains("manifest.yaml:10:9")
+                || error_message.contains("manifest.yaml:10:"),
+            "Expected line 10 location in: {error_message}"
+        );
+        assert!(
+            error_message.contains("raylib:"),
+            "Expected snippet context in: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_yaml_unknown_field_in_profile_has_precise_diagnostics() {
+        let malformed_yaml = r#"configuration:
+  name: test_app
+  version: "1.0.0"
+profiles:
+  release:
+    invalid_option_key: true
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(malformed_yaml);
+        assert!(parse_result.is_err());
+        let error = parse_result.unwrap_err();
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains("unknown field `invalid_option_key` in profile 'release'"),
+            "Error was: {error_message}"
+        );
+        assert!(
+            error_message.contains("manifest.yaml:6:5")
+                || error_message.contains("manifest.yaml:6:"),
+            "Expected line 6 location in: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_yaml_unknown_root_field_has_precise_diagnostics() {
+        let malformed_yaml = r#"configuration:
+  name: test_app
+  version: "1.0.0"
+unrecognized_root_key: "value"
+profiles:
+  release: {}
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(malformed_yaml);
+        assert!(parse_result.is_err());
+        let error = parse_result.unwrap_err();
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains("unknown field `unrecognized_root_key` at root level"),
+            "Error was: {error_message}"
+        );
+        assert!(
+            error_message.contains("manifest.yaml:4:1"),
+            "Expected line 4 location in: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_yaml_deprecated_inherits_has_precise_diagnostics() {
+        let malformed_yaml = r#"configuration:
+  name: test_app
+  version: "1.0.0"
+profiles:
+  release: {}
+  debug:
+    inherits: release
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(malformed_yaml);
+        assert!(parse_result.is_err());
+        let error = parse_result.unwrap_err();
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains("profile 'debug' uses 'inherits', which has been removed"),
+            "Error was: {error_message}"
+        );
+        assert!(
+            error_message.contains("manifest.yaml:7:5"),
+            "Expected line 7 location in: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_yaml_missing_release_profile_has_precise_diagnostics() {
+        let malformed_yaml = r#"configuration:
+  name: test_app
+  version: "1.0.0"
+profiles:
+  debug: {}
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(malformed_yaml);
+        assert!(parse_result.is_err());
+        let error = parse_result.unwrap_err();
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains("manifest must define mandatory profiles.release profile"),
+            "Error was: {error_message}"
+        );
+        assert!(
+            error_message.contains("manifest.yaml:4:1"),
+            "Expected line 4 location in: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_yaml_syntax_error_has_precise_diagnostics() {
+        let malformed_yaml = r#"configuration:
+  name: "unclosed string
+profiles:
+  release: {}
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(malformed_yaml);
+        assert!(parse_result.is_err());
+        let error = parse_result.unwrap_err();
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains("manifest.yaml:2:"),
+            "Expected line 2 location in: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_yaml_vars_and_x_custom_allowed() {
+        let valid_yaml = r#"vars:
+  shared_opt: &opt 3
+x-custom-metadata:
+  vendor_id: "example"
+configuration:
+  name: valid_app
+  version: "2.0.0"
+profiles:
+  release:
+    optimization_level: *opt
+"#;
+        let parse_result = ProjectManifest::from_yaml_str(valid_yaml);
+        assert!(parse_result.is_ok(), "Expected valid YAML parsing");
+        let manifest = parse_result.unwrap();
+        assert_eq!(manifest.configuration.name, "valid_app");
+        assert_eq!(manifest.configuration.version, "2.0.0");
+        let release = manifest.resolve_profile("release").unwrap();
+        assert_eq!(release.opt_level, 3);
+        assert!(manifest.extra_fields.contains_key("x-custom-metadata"));
     }
 
     #[test]

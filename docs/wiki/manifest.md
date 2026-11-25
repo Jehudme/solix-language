@@ -202,6 +202,27 @@ During `solix build`, packaged `.slxp` packages receive automatically stamped `s
 
 ---
 
+### 8. Diagnostic & Validation Errors
+
+When a manifest contains errors or missing required fields, `solix build` and `solix compile` emit compiler-grade diagnostic output with exact line numbers, column numbers, hierarchical field path context, and visual pointer snippets:
+
+```text
+Error: Failed to parse manifest.yaml: missing required field `version` for dependency 'raylib' in profile 'debug'
+  --> manifest.yaml:10:9
+   |
+ 8 |     dependencies:
+ 9 |       raylib:
+10 |         profile: debug
+   |         ^ missing field `version`
+```
+
+Common validation checks:
+* **Missing `profiles.release`**: Manifests must declare a release profile (`E0403`).
+* **Deprecated `inherits`**: Cross-profile inheritance via `inherits:` has been removed in favor of explicit YAML anchors (`E0402`).
+* **Unknown Root Fields**: Unrecognized fields at the root of `manifest.yaml` must be prefixed with `x-` or placed in `vars:` (`E0404`).
+
+---
+
 ## Related Documentation
 * [Formal `manifest.yaml` Schema Specification](../spec/tools/cli/manifest.md)
 * [CLI Reference: `compile` & `build`](commands/compile-and-build.md)
