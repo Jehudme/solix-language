@@ -15,6 +15,7 @@ import datetime as dt
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -301,6 +302,48 @@ def update_c_ffi_version(repo_root: Path, new_version: str) -> None:
         header_path.write_text(updated_header, encoding="utf-8")
 
 
+def update_vscode_extension_version(repo_root: Path, new_version: str) -> None:
+    """Updates `editors/vscode/package.json` and `package-lock.json` versions and stages vsix."""
+    package_json_path = repo_root / "editors" / "vscode" / "package.json"
+    if package_json_path.is_file():
+        package_content = json.loads(package_json_path.read_text(encoding="utf-8"))
+        package_content["version"] = new_version
+        package_json_path.write_text(json.dumps(package_content, indent=4) + "\n", encoding="utf-8")
+
+    package_lock_path = repo_root / "editors" / "vscode" / "package-lock.json"
+    if package_lock_path.is_file():
+        lock_content = json.loads(package_lock_path.read_text(encoding="utf-8"))
+        lock_content["version"] = new_version
+        if "packages" in lock_content and "" in lock_content["packages"]:
+            lock_content["packages"][""]["version"] = new_version
+        package_lock_path.write_text(json.dumps(lock_content, indent=4) + "\n", encoding="utf-8")
+
+    vscode_directory = repo_root / "editors" / "vscode"
+    node_modules_directory = vscode_directory / "node_modules"
+    if node_modules_directory.is_dir() and shutil.which("npm") is not None:
+        try:
+            subprocess.run(
+                ["npm", "run", "package"],
+                cwd=str(vscode_directory),
+                capture_output=True,
+                check=False,
+            )
+            built_vsix_path = vscode_directory / "build" / "solix-language.vsix"
+            staged_vsix_path = (
+                repo_root
+                / "crates"
+                / "solix-toolchain"
+                / "assets"
+                / "vscode"
+                / "solix-language.vsix"
+            )
+            if built_vsix_path.is_file():
+                staged_vsix_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(built_vsix_path, staged_vsix_path)
+        except Exception:
+            pass
+
+
 def sync_cargo_lock(repo_root: Path) -> None:
     """Refreshes Cargo.lock workspace crate entries cleanly without touching upstream deps."""
     proc = subprocess.run(
@@ -413,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.write and commits:
         update_cargo_toml_version(repo_root / "Cargo.toml", next_version)
         update_c_ffi_version(repo_root, next_version)
+        update_vscode_extension_version(repo_root, next_version)
         for rel_changelog in CHANGELOG_FILES:
             prepend_changelog_section(repo_root / rel_changelog, next_version, section_md)
         if not args.no_lock_sync:

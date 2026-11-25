@@ -750,6 +750,20 @@ fn test_install_vscode_flag_parsing_and_resolution() {
     );
 }
 
+#[test]
+fn test_install_vscode_with_force_flag_parsing() {
+    let install_vscode_cli = Cli::try_parse_from(["solix", "install", "--vscode", "--force"])
+        .expect("Must parse 'solix install --vscode --force' cleanly");
+    if let solix_toolchain::Commands::Install(args) = install_vscode_cli.command {
+        assert!(args.vscode);
+        assert!(args.force);
+        assert!(args.path.is_none());
+        assert!(!args.bundled);
+    } else {
+        panic!("Expected Install command");
+    }
+}
+
 fn create_isolated_solix_command(
     solix_home: &std::path::Path,
     working_dir: &std::path::Path,

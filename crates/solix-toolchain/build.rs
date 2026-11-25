@@ -470,6 +470,10 @@ fn emit_ffi_git_tag() {
 
 fn main() {
     println!("cargo:rerun-if-changed=assets");
+    println!("cargo:rerun-if-changed=assets/vscode");
+    println!("cargo:rerun-if-changed=assets/vscode/solix-language.vsix");
+    println!("cargo:rerun-if-changed=assets/packages");
+    println!("cargo:rerun-if-changed=assets/docs");
     emit_ffi_git_tag();
 
     let out_dir = match env::var("OUT_DIR") {
@@ -480,9 +484,13 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()));
     generate_embedded_assets(&manifest_dir, &out_dir);
 
-    // OUT_DIR is target/<profile>/build/solix-toolchain-<hash>/out
-    // Navigating 3 ancestors up yields target/<profile>
-    let target_dir = match out_dir.ancestors().nth(3) {
+    // OUT_DIR is target/<profile>/build/.../out
+    // Locating the 'build' directory ancestor and taking its parent yields target/<profile>
+    let target_dir = match out_dir
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "build"))
+        .and_then(|build_ancestor| build_ancestor.parent())
+    {
         Some(dir) => dir,
         None => return,
     };

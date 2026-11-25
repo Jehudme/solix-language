@@ -141,6 +141,21 @@ To eliminate security risks and unpredictable host environment pollution, the So
 
 ---
 
+## 7. C-FFI Header Version Handshake & Synchronization
+
+The C/C++ FFI SDK header (`solix_ffi.h`) defines compile-time SemVer preprocessor macros to ensure binary and structural interface compatibility:
+
+```c
+#define SOLIX_FFI_VERSION_MAJOR 2
+#define SOLIX_FFI_VERSION_MINOR 0
+#define SOLIX_FFI_VERSION_PATCH 1
+#define SOLIX_FFI_VERSION       "2.0.1"
+```
+
+During initialization, native extension modules can verify that the runtime major and minor versions satisfy their structural expectations. Automated CTest suites dynamically validate that `SOLIX_FFI_VERSION` correctly formats `SOLIX_FFI_VERSION_MAJOR`, `SOLIX_FFI_VERSION_MINOR`, and `SOLIX_FFI_VERSION_PATCH` without requiring hardcoded patch numbers.
+
+---
+
 ## Related Documentation
 * [FFI Wiki Overview](../wiki/ffi/README.md)
 * [C & C++ SDK Reference (`solix::ffi`)](../wiki/ffi/c-cpp-sdk.md)
