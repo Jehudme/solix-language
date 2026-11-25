@@ -434,7 +434,7 @@ impl ResolvedProfile {
             is_static: true,
             emit_disassembly: false,
             warnings_as_errors: false,
-            verify_checksum: true,
+            verify_checksum: false,
             link: "static".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
@@ -460,7 +460,7 @@ impl ResolvedProfile {
             is_static: false,
             emit_disassembly: false,
             warnings_as_errors: false,
-            verify_checksum: true,
+            verify_checksum: false,
             link: "dynamic".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string()],
@@ -486,7 +486,7 @@ impl ResolvedProfile {
             is_static: false,
             emit_disassembly: false,
             warnings_as_errors: false,
-            verify_checksum: true,
+            verify_checksum: false,
             link: "dynamic".to_string(),
             memory_limit_mb: None,
             sources: vec!["src".to_string(), "tests".to_string()],
@@ -932,6 +932,9 @@ impl ProjectManifest {
             }
             if let Some(verify_checksum) = user_config.verify_checksum {
                 resolved.verify_checksum = verify_checksum;
+            } else {
+                resolved.verify_checksum =
+                    !resolved.is_static && target_profile != "debug" && target_profile != "test";
             }
             if let Some(memory_limit_mb) = user_config.memory_limit_mb {
                 resolved.memory_limit_mb = Some(memory_limit_mb);
@@ -2710,5 +2713,80 @@ version = "0.1.0"
         assert!(!is_solix_native_module_name("libglfw.so"));
         assert!(!is_solix_native_module_name("openal.dll"));
         assert!(!is_solix_native_module_name("cblas.dylib"));
+    }
+
+    #[test]
+    fn test_issue_250_conditional_checksum_defaults() {
+        // Release static profile: verify_checksum defaults to false
+        let yaml_static_release = r#"
+configuration:
+  name: test_pkg
+  version: "1.0.0"
+profiles:
+  release:
+    static: true
+"#;
+        let manifest_static =
+            ProjectManifest::from_yaml_str(yaml_static_release).expect("valid yaml");
+        let profile_static = manifest_static
+            .resolve_profile("release")
+            .expect("resolves");
+        assert!(
+            !profile_static.verify_checksum,
+            "Static profile must default to verify_checksum = false"
+        );
+
+        // Release dynamic profile: verify_checksum defaults to true
+        let yaml_dynamic_release = r#"
+configuration:
+  name: test_pkg
+  version: "1.0.0"
+profiles:
+  release:
+    static: false
+"#;
+        let manifest_dynamic =
+            ProjectManifest::from_yaml_str(yaml_dynamic_release).expect("valid yaml");
+        let profile_dynamic = manifest_dynamic
+            .resolve_profile("release")
+            .expect("resolves");
+        assert!(
+            profile_dynamic.verify_checksum,
+            "Dynamic release profile must default to verify_checksum = true"
+        );
+
+        // Debug profile: verify_checksum defaults to false
+        let profile_debug = manifest_static.resolve_profile("debug").expect("resolves");
+        assert!(
+            !profile_debug.verify_checksum,
+            "Debug profile must default to verify_checksum = false"
+        );
+
+        // Test profile: verify_checksum defaults to false
+        let profile_test = manifest_static.resolve_profile("test").expect("resolves");
+        assert!(
+            !profile_test.verify_checksum,
+            "Test profile must default to verify_checksum = false"
+        );
+
+        // Explicit override: verify_checksum = true on debug
+        let yaml_explicit_debug = r#"
+configuration:
+  name: test_pkg
+  version: "1.0.0"
+profiles:
+  release: {}
+  debug:
+    verify_checksum: true
+"#;
+        let manifest_explicit =
+            ProjectManifest::from_yaml_str(yaml_explicit_debug).expect("valid yaml");
+        let profile_explicit_debug = manifest_explicit
+            .resolve_profile("debug")
+            .expect("resolves");
+        assert!(
+            profile_explicit_debug.verify_checksum,
+            "Explicit verify_checksum = true must be respected"
+        );
     }
 }

@@ -130,7 +130,7 @@ Every profile under `profiles.<profile_name>` is **strictly self-contained**:
 | `link` | `"dynamic"` \| `"static"` | `"dynamic"` | `"dynamic"` | `"dynamic"` | Dependency link mode override |
 | `emit_disassembly` | Boolean | `false` | `false` | `false` | Emits `.slxasm` disassembly artifacts |
 | `warnings_as_errors` | Boolean | `false` | `false` | `false` | Promotes compiler warnings to hard errors |
-| `verify_checksum` | Boolean | `true` | `true` | `true` | Enforces SHA-256 verification on dependencies |
+| `verify_checksum` | Boolean | `false` (static) / `true` (dynamic) | `false` | `false` | Enforces SHA-256 verification on dependencies (bypassed on static, debug, and test profiles for speed; enforced on dynamic release) |
 | `memory_limit_mb` | Integer | `None` | `None` | `None` | Optional runtime heap cap in MiB |
 | `sources` | List of Strings | `["src"]` | `["src"]` | `["tests"]` | Directories scanned recursively for `.slx` files |
 | `platforms` | List of Strings | `["host"]` | `["host"]` | `["host"]` | Target OS tokens, `<os>-<arch>` pairs, or Rust triples |

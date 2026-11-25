@@ -2997,6 +2997,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 && !node.modifiers.contains(&Modifier::Abstract)
                 && !node.modifiers.contains(&Modifier::Native)
                 && !node.modifiers.contains(&Modifier::Extern)
+                && !node.has_syntax_errors
                 && !block_definitely_returns(body)
             {
                 let method_name = if node.name_span.end as usize <= self.source_text.len() {

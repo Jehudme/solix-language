@@ -341,3 +341,52 @@ fn test_char_literal_escaped_character_bounds_validation() {
         );
     }
 }
+
+#[test]
+fn test_issue_248_parser_error_recovery_and_cascade_prevention() {
+    let source = r#"
+package pong;
+
+public class Main {
+    public static int32 main() {
+        whilje(true) {
+            int32 counter = 1;
+        };
+
+        return 0;
+    }
+}
+"#;
+    let tokens = lex_source(0, source).expect("Lexing source must succeed");
+    let parse_result = parse_source(0, &tokens, source);
+    assert!(
+        parse_result.is_err(),
+        "Must report parse error for misspelled control flow keyword"
+    );
+    let errors = parse_result.expect_err("Parsing errors");
+
+    // Exactly one diagnostic must be emitted: E0202 (UnknownControlFlowKeyword) with suggestion "while"
+    assert_eq!(
+        errors.len(),
+        1,
+        "Expected exactly 1 diagnostic for misspelled keyword, but got {}: {errors:?}",
+        errors.len()
+    );
+    assert_eq!(errors[0].error_code(), "E0202");
+    let formatted_error = format!("{}", errors[0]);
+    assert!(formatted_error.contains("whilje"));
+
+    // Crucially: no cascading StatementDirectlyInClass (E0128) or InvalidTopLevelToken (E0195)
+    assert!(
+        !errors
+            .iter()
+            .any(|error_entry| error_entry.error_code() == "E0128"),
+        "Must NOT emit StatementDirectlyInClass"
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|error_entry| error_entry.error_code() == "E0195"),
+        "Must NOT emit InvalidTopLevelToken"
+    );
+}

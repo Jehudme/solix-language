@@ -525,6 +525,7 @@ pub struct ClientModuleSolver {
     store_directory: PathBuf,
     native_cache_directory: PathBuf,
     package_cache: std::sync::Arc<dyn crate::cache::PackageCache>,
+    verify_checksums: bool,
 }
 
 impl Default for ClientModuleSolver {
@@ -546,6 +547,7 @@ impl ClientModuleSolver {
             package_cache: std::sync::Arc::new(crate::cache::FilesystemPackageCache::with_root(
                 cache_root,
             )),
+            verify_checksums: true,
         }
     }
 
@@ -560,7 +562,15 @@ impl ClientModuleSolver {
             package_cache: std::sync::Arc::new(crate::cache::FilesystemPackageCache::with_root(
                 cache_root,
             )),
+            verify_checksums: true,
         }
+    }
+
+    /// Configures whether cryptographic checksums are verified on native shared libraries.
+    #[must_use]
+    pub fn with_verify_checksums(mut self, verify_checksums: bool) -> Self {
+        self.verify_checksums = verify_checksums;
+        self
     }
 
     /// Configures an explicit package extraction cache for this solver.
@@ -812,10 +822,11 @@ impl ClientModuleSolver {
                     }
                 }
 
-                let has_applicable_checksum = cached_program
-                    .native_library_checksums
-                    .keys()
-                    .any(|key| crate::project::native_checksum_key_applies_to_host(key));
+                let has_applicable_checksum = self.verify_checksums
+                    && cached_program
+                        .native_library_checksums
+                        .keys()
+                        .any(|key| crate::project::native_checksum_key_applies_to_host(key));
 
                 let expected_checksums_satisfied = !has_applicable_checksum
                     || (!discovered_libs.is_empty()

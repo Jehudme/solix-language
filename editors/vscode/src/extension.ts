@@ -136,48 +136,6 @@ function findToolchainBinary(serverLogChannel: vscode.OutputChannel): string {
         return trimmedPath;
     }
 
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders) {
-        const discoveredCandidates: string[] = [];
-        for (const folder of workspaceFolders) {
-            let currentDirectory = folder.uri.fsPath;
-            for (let depthIndex = 0; depthIndex < 6; depthIndex += 1) {
-                const candidates = [
-                    path.join(currentDirectory, 'target', 'release', 'solix'),
-                    path.join(currentDirectory, 'target', 'debug', 'solix'),
-                ];
-                for (const candidate of candidates) {
-                    if (fs.existsSync(candidate) && !discoveredCandidates.includes(candidate)) {
-                        discoveredCandidates.push(candidate);
-                    }
-                }
-                const parentDirectory = path.dirname(currentDirectory);
-                if (parentDirectory === currentDirectory) {
-                    break;
-                }
-                currentDirectory = parentDirectory;
-            }
-        }
-
-        discoveredCandidates.sort((firstCandidate, secondCandidate) => {
-            const firstIsRelease = firstCandidate.includes(path.join('target', 'release'));
-            const secondIsRelease = secondCandidate.includes(path.join('target', 'release'));
-            if (firstIsRelease !== secondIsRelease) {
-                return firstIsRelease ? -1 : 1;
-            }
-            try {
-                return fs.statSync(secondCandidate).mtimeMs - fs.statSync(firstCandidate).mtimeMs;
-            } catch {
-                return 0;
-            }
-        });
-
-        for (const candidate of discoveredCandidates) {
-            serverLogChannel.appendLine(`Found local Solix toolchain binary: ${candidate}`);
-            return candidate;
-        }
-    }
-
     const homeDirectory = os.homedir();
     const localBinSolix = path.join(homeDirectory, '.local', 'bin', 'solix');
     if (fs.existsSync(localBinSolix)) {
@@ -209,49 +167,13 @@ function findSolixBinaries(serverLogChannel: vscode.OutputChannel): DiscoveredBi
         return { lspBinaryPath: trimmedPath, isToolchain, toolchainBinaryPath };
     }
 
-    // 2. Search workspace folders and walk up parent directories
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders) {
-        const discoveredCandidates: string[] = [];
-
-        for (const folder of workspaceFolders) {
-            let currentDirectory = folder.uri.fsPath;
-            for (let depthIndex = 0; depthIndex < 6; depthIndex += 1) {
-                const workspaceCandidates = [
-                    path.join(currentDirectory, 'target', 'release', 'solix'),
-                    path.join(currentDirectory, 'target', 'debug', 'solix'),
-                ];
-
-                for (const candidate of workspaceCandidates) {
-                    if (fs.existsSync(candidate) && !discoveredCandidates.includes(candidate)) {
-                        discoveredCandidates.push(candidate);
-                    }
-                }
-
-                const parentDirectory = path.dirname(currentDirectory);
-                if (parentDirectory === currentDirectory) {
-                    break;
-                }
-                currentDirectory = parentDirectory;
-            }
-        }
-
-        // Sort candidates by modification time (newest first)
-        discoveredCandidates.sort((firstPath, secondPath) => {
-            try {
-                return fs.statSync(secondPath).mtimeMs - fs.statSync(firstPath).mtimeMs;
-            } catch {
-                return 0;
-            }
-        });
-
-        for (const candidate of discoveredCandidates) {
-            if (isLspCapableToolchain(candidate)) {
-                serverLogChannel.appendLine(`Found verified LSP-capable build artifact: ${candidate}`);
-                return { lspBinaryPath: candidate, isToolchain: true, toolchainBinaryPath: candidate };
-            } else {
-                serverLogChannel.appendLine(`Skipping stale build artifact without 'lsp' subcommand: ${candidate}`);
-            }
+    // 2. Explicit user configuration for Toolchain path
+    const configuredToolchainPath = vscode.workspace.getConfiguration('solix').get<string>('toolchain.path');
+    if (configuredToolchainPath && configuredToolchainPath.trim().length > 0) {
+        const trimmedToolchain = configuredToolchainPath.trim();
+        if (isLspCapableToolchain(trimmedToolchain)) {
+            serverLogChannel.appendLine(`Using user-configured Solix toolchain for LSP: ${trimmedToolchain}`);
+            return { lspBinaryPath: trimmedToolchain, isToolchain: true, toolchainBinaryPath: trimmedToolchain };
         }
     }
 
@@ -450,3 +372,5 @@ export async function deactivate(): Promise<void> {
         await languageClient.stop();
     }
 }
+
+export { findToolchainBinary, findSolixBinaries };

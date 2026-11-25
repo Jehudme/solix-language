@@ -1,7 +1,7 @@
 //! Suite: MethodDeclaration - Declarations (TESTS.md)
 
 use solix_runtime::Value;
-use solix_tests::common::{assert_compile_error, compile_and_run};
+use solix_tests::common::{assert_compile_error, compile_and_run, compile_source_get_diagnostics};
 
 #[test]
 fn test_case_3_1_virtual_method_overriding() {
@@ -152,4 +152,29 @@ fn test_case_4_7_nested_method_declaration_inside_another_method() {
         }
     "#;
     assert_compile_error(code, "E0123");
+}
+
+#[test]
+fn test_case_4_8_missing_return_suppressed_when_method_has_syntax_errors() {
+    let code = r#"
+        class Main {
+            public static int32 badMethod() {
+                whilje(true) {
+                };
+            }
+        }
+    "#;
+    let diagnostics = compile_source_get_diagnostics(code);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic_item| diagnostic_item.error_code() == "E0202"),
+        "Must emit E0202 for whilje keyword typo, got: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic_item| diagnostic_item.error_code() == "E0212"),
+        "Must NOT emit false cascading E0212 (MissingReturn) when method has syntax errors, got: {diagnostics:?}"
+    );
 }

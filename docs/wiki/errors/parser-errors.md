@@ -137,3 +137,27 @@ This section documents the syntax diagnostics emitted by [`crates/solix-compilat
   char valid_letter = 'a';
   char valid_escape = '\n';
   ```
+
+---
+
+### `E0202`: Unknown Control-Flow Keyword or Statement
+* **Cause:** A statement starts with an unrecognized identifier followed by `(...)` and a block `{ ... }` that closely matches a control-flow keyword (e.g. `whilje`, `iff`, `foor`, `swich`). The parser computes Levenshtein distance, suggests the correct keyword, and synchronizes the statement block to prevent cascading syntax errors.
+* **Bad Code:**
+  ```solix
+  public static int32 main() {
+      whilje(!WindowShouldClose()) {
+          draw_frame();
+      }
+      return 0;
+  }
+  ```
+* **Fixed Code:**
+  ```solix
+  public static int32 main() {
+      while (!WindowShouldClose()) {
+          draw_frame();
+      }
+      return 0;
+  }
+  ```
+

@@ -23,7 +23,7 @@ The official Visual Studio Code extension for the **Solix** programming language
 
 ## Requirements
 
-The extension requires the Solix toolchain (`solix` or `solix-lsp`) installed and available in system `PATH`, `~/.cargo/bin`, or workspace `target/` directories.
+The extension requires the Solix toolchain (`solix` or `solix-lsp`) installed and available via user settings (`solix.lsp.path`, `solix.toolchain.path`), `~/.local/bin`, `~/.cargo/bin`, or system `PATH`. Workspace build artifacts (`target/`) are never automatically executed as language servers; developers testing local builds can explicitly set `"solix.lsp.path": "${workspaceFolder}/target/release/solix"`.
 
 ## Extension Settings
 

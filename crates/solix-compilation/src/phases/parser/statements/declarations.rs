@@ -145,6 +145,9 @@ pub struct MethodDeclaration {
     pub body: Option<BlockStatement>,
     /// Optional resolved symbol identifier populated by the semantic binder.
     pub resolved_symbol_id: Option<u32>,
+    /// Whether syntax or parsing errors were encountered while parsing this method body.
+    #[serde(default)]
+    pub has_syntax_errors: bool,
 }
 
 /// Class constructor declaration.
