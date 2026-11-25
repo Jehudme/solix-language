@@ -4,7 +4,9 @@
     "python3": "python3",
     "lua": "lua",
     "luajit": "luajit",
-    "gcc": "gcc"
+    "gcc": "gcc",
+    "javac": "javac",
+    "java": "java"
   },
   "defaults": {
     "warmup": 3,

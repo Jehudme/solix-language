@@ -269,6 +269,7 @@ class BenchmarkRunner:
             shutil.which("taskset") if (pin_cpu and OS_NAME == "Linux") else None
         )
         self.c_bins_cache: Dict[str, Path] = {}
+        self.java_bins_cache: Dict[str, Tuple[Path, str]] = {}
         self.solix_bins_cache: Dict[str, Tuple[Path, float]] = {}
 
     def _load_config(self, config_path: Path) -> Dict[str, Any]:
@@ -282,12 +283,14 @@ class BenchmarkRunner:
                 "lua": "lua",
                 "luajit": "luajit",
                 "gcc": "gcc",
+                "javac": "javac",
+                "java": "java",
             },
             "defaults": {"warmup": 3, "iterations": 11},
         }
 
     def resolve_engine(self, engine_name: str) -> Optional[str]:
-        """Resolves executable path for `solix`, `python3`, `lua`, `luajit`, or `gcc`."""
+        """Resolves executable path for `solix`, `python3`, `lua`, `luajit`, `gcc`, `javac`, or `java`."""
         if engine_name == "solix":
             if self.solix_bin_override and Path(self.solix_bin_override).exists():
                 return str(Path(self.solix_bin_override).resolve())
@@ -362,6 +365,41 @@ class BenchmarkRunner:
             if res.returncode == 0 and out_bin.exists():
                 self.c_bins_cache[str(c_file)] = out_bin
                 return out_bin
+        except Exception:
+            pass
+        return None
+
+    def compile_java_workload(
+        self, java_file: Path
+    ) -> Optional[Tuple[Path, str]]:
+        """Compiles a Java comparative workload into temp cache, returning (class_dir, main_class)."""
+        if str(java_file) in self.java_bins_cache:
+            return self.java_bins_cache[str(java_file)]
+        javac_bin = self.resolve_engine("javac")
+        java_bin = self.resolve_engine("java")
+        if not javac_bin or not java_bin:
+            return None
+        temp_build_dir = (
+            Path(tempfile.gettempdir())
+            / "solix_bench_build"
+            / f"java_{java_file.parent.name}_{java_file.stem}"
+        )
+        temp_build_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            compile_cmd = [javac_bin, "-d", str(temp_build_dir), str(java_file)]
+            compile_res = subprocess.run(
+                compile_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            if compile_res.returncode == 0:
+                main_class = java_file.stem
+                self.java_bins_cache[str(java_file)] = (temp_build_dir, main_class)
+                return temp_build_dir, main_class
         except Exception:
             pass
         return None
@@ -525,6 +563,19 @@ class BenchmarkRunner:
                     self.extract_result_checksum(out) if code == 0 else None
                 )
 
+        java_bin = self.resolve_engine("java")
+        java_files = sorted(workload_dir.glob("*.java"))
+        if java_bin and java_files:
+            java_target = self.compile_java_workload(java_files[0])
+            if java_target:
+                class_dir, main_class = java_target
+                code, out, _, _ = self.execute_command(
+                    [java_bin, "-cp", str(class_dir), main_class]
+                )
+                results["java"] = (
+                    self.extract_result_checksum(out) if code == 0 else None
+                )
+
         target_checksum = results.get("solix")
         if target_checksum is None:
             return False, "Solix execution failed or produced no checksum", results
@@ -635,6 +686,7 @@ class BenchmarkRunner:
         py_bin = None if solix_only else self.resolve_engine("python3")
         lua_bin = None if solix_only else self.resolve_engine("lua")
         luajit_bin = None if solix_only else self.resolve_engine("luajit")
+        java_bin = None if solix_only else self.resolve_engine("java")
 
         telemetry = get_hardware_telemetry()
         metadata: Dict[str, Any] = {
@@ -755,6 +807,21 @@ class BenchmarkRunner:
                     results["workloads"][wname]["c"] = (
                         self.benchmark_workload_engine(
                             [str(c_bin)],
+                            warmup_runs=warmup,
+                            timed_runs=iterations,
+                            scale_iterations=scale_iterations,
+                            benchmark_duration_ms=benchmark_duration_ms,
+                        )
+                    )
+
+            java_files = sorted(wdir.glob("*.java"))
+            if java_bin and java_files:
+                java_target = self.compile_java_workload(java_files[0])
+                if java_target:
+                    class_dir, main_class = java_target
+                    results["workloads"][wname]["java"] = (
+                        self.benchmark_workload_engine(
+                            [java_bin, "-cp", str(class_dir), main_class],
                             warmup_runs=warmup,
                             timed_runs=iterations,
                             scale_iterations=scale_iterations,
@@ -1097,7 +1164,7 @@ def compare_multiple_baselines(
 
 
 def extract_cross_language_rows(benchmark_data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Extracts comparative language metrics (Solix, Python3, Lua, LuaJIT, C) from a run."""
+    """Extracts comparative language metrics (Solix, Python3, Lua, LuaJIT, C, Java) from a run."""
     workloads = benchmark_data.get("workloads", {})
     rows: List[Dict[str, Any]] = []
     for wname, engines in sorted(workloads.items()):
@@ -1110,9 +1177,10 @@ def extract_cross_language_rows(benchmark_data: Dict[str, Any]) -> List[Dict[str
         lua_ms = float(engines.get("lua", {}).get("median_ms", 0.0))
         luajit_ms = float(engines.get("luajit", {}).get("median_ms", 0.0))
         c_ms = float(engines.get("c", {}).get("median_ms", 0.0))
+        java_ms = float(engines.get("java", {}).get("median_ms", 0.0))
         rss_kb = int(solix_entry.get("rss_kb", 0))
         has_any_other = any(
-            value > 0.0 for value in (py_ms, lua_ms, luajit_ms, c_ms, safe_ms)
+            value > 0.0 for value in (py_ms, lua_ms, luajit_ms, c_ms, java_ms, safe_ms)
         )
         if solix_ms <= 0.0 and not has_any_other:
             continue
@@ -1127,6 +1195,7 @@ def extract_cross_language_rows(benchmark_data: Dict[str, Any]) -> List[Dict[str
                 "lua_ms": lua_ms,
                 "luajit_ms": luajit_ms,
                 "c_ms": c_ms,
+                "java_ms": java_ms,
                 "solix_rss_kb": rss_kb,
                 "vs_python": round(py_ms / solix_ms, 2)
                 if solix_ms > 0.0 and py_ms > 0.0
@@ -1170,15 +1239,16 @@ def render_cross_language_markdown(benchmark_data: Dict[str, Any]) -> str:
     has_lua = any(row["lua_ms"] > 0.0 for row in rows)
     has_luajit = any(row["luajit_ms"] > 0.0 for row in rows)
     has_py = any(row["python3_ms"] > 0.0 for row in rows)
+    has_java = any(row.get("java_ms", 0.0) > 0.0 for row in rows)
 
-    if not any((has_c, has_lua, has_luajit, has_py)):
+    if not any((has_c, has_lua, has_luajit, has_py, has_java)):
         return ""
 
     lines = ["\n### Cross-Language Comparison\n"]
     lines.append(
-        "| Workload | Precompile (ms) | Solix VM (ms) | Cold Start (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | vs Python | Solix RSS (KB) |"
+        "| Workload | Precompile (ms) | Solix VM (ms) | Cold Start (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | Java (ms) | vs Python | Solix RSS (KB) |"
     )
-    lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for row in rows:
         compile_str = (
             f"{row['solix_compile_ms']:.2f}"
@@ -1195,10 +1265,11 @@ def render_cross_language_markdown(benchmark_data: Dict[str, Any]) -> str:
         lua_str = f"{row['lua_ms']:.2f}" if row["lua_ms"] > 0.0 else "-"
         luajit_str = f"{row['luajit_ms']:.2f}" if row["luajit_ms"] > 0.0 else "-"
         c_str = f"{row['c_ms']:.2f}" if row["c_ms"] > 0.0 else "-"
+        java_str = f"{row['java_ms']:.2f}" if row.get("java_ms", 0.0) > 0.0 else "-"
         vs_py = f"{row['vs_python']:.2f}x" if row["vs_python"] is not None else "-"
         rss_str = f"{row['solix_rss_kb']}" if row["solix_rss_kb"] > 0 else "-"
         lines.append(
-            f"| `{row['workload']}` | {compile_str} | {solix_str} | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {vs_py} | {rss_str} |"
+            f"| `{row['workload']}` | {compile_str} | {solix_str} | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {java_str} | {vs_py} | {rss_str} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -1270,6 +1341,7 @@ def render_run_console_table(
             "Lua (ms)",
             "LuaJIT (ms)",
             "C -O3 (ms)",
+            "Java (ms)",
             "vs Python",
             "RSS (KB)",
         ]
@@ -1295,6 +1367,7 @@ def render_run_console_table(
                     f"{row['lua_ms']:.2f}" if row["lua_ms"] > 0 else "-",
                     f"{row['luajit_ms']:.2f}" if row["luajit_ms"] > 0 else "-",
                     f"{row['c_ms']:.2f}" if row["c_ms"] > 0 else "-",
+                    f"{row['java_ms']:.2f}" if row.get("java_ms", 0.0) > 0 else "-",
                     f"{row['vs_python']:.2f}x"
                     if row["vs_python"] is not None
                     else "-",
@@ -1370,9 +1443,9 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             )
     else:
         lines.append(
-            "| Workload | Precompile (ms) | Solix (ms) | Cold (ms) | Python (ms) | Lua (ms) | LuaJIT (ms) | C (ms) | Speedup vs Python | RSS (KB) |"
+            "| Workload | Precompile (ms) | Solix (ms) | Cold (ms) | Python (ms) | Lua (ms) | LuaJIT (ms) | C (ms) | Java (ms) | Speedup vs Python | RSS (KB) |"
         )
-        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
         for wname, edata in sorted(workloads.items()):
             compile_ms = edata.get("solix_fast", {}).get("compile_ms", 0.0)
             cold_ms = edata.get("solix_fast", {}).get("cold_start_ms", 0.0)
@@ -1381,6 +1454,7 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             lua_ms = edata.get("lua", {}).get("median_ms", 0.0)
             luajit_ms = edata.get("luajit", {}).get("median_ms", 0.0)
             c_ms = edata.get("c", {}).get("median_ms", 0.0)
+            java_ms = edata.get("java", {}).get("median_ms", 0.0)
             rss_kb = edata.get("solix_fast", {}).get("rss_kb", 0)
 
             compile_str = f"{compile_ms:.2f}" if compile_ms > 0 else "-"
@@ -1393,10 +1467,11 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             lua_str = f"{lua_ms:.2f}" if lua_ms > 0 else "-"
             luajit_str = f"{luajit_ms:.2f}" if luajit_ms > 0 else "-"
             c_str = f"{c_ms:.2f}" if c_ms > 0 else "-"
+            java_str = f"{java_ms:.2f}" if java_ms > 0 else "-"
             py_str = f"{py_ms:.2f}" if py_ms > 0 else "-"
 
             lines.append(
-                f"| `{wname}` | {compile_str} | **{solix_ms:.2f}** | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {speedup_str} | {rss_kb} |"
+                f"| `{wname}` | {compile_str} | **{solix_ms:.2f}** | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {java_str} | {speedup_str} | {rss_kb} |"
             )
 
         lines.append("")
@@ -1411,6 +1486,7 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             "> - **Lua (ms):** Median execution time of the standard Lua 5.4 interpreter.\n"
             "> - **LuaJIT (ms):** Median execution time of the LuaJIT 2.1 JIT compiler.\n"
             "> - **C (ms):** Median execution time of native C compiled with GCC `-O3`.\n"
+            "> - **Java (ms):** Median execution time of OpenJDK JVM HotSpot.\n"
             "> - **Speedup vs Python:** Speedup ratio of Solix relative to CPython (`Python / Solix`).\n"
             "> - **RSS (KB):** Peak Resident Set Size memory consumption in kilobytes."
         )
