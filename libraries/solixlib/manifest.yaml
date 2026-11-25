@@ -18,6 +18,7 @@ profiles:
     natives:
       solixlib_native:
         profile: release
+        docker: true
 
   debug:
     optimization_level: 0

@@ -3029,3 +3029,110 @@ profiles:
         0
     );
 }
+
+// ============================================================================
+// Test Docker Containerization Strategy & Verification (Issues #253 & #251)
+// ============================================================================
+
+#[test]
+fn test_docker_strategy_mandated_for_all_target_triples() {
+    let supported_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ];
+
+    for target_triple in supported_triples {
+        for docker_flag in [true, false] {
+            let strategy_result = solix_toolchain::select_cargo_strategy(
+                target_triple,
+                "x86_64-unknown-linux-gnu",
+                docker_flag,
+            );
+            assert!(
+                strategy_result.is_ok(),
+                "select_cargo_strategy must succeed for {target_triple}"
+            );
+            assert_eq!(
+                strategy_result.unwrap(),
+                solix_toolchain::CargoBuildStrategy::Docker,
+                "Containerized Docker strategy must be selected for {target_triple} regardless of docker flag"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_native_target_config_defaults_to_docker() {
+    let default_config = solix_common::project::NativeTargetConfig {
+        docker: None,
+        ..Default::default()
+    };
+    assert!(
+        default_config.is_docker_strategy(),
+        "NativeTargetConfig must default to docker strategy when docker field is omitted"
+    );
+
+    let explicit_docker_config = solix_common::project::NativeTargetConfig {
+        docker: Some(true),
+        ..Default::default()
+    };
+    assert!(
+        explicit_docker_config.is_docker_strategy(),
+        "NativeTargetConfig must report true when docker is explicitly true"
+    );
+}
+
+#[test]
+fn test_verify_docker_daemon_active_or_actionable_error() {
+    let daemon_result = solix_toolchain::verify_docker_daemon_active();
+    match daemon_result {
+        Ok(version_info) => {
+            assert!(
+                version_info.contains("Docker"),
+                "Version string must identify Docker runtime: {version_info}"
+            );
+        }
+        Err(diagnostic_error) => {
+            let error_message = diagnostic_error.to_string();
+            assert!(
+                error_message.contains("Docker")
+                    || error_message.contains("docker")
+                    || error_message.contains("daemon is unreachable"),
+                "Diagnostic error must provide actionable Docker instructions: {error_message}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_cross_and_dockcross_image_mappings_for_all_triples() {
+    let supported_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ];
+
+    for target_triple in supported_triples {
+        let cross_image = solix_toolchain::cross_image_for_triple(target_triple);
+        assert!(
+            cross_image.contains("ghcr.io/cross-rs/"),
+            "cross image for {target_triple} must be canonical cross-rs image: {cross_image}"
+        );
+
+        let dockcross_image = solix_toolchain::dockcross_image_for_triple(target_triple);
+        assert!(
+            dockcross_image.is_some(),
+            "dockcross image must be defined for {target_triple}"
+        );
+        let dockcross_image_str = dockcross_image.unwrap();
+        assert!(
+            dockcross_image_str.starts_with("dockcross/"),
+            "dockcross image for {target_triple} must be canonical dockcross image: {dockcross_image_str}"
+        );
+    }
+}

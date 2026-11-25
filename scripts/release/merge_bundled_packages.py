@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Merge per-platform bundled `.slxarc` archives into universal cross-platform packages.
+"""[DEPRECATED] Merge per-platform bundled `.slxarc` archives into universal cross-platform packages.
+
+NOTICE: This script is deprecated in favor of single-runner Docker containerized cross-compilation
+(see Issue #251 and Issue #253). Native libraries are now compiled across all target architectures
+within hermetic Docker containers on a single host runner, producing universal archives directly.
+This script is maintained exclusively for backward compatibility and archival merge testing.
 
 Given two or more input directories formatted as `<name>-<profile>@<version>/<name>.slxarc`,
 this utility combines all target-qualified native libraries (`lib/<target_triple>/*`) and
@@ -403,6 +408,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    print(
+        "[DEPRECATION WARNING] merge_bundled_packages.py is deprecated; single-runner Docker builds produce universal archives directly.",
+        file=sys.stderr,
+    )
     arguments = parse_args()
     required_targets = [
         item.strip()

@@ -305,9 +305,10 @@ pub struct NativeTargetConfig {
 
 impl NativeTargetConfig {
     /// Returns true if this native target is configured to compile inside a Docker container.
+    /// Containerized compilation via Docker is the mandated default for all native targets.
     #[must_use]
     pub fn is_docker_strategy(&self) -> bool {
-        self.docker.unwrap_or(false)
+        self.docker.unwrap_or(true)
             || self.strategy.as_deref().is_some_and(|strategy_name| {
                 strategy_name.eq_ignore_ascii_case("docker")
                     || strategy_name.eq_ignore_ascii_case("container")
