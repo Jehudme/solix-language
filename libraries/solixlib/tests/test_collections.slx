@@ -116,6 +116,22 @@ public class TestCollections {
         if (age_map.contains_key(new String("Bob"))) {
             return false;
         }
+        if (!age_map.contains_value(25) || !age_map.contains_value(35)) {
+            return false;
+        }
+        if (age_map.contains_value(99)) {
+            return false;
+        }
+
+        HashMap<int32, String> object_value_map = new HashMap<int32, String>();
+        object_value_map.put(1, new String("ValueA"));
+        object_value_map.put(2, new String("ValueB"));
+        if (!object_value_map.contains_value(new String("ValueA"))) {
+            return false;
+        }
+        if (object_value_map.contains_value(new String("ValueC"))) {
+            return false;
+        }
 
         return true;
     }

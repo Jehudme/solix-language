@@ -99,6 +99,12 @@ public class TestTime {
             return false;
         }
 
+        DateTime local_time = DateTime::now_local();
+        String local_iso = local_time.to_iso_string();
+        if (local_iso.ends_with(new String("Z"))) {
+            return false;
+        }
+
         return true;
     }
 

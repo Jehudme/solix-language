@@ -933,13 +933,19 @@ fn compile_cargo_native(
 
         let mut command = if matches!(strategy, CargoBuildStrategy::Docker) {
             if let Some(cross_executable) = find_executable("cross") {
-                let mut cmd = crate::process::create_process_command(&cross_executable);
-                cmd.arg("build");
-                cmd.arg("--manifest-path")
+                let mut cross_command = crate::process::create_process_command(&cross_executable);
+                cross_command.arg("build");
+                cross_command
+                    .arg("--manifest-path")
                     .arg(&cargo_manifest)
                     .arg("--target-dir")
                     .arg(&cargo_target_dir);
-                cmd
+                let native_crate_dir = cargo_manifest.parent().unwrap_or(project_root);
+                let cross_toml = native_crate_dir.join("Cross.toml");
+                if cross_toml.exists() {
+                    cross_command.env("CROSS_CONFIG", &cross_toml);
+                }
+                cross_command
             } else if let Some(docker_executable) = find_executable("docker") {
                 let image = entry
                     .docker_image

@@ -581,6 +581,20 @@ pub fn execute_pass1_symbol_discovery(
                         continue;
                     }
 
+                    let parameter_names: Vec<String> = interface_declaration
+                        .generic_params
+                        .iter()
+                        .map(|generic_parameter| {
+                            let start_offset = generic_parameter.name_span.start as usize;
+                            let end_offset = generic_parameter.name_span.end as usize;
+                            if end_offset <= source_text.len() {
+                                source_text[start_offset..end_offset].to_string()
+                            } else {
+                                "T".to_string()
+                            }
+                        })
+                        .collect();
+
                     let interface_symbol = SymbolEntry {
                         id: SymbolId(0),
                         name: interface_name.to_string(),
@@ -597,7 +611,7 @@ pub fn execute_pass1_symbol_discovery(
                         is_static: false,
                         is_const: false,
                         slot_index: None,
-                        parameter_names: Vec::new(),
+                        parameter_names,
                     };
                     symbol_table.insert_symbol(interface_symbol);
                 }

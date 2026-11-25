@@ -120,6 +120,9 @@ Static utility class offering collection operations.
 ### Methods
 - `Collections.to_string<T>(IIterable<T> collection) -> String`: Formats any iterable collection into canonical comma-separated notation, e.g. `"[item1, item2, item3]"`. Integrates seamlessly with `IStringable` and `Console::print(IStringable)`.
 
+### Key & Element Equality Protocol
+Hash-based collection structures (`HashMap<K, V>` and `HashSet<T>`) support keys and elements implementing `IEquatable<T>` and `IHashable`. Custom object keys dynamically dispatch to their specialized `equals` method, enabling value-based map indexing and set membership without pointer identity restriction.
+
 ---
 
 ## 10. Memory Lifecycle & Destructor Contracts

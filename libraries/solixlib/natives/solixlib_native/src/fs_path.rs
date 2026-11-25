@@ -45,7 +45,7 @@ pub unsafe extern "C" fn path_native_combine(
     let first_path = unsafe { read_solix_chars(vm_context, first_address) };
     let second_path = unsafe { read_solix_chars(vm_context, second_address) };
 
-    let combined = Path::new(&first_path).join(second_path);
+    let combined = Path::new(&first_path).join(&second_path);
     let normalized_string = combined.to_string_lossy().replace('\\', "/");
     let allocated_address = unsafe { alloc_solix_chars(vm_context, &normalized_string) };
     SolixCValue::ref_val(allocated_address)

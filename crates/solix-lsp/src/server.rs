@@ -654,11 +654,30 @@ impl LanguageServer for SolixLanguageServer {
         params: DocumentOnTypeFormattingParams,
     ) -> Result<Option<Vec<TextEdit>>> {
         let uri = &params.text_document_position.text_document.uri;
+        let cursor_position = params.text_document_position.position;
         let snapshot = match self.workspace.get_snapshot(uri) {
             Some(snapshot) => snapshot,
             None => return Ok(None),
         };
 
-        Ok(Some(format_document(&snapshot)))
+        let target_line = if params.ch == "\n" && cursor_position.line > 0 {
+            cursor_position.line - 1
+        } else {
+            cursor_position.line
+        };
+
+        let line_range = Range {
+            start: Position {
+                line: target_line,
+                character: 0,
+            },
+            end: Position {
+                line: target_line + 1,
+                character: 0,
+            },
+        };
+
+        let localized_edits = format_range(&snapshot, line_range);
+        Ok(Some(localized_edits))
     }
 }

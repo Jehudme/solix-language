@@ -30,22 +30,117 @@ pub fn format_document(snapshot: &AnalysisSnapshot) -> Vec<TextEdit> {
     }]
 }
 
-/// Formats a specific line range within a Solix source document.
+/// Computes the block nesting indentation level at the specified zero-based line index.
+#[must_use]
+pub fn compute_indent_level_at_line(source_text: &str, target_line_index: u32) -> usize {
+    let mut indent_level = 0usize;
+    let mut in_block_comment = false;
+    for (line_index, raw_line) in source_text.lines().enumerate() {
+        if line_index as u32 >= target_line_index {
+            break;
+        }
+        let trimmed_line = raw_line.trim();
+        if trimmed_line.is_empty() {
+            continue;
+        }
+        if in_block_comment {
+            if trimmed_line.contains("*/") {
+                in_block_comment = false;
+            }
+            continue;
+        }
+        if trimmed_line.starts_with("/*") && !trimmed_line.contains("*/") {
+            in_block_comment = true;
+            continue;
+        }
+
+        let starts_with_closing_brace =
+            trimmed_line.starts_with('}') || trimmed_line.starts_with(']');
+        if starts_with_closing_brace {
+            indent_level = indent_level.saturating_sub(1);
+        }
+
+        let open_brace_count = trimmed_line
+            .chars()
+            .filter(|&character| character == '{')
+            .count();
+        let close_brace_count = trimmed_line
+            .chars()
+            .filter(|&character| character == '}')
+            .count();
+
+        if starts_with_closing_brace {
+            let remaining_close_count = close_brace_count.saturating_sub(1);
+            if open_brace_count > remaining_close_count {
+                indent_level += open_brace_count - remaining_close_count;
+            } else if remaining_close_count > open_brace_count {
+                indent_level =
+                    indent_level.saturating_sub(remaining_close_count - open_brace_count);
+            }
+        } else if open_brace_count > close_brace_count {
+            indent_level += open_brace_count - close_brace_count;
+        } else if close_brace_count > open_brace_count {
+            indent_level = indent_level.saturating_sub(close_brace_count - open_brace_count);
+        }
+    }
+    indent_level
+}
+
+/// Formats a specific line range within a Solix source document preserving base indentation.
 #[must_use]
 pub fn format_range(snapshot: &AnalysisSnapshot, range: Range) -> Vec<TextEdit> {
-    let start_offset = position_to_byte_offset(&snapshot.source_text, range.start);
-    let end_offset = position_to_byte_offset(&snapshot.source_text, range.end);
+    let start_line = range.start.line;
+    let end_line = if range.end.character == 0 && range.end.line > range.start.line {
+        range.end.line - 1
+    } else {
+        range.end.line
+    };
 
-    if start_offset >= end_offset || end_offset > snapshot.source_text.len() {
+    let document_lines: Vec<&str> = snapshot.source_text.lines().collect();
+    if start_line as usize >= document_lines.len() {
+        return Vec::new();
+    }
+    let clamped_end_line = (end_line as usize).min(document_lines.len().saturating_sub(1));
+
+    let initial_indent_level = compute_indent_level_at_line(&snapshot.source_text, start_line);
+    let selected_slice = document_lines[start_line as usize..=clamped_end_line].join("\n");
+    let formatted_text = format_source_with_base_indent(&selected_slice, initial_indent_level);
+
+    let start_offset = position_to_byte_offset(
+        &snapshot.source_text,
+        Position {
+            line: start_line,
+            character: 0,
+        },
+    );
+    let end_offset = if clamped_end_line + 1 < document_lines.len() {
+        position_to_byte_offset(
+            &snapshot.source_text,
+            Position {
+                line: (clamped_end_line + 1) as u32,
+                character: 0,
+            },
+        )
+    } else {
+        snapshot.source_text.len()
+    };
+
+    let target_range = Range {
+        start: Position {
+            line: start_line,
+            character: 0,
+        },
+        end: byte_offset_to_position(&snapshot.source_text, end_offset),
+    };
+
+    let original_slice = &snapshot.source_text[start_offset..end_offset];
+    if original_slice == formatted_text.trim_end_matches('\n') || original_slice == formatted_text {
         return Vec::new();
     }
 
-    let slice = &snapshot.source_text[start_offset..end_offset];
-    let formatted = format_source(slice);
-
     vec![TextEdit {
-        range,
-        new_text: formatted,
+        range: target_range,
+        new_text: formatted_text,
     }]
 }
 
@@ -56,8 +151,14 @@ pub fn format_range(snapshot: &AnalysisSnapshot, range: Range) -> Vec<TextEdit> 
 /// Comments: preserves all inline and block comments.
 #[must_use]
 pub fn format_source(source: &str) -> String {
+    format_source_with_base_indent(source, 0)
+}
+
+/// Formats raw Solix source code starting from an initial base indentation level.
+#[must_use]
+pub fn format_source_with_base_indent(source: &str, initial_indent_level: usize) -> String {
     let mut formatted_lines = Vec::new();
-    let mut indent_level = 0usize;
+    let mut indent_level = initial_indent_level;
     let mut in_block_comment = false;
 
     for raw_line in source.lines() {
