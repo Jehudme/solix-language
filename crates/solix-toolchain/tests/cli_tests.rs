@@ -2098,3 +2098,126 @@ fn test_cli_fmt_skips_ignored_directories() {
         "Expected .git/ file to be untouched"
     );
 }
+
+#[test]
+fn test_new_package_clean_manifest_with_default_solix_dependency() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_dir = workspace.root_path().join("clean_app");
+
+    let new_package_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        target_dir.to_str().expect("valid path"),
+        "--no-native",
+    ])
+    .expect("parse new package cli");
+
+    assert_eq!(run(new_package_cli).expect("execute new package"), 0);
+
+    let manifest_path = target_dir.join("manifest.yaml");
+    assert!(manifest_path.is_file(), "manifest.yaml must exist");
+
+    let manifest_content = std::fs::read_to_string(&manifest_path).expect("read manifest");
+
+    // Must NOT contain vars: block or anchor aliases
+    assert!(
+        !manifest_content.contains("vars:"),
+        "Manifest must not contain legacy vars: block"
+    );
+    assert!(
+        !manifest_content.contains("*proj_version"),
+        "Manifest must not use *proj_version alias"
+    );
+    assert!(
+        !manifest_content.contains("*release_platforms"),
+        "Manifest must not use *release_platforms alias"
+    );
+    assert!(
+        !manifest_content.contains("*host_platform"),
+        "Manifest must not use *host_platform alias"
+    );
+
+    // Must contain direct version scalar
+    assert!(
+        manifest_content.contains("version: \"0.1.0\""),
+        "Manifest must contain direct version scalar"
+    );
+
+    // Must contain default solix dependency with current toolchain version
+    let expected_solix_dep = format!(
+        "solix:\n        version: \"{}\"\n        profile: release",
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(
+        manifest_content.contains(&expected_solix_dep),
+        "Manifest must include default solix dependency"
+    );
+
+    // Must contain direct platforms
+    assert!(
+        manifest_content.contains("platforms:\n      - all"),
+        "Release profile must specify direct platforms"
+    );
+    assert!(
+        manifest_content.contains("platforms:\n      - host"),
+        "Debug profile must specify direct platforms"
+    );
+}
+
+#[test]
+fn test_new_package_no_std_flag() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_dir = workspace.root_path().join("freestanding_app");
+
+    let new_package_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        target_dir.to_str().expect("valid path"),
+        "--no-native",
+        "--no-std",
+    ])
+    .expect("parse new package cli");
+
+    assert_eq!(run(new_package_cli).expect("execute new package"), 0);
+
+    let manifest_path = target_dir.join("manifest.yaml");
+    let manifest_content = std::fs::read_to_string(&manifest_path).expect("read manifest");
+
+    assert!(
+        !manifest_content.contains("solix:"),
+        "Manifest must not contain solix dependency when --no-std is passed"
+    );
+    assert!(
+        !manifest_content.contains("dependencies:"),
+        "Manifest must have no dependencies block when empty and --no-std is passed"
+    );
+}
+
+#[test]
+fn test_new_package_explicit_solix_dep_override() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let target_dir = workspace.root_path().join("pinned_app");
+
+    let new_package_cli = Cli::try_parse_from([
+        "solix",
+        "new",
+        "package",
+        target_dir.to_str().expect("valid path"),
+        "--no-native",
+        "-d",
+        "solix@1.9.0",
+    ])
+    .expect("parse new package cli");
+
+    assert_eq!(run(new_package_cli).expect("execute new package"), 0);
+
+    let manifest_path = target_dir.join("manifest.yaml");
+    let manifest_content = std::fs::read_to_string(&manifest_path).expect("read manifest");
+
+    assert!(
+        manifest_content.contains("version: \"1.9.0\""),
+        "Manifest must honor explicit solix version override"
+    );
+}

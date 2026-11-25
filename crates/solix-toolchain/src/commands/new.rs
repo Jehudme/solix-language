@@ -112,6 +112,7 @@ pub fn execute_new(args: NewArgs) -> Result<()> {
         lib: args.lib,
         native: args.native,
         no_native: args.no_native,
+        no_std: args.no_std,
         deps: args.deps,
         force: args.force,
     })
@@ -161,7 +162,10 @@ pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
         None
     };
 
-    let parsed_deps = parse_dependency_flags(&args.deps);
+    let mut parsed_deps = parse_dependency_flags(&args.deps);
+    if !args.no_std && !parsed_deps.contains_key("solix") {
+        parsed_deps.insert("solix".to_string(), env!("CARGO_PKG_VERSION").to_string());
+    }
     let safe_snake_name = to_snake_case(&project_name);
     let bridge_folder_name = format!("{safe_snake_name}_bridge");
 
@@ -370,20 +374,10 @@ struct ProjectManifestRenderSpec<'a> {
 
 fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String {
     let mut lines = Vec::new();
-    lines.push("vars:".to_string());
-    lines.push(format!(
-        "  project_version: &proj_version \"{}\"",
-        spec.version
-    ));
-    lines.push("  default_platforms: &host_platform".to_string());
-    lines.push("    - host".to_string());
-    lines.push("  release_platforms: &release_platforms".to_string());
-    lines.push("    - all".to_string());
-    lines.push(String::new());
 
     lines.push("configuration:".to_string());
     lines.push(format!("  name: {}", spec.project_name));
-    lines.push("  version: *proj_version".to_string());
+    lines.push(format!("  version: \"{}\"", spec.version));
     lines.push(format!(
         "  description: {}",
         yaml_quoted_scalar(spec.description)
@@ -411,7 +405,8 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
         "    static: true".to_string(),
         "    sources:".to_string(),
         "      - src".to_string(),
-        "    platforms: *release_platforms".to_string(),
+        "    platforms:".to_string(),
+        "      - all".to_string(),
     ]);
     if let Some(key) = spec.native_key {
         lines.extend([
@@ -434,7 +429,8 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
         "    static: false".to_string(),
         "    sources:".to_string(),
         "      - src".to_string(),
-        "    platforms: *host_platform".to_string(),
+        "    platforms:".to_string(),
+        "      - host".to_string(),
     ]);
     if let Some(key) = spec.native_key {
         lines.extend([
@@ -456,7 +452,8 @@ fn render_project_manifest_yaml(spec: &ProjectManifestRenderSpec<'_>) -> String 
         "    sources:".to_string(),
         "      - src".to_string(),
         "      - tests".to_string(),
-        "    platforms: *host_platform".to_string(),
+        "    platforms:".to_string(),
+        "      - host".to_string(),
     ]);
     if let Some(key) = spec.native_key {
         lines.extend([
