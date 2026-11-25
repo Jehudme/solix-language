@@ -272,33 +272,47 @@ def get_host_target_triple() -> str:
 
 
 def load_manifest(project_root: Path) -> dict[str, Any]:
-    """Parses manifest.toml from the project root directory."""
-    manifest_path = project_root / "manifest.toml"
-    if not manifest_path.exists():
+    """Parses manifest.yaml, manifest.yml, or legacy manifest.toml from the project root directory."""
+    manifest_yaml = project_root / "manifest.yaml"
+    manifest_yml = project_root / "manifest.yml"
+    manifest_toml = project_root / "manifest.toml"
+
+    if manifest_yaml.exists():
+        manifest_path = manifest_yaml
+    elif manifest_yml.exists():
+        manifest_path = manifest_yml
+    elif manifest_toml.exists():
+        manifest_path = manifest_toml
+    else:
         raise BuildError(
             phase="Manifest Loading",
-            message=f"manifest.toml not found at '{manifest_path}'",
+            message=f"manifest.yaml (or manifest.toml) not found at '{project_root}'",
             cwd=project_root,
             hint="Ensure that you are running the build from a valid Solix project directory.",
         )
 
     try:
-        with open(manifest_path, "rb") as manifest_file:
-            manifest_data = tomllib.load(manifest_file)
+        if manifest_path.suffix in (".yaml", ".yml"):
+            import yaml
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest_data = yaml.safe_load(manifest_file) or {}
+        else:
+            with open(manifest_path, "rb") as manifest_file:
+                manifest_data = tomllib.load(manifest_file)
     except Exception as parse_error:
         raise BuildError(
             phase="Manifest Parsing",
-            message=f"Failed to parse manifest.toml: {parse_error}",
+            message=f"Failed to parse {manifest_path.name}: {parse_error}",
             cwd=project_root,
-            hint="Ensure manifest.toml is valid TOML syntax.",
+            hint=f"Ensure {manifest_path.name} is valid syntax.",
         ) from parse_error
 
     if "configuration" not in manifest_data or "name" not in manifest_data["configuration"]:
         raise BuildError(
             phase="Manifest Validation",
-            message="manifest.toml must contain a valid [configuration] section with 'name'",
+            message=f"{manifest_path.name} must contain a valid [configuration] section with 'name'",
             cwd=project_root,
-            hint="Add [configuration] section with name = \"<package_name>\" to manifest.toml.",
+            hint=f"Add [configuration] section with name = \"<package_name>\" to {manifest_path.name}.",
         )
 
     return manifest_data

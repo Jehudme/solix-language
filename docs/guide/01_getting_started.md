@@ -145,14 +145,9 @@ In Solix, executable programs define a `main` method (by default `Main::main`). 
 #### The Project Manifest (`manifest.yaml`)
 
 ```yaml
-vars:
-  project_version: &app_version "0.1.0"
-  default_sources: &src_dirs
-    - src
-
 configuration:
   name: hello_solix
-  version: *app_version
+  version: "0.1.0"
   description: A Solix project
   license: Apache-2.0
   authors: []
@@ -164,11 +159,16 @@ profiles:
     inline_threshold: 16
     debug_symbols: false
     static: true
-    sources: *src_dirs
     platforms:
-      - host
+      - all
+    sources:
+      - src
     natives:
       hello_solix_bridge:
+        profile: release
+    dependencies:
+      solix:
+        version: "2.0.1"
         profile: release
 
   debug:
@@ -177,12 +177,17 @@ profiles:
     inline_threshold: 8
     debug_symbols: true
     static: false
-    sources: *src_dirs
     platforms:
       - host
+    sources:
+      - src
     natives:
       hello_solix_bridge:
         profile: debug
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release
 
   test:
     entrypoint: TestRunner::test
@@ -190,11 +195,18 @@ profiles:
     inline_threshold: 8
     debug_symbols: true
     static: false
+    platforms:
+      - host
     sources:
       - src
       - tests
-    platforms:
-      - host
+    natives:
+      hello_solix_bridge:
+        profile: debug
+    dependencies:
+      solix:
+        version: "2.0.1"
+        profile: release
 ```
 
 > [!TIP]

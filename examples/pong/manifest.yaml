@@ -1,16 +1,6 @@
-vars:
-  dependencies: &dependencies
-   raylib:
-    profile: release
-    version: 5.5.0
-   
-   solix:
-    profile: release
-    version: 2.1.0
-
 configuration:
   name: pong
-  version: 0.1.0
+  version: "0.1.0"
   description: "A Solix package"
   license: "Apache-2.0"
   authors: []
@@ -26,7 +16,13 @@ profiles:
       - src
     platforms: 
       - all
-    dependencies: *dependencies
+    dependencies:
+      raylib:
+        version: "5.6.1"
+        profile: release
+      solix:
+        version: "2.1.1"
+        profile: release
 
   debug:
     entrypoint: Main::main
@@ -38,8 +34,13 @@ profiles:
       - src
     platforms: 
       - host
-    dependencies: *dependencies
-
+    dependencies:
+      raylib:
+        version: "5.6.1"
+        profile: release
+      solix:
+        version: "2.1.1"
+        profile: release
 
   test:
     entrypoint: TestRunner::test
@@ -52,5 +53,10 @@ profiles:
       - tests
     platforms: 
       - host
-    dependencies: *dependencies
-
+    dependencies:
+      raylib:
+        version: "5.6.1"
+        profile: release
+      solix:
+        version: "2.1.1"
+        profile: release

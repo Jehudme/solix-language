@@ -307,7 +307,7 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
         debug_inspection
             .file_entries
             .iter()
-            .any(|item| item.path == "manifest.toml")
+            .any(|item| item.path == "manifest.yaml")
     );
     assert!(
         debug_inspection
@@ -422,7 +422,20 @@ fn test_run_with_direct_native_library_flag() {
     .expect("Failed to parse build CLI");
     assert_eq!(run(build_cli).expect("Build must succeed"), 0);
 
-    // Locate the emitted native cdylib in build/.cache/stage/debug/bin
+    // Locate the emitted native cdylib in build/debug/stage/bin or build/.cache/stage/debug/bin
+    let candidate_declarative_triple = project_root
+        .join("build")
+        .join("debug")
+        .join("stage")
+        .join("bin")
+        .join(solix_common::project::host_target_triple())
+        .join(host_cdylib_filename("__native_rust_bridge"));
+    let candidate_declarative_flat = project_root
+        .join("build")
+        .join("debug")
+        .join("stage")
+        .join("bin")
+        .join(host_cdylib_filename("__native_rust_bridge"));
     let candidate_flat = project_root
         .join("build")
         .join(".cache")
@@ -438,7 +451,11 @@ fn test_run_with_direct_native_library_flag() {
         .join("bin")
         .join(solix_common::project::host_target_triple())
         .join(host_cdylib_filename("__native_rust_bridge"));
-    let native_lib_path = if candidate_flat.exists() {
+    let native_lib_path = if candidate_declarative_triple.exists() {
+        candidate_declarative_triple
+    } else if candidate_declarative_flat.exists() {
+        candidate_declarative_flat
+    } else if candidate_flat.exists() {
         candidate_flat
     } else {
         candidate_triple
@@ -600,7 +617,7 @@ fn test_info_command_on_slxarc_archive() {
     assert!(
         files_array
             .iter()
-            .any(|item| item["path"] == "manifest.toml")
+            .any(|item| item["path"] == "manifest.yaml")
     );
     assert!(
         files_array
@@ -776,32 +793,48 @@ public class Math {
     let project_root = workspace.root_path().join("deps_project");
     copy_project_tree(&template_source, &project_root).expect("copy template");
 
-    // 3. Update manifest.toml to declare dependency
+    // 3. Update manifest.yaml to declare dependency
     let manifest_content = r#"
-[configuration]
-name = "deps_project"
-version = "0.1.0"
-description = "Project with dependencies"
-license = "Apache-2.0"
-authors = ["Tester"]
+configuration:
+  name: deps_project
+  version: "0.1.0"
+  description: "Project with dependencies"
+  license: "Apache-2.0"
+  authors:
+    - Tester
 
-[profiles.release]
-entrypoint = "Main::main"
-optimization_level = 3
-inline_threshold = 16
-debug_symbols = false
-static = true
-sources = ["src"]
-dependencies = { math = { version = "1.0.0", profile = "release" } }
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - all
+    dependencies:
+      math:
+        version: "1.0.0"
+        profile: release
 
-[profiles.debug]
-inherits = "release"
-optimization_level = 0
-inline_threshold = 8
-debug_symbols = true
-static = false
+  debug:
+    entrypoint: Main::main
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    dependencies:
+      math:
+        version: "1.0.0"
+        profile: release
 "#;
-    fs::write(project_root.join("manifest.toml"), manifest_content).expect("write manifest");
+    fs::write(project_root.join("manifest.yaml"), manifest_content).expect("write manifest");
 
     // 4. Update src/main.slx to use Math::compute
     let main_content = r#"
@@ -1134,28 +1167,42 @@ fn test_static_release_build_bundles_dependency_natives_and_runs_standalone() {
     copy_project_tree(&template_source, &dep_root).expect("copy template for widget_dep");
 
     let dep_manifest = r#"
-[configuration]
-name = "widget_dep"
-version = "0.1.0"
-description = "Dependency with native bridge, overloaded ctors, vtable, and static global"
-license = "Apache-2.0"
-authors = ["Tester"]
+configuration:
+  name: widget_dep
+  version: "0.1.0"
+  description: "Dependency with native bridge, overloaded ctors, vtable, and static global"
+  license: "Apache-2.0"
+  authors:
+    - Tester
 
-[profiles.release]
-optimization_level = 3
-inline_threshold = 0
-debug_symbols = false
-static = true
-sources = ["src"]
+profiles:
+  release:
+    optimization_level: 3
+    inline_threshold: 0
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - all
+    natives:
+      rust_bridge:
+        profile: release
 
-[profiles.debug]
-inherits = "release"
-optimization_level = 0
-inline_threshold = 0
-debug_symbols = true
-static = false
+  debug:
+    optimization_level: 0
+    inline_threshold: 0
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    natives:
+      rust_bridge:
+        profile: debug
 "#;
-    fs::write(dep_root.join("manifest.toml"), dep_manifest).expect("write dep manifest");
+    fs::write(dep_root.join("manifest.yaml"), dep_manifest).expect("write dep manifest");
 
     let dep_source = r#"
 package widget_dep;

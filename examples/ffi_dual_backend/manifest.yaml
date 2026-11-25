@@ -1,14 +1,6 @@
-vars:
-  project_version: &proj_ver "1.0.0"
-  default_platforms: &host_plat
-    - host
-  all_sources: &test_sources
-    - src
-    - tests
-
 configuration:
   name: ffi_dual_backend
-  version: *proj_ver
+  version: "1.0.0"
   description: Dual-backend CMake (C11/C++17) and Rust FFI feature matrix showcase and test suite
   license: Apache-2.0
   authors:
@@ -35,8 +27,11 @@ profiles:
     inline_threshold: 8
     debug_symbols: true
     static: false
-    sources: *test_sources
-    platforms: *host_plat
+    sources:
+      - src
+      - tests
+    platforms:
+      - host
     natives:
       cmake_backend:
         profile: release
@@ -47,8 +42,11 @@ profiles:
     inline_threshold: 8
     debug_symbols: true
     static: false
-    sources: *test_sources
-    platforms: *host_plat
+    sources:
+      - src
+      - tests
+    platforms:
+      - host
     natives:
       rust_backend:
         profile: release

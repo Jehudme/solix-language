@@ -41,6 +41,7 @@ def generate_project(
     test_entry: str = "TestRunner::test",
     is_library: bool = False,
     no_native: bool = False,
+    no_std: bool = False,
     dependencies: list[str] | None = None,
     force: bool = False,
 ) -> Path:
@@ -55,10 +56,10 @@ def generate_project(
     if dependencies is None:
         dependencies = []
 
-    manifest_file = target_path / "manifest.toml"
+    manifest_file = target_path / "manifest.yaml"
     if manifest_file.exists() and not force:
         raise FileExistsError(
-            f"Target directory '{target_path}' already contains a Solix project (manifest.toml exists). Use --force to overwrite."
+            f"Target directory '{target_path}' already contains a Solix project (manifest.yaml exists). Use --force to overwrite."
         )
 
     target_path.mkdir(parents=True, exist_ok=True)
@@ -85,47 +86,68 @@ def generate_project(
             dependency_name, dependency_version = dependency_item, "*"
         parsed_dependencies[dependency_name.strip()] = dependency_version.strip()
 
-    # 3. Write manifest.toml
-    authors_formatted = ", ".join(f'"{author_item}"' for author_item in authors)
-    deps_lines = []
-    for dependency_name, dependency_version in sorted(parsed_dependencies.items()):
-        deps_lines.append(f'{dependency_name} = {{ version = "{dependency_version}", profile = "release" }}')
-    
-    release_deps_block = ""
-    if deps_lines:
-        release_deps_block = "\n[profiles.release.dependencies]\n" + "\n".join(deps_lines)
+    if not no_std and "solix" not in parsed_dependencies:
+        parsed_dependencies["solix"] = "2.0.1"
 
-    default_release_platforms = '["universal"]' if no_native else '["all"]'
+    # 3. Write manifest.yaml
+    if authors:
+        authors_entries = ["\n    - " + "\n    - ".join(f'"{author_item}"' for author_item in authors)]
+        authors_formatted = "".join(authors_entries)
+    else:
+        authors_formatted = " []"
 
-    manifest_content = f"""[configuration]
-name = "{project_name}"
-version = "{version}"
-description = "{description}"
-license = "{license_id}"
-authors = [{authors_formatted}]
+    dependencies_block = ""
+    if parsed_dependencies:
+        dependency_lines = ["\n    dependencies:"]
+        for dependency_name, dependency_version in sorted(parsed_dependencies.items()):
+            dependency_lines.append(f"      {dependency_name}:")
+            dependency_lines.append(f'        version: "{dependency_version}"')
+            dependency_lines.append("        profile: release")
+        dependencies_block = "\n".join(dependency_lines)
 
-[profiles.release]
-entrypoint = "{main_entry}"
-optimization_level = 3
-inline_threshold = 16
-debug_symbols = false
-static = true
-platforms = {default_release_platforms}
-sources = ["src"]{release_deps_block}
+    default_release_platform = "universal" if no_native else "all"
 
-[profiles.debug]
-inherits = "release"
-optimization_level = 0
-inline_threshold = 8
-debug_symbols = true
-static = false
-platforms = ["host"]
+    manifest_content = f"""configuration:
+  name: {project_name}
+  version: "{version}"
+  description: "{description}"
+  license: "{license_id}"
+  authors:{authors_formatted}
 
-[profiles.test]
-inherits = "debug"
-entrypoint = "{test_entry}"
-platforms = ["host"]
-sources = ["tests"]
+profiles:
+  release:
+    entrypoint: {main_entry}
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    platforms:
+      - {default_release_platform}
+    sources:
+      - src{dependencies_block}
+
+  debug:
+    entrypoint: {main_entry}
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    platforms:
+      - host
+    sources:
+      - src{dependencies_block}
+
+  test:
+    entrypoint: {test_entry}
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    platforms:
+      - host
+    sources:
+      - src
+      - tests{dependencies_block}
 """
     manifest_file.write_text(manifest_content, encoding="utf-8")
 
@@ -342,7 +364,12 @@ def parse_arguments() -> argparse.Namespace:
         default=[],
         help="Dependency specification in pkg@ver format (can be repeated)",
     )
-    parser.add_argument("--force", action="store_true", help="Overwrite existing manifest.toml")
+    parser.add_argument(
+        "--no-std",
+        action="store_true",
+        help="Do not add default solix standard library dependency",
+    )
+    parser.add_argument("--force", action="store_true", help="Overwrite existing manifest.yaml")
     return parser.parse_args()
 
 
@@ -360,6 +387,7 @@ def main() -> None:
             test_entry=arguments.test,
             is_library=arguments.lib,
             no_native=arguments.no_native,
+            no_std=arguments.no_std,
             dependencies=arguments.deps,
             force=arguments.force,
         )
