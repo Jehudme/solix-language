@@ -486,20 +486,31 @@ fn test_inexhaustive_enum_switch_with_default_clause_succeeds() {
 #[test]
 fn test_c_ffi_header_definitions_synchronized_with_runtime_version() {
     let ffi_header_content = include_str!("../../../../../ffi/c/include/solix_ffi.h");
+    let package_version = env!("CARGO_PKG_VERSION");
+    let version_segments: Vec<&str> = package_version.split('.').collect();
+    assert_eq!(
+        version_segments.len(),
+        3,
+        "Package version must follow semantic versioning format"
+    );
+    let expected_major = version_segments[0];
+    let expected_minor = version_segments[1];
+    let expected_patch = version_segments[2];
+
     assert!(
-        ffi_header_content.contains("#define SOLIX_FFI_VERSION_MAJOR 2"),
-        "FFI major version must be 2"
+        ffi_header_content.contains(&format!("#define SOLIX_FFI_VERSION_MAJOR {expected_major}")),
+        "FFI major version must match package major version {expected_major}"
     );
     assert!(
-        ffi_header_content.contains("#define SOLIX_FFI_VERSION_MINOR 0"),
-        "FFI minor version must be 0"
+        ffi_header_content.contains(&format!("#define SOLIX_FFI_VERSION_MINOR {expected_minor}")),
+        "FFI minor version must match package minor version {expected_minor}"
     );
     assert!(
-        ffi_header_content.contains("#define SOLIX_FFI_VERSION_PATCH 0"),
-        "FFI patch version must be 0"
+        ffi_header_content.contains(&format!("#define SOLIX_FFI_VERSION_PATCH {expected_patch}")),
+        "FFI patch version must match package patch version {expected_patch}"
     );
     assert!(
-        ffi_header_content.contains("#define SOLIX_FFI_VERSION \"2.0.0\""),
-        "FFI version string must be '2.0.0'"
+        ffi_header_content.contains(&format!("#define SOLIX_FFI_VERSION \"{package_version}\"")),
+        "FFI version string must match package version '{package_version}'"
     );
 }
