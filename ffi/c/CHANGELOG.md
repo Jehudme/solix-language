@@ -2,6 +2,13 @@
 
 All notable changes to the Solix C/C++ FFI SDK (`solix::ffi`) will be documented in this file.
 
+## [2.0.1] - 2026-11-25
+
+### Bug Fixes
+
+- *(tests)* Synchronize C-FFI header version assertions dynamically with package version (#262)
+- *(compiler)* Resolve eleventh-sweep binder, LSP, DAP, VM, fmt, and stdlib edge cases (#251-#260) (#261)
+
 ## [2.0.0] - 2026-11-24
 
 ### Bug Fixes
