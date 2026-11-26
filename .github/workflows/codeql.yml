@@ -5,7 +5,6 @@ run-name: "CodeQL | ${{ github.event_name == 'pull_request' && format('PR #{0} (
 on:
   push:
     branches:
-      - dev
       - master
     paths:
       - ".github/**"

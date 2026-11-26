@@ -929,11 +929,21 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("--remove-label", ci_text)
         self.assertIn("pr-benchmark:", ci_text)
         self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
+        self.assertIn("<!-- solix-pr-coverage -->", ci_text)
         self.assertIn("Publish benchmark report to Step Summary", ci_text)
         self.assertIn(
             "pr-benchmark:\n    name: PR Performance Benchmark (vs dev)\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
             ci_text,
         )
+        self.assertNotIn("  push:\n    branches:\n      - dev", ci_text)
+        self.assertIn("key: solix-dev-bench-bin-", ci_text)
+        self.assertIn("CARGO_TARGET_DIR=", ci_text)
+
+        dev_release_text = (REPO_ROOT / ".github" / "workflows" / "dev-release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("key: solix-bundled-dev-all-", dev_release_text)
+        self.assertIn("key: solix-ci-llvm-cov-0.9.1", dev_release_text)
 
     def test_pr_discussion_sync_workflow_handles_artifacts_and_comments(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

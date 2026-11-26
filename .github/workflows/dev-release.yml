@@ -45,6 +45,19 @@ jobs:
         with:
           shared-key: ci-linux
 
+      - name: Cache prebuilt cargo-llvm-cov binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/solix-ci-tools/cargo-llvm-cov
+          key: solix-ci-llvm-cov-0.9.1
+
+      - name: Restore cached bundled first-party libraries
+        id: bundled-libs-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: crates/solix-toolchain/assets/packages
+          key: solix-bundled-dev-all-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
+
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
@@ -69,17 +82,24 @@ jobs:
           echo "$HOME/.cache/solix-ci-tools/cargo-llvm-cov" >> "$GITHUB_PATH"
 
       - name: Install cross runner
+        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         run: |
           if ! command -v cross >/dev/null 2>&1; then
             curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
 
       - name: Build release and debug Solix binaries and stage default packages
+        env:
+          BUNDLED_CACHE_HIT: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
         run: |
           python3 scripts/docs/build_docs_site.py
           cargo build --release --bin solix
           cargo build --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release,debug --target host --solix-binary target/release/solix
+          if [ "$BUNDLED_CACHE_HIT" != "true" ]; then
+            python3 scripts/release/build_default_libraries.py --profiles release,debug --target host --solix-binary target/release/solix
+            cargo build --release --bin solix
+            cargo build --bin solix
+          fi
 
       - name: Package standalone binary archives and distribution artifacts
         run: |
@@ -191,7 +211,7 @@ jobs:
           fi
 
           # 2. Cumulative Code Coverage
-          export PATH="$HOME/.cache/solix-ci-tools/cargo-llvm-cov/bin:$PATH"
+          export PATH="$HOME/.cache/solix-ci-tools/cargo-llvm-cov:$PATH"
           SOLIX_BIN="$(pwd)/target/debug/solix"
           export SOLIX_BIN
           cargo llvm-cov --workspace --all-targets --ignore-filename-regex '(/rustc/|/tests/)' --fail-under-lines 55 --summary-only | tee "$RUNNER_TEMP/coverage_summary.txt"

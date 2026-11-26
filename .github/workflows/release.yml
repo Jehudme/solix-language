@@ -79,14 +79,14 @@ jobs:
           REPO_NAME: ${{ github.repository }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          DEV_SHA=$(git rev-parse origin/dev)
-          echo "Checking required CI checks on origin/dev (${DEV_SHA})..."
-          CHECK_JSON=$(gh api --paginate "repos/${REPO_NAME}/commits/${DEV_SHA}/check-runs")
-          python3 - "$CHECK_JSON" "$DRY_RUN" <<'PY'
-          import json, sys
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
 
-          payload = json.loads(sys.argv[1])
-          dry_run = sys.argv[2].lower() == "true"
+          repo_name = os.environ["REPO_NAME"]
+          dry_run = os.environ["DRY_RUN"].lower() == "true"
           required = [
               "Lint, Formatting & Documentation Gate",
               "Security & Supply-Chain Audit",
@@ -94,11 +94,58 @@ jobs:
               "Test Matrix (macos-latest)",
               "Test Matrix (windows-latest)",
           ]
-          runs = {}
-          for item in payload.get("check_runs", []):
-              name = item.get("name", "")
-              if name not in runs or item.get("conclusion") == "success":
-                  runs[name] = item
+
+          recent_commits = (
+              subprocess.check_output(
+                  ["git", "rev-list", "-n", "10", "origin/dev"],
+                  text=True,
+              )
+              .strip()
+              .splitlines()
+          )
+          target_sha = recent_commits[0]
+          for candidate_sha in recent_commits:
+              subject = subprocess.check_output(
+                  ["git", "log", "-1", "--format=%s", candidate_sha],
+                  text=True,
+              ).strip()
+              if "[skip ci]" not in subject.lower():
+                  target_sha = candidate_sha
+                  break
+
+          def fetch_check_runs_map(commit_sha: str) -> dict[str, dict]:
+              raw_json = subprocess.check_output(
+                  ["gh", "api", "--paginate", f"repos/{repo_name}/commits/{commit_sha}/check-runs"],
+                  text=True,
+              )
+              payload = json.loads(raw_json)
+              runs_by_name: dict[str, dict] = {}
+              for item in payload.get("check_runs", []):
+                  check_name = item.get("name", "")
+                  if check_name not in runs_by_name or item.get("conclusion") == "success":
+                      runs_by_name[check_name] = item
+              return runs_by_name
+
+          verified_sha = target_sha
+          runs = fetch_check_runs_map(target_sha)
+          if not all(
+              runs.get(req, {}).get("status") == "completed"
+              and runs.get(req, {}).get("conclusion") == "success"
+              for req in required
+          ):
+              pulls_raw = subprocess.check_output(
+                  ["gh", "api", f"repos/{repo_name}/commits/{target_sha}/pulls"],
+                  text=True,
+              )
+              pulls = json.loads(pulls_raw)
+              for pull in pulls:
+                  pr_head_sha = (pull.get("head") or {}).get("sha")
+                  if pr_head_sha:
+                      pr_runs = fetch_check_runs_map(pr_head_sha)
+                      if pr_runs:
+                          runs = pr_runs
+                          verified_sha = f"{pr_head_sha} (PR #{pull.get('number')} merged as {target_sha[:7]})"
+                          break
 
           missing_or_failed = []
           for req in required:
@@ -108,14 +155,14 @@ jobs:
                   missing_or_failed.append(f"{req} ({status_desc})")
 
           if missing_or_failed:
-              msg = "origin/dev HEAD has incomplete/failing CI checks: " + ", ".join(missing_or_failed)
+              msg = f"origin/dev ({verified_sha}) has incomplete/failing CI checks: " + ", ".join(missing_or_failed)
               if dry_run:
                   print(f"::warning::{msg}")
               else:
                   print(f"::error::{msg}", file=sys.stderr)
                   sys.exit(1)
           else:
-              print("All required CI checks passed on origin/dev HEAD.")
+              print(f"All required CI checks passed for origin/dev ({verified_sha}).")
           PY
 
       - id: bump
