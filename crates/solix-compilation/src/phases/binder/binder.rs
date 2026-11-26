@@ -266,7 +266,7 @@ pub fn bind_context(
                 *main_source_id,
                 BindingError::MainMethodSignatureInvalid {
                     reason: format!(
-                        "Main method must return 'void' or 'int32', found '{return_type}'"
+                        "Entry point 'main' must return 'void' or 'int32', found '{return_type}'"
                     ),
                     span: main_span.to_source_span(),
                 },
@@ -317,7 +317,7 @@ pub fn bind_context(
             accumulated_errors.push((
                 *main_source_id,
                 BindingError::MainMethodSignatureInvalid {
-                    reason: "Main method parameters must be empty () or take a single string[]/char[][] parameter".to_string(),
+                    reason: "Entry point 'main' parameters must be empty () or take a single 'string[]' / 'char[][]' parameter".to_string(),
                     span: main_span.to_source_span(),
                 },
             ));

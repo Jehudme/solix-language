@@ -49,6 +49,16 @@ impl ConstantPoolValue {
     }
 }
 
+impl std::fmt::Display for ConstantPoolValue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int64(int_value) => write!(formatter, "{int_value}"),
+            Self::Float64(raw_bits) => write!(formatter, "{}", f64::from_bits(*raw_bits)),
+            Self::String(string_value) => write!(formatter, "\"{string_value}\""),
+        }
+    }
+}
+
 /// Deduplicating constant pool managing numeric and string literals.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ConstantPool {

@@ -177,7 +177,7 @@ fn test_switch_statement_custom_equality_overload_many_cases_no_window_leak() {
 // ============================================================================
 
 #[test]
-fn test_cyclic_interface_inheritance_rejected_with_e0204() {
+fn test_cyclic_interface_inheritance_rejected_with_e0323() {
     let source_code = r#"
         interface AlphaProtocol extends BetaProtocol {}
         interface BetaProtocol extends AlphaProtocol {}
@@ -190,7 +190,7 @@ fn test_cyclic_interface_inheritance_rejected_with_e0204() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0204");
+    assert_compile_error(source_code, "E0323");
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn test_runtime_negative_array_length_traps_with_index_out_of_bounds() {
 // ============================================================================
 
 #[test]
-fn test_assert_statement_with_non_string_message_rejected_with_e0301() {
+fn test_assert_statement_with_non_string_message_rejected_with_e0317() {
     let source_code = r#"
         class AssertNonStringTest {
             public static int32 main() {
@@ -259,7 +259,7 @@ fn test_assert_statement_with_non_string_message_rejected_with_e0301() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0301");
+    assert_compile_error(source_code, "E0317");
 }
 
 #[test]

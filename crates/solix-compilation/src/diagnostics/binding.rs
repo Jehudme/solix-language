@@ -148,10 +148,10 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Non-void method '{method_name}' must return a value of type '{expected_type}'")]
+    #[error("Non-void function '{method_name}' must return a value of type '{expected_type}'")]
     #[diagnostic(
         code(solix::binder::missing_return),
-        help("Ensure all code paths return an expression matching the method's return type.")
+        help("Ensure all code paths return an expression matching the declared return type.")
     )]
     MissingReturn {
         method_name: String,
@@ -288,7 +288,10 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Ambiguous imported symbol '{symbol_name}'; matches candidates: {candidates:?}")]
+    #[error(
+        "Ambiguous imported symbol '{symbol_name}'; matches candidates: {}",
+        candidates.join(", ")
+    )]
     #[diagnostic(
         code(solix::binder::ambiguous_import),
         help(
@@ -518,14 +521,16 @@ pub enum BindingError {
         span: SourceSpan,
     },
 
-    #[error("Invalid 'main' entry point signature: {reason}")]
+    #[error("Invalid entry point signature: {reason}")]
     #[diagnostic(
         code(solix::binder::main_method_signature_invalid),
-        help("The 'main' function must have signature 'int32 main()' or 'void main()'.")
+        help(
+            "Entry point functions (default 'main', or configured via 'profiles.<profile>.entrypoint' or '--entry') must have return type 'int32' or 'void' and accept () or (string[] / char[][])."
+        )
     )]
     MainMethodSignatureInvalid {
         reason: String,
-        #[label("invalid main signature")]
+        #[label("invalid entry point signature")]
         span: SourceSpan,
     },
 
@@ -533,7 +538,7 @@ pub enum BindingError {
     #[diagnostic(
         code(solix::binder::multiple_main_methods_found),
         help(
-            "Ensure exactly one 'main' function is defined across all compiled files in the package."
+            "Define a single unique 'main' entry point function, or select an explicit entry point via 'profiles.<profile>.entrypoint' or '--entry'."
         )
     )]
     MultipleMainMethodsFound {
@@ -1434,13 +1439,13 @@ impl BindingError {
             Self::GenericTypeConstraintViolation { .. } => "E0297",
             Self::CannotThrowNull { .. } => "E0298",
             Self::NegativeArrayLength { .. } => "E0299",
-            Self::CyclicInterfaceInheritance { .. } => "E0204",
-            Self::AssertMessageNotString { .. } => "E0301",
-            Self::GenericInstantiationDepthExceeded { .. } => "E0302",
-            Self::CyclicStaticFieldDependency { .. } => "E0303",
-            Self::VirtualCallInDestructorForbidden { .. } => "E0304",
-            Self::SymbolCollidesWithPackageName { .. } => "E0305",
-            Self::InexhaustiveEnumSwitch { .. } => "E0306",
+            Self::CyclicInterfaceInheritance { .. } => "E0323",
+            Self::AssertMessageNotString { .. } => "E0317",
+            Self::GenericInstantiationDepthExceeded { .. } => "E0318",
+            Self::CyclicStaticFieldDependency { .. } => "E0319",
+            Self::VirtualCallInDestructorForbidden { .. } => "E0320",
+            Self::SymbolCollidesWithPackageName { .. } => "E0321",
+            Self::InexhaustiveEnumSwitch { .. } => "E0322",
             Self::CatchTypeNotException { .. } => "E0315",
             Self::ThrowTypeNotException { .. } => "E0316",
         }

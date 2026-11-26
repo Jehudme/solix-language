@@ -1592,7 +1592,7 @@ impl SlxpPackage {
                 let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
                     EmissionError::ContainerSerializationFailed {
                         reason: format!(
-                            "failed to decode root binary '{entry_name}': {deser_error:?}"
+                            "failed to decode root binary '{entry_name}': {deser_error}"
                         ),
                     }
                 })?;
@@ -1606,7 +1606,7 @@ impl SlxpPackage {
                     })?;
                 let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
                     EmissionError::ContainerSerializationFailed {
-                        reason: format!("failed to decode binary '{entry_name}': {deser_error:?}"),
+                        reason: format!("failed to decode binary '{entry_name}': {deser_error}"),
                     }
                 })?;
                 binaries.push(binary);
@@ -1622,7 +1622,7 @@ impl SlxpPackage {
                 let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
                     EmissionError::ContainerSerializationFailed {
                         reason: format!(
-                            "failed to decode dependency binary '{entry_name}': {deser_error:?}"
+                            "failed to decode dependency binary '{entry_name}': {deser_error}"
                         ),
                     }
                 })?;
@@ -1856,7 +1856,7 @@ impl SlxpPackage {
                         })?;
                     let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_err| {
                         EmissionError::ContainerSerializationFailed {
-                            reason: format!("failed to decode root binary: {deser_err:?}"),
+                            reason: format!("failed to decode root binary: {deser_err}"),
                         }
                     })?;
                     binaries.push(binary);

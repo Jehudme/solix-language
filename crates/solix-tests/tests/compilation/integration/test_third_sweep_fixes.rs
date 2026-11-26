@@ -21,7 +21,7 @@ use solix_tests::common::{
 };
 
 // ============================================================================
-// Issue #171: Generic Monomorphizer Recursion Depth Limit (E0302)
+// Issue #171: Generic Monomorphizer Recursion Depth Limit (E0318)
 // ============================================================================
 
 #[test]
@@ -38,7 +38,7 @@ fn test_generic_monomorphizer_self_referential_depth_limit_rejected() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0302");
+    assert_compile_error(source_code, "E0318");
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn test_cyclic_static_field_dependencies_rejected() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0303");
+    assert_compile_error(source_code, "E0319");
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn test_virtual_call_in_destructor_rejected() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0304");
+    assert_compile_error(source_code, "E0320");
 }
 
 #[test]
@@ -345,7 +345,7 @@ fn test_top_level_class_name_collision_with_package_segment_rejected() {
             "#,
         ),
     ];
-    assert_compile_sources_error(&sources, "E0305");
+    assert_compile_sources_error(&sources, "E0321");
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn test_inexhaustive_enum_switch_missing_variants_and_default_rejected() {
             }
         }
     "#;
-    assert_compile_error(source_code, "E0306");
+    assert_compile_error(source_code, "E0322");
 }
 
 #[test]

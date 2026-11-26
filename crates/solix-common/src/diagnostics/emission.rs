@@ -4,6 +4,23 @@
 
 use miette::Diagnostic;
 
+fn format_magic_bytes(bytes: &[u8; 4]) -> String {
+    let ascii: String = bytes
+        .iter()
+        .map(|byte| {
+            if byte.is_ascii_graphic() {
+                char::from(*byte).to_string()
+            } else {
+                format!("\\x{byte:02x}")
+            }
+        })
+        .collect();
+    format!(
+        "'{ascii}' (0x{:02X} 0x{:02X} 0x{:02X} 0x{:02X})",
+        bytes[0], bytes[1], bytes[2], bytes[3]
+    )
+}
+
 /// Structured diagnostic errors emitted during bytecode emission and binary container serialization/deserialization.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Diagnostic)]
 pub enum EmissionError {
@@ -39,7 +56,7 @@ pub enum EmissionError {
     )]
     JumpOffsetOverflow { offset: i64 },
 
-    #[error("Invalid binary magic header: expected 'SLXB', found {found:?}")]
+    #[error("Invalid binary magic header: expected 'SLXB', found {}", format_magic_bytes(.found))]
     #[diagnostic(
         code(solix::emitter::invalid_magic),
         help("Ensure the input file is a valid Solix compiled binary (*.slxb).")
@@ -93,7 +110,9 @@ pub enum EmissionError {
     #[error("Program entry point '{entry_symbol}' could not be resolved")]
     #[diagnostic(
         code(solix::emitter::missing_entry_point),
-        help("Ensure a valid 'main' function is declared in the source program.")
+        help(
+            "Ensure a valid entry point function is declared or configured via 'profiles.<profile>.entrypoint' or '--entry'."
+        )
     )]
     MissingEntryPoint { entry_symbol: String },
 
@@ -121,7 +140,7 @@ pub enum EmissionError {
     #[error("Project archive or container error: {reason}")]
     #[diagnostic(
         code(solix::emitter::container_serialization_failed),
-        help("Check project structure, manifest.toml, or archive container integrity.")
+        help("Check project structure, manifest.yaml, or archive container integrity.")
     )]
     ContainerSerializationFailed { reason: String },
 

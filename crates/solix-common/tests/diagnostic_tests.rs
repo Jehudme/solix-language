@@ -36,4 +36,28 @@ fn test_common_emission_error_codes() {
         max: 255,
     };
     assert_eq!(reg_err.error_code(), "E0302");
+
+    let magic_err = EmissionError::InvalidMagic {
+        found: *b"PK\x03\x04",
+    };
+    let magic_text = magic_err.to_string();
+    assert!(magic_text.contains("'PK\\x03\\x04'"), "got: {magic_text}");
+    assert!(
+        !magic_text.contains("[80,"),
+        "leaked debug array: {magic_text}"
+    );
+
+    let container_err = EmissionError::ContainerSerializationFailed {
+        reason: "corrupt manifest".to_string(),
+    };
+    let help_text = miette::Diagnostic::help(&container_err)
+        .expect("help metadata")
+        .to_string();
+    assert!(help_text.contains("manifest.yaml"));
+    assert!(!help_text.contains("manifest.toml"));
+
+    let pool_num = solix_common::ConstantPoolValue::from_f64(2.5);
+    let pool_str = solix_common::ConstantPoolValue::String("ok".to_string());
+    assert_eq!(pool_num.to_string(), "2.5");
+    assert_eq!(pool_str.to_string(), "\"ok\"");
 }

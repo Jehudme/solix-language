@@ -27,6 +27,20 @@ pub enum LiteralValue {
     Null,
 }
 
+impl std::fmt::Display for LiteralValue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int(int_value) => write!(formatter, "{int_value}"),
+            Self::UInt(uint_value) => write!(formatter, "{uint_value}"),
+            Self::Float(float_value) => write!(formatter, "{float_value}"),
+            Self::String(string_value) => write!(formatter, "\"{string_value}\""),
+            Self::Char(char_value) => write!(formatter, "'{char_value}'"),
+            Self::Bool(bool_value) => write!(formatter, "{bool_value}"),
+            Self::Null => write!(formatter, "null"),
+        }
+    }
+}
+
 /// Body representation for a lambda closure expression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LambdaBody {
