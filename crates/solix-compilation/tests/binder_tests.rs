@@ -284,7 +284,7 @@ fn test_symbol_signature_string_with_parameter_names() {
     let symbol = SymbolEntry {
         id: SymbolId(2),
         name: "DrawRectangleRounded".to_string(),
-        fully_qualified_name: "raylib::Raylib::DrawRectangleRounded".to_string(),
+        fully_qualified_name: "raylib::DrawRectangleRounded".to_string(),
         source_id: 0,
         span: Span::new(0, 0, 10),
         modifiers: vec![Modifier::Public, Modifier::Static],
@@ -410,14 +410,12 @@ fn test_strict_foreign_package_symbol_isolation() {
     let foreign_source = r#"
 package raylib;
 
-public class Raylib {
-    public static void init() {}
-}
+public native void InitWindow(int32 width, int32 height, string title);
 "#;
 
     let unimported_consumer = r#"
 public int32 main() {
-    Raylib::init();
+    InitWindow(800, 600, "test");
     return 0;
 }
 "#;
@@ -433,14 +431,14 @@ public int32 main() {
 
     assert!(
         bind_unimported_result.is_err() || !context_unimported.binding_errors.is_empty(),
-        "Using foreign package symbol 'Raylib' without import must fail binding"
+        "Using foreign package symbol 'InitWindow' without import must fail binding"
     );
 
     let imported_consumer = r#"
 import raylib.*;
 
 public int32 main() {
-    Raylib::init();
+    InitWindow(800, 600, "test");
     return 0;
 }
 "#;

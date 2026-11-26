@@ -23,7 +23,7 @@ public class Star {
     }
 
     public void draw() {
-        Raylib::DrawRectangle(
+        DrawRectangle(
             (int32)this.pos_x,
             (int32)this.pos_y,
             (int32)this.size,

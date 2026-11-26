@@ -85,9 +85,9 @@ public class InvaderGame {
     }
 
     public void update_playing() {
-        bool move_left = Raylib::IsKeyDown(KeyboardKey::KEY_LEFT) || Raylib::IsKeyDown(KeyboardKey::KEY_A);
-        bool move_right = Raylib::IsKeyDown(KeyboardKey::KEY_RIGHT) || Raylib::IsKeyDown(KeyboardKey::KEY_D);
-        bool fire_pressed = Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyDown(KeyboardKey::KEY_SPACE);
+        bool move_left = IsKeyDown(KeyboardKey::KEY_LEFT) || IsKeyDown(KeyboardKey::KEY_A);
+        bool move_right = IsKeyDown(KeyboardKey::KEY_RIGHT) || IsKeyDown(KeyboardKey::KEY_D);
+        bool fire_pressed = IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyDown(KeyboardKey::KEY_SPACE);
 
         // Update player & maybe launch laser
         Projectile maybe_new_laser = this.player.update(move_left, move_right, fire_pressed, this.audio_manager);
@@ -133,7 +133,7 @@ public class InvaderGame {
             // Test vs UFO Mothership
             if (this.armada.mothership.is_active) {
                 Rectangle ufo_rect = this.armada.mothership.get_rect();
-                if (Raylib::CheckCollisionRecs(laser_rect, ufo_rect)) {
+                if (CheckCollisionRecs(laser_rect, ufo_rect)) {
                     this.armada.mothership.is_active = false;
                     this.player_laser.active = false;
                     this.score = this.score + this.armada.mothership.bonus_points;
@@ -148,7 +148,7 @@ public class InvaderGame {
                 for (int32 alien_index = 0; alien_index < this.armada.total_aliens; alien_index = alien_index + 1) {
                     if (this.armada.armada_grid[alien_index].is_alive) {
                         Rectangle alien_rect = this.armada.armada_grid[alien_index].get_rect();
-                        if (Raylib::CheckCollisionRecs(laser_rect, alien_rect)) {
+                        if (CheckCollisionRecs(laser_rect, alien_rect)) {
                             this.armada.armada_grid[alien_index].is_alive = false;
                             this.armada.active_aliens = this.armada.active_aliens - 1;
                             this.player_laser.active = false;
@@ -207,7 +207,7 @@ public class InvaderGame {
                 // Test vs player
                 if (!bomb_absorbed) {
                     Rectangle player_rect = this.player.get_rect();
-                    if (Raylib::CheckCollisionRecs(bomb_rect, player_rect)) {
+                    if (CheckCollisionRecs(bomb_rect, player_rect)) {
                         this.alien_bombs[bomb_index].active = false;
                         bool player_died = this.player.hit_by_hazard(this.audio_manager, this.particles);
                         if (player_died) {
@@ -233,7 +233,7 @@ public class InvaderGame {
 
     public void draw(float32 shake_offset_x, float32 shake_offset_y) {
         // Space canvas clear
-        Raylib::ClearBackground(new Color(10, 12, 20, 255));
+        ClearBackground(new Color(10, 12, 20, 255));
 
         // Draw background starfield
         this.starfield.draw();
@@ -287,60 +287,60 @@ public class InvaderGame {
     }
 
     public static int32 main() {
-        Raylib::InitWindow(
+        InitWindow(
             GameConstants::SCREEN_WIDTH,
             GameConstants::SCREEN_HEIGHT,
             "Solix Invaders - Cyber Neon Arcade"
         );
-        Raylib::InitAudioDevice();
-        Raylib::SetTargetFPS(60);
-        Raylib::SetExitKey(0); // Disable ESC default window close so ESC can be used for pause
+        InitAudioDevice();
+        SetTargetFPS(60);
+        SetExitKey(0); // Disable ESC default window close so ESC can be used for pause
 
         InvaderGame game = new InvaderGame();
 
-        while (!Raylib::WindowShouldClose()) {
+        while (!WindowShouldClose()) {
             // Global keybinds
-            if (Raylib::IsKeyPressed(KeyboardKey::KEY_M)) {
+            if (IsKeyPressed(KeyboardKey::KEY_M)) {
                 game.audio_manager.toggle_mute();
             }
-            if (Raylib::IsKeyPressed(KeyboardKey::KEY_C)) {
+            if (IsKeyPressed(KeyboardKey::KEY_C)) {
                 game.user_interface.crt_scanlines_enabled = !game.user_interface.crt_scanlines_enabled;
             }
 
             // State management
             if (game.game_state == GameState::TITLE) {
                 game.starfield.update();
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
+                if (IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyPressed(KeyboardKey::KEY_ENTER)) {
                     game.start_new_game();
                     game.game_state = GameState::PLAYING;
                 }
             } else if (game.game_state == GameState::PLAYING) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                if (IsKeyPressed(KeyboardKey::KEY_P) || IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
                     game.game_state = GameState::PAUSED;
                 } else {
                     game.update_playing();
                 }
             } else if (game.game_state == GameState::PAUSED) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                if (IsKeyPressed(KeyboardKey::KEY_P) || IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_R)) {
                     game.start_new_game();
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_Q)) {
                     game.game_state = GameState::TITLE;
                 }
             } else if (game.game_state == GameState::VICTORY) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
+                if (IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyPressed(KeyboardKey::KEY_ENTER)) {
                     game.advance_next_wave();
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_Q)) {
                     game.game_state = GameState::TITLE;
                 }
             } else if (game.game_state == GameState::GAME_OVER) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
+                if (IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyPressed(KeyboardKey::KEY_R)) {
                     game.start_new_game();
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_Q)) {
                     game.game_state = GameState::TITLE;
                 }
             }
@@ -369,14 +369,14 @@ public class InvaderGame {
             }
 
             // Rendering pipeline
-            Raylib::BeginDrawing();
+            BeginDrawing();
             game.draw(shake_offset_x, shake_offset_y);
-            Raylib::EndDrawing();
+            EndDrawing();
         }
 
         game.audio_manager.unload_all();
-        Raylib::CloseAudioDevice();
-        Raylib::CloseWindow();
+        CloseAudioDevice();
+        CloseWindow();
         return 0;
     }
 }

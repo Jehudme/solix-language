@@ -135,20 +135,20 @@ public class PlayerCannon {
         Color cockpit_cyan = new Color(0, 229, 255, 255);
 
         // Defender tank base
-        Raylib::DrawRectangle(center_int_x - 18, base_int_y + 10, 36, 10, cannon_green);
+        DrawRectangle(center_int_x - 18, base_int_y + 10, 36, 10, cannon_green);
         // Mid chassis
-        Raylib::DrawRectangle(center_int_x - 14, base_int_y + 5, 28, 6, cannon_green);
+        DrawRectangle(center_int_x - 14, base_int_y + 5, 28, 6, cannon_green);
         // Cockpit window
-        Raylib::DrawRectangle(center_int_x - 5, base_int_y + 6, 10, 4, cockpit_cyan);
+        DrawRectangle(center_int_x - 5, base_int_y + 6, 10, 4, cockpit_cyan);
         // Center gun turret
-        Raylib::DrawRectangle(center_int_x - 3, base_int_y - 4, 6, 10, cannon_bright);
+        DrawRectangle(center_int_x - 3, base_int_y - 4, 6, 10, cannon_bright);
         // Muzzle nozzle
-        Raylib::DrawRectangle(center_int_x - 1, base_int_y - 8, 2, 4, cannon_bright);
+        DrawRectangle(center_int_x - 1, base_int_y - 8, 2, 4, cannon_bright);
 
         // Shield aura ring if invulnerable
         if (this.invulnerable_ticks > 0) {
             Color shield_ring = new Color(0, 229, 255, 140);
-            Raylib::DrawCircleLines(center_int_x, base_int_y + 6, 26.0, shield_ring);
+            DrawCircleLines(center_int_x, base_int_y + 6, 26.0, shield_ring);
         }
     }
 }

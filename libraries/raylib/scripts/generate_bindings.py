@@ -826,7 +826,7 @@ def parse_api_to_ir(api_data: dict, define_guard: str) -> ApiIR:
 # Pass 2: Solix Declarations Emitter (--out-slx)
 # ============================================================================
 
-def emit_solix_declarations(ir: ApiIR, package_name: str, class_name: str) -> str:
+def emit_solix_declarations(ir: ApiIR, package_name: str, _class_name: str = "") -> str:
     """Emits complete 1-to-1 Solix API declarations from intermediate representation lists."""
     lines: list[str] = [
         "// Auto-generated 1-to-1 C API bindings for the Solix Programming Language",
@@ -841,12 +841,20 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, class_name: str) -> st
 
     for define_obj in ir.defines:
         if define_obj.item_type == "INT":
+            if define_obj.description:
+                lines.append(f"/// {define_obj.description}")
             lines.append(f"const int32 {define_obj.name} = {define_obj.evaluated_value};")
         elif define_obj.item_type == "FLOAT":
+            if define_obj.description:
+                lines.append(f"/// {define_obj.description}")
             lines.append(f"const float32 {define_obj.name} = (float32){define_obj.evaluated_value};")
         elif define_obj.item_type == "STRING":
+            if define_obj.description:
+                lines.append(f"/// {define_obj.description}")
             lines.append(f'const string {define_obj.name} = "{define_obj.raw_value}";')
         elif define_obj.item_type == "FLOAT_MATH" and define_obj.evaluated_value is not None:
+            if define_obj.description:
+                lines.append(f"/// {define_obj.description}")
             lines.append(f"const float32 {define_obj.name} = (float32){define_obj.evaluated_value};")
 
     lines.append("")
@@ -971,21 +979,8 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, class_name: str) -> st
             lines.append("")
 
     lines.append("// ===========================================================================")
-    lines.append(f"// Primary Engine API (Class {class_name} & Top-Level Functions)")
+    lines.append("// Primary Engine API (Top-Level Package Functions)")
     lines.append("// ===========================================================================")
-    lines.append(f"public class {class_name} {{")
-
-    # Class-level constants
-    for define_obj in ir.defines:
-        if define_obj.item_type == "INT":
-            lines.append(f"    public static const int32 {define_obj.name} = {define_obj.evaluated_value};")
-        elif define_obj.item_type == "FLOAT":
-            lines.append(f"    public static const float32 {define_obj.name} = (float32){define_obj.evaluated_value};")
-        elif define_obj.item_type == "STRING":
-            lines.append(f'    public static const string {define_obj.name} = "{define_obj.raw_value}";')
-        elif define_obj.item_type == "FLOAT_MATH" and define_obj.evaluated_value is not None:
-            lines.append(f"    public static const float32 {define_obj.name} = (float32){define_obj.evaluated_value};")
-    lines.append("")
 
     for func_obj in ir.functions:
         param_decls = [
@@ -996,27 +991,8 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, class_name: str) -> st
         param_list_str = ", ".join(param_decls)
 
         if func_obj.description:
-            lines.append(f"    /// {func_obj.description}")
-        lines.append(f"    public static native {func_obj.solix_return_type} {func_obj.name}({param_list_str});")
-        if func_obj.snake_name != func_obj.name:
-            lines.append(f"    public static native {func_obj.solix_return_type} {func_obj.snake_name}({param_list_str});")
-
-    lines.append("}")
-    lines.append("")
-
-    # Direct top-level functions
-    lines.append("// --- Direct Top-Level Function Exports ---")
-    for func_obj in ir.functions:
-        param_decls = [
-            f"{param.solix_type} {param.escaped_solix_name}"
-            for param in func_obj.params
-            if not param.is_variadic
-        ]
-        param_list_str = ", ".join(param_decls)
-
+            lines.append(f"/// {func_obj.description}")
         lines.append(f"public native {func_obj.solix_return_type} {func_obj.name}({param_list_str});")
-        if func_obj.snake_name != func_obj.name:
-            lines.append(f"public native {func_obj.solix_return_type} {func_obj.snake_name}({param_list_str});")
 
     return "\n".join(lines) + "\n"
 
@@ -1026,84 +1002,17 @@ def emit_solix_declarations(ir: ApiIR, package_name: str, class_name: str) -> st
 # ============================================================================
 
 def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
-    """Emits complete 1-to-1 Rust FFI companion bridge from intermediate representation lists."""
+    """Emits complete 1-to-1 Rust FFI companion bridge powered by `solix-ffi`."""
     lines: list[str] = [
         "//! Auto-generated 1-to-1 Rust native bridge extension for Solix C-API bindings.",
-        "//! Generated via unified Two-Pass IR generator with zero hardcoded engine types.",
+        "//! Generated via unified Two-Pass IR generator using `solix-ffi`.",
         "",
         "#![allow(non_snake_case, non_camel_case_types, non_upper_case_globals, unused_variables, dead_code, unused_imports, unused_mut, clippy::all)]",
         "",
-        "use std::ffi::{c_char, c_int, c_longlong, c_short, c_uint, c_ulonglong, c_ushort, c_void, CStr};",
-        "",
-        "/// Stable C-ABI tagged value passed across native shared library boundaries.",
-        "#[repr(C)]",
-        "#[derive(Debug, Clone, Copy, PartialEq)]",
-        "pub struct SolixCValue {",
-        "    pub tag: u32,",
-        "    pub flags: u32,",
-        "    pub payload: u64,",
-        "}",
-        "",
-        "impl SolixCValue {",
-        "    #[inline]",
-        "    pub const fn null() -> Self {",
-        "        Self { tag: 0, flags: 0, payload: 0 }",
-        "    }",
-        "    #[inline]",
-        "    pub const fn bool_val(val: bool) -> Self {",
-        "        Self { tag: 1, flags: 0, payload: if val { 1 } else { 0 } }",
-        "    }",
-        "    #[inline]",
-        "    pub const fn i32_val(val: i32) -> Self {",
-        "        Self { tag: 2, flags: 0, payload: (val as i64) as u64 }",
-        "    }",
-        "    #[inline]",
-        "    pub const fn i64_val(val: i64) -> Self {",
-        "        Self { tag: 3, flags: 0, payload: val as u64 }",
-        "    }",
-        "    #[inline]",
-        "    pub const fn f64_val(val: f64) -> Self {",
-        "        Self { tag: 4, flags: 0, payload: val.to_bits() }",
-        "    }",
-        "    #[inline]",
-        "    pub const fn ref_val(addr: u32) -> Self {",
-        "        Self { tag: 5, flags: 0, payload: addr as u64 }",
-        "    }",
-        "}",
-        "",
-        "/// Context structure passed to native callbacks providing safe field and heap accessor function pointers.",
-        "#[repr(C)]",
-        "pub struct SolixVmContext {",
-        "    pub magic: u64,",
-        "    pub vm_ptr: *mut c_void,",
-        "    pub get_field_i32: unsafe extern \"C\" fn(*mut c_void, u32, u32) -> i32,",
-        "    pub set_field_i32: unsafe extern \"C\" fn(*mut c_void, u32, u32, i32),",
-        "    pub read_bytes: unsafe extern \"C\" fn(vm_ptr: *mut c_void, addr: u32, out_buf: *mut u8, cap: u32) -> u32,",
-        "    pub alloc_string: unsafe extern \"C\" fn(vm_ptr: *mut c_void, ptr: *const u8, len: u32) -> u32,",
-        "    pub alloc_chars: unsafe extern \"C\" fn(vm_ptr: *mut c_void, ptr: *const u8, len: u32) -> u32,",
-        "    pub alloc_byte_array: unsafe extern \"C\" fn(vm_ptr: *mut c_void, ptr: *const u8, len: u32) -> u32,",
-        "    pub alloc_array: unsafe extern \"C\" fn(vm_ptr: *mut c_void, len: u32, type_tag: u8) -> u32,",
-        "    pub array_len: unsafe extern \"C\" fn(vm_ptr: *mut c_void, arr_addr: u32) -> u32,",
-        "    pub array_get_u64: unsafe extern \"C\" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32) -> u64,",
-        "    pub array_set_u64: unsafe extern \"C\" fn(vm_ptr: *mut c_void, arr_addr: u32, index: u32, raw_val: u64),",
-        "    pub alloc_object: unsafe extern \"C\" fn(vm_ptr: *mut c_void, class_vtable_id: u32, field_count: u32) -> u32,",
-        "    pub read_field_u64: unsafe extern \"C\" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32) -> u64,",
-        "    pub write_field_u64: unsafe extern \"C\" fn(vm_ptr: *mut c_void, obj_addr: u32, offset: u32, raw_val: u64),",
-        "    pub get_class_vtable_id: unsafe extern \"C\" fn(vm_ptr: *mut c_void, name_ptr: *const c_char) -> u32,",
-        "}",
-        "",
-        "pub type NativeCFunctionPtr = unsafe extern \"C\" fn(",
-        "    *mut c_void,",
-        "    *const SolixCValue,",
-        "    u32,",
-        "    *mut SolixCValue,",
-        ") -> SolixCValue;",
-        "",
-        "pub type RegisterNativeCallback = unsafe extern \"C\" fn(",
-        "    *mut c_void,",
-        "    *const c_char,",
-        "    NativeCFunctionPtr,",
-        ");",
+        "use solix_ffi::{SolixCValue, SolixVmContext, solix_export};",
+        "use std::ffi::{",
+        "    CStr, CString, c_char, c_int, c_longlong, c_short, c_uint, c_ulonglong, c_ushort, c_void,",
+        "};",
         "",
         "// ===========================================================================",
         "// Callback Function Signatures",
@@ -1163,22 +1072,22 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
         # 1. Writeback
         lines.append(f"unsafe fn writeback_{snake_name}(vm_context: *mut c_void, addr: u32, val: &C_{struct_obj.name}) {{")
         lines.append("    if addr == 0 { return; }")
-        lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
+        lines.append("    let Some(ctx) = SolixVmContext::validate(vm_context) else { return; };")
 
         for field_idx, field_obj in enumerate(struct_obj.fields):
             field_name = field_obj.escaped_rust_name
             raw_type = field_obj.raw_type
 
             if raw_type in ("bool", "_Bool"):
-                lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {field_idx}, if val.{field_name} {{ 1 }} else {{ 0 }});")
+                lines.append(f"    ctx.set_field_i32(addr, {field_idx}, if val.{field_name} {{ 1 }} else {{ 0 }});")
             elif raw_type in ("unsigned char", "uint8", "uchar", "char", "int8", "short", "int16", "unsigned short", "uint16", "ushort", "int", "i32", "unsigned int", "uint", "u32"):
-                lines.append(f"    ((*context_ptr).set_field_i32)(vm_context, addr, {field_idx}, val.{field_name} as i32);")
+                lines.append(f"    ctx.set_field_i32(addr, {field_idx}, val.{field_name} as i32);")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name}.to_bits() as u64);")
+                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name}.to_bits() as u64);")
             elif raw_type in ("double", "f64"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name}.to_bits());")
+                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name}.to_bits());")
             elif raw_type in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name} as u64);")
+                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name} as u64);")
             elif field_obj.is_array:
                 base_elem = field_obj.array_base_type or ""
                 size_str = str(field_obj.array_size or 0)
@@ -1187,33 +1096,33 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append(f"    while str_len_{field_idx} < {size_str} && val.{field_name}[str_len_{field_idx}] != 0 {{")
                     lines.append(f"        str_len_{field_idx} += 1;")
                     lines.append("    }")
-                    lines.append(f"    let str_addr_{field_idx} = ((*context_ptr).alloc_string)(vm_context, val.{field_name}.as_ptr() as *const u8, str_len_{field_idx} as u32);")
-                    lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, str_addr_{field_idx} as u64);")
+                    lines.append(f"    let str_addr_{field_idx} = (ctx.alloc_string)(ctx.vm_ptr, val.{field_name}.as_ptr() as *const u8, str_len_{field_idx} as u32);")
+                    lines.append(f"    ctx.write_field_u64(addr, {field_idx}, str_addr_{field_idx} as u64);")
                 elif base_elem in ir.struct_map or resolve_alias_recursively(base_elem, ir.alias_map) in ir.struct_map:
                     resolved_struct = (
                         base_elem if base_elem in ir.struct_map
                         else resolve_alias_recursively(base_elem, ir.alias_map)
                     )
                     nested_snake = to_snake_case(resolved_struct)
-                    lines.append(f"    let arr_addr_{field_idx} = ((*context_ptr).alloc_array)(vm_context, {size_str}, 0);")
+                    lines.append(f"    let arr_addr_{field_idx} = ctx.alloc_array({size_str}, 0);")
                     lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
                     lines.append(f"        let child_addr = pack_{nested_snake}(vm_context, val.{field_name}[elem_idx as usize]);")
-                    lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, child_addr as u64);")
+                    lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, child_addr as u64);")
                     lines.append("    }")
-                    lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, arr_addr_{field_idx} as u64);")
+                    lines.append(f"    ctx.write_field_u64(addr, {field_idx}, arr_addr_{field_idx} as u64);")
                 else:
-                    lines.append(f"    let arr_addr_{field_idx} = ((*context_ptr).alloc_array)(vm_context, {size_str}, 0);")
+                    lines.append(f"    let arr_addr_{field_idx} = ctx.alloc_array({size_str}, 0);")
                     lines.append(f"    for elem_idx in 0..{size_str}u32 {{")
                     if base_elem in ("float", "f32"):
-                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, (val.{field_name}[elem_idx as usize] as f64).to_bits());")
+                        lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, (val.{field_name}[elem_idx as usize] as f64).to_bits());")
                     elif base_elem in ("double", "f64"):
-                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize].to_bits());")
+                        lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize].to_bits());")
                     else:
-                        lines.append(f"        ((*context_ptr).array_set_u64)(vm_context, arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize] as u64);")
+                        lines.append(f"        ctx.array_set_u64(arr_addr_{field_idx}, elem_idx, val.{field_name}[elem_idx as usize] as u64);")
                     lines.append("    }")
-                    lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, arr_addr_{field_idx} as u64);")
+                    lines.append(f"    ctx.write_field_u64(addr, {field_idx}, arr_addr_{field_idx} as u64);")
             elif field_obj.is_pointer:
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name} as usize as u64);")
+                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name} as usize as u64);")
             elif raw_type in ir.struct_map or resolve_alias_recursively(raw_type, ir.alias_map) in ir.struct_map:
                 resolved_struct = (
                     raw_type if raw_type in ir.struct_map
@@ -1221,19 +1130,18 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 )
                 nested_snake = to_snake_case(resolved_struct)
                 lines.append(f"    let child_{field_idx} = pack_{nested_snake}(vm_context, val.{field_name});")
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, child_{field_idx} as u64);")
+                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, child_{field_idx} as u64);")
             elif raw_type.endswith("*") or raw_type.startswith("void") or "*" in resolve_alias_recursively(raw_type, ir.alias_map):
-                lines.append(f"    ((*context_ptr).write_field_u64)(vm_context, addr, {field_idx}, val.{field_name} as usize as u64);")
+                lines.append(f"    ctx.write_field_u64(addr, {field_idx}, val.{field_name} as usize as u64);")
 
         lines.append("}")
         lines.append("")
 
         # 2. Pack
         lines.append(f"unsafe fn pack_{snake_name}(vm_context: *mut c_void, val: C_{struct_obj.name}) -> u32 {{")
-        lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
-        lines.append(f'    let class_name_str = c"{struct_obj.name}";')
-        lines.append("    let class_vtable_id = ((*context_ptr).get_class_vtable_id)(vm_context, class_name_str.as_ptr());")
-        lines.append(f"    let addr = ((*context_ptr).alloc_object)(vm_context, class_vtable_id, {field_count});")
+        lines.append("    let Some(ctx) = SolixVmContext::validate(vm_context) else { return 0; };")
+        lines.append(f'    let class_vtable_id = ctx.get_class_vtable_id("{struct_obj.name}");')
+        lines.append(f"    let addr = ctx.alloc_object(class_vtable_id, {field_count});")
         lines.append("    if addr > 0 {")
         lines.append(f"        writeback_{snake_name}(vm_context, addr, &val);")
         lines.append("    }")
@@ -1244,7 +1152,7 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
         # 3. Unpack
         lines.append(f"unsafe fn unpack_{snake_name}(vm_context: *mut c_void, addr: u32) -> C_{struct_obj.name} {{")
         lines.append(f"    if addr == 0 {{ return C_{struct_obj.name}::default(); }}")
-        lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
+        lines.append(f"    let Some(ctx) = SolixVmContext::validate(vm_context) else {{ return C_{struct_obj.name}::default(); }};")
         lines.append(f"    let mut result = C_{struct_obj.name}::default();")
 
         for field_idx, field_obj in enumerate(struct_obj.fields):
@@ -1252,34 +1160,36 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             raw_type = field_obj.raw_type
 
             if raw_type in ("bool", "_Bool"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) != 0;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) != 0;")
             elif raw_type in ("unsigned char", "uint8", "uchar"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as u8;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as u8;")
             elif raw_type in ("char", "int8"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_char;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_char;")
             elif raw_type in ("short", "int16"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_short;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_short;")
             elif raw_type in ("unsigned short", "uint16", "ushort"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_ushort;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_ushort;")
             elif raw_type in ("int", "i32"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_int;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_int;")
             elif raw_type in ("unsigned int", "uint", "u32"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).get_field_i32)(vm_context, addr, {field_idx}) as c_uint;")
+                lines.append(f"    result.{field_name} = ctx.get_field_i32(addr, {field_idx}) as c_uint;")
             elif raw_type in ("float", "f32"):
-                lines.append(f"    result.{field_name} = f32::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32);")
+                lines.append(f"    result.{field_name} = f32::from_bits(ctx.read_field_u64(addr, {field_idx}) as u32);")
             elif raw_type in ("double", "f64"):
-                lines.append(f"    result.{field_name} = f64::from_bits(((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}));")
+                lines.append(f"    result.{field_name} = f64::from_bits(ctx.read_field_u64(addr, {field_idx}));")
             elif raw_type in ("long", "long long", "int64"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as c_longlong;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as c_longlong;")
             elif raw_type in ("unsigned long", "unsigned long long", "uint64"):
-                lines.append(f"    result.{field_name} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as c_ulonglong;")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as c_ulonglong;")
             elif field_obj.is_array:
                 base_elem = field_obj.array_base_type or ""
                 size_str = str(field_obj.array_size or 0)
                 if base_elem in ("char", "const char"):
-                    lines.append(f"    let str_addr_{field_idx} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32;")
-                    lines.append(f"    if str_addr_{field_idx} > 0 {{")
-                    lines.append(f"        let read_len = ((*context_ptr).read_bytes)(vm_context, str_addr_{field_idx}, result.{field_name}.as_mut_ptr() as *mut u8, ({size_str} - 1) as u32) as usize;")
+                    lines.append(f"    let str_addr_{field_idx} = ctx.read_field_u64(addr, {field_idx}) as u32;")
+                    lines.append(f"    if str_addr_{field_idx} > 0 && {size_str} > 0 {{")
+                    lines.append(f"        let max_copy = ({size_str}usize).saturating_sub(1);")
+                    lines.append(f"        let out_slice = std::slice::from_raw_parts_mut(result.{field_name}.as_mut_ptr().cast::<u8>(), max_copy);")
+                    lines.append(f"        let read_len = ctx.read_bytes(str_addr_{field_idx}, out_slice).min(max_copy);")
                     lines.append(f"        result.{field_name}[read_len] = 0;")
                     lines.append("    }")
                 elif base_elem in ir.struct_map or resolve_alias_recursively(base_elem, ir.alias_map) in ir.struct_map:
@@ -1288,20 +1198,20 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                         else resolve_alias_recursively(base_elem, ir.alias_map)
                     )
                     nested_snake = to_snake_case(resolved_struct)
-                    lines.append(f"    let arr_addr_{field_idx} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32;")
+                    lines.append(f"    let arr_addr_{field_idx} = ctx.read_field_u64(addr, {field_idx}) as u32;")
                     lines.append(f"    if arr_addr_{field_idx} > 0 {{")
-                    lines.append(f"        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_{field_idx}).min({size_str});")
+                    lines.append(f"        let arr_len = ctx.array_len(arr_addr_{field_idx}).min({size_str});")
                     lines.append("        for elem_idx in 0..arr_len {")
-                    lines.append(f"            let child_addr = ((*context_ptr).array_get_u64)(vm_context, arr_addr_{field_idx}, elem_idx) as u32;")
+                    lines.append(f"            let child_addr = ctx.array_get_u64(arr_addr_{field_idx}, elem_idx) as u32;")
                     lines.append(f"            result.{field_name}[elem_idx as usize] = unpack_{nested_snake}(vm_context, child_addr);")
                     lines.append("        }")
                     lines.append("    }")
                 else:
-                    lines.append(f"    let arr_addr_{field_idx} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32;")
+                    lines.append(f"    let arr_addr_{field_idx} = ctx.read_field_u64(addr, {field_idx}) as u32;")
                     lines.append(f"    if arr_addr_{field_idx} > 0 {{")
-                    lines.append(f"        let arr_len = ((*context_ptr).array_len)(vm_context, arr_addr_{field_idx}).min({size_str});")
+                    lines.append(f"        let arr_len = ctx.array_len(arr_addr_{field_idx}).min({size_str});")
                     lines.append("        for elem_idx in 0..arr_len {")
-                    lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, arr_addr_{field_idx}, elem_idx);")
+                    lines.append(f"            let raw_val = ctx.array_get_u64(arr_addr_{field_idx}, elem_idx);")
                     if base_elem in ("float", "f32"):
                         lines.append(f"            result.{field_name}[elem_idx as usize] = if (raw_val >> 32) == 0 {{ f32::from_bits(raw_val as u32) }} else {{ f64::from_bits(raw_val) as f32 }};")
                     elif base_elem in ("double", "f64"):
@@ -1312,16 +1222,16 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                     lines.append("        }")
                     lines.append("    }")
             elif field_obj.is_pointer:
-                lines.append(f"    result.{field_name} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as usize as {field_obj.rust_type};")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as usize as {field_obj.rust_type};")
             elif raw_type in ir.struct_map or resolve_alias_recursively(raw_type, ir.alias_map) in ir.struct_map:
                 resolved_struct = (
                     raw_type if raw_type in ir.struct_map
                     else resolve_alias_recursively(raw_type, ir.alias_map)
                 )
                 nested_snake = to_snake_case(resolved_struct)
-                lines.append(f"    result.{field_name} = unpack_{nested_snake}(vm_context, ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as u32);")
+                lines.append(f"    result.{field_name} = unpack_{nested_snake}(vm_context, ctx.read_field_u64(addr, {field_idx}) as u32);")
             elif raw_type.endswith("*") or raw_type.startswith("void") or "*" in resolve_alias_recursively(raw_type, ir.alias_map):
-                lines.append(f"    result.{field_name} = ((*context_ptr).read_field_u64)(vm_context, addr, {field_idx}) as usize as {field_obj.rust_type};")
+                lines.append(f"    result.{field_name} = ctx.read_field_u64(addr, {field_idx}) as usize as {field_obj.rust_type};")
 
         lines.append("    result")
         lines.append("}")
@@ -1383,41 +1293,38 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             raw_param = param.raw_type
 
             if raw_param in ("int", "i32"):
-                call_args.append(f"{arg_expr}.payload as c_int")
+                call_args.append(f"{arg_expr}.as_i32() as c_int")
             elif raw_param in ("unsigned int", "uint", "u32"):
                 call_args.append(f"{arg_expr}.payload as c_uint")
             elif raw_param in ("short", "int16"):
-                call_args.append(f"{arg_expr}.payload as c_short")
+                call_args.append(f"{arg_expr}.as_i32() as c_short")
             elif raw_param in ("unsigned short", "uint16", "ushort"):
                 call_args.append(f"{arg_expr}.payload as c_ushort")
             elif raw_param in ("char", "int8"):
-                call_args.append(f"{arg_expr}.payload as c_char")
+                call_args.append(f"{arg_expr}.as_i32() as c_char")
             elif raw_param in ("unsigned char", "uint8", "uchar"):
                 call_args.append(f"{arg_expr}.payload as u8")
             elif raw_param in ("long", "long long", "int64"):
-                call_args.append(f"{arg_expr}.payload as c_longlong")
+                call_args.append(f"{arg_expr}.as_i64() as c_longlong")
             elif raw_param in ("unsigned long", "unsigned long long", "uint64"):
                 call_args.append(f"{arg_expr}.payload as c_ulonglong")
             elif raw_param in ("float", "f32"):
-                call_args.append(f"f64::from_bits({arg_expr}.payload) as f32")
+                call_args.append(f"{arg_expr}.as_f64() as f32")
             elif raw_param in ("double", "f64"):
-                call_args.append(f"f64::from_bits({arg_expr}.payload)")
+                call_args.append(f"{arg_expr}.as_f64()")
             elif raw_param in ("bool", "_Bool"):
-                call_args.append(f"{arg_expr}.payload != 0")
+                call_args.append(f"{arg_expr}.as_bool()")
             elif param.is_string:
-                buf_var = f"str_buf_{param_idx}"
+                keepalive_var = f"str_keepalive_{param_idx}"
                 ptr_var = f"str_ptr_{param_idx}"
                 addr_var = f"str_addr_{param_idx}"
-                pre_call_lines.append(f"    let {addr_var} = {arg_expr}.payload as u32;")
-                pre_call_lines.append(f"    let mut {buf_var} = [0u8; 1024];")
-                pre_call_lines.append(f"    let {ptr_var} = if {addr_var} > 0 {{")
-                pre_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
-                pre_call_lines.append(f"        let read_len = ((*context_ptr).read_bytes)(vm_context, {addr_var}, {buf_var}.as_mut_ptr(), 1023) as usize;")
-                pre_call_lines.append(f"        {buf_var}[read_len] = 0;")
-                pre_call_lines.append(f"        {buf_var}.as_ptr() as *const c_char")
+                pre_call_lines.append(f"    let {addr_var} = {arg_expr}.as_ref();")
+                pre_call_lines.append(f"    let {keepalive_var}: Option<CString> = if let Some(ctx) = SolixVmContext::validate(vm_context) {{")
+                pre_call_lines.append(f"        ctx.read_string({addr_var}).and_then(|decoded_str| CString::new(decoded_str).ok())")
                 pre_call_lines.append("    } else {")
-                pre_call_lines.append('        c"".as_ptr()')
+                pre_call_lines.append("        None")
                 pre_call_lines.append("    };")
+                pre_call_lines.append(f'    let {ptr_var} = {keepalive_var}.as_ref().map_or(c"".as_ptr(), |c_string| c_string.as_ptr());')
                 call_args.append(ptr_var)
             elif param.is_callback:
                 call_args.append(
@@ -1425,12 +1332,12 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 )
             elif param.is_struct_val and param.base_struct_name:
                 struct_snake = to_snake_case(param.base_struct_name)
-                call_args.append(f"unpack_{struct_snake}(vm_context, {arg_expr}.payload as u32)")
+                call_args.append(f"unpack_{struct_snake}(vm_context, {arg_expr}.as_ref())")
             elif param.is_mutable_struct_ptr and param.base_struct_name:
                 struct_snake = to_snake_case(param.base_struct_name)
                 var_name = f"{struct_snake}_mut_{param_idx}"
                 addr_name = f"{struct_snake}_addr_{param_idx}"
-                pre_call_lines.append(f"    let {addr_name} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let {addr_name} = {arg_expr}.as_ref();")
                 pre_call_lines.append(f"    let mut {var_name} = unpack_{struct_snake}(vm_context, {addr_name});")
                 call_args.append(f"&mut {var_name}")
                 post_call_lines.append(f"    writeback_{struct_snake}(vm_context, {addr_name}, &{var_name});")
@@ -1439,15 +1346,16 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 struct_snake = to_snake_case(concrete_st)
                 vec_name = f"struct_vec_{param_idx}"
                 arr_name = f"arr_addr_{param_idx}"
-                pre_call_lines.append(f"    let {arr_name} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let {arr_name} = {arg_expr}.as_ref();")
                 pre_call_lines.append(f"    let mut {vec_name}: Vec<C_{concrete_st}> = Vec::new();")
                 pre_call_lines.append(f"    if {arr_name} > 0 {{")
-                pre_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
-                pre_call_lines.append(f"        let total_count = ((*context_ptr).array_len)(vm_context, {arr_name});")
-                pre_call_lines.append(f"        {vec_name}.reserve_exact(total_count as usize);")
-                pre_call_lines.append("        for elem_idx in 0..total_count {")
-                pre_call_lines.append(f"            let child_addr = ((*context_ptr).array_get_u64)(vm_context, {arr_name}, elem_idx) as u32;")
-                pre_call_lines.append(f"            {vec_name}.push(unpack_{struct_snake}(vm_context, child_addr));")
+                pre_call_lines.append("        if let Some(ctx) = SolixVmContext::validate(vm_context) {")
+                pre_call_lines.append(f"            let total_count = ctx.array_len({arr_name});")
+                pre_call_lines.append(f"            {vec_name}.reserve_exact(total_count as usize);")
+                pre_call_lines.append("            for elem_idx in 0..total_count {")
+                pre_call_lines.append(f"                let child_addr = ctx.array_get_u64({arr_name}, elem_idx) as u32;")
+                pre_call_lines.append(f"                {vec_name}.push(unpack_{struct_snake}(vm_context, child_addr));")
+                pre_call_lines.append("            }")
                 pre_call_lines.append("        }")
                 pre_call_lines.append("    }")
                 call_args.append(f"if {arr_name} > 0 {{ {vec_name}.as_ptr() }} else {{ std::ptr::null() }}")
@@ -1456,36 +1364,38 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
                 rust_elem = param.rust_type.replace("*const ", "").replace("*mut ", "")
                 vec_name = f"prim_vec_{param_idx}"
                 arr_name = f"arr_addr_{param_idx}"
-                pre_call_lines.append(f"    let {arr_name} = {arg_expr}.payload as u32;")
+                pre_call_lines.append(f"    let {arr_name} = {arg_expr}.as_ref();")
                 pre_call_lines.append(f"    let mut {vec_name}: Vec<{rust_elem}> = Vec::new();")
                 pre_call_lines.append(f"    if {arr_name} > 0 {{")
-                pre_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
-                pre_call_lines.append(f"        let total_count = ((*context_ptr).array_len)(vm_context, {arr_name});")
-                pre_call_lines.append(f"        {vec_name}.reserve_exact(total_count as usize);")
-                pre_call_lines.append("        for elem_idx in 0..total_count {")
-                pre_call_lines.append(f"            let raw_val = ((*context_ptr).array_get_u64)(vm_context, {arr_name}, elem_idx);")
+                pre_call_lines.append("        if let Some(ctx) = SolixVmContext::validate(vm_context) {")
+                pre_call_lines.append(f"            let total_count = ctx.array_len({arr_name});")
+                pre_call_lines.append(f"            {vec_name}.reserve_exact(total_count as usize);")
+                pre_call_lines.append("            for elem_idx in 0..total_count {")
+                pre_call_lines.append(f"                let raw_val = ctx.array_get_u64({arr_name}, elem_idx);")
                 if base_prim in ("float", "f32"):
-                    pre_call_lines.append(f"            {vec_name}.push(if (raw_val >> 32) == 0 {{ f32::from_bits(raw_val as u32) }} else {{ f64::from_bits(raw_val) as f32 }});")
+                    pre_call_lines.append(f"                {vec_name}.push(if (raw_val >> 32) == 0 {{ f32::from_bits(raw_val as u32) }} else {{ f64::from_bits(raw_val) as f32 }});")
                 elif base_prim in ("double", "f64"):
-                    pre_call_lines.append(f"            {vec_name}.push(f64::from_bits(raw_val));")
+                    pre_call_lines.append(f"                {vec_name}.push(f64::from_bits(raw_val));")
                 else:
-                    pre_call_lines.append(f"            {vec_name}.push(raw_val as {rust_elem});")
+                    pre_call_lines.append(f"                {vec_name}.push(raw_val as {rust_elem});")
+                pre_call_lines.append("            }")
                 pre_call_lines.append("        }")
                 pre_call_lines.append("    }")
                 call_args.append(f"if {arr_name} > 0 {{ {vec_name}.as_mut_ptr() }} else {{ std::ptr::null_mut() }}")
 
                 if param.is_mutable_primitive_array:
                     post_call_lines.append(f"    if {arr_name} > 0 {{")
-                    post_call_lines.append("        let context_ptr = vm_context as *mut SolixVmContext;")
-                    post_call_lines.append(f"        let total_count = ((*context_ptr).array_len)(vm_context, {arr_name});")
-                    post_call_lines.append("        for elem_idx in 0..total_count {")
-                    post_call_lines.append(f"            let updated_elem = {vec_name}[elem_idx as usize];")
+                    post_call_lines.append("        if let Some(ctx) = SolixVmContext::validate(vm_context) {")
+                    post_call_lines.append(f"            let total_count = ctx.array_len({arr_name});")
+                    post_call_lines.append("            for elem_idx in 0..total_count {")
+                    post_call_lines.append(f"                let updated_elem = {vec_name}[elem_idx as usize];")
                     if base_prim in ("float", "f32"):
-                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, (updated_elem as f64).to_bits());")
+                        post_call_lines.append(f"                ctx.array_set_u64({arr_name}, elem_idx, (updated_elem as f64).to_bits());")
                     elif base_prim in ("double", "f64"):
-                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem.to_bits());")
+                        post_call_lines.append(f"                ctx.array_set_u64({arr_name}, elem_idx, updated_elem.to_bits());")
                     else:
-                        post_call_lines.append(f"            ((*context_ptr).array_set_u64)(vm_context, {arr_name}, elem_idx, updated_elem as u64);")
+                        post_call_lines.append(f"                ctx.array_set_u64({arr_name}, elem_idx, updated_elem as u64);")
+                    post_call_lines.append("            }")
                     post_call_lines.append("        }")
                     post_call_lines.append("    }")
             else:
@@ -1515,79 +1425,68 @@ def emit_rust_bridge(ir: ApiIR, package_name: str, class_name: str) -> str:
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append("    SolixCValue::bool_val(call_result)")
+            lines.append("    SolixCValue::from_bool(call_result)")
         elif raw_ret in ("int", "i32", "unsigned int", "uint", "u32", "short", "int16", "unsigned short", "uint16", "ushort", "char", "int8", "unsigned char", "uint8", "uchar"):
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append("    SolixCValue::i32_val(call_result as i32)")
+            lines.append("    SolixCValue::from_i32(call_result as i32)")
         elif raw_ret in ("long", "long long", "int64", "unsigned long", "unsigned long long", "uint64"):
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append("    SolixCValue::i64_val(call_result as i64)")
+            lines.append("    SolixCValue::from_i64(call_result as i64)")
         elif raw_ret in ("float", "f32"):
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append("    SolixCValue::f64_val(call_result as f64)")
+            lines.append("    SolixCValue::from_f64(call_result as f64)")
         elif raw_ret in ("double", "f64"):
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append("    SolixCValue::f64_val(call_result)")
+            lines.append("    SolixCValue::from_f64(call_result)")
         elif raw_ret in ("const char *", "char *"):
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
             lines.append("    if call_result.is_null() { return SolixCValue::null(); }")
+            lines.append("    let Some(ctx) = SolixVmContext::validate(vm_context) else { return SolixCValue::null(); };")
             lines.append("    let c_str = CStr::from_ptr(call_result);")
             lines.append("    let bytes = c_str.to_bytes();")
-            lines.append("    let context_ptr = vm_context as *mut SolixVmContext;")
-            lines.append("    let addr = ((*context_ptr).alloc_string)(vm_context, bytes.as_ptr(), bytes.len() as u32);")
-            lines.append("    SolixCValue::ref_val(addr)")
+            lines.append("    let addr = (ctx.alloc_string)(ctx.vm_ptr, bytes.as_ptr(), bytes.len() as u32);")
+            lines.append("    SolixCValue::from_ref(addr)")
         elif ret_ptr_depth == 0 and (base_ret in ir.struct_map or resolved_ret in ir.struct_map):
             concrete_st = base_ret if base_ret in ir.struct_map else resolved_ret
             struct_snake = to_snake_case(concrete_st)
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append(f"    SolixCValue::ref_val(pack_{struct_snake}(vm_context, call_result))")
+            lines.append(f"    SolixCValue::from_ref(pack_{struct_snake}(vm_context, call_result))")
         else:
             lines.append(f"    let call_result = {call_invocation};")
             for post_line in post_call_lines:
                 lines.append(post_line)
-            lines.append("    SolixCValue::i64_val(call_result as usize as i64)")
+            lines.append("    SolixCValue::from_i64(call_result as usize as i64)")
 
         lines.append("}")
         lines.append("")
 
-        snake_name = func_obj.snake_name
         func_name = func_obj.name
-        registration_entries.append((f"{class_name}::{func_name}", wrapper_name))
-        registration_entries.append((f"{class_name}::{snake_name}", wrapper_name))
         registration_entries.append((f"{package_name}::{func_name}", wrapper_name))
-        registration_entries.append((f"{package_name}::{snake_name}", wrapper_name))
         registration_entries.append((func_name, wrapper_name))
-        registration_entries.append((snake_name, wrapper_name))
 
     lines.append("// ===========================================================================")
     lines.append("// Native Symbol Dynamic Registration Hook")
     lines.append("// ===========================================================================")
-    lines.append("#[unsafe(no_mangle)]")
-    lines.append("pub unsafe extern \"C\" fn solix_register_natives(")
-    lines.append("    collector_context: *mut c_void,", )
-    lines.append("    register_callback: RegisterNativeCallback,")
-    lines.append(") {")
+    lines.append("solix_export! {")
 
     seen_symbols = set()
     for symbol_path, wrapper_fn_name in registration_entries:
         if symbol_path in seen_symbols:
             continue
         seen_symbols.add(symbol_path)
-        lines.append(
-            f'    register_callback(collector_context, c"{symbol_path}".as_ptr(), {wrapper_fn_name});'
-        )
+        lines.append(f'    "{symbol_path}" => {wrapper_fn_name},')
 
     lines.append("}")
     lines.append("")
@@ -1626,7 +1525,7 @@ def main() -> None:
     parser.add_argument(
         "--class-name",
         default="Raylib",
-        help="Primary class name for Solix engine wrapper (default: Raylib)",
+        help="Optional symbol prefix for internal Rust FFI wrapper functions (default: Raylib)",
     )
     parser.add_argument(
         "--define-guard",

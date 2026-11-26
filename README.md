@@ -20,7 +20,7 @@ The Solix compiler translates source code into compact binary containers (`.slxb
 
 ### Clean and Explicit Scope Syntax
 Solix enforces clear visual separation between namespaces, types, and instance members:
-* **Scope Resolution (`::`)**: Used strictly for namespace paths, types, static methods, and enum variants (e.g. `std::io::Console::write_line`, `solix::collections::List`, `Raylib::InitWindow`, `GameState::PLAYING`).
+* **Scope Resolution (`::`)**: Used strictly for namespace paths, types, static methods, and enum variants (e.g. `std::io::Console::write_line`, `solix::collections::List`, `Color::RED`, `GameState::PLAYING`).
 * **Member Access (`.`)**: Used strictly for instance fields, object properties, and instance method invocations (e.g. `player.health`, `particle.update(delta_time)`).
 
 ### All-in-One Unified Toolchain

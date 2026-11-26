@@ -10,5 +10,6 @@ name = "__native_raylib"
 crate-type = ["cdylib"]
 
 [dependencies]
+solix-ffi = "2.0.1"
 
 [build-dependencies]

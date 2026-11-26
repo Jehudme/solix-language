@@ -700,7 +700,7 @@ fn test_feature_24_semantic_tokens() {
 #[test]
 fn test_semantic_tokens_syntax_error_resilience_and_no_overlap() {
     let (workspace, uri) = create_test_workspace();
-    let source = "/* Multi-line\n   comment */\nclass Worker {\n    int32 id;\n    public void work( {\n    Raylib::ClearBackground(bg_slate);\n}\n";
+    let source = "/* Multi-line\n   comment */\nclass Worker {\n    int32 id;\n    public void work( {\n    Canvas::ClearBackground(bg_slate);\n}\n";
 
     let snapshot = workspace.did_open(uri, 1, source.to_string());
     let result = semantic_tokens_full(&snapshot).unwrap();
@@ -1276,7 +1276,7 @@ fn test_breakout_semantic_tokens_clear_background() {
             }
 
             // Line 572 (0-indexed) corresponds to line 573 in breakout/src/main.slx:
-            // "            Raylib::ClearBackground(bg_slate);"
+            // "            ClearBackground(bg_slate);"
             if current_line == 572 {
                 if token.length == 15 {
                     clear_bg_token =
@@ -1295,13 +1295,13 @@ fn test_breakout_semantic_tokens_clear_background() {
         );
         let (_, cb_char, cb_len, cb_type) = clear_bg_token.unwrap();
         assert_eq!(
-            cb_char, 20,
-            "ClearBackground must start at character index 20"
+            cb_char, 12,
+            "ClearBackground must start at character index 12"
         );
         assert_eq!(cb_len, 15, "ClearBackground must be 15 characters long");
         assert_eq!(
-            cb_type, 7,
-            "ClearBackground must be classified as METHOD (7)"
+            cb_type, 6,
+            "ClearBackground at package root must be classified as FUNCTION (6)"
         );
 
         assert!(
@@ -1309,7 +1309,7 @@ fn test_breakout_semantic_tokens_clear_background() {
             "Expected bg_slate semantic token with length 8 on line 572"
         );
         let (_, slate_char, slate_len, slate_type) = bg_slate_token.unwrap();
-        assert_eq!(slate_char, 36, "bg_slate must start at character index 36");
+        assert_eq!(slate_char, 28, "bg_slate must start at character index 28");
         assert_eq!(slate_len, 8, "bg_slate must be 8 characters long");
         assert_eq!(slate_type, 9, "bg_slate must be classified as VARIABLE (9)");
     }
@@ -1423,7 +1423,7 @@ fn test_unimported_specific_symbol_emits_diagnostic() {
 fn test_semantic_tokens_pascal_case_method_call_classification() {
     let (workspace, test_uri) = create_test_workspace();
     let test_source =
-        "class Worker {\n    public void work( {\n    Raylib::ClearBackground(bg_slate);\n}\n";
+        "class Worker {\n    public void work( {\n    Canvas::ClearBackground(bg_slate);\n}\n";
     let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
     let result = semantic_tokens_full(&snapshot).unwrap();
     if let SemanticTokensResult::Tokens(tokens) = result {
@@ -1448,6 +1448,41 @@ fn test_semantic_tokens_pascal_case_method_call_classification() {
         assert!(
             found_clear_bg,
             "Expected to locate ClearBackground semantic token"
+        );
+    } else {
+        panic!("Expected full semantic tokens result");
+    }
+}
+
+#[test]
+fn test_semantic_tokens_pascal_case_root_function_classification() {
+    let (workspace, test_uri) = create_test_workspace();
+    let test_source =
+        "class Worker {\n    public void work() {\n        ClearBackground(bg_slate);\n    }\n}\n";
+    let snapshot = workspace.did_open(test_uri, 1, test_source.to_string());
+    let result = semantic_tokens_full(&snapshot).unwrap();
+    if let SemanticTokensResult::Tokens(tokens) = result {
+        let mut current_line = 0u32;
+        let mut current_char = 0u32;
+        let mut found_clear_bg = false;
+        for token in &tokens.data {
+            if token.delta_line > 0 {
+                current_line += token.delta_line;
+                current_char = token.delta_start;
+            } else {
+                current_char += token.delta_start;
+            }
+            if current_line == 2 && current_char == 8 && token.length == 15 {
+                found_clear_bg = true;
+                assert_eq!(
+                    token.token_type, 6,
+                    "Root PascalCase ClearBackground(...) must be classified as FUNCTION (6)"
+                );
+            }
+        }
+        assert!(
+            found_clear_bg,
+            "Expected to locate root ClearBackground semantic token"
         );
     } else {
         panic!("Expected full semantic tokens result");

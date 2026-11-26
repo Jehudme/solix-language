@@ -505,6 +505,9 @@ impl WorkspaceManager {
                 if !exported_static
                     .modifiers
                     .contains(&solix_common::bytecode::manifest::DeclarationModifier::Public)
+                    && !exported_static
+                        .modifiers
+                        .contains(&solix_common::bytecode::manifest::DeclarationModifier::Const)
                 {
                     continue;
                 }
@@ -628,7 +631,8 @@ impl WorkspaceManager {
                                 }
                             }
                             solix_compilation::phases::parser::statements::declarations::Declaration::Field(field_declaration)
-                                if field_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public) =>
+                                if field_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Public)
+                                    || field_declaration.modifiers.contains(&solix_compilation::phases::parser::statements::declarations::Modifier::Const) =>
                             {
                                 let field_name = get_span_text_workspace(&snapshot.source_text, field_declaration.name_span);
                                 let detail_string = format!("field {}", field_name);

@@ -55,9 +55,9 @@ public class Brick {
         if (this.health == 1 && this.max_health == 2) {
             active_color = this.cracked_color;
         }
-        Raylib::DrawRectangleRounded(brick_rect, 0.22, 4, active_color);
+        DrawRectangleRounded(brick_rect, 0.22, 4, active_color);
         Color highlight_line = new Color(255, 255, 255, 55);
-        Raylib::DrawRectangleRoundedLines(brick_rect, 0.22, 4, highlight_line);
+        DrawRectangleRoundedLines(brick_rect, 0.22, 4, highlight_line);
     }
 }
 
@@ -188,13 +188,13 @@ public class BreakoutGame {
     }
 
     public void update_playing() {
-        float32 delta_seconds = Raylib::GetFrameTime();
+        float32 delta_seconds = GetFrameTime();
         if (delta_seconds > 0.05) {
             delta_seconds = 0.05;
         }
 
         // Toggle pause
-        if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+        if (IsKeyPressed(KeyboardKey::KEY_P) || IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
             this.game_state = GameState::PAUSED;
             return;
         }
@@ -203,10 +203,10 @@ public class BreakoutGame {
         float32 paddle_speed = 520.0;
         float32 movement_step = paddle_speed * delta_seconds;
 
-        if (Raylib::IsKeyDown(KeyboardKey::KEY_LEFT) || Raylib::IsKeyDown(KeyboardKey::KEY_A)) {
+        if (IsKeyDown(KeyboardKey::KEY_LEFT) || IsKeyDown(KeyboardKey::KEY_A)) {
             this.paddle_pos_x = this.paddle_pos_x - movement_step;
         }
-        if (Raylib::IsKeyDown(KeyboardKey::KEY_RIGHT) || Raylib::IsKeyDown(KeyboardKey::KEY_D)) {
+        if (IsKeyDown(KeyboardKey::KEY_RIGHT) || IsKeyDown(KeyboardKey::KEY_D)) {
             this.paddle_pos_x = this.paddle_pos_x + movement_step;
         }
 
@@ -225,7 +225,7 @@ public class BreakoutGame {
             this.ball_pos_x = this.paddle_pos_x + this.paddle_width * 0.5;
             this.ball_pos_y = this.paddle_pos_y - this.ball_radius - 2.0;
 
-            if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
+            if (IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyPressed(KeyboardKey::KEY_ENTER)) {
                 this.ball_attached = false;
                 this.ball_speed_x = 180.0;
                 this.ball_speed_y = -360.0;
@@ -277,7 +277,7 @@ public class BreakoutGame {
                 this.paddle_height
             );
             Vector2 ball_origin = new Vector2(this.ball_pos_x, this.ball_pos_y);
-            if (Raylib::CheckCollisionCircleRec(ball_origin, this.ball_radius, paddle_rect)) {
+            if (CheckCollisionCircleRec(ball_origin, this.ball_radius, paddle_rect)) {
                 this.ball_pos_y = this.paddle_pos_y - this.ball_radius;
                 this.combo = 0;
 
@@ -306,7 +306,7 @@ public class BreakoutGame {
                     Brick target_brick = this.bricks[brick_index];
                     if (target_brick.health > 0) {
                         Rectangle target_box = target_brick.get_rect();
-                        if (Raylib::CheckCollisionCircleRec(ball_center_point, this.ball_radius, target_box)) {
+                        if (CheckCollisionCircleRec(ball_center_point, this.ball_radius, target_box)) {
                             collision_handled = true;
                             target_brick.health = target_brick.health - 1;
 
@@ -349,7 +349,7 @@ public class BreakoutGame {
     public void draw_game_board(float32 offset_x, float32 offset_y) {
         // Subtle arena boundary frame
         Color arena_border_color = new Color(28, 32, 48, 255);
-        Raylib::DrawRectangleLines(
+        DrawRectangleLines(
             (int32)(20.0 + offset_x),
             (int32)(60.0 + offset_y),
             760,
@@ -370,9 +370,9 @@ public class BreakoutGame {
             this.paddle_height
         );
         Color paddle_cyan = new Color(0, 229, 255, 255);
-        Raylib::DrawRectangleRounded(paddle_visual, 0.5, 6, paddle_cyan);
+        DrawRectangleRounded(paddle_visual, 0.5, 6, paddle_cyan);
         Color paddle_glow = new Color(0, 229, 255, 80);
-        Raylib::DrawRectangleRoundedLines(paddle_visual, 0.5, 6, paddle_glow);
+        DrawRectangleRoundedLines(paddle_visual, 0.5, 6, paddle_glow);
 
         // Draw glowing ball
         Vector2 ball_center = new Vector2(
@@ -380,31 +380,31 @@ public class BreakoutGame {
             this.ball_pos_y + offset_y
         );
         Color ball_aura = new Color(0, 229, 255, 60);
-        Raylib::DrawCircleV(ball_center, this.ball_radius + 6.0, ball_aura);
+        DrawCircleV(ball_center, this.ball_radius + 6.0, ball_aura);
         Color ball_mid = new Color(0, 229, 255, 160);
-        Raylib::DrawCircleV(ball_center, this.ball_radius + 2.0, ball_mid);
+        DrawCircleV(ball_center, this.ball_radius + 2.0, ball_mid);
         Color ball_core = new Color(255, 255, 255, 255);
-        Raylib::DrawCircleV(ball_center, this.ball_radius, ball_core);
+        DrawCircleV(ball_center, this.ball_radius, ball_core);
 
         // Top HUD bar
         Color hud_background = new Color(28, 32, 48, 255);
-        Raylib::DrawRectangle(0, 0, 800, 60, hud_background);
+        DrawRectangle(0, 0, 800, 60, hud_background);
         Color hud_line = new Color(45, 52, 75, 255);
-        Raylib::DrawRectangle(0, 58, 800, 2, hud_line);
+        DrawRectangle(0, 58, 800, 2, hud_line);
 
         Color text_label_color = new Color(140, 150, 175, 255);
-        Raylib::DrawText("SCORE", 35, 12, 12, text_label_color);
-        Raylib::DrawText("" + this.score, 35, 28, 20, Color::RAYWHITE);
+        DrawText("SCORE", 35, 12, 12, text_label_color);
+        DrawText("" + this.score, 35, 28, 20, Color::RAYWHITE);
 
-        Raylib::DrawText("HIGH SCORE", 200, 12, 12, text_label_color);
-        Raylib::DrawText("" + this.high_score, 200, 28, 20, Color::RAYWHITE);
+        DrawText("HIGH SCORE", 200, 12, 12, text_label_color);
+        DrawText("" + this.high_score, 200, 28, 20, Color::RAYWHITE);
 
         if (this.combo > 1) {
             Color combo_gold = new Color(255, 215, 0, 255);
-            Raylib::DrawText("COMBO x" + this.combo, 380, 22, 22, combo_gold);
+            DrawText("COMBO x" + this.combo, 380, 22, 22, combo_gold);
         }
 
-        Raylib::DrawText("LIVES", 570, 12, 12, text_label_color);
+        DrawText("LIVES", 570, 12, 12, text_label_color);
         for (int32 pill_index = 0; pill_index < 3; pill_index = pill_index + 1) {
             float32 pill_x = (float32)(570 + pill_index * 26);
             Rectangle life_pill = new Rectangle(pill_x, 32.0, 20.0, 12.0);
@@ -412,134 +412,134 @@ public class BreakoutGame {
             if (pill_index >= this.lives) {
                 pill_fill = new Color(50, 55, 75, 255);
             }
-            Raylib::DrawRectangleRounded(life_pill, 0.5, 4, pill_fill);
+            DrawRectangleRounded(life_pill, 0.5, 4, pill_fill);
         }
 
-        Raylib::DrawFPS(720, 20);
+        DrawFPS(720, 20);
     }
 
     public void render_title_modal() {
         Color modal_overlay = new Color(10, 12, 18, 210);
-        Raylib::DrawRectangle(0, 0, 800, 600, modal_overlay);
+        DrawRectangle(0, 0, 800, 600, modal_overlay);
 
         Rectangle card_frame = new Rectangle(140.0, 90.0, 520.0, 420.0);
         Color card_bg = new Color(18, 22, 34, 245);
-        Raylib::DrawRectangleRounded(card_frame, 0.08, 6, card_bg);
+        DrawRectangleRounded(card_frame, 0.08, 6, card_bg);
         Color card_border = new Color(0, 229, 255, 180);
-        Raylib::DrawRectangleRoundedLines(card_frame, 0.08, 6, card_border);
+        DrawRectangleRoundedLines(card_frame, 0.08, 6, card_border);
 
         Color title_cyan = new Color(0, 229, 255, 255);
-        Raylib::DrawText("SOLIX BREAKOUT", 220, 130, 40, title_cyan);
+        DrawText("SOLIX BREAKOUT", 220, 130, 40, title_cyan);
         Color subtitle_gray = new Color(140, 150, 180, 255);
-        Raylib::DrawText("Built with Solix & Raylib", 295, 185, 16, subtitle_gray);
+        DrawText("Built with Solix & Raylib", 295, 185, 16, subtitle_gray);
 
         // Controls box
         Rectangle controls_box = new Rectangle(180.0, 225.0, 440.0, 135.0);
         Color box_bg = new Color(26, 32, 48, 255);
-        Raylib::DrawRectangleRounded(controls_box, 0.06, 4, box_bg);
+        DrawRectangleRounded(controls_box, 0.06, 4, box_bg);
 
-        Raylib::DrawText("CONTROLS", 200, 235, 14, title_cyan);
-        Raylib::DrawText("[ A / D ] or [ LEFT / RIGHT ]  Move Paddle", 200, 260, 16, Color::RAYWHITE);
-        Raylib::DrawText("[ SPACE ] or [ ENTER ]         Launch / Start", 200, 288, 16, Color::RAYWHITE);
-        Raylib::DrawText("[ P ] or [ ESC ]               Pause", 200, 316, 16, Color::RAYWHITE);
+        DrawText("CONTROLS", 200, 235, 14, title_cyan);
+        DrawText("[ A / D ] or [ LEFT / RIGHT ]  Move Paddle", 200, 260, 16, Color::RAYWHITE);
+        DrawText("[ SPACE ] or [ ENTER ]         Launch / Start", 200, 288, 16, Color::RAYWHITE);
+        DrawText("[ P ] or [ ESC ]               Pause", 200, 316, 16, Color::RAYWHITE);
 
         if (this.high_score > 0) {
             Color gold_text = new Color(255, 215, 0, 255);
-            Raylib::DrawText("SESSION HIGH SCORE: " + this.high_score, 265, 380, 18, gold_text);
+            DrawText("SESSION HIGH SCORE: " + this.high_score, 265, 380, 18, gold_text);
         }
 
-        Raylib::DrawText("PRESS [ SPACE ] OR [ ENTER ] TO PLAY", 205, 435, 20, title_cyan);
+        DrawText("PRESS [ SPACE ] OR [ ENTER ] TO PLAY", 205, 435, 20, title_cyan);
     }
 
     public void render_paused_modal() {
         Color modal_overlay = new Color(10, 12, 18, 190);
-        Raylib::DrawRectangle(0, 0, 800, 600, modal_overlay);
+        DrawRectangle(0, 0, 800, 600, modal_overlay);
 
         Rectangle pause_card = new Rectangle(200.0, 160.0, 400.0, 270.0);
         Color card_bg = new Color(18, 22, 34, 245);
-        Raylib::DrawRectangleRounded(pause_card, 0.1, 6, card_bg);
+        DrawRectangleRounded(pause_card, 0.1, 6, card_bg);
         Color card_border = new Color(0, 229, 255, 180);
-        Raylib::DrawRectangleRoundedLines(pause_card, 0.1, 6, card_border);
+        DrawRectangleRoundedLines(pause_card, 0.1, 6, card_border);
 
         Color title_cyan = new Color(0, 229, 255, 255);
-        Raylib::DrawText("GAME PAUSED", 285, 200, 34, title_cyan);
+        DrawText("GAME PAUSED", 285, 200, 34, title_cyan);
 
-        Raylib::DrawText("[ P ] or [ ENTER ] - Resume Game", 255, 265, 18, Color::RAYWHITE);
-        Raylib::DrawText("[ R ]              - Restart Match", 255, 305, 18, Color::RAYWHITE);
-        Raylib::DrawText("[ Q ]              - Quit to Main Menu", 255, 345, 18, Color::RAYWHITE);
+        DrawText("[ P ] or [ ENTER ] - Resume Game", 255, 265, 18, Color::RAYWHITE);
+        DrawText("[ R ]              - Restart Match", 255, 305, 18, Color::RAYWHITE);
+        DrawText("[ Q ]              - Quit to Main Menu", 255, 345, 18, Color::RAYWHITE);
     }
 
     public void render_end_modal() {
         Color modal_overlay = new Color(10, 12, 18, 210);
-        Raylib::DrawRectangle(0, 0, 800, 600, modal_overlay);
+        DrawRectangle(0, 0, 800, 600, modal_overlay);
 
         Rectangle end_card = new Rectangle(180.0, 120.0, 440.0, 360.0);
         Color card_bg = new Color(18, 22, 34, 245);
-        Raylib::DrawRectangleRounded(end_card, 0.1, 6, card_bg);
+        DrawRectangleRounded(end_card, 0.1, 6, card_bg);
 
         bool is_victory = (this.game_state == GameState::VICTORY);
         Color header_color = new Color(255, 82, 82, 255);
         if (is_victory) {
             header_color = new Color(0, 230, 118, 255);
         }
-        Raylib::DrawRectangleRoundedLines(end_card, 0.1, 6, header_color);
+        DrawRectangleRoundedLines(end_card, 0.1, 6, header_color);
 
         if (is_victory) {
-            Raylib::DrawText("VICTORY!", 310, 155, 42, header_color);
-            Raylib::DrawText("ALL BRICKS CLEARED!", 305, 205, 18, Color::RAYWHITE);
+            DrawText("VICTORY!", 310, 155, 42, header_color);
+            DrawText("ALL BRICKS CLEARED!", 305, 205, 18, Color::RAYWHITE);
         } else {
-            Raylib::DrawText("GAME OVER", 280, 155, 42, header_color);
-            Raylib::DrawText("OUT OF LIVES!", 340, 205, 18, Color::RAYWHITE);
+            DrawText("GAME OVER", 280, 155, 42, header_color);
+            DrawText("OUT OF LIVES!", 340, 205, 18, Color::RAYWHITE);
         }
 
-        Raylib::DrawText("FINAL SCORE: " + this.score, 300, 250, 22, Color::RAYWHITE);
+        DrawText("FINAL SCORE: " + this.score, 300, 250, 22, Color::RAYWHITE);
 
         if (this.score >= this.high_score && this.score > 0) {
             Color gold_text = new Color(255, 215, 0, 255);
-            Raylib::DrawText("★ NEW HIGH SCORE! ★", 285, 285, 20, gold_text);
+            DrawText("★ NEW HIGH SCORE! ★", 285, 285, 20, gold_text);
         } else {
             Color gray_text = new Color(140, 150, 180, 255);
-            Raylib::DrawText("HIGH SCORE: " + this.high_score, 320, 285, 18, gray_text);
+            DrawText("HIGH SCORE: " + this.high_score, 320, 285, 18, gray_text);
         }
 
         int32 cleared_count = 50 - this.active_brick_count;
-        Raylib::DrawText("BRICKS CLEARED: " + cleared_count + " / 50", 295, 320, 18, Color::RAYWHITE);
+        DrawText("BRICKS CLEARED: " + cleared_count + " / 50", 295, 320, 18, Color::RAYWHITE);
 
         Color cyan_prompt = new Color(0, 229, 255, 255);
-        Raylib::DrawText("[ SPACE ] or [ R ] - Play Again", 265, 375, 18, cyan_prompt);
-        Raylib::DrawText("[ Q ]              - Return to Menu", 265, 410, 18, Color::RAYWHITE);
+        DrawText("[ SPACE ] or [ R ] - Play Again", 265, 375, 18, cyan_prompt);
+        DrawText("[ Q ]              - Return to Menu", 265, 410, 18, Color::RAYWHITE);
     }
 
     public static int32 main() {
-        Raylib::InitWindow(800, 600, "Solix Breakout - Modern Neon Arcade");
-        Raylib::SetTargetFPS(60);
-        Raylib::SetExitKey(0);
+        InitWindow(800, 600, "Solix Breakout - Modern Neon Arcade");
+        SetTargetFPS(60);
+        SetExitKey(0);
 
         BreakoutGame game = new BreakoutGame();
 
-        while (!Raylib::WindowShouldClose()) {
+        while (!WindowShouldClose()) {
             // Update state
             if (game.game_state == GameState::TITLE) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER)) {
+                if (IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyPressed(KeyboardKey::KEY_ENTER)) {
                     game.reset_match();
                     game.game_state = GameState::PLAYING;
                 }
             } else if (game.game_state == GameState::PLAYING) {
                 game.update_playing();
             } else if (game.game_state == GameState::PAUSED) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_P) || Raylib::IsKeyPressed(KeyboardKey::KEY_ENTER) || Raylib::IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
+                if (IsKeyPressed(KeyboardKey::KEY_P) || IsKeyPressed(KeyboardKey::KEY_ENTER) || IsKeyPressed(KeyboardKey::KEY_ESCAPE)) {
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_R)) {
                     game.reset_match();
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_Q)) {
                     game.game_state = GameState::TITLE;
                 }
             } else if (game.game_state == GameState::VICTORY || game.game_state == GameState::GAME_OVER) {
-                if (Raylib::IsKeyPressed(KeyboardKey::KEY_SPACE) || Raylib::IsKeyPressed(KeyboardKey::KEY_R)) {
+                if (IsKeyPressed(KeyboardKey::KEY_SPACE) || IsKeyPressed(KeyboardKey::KEY_R)) {
                     game.reset_match();
                     game.game_state = GameState::PLAYING;
-                } else if (Raylib::IsKeyPressed(KeyboardKey::KEY_Q)) {
+                } else if (IsKeyPressed(KeyboardKey::KEY_Q)) {
                     game.game_state = GameState::TITLE;
                 }
             }
@@ -568,9 +568,9 @@ public class BreakoutGame {
             }
 
             // Render
-            Raylib::BeginDrawing();
+            BeginDrawing();
             Color bg_slate = new Color(18, 20, 30, 255);
-            Raylib::ClearBackground(bg_slate);
+            ClearBackground(bg_slate);
 
             game.draw_game_board(shake_x, shake_y);
 
@@ -582,10 +582,10 @@ public class BreakoutGame {
                 game.render_end_modal();
             }
 
-            Raylib::EndDrawing();
+            EndDrawing();
         }
 
-        Raylib::CloseWindow();
+        CloseWindow();
         return 0;
     }
 }
