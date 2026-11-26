@@ -38,7 +38,7 @@ public class BunkerCell {
             fill_color = new Color(0, 120, 60, 180);
         }
 
-        Raylib::DrawRectangle(
+        DrawRectangle(
             (int32)this.pos_x,
             (int32)this.pos_y,
             (int32)this.cell_width,
@@ -96,7 +96,7 @@ public class Bunker {
         for (int32 cell_index = 0; cell_index < this.cell_count; cell_index = cell_index + 1) {
             if (this.cells[cell_index] != null && this.cells[cell_index].cell_health > 0) {
                 Rectangle cell_rect = this.cells[cell_index].get_rect();
-                if (Raylib::CheckCollisionRecs(cell_rect, projectile_rect)) {
+                if (CheckCollisionRecs(cell_rect, projectile_rect)) {
                     this.cells[cell_index].take_damage();
                     return true;
                 }

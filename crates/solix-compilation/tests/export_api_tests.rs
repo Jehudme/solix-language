@@ -5,8 +5,9 @@
 
 use solix_common::bytecode::BinaryProgram;
 use solix_common::bytecode::manifest::ExportManifest;
-use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+use solix_compilation::CompilationContext::{BuildProfile, CompilationContext, CompilationOptions};
 use solix_compilation::CompilationPipeline;
+use solix_compilation::diagnostics::BindingError;
 use solix_compilation::phases::export_api::generate_api_header_and_ast;
 use solix_compilation::phases::parser::statements::ProgramAst;
 
@@ -242,5 +243,133 @@ public class Main {
     assert!(
         consumer_context.is_external_source(dep_source_id),
         "Dependency source must be marked as external source"
+    );
+}
+
+#[test]
+fn test_top_level_const_and_root_native_export_across_package_boundary() {
+    let raylib_source = r#"
+package raylib;
+
+const int32 RAYLIB_VERSION_MAJOR = 6;
+public native void InitWindow(int32 width, int32 height, string title);
+"#;
+
+    let raylib_options = CompilationOptions::new()
+        .with_profile(BuildProfile::Release)
+        .with_package_metadata("raylib", "5.6.1", "Raylib Bindings")
+        .with_source("raylib.slx", raylib_source);
+
+    let mut raylib_context = CompilationContext::new(raylib_options);
+    let mut raylib_pipeline = CompilationPipeline::standard();
+    let raylib_result = raylib_pipeline.execute(&mut raylib_context);
+    assert!(
+        raylib_result.is_ok(),
+        "Release library compilation must succeed: {raylib_result:?}"
+    );
+
+    let raylib_program = raylib_context
+        .emission_artifacts
+        .expect("Raylib emission artifacts must exist")
+        .program;
+    assert!(
+        raylib_program
+            .export_manifest
+            .api_header
+            .contains("extern const int32 raylib::RAYLIB_VERSION_MAJOR;"),
+        "Release API header must preserve top-level const export: {}",
+        raylib_program.export_manifest.api_header
+    );
+    assert!(
+        raylib_program.export_manifest.api_header.contains(
+            "extern public void raylib::InitWindow(int32 width, int32 height, string title);"
+        ),
+        "Release API header must preserve root PascalCase native export: {}",
+        raylib_program.export_manifest.api_header
+    );
+
+    // Positive: consumer importing `raylib.*` accesses both root constant and root PascalCase native function
+    let positive_consumer = r#"
+package game;
+
+import raylib.*;
+
+public class Main {
+    public static int32 main() {
+        InitWindow(800, 600, "Title");
+        raylib::InitWindow(320, 240, "Qualified");
+        return RAYLIB_VERSION_MAJOR;
+    }
+}
+"#;
+    let positive_options = CompilationOptions::new()
+        .with_source("main.slx", positive_consumer)
+        .with_dependency_binary(raylib_program.clone());
+    let mut positive_context = CompilationContext::new(positive_options);
+    let mut positive_pipeline = CompilationPipeline::standard();
+    let positive_result = positive_pipeline.execute(&mut positive_context);
+    assert!(
+        positive_result.is_ok(),
+        "Consumer importing raylib.* must resolve root const and PascalCase functions: {positive_result:?}"
+    );
+
+    // Negative 1: mutating an imported top-level const must trigger E0210
+    let const_mutation_consumer = r#"
+package game;
+
+import raylib.*;
+
+public class Main {
+    public static int32 main() {
+        RAYLIB_VERSION_MAJOR = 7;
+        return 0;
+    }
+}
+"#;
+    let mutation_options = CompilationOptions::new()
+        .with_source("main.slx", const_mutation_consumer)
+        .with_dependency_binary(raylib_program.clone());
+    let mut mutation_context = CompilationContext::new(mutation_options);
+    let mut mutation_pipeline = CompilationPipeline::standard();
+    let mutation_result = mutation_pipeline.execute(&mut mutation_context);
+    assert!(
+        mutation_result.is_err() || !mutation_context.binding_errors.is_empty(),
+        "Assigning to imported top-level const must fail binding"
+    );
+    let has_e0210 = mutation_context
+        .binding_errors
+        .iter()
+        .any(|(_, binding_error)| {
+            matches!(binding_error, BindingError::CannotAssignToConst { .. })
+        });
+    assert!(
+        has_e0210,
+        "Expected E0210 CannotAssignToConst, got: {:?}",
+        mutation_context.binding_errors
+    );
+
+    // Negative 2: removed Raylib:: wrapper class and snake_case duplicate must be rejected
+    let legacy_consumer = r#"
+package game;
+
+import raylib.*;
+
+public class Main {
+    public static int32 main() {
+        Raylib::InitWindow(800, 600, "Legacy");
+        init_window(800, 600, "Snake");
+        return 0;
+    }
+}
+"#;
+    let legacy_options = CompilationOptions::new()
+        .with_source("main.slx", legacy_consumer)
+        .with_dependency_binary(raylib_program);
+    let mut legacy_context = CompilationContext::new(legacy_options);
+    let mut legacy_pipeline = CompilationPipeline::standard();
+    let legacy_result = legacy_pipeline.execute(&mut legacy_context);
+    assert!(
+        legacy_result.is_err() || !legacy_context.binding_errors.is_empty(),
+        "Removed Raylib:: wrapper and snake_case duplicates must be rejected"
     );
 }

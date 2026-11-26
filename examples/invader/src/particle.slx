@@ -70,7 +70,7 @@ public class Particle {
         int32 alpha_byte = (int32)(alpha_ratio * 255.0);
         Color faded_color = new Color(this.color.r, this.color.g, this.color.b, alpha_byte);
 
-        Raylib::DrawRectangle(
+        DrawRectangle(
             (int32)this.pos_x,
             (int32)this.pos_y,
             (int32)this.size,

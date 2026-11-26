@@ -590,8 +590,9 @@ fn emit_top_level_field(
     source_code: &str,
     is_debug: bool,
 ) {
+    let is_const = field_declaration.modifiers.contains(&Modifier::Const);
     if field_declaration.modifiers.contains(&Modifier::Extern)
-        || (!is_debug && !field_declaration.modifiers.contains(&Modifier::Public))
+        || (!is_debug && !is_const && !field_declaration.modifiers.contains(&Modifier::Public))
     {
         return;
     }
@@ -606,7 +607,10 @@ fn emit_top_level_field(
     };
 
     let field_type_str = get_span_text(field_declaration.field_type.span(), source_code);
-    output_buffer.push_str(&format!("extern {field_type_str} {qualified_name};\n\n"));
+    let const_prefix = if is_const { "const " } else { "" };
+    output_buffer.push_str(&format!(
+        "extern {const_prefix}{field_type_str} {qualified_name};\n\n"
+    ));
 }
 
 /// Generates the public API header source string and its pre-parsed serialized AST bytes.

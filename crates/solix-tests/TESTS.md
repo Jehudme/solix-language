@@ -2054,15 +2054,15 @@ void test() {
 
 ### Case 4.6: Package-Level Native Compatibility and Free Functions [IMPLEMENTED]
 
-* **Source**: Generated Raylib package-level functions and compatibility facade.
+* **Source**: Generated Raylib root-level canonical `PascalCase` native functions.
 * **Positive**: Selectively import a generated free function, compile it, and verify it delegates to the native bridge.
 * **Negative**: Calling a missing or unsupported generated API function reports a binder/import error rather than silently compiling.
 ```
 
 ### Case 4.7: Raylib Variadic API Adapters [IMPLEMENTED]
 
-* **Source**: Generated `raylib.trace_log(int32, String)` and `raylib.text_format(String)` adapters.
-* **Positive**: The fixed-arity adapters compile, link to the native bridge, preserve literal text, and remain available through the `Raylib` compatibility facade.
+* **Source**: Generated `raylib::TraceLog(int32, string)` and `raylib::TextFormat(string)` root adapters.
+* **Positive**: The fixed-arity adapters compile, link to the native bridge, preserve literal text, and resolve directly at package root (`TraceLog`, `TextFormat`).
 * **Negative**: Variadic arguments are not accepted at the Solix boundary, and callback/pointer-to-pointer APIs remain explicitly classified as unsupported rather than being generated with unsafe signatures.
 
 ### Case 4.8: Raylib Value-Type Structural Equality [IMPLEMENTED]

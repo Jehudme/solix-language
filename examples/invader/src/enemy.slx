@@ -48,52 +48,52 @@ public class InvaderAlien {
 
         if (this.alien_type == InvaderType::SQUID) {
             // Squid: sleek triangular head with two eyes and dual tentacles
-            Raylib::DrawRectangle(center_int_x - 6, center_int_y - 8, 12, 10, alien_color);
-            Raylib::DrawRectangle(center_int_x - 10, center_int_y - 4, 20, 6, alien_color);
+            DrawRectangle(center_int_x - 6, center_int_y - 8, 12, 10, alien_color);
+            DrawRectangle(center_int_x - 10, center_int_y - 4, 20, 6, alien_color);
             // Eyes
-            Raylib::DrawRectangle(center_int_x - 4, center_int_y - 3, 2, 2, Color::BLACK);
-            Raylib::DrawRectangle(center_int_x + 2, center_int_y - 3, 2, 2, Color::BLACK);
+            DrawRectangle(center_int_x - 4, center_int_y - 3, 2, 2, Color::BLACK);
+            DrawRectangle(center_int_x + 2, center_int_y - 3, 2, 2, Color::BLACK);
             // Animated tentacles
             if (anim_frame == 0) {
-                Raylib::DrawRectangle(center_int_x - 8, center_int_y + 4, 4, 6, alien_color);
-                Raylib::DrawRectangle(center_int_x + 4, center_int_y + 4, 4, 6, alien_color);
+                DrawRectangle(center_int_x - 8, center_int_y + 4, 4, 6, alien_color);
+                DrawRectangle(center_int_x + 4, center_int_y + 4, 4, 6, alien_color);
             } else {
-                Raylib::DrawRectangle(center_int_x - 4, center_int_y + 4, 8, 6, alien_color);
+                DrawRectangle(center_int_x - 4, center_int_y + 4, 8, 6, alien_color);
             }
         } else if (this.alien_type == InvaderType::CRAB) {
             // Crab: wide body, antenna claws, and walking legs
-            Raylib::DrawRectangle(center_int_x - 12, center_int_y - 5, 24, 10, alien_color);
-            Raylib::DrawRectangle(center_int_x - 8, center_int_y - 9, 16, 4, alien_color);
+            DrawRectangle(center_int_x - 12, center_int_y - 5, 24, 10, alien_color);
+            DrawRectangle(center_int_x - 8, center_int_y - 9, 16, 4, alien_color);
             // Eyes
-            Raylib::DrawRectangle(center_int_x - 6, center_int_y - 4, 3, 3, Color::BLACK);
-            Raylib::DrawRectangle(center_int_x + 3, center_int_y - 4, 3, 3, Color::BLACK);
+            DrawRectangle(center_int_x - 6, center_int_y - 4, 3, 3, Color::BLACK);
+            DrawRectangle(center_int_x + 3, center_int_y - 4, 3, 3, Color::BLACK);
             // Claws and legs
             if (anim_frame == 0) {
-                Raylib::DrawRectangle(center_int_x - 14, center_int_y - 8, 4, 6, alien_color);
-                Raylib::DrawRectangle(center_int_x + 10, center_int_y - 8, 4, 6, alien_color);
-                Raylib::DrawRectangle(center_int_x - 10, center_int_y + 5, 4, 5, alien_color);
-                Raylib::DrawRectangle(center_int_x + 6, center_int_y + 5, 4, 5, alien_color);
+                DrawRectangle(center_int_x - 14, center_int_y - 8, 4, 6, alien_color);
+                DrawRectangle(center_int_x + 10, center_int_y - 8, 4, 6, alien_color);
+                DrawRectangle(center_int_x - 10, center_int_y + 5, 4, 5, alien_color);
+                DrawRectangle(center_int_x + 6, center_int_y + 5, 4, 5, alien_color);
             } else {
-                Raylib::DrawRectangle(center_int_x - 14, center_int_y + 2, 4, 7, alien_color);
-                Raylib::DrawRectangle(center_int_x + 10, center_int_y + 2, 4, 7, alien_color);
-                Raylib::DrawRectangle(center_int_x - 6, center_int_y + 5, 12, 4, alien_color);
+                DrawRectangle(center_int_x - 14, center_int_y + 2, 4, 7, alien_color);
+                DrawRectangle(center_int_x + 10, center_int_y + 2, 4, 7, alien_color);
+                DrawRectangle(center_int_x - 6, center_int_y + 5, 12, 4, alien_color);
             }
         } else {
             // Octopus: broad dome, wide eyes, four undulating tentacles
-            Raylib::DrawRectangle(center_int_x - 10, center_int_y - 8, 20, 10, alien_color);
-            Raylib::DrawRectangle(center_int_x - 12, center_int_y - 4, 24, 7, alien_color);
+            DrawRectangle(center_int_x - 10, center_int_y - 8, 20, 10, alien_color);
+            DrawRectangle(center_int_x - 12, center_int_y - 4, 24, 7, alien_color);
             // Eyes
-            Raylib::DrawRectangle(center_int_x - 5, center_int_y - 3, 3, 3, Color::BLACK);
-            Raylib::DrawRectangle(center_int_x + 2, center_int_y - 3, 3, 3, Color::BLACK);
+            DrawRectangle(center_int_x - 5, center_int_y - 3, 3, 3, Color::BLACK);
+            DrawRectangle(center_int_x + 2, center_int_y - 3, 3, 3, Color::BLACK);
             // Tentacles
             if (anim_frame == 0) {
-                Raylib::DrawRectangle(center_int_x - 12, center_int_y + 4, 4, 6, alien_color);
-                Raylib::DrawRectangle(center_int_x - 4, center_int_y + 4, 3, 5, alien_color);
-                Raylib::DrawRectangle(center_int_x + 1, center_int_y + 4, 3, 5, alien_color);
-                Raylib::DrawRectangle(center_int_x + 8, center_int_y + 4, 4, 6, alien_color);
+                DrawRectangle(center_int_x - 12, center_int_y + 4, 4, 6, alien_color);
+                DrawRectangle(center_int_x - 4, center_int_y + 4, 3, 5, alien_color);
+                DrawRectangle(center_int_x + 1, center_int_y + 4, 3, 5, alien_color);
+                DrawRectangle(center_int_x + 8, center_int_y + 4, 4, 6, alien_color);
             } else {
-                Raylib::DrawRectangle(center_int_x - 8, center_int_y + 4, 5, 6, alien_color);
-                Raylib::DrawRectangle(center_int_x + 3, center_int_y + 4, 5, 6, alien_color);
+                DrawRectangle(center_int_x - 8, center_int_y + 4, 5, 6, alien_color);
+                DrawRectangle(center_int_x + 3, center_int_y + 4, 5, 6, alien_color);
             }
         }
     }
@@ -153,14 +153,14 @@ public class MothershipUfo {
         int32 center_int_y = (int32)(this.pos_y + 9.0);
 
         // Flying saucer main disk
-        Raylib::DrawRectangle(center_int_x - 22, center_int_y - 2, 44, 7, ufo_crimson);
-        Raylib::DrawRectangle(center_int_x - 14, center_int_y - 6, 28, 5, ufo_core);
+        DrawRectangle(center_int_x - 22, center_int_y - 2, 44, 7, ufo_crimson);
+        DrawRectangle(center_int_x - 14, center_int_y - 6, 28, 5, ufo_core);
         // Cockpit dome
-        Raylib::DrawRectangle(center_int_x - 6, center_int_y - 8, 12, 3, cockpit_cyan);
+        DrawRectangle(center_int_x - 6, center_int_y - 8, 12, 3, cockpit_cyan);
         // Underbody landing lights
-        Raylib::DrawRectangle(center_int_x - 16, center_int_y + 5, 4, 3, Color::YELLOW);
-        Raylib::DrawRectangle(center_int_x - 2, center_int_y + 5, 4, 3, Color::YELLOW);
-        Raylib::DrawRectangle(center_int_x + 12, center_int_y + 5, 4, 3, Color::YELLOW);
+        DrawRectangle(center_int_x - 16, center_int_y + 5, 4, 3, Color::YELLOW);
+        DrawRectangle(center_int_x - 2, center_int_y + 5, 4, 3, Color::YELLOW);
+        DrawRectangle(center_int_x + 12, center_int_y + 5, 4, 3, Color::YELLOW);
     }
 }
 

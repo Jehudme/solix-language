@@ -4,11 +4,11 @@ import raylib.*;
 
 public class Main {
     public static int32 main() {
-        Raylib::InitWindow(600, 600, "pong");
+        InitWindow(600, 600, "pong");
         
         while(!WindowShouldClose()) {
-            Raylib::BeginDrawing();
-            Raylib::EndDrawing();
+            BeginDrawing();
+            EndDrawing();
         }
 
         return 0;

@@ -83,18 +83,18 @@ public class Projectile {
                 bounding_rect.width + 4.0,
                 bounding_rect.height
             );
-            Raylib::DrawRectangleRounded(glow_rect, 0.4, 4, this.glow_color);
-            Raylib::DrawRectangleRounded(bounding_rect, 0.4, 4, this.core_color);
+            DrawRectangleRounded(glow_rect, 0.4, 4, this.glow_color);
+            DrawRectangleRounded(bounding_rect, 0.4, 4, this.core_color);
         } else {
             // Zigzag alien plasma bomb
-            Raylib::DrawRectangleRounded(bounding_rect, 0.5, 4, this.glow_color);
+            DrawRectangleRounded(bounding_rect, 0.5, 4, this.glow_color);
             Rectangle inner_core = new Rectangle(
                 bounding_rect.x + 1.0,
                 bounding_rect.y + 1.0,
                 bounding_rect.width - 2.0,
                 bounding_rect.height - 2.0
             );
-            Raylib::DrawRectangleRounded(inner_core, 0.5, 4, this.core_color);
+            DrawRectangleRounded(inner_core, 0.5, 4, this.core_color);
         }
     }
 }

@@ -38,45 +38,45 @@ public class TestRunner {
         // Test 6: CheckCollisionPointRec with Vector2 and Rectangle (verifies float32 IEEE-754 bit-encoding)
         Vector2 test_point = new Vector2((float32)50.0, (float32)50.0);
         Rectangle collision_rect = new Rectangle((float32)0.0, (float32)0.0, (float32)100.0, (float32)100.0);
-        bool collision_result = Raylib::CheckCollisionPointRec(test_point, collision_rect);
+        bool collision_result = CheckCollisionPointRec(test_point, collision_rect);
         if (!collision_result) {
             return 7;
         }
         Vector2 outside_point = new Vector2((float32)150.0, (float32)50.0);
-        bool outside_result = Raylib::CheckCollisionPointRec(outside_point, collision_rect);
+        bool outside_result = CheckCollisionPointRec(outside_point, collision_rect);
         if (outside_result) {
             return 12;
         }
 
-        // Test 7: Raylib version constants
-        int32 version_major = Raylib::RAYLIB_VERSION_MAJOR;
+        // Test 7: Raylib version constants exported at package root
+        int32 version_major = RAYLIB_VERSION_MAJOR;
         if (version_major != 6) {
             return 8;
         }
 
         // Test 8: Native Raylib API calls (Trace log level & window querying)
-        Raylib::SetTraceLogLevel(TraceLogLevel::LOG_NONE);
-        bool window_ready_before = Raylib::IsWindowReady();
+        SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+        bool window_ready_before = IsWindowReady();
         if (window_ready_before) {
             return 9;
         }
 
-        // Test 9: Top-level free-function binding aliases
-        set_trace_log_level(TraceLogLevel::LOG_NONE);
-        bool window_ready_alias = is_window_ready();
-        if (window_ready_alias) {
+        // Test 9: Package-qualified root PascalCase Raylib calls
+        raylib::SetTraceLogLevel(TraceLogLevel::LOG_NONE);
+        bool window_ready_qualified = raylib::IsWindowReady();
+        if (window_ready_qualified) {
             return 10;
         }
 
         // Test 10: Window lifecycle initialization and closure
-        Raylib::InitWindow(320, 240, "Solix Raylib Conformance Test");
-        bool window_ready_after = Raylib::IsWindowReady();
+        InitWindow(320, 240, "Solix Raylib Conformance Test");
+        bool window_ready_after = IsWindowReady();
         if (!window_ready_after) {
-            Raylib::CloseWindow();
+            CloseWindow();
             return 11;
         }
 
-        Raylib::CloseWindow();
+        CloseWindow();
 
         // Test 11: float32 array allocation and indexing
         float32[] float_elements = new float32[4];
@@ -99,7 +99,7 @@ public class TestRunner {
         Vector3 sphere_center = new Vector3((float32)0.0, (float32)10.0, (float32)0.0);
         float32 sphere_radius = (float32)2.0;
 
-        RayCollision ray_collision = Raylib::GetRayCollisionSphere(test_ray, sphere_center, sphere_radius);
+        RayCollision ray_collision = GetRayCollisionSphere(test_ray, sphere_center, sphere_radius);
         if (!ray_collision.hit) {
             return 14;
         }

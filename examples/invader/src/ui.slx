@@ -13,34 +13,34 @@ public class UserInterface {
         Color cyan_score = new Color(0, 229, 255, 255);
         Color gold_high = new Color(255, 214, 0, 255);
 
-        Raylib::DrawText("SCORE< 1 >", 45, 14, 18, label_gray);
-        Raylib::DrawText("" + current_score, 50, 34, 22, cyan_score);
+        DrawText("SCORE< 1 >", 45, 14, 18, label_gray);
+        DrawText("" + current_score, 50, 34, 22, cyan_score);
 
-        Raylib::DrawText("HI-SCORE", 345, 14, 18, label_gray);
-        Raylib::DrawText("" + high_score, 360, 34, 22, gold_high);
+        DrawText("HI-SCORE", 345, 14, 18, label_gray);
+        DrawText("" + high_score, 360, 34, 22, gold_high);
 
-        Raylib::DrawText("WAVE", 690, 14, 18, label_gray);
-        Raylib::DrawText("" + wave_number, 705, 34, 22, Color::WHITE);
+        DrawText("WAVE", 690, 14, 18, label_gray);
+        DrawText("" + wave_number, 705, 34, 22, Color::WHITE);
 
         // Arcade boundary green line
         Color laser_boundary = new Color(0, 230, 118, 120);
-        Raylib::DrawLine(20, 615, 780, 615, laser_boundary);
+        DrawLine(20, 615, 780, 615, laser_boundary);
 
         // Bottom status row: Lives icons and Mute status
-        Raylib::DrawText("" + lives, 35, 624, 18, Color::WHITE);
+        DrawText("" + lives, 35, 624, 18, Color::WHITE);
         for (int32 life_icon_idx = 0; life_icon_idx < lives && life_icon_idx < 5; life_icon_idx = life_icon_idx + 1) {
             int32 icon_origin_x = 60 + (life_icon_idx * 30);
             Color icon_green = new Color(0, 230, 118, 255);
-            Raylib::DrawRectangle(icon_origin_x, 626, 18, 8, icon_green);
-            Raylib::DrawRectangle(icon_origin_x + 7, 622, 4, 5, icon_green);
+            DrawRectangle(icon_origin_x, 626, 18, 8, icon_green);
+            DrawRectangle(icon_origin_x + 7, 622, 4, 5, icon_green);
         }
 
         if (is_muted) {
             Color muted_tint = new Color(255, 82, 82, 220);
-            Raylib::DrawText("[ AUDIO: MUTED (M) ]", 600, 624, 16, muted_tint);
+            DrawText("[ AUDIO: MUTED (M) ]", 600, 624, 16, muted_tint);
         } else {
             Color sound_tint = new Color(140, 160, 200, 180);
-            Raylib::DrawText("[ AUDIO: ON (M) ]", 615, 624, 16, sound_tint);
+            DrawText("[ AUDIO: ON (M) ]", 615, 624, 16, sound_tint);
         }
     }
 
@@ -50,106 +50,106 @@ public class UserInterface {
         }
         Color scanline_tint = new Color(0, 0, 0, 24);
         for (int32 line_y = 0; line_y < 650; line_y = line_y + 4) {
-            Raylib::DrawLine(0, line_y, 800, line_y, scanline_tint);
+            DrawLine(0, line_y, 800, line_y, scanline_tint);
         }
     }
 
     public void render_title_screen(int32 high_score) {
         // Semi-transparent backdrop
-        Raylib::DrawRectangle(0, 0, 800, 650, new Color(10, 12, 20, 230));
+        DrawRectangle(0, 0, 800, 650, new Color(10, 12, 20, 230));
 
         // Arcade Title
         Color neon_cyan = new Color(0, 229, 255, 255);
         Color neon_purple = new Color(224, 64, 251, 255);
-        Raylib::DrawText("SOLIX INVADERS", 220, 95, 46, neon_cyan);
-        Raylib::DrawText("CYBER ARCADE 1978 REBORN", 270, 150, 18, neon_purple);
+        DrawText("SOLIX INVADERS", 220, 95, 46, neon_cyan);
+        DrawText("CYBER ARCADE 1978 REBORN", 270, 150, 18, neon_purple);
 
         // Point values table
         Color card_bg = new Color(18, 22, 36, 255);
         Rectangle table_rect = new Rectangle(200.0, 195.0, 400.0, 240.0);
-        Raylib::DrawRectangleRounded(table_rect, 0.08, 6, card_bg);
-        Raylib::DrawRectangleRoundedLines(table_rect, 0.08, 6, neon_purple);
+        DrawRectangleRounded(table_rect, 0.08, 6, card_bg);
+        DrawRectangleRoundedLines(table_rect, 0.08, 6, neon_purple);
 
-        Raylib::DrawText("* SCORE ADVANCE TABLE *", 275, 215, 18, Color::WHITE);
+        DrawText("* SCORE ADVANCE TABLE *", 275, 215, 18, Color::WHITE);
 
         // Mothership row
-        Raylib::DrawRectangle(250, 258, 26, 8, new Color(255, 23, 68, 255));
-        Raylib::DrawText("= ?  MYSTERY", 310, 252, 20, new Color(255, 64, 129, 255));
+        DrawRectangle(250, 258, 26, 8, new Color(255, 23, 68, 255));
+        DrawText("= ?  MYSTERY", 310, 252, 20, new Color(255, 64, 129, 255));
 
         // Squid row
-        Raylib::DrawRectangle(252, 298, 20, 14, new Color(224, 64, 251, 255));
-        Raylib::DrawText("= 30 POINTS", 310, 294, 20, new Color(224, 64, 251, 255));
+        DrawRectangle(252, 298, 20, 14, new Color(224, 64, 251, 255));
+        DrawText("= 30 POINTS", 310, 294, 20, new Color(224, 64, 251, 255));
 
         // Crab row
-        Raylib::DrawRectangle(250, 340, 24, 12, new Color(0, 229, 255, 255));
-        Raylib::DrawText("= 20 POINTS", 310, 336, 20, new Color(0, 229, 255, 255));
+        DrawRectangle(250, 340, 24, 12, new Color(0, 229, 255, 255));
+        DrawText("= 20 POINTS", 310, 336, 20, new Color(0, 229, 255, 255));
 
         // Octopus row
-        Raylib::DrawRectangle(250, 382, 24, 12, new Color(255, 214, 0, 255));
-        Raylib::DrawText("= 10 POINTS", 310, 378, 20, new Color(255, 214, 0, 255));
+        DrawRectangle(250, 382, 24, 12, new Color(255, 214, 0, 255));
+        DrawText("= 10 POINTS", 310, 378, 20, new Color(255, 214, 0, 255));
 
         // Controls guidance
         Color green_prompt = new Color(0, 230, 118, 255);
-        Raylib::DrawText("[ SPACE ] or [ ENTER ] - Insert Coin & Play", 205, 465, 20, green_prompt);
-        Raylib::DrawText("Controls: [ LEFT / RIGHT / A / D ] Move   [ SPACE ] Fire", 160, 505, 18, Color::WHITE);
-        Raylib::DrawText("[ P ] Pause   [ M ] Mute Sound   [ C ] CRT Scanlines", 175, 535, 18, new Color(140, 160, 200, 255));
+        DrawText("[ SPACE ] or [ ENTER ] - Insert Coin & Play", 205, 465, 20, green_prompt);
+        DrawText("Controls: [ LEFT / RIGHT / A / D ] Move   [ SPACE ] Fire", 160, 505, 18, Color::WHITE);
+        DrawText("[ P ] Pause   [ M ] Mute Sound   [ C ] CRT Scanlines", 175, 535, 18, new Color(140, 160, 200, 255));
 
         if (high_score > 0) {
-            Raylib::DrawText("ALL-TIME HIGH SCORE: " + high_score, 275, 580, 18, new Color(255, 214, 0, 255));
+            DrawText("ALL-TIME HIGH SCORE: " + high_score, 275, 580, 18, new Color(255, 214, 0, 255));
         }
     }
 
     public void render_pause_screen() {
-        Raylib::DrawRectangle(0, 0, 800, 650, new Color(10, 12, 20, 200));
+        DrawRectangle(0, 0, 800, 650, new Color(10, 12, 20, 200));
 
         Rectangle pause_card = new Rectangle(230.0, 200.0, 340.0, 220.0);
         Color card_bg = new Color(18, 22, 36, 255);
-        Raylib::DrawRectangleRounded(pause_card, 0.1, 6, card_bg);
+        DrawRectangleRounded(pause_card, 0.1, 6, card_bg);
 
         Color cyan_border = new Color(0, 229, 255, 255);
-        Raylib::DrawRectangleRoundedLines(pause_card, 0.1, 6, cyan_border);
+        DrawRectangleRoundedLines(pause_card, 0.1, 6, cyan_border);
 
-        Raylib::DrawText("GAME PAUSED", 285, 235, 34, cyan_border);
-        Raylib::DrawText("[ P / ESC ]  - Resume Mission", 270, 295, 18, Color::WHITE);
-        Raylib::DrawText("[ R ]        - Restart Wave", 270, 330, 18, Color::WHITE);
-        Raylib::DrawText("[ Q ]        - Return to Menu", 270, 365, 18, Color::WHITE);
+        DrawText("GAME PAUSED", 285, 235, 34, cyan_border);
+        DrawText("[ P / ESC ]  - Resume Mission", 270, 295, 18, Color::WHITE);
+        DrawText("[ R ]        - Restart Wave", 270, 330, 18, Color::WHITE);
+        DrawText("[ Q ]        - Return to Menu", 270, 365, 18, Color::WHITE);
     }
 
     public void render_game_over_screen(bool is_victory, int32 final_score, int32 high_score, int32 wave_num) {
-        Raylib::DrawRectangle(0, 0, 800, 650, new Color(10, 12, 20, 220));
+        DrawRectangle(0, 0, 800, 650, new Color(10, 12, 20, 220));
 
         Rectangle modal_rect = new Rectangle(200.0, 150.0, 400.0, 340.0);
         Color card_bg = new Color(18, 22, 36, 255);
-        Raylib::DrawRectangleRounded(modal_rect, 0.1, 6, card_bg);
+        DrawRectangleRounded(modal_rect, 0.1, 6, card_bg);
 
         Color theme_color = new Color(255, 23, 68, 255); // Crimson for Game Over
         if (is_victory) {
             theme_color = new Color(0, 230, 118, 255); // Green for Victory
         }
-        Raylib::DrawRectangleRoundedLines(modal_rect, 0.1, 6, theme_color);
+        DrawRectangleRoundedLines(modal_rect, 0.1, 6, theme_color);
 
         if (is_victory) {
-            Raylib::DrawText("WAVE DEFENDED!", 255, 185, 36, theme_color);
-            Raylib::DrawText("EARTH IS SAFE... FOR NOW", 270, 230, 18, Color::WHITE);
+            DrawText("WAVE DEFENDED!", 255, 185, 36, theme_color);
+            DrawText("EARTH IS SAFE... FOR NOW", 270, 230, 18, Color::WHITE);
         } else {
-            Raylib::DrawText("GAME OVER", 285, 185, 42, theme_color);
-            Raylib::DrawText("EARTH HAS BEEN INVADED!", 265, 230, 18, Color::WHITE);
+            DrawText("GAME OVER", 285, 185, 42, theme_color);
+            DrawText("EARTH HAS BEEN INVADED!", 265, 230, 18, Color::WHITE);
         }
 
-        Raylib::DrawText("FINAL SCORE: " + final_score, 290, 280, 22, Color::WHITE);
+        DrawText("FINAL SCORE: " + final_score, 290, 280, 22, Color::WHITE);
 
         if (final_score >= high_score && final_score > 0) {
             Color gold_glow = new Color(255, 214, 0, 255);
-            Raylib::DrawText("★ NEW HIGH SCORE RECORD! ★", 235, 315, 20, gold_glow);
+            DrawText("★ NEW HIGH SCORE RECORD! ★", 235, 315, 20, gold_glow);
         } else {
             Color gray_text = new Color(140, 160, 200, 255);
-            Raylib::DrawText("HIGH SCORE: " + high_score, 310, 315, 18, gray_text);
+            DrawText("HIGH SCORE: " + high_score, 310, 315, 18, gray_text);
         }
 
-        Raylib::DrawText("WAVES SURVIVED: " + wave_num, 295, 350, 18, Color::WHITE);
+        DrawText("WAVES SURVIVED: " + wave_num, 295, 350, 18, Color::WHITE);
 
         Color green_prompt = new Color(0, 230, 118, 255);
-        Raylib::DrawText("[ SPACE ] or [ R ] - Play Again", 260, 400, 18, green_prompt);
-        Raylib::DrawText("[ Q ]              - Return to Menu", 260, 435, 18, Color::WHITE);
+        DrawText("[ SPACE ] or [ R ] - Play Again", 260, 400, 18, green_prompt);
+        DrawText("[ Q ]              - Return to Menu", 260, 435, 18, Color::WHITE);
     }
 }
