@@ -27,7 +27,7 @@ int32 result = MathBridge::fast_add(15, 27);
 
 ## 2. Stable C-ABI: `SolixCValue`
 
-Values are passed across the native boundary using the `SolixCValue` structure (exact size 16 bytes, 8-byte alignment, defined identically in [`ffi/rust`](../../ffi/rust/src/value.rs) and [`ffi/c/include/solix_ffi.h`](../../ffi/c/include/solix_ffi.h)):
+Values are passed across the native boundary using the `SolixCValue` structure (exact size 16 bytes, 8-byte alignment, defined identically in [`ffi/rust`](../../ffi/rust/src/value.rs) and [`ffi/c/include/solix_ffi.h`](../../ffi/c/include/solix_ffi.h)). Both `solix-ffi` and `solix::ffi` maintain lockstep release versions synchronized by [`prepare_release_train.py`](../../scripts/release/prepare_release_train.py) while keeping `ffi/rust/Cargo.toml` standalone-mountable inside Docker cross containers:
 
 ```rust
 #[repr(C)]

@@ -969,6 +969,35 @@ class SolixBenchCliTests(unittest.TestCase):
         ):
             self.assertIn(required_triple, release_text)
 
+        for crate_manifest in (
+            "crates/solix-common/Cargo.toml",
+            "crates/solix-compilation/Cargo.toml",
+            "crates/solix-runtime/Cargo.toml",
+        ):
+            manifest_text = (REPO_ROOT / crate_manifest).read_text(encoding="utf-8")
+            self.assertIn("version.workspace = true", manifest_text, crate_manifest)
+
+        ffi_manifest_text = (REPO_ROOT / "ffi/rust/Cargo.toml").read_text(encoding="utf-8")
+        self.assertNotIn(".workspace = true", ffi_manifest_text)
+        sys.path.insert(0, str(SCRIPTS_DIR / "release"))
+        try:
+            import prepare_release_train  # noqa: E402
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                sandbox = Path(tmp_dir)
+                (sandbox / "ffi" / "rust").mkdir(parents=True)
+                (sandbox / "ffi" / "rust" / "Cargo.toml").write_text(
+                    ffi_manifest_text, encoding="utf-8"
+                )
+                prepare_release_train.update_rust_ffi_version(sandbox, "9.8.7")
+                bumped = (sandbox / "ffi" / "rust" / "Cargo.toml").read_text(encoding="utf-8")
+                self.assertIn('version = "9.8.7"', bumped)
+        finally:
+            if str(SCRIPTS_DIR / "release") in sys.path:
+                sys.path.remove(str(SCRIPTS_DIR / "release"))
+
+        self.assertIn("Verified release version parity:", release_text)
+
         for cross_toml_rel in (
             "libraries/raylib/natives/raylib/Cross.toml",
             "libraries/solixlib/natives/solixlib_native/Cross.toml",

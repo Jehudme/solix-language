@@ -327,8 +327,6 @@ jobs:
         with:
           path: crates/solix-toolchain/assets/packages
           key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
-          restore-keys: |
-            solix-bundled-${{ runner.os }}-
 
       - name: Build solix toolchain binary
         run: cargo build --bin solix

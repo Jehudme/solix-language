@@ -1317,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "solix-ffi"
-version = "2.0.1"
+version = "3.0.0"
 
 [[package]]
 name = "solix-lsp"

@@ -190,6 +190,7 @@ jobs:
           # Tag vX.Y.Z is not pushed until the next step, so generated template tests
           # must point at `dev` during this pre-tag verification step.
           SOLIX_FFI_GIT_TAG: dev
+          NEXT_VER: ${{ steps.bump.outputs.version }}
         run: |
           python3 scripts/docs/build_docs_site.py
           cargo build --bin solix
@@ -200,8 +201,31 @@ jobs:
           SOLIX_BIN="$(pwd)/target/debug/solix"
           export SOLIX_BIN
           cargo test --workspace --locked
+          python3 - "$NEXT_VER" <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          expected_version = sys.argv[1]
+          meta = json.loads(
+              subprocess.check_output(
+                  ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+                  text=True,
+              )
+          )
+          versions = {pkg["name"]: pkg["version"] for pkg in meta["packages"]}
+          for crate_name in ("solix-common", "solix-ffi", "solix-compilation", "solix-runtime"):
+              actual_version = versions.get(crate_name)
+              if actual_version != expected_version:
+                  raise SystemExit(
+                      f"ERROR: crate '{crate_name}' version '{actual_version}' != release target '{expected_version}'"
+                  )
+              print(f"Verified release version parity: {crate_name} == {actual_version}")
+          PY
           cargo package -p solix-common --locked --allow-dirty
           cargo package -p solix-ffi --locked --allow-dirty
+          cargo package -p solix-compilation --no-verify --locked --allow-dirty
+          cargo package -p solix-runtime --no-verify --locked --allow-dirty
           git checkout -- crates/solix-toolchain/assets/docs 2>/dev/null || true
 
       - id: promote # zizmor: ignore[use-trusted-publishing]
@@ -222,7 +246,7 @@ jobs:
 
           git config user.name "solix-release-bot"
           git config user.email "release-bot@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock CHANGELOG.md crates/*/CHANGELOG.md ffi/rust/CHANGELOG.md ffi/c/CHANGELOG.md ffi/c/CMakeLists.txt ffi/c/include/solix_ffi.h libraries/*/manifest.yaml libraries/*/CHANGELOG.md examples/*/manifest.yaml examples/*/CHANGELOG.md crates/solix-toolchain/assets/packages editors/vscode/package.json editors/vscode/package-lock.json crates/solix-toolchain/assets/vscode/solix-language.vsix
+          git add Cargo.toml Cargo.lock CHANGELOG.md crates/*/CHANGELOG.md ffi/rust/Cargo.toml ffi/rust/CHANGELOG.md ffi/c/CHANGELOG.md ffi/c/CMakeLists.txt ffi/c/include/solix_ffi.h libraries/*/manifest.yaml libraries/*/CHANGELOG.md examples/*/manifest.yaml examples/*/CHANGELOG.md crates/solix-toolchain/assets/packages editors/vscode/package.json editors/vscode/package-lock.json crates/solix-toolchain/assets/vscode/solix-language.vsix
           if ! git diff --cached --quiet; then
             git commit -m "chore(release): release ${NEXT_VER}"
           fi

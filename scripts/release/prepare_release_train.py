@@ -43,6 +43,10 @@ CHANGELOG_FILES = (
 CMAKE_FFI_VERSION_RE = re.compile(
     r"(project\(\s*solix_ffi\s+VERSION\s+)(\d+\.\d+\.\d+)(\s+LANGUAGES\b)"
 )
+RUST_FFI_VERSION_RE = re.compile(
+    r'(\[package\]\s*(?:[^\[]*?\n)?version\s*=\s*")([^"]+)(")',
+    re.MULTILINE,
+)
 HEADER_FFI_VERSION_RE = re.compile(
     r'(#define\s+SOLIX_FFI_VERSION\s+")(\d+\.\d+\.\d+)(")'
 )
@@ -302,6 +306,18 @@ def update_c_ffi_version(repo_root: Path, new_version: str) -> None:
         header_path.write_text(updated_header, encoding="utf-8")
 
 
+def update_rust_ffi_version(repo_root: Path, new_version: str) -> None:
+    """Updates `ffi/rust/Cargo.toml` standalone package version in lockstep with the workspace."""
+    cargo_path = repo_root / "ffi" / "rust" / "Cargo.toml"
+    if not cargo_path.is_file():
+        return
+    cargo_text = cargo_path.read_text(encoding="utf-8")
+    updated_cargo, subs = RUST_FFI_VERSION_RE.subn(rf"\g<1>{new_version}\g<3>", cargo_text, count=1)
+    if subs != 1:
+        raise RuntimeError(f"Failed to update solix-ffi package version in '{cargo_path}'")
+    cargo_path.write_text(updated_cargo, encoding="utf-8")
+
+
 def update_vscode_extension_version(repo_root: Path, new_version: str) -> None:
     """Updates `editors/vscode/package.json` and `package-lock.json` versions and stages vsix."""
     package_json_path = repo_root / "editors" / "vscode" / "package.json"
@@ -456,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.write and commits:
         update_cargo_toml_version(repo_root / "Cargo.toml", next_version)
         update_c_ffi_version(repo_root, next_version)
+        update_rust_ffi_version(repo_root, next_version)
         update_vscode_extension_version(repo_root, next_version)
         for rel_changelog in CHANGELOG_FILES:
             prepend_changelog_section(repo_root / rel_changelog, next_version, section_md)
