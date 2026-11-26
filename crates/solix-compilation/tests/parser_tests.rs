@@ -449,3 +449,48 @@ public class Main {
         "Must NOT emit InvalidTopLevelToken"
     );
 }
+
+#[test]
+fn test_class_member_synchronize_recovers_method_after_missing_semicolon() {
+    use solix_compilation::phases::parser::parse_source_resilient;
+    use solix_compilation::phases::parser::statements::declarations::{ClassMember, Declaration};
+
+    let source = r#"
+public class BrokenFieldClass {
+    public int32 missing_semi
+    public void valid_method() {
+        int32 ok = 1;
+    }
+}
+"#;
+    let tokens = lex_source(0, source).expect("Lexing source must succeed");
+    let (ast, errors) = parse_source_resilient(0, &tokens, source);
+    assert!(
+        !errors.is_empty(),
+        "Missing semicolon on field must emit a parse diagnostic"
+    );
+
+    let class_decl = ast
+        .declarations
+        .iter()
+        .find_map(|decl| match decl {
+            Declaration::Class(class_decl) => Some(class_decl),
+            _ => None,
+        })
+        .expect("BrokenFieldClass should still be recovered in AST");
+
+    let method_names: Vec<&str> = class_decl
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            ClassMember::Method(method_decl) => Some(
+                &source[method_decl.name_span.start as usize..method_decl.name_span.end as usize],
+            ),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        method_names.contains(&"valid_method"),
+        "Parser::synchronize must stop at 'public' so 'valid_method' is recovered; found {method_names:?}"
+    );
+}

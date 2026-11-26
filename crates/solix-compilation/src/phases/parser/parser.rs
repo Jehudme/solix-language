@@ -339,7 +339,61 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
     }
 
     fn record_error(&mut self, error: ParsingError) {
+        let error_span = error.source_span();
+        let error_code = error.error_code();
+        if self.errors.iter().any(|existing| {
+            existing.error_code() == error_code && existing.source_span() == error_span
+        }) {
+            return;
+        }
         self.errors.push(error);
+    }
+
+    fn is_sync_token(&self, kind: TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::KeywordClass
+                | TokenKind::KeywordInterface
+                | TokenKind::KeywordEnum
+                | TokenKind::KeywordPackage
+                | TokenKind::KeywordImport
+                | TokenKind::KeywordAlias
+                | TokenKind::KeywordFor
+                | TokenKind::KeywordIf
+                | TokenKind::KeywordWhile
+                | TokenKind::KeywordDo
+                | TokenKind::KeywordSwitch
+                | TokenKind::KeywordReturn
+                | TokenKind::KeywordThrow
+                | TokenKind::KeywordBreak
+                | TokenKind::KeywordContinue
+                | TokenKind::KeywordConst
+                | TokenKind::KeywordAssert
+                | TokenKind::KeywordExit
+                | TokenKind::KeywordTry
+                | TokenKind::KeywordPublic
+                | TokenKind::KeywordProtected
+                | TokenKind::KeywordPrivate
+                | TokenKind::KeywordInternal
+                | TokenKind::KeywordStatic
+                | TokenKind::KeywordInline
+                | TokenKind::KeywordNative
+                | TokenKind::KeywordVirtual
+                | TokenKind::KeywordOverride
+                | TokenKind::KeywordWeak
+                | TokenKind::KeywordAbstract
+                | TokenKind::KeywordFinal
+                | TokenKind::KeywordExtern
+                | TokenKind::KeywordOperator
+                | TokenKind::PunctuationCloseBrace
+        ) || (kind == TokenKind::OperatorBitwiseNot && self.inside_class && !self.inside_function())
+    }
+
+    fn synchronize_after(&mut self, start_position: usize) {
+        if self.cursor.position > start_position && self.is_sync_token(self.cursor.peek_kind()) {
+            return;
+        }
+        self.synchronize();
     }
 
     fn synchronize(&mut self) {
@@ -352,23 +406,10 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             {
                 return;
             }
-            match self.cursor.peek_kind() {
-                TokenKind::KeywordClass
-                | TokenKind::KeywordInterface
-                | TokenKind::KeywordEnum
-                | TokenKind::KeywordPackage
-                | TokenKind::KeywordImport
-                | TokenKind::KeywordAlias
-                | TokenKind::KeywordFor
-                | TokenKind::KeywordIf
-                | TokenKind::KeywordWhile
-                | TokenKind::KeywordReturn
-                | TokenKind::KeywordTry
-                | TokenKind::PunctuationCloseBrace => return,
-                _ => {
-                    self.cursor.advance();
-                }
+            if self.is_sync_token(self.cursor.peek_kind()) {
+                return;
             }
+            self.cursor.advance();
         }
     }
 
@@ -430,39 +471,60 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
     }
 
-    /// Computes the Levenshtein edit distance between two string slices.
+    /// Computes the Levenshtein edit distance between two strings without heap allocation
+    /// for typical ASCII identifiers up to 32 bytes.
     fn levenshtein_distance(source: &str, target: &str) -> usize {
+        const MAX_STACK_LEN: usize = 32;
+        if source.is_ascii()
+            && target.is_ascii()
+            && source.len() <= MAX_STACK_LEN
+            && target.len() <= MAX_STACK_LEN
+        {
+            let source_bytes = source.as_bytes();
+            let target_bytes = target.as_bytes();
+            let target_length = target_bytes.len();
+            let mut prev_row = [0usize; MAX_STACK_LEN + 1];
+            let mut curr_row = [0usize; MAX_STACK_LEN + 1];
+
+            for (index, cell) in prev_row.iter_mut().enumerate().take(target_length + 1) {
+                *cell = index;
+            }
+
+            for (source_offset, &source_byte) in source_bytes.iter().enumerate() {
+                curr_row[0] = source_offset + 1;
+                for (target_offset, &target_byte) in target_bytes.iter().enumerate() {
+                    let substitution_cost = usize::from(source_byte != target_byte);
+                    let deletion = prev_row[target_offset + 1] + 1;
+                    let insertion = curr_row[target_offset] + 1;
+                    let substitution = prev_row[target_offset] + substitution_cost;
+                    curr_row[target_offset + 1] = deletion.min(insertion).min(substitution);
+                }
+                prev_row[..=target_length].copy_from_slice(&curr_row[..=target_length]);
+            }
+
+            return prev_row[target_length];
+        }
+
         let source_chars: Vec<char> = source.chars().collect();
         let target_chars: Vec<char> = target.chars().collect();
         let source_length = source_chars.len();
         let target_length = target_chars.len();
-
-        let mut distance_matrix = vec![vec![0usize; target_length + 1]; source_length + 1];
-
-        for (source_index, row) in distance_matrix.iter_mut().enumerate() {
-            row[0] = source_index;
-        }
-        for (target_index, cell) in distance_matrix[0].iter_mut().enumerate() {
-            *cell = target_index;
-        }
+        let mut prev_row: Vec<usize> = (0..=target_length).collect();
+        let mut curr_row = vec![0usize; target_length + 1];
 
         for source_index in 1..=source_length {
+            curr_row[0] = source_index;
             for target_index in 1..=target_length {
                 let substitution_cost =
-                    if source_chars[source_index - 1] == target_chars[target_index - 1] {
-                        0
-                    } else {
-                        1
-                    };
-                distance_matrix[source_index][target_index] = (distance_matrix[source_index - 1]
-                    [target_index]
-                    + 1)
-                .min(distance_matrix[source_index][target_index - 1] + 1)
-                .min(distance_matrix[source_index - 1][target_index - 1] + substitution_cost);
+                    usize::from(source_chars[source_index - 1] != target_chars[target_index - 1]);
+                curr_row[target_index] = (prev_row[target_index] + 1)
+                    .min(curr_row[target_index - 1] + 1)
+                    .min(prev_row[target_index - 1] + substitution_cost);
             }
+            std::mem::swap(&mut prev_row, &mut curr_row);
         }
 
-        distance_matrix[source_length][target_length]
+        prev_row[target_length]
     }
 
     fn parse_program(&mut self) -> ProgramAst {
@@ -1104,11 +1166,12 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         let mut members = Vec::new();
         while !self.cursor.check(TokenKind::PunctuationCloseBrace) && !self.cursor.is_at_end() {
+            let member_start_position = self.cursor.position;
             match self.parse_class_member() {
                 Ok(member) => members.push(member),
                 Err(error) => {
                     self.record_error(error);
-                    self.synchronize();
+                    self.synchronize_after(member_start_position);
                 }
             }
         }
@@ -1952,77 +2015,97 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
                 {
                     let ident_span = self.cursor.current_span();
                     let ident_text = self.get_lexeme(ident_span);
-                    let control_flow_keywords = ["while", "if", "for", "switch"];
+                    // Only recover `foo(...) { ... }` when the identifier can either fuzzily match
+                    // a control-flow keyword (length <= 8 since max keyword length is 6 + max distance 2)
+                    // or start an out-of-class constructor (`UpperCase(...) { ... }`).
+                    // Standard function/method calls end in ';' so they bypass Levenshtein completely.
+                    let starts_upper = ident_text
+                        .as_bytes()
+                        .first()
+                        .is_some_and(u8::is_ascii_uppercase);
+                    let could_be_keyword_typo = ident_text.len() <= 8;
 
-                    let mut best_keyword = None;
-                    let mut best_distance = usize::MAX;
-                    for candidate in control_flow_keywords {
-                        let distance = Self::levenshtein_distance(ident_text, candidate);
-                        if distance < best_distance {
-                            best_distance = distance;
-                            best_keyword = Some(candidate);
-                        }
-                    }
-
-                    let has_trailing_block = {
-                        let mut scan = self.cursor.position + 2;
-                        let mut paren_depth = 1;
-                        while scan < self.cursor.tokens.len() && paren_depth > 0 {
-                            match self.cursor.tokens[scan].kind {
-                                TokenKind::PunctuationOpenParen => paren_depth += 1,
-                                TokenKind::PunctuationCloseParen => paren_depth -= 1,
-                                _ => {}
+                    if could_be_keyword_typo || starts_upper {
+                        let has_trailing_block = {
+                            let mut scan = self.cursor.position + 2;
+                            let mut paren_depth = 1;
+                            while scan < self.cursor.tokens.len() && paren_depth > 0 {
+                                match self.cursor.tokens[scan].kind {
+                                    TokenKind::PunctuationOpenParen => paren_depth += 1,
+                                    TokenKind::PunctuationCloseParen => paren_depth -= 1,
+                                    _ => {}
+                                }
+                                scan += 1;
                             }
-                            scan += 1;
-                        }
-                        paren_depth == 0
-                            && scan < self.cursor.tokens.len()
-                            && self.cursor.tokens[scan].kind == TokenKind::PunctuationOpenBrace
-                    };
+                            paren_depth == 0
+                                && scan < self.cursor.tokens.len()
+                                && self.cursor.tokens[scan].kind == TokenKind::PunctuationOpenBrace
+                        };
 
-                    if has_trailing_block
-                        && best_distance <= 2
-                        && let Some(suggestion) = best_keyword
-                    {
-                        self.record_error(ParsingError::UnknownControlFlowKeyword {
-                            identifier: ident_text.to_string(),
-                            suggestion: suggestion.to_string(),
-                            span: ident_span.to_source_span(),
-                        });
-                        self.cursor.advance();
+                        if has_trailing_block {
+                            if could_be_keyword_typo {
+                                let control_flow_keywords = ["while", "if", "for", "switch"];
+                                let mut best_keyword = None;
+                                let mut best_distance = usize::MAX;
+                                for candidate in control_flow_keywords {
+                                    if ident_text.len().abs_diff(candidate.len()) > 2 {
+                                        continue;
+                                    }
+                                    let distance =
+                                        Self::levenshtein_distance(ident_text, candidate);
+                                    if distance < best_distance {
+                                        best_distance = distance;
+                                        best_keyword = Some(candidate);
+                                    }
+                                }
 
-                        let _ = self.cursor.match_token(TokenKind::PunctuationOpenParen);
-                        let mut paren_depth = 1;
-                        while !self.cursor.is_at_end() && paren_depth > 0 {
-                            if self.cursor.check(TokenKind::PunctuationOpenParen) {
-                                paren_depth += 1;
-                            } else if self.cursor.check(TokenKind::PunctuationCloseParen) {
-                                paren_depth -= 1;
+                                if best_distance <= 2
+                                    && let Some(suggestion) = best_keyword
+                                {
+                                    self.record_error(ParsingError::UnknownControlFlowKeyword {
+                                        identifier: ident_text.to_string(),
+                                        suggestion: suggestion.to_string(),
+                                        span: ident_span.to_source_span(),
+                                    });
+                                    self.cursor.advance();
+
+                                    let _ =
+                                        self.cursor.match_token(TokenKind::PunctuationOpenParen);
+                                    let mut paren_depth = 1;
+                                    while !self.cursor.is_at_end() && paren_depth > 0 {
+                                        if self.cursor.check(TokenKind::PunctuationOpenParen) {
+                                            paren_depth += 1;
+                                        } else if self
+                                            .cursor
+                                            .check(TokenKind::PunctuationCloseParen)
+                                        {
+                                            paren_depth -= 1;
+                                        }
+                                        self.cursor.advance();
+                                    }
+
+                                    let block = self.parse_block()?;
+                                    if self.cursor.check(TokenKind::PunctuationSemicolon) {
+                                        self.cursor.advance();
+                                    }
+                                    return Ok(vec![Statement::Block(block)]);
+                                }
                             }
-                            self.cursor.advance();
-                        }
 
-                        let block = self.parse_block()?;
-                        if self.cursor.check(TokenKind::PunctuationSemicolon) {
-                            self.cursor.advance();
+                            if starts_upper {
+                                let name_span = self
+                                    .cursor
+                                    .advance()
+                                    .map(|token| token.span)
+                                    .unwrap_or_default();
+                                let ctor =
+                                    self.parse_constructor_declaration(Vec::new(), name_span)?;
+                                self.record_error(ParsingError::ConstructorOutsideClass {
+                                    span: ctor.span.to_source_span(),
+                                });
+                                return Ok(vec![Statement::Block(ctor.body)]);
+                            }
                         }
-                        return Ok(vec![Statement::Block(block)]);
-                    } else if has_trailing_block
-                        && ident_text
-                            .chars()
-                            .next()
-                            .is_some_and(|character| character.is_ascii_uppercase())
-                    {
-                        let name_span = self
-                            .cursor
-                            .advance()
-                            .map(|token| token.span)
-                            .unwrap_or_default();
-                        let ctor = self.parse_constructor_declaration(Vec::new(), name_span)?;
-                        self.record_error(ParsingError::ConstructorOutsideClass {
-                            span: ctor.span.to_source_span(),
-                        });
-                        return Ok(vec![Statement::Block(ctor.body)]);
                     }
                 }
 
