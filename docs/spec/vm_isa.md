@@ -107,9 +107,11 @@ Used for static, direct, and virtual function dispatch:
 | `0x1B` | `DivF64` | A | `dst, src1, src2` | 64-bit floating division. |
 | `0x1C` | `ModI32` | A | `dst, src1, src2` | Modulo remainder (traps on divide by zero; wrapping on `i32::MIN % -1`). |
 | `0x1D` | `ModI64` | A | `dst, src1, src2` | Modulo remainder (traps on divide by zero; wrapping on `i64::MIN % -1`). |
-| `0x1E` | `NegI32` | A | `dst, src1` | Negation: `dst = -src1`. |
-| `0x1F` | `NegI64` | A | `dst, src1` | Negation: `dst = -src1`. |
+| `0x1E` | `NegI32` | A | `dst, src1` | Negation: `dst = -src1` (two's-complement wrapping on `i32::MIN`). |
+| `0x1F` | `NegI64` | A | `dst, src1` | Negation: `dst = -src1` (two's-complement wrapping on `i64::MIN`). |
 | `0x20` | `NegF64` | A | `dst, src1` | Negation: `dst = -src1`. |
+
+> Signed arithmetic opcodes (`DivI32`, `DivI64`, `ModI32`, `ModI64`, `NegI32`, `NegI64`) trap strictly on division/modulo by zero and use defined two's-complement wrapping semantics on minimum-value overflow in both default and `--safe` execution modes. Set `SOLIX_TRACE_TRAPS=1` to emit rust backtraces when a `NullReferenceAccess` trap is constructed.
 
 ### 3.3. Bitwise & Logic Operations (`0x21` .. `0x2F`)
 | Opcode Hex | Name | Format | Operands | Description |

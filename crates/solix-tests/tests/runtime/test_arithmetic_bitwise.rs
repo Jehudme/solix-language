@@ -234,3 +234,64 @@ fn test_eq_string_heap_comparison() {
     let res = vm.run().expect("Execution failed");
     assert_eq!(res, Value::Bool(true));
 }
+
+#[test]
+fn test_i64_out_of_range_rejected_by_i32_and_u32_reads() {
+    // Regression test (#292.1): Value::I64 outside i32/u32 bounds must trap instead of truncating.
+    let make_program_and_run = |opcode: OpCode, rhs_i64: i64| -> Result<Value, RuntimeError> {
+        let mut binary = BinaryProgram::new();
+        let overflow_const = binary
+            .constant_pool
+            .add_i64(rhs_i64)
+            .expect("add i64 const");
+
+        let mut func = CompiledFunction::new("main", 0, 0, 4);
+        func.instructions
+            .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 0, 1));
+        func.instructions.push(Instruction::format_b(
+            OpCode::LoadConst,
+            0,
+            1,
+            overflow_const as u32,
+        ));
+        func.instructions
+            .push(Instruction::format_a(opcode, 0, 2, 0, 1));
+        func.instructions
+            .push(Instruction::format_a(OpCode::ReturnValue, 0, 2, 0, 0));
+
+        binary.functions.push(func);
+        binary.entry_point_id = Some(0);
+        let context = RuntimeContext::new(RuntimeOptions::new().with_binary(binary))?;
+        let mut vm = VirtualMachine::new(context);
+        vm.run()
+    };
+
+    // (1_i64 << 32) + 5 previously truncated to 5 in read_i32_slow / read_u32_fast.
+    let overflow_pos = (1_i64 << 32) + 5;
+    assert!(matches!(
+        make_program_and_run(OpCode::AddI32, overflow_pos),
+        Err(RuntimeError::TypeMismatch { .. })
+    ));
+    assert!(matches!(
+        make_program_and_run(OpCode::AddI32, (i32::MIN as i64) - 1),
+        Err(RuntimeError::TypeMismatch { .. })
+    ));
+    assert!(matches!(
+        make_program_and_run(OpCode::LtU32, overflow_pos),
+        Err(RuntimeError::TypeMismatch { .. })
+    ));
+    assert!(matches!(
+        make_program_and_run(OpCode::LtU32, -1),
+        Err(RuntimeError::TypeMismatch { .. })
+    ));
+
+    // In-range Value::I64 values continue to coerce without error.
+    assert_eq!(
+        make_program_and_run(OpCode::AddI32, i32::MAX as i64).expect("in-range i32"),
+        Value::I32(i32::MIN)
+    );
+    assert_eq!(
+        make_program_and_run(OpCode::LtU32, u32::MAX as i64).expect("in-range u32"),
+        Value::Bool(true)
+    );
+}
