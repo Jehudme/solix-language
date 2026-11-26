@@ -34,34 +34,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+      - name: Set up Rust with llvm-tools, Cargo cache, Python, and bundled package cache
+        id: setup
+        uses: ./.github/actions/solix-setup
         with:
-          toolchain: stable
-          components: llvm-tools-preview
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: ci-linux
+          rust-components: llvm-tools-preview
+          rust-cache-shared-key: ci-linux
+          restore-bundled-libs: "true"
+          bundled-libs-key-prefix: solix-bundled-dev-all
 
       - name: Cache prebuilt cargo-llvm-cov binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/solix-ci-tools/cargo-llvm-cov
           key: solix-ci-llvm-cov-0.9.1
-
-      - name: Restore cached bundled first-party libraries
-        id: bundled-libs-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: crates/solix-toolchain/assets/packages
-          key: solix-bundled-dev-all-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: "3.12"
 
       - name: Install Linux build and benchmark dependencies
         run: |
@@ -82,7 +68,7 @@ jobs:
           echo "$HOME/.cache/solix-ci-tools/cargo-llvm-cov" >> "$GITHUB_PATH"
 
       - name: Install cross runner
-        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
+        if: steps.setup.outputs.bundled-libs-cache-hit != 'true'
         run: |
           if ! command -v cross >/dev/null 2>&1; then
             curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
@@ -90,7 +76,7 @@ jobs:
 
       - name: Build release and debug Solix binaries and stage default packages
         env:
-          BUNDLED_CACHE_HIT: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
+          BUNDLED_CACHE_HIT: ${{ steps.setup.outputs.bundled-libs-cache-hit }}
         run: |
           python3 scripts/docs/build_docs_site.py
           cargo build --release --bin solix

@@ -1,23 +1,7 @@
 name: Solix Job Setup
-description: Shared checkout, Rust toolchain, Cargo cache, Python/Node setup, and bundled package cache restore.
+description: Shared Rust toolchain, Cargo cache, Python/Node setup, and bundled package cache restore.
 
 inputs:
-  checkout-ref:
-    description: Optional git ref or SHA to checkout
-    required: false
-    default: ""
-  fetch-depth:
-    description: Git fetch depth
-    required: false
-    default: "1"
-  submodules:
-    description: Checkout git submodules
-    required: false
-    default: "false"
-  persist-credentials:
-    description: Persist credentials in git config
-    required: false
-    default: "false"
   enable-rust:
     description: Install Rust toolchain
     required: false
@@ -67,19 +51,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Enable long paths on Windows
-      if: runner.os == 'Windows'
-      shell: bash
-      run: git config --global core.longpaths true
-
-    - name: Checkout repository
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      with:
-        ref: ${{ inputs.checkout-ref }}
-        fetch-depth: ${{ inputs.fetch-depth }}
-        submodules: ${{ inputs.submodules }}
-        persist-credentials: ${{ inputs.persist-credentials }}
-
     - name: Install Rust toolchain
       if: inputs.enable-rust == 'true'
       uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1

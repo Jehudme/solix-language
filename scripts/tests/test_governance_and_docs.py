@@ -485,7 +485,7 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                 if stripped.startswith(("uses:", "- uses:")):
                     action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
                     if local_action_re.match(action_spec):
-                        action_manifest = REPO_ROOT / action_spec.lstrip("./") / "action.yml"
+                        action_manifest = REPO_ROOT / action_spec.removeprefix("./") / "action.yml"
                         self.assertTrue(
                             action_manifest.is_file(),
                             f"Missing local composite action manifest for {action_spec}",
@@ -963,11 +963,22 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertNotIn("  push:\n    branches:\n      - dev", ci_text)
         self.assertIn("key: solix-dev-bench-bin-", ci_text)
         self.assertIn("CARGO_TARGET_DIR=", ci_text)
+        self.assertIn("./.github/actions/solix-setup", ci_text)
+        self.assertNotIn("EmbarkStudios/cargo-deny-action", ci_text)
+        self.assertIn("cargo-deny-0.19.0", ci_text)
+        self.assertIn("codeql:", ci_text)
+        self.assertIn("staged-offline-docs", ci_text)
+        self.assertFalse((REPO_ROOT / ".github" / "workflows" / "codeql.yml").exists())
+
+        setup_action_text = (
+            REPO_ROOT / ".github" / "actions" / "solix-setup" / "action.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("bundled-libs-key-prefix", setup_action_text)
 
         dev_release_text = (REPO_ROOT / ".github" / "workflows" / "dev-release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("key: solix-bundled-dev-all-", dev_release_text)
+        self.assertIn("solix-bundled-dev-all", dev_release_text)
         self.assertIn("key: solix-ci-llvm-cov-0.9.1", dev_release_text)
 
     def test_pr_discussion_sync_workflow_handles_artifacts_and_comments(self) -> None:
