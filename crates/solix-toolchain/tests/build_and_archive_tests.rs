@@ -3250,12 +3250,17 @@ fn test_apple_host_strategy_and_multi_platform_resolution() {
         None,
         Some("linux,windows"),
     );
+    let expected_windows_triple = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "x86_64-pc-windows-msvc"
+    } else {
+        "x86_64-pc-windows-gnu"
+    };
     assert_eq!(
         docker_bucket_triples,
         vec![
             "x86_64-unknown-linux-gnu".to_string(),
             "aarch64-unknown-linux-gnu".to_string(),
-            "x86_64-pc-windows-gnu".to_string(),
+            expected_windows_triple.to_string(),
         ]
     );
 
