@@ -183,11 +183,14 @@ def build_library(
     target_profile: str,
     environment_variables: dict[str, str],
     target_override: str | None = None,
+    platform_override: str | None = None,
 ) -> None:
     """Runs solix build on a library for a given profile."""
     build_command = [*solix_executable, "build", str(library_directory), "--profile", target_profile]
     if target_override:
         build_command.extend(["--target", target_override])
+    if platform_override:
+        build_command.extend(["--platform", platform_override])
     print(f"Building library at '{library_directory}' for profile '{target_profile}'...")
     subprocess_result = subprocess.run(
         build_command,
@@ -207,6 +210,8 @@ def is_cross_target_triple(target_triple: str | None) -> bool:
     cleaned = target_triple.strip().lower()
     if not cleaned or cleaned == "host":
         return False
+    if "," in cleaned or cleaned in ("all", "linux", "windows", "macos", "apple", "darwin"):
+        return True
 
     sys_name = platform.system().lower()
     host_os = "macos" if sys_name == "darwin" else ("windows" if sys_name.startswith("win") else "linux")
@@ -288,7 +293,13 @@ def main() -> None:
         "--target",
         type=str,
         default=None,
-        help="Optional target triple or 'host' forwarded to solix build",
+        help="Optional target triple (or comma-separated list) or 'host' forwarded to solix build",
+    )
+    parser.add_argument(
+        "--platform",
+        type=str,
+        default=None,
+        help="Optional platform filter (e.g. 'linux,windows' or 'macos') forwarded to solix build",
     )
 
     arguments = parser.parse_args()
@@ -340,6 +351,7 @@ def main() -> None:
                 target_profile,
                 environment_variables,
                 target_override=arguments.target,
+                platform_override=arguments.platform,
             )
 
             candidate_archive = library_dir / "build" / target_profile / f"{library_name}.slxarc"
@@ -376,10 +388,11 @@ def main() -> None:
             print(f"Staged '{relative_archive_path}' ({file_size_bytes} bytes, SHA: {file_digest[:12]}...)")
 
             effective_target = arguments.target or environment_variables.get("SOLIX_TARGET_TRIPLE")
-            if arguments.install and not is_cross_target_triple(effective_target):
+            should_skip_install = bool(arguments.platform) or is_cross_target_triple(effective_target)
+            if arguments.install and not should_skip_install:
                 install_library_archive(solix_executable, staged_archive_path, target_profile, environment_variables)
             elif arguments.install:
-                print(f"Skipping host package store install for cross-target '{effective_target}'.")
+                print(f"Skipping host package store install for cross/multi-target '{arguments.platform or effective_target}'.")
 
     for existing_entry in output_directory.iterdir():
         if existing_entry.is_dir() and existing_entry.name not in expected_folders:

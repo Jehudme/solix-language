@@ -3216,3 +3216,147 @@ fn test_cross_and_dockcross_image_mappings_for_all_triples() {
         "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
     );
 }
+
+#[test]
+fn test_apple_host_strategy_and_multi_platform_resolution() {
+    assert_eq!(
+        solix_toolchain::select_cargo_strategy("x86_64-apple-darwin", "aarch64-apple-darwin", true)
+            .expect("apple-on-apple strategy"),
+        solix_toolchain::CargoBuildStrategy::HostAppleSdk
+    );
+    assert_eq!(
+        solix_toolchain::select_cargo_strategy(
+            "aarch64-apple-darwin",
+            "aarch64-apple-darwin",
+            false
+        )
+        .expect("apple-on-apple strategy"),
+        solix_toolchain::CargoBuildStrategy::HostAppleSdk
+    );
+    assert_eq!(
+        solix_toolchain::select_cargo_strategy(
+            "x86_64-unknown-linux-gnu",
+            "aarch64-apple-darwin",
+            false
+        )
+        .expect("linux-on-apple strategy must still mandate docker"),
+        solix_toolchain::CargoBuildStrategy::Docker
+    );
+
+    let all_platforms = vec!["all".to_string()];
+    let docker_bucket_triples = solix_toolchain::resolve_native_triples_for_test(
+        None,
+        &all_platforms,
+        None,
+        Some("linux,windows"),
+    );
+    let expected_windows_triple = if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "x86_64-pc-windows-msvc"
+    } else {
+        "x86_64-pc-windows-gnu"
+    };
+    assert_eq!(
+        docker_bucket_triples,
+        vec![
+            "x86_64-unknown-linux-gnu".to_string(),
+            "aarch64-unknown-linux-gnu".to_string(),
+            expected_windows_triple.to_string(),
+        ]
+    );
+
+    let macos_bucket_triples =
+        solix_toolchain::resolve_native_triples_for_test(None, &all_platforms, None, Some("macos"));
+    assert_eq!(
+        macos_bucket_triples,
+        vec![
+            "x86_64-apple-darwin".to_string(),
+            "aarch64-apple-darwin".to_string(),
+        ]
+    );
+
+    let comma_targets = solix_toolchain::resolve_native_triples_for_test(
+        None,
+        &all_platforms,
+        Some("x86_64-apple-darwin,aarch64-apple-darwin,x86_64-apple-darwin"),
+        None,
+    );
+    assert_eq!(
+        comma_targets,
+        vec![
+            "x86_64-apple-darwin".to_string(),
+            "aarch64-apple-darwin".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn test_apple_target_on_non_macos_host_reports_actionable_diagnostic() {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let project_root = workspace.root_path().join("apple_diagnostic_pkg");
+    let native_dir = project_root.join("natives").join("sample_native");
+    fs::create_dir_all(project_root.join("src")).expect("create src");
+    fs::create_dir_all(native_dir.join("src")).expect("create native src");
+
+    fs::write(
+        project_root.join("manifest.yaml"),
+        r#"configuration:
+  name: apple_diagnostic_pkg
+  version: "0.1.0"
+
+profiles:
+  release:
+    platforms:
+      - macos
+    sources:
+      - src
+    natives:
+      sample_native:
+        profile: release
+"#,
+    )
+    .expect("write manifest.yaml");
+    fs::write(
+        project_root.join("src").join("main.slx"),
+        "public class Main { public static int32 main() { return 0; } }\n",
+    )
+    .expect("write main.slx");
+    fs::write(
+        native_dir.join("Cargo.toml"),
+        "[package]\nname = \"__native_sample_native\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write native Cargo.toml");
+    fs::write(native_dir.join("src").join("lib.rs"), "").expect("write lib.rs");
+
+    if solix_toolchain::verify_docker_daemon_active().is_err() {
+        return;
+    }
+
+    let build_result = solix_toolchain::execute_build(solix_toolchain::BuildArgs {
+        path: project_root,
+        platform: Some("macos".to_string()),
+        profile: Some("release".to_string()),
+        debug: false,
+        release: true,
+        test: false,
+        pkg_dir: None,
+        install: false,
+        force: false,
+        check_env: true,
+        target: None,
+    });
+    assert!(
+        build_result.is_err(),
+        "Targeting apple-darwin on non-macOS host without custom osxcross image must return actionable diagnostic"
+    );
+    let err_text = build_result
+        .expect_err("expected diagnostic error")
+        .to_string();
+    assert!(
+        err_text.contains("osxcross") || err_text.contains("Apple macOS SDK"),
+        "Diagnostic error must explain Apple SDK / osxcross constraint, got: {err_text}"
+    );
+}
