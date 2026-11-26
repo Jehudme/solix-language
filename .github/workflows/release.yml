@@ -224,8 +224,6 @@ jobs:
           PY
           cargo package -p solix-common --locked --allow-dirty
           cargo package -p solix-ffi --locked --allow-dirty
-          cargo package -p solix-compilation --no-verify --locked --allow-dirty
-          cargo package -p solix-runtime --no-verify --locked --allow-dirty
           git checkout -- crates/solix-toolchain/assets/docs 2>/dev/null || true
 
       - id: promote # zizmor: ignore[use-trusted-publishing]
