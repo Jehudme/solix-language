@@ -1251,3 +1251,240 @@ public class AlphaUtils {
         "alpha-utils folder must NOT be deleted when uninstalling alpha"
     );
 }
+
+#[test]
+fn test_new_package_decouples_bundled_solix_version_from_toolchain_version() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("work");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    let custom_bundled_dir = workspace.root_path().join("custom_bundled");
+    let target_project_dir = workspace.root_path().join("decoupled_app");
+
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+    fs::create_dir_all(&custom_bundled_dir).expect("create custom bundled dir");
+
+    // Simulate a release train where workspace crates are e.g. 3.0.0 while solix stdlib is 9.8.7.
+    fs::write(
+        custom_bundled_dir.join("bundled_manifest.json"),
+        r#"{
+  "schema_version": 1,
+  "packages": [
+    {
+      "name": "raylib",
+      "version": "10.0.0",
+      "profile": "release",
+      "archive_rel_path": "raylib-release@10.0.0/raylib.slxarc"
+    },
+    {
+      "name": "solix",
+      "version": "9.8.7",
+      "profile": "release",
+      "archive_rel_path": "solix-release@9.8.7/solix.slxarc"
+    }
+  ]
+}
+"#,
+    )
+    .expect("write custom bundled_manifest.json");
+
+    let mut new_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    new_cmd
+        .args([
+            "new",
+            "package",
+            target_project_dir.to_str().expect("valid project path"),
+            "--no-native",
+        ])
+        .env("SOLIX_BUNDLED_PACKAGES_DIR", &custom_bundled_dir)
+        .env("SOLIX_NO_AUTO_BOOTSTRAP", "1");
+
+    let output = new_cmd.output().expect("execute solix new package");
+    assert!(
+        output.status.success(),
+        "solix new package failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest_text =
+        fs::read_to_string(target_project_dir.join("manifest.yaml")).expect("read manifest.yaml");
+    assert!(
+        manifest_text.contains("solix:\n        version: \"9.8.7\"\n        profile: release"),
+        "Scaffolded manifest must pin bundled stdlib version 9.8.7 instead of toolchain version:\n{manifest_text}"
+    );
+}
+
+#[test]
+fn test_new_package_invalid_bundled_dir_falls_back_cleanly() {
+    let workspace = HermeticCliWorkspace::create().expect("create workspace");
+    let solix_home = workspace.root_path().join("solix_home");
+    let isolated_cwd = workspace.root_path().join("work");
+    let empty_path_dir = workspace.root_path().join("empty_bin");
+    let corrupted_bundled_dir = workspace.root_path().join("corrupted_bundled");
+    let fallback_project_dir = workspace.root_path().join("fallback_app");
+    let freestanding_project_dir = workspace.root_path().join("freestanding_app");
+
+    fs::create_dir_all(&isolated_cwd).expect("create isolated cwd");
+    fs::create_dir_all(&empty_path_dir).expect("create empty path dir");
+    fs::create_dir_all(&corrupted_bundled_dir).expect("create corrupted bundled dir");
+    fs::write(
+        corrupted_bundled_dir.join("bundled_manifest.json"),
+        "{ invalid json",
+    )
+    .expect("write malformed bundled_manifest.json");
+
+    // 1. Positive fallback: malformed runtime bundled_manifest.json must not fail `solix new`
+    let mut new_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    new_cmd
+        .args([
+            "new",
+            "package",
+            fallback_project_dir.to_str().expect("valid project path"),
+            "--no-native",
+        ])
+        .env("SOLIX_BUNDLED_PACKAGES_DIR", &corrupted_bundled_dir)
+        .env("SOLIX_NO_AUTO_BOOTSTRAP", "1");
+
+    let fallback_output = new_cmd.output().expect("execute solix new fallback");
+    assert!(
+        fallback_output.status.success(),
+        "solix new must fall back gracefully when runtime bundled_manifest.json is malformed: stderr={}",
+        String::from_utf8_lossy(&fallback_output.stderr)
+    );
+    let fallback_manifest = fs::read_to_string(fallback_project_dir.join("manifest.yaml"))
+        .expect("read fallback manifest.yaml");
+    let expected_fallback = format!(
+        "solix:\n        version: \"{}\"\n        profile: release",
+        solix_toolchain::assets::default_bundled_solix_version()
+    );
+    assert!(
+        fallback_manifest.contains(&expected_fallback),
+        "Fallback manifest must stamp checked-in bundled stdlib version:\n{fallback_manifest}"
+    );
+
+    // 2. Negative check: --no-std still omits `solix` dependency completely
+    let mut no_std_cmd = create_isolated_solix_command(&solix_home, &isolated_cwd, &empty_path_dir);
+    no_std_cmd
+        .args([
+            "new",
+            "package",
+            freestanding_project_dir
+                .to_str()
+                .expect("valid freestanding path"),
+            "--no-native",
+            "--no-std",
+        ])
+        .env("SOLIX_BUNDLED_PACKAGES_DIR", &corrupted_bundled_dir)
+        .env("SOLIX_NO_AUTO_BOOTSTRAP", "1");
+
+    let no_std_output = no_std_cmd.output().expect("execute solix new --no-std");
+    assert!(
+        no_std_output.status.success(),
+        "solix new --no-std failed: stderr={}",
+        String::from_utf8_lossy(&no_std_output.stderr)
+    );
+    let freestanding_manifest = fs::read_to_string(freestanding_project_dir.join("manifest.yaml"))
+        .expect("read freestanding manifest.yaml");
+    assert!(
+        !freestanding_manifest.contains("solix:"),
+        "Manifest with --no-std must omit solix dependency"
+    );
+}
+
+#[test]
+fn test_parse_bundled_package_version_prefers_release_profile() {
+    let sample_manifest = r#"{
+        "schema_version": 1,
+        "packages": [
+            {
+                "name": "solix",
+                "version": "2.2.0-debug",
+                "profile": "debug",
+                "archive_rel_path": "solix-debug@2.2.0-debug/solix.slxarc"
+            },
+            {
+                "name": "raylib",
+                "version": "6.0.0",
+                "profile": "release",
+                "archive_rel_path": "raylib-release@6.0.0/raylib.slxarc"
+            },
+            {
+                "name": "solix",
+                "version": "2.2.0",
+                "profile": "release",
+                "archive_rel_path": "solix-release@2.2.0/solix.slxarc"
+            }
+        ]
+    }"#;
+
+    assert_eq!(
+        solix_toolchain::assets::parse_bundled_package_version(sample_manifest, "solix").as_deref(),
+        Some("2.2.0")
+    );
+    assert_eq!(
+        solix_toolchain::assets::parse_bundled_package_version(sample_manifest, "raylib")
+            .as_deref(),
+        Some("6.0.0")
+    );
+}
+
+#[test]
+fn test_parse_bundled_package_version_rejects_invalid_and_missing_entries() {
+    assert_eq!(
+        solix_toolchain::assets::parse_bundled_package_version("not valid json", "solix"),
+        None
+    );
+    assert_eq!(
+        solix_toolchain::assets::parse_bundled_package_version(r#"{"schema_version": 1}"#, "solix"),
+        None
+    );
+    assert_eq!(
+        solix_toolchain::assets::parse_bundled_package_version(
+            r#"{"packages": [{"name": "solix", "version": "   ", "profile": "release"}]}"#,
+            "solix"
+        ),
+        None
+    );
+    assert_eq!(
+        solix_toolchain::assets::parse_bundled_package_version(
+            r#"{"packages": [{"name": "raylib", "version": "6.0.0", "profile": "release"}]}"#,
+            "solix"
+        ),
+        None
+    );
+}
+
+#[test]
+fn test_resolve_bundled_package_version_from_dir_manifest_and_folder_fallback() {
+    let temp_root = tempfile::tempdir().expect("create temp dir");
+    let packages_dir = temp_root.path();
+
+    // 1. Subdirectory fallback when bundled_manifest.json is absent
+    fs::create_dir_all(packages_dir.join("solix-debug@2.2.0-alpha")).expect("create debug dir");
+    fs::create_dir_all(packages_dir.join("solix-release@2.2.0")).expect("create release dir");
+    assert_eq!(
+        solix_toolchain::assets::resolve_bundled_package_version_from_dir(packages_dir, "solix")
+            .as_deref(),
+        Some("2.2.0")
+    );
+
+    // 2. Explicit bundled_manifest.json overrides directory scanning
+    fs::write(
+        packages_dir.join("bundled_manifest.json"),
+        r#"{"schema_version": 1, "packages": [{"name": "solix", "version": "2.9.4", "profile": "release"}]}"#,
+    )
+    .expect("write bundled_manifest.json");
+    assert_eq!(
+        solix_toolchain::assets::resolve_bundled_package_version_from_dir(packages_dir, "solix")
+            .as_deref(),
+        Some("2.9.4")
+    );
+}
+
+#[test]
+fn test_default_bundled_solix_version_resolves_checked_in_manifest() {
+    let resolved_version = solix_toolchain::assets::default_bundled_solix_version();
+    assert!(!resolved_version.trim().is_empty());
+    assert_eq!(resolved_version.split('.').count(), 3);
+}

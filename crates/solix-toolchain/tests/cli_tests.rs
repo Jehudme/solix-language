@@ -2189,10 +2189,10 @@ fn test_new_package_clean_manifest_with_default_solix_dependency() {
         "Manifest must contain direct version scalar"
     );
 
-    // Must contain default solix dependency with current toolchain version
+    // Must contain default solix dependency matching active bundled stdlib version
     let expected_solix_dep = format!(
         "solix:\n        version: \"{}\"\n        profile: release",
-        env!("CARGO_PKG_VERSION")
+        solix_toolchain::assets::default_bundled_solix_version()
     );
     assert!(
         manifest_content.contains(&expected_solix_dep),

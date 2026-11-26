@@ -9,11 +9,15 @@ test harnesses, and Rust cdylib bridges with hermetic build/.cache/cargo isolati
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
 import shutil
 import sys
+
+
+DEFAULT_BUNDLED_SOLIX_FALLBACK_VERSION = "2.1.1"
 
 
 def to_pascal_case(raw_name: str) -> str:
@@ -28,6 +32,90 @@ def to_snake_case(raw_name: str) -> str:
     words = re.split(r"[^a-zA-Z0-9]+", raw_name)
     cleaned = "_".join(word_item.lower() for word_item in words if word_item)
     return cleaned if cleaned else "app"
+
+
+def parse_bundled_package_version(manifest_json: str, package_name: str) -> str | None:
+    """Extracts a package version from bundled_manifest.json content, preferring release."""
+    try:
+        parsed_payload = json.loads(manifest_json)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed_payload, dict):
+        return None
+    packages_list = parsed_payload.get("packages")
+    if not isinstance(packages_list, list):
+        return None
+
+    fallback_version: str | None = None
+    for package_entry in packages_list:
+        if not isinstance(package_entry, dict) or package_entry.get("name") != package_name:
+            continue
+        raw_version = package_entry.get("version")
+        if not isinstance(raw_version, str):
+            continue
+        trimmed_version = raw_version.strip()
+        if not trimmed_version:
+            continue
+        if package_entry.get("profile") == "release":
+            return trimmed_version
+        if fallback_version is None:
+            fallback_version = trimmed_version
+
+    return fallback_version
+
+
+def resolve_bundled_package_version_from_dir(
+    bundled_directory: Path, package_name: str
+) -> str | None:
+    """Resolves a bundled package version from bundled_manifest.json or staged subfolders."""
+    manifest_file = bundled_directory / "bundled_manifest.json"
+    if manifest_file.is_file():
+        resolved = parse_bundled_package_version(
+            manifest_file.read_text(encoding="utf-8"), package_name
+        )
+        if resolved:
+            return resolved
+
+    if not bundled_directory.is_dir():
+        return None
+
+    folder_prefix = f"{package_name}-"
+    fallback_version: str | None = None
+    for entry_path in sorted(bundled_directory.iterdir()):
+        if not entry_path.is_dir():
+            continue
+        folder_name = entry_path.name
+        if not folder_name.startswith(folder_prefix) or "@" not in folder_name:
+            continue
+        profile_part, version_part = folder_name[len(folder_prefix) :].split("@", 1)
+        trimmed_version = version_part.strip()
+        if not trimmed_version:
+            continue
+        if profile_part == "release":
+            return trimmed_version
+        if fallback_version is None:
+            fallback_version = trimmed_version
+
+    return fallback_version
+
+
+def resolve_default_bundled_solix_version() -> str:
+    """Resolves the active bundled `solix` library version independently of CLI crate version."""
+    custom_dir_raw = os.environ.get("SOLIX_BUNDLED_PACKAGES_DIR", "").strip()
+    if custom_dir_raw:
+        custom_dir = Path(custom_dir_raw)
+        if custom_dir.exists():
+            resolved = resolve_bundled_package_version_from_dir(custom_dir, "solix")
+            if resolved:
+                return resolved
+
+    assets_packages_dir = Path(__file__).resolve().parent.parent / "packages"
+    if assets_packages_dir.exists():
+        resolved = resolve_bundled_package_version_from_dir(assets_packages_dir, "solix")
+        if resolved:
+            return resolved
+
+    return DEFAULT_BUNDLED_SOLIX_FALLBACK_VERSION
 
 
 def generate_project(
@@ -87,7 +175,7 @@ def generate_project(
         parsed_dependencies[dependency_name.strip()] = dependency_version.strip()
 
     if not no_std and "solix" not in parsed_dependencies:
-        parsed_dependencies["solix"] = "2.0.1"
+        parsed_dependencies["solix"] = resolve_default_bundled_solix_version()
 
     # 3. Write manifest.yaml
     if authors:

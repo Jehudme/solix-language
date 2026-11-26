@@ -626,6 +626,134 @@ pub fn resolve_bundled_packages_dir() -> Option<PathBuf> {
     materialize_embedded_bundled_packages().ok().flatten()
 }
 
+/// Parses the version string of `package_name` from a `bundled_manifest.json` payload.
+///
+/// Prefers the `release` profile entry when multiple profiles are listed, falling back
+/// to the first matching entry with a non-empty version string.
+#[must_use]
+pub fn parse_bundled_package_version(manifest_json: &str, package_name: &str) -> Option<String> {
+    let parsed_manifest: serde_json::Value = serde_json::from_str(manifest_json).ok()?;
+    let package_entries = parsed_manifest.get("packages")?.as_array()?;
+    let mut fallback_version: Option<String> = None;
+
+    for package_entry in package_entries {
+        let entry_name = package_entry
+            .get("name")
+            .and_then(serde_json::Value::as_str);
+        if entry_name != Some(package_name) {
+            continue;
+        }
+        let Some(raw_version) = package_entry
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let trimmed_version = raw_version.trim();
+        if trimmed_version.is_empty() {
+            continue;
+        }
+        let entry_profile = package_entry
+            .get("profile")
+            .and_then(serde_json::Value::as_str);
+        if entry_profile == Some("release") {
+            return Some(trimmed_version.to_string());
+        }
+        if fallback_version.is_none() {
+            fallback_version = Some(trimmed_version.to_string());
+        }
+    }
+
+    fallback_version
+}
+
+/// Resolves a bundled package version from a bundled packages directory on disk.
+///
+/// Checks `bundled_manifest.json` first and falls back to scanning `<name>-<profile>@<version>`
+/// subdirectories when a directory override omits the manifest index.
+#[must_use]
+pub fn resolve_bundled_package_version_from_dir(
+    bundled_directory: &Path,
+    package_name: &str,
+) -> Option<String> {
+    let manifest_path = bundled_directory.join("bundled_manifest.json");
+    if let Ok(manifest_text) = fs::read_to_string(&manifest_path)
+        && let Some(resolved_version) = parse_bundled_package_version(&manifest_text, package_name)
+    {
+        return Some(resolved_version);
+    }
+
+    let entries = fs::read_dir(bundled_directory).ok()?;
+    let folder_prefix = format!("{package_name}-");
+    let mut fallback_version: Option<String> = None;
+
+    for dir_entry in entries.flatten() {
+        let entry_path = dir_entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+        let Some(folder_name) = entry_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(remainder) = folder_name.strip_prefix(&folder_prefix) else {
+            continue;
+        };
+        let Some((profile_part, version_part)) = remainder.split_once('@') else {
+            continue;
+        };
+        let trimmed_version = version_part.trim();
+        if trimmed_version.is_empty() {
+            continue;
+        }
+        if profile_part == "release" {
+            return Some(trimmed_version.to_string());
+        }
+        if fallback_version.is_none() {
+            fallback_version = Some(trimmed_version.to_string());
+        }
+    }
+
+    fallback_version
+}
+
+/// Resolves the active bundled version for a first-party library package (e.g. `"solix"`).
+///
+/// Priority:
+/// 1. Active runtime `bundled_manifest.json` or staged folder under `resolve_bundled_packages_dir()`.
+/// 2. Compile-time embedded `bundled_manifest.json` when bundled `.slxarc` archives were staged.
+/// 3. Compile-time checked-in `assets/packages/bundled_manifest.json`.
+#[must_use]
+pub fn default_bundled_package_version(package_name: &str) -> Option<String> {
+    if let Some(bundled_directory) = resolve_bundled_packages_dir()
+        && let Some(resolved_version) =
+            resolve_bundled_package_version_from_dir(&bundled_directory, package_name)
+    {
+        return Some(resolved_version);
+    }
+
+    if let Some(manifest_bytes) = EMBEDDED_BUNDLED_MANIFEST
+        && let Ok(manifest_text) = std::str::from_utf8(manifest_bytes)
+        && let Some(resolved_version) = parse_bundled_package_version(manifest_text, package_name)
+    {
+        return Some(resolved_version);
+    }
+
+    parse_bundled_package_version(
+        include_str!("../assets/packages/bundled_manifest.json"),
+        package_name,
+    )
+}
+
+/// Resolves the default `"solix"` standard library dependency version for project scaffolding.
+///
+/// Decouples the independently versioned `libraries/solixlib` package from `CARGO_PKG_VERSION`,
+/// falling back to `CARGO_PKG_VERSION` only if no bundled manifest entry can be resolved.
+#[must_use]
+pub fn default_bundled_solix_version() -> String {
+    default_bundled_package_version("solix")
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
 /// Resolves the filesystem path to the bundled Solix Visual Studio Code extension (`.vsix`).
 ///
 /// Priority:

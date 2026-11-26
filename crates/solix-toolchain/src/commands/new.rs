@@ -164,7 +164,10 @@ pub fn execute_new_package(args: NewPackageArgs) -> Result<()> {
 
     let mut parsed_deps = parse_dependency_flags(&args.deps);
     if !args.no_std && !parsed_deps.contains_key("solix") {
-        parsed_deps.insert("solix".to_string(), env!("CARGO_PKG_VERSION").to_string());
+        parsed_deps.insert(
+            "solix".to_string(),
+            crate::assets::default_bundled_solix_version(),
+        );
     }
     let safe_snake_name = to_snake_case(&project_name);
     let bridge_folder_name = format!("{safe_snake_name}_bridge");
