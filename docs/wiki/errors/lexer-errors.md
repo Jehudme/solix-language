@@ -1,52 +1,12 @@
-# Lexical Error Codes (`E0000` – `E0015`)
+# Lexical Error Codes (`E0000`, `E0011` – `E0016`)
 
-This section documents the lexical analysis diagnostics emitted during tokenization by [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../../crates/solix-compilation/src/phases/lexing/lexer.rs).
-
----
-
-### `E0001`: Unterminated String Literal
-* **Cause:** A string literal begins with a double quote `"` but reaches the end of the line or file without a closing quote.
-* **Bad Code:**
-  ```solix
-  string message = "hello world;
-  ```
-* **Fixed Code:**
-  ```solix
-  string message = "hello world";
-  ```
+This section documents all lexical analysis diagnostics emitted during tokenization by [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../../crates/solix-compilation/src/phases/lexing/lexer.rs) and defined in [`LexingError`](../../../crates/solix-compilation/src/diagnostics/lexing.rs).
 
 ---
 
-### `E0002`: Invalid Number Literal
-* **Cause:** A number literal has malformed digits for its base, multiple decimal points, or improper underscore placement.
-* **Bad Code:**
-  ```solix
-  int32 binary_value = 0b1020;
-  float64 malformed = 3.14.15;
-  ```
-* **Fixed Code:**
-  ```solix
-  int32 binary_value = 0b1010;
-  float64 valid_float = 3.1415;
-  ```
-
----
-
-### `E0003`: Invalid Character Escape Sequence
-* **Cause:** A backslash in a string or character literal is followed by an unrecognized escape character.
-* **Bad Code:**
-  ```solix
-  string path = "C:\programs\tools";
-  ```
-* **Fixed Code:**
-  ```solix
-  string path = "C:\\programs\\tools";
-  ```
-
----
-
-### `E0004`: Unexpected Character
-* **Cause:** The source text contains an invalid character or non-Unicode byte that cannot form any valid token.
+### `E0000`: Unknown Token
+* **Cause:** Unknown or unrecognized token.
+* **Help:** Remove or replace this unrecognized character with valid Solix syntax.
 * **Bad Code:**
   ```solix
   int32 value = 10 @ 20;
@@ -58,23 +18,81 @@ This section documents the lexical analysis diagnostics emitted during tokenizat
 
 ---
 
-### `E0005`: Unterminated Multi-Line Comment
-* **Cause:** A delimited comment `/*` is opened but never closed with `*/` before reaching the end of the file.
+### `E0011`: Unterminated String Literal
+* **Cause:** Unterminated string literal.
+* **Help:** Add a closing quote '"' to terminate the string literal before end of line or file.
 * **Bad Code:**
   ```solix
-  /* Comment started here
-  public int32 main() { return 0; }
+  string message = "hello world;
   ```
 * **Fixed Code:**
   ```solix
-  /* Comment started here */
-  public int32 main() { return 0; }
+  string message = "hello world";
   ```
 
 ---
 
-### `E0016`: Leading-Zero Decimal Integer Literal
-* **Cause:** A decimal integer begins with an unnecessary leading zero (e.g. `0123`). Leading zeros are prohibited on decimal integers to prevent ambiguity with legacy octal notation.
+### `E0012`: Unterminated Character Literal
+* **Cause:** Unterminated character literal.
+* **Help:** Add a closing quote '\\'' to terminate the character literal before end of line.
+* **Bad Code:**
+  ```solix
+  char letter = 'a;
+  ```
+* **Fixed Code:**
+  ```solix
+  char letter = 'a';
+  ```
+
+---
+
+### `E0013`: Unterminated Block Comment
+* **Cause:** Unterminated block comment.
+* **Help:** Add a closing '*/' before end of file.
+* **Bad Code:**
+  ```solix
+  /* Comment started here
+  public static int32 main() { return 0; }
+  ```
+* **Fixed Code:**
+  ```solix
+  /* Comment started here */
+  public static int32 main() { return 0; }
+  ```
+
+---
+
+### `E0014`: Malformed Hex Literal
+* **Cause:** Malformed hexadecimal integer literal.
+* **Help:** Hexadecimal literals must have one or more hex digits (0-9, a-f) after '0x'.
+* **Bad Code:**
+  ```solix
+  int32 mask = 0x;
+  ```
+* **Fixed Code:**
+  ```solix
+  int32 mask = 0xFF;
+  ```
+
+---
+
+### `E0015`: Malformed Binary Literal
+* **Cause:** Malformed binary integer literal.
+* **Help:** Binary literals must have one or more binary digits (0 or 1) after '0b'.
+* **Bad Code:**
+  ```solix
+  int32 bits = 0b;
+  ```
+* **Fixed Code:**
+  ```solix
+  int32 bits = 0b1010;
+  ```
+
+---
+
+### `E0016`: Leading Zero Integer Literal
+* **Cause:** Decimal integer literal cannot have leading zeros.
+* **Help:** Remove the leading zero or use '0x' for hexadecimal or '0b' for binary.
 * **Bad Code:**
   ```solix
   int32 counter_value = 0123;
