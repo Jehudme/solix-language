@@ -34,8 +34,13 @@ impl CompilationPhase for LexerPhase {
 
         let mut accumulated_diagnostics = Vec::new();
 
-        for source_index in 0..sources_count {
-            let source_id = source_index as u16;
+        for (source_index, source_text) in context.sources.iter().enumerate() {
+            let Ok(source_id) = u16::try_from(source_index) else {
+                accumulated_diagnostics.push(CompilationDiagnostic::from(
+                    crate::LexingError::source_limit_exceeded(),
+                ));
+                return Err(accumulated_diagnostics);
+            };
             if context
                 .ast
                 .get(source_index)
@@ -44,7 +49,6 @@ impl CompilationPhase for LexerPhase {
             {
                 continue;
             }
-            let source_text = &context.sources[source_index];
 
             match crate::phases::lexing::lex_source(source_id, source_text) {
                 Ok(tokens) => {
@@ -92,8 +96,15 @@ impl CompilationPhase for ParserPhase {
 
         let mut accumulated_diagnostics = Vec::new();
 
-        for source_index in 0..sources_count {
-            let source_id = source_index as u16;
+        for (source_index, source_text) in context.sources.iter().enumerate() {
+            let Ok(source_id) = u16::try_from(source_index) else {
+                accumulated_diagnostics.push(CompilationDiagnostic::from(
+                    crate::ParsingError::SourceLimitExceeded {
+                        span: miette::SourceSpan::from((0usize, 0usize)),
+                    },
+                ));
+                return Err(accumulated_diagnostics);
+            };
             if context
                 .ast
                 .get(source_index)
@@ -102,7 +113,6 @@ impl CompilationPhase for ParserPhase {
             {
                 continue;
             }
-            let source_text = &context.sources[source_index];
             let tokens = context
                 .tokens
                 .get(source_index)

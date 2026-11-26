@@ -557,3 +557,79 @@ public int32 main() {
         "ui::components::Box must not contain field 'value'"
     );
 }
+
+#[test]
+fn test_call_normalizer_does_not_contaminate_unrelated_class_methods() {
+    use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+    use solix_compilation::phases::parser::statements::Statement;
+    use solix_compilation::phases::parser::statements::declarations::{ClassMember, Declaration};
+    use solix_compilation::phases::parser::statements::expressions::Expression;
+
+    let source = r#"
+public class Logger {
+    public void write(string text, int32 level = 0) {
+    }
+}
+
+public class FileWriter {
+    public void write(string text) {
+    }
+}
+
+public class MainApp {
+    public static int32 main() {
+        FileWriter writer = new FileWriter();
+        writer.write("hi");
+
+        Logger logger = new Logger();
+        logger.write("boot");
+        return 0;
+    }
+}
+"#;
+
+    let options = CompilationOptions::new()
+        .with_source("main.slx", source)
+        .with_entry_point(Some("MainApp::main".to_string()));
+    let mut context = CompilationContext::new(options);
+    let result = context.execute();
+    assert!(
+        result.is_ok(),
+        "FileWriter::write('hi') must not fail due to Logger::write default arg pollution: {result:?}"
+    );
+
+    let program_ast = context.ast[0].as_ref().expect("AST present");
+    let main_body = program_ast
+        .declarations
+        .iter()
+        .find_map(|decl| {
+            if let Declaration::Class(cls) = decl
+                && &source[cls.name_span.start as usize..cls.name_span.end as usize] == "MainApp"
+            {
+                for member in &cls.members {
+                    if let ClassMember::Method(method) = member {
+                        return method.body.as_ref();
+                    }
+                }
+            }
+            None
+        })
+        .expect("MainApp::main body");
+
+    let arg_counts: Vec<usize> = main_body
+        .statements
+        .iter()
+        .filter_map(|stmt| match stmt {
+            Statement::Expression(expr_stmt) => match &expr_stmt.expression {
+                Expression::MethodCall { arguments, .. } => Some(arguments.len()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        arg_counts,
+        vec![1, 2],
+        "writer.write('hi') must stay at 1 arg while logger.write('boot') injects default arg (2 args)"
+    );
+}

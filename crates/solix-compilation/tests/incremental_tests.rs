@@ -134,10 +134,18 @@ fn test_dependency_and_transitive_dependents_graph() {
     let mut context = CompilationContext::new(CompilationOptions::new());
 
     // Add 4 sources: 0, 1, 2, 3
-    let source_zero = context.add_source("base.slx", "class Base {}");
-    let source_one = context.add_source("middle_a.slx", "import base; class MiddleA {}");
-    let source_two = context.add_source("leaf.slx", "import middle_a; class Leaf {}");
-    let source_three = context.add_source("middle_b.slx", "import base; class MiddleB {}");
+    let source_zero = context
+        .add_source("base.slx", "class Base {}")
+        .expect("source_zero registration");
+    let source_one = context
+        .add_source("middle_a.slx", "import base; class MiddleA {}")
+        .expect("source_one registration");
+    let source_two = context
+        .add_source("leaf.slx", "import middle_a; class Leaf {}")
+        .expect("source_two registration");
+    let source_three = context
+        .add_source("middle_b.slx", "import base; class MiddleB {}")
+        .expect("source_three registration");
 
     assert_eq!(source_zero, 0);
     assert_eq!(source_one, 1);

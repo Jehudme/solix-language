@@ -138,7 +138,9 @@ pub fn execute_pass1_symbol_discovery(
     }
 
     for (source_index, ast_option) in source_asts.iter().enumerate() {
-        let source_id = source_index as u16;
+        let Ok(source_id) = u16::try_from(source_index) else {
+            break;
+        };
         let source_text = source_texts
             .get(source_index)
             .map(|text| text.as_str())

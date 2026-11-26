@@ -568,3 +568,275 @@ fn test_ast_inliner_method_resolution_across_namespaces_no_collision() {
         "Each namespace's method body must be independently inlined without cross-namespace collision"
     );
 }
+
+#[test]
+fn test_ast_inliner_preserves_this_class_type_not_return_type() {
+    use solix_compilation::phases::optimizer::AstInlinerPhase;
+    use solix_compilation::phases::parser::statements::Statement;
+    use solix_compilation::phases::parser::statements::control_flow::ReturnStatement;
+    use solix_compilation::phases::parser::statements::declarations::{ClassMember, Declaration};
+    use solix_compilation::phases::parser::statements::expressions::Expression;
+    use solix_compilation::phases::parser::statements::types::TypeAnnotation;
+    use solix_compilation::phases::{BinderPhase, LexerPhase, ParserPhase};
+    use solix_compilation::pipeline::CompilationPipeline;
+
+    let source = r#"
+        public class Point {
+            public int32 coord_x;
+            public int32 coord_y;
+            public float64 scale;
+
+            public Point(int32 init_x, int32 init_y, float64 init_scale) {
+                this.coord_x = init_x;
+                this.coord_y = init_y;
+                this.scale = init_scale;
+            }
+
+            public int32 sum_coords() {
+                return this.coord_x + this.coord_y;
+            }
+
+            public float64 get_scaled_x() {
+                return cast(this.coord_x, float64) * this.scale;
+            }
+        }
+
+        public class MainApp {
+            public static int32 main() {
+                Point pt = new Point(3, 4, 2.0);
+                int32 total = pt.sum_coords();
+                float64 scaled = pt.get_scaled_x();
+                return total + cast(scaled, int32);
+            }
+        }
+    "#;
+
+    let mut pipeline = CompilationPipeline::empty()
+        .add_phase(LexerPhase::new())
+        .add_phase(ParserPhase::new())
+        .add_phase(BinderPhase::new())
+        .add_phase(AstInlinerPhase::new());
+
+    let options = CompilationOptions::new()
+        .with_source("main.slx", source)
+        .with_entry_point(Some("MainApp::main".to_string()))
+        .with_inline_threshold(8);
+    let mut context = CompilationContext::new(options);
+    context
+        .execute_pipeline(&mut pipeline)
+        .expect("Frontend + AstInliner pipeline must succeed");
+
+    let artifacts = context
+        .binding_artifacts
+        .as_ref()
+        .expect("Binding artifacts present");
+    let ast = context.ast[0].as_ref().expect("AST present");
+
+    let mut found_synthetic_this_count = 0usize;
+    for decl in &ast.declarations {
+        if let Declaration::Class(class_decl) = decl {
+            for member in &class_decl.members {
+                if let ClassMember::Method(method) = member
+                    && let Some(body) = &method.body
+                {
+                    for stmt in &body.statements {
+                        let init_expr = match stmt {
+                            Statement::VariableDeclaration(var_decl) => &var_decl.initializer,
+                            _ => &None,
+                        };
+                        if let Some(Expression::Block { statements, .. }) = init_expr {
+                            for inner_stmt in statements {
+                                if let Statement::VariableDeclaration(inner_var) = inner_stmt {
+                                    let var_name = context.get_lexeme(inner_var.name_span);
+                                    if var_name.ends_with("_this") {
+                                        found_synthetic_this_count += 1;
+                                        assert!(
+                                            matches!(
+                                                inner_var.var_type,
+                                                TypeAnnotation::Named { .. }
+                                            ),
+                                            "Synthetic '{var_name}' var_type must be TypeAnnotation::Named (Point), got {:?}",
+                                            inner_var.var_type
+                                        );
+                                        let node_type = artifacts
+                                            .node_types
+                                            .get(&inner_var.name_span)
+                                            .expect("Synthetic 'this' node_type must exist");
+                                        assert!(
+                                            matches!(node_type, solix_common::Type::Class { symbol_name, .. } if symbol_name.contains("Point")),
+                                            "Expected Type::Class(Point) for '{var_name}', got {node_type:?}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        if let Statement::Return(ReturnStatement { .. }) = stmt {}
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        found_synthetic_this_count, 2,
+        "Expected both pt.sum_coords() and pt.get_scaled_x() to synthesize 'this' bindings"
+    );
+
+    // Also run end-to-end execution to verify emitted bytecode behavior
+    let full_options = CompilationOptions::new()
+        .with_source("main.slx", source)
+        .with_entry_point(Some("MainApp::main".to_string()))
+        .with_inline_threshold(8);
+    let mut full_context = CompilationContext::new(full_options);
+    full_context
+        .execute()
+        .expect("Full compilation with inlined instance methods must succeed");
+    assert_eq!(run_program(&full_context), Value::I32(13));
+}
+
+#[test]
+fn test_ast_inliner_unqualified_call_respects_resolved_symbols_and_return_types() {
+    use solix_compilation::phases::optimizer::AstInlinerPhase;
+    use solix_compilation::phases::parser::statements::Statement;
+    use solix_compilation::phases::parser::statements::declarations::{ClassMember, Declaration};
+    use solix_compilation::phases::{BinderPhase, LexerPhase, ParserPhase};
+    use solix_compilation::pipeline::CompilationPipeline;
+
+    // Case 1: External symbol with same name as a local free function must NOT be rewritten
+    // to inline the unrelated local free function body.
+    let ext_source = r#"
+        package extpkg;
+
+        public int32 shared_helper() {
+            return 10;
+        }
+    "#;
+    let local_source = r#"
+        package app;
+        import extpkg.*;
+
+        public class Point {
+            public int32 val;
+            public Point(int32 v) { this.val = v; }
+        }
+
+        Point make_point() {
+            return new Point(42);
+        }
+
+        int32[] make_array() {
+            return new int32[3];
+        }
+
+        public class MainApp {
+            public static int32 main() {
+                Point made = make_point();
+                int32[] arr = make_array();
+                return shared_helper() + made.val + arr.length;
+            }
+        }
+    "#;
+    let helper_source = r#"
+        package other;
+        int32 shared_helper() {
+            return 9999;
+        }
+    "#;
+
+    let mut pipeline = CompilationPipeline::empty()
+        .add_phase(LexerPhase::new())
+        .add_phase(ParserPhase::new())
+        .add_phase(BinderPhase::new());
+
+    let options = CompilationOptions::new()
+        .with_source("ext.slx", ext_source)
+        .with_source("local.slx", local_source)
+        .with_source("other.slx", helper_source)
+        .with_entry_point(Some("app::MainApp::main".to_string()))
+        .with_inline_threshold(8);
+    let mut context = CompilationContext::new(options);
+    context.mark_external_source(0);
+    context
+        .execute_pipeline(&mut pipeline)
+        .expect("Frontend pipeline must succeed");
+
+    // Clear node_types for make_point() and make_array() call spans to exercise vacant return resolution
+    let ast = context.ast[1].as_ref().expect("local AST");
+    let mut call_spans = Vec::new();
+    for decl in &ast.declarations {
+        if let Declaration::Class(class_decl) = decl {
+            for member in &class_decl.members {
+                if let ClassMember::Method(method) = member
+                    && let Some(body) = &method.body
+                {
+                    for stmt in &body.statements {
+                        if let Statement::VariableDeclaration(var_decl) = stmt
+                            && let Some(init) = &var_decl.initializer
+                        {
+                            call_spans.push((
+                                context.get_lexeme(var_decl.name_span).to_string(),
+                                init.span(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(artifacts) = context.binding_artifacts.as_mut() {
+        for (_, span) in &call_spans {
+            artifacts.node_types.remove(span);
+        }
+    }
+
+    let mut inliner = AstInlinerPhase::new();
+    use solix_compilation::phases::phase::CompilationPhase;
+    inliner
+        .run(&mut context)
+        .expect("AstInlinerPhase must succeed");
+
+    let artifacts = context
+        .binding_artifacts
+        .as_ref()
+        .expect("Binding artifacts");
+    for (name, span) in &call_spans {
+        let recorded = artifacts
+            .node_types
+            .get(span)
+            .expect("Inlined call span must recover return type into node_types");
+        if name == "made" {
+            assert!(
+                matches!(recorded, solix_common::Type::Class { symbol_name, .. } if symbol_name.contains("Point")),
+                "make_point() return type must be Type::Class(Point), got {recorded:?}"
+            );
+        } else if name == "arr" {
+            assert!(
+                matches!(recorded, solix_common::Type::Array { .. }),
+                "make_array() return type must be Type::Array, got {recorded:?}"
+            );
+        }
+    }
+
+    // Confirm shared_helper() call inside MainApp::main was NOT inlined with 9999 from 'other'
+    let main_ast = context.ast[1].as_ref().expect("local AST after inliner");
+    let return_expr = main_ast.declarations.iter().find_map(|decl| {
+        if let Declaration::Class(class_decl) = decl {
+            for member in &class_decl.members {
+                if let ClassMember::Method(method) = member
+                    && let Some(body) = &method.body
+                {
+                    for stmt in &body.statements {
+                        if let Statement::Return(ret) = stmt {
+                            return ret.value.as_ref();
+                        }
+                    }
+                }
+            }
+        }
+        None
+    });
+    let serialized_ret = format!("{return_expr:?}");
+    assert!(
+        !serialized_ret.contains("9999"),
+        "External shared_helper() must never inline unrelated other::shared_helper (9999): {serialized_ret}"
+    );
+}

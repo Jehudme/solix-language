@@ -217,7 +217,7 @@ The following identifiers are reserved as **primitive type names**. They denote 
 
 ## 7. Numeric Literals
 
-Numeric literals represent compile-time constant values. The lexer classifies them by their prefix and content; suffixes refine the type.
+Numeric literals represent compile-time constant values. The lexer classifies them by their prefix and content; suffixes refine the type. Single underscores (`_`) may be placed **between** digits as visual separators (`1_000_000`, `0xDEAD_BEEF`, `0b1111_0000`, `1_000.25_0e+1_0`). Leading underscores immediately after a prefix (`0x_FF`, `0b_10`), trailing underscores (`1_`, `0xFF_`, `1.0_`), or consecutive underscores (`1__0`, `0xF__F`) are lexical errors (`E0014`, `E0015`, or `E0017`).
 
 ### 7.1 Integer Literals
 
@@ -321,7 +321,8 @@ char_body      ::= printable_ascii_char_except_backslash_and_single_quote
 | `\'`   | U+0027  | Single quote         |
 | `\"`   | U+0022  | Double quote         |
 | `\0`   | U+0000  | Null character       |
-| `\xHH` | U+00HH  | Hexadecimal byte value (exactly 2 hex digits) |
+| `\xHH` | U+00HH  | Hexadecimal byte scalar (exact 2 hex digits) |
+| `\u{H...}` | U+0000 – U+10FFFF | Unicode scalar escape (1 to 6 hex digits; surrogates disallowed) |
 
 A character literal must contain exactly one character body element (after escape expansion). An empty literal `''` or a multi-character literal `'ab'` is a lexical error.
 
@@ -336,6 +337,7 @@ string greeting = "Hello, World!";
 string empty = "";
 string escaped = "Line 1\nLine 2\tTabbed";
 string hex = "Null byte: \x00 End";
+string unicode = "Check: \u{2713} Rocket: \u{1F680}";
 ```
 
 **Syntax:**
@@ -346,7 +348,7 @@ string_body    ::= printable_ascii_char_except_backslash_and_double_quote
                  | escape_sequence
 ```
 
-The same escape sequences defined in §8 apply inside string literals (`\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`, `\xHH`). The lexer decodes these sequences directly into their corresponding byte values when constructing the token literal representation:
+The same escape sequences defined in §8 apply inside string literals (`\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`, `\xHH`, `\u{H...}`). The lexer preserves the literal source slice and the parser decodes these escape sequences into UTF-8 character/string values:
 - `\n` decodes to ASCII byte `0x0A` (line feed)
 - `\t` decodes to ASCII byte `0x09` (horizontal tab)
 - `\r` decodes to ASCII byte `0x0D` (carriage return)

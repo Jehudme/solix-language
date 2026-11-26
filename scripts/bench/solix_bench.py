@@ -499,11 +499,23 @@ class BenchmarkRunner:
             + [str(path) for path in slx_files]
             + ["-o", str(out_binary), "--profile", profile]
         )
-        start_time = time.perf_counter()
+        # Warm up filesystem caches once, then sample 3 passes and use the median
+        # to eliminate cold-start subprocess variance in CI telemetry.
         compile_code, _compile_out, _compile_dur, _compile_rss = self.execute_command(cmd)
-        compile_ms = (time.perf_counter() - start_time) * 1000.0
+        if compile_code != 0 or not out_binary.exists():
+            return None, 0.0
 
-        if compile_code == 0 and out_binary.exists():
+        compile_samples_ms: List[float] = []
+        for _ in range(3):
+            start_time = time.perf_counter()
+            sample_code, _sample_out, _sample_dur, _sample_rss = self.execute_command(cmd)
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            if sample_code != 0:
+                return None, 0.0
+            compile_samples_ms.append(elapsed_ms)
+
+        compile_ms = statistics.median(compile_samples_ms)
+        if out_binary.exists():
             cached_result = (out_binary, round(compile_ms, 2))
             self.solix_bins_cache[cache_key] = cached_result
             return cached_result

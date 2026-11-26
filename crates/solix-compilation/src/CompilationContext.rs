@@ -380,15 +380,24 @@ impl CompilationContext {
     }
 
     /// Registers an additional source file dynamically, returning its assigned `source_id`.
-    pub fn add_source(&mut self, name: impl Into<String>, code: impl Into<String>) -> u16 {
-        let source_id = self.sources.len() as u16;
+    ///
+    /// # Errors
+    /// Returns [`CompilationDiagnostic`] (`E0018`) if more than 65,536 sources would be registered.
+    pub fn add_source(
+        &mut self,
+        name: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Result<u16, CompilationDiagnostic> {
+        let source_id = u16::try_from(self.sources.len()).map_err(|_| {
+            CompilationDiagnostic::from(crate::LexingError::source_limit_exceeded())
+        })?;
         self.source_names.push(name.into());
         self.sources.push(code.into());
         self.tokens.push(Vec::new());
         self.ast.push(None);
         self.dependencies.push(Vec::new());
         self.dependents.push(Vec::new());
-        source_id
+        Ok(source_id)
     }
 
     /// Resolves the exact string slice from the source code corresponding to a token span.
@@ -412,7 +421,7 @@ impl CompilationContext {
         self.source_names
             .iter()
             .position(|name_str| name_str == name)
-            .map(|index| index as u16)
+            .and_then(|index| u16::try_from(index).ok())
     }
 
     /// Returns the raw source code text associated with a given `source_id`.

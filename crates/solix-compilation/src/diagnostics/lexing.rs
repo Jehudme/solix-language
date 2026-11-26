@@ -86,6 +86,32 @@ pub enum LexingError {
         #[label("leading zero in decimal integer")]
         span: SourceSpan,
     },
+
+    #[error("Malformed numeric literal")]
+    #[diagnostic(
+        code(solix::lexer::malformed_number),
+        help(
+            "Numeric literals cannot have leading, trailing, or consecutive underscores, and exponents require at least one digit."
+        )
+    )]
+    MalformedNumericLiteral {
+        token: Token,
+        #[label("invalid numeric literal syntax")]
+        span: SourceSpan,
+    },
+
+    #[error("Compilation source file limit exceeded (maximum 65,536 sources)")]
+    #[diagnostic(
+        code(solix::lexer::source_limit_exceeded),
+        help(
+            "Reduce the number of source files or consolidate modules to stay within the 65,536-source index limit."
+        )
+    )]
+    SourceLimitExceeded {
+        token: Token,
+        #[label("source limit exceeded")]
+        span: SourceSpan,
+    },
 }
 
 impl LexingError {
@@ -152,6 +178,26 @@ impl LexingError {
         }
     }
 
+    /// Constructs a new [`LexingError::MalformedNumericLiteral`] from a token.
+    #[must_use]
+    pub fn malformed_number(token: Token) -> Self {
+        Self::MalformedNumericLiteral {
+            token,
+            span: token.span.to_source_span(),
+        }
+    }
+
+    /// Constructs a new [`LexingError::SourceLimitExceeded`] diagnostic.
+    #[must_use]
+    pub fn source_limit_exceeded() -> Self {
+        let sentinel_span = solix_common::span::Span::default();
+        let sentinel_token = Token::new(solix_common::tokens::TokenKind::Unknown, sentinel_span);
+        Self::SourceLimitExceeded {
+            token: sentinel_token,
+            span: sentinel_span.to_source_span(),
+        }
+    }
+
     /// Returns the underlying token associated with this error.
     #[must_use]
     pub const fn token(&self) -> Token {
@@ -162,7 +208,9 @@ impl LexingError {
             | Self::UnterminatedBlockComment { token, .. }
             | Self::MalformedHexLiteral { token, .. }
             | Self::MalformedBinaryLiteral { token, .. }
-            | Self::LeadingZeroIntegerLiteral { token, .. } => *token,
+            | Self::LeadingZeroIntegerLiteral { token, .. }
+            | Self::MalformedNumericLiteral { token, .. }
+            | Self::SourceLimitExceeded { token, .. } => *token,
         }
     }
 
@@ -177,6 +225,8 @@ impl LexingError {
             Self::MalformedHexLiteral { .. } => "E0014",
             Self::MalformedBinaryLiteral { .. } => "E0015",
             Self::LeadingZeroIntegerLiteral { .. } => "E0016",
+            Self::MalformedNumericLiteral { .. } => "E0017",
+            Self::SourceLimitExceeded { .. } => "E0018",
         }
     }
 
@@ -190,7 +240,9 @@ impl LexingError {
             | Self::UnterminatedBlockComment { span, .. }
             | Self::MalformedHexLiteral { span, .. }
             | Self::MalformedBinaryLiteral { span, .. }
-            | Self::LeadingZeroIntegerLiteral { span, .. } => *span,
+            | Self::LeadingZeroIntegerLiteral { span, .. }
+            | Self::MalformedNumericLiteral { span, .. }
+            | Self::SourceLimitExceeded { span, .. } => *span,
         }
     }
 }
@@ -227,6 +279,12 @@ mod tests {
 
         let error_leading_zero = LexingError::leading_zero_integer(dummy_token);
         assert_eq!(error_leading_zero.error_code(), "E0016");
+
+        let error_malformed_num = LexingError::malformed_number(dummy_token);
+        assert_eq!(error_malformed_num.error_code(), "E0017");
+
+        let error_source_limit = LexingError::source_limit_exceeded();
+        assert_eq!(error_source_limit.error_code(), "E0018");
     }
 
     #[test]

@@ -343,6 +343,65 @@ fn test_char_literal_escaped_character_bounds_validation() {
 }
 
 #[test]
+fn test_unicode_braced_escape_sequences_in_string_and_char_literals() {
+    use solix_compilation::phases::parser::statements::declarations::Declaration;
+    use solix_compilation::phases::parser::statements::expressions::{Expression, LiteralValue};
+
+    let valid_source = r#"
+        char check = '\u{2713}';
+        char emoji = '\u{1F680}';
+        string text = "A\u{0042}\u{2713}\u{1F680}";
+    "#;
+    let tokens = lex_source(0, valid_source).expect("Lexing valid unicode escapes must succeed");
+    let ast = parse_source(0, &tokens, valid_source)
+        .expect("Valid unicode escapes in char and string literals must parse cleanly");
+    assert_eq!(ast.declarations.len(), 3);
+
+    let extracted_values: Vec<LiteralValue> = ast
+        .declarations
+        .iter()
+        .filter_map(|decl| match decl {
+            Declaration::Field(field) => match field.initializer.as_ref()? {
+                Expression::Literal { value, .. } => Some(value.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        extracted_values,
+        vec![
+            LiteralValue::Char('\u{2713}'),
+            LiteralValue::Char('\u{1F680}'),
+            LiteralValue::String("AB\u{2713}\u{1F680}".to_string()),
+        ]
+    );
+
+    let invalid_escapes = [
+        r#"string empty_brace = "\u{}";"#,
+        r#"string missing_brace = "\u1234";"#,
+        r#"string too_many_digits = "\u{1234567}";"#,
+        r#"string surrogate = "\u{D800}";"#,
+        r#"string out_of_range = "\u{110000}";"#,
+        r#"char bad_char_unicode = '\u{110000}';"#,
+        r#"char invalid_hex = '\u{ZZZZ}';"#,
+    ];
+    for snippet in invalid_escapes {
+        let bad_tokens = lex_source(0, snippet).expect("Lexing invalid escape string succeeds");
+        let bad_parse = parse_source(0, &bad_tokens, snippet);
+        assert!(
+            bad_parse.is_err(),
+            "Invalid unicode escape must fail: {snippet}"
+        );
+        let errors = bad_parse.expect_err("Parsing error expected");
+        assert!(
+            errors.iter().any(|error| error.error_code() == "E0151"),
+            "Expected E0151 for '{snippet}', got {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn test_issue_248_parser_error_recovery_and_cascade_prevention() {
     let source = r#"
 package pong;
@@ -388,5 +447,50 @@ public class Main {
             .iter()
             .any(|error_entry| error_entry.error_code() == "E0195"),
         "Must NOT emit InvalidTopLevelToken"
+    );
+}
+
+#[test]
+fn test_class_member_synchronize_recovers_method_after_missing_semicolon() {
+    use solix_compilation::phases::parser::parse_source_resilient;
+    use solix_compilation::phases::parser::statements::declarations::{ClassMember, Declaration};
+
+    let source = r#"
+public class BrokenFieldClass {
+    public int32 missing_semi
+    public void valid_method() {
+        int32 ok = 1;
+    }
+}
+"#;
+    let tokens = lex_source(0, source).expect("Lexing source must succeed");
+    let (ast, errors) = parse_source_resilient(0, &tokens, source);
+    assert!(
+        !errors.is_empty(),
+        "Missing semicolon on field must emit a parse diagnostic"
+    );
+
+    let class_decl = ast
+        .declarations
+        .iter()
+        .find_map(|decl| match decl {
+            Declaration::Class(class_decl) => Some(class_decl),
+            _ => None,
+        })
+        .expect("BrokenFieldClass should still be recovered in AST");
+
+    let method_names: Vec<&str> = class_decl
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            ClassMember::Method(method_decl) => Some(
+                &source[method_decl.name_span.start as usize..method_decl.name_span.end as usize],
+            ),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        method_names.contains(&"valid_method"),
+        "Parser::synchronize must stop at 'public' so 'valid_method' is recovered; found {method_names:?}"
     );
 }

@@ -430,7 +430,7 @@ This section documents all syntax diagnostics emitted by [`crates/solix-compilat
 ### `E0151`: Invalid Escape Sequence
 * **Diagnostic Message:** `Invalid escape sequence in literal`
 * **Variant:** `ParsingError::InvalidEscapeSequence`
-* **Resolution:** Valid escape sequences are: \n, \t, \r, \\, \', ", \0, \xHH.
+* **Resolution:** Valid escape sequences are: `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`, `\xHH`, `\u{H...}`.
 
 ---
 
@@ -513,6 +513,14 @@ This section documents all syntax diagnostics emitted by [`crates/solix-compilat
       return 0;
   }
   ```
+
+---
+
+### `E0159`: Compilation Source File Limit Exceeded
+* **Diagnostic Message:** `Compilation source file limit exceeded (maximum 65,536 sources)`
+* **Variant:** `ParsingError::SourceLimitExceeded`
+* **Cause:** More than 65,536 source modules were submitted to the parser (`u16` `Span::id` limit).
+* **Resolution:** Consolidate generated modules or split the workspace into separately compiled package artifacts.
 
 ---
 

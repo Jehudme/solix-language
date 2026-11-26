@@ -310,3 +310,95 @@ fn test_decimal_integer_with_leading_zeros_rejected() {
         );
     }
 }
+
+#[test]
+fn test_numeric_underscore_and_exponent_validation() {
+    let invalid_cases = [
+        ("0x_", "E0014"),
+        ("0x___", "E0014"),
+        ("0x_FF", "E0014"),
+        ("0xFF_", "E0014"),
+        ("0xF__F", "E0014"),
+        ("0xFF_L", "E0014"),
+        ("0b_", "E0015"),
+        ("0b___", "E0015"),
+        ("0b_10", "E0015"),
+        ("0b10_", "E0015"),
+        ("0b1__0", "E0015"),
+        ("0b10_L", "E0015"),
+        ("1_", "E0017"),
+        ("1__0", "E0017"),
+        ("1_L", "E0017"),
+        ("1_.0", "E0017"),
+        ("1.0_", "E0017"),
+        ("1.0__5", "E0017"),
+        ("1.0_f", "E0017"),
+        ("1_e2", "E0017"),
+        ("1e", "E0017"),
+        ("1e+", "E0017"),
+        ("1e-", "E0017"),
+        ("1.0e", "E0017"),
+        ("1.0e+", "E0017"),
+        ("1.0e-", "E0017"),
+        ("1e_2", "E0017"),
+        ("1e2_", "E0017"),
+        ("1e2__3", "E0017"),
+        ("1.0e_5", "E0017"),
+    ];
+
+    for (snippet, expected_code) in invalid_cases {
+        let result = lex_source(0, snippet);
+        assert!(
+            result.is_err(),
+            "Expected malformed numeric literal '{snippet}' to fail lexing"
+        );
+        let errors = result.expect_err("Expected lexing error");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.error_code() == expected_code),
+            "Expected {expected_code} for '{snippet}', got {errors:?}"
+        );
+    }
+
+    let valid_cases = [
+        "0xDEAD_BEEF",
+        "0b1111_0000",
+        "1_000_000",
+        "1_000L",
+        "1.",
+        "1.f",
+        "1.F",
+        "1.e3",
+        "1_0.2_5e+1_0",
+        "1_0.2_5e-1_0f",
+    ];
+    for snippet in valid_cases {
+        let result = lex_source(0, snippet);
+        assert!(
+            result.is_ok(),
+            "Expected valid numeric literal '{snippet}' to lex cleanly, got {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_source_index_u16_capacity_check() {
+    use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+    let mut context = CompilationContext::new(CompilationOptions::new());
+    for index in 0..usize::from(u16::MAX) + 1 {
+        context
+            .add_source(format!("src_{index}.slx"), "")
+            .expect("First 65,536 sources fit within u16");
+    }
+    let overflow = context.add_source("overflow.slx", "");
+    assert!(
+        overflow.is_err(),
+        "65,537th source must be rejected with diagnostic"
+    );
+    let diag = overflow.expect_err("Expected E0018");
+    assert!(
+        format!("{diag}").contains("source file limit exceeded"),
+        "Unexpected diagnostic message: {diag}"
+    );
+}
