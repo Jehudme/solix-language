@@ -109,7 +109,9 @@ The Solix compilation pipeline enforces zero tolerance for cascading compiler fa
 | **Lexing $\to$ Parsing** | Unrecognized token, unterminated literal, or invalid escape | Compiler halts; parser never instantiated |
 | **Parsing $\to$ Binding** | Syntax grammar violation, missing semicolon, unmatched bracket | Compiler halts; binder never instantiated |
 | **Binding $\to$ Emitting** | Type mismatch, unknown identifier, cyclic inheritance, invalid cast, or final modifier violations | Compiler halts; emitter never instantiated |
-| **Emitting $\to$ Packaging** | Register exhaustion (> 65,535 registers) or jump offset overflow | Packaging aborted; no binary emitted |
+| **Emitting $\to$ Packaging** | Register exhaustion (> 65,535 registers), jump offset overflow, or interface/tuple ID overflow after compaction | Packaging aborted; no binary emitted |
+
+During static reachability linking (`apply_reachability_and_static_linking`), interface descriptors (`CallInterface` / `.itable` targets) and `TupleInstanceof` class targets are compacted deterministically to the lowest dense `vtable_id`s starting at `1` so 8-bit interface dispatch opcodes never wrap modulo `256` in large programs.
 
 ---
 

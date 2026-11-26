@@ -582,4 +582,49 @@ fn test_verifier_rejects_i32_branch_overflow_and_object_tuple_step_bounds() {
         verify_program(&[first_unit, second_unit], &[f0, f1], 0).is_err(),
         "Second binary with empty pool must not resolve constant index 0 via static_base_offset fallback"
     );
+
+    // 7. Relocating CallInterface across loaded modules must reject iface_id > 255 instead of wrapping u8
+    let mut mod_a = BinaryProgram::new();
+    for class_idx in 0..250u32 {
+        mod_a.classes.push(CompiledClass::new(
+            format!("ModAClass{class_idx}"),
+            class_idx,
+            None,
+            8,
+        ));
+    }
+    let mut func_a = CompiledFunction::new("mod_a_fn", 0, 0, 1);
+    func_a
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    mod_a.functions.push(func_a);
+
+    let mut mod_b = BinaryProgram::new();
+    let mut iface_b = CompiledClass::new("ModBIface", 7, None, 8);
+    iface_b.itable.push((7, vec![0]));
+    mod_b.classes.push(iface_b);
+    let mut func_b = CompiledFunction::new("mod_b_main", 0, 0, 2);
+    func_b.instructions.push(Instruction::format_call(
+        OpCode::CallInterface,
+        0,
+        7 << 8,
+        1,
+        1,
+    ));
+    func_b
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    mod_b.functions.push(func_b);
+    mod_b.entry_point = Some("mod_b_main".to_string());
+
+    let err_reloc = RuntimeContext::new(
+        RuntimeOptions::new().with_binary(mod_a).with_binary(mod_b),
+    )
+    .expect_err(
+        "CallInterface iface_id > 255 after relocation must fail cleanly instead of truncating",
+    );
+    assert!(
+        err_reloc.to_string().contains("255"),
+        "Unexpected error message for relocated CallInterface overflow: {err_reloc}"
+    );
 }

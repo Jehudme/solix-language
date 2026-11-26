@@ -117,6 +117,8 @@ struct StaticLinker<'program> {
     next_vtable_id: u32,
     call_extern_rewrites: HashMap<(usize, usize), usize>,
     alloc_extern_rewrites: HashMap<(usize, usize), u32>,
+    call_interface_ifaces: HashMap<(usize, usize), u32>,
+    tuple_instanceof_vts: HashMap<(usize, usize), u32>,
 }
 
 impl<'program> StaticLinker<'program> {
@@ -152,6 +154,8 @@ impl<'program> StaticLinker<'program> {
             next_vtable_id,
             call_extern_rewrites: HashMap::new(),
             alloc_extern_rewrites: HashMap::new(),
+            call_interface_ifaces: HashMap::new(),
+            tuple_instanceof_vts: HashMap::new(),
         }
     }
 
@@ -411,7 +415,7 @@ impl<'program> StaticLinker<'program> {
             None
         };
 
-        for instruction in &mut cloned_function.instructions {
+        for (inst_pc, instruction) in cloned_function.instructions.iter_mut().enumerate() {
             let raw_op = instruction.raw_opcode();
             if raw_op == OpCode::LoadConst as u8 || raw_op == OpCode::LoadF64 as u8 {
                 if let Ok(opcode) = instruction.opcode(0) {
@@ -501,6 +505,8 @@ impl<'program> StaticLinker<'program> {
                 if old_iface_id > 0 {
                     let slot = target & 0xFF;
                     let new_iface_id = self.reserve_dep_vtable_id(dep_idx, old_iface_id);
+                    self.call_interface_ifaces
+                        .insert((new_index, inst_pc), new_iface_id);
                     let new_target = ((new_iface_id as u16) << 8) | slot;
                     *instruction = Instruction::format_call(
                         OpCode::CallInterface,
@@ -515,16 +521,29 @@ impl<'program> StaticLinker<'program> {
                 && (instruction.flags() & 0x80) != 0
                 && let Ok(opcode) = instruction.opcode(0)
             {
-                let old_vt = u32::from(instruction.flags() & 0x7F);
+                let old_vt = if opcode == OpCode::AllocArray && instruction.src2() > 0 {
+                    u32::from(instruction.src2())
+                } else {
+                    u32::from(instruction.flags() & 0x7F)
+                };
                 if old_vt > 0 {
                     let new_vt = self.reserve_dep_vtable_id(dep_idx, old_vt);
+                    if opcode == OpCode::TupleInstanceof {
+                        self.tuple_instanceof_vts
+                            .insert((new_index, inst_pc), new_vt);
+                    }
                     let new_flags = 0x80 | ((new_vt as u8) & 0x7F);
+                    let new_src2 = if opcode == OpCode::AllocArray {
+                        new_vt as u16
+                    } else {
+                        instruction.src2()
+                    };
                     *instruction = Instruction::format_a(
                         opcode,
                         new_flags,
                         instruction.dst(),
                         instruction.src1(),
-                        instruction.src2(),
+                        new_src2,
                     );
                 }
             } else if (raw_op == OpCode::GetStatic as u8 || raw_op == OpCode::SetStatic as u8)
@@ -859,7 +878,7 @@ impl<'program> StaticLinker<'program> {
         }
     }
 
-    fn prune_and_remap(self) {
+    fn prune_and_remap(&mut self) {
         if self.reachable_indices.is_empty()
             || self.reachable_indices.len() == self.program.functions.len()
         {
@@ -925,8 +944,275 @@ impl<'program> StaticLinker<'program> {
             self.program.entry_point_id = Some(new_entry_id as u32);
         }
 
+        self.call_interface_ifaces = std::mem::take(&mut self.call_interface_ifaces)
+            .into_iter()
+            .filter_map(|((old_idx, inst_pc), iface_id)| {
+                old_to_new_index
+                    .get(&old_idx)
+                    .map(|&new_idx| ((new_idx, inst_pc), iface_id))
+            })
+            .collect();
+        self.tuple_instanceof_vts = std::mem::take(&mut self.tuple_instanceof_vts)
+            .into_iter()
+            .filter_map(|((old_idx, inst_pc), vt_id)| {
+                old_to_new_index
+                    .get(&old_idx)
+                    .map(|&new_idx| ((new_idx, inst_pc), vt_id))
+            })
+            .collect();
+
         self.program.functions = pruned_functions;
     }
+}
+
+/// Compacts `vtable_id`s across `program` so interfaces and `TupleInstanceof` targets receive the
+/// lowest dense IDs (`1..`), preventing `CallInterface` (8-bit `iface_id`) and
+/// `TupleInstanceof` (7-bit `vtable_id`) instruction-encoding truncation.
+fn compact_program_vtables(
+    program: &mut BinaryProgram,
+    call_interface_ifaces: &HashMap<(usize, usize), u32>,
+    tuple_instanceof_vts: &HashMap<(usize, usize), u32>,
+) -> Result<(), solix_common::diagnostics::EmissionError> {
+    if program.classes.is_empty()
+        && call_interface_ifaces.is_empty()
+        && tuple_instanceof_vts.is_empty()
+    {
+        return Ok(());
+    }
+
+    let mut tuple_priority_ids: HashSet<u32> = HashSet::new();
+    let mut interface_priority_ids: HashSet<u32> = HashSet::new();
+    let mut all_ids: HashSet<u32> = HashSet::new();
+
+    for class_desc in &program.classes {
+        if class_desc.vtable_id > 0 {
+            all_ids.insert(class_desc.vtable_id);
+        }
+        if let Some(base_id) = class_desc.base_vtable_id
+            && base_id > 0
+        {
+            all_ids.insert(base_id);
+        }
+        for (iface_id, _) in &class_desc.itable {
+            if *iface_id > 0 {
+                interface_priority_ids.insert(*iface_id);
+                all_ids.insert(*iface_id);
+            }
+        }
+    }
+
+    for (func_idx, func) in program.functions.iter().enumerate() {
+        for (inst_pc, instruction) in func.instructions.iter().enumerate() {
+            let raw_op = instruction.raw_opcode();
+            if raw_op == OpCode::AllocObject as u8 {
+                let vt = u32::from(instruction.src1());
+                if vt > 0 {
+                    all_ids.insert(vt);
+                }
+            } else if raw_op == OpCode::Instanceof as u8
+                || (raw_op == OpCode::CastCheck as u8 && instruction.flags() == 0)
+            {
+                let vt = u32::from(instruction.src2());
+                if vt > 0 {
+                    all_ids.insert(vt);
+                }
+            } else if raw_op == OpCode::CallInterface as u8 {
+                let iface_id = call_interface_ifaces
+                    .get(&(func_idx, inst_pc))
+                    .copied()
+                    .unwrap_or_else(|| u32::from(instruction.call_target() >> 8));
+                if iface_id > 0 {
+                    interface_priority_ids.insert(iface_id);
+                    all_ids.insert(iface_id);
+                }
+            } else if raw_op == OpCode::TupleInstanceof as u8 && (instruction.flags() & 0x80) != 0 {
+                let vt = tuple_instanceof_vts
+                    .get(&(func_idx, inst_pc))
+                    .copied()
+                    .unwrap_or_else(|| u32::from(instruction.flags() & 0x7F));
+                if vt > 0 {
+                    tuple_priority_ids.insert(vt);
+                    all_ids.insert(vt);
+                }
+            } else if raw_op == OpCode::AllocArray as u8 && instruction.flags() >= 0x80 {
+                let vt = if instruction.src2() > 0 {
+                    u32::from(instruction.src2())
+                } else {
+                    u32::from(instruction.flags() & 0x7F)
+                };
+                if vt > 0 {
+                    all_ids.insert(vt);
+                }
+            }
+        }
+    }
+
+    let mut tuple_list: Vec<u32> = tuple_priority_ids.iter().copied().collect();
+    tuple_list.sort_unstable();
+
+    let mut iface_list: Vec<u32> = interface_priority_ids
+        .iter()
+        .copied()
+        .filter(|id| !tuple_priority_ids.contains(id))
+        .collect();
+    iface_list.sort_unstable();
+
+    let mut other_list: Vec<u32> = all_ids
+        .iter()
+        .copied()
+        .filter(|id| !tuple_priority_ids.contains(id) && !interface_priority_ids.contains(id))
+        .collect();
+    other_list.sort_unstable();
+
+    let mut id_remap: HashMap<u32, u32> = HashMap::with_capacity(all_ids.len());
+    let mut next_compact_id = 1u32;
+    for old_id in tuple_list.into_iter().chain(iface_list).chain(other_list) {
+        id_remap.insert(old_id, next_compact_id);
+        next_compact_id = next_compact_id.saturating_add(1);
+    }
+
+    for class_desc in &mut program.classes {
+        if class_desc.vtable_id > 0
+            && let Some(&mapped_id) = id_remap.get(&class_desc.vtable_id)
+        {
+            class_desc.vtable_id = mapped_id;
+        }
+        if let Some(base_id) = class_desc.base_vtable_id
+            && base_id > 0
+            && let Some(&mapped_base) = id_remap.get(&base_id)
+        {
+            class_desc.base_vtable_id = Some(mapped_base);
+        }
+        for (iface_id, _) in &mut class_desc.itable {
+            if *iface_id > 0
+                && let Some(&mapped_iface) = id_remap.get(iface_id)
+            {
+                *iface_id = mapped_iface;
+            }
+        }
+    }
+
+    for (func_idx, func) in program.functions.iter_mut().enumerate() {
+        for (inst_pc, instruction) in func.instructions.iter_mut().enumerate() {
+            let raw_op = instruction.raw_opcode();
+            if raw_op == OpCode::AllocObject as u8 {
+                let old_vt = u32::from(instruction.src1());
+                if old_vt > 0
+                    && let Some(&new_vt) = id_remap.get(&old_vt)
+                {
+                    let new_vt_u16 = u16::try_from(new_vt).map_err(|_| {
+                        solix_common::diagnostics::EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "Compacted AllocObject vtable ID {new_vt} exceeds 16-bit limit"
+                            ),
+                        }
+                    })?;
+                    *instruction = Instruction::format_a(
+                        OpCode::AllocObject,
+                        instruction.flags(),
+                        instruction.dst(),
+                        new_vt_u16,
+                        instruction.src2(),
+                    );
+                }
+            } else if raw_op == OpCode::Instanceof as u8
+                || (raw_op == OpCode::CastCheck as u8 && instruction.flags() == 0)
+            {
+                let old_vt = u32::from(instruction.src2());
+                if old_vt > 0
+                    && let Some(&new_vt) = id_remap.get(&old_vt)
+                    && let Ok(opcode) = instruction.opcode(inst_pc)
+                {
+                    let new_vt_u16 = u16::try_from(new_vt).map_err(|_| {
+                        solix_common::diagnostics::EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "Compacted type-check vtable ID {new_vt} exceeds 16-bit limit"
+                            ),
+                        }
+                    })?;
+                    *instruction = Instruction::format_a(
+                        opcode,
+                        instruction.flags(),
+                        instruction.dst(),
+                        instruction.src1(),
+                        new_vt_u16,
+                    );
+                }
+            } else if raw_op == OpCode::CallInterface as u8 {
+                let old_iface = call_interface_ifaces
+                    .get(&(func_idx, inst_pc))
+                    .copied()
+                    .unwrap_or_else(|| u32::from(instruction.call_target() >> 8));
+                if old_iface > 0
+                    && let Some(&new_iface) = id_remap.get(&old_iface)
+                {
+                    let new_iface_u8 = u8::try_from(new_iface).map_err(|_| {
+                        solix_common::diagnostics::EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "Interface ID {new_iface} exceeds CallInterface 8-bit opcode encoding limit (255)"
+                            ),
+                        }
+                    })?;
+                    let slot = instruction.call_target() & 0xFF;
+                    let new_target = (u16::from(new_iface_u8) << 8) | slot;
+                    *instruction = Instruction::format_call(
+                        OpCode::CallInterface,
+                        instruction.call_dst(),
+                        new_target,
+                        instruction.arg_base(),
+                        instruction.arg_count(),
+                    );
+                }
+            } else if raw_op == OpCode::TupleInstanceof as u8 && (instruction.flags() & 0x80) != 0 {
+                let old_vt = tuple_instanceof_vts
+                    .get(&(func_idx, inst_pc))
+                    .copied()
+                    .unwrap_or_else(|| u32::from(instruction.flags() & 0x7F));
+                if old_vt > 0
+                    && let Some(&new_vt) = id_remap.get(&old_vt)
+                {
+                    if new_vt > 0x7F {
+                        return Err(
+                            solix_common::diagnostics::EmissionError::ContainerSerializationFailed {
+                                reason: format!(
+                                    "TupleInstanceof class ID {new_vt} exceeds 7-bit type-tag limit (127)"
+                                ),
+                            },
+                        );
+                    }
+                    let new_flags = 0x80 | ((new_vt as u8) & 0x7F);
+                    *instruction = instruction.with_flags(new_flags);
+                }
+            } else if raw_op == OpCode::AllocArray as u8 && instruction.flags() >= 0x80 {
+                let old_vt = if instruction.src2() > 0 {
+                    u32::from(instruction.src2())
+                } else {
+                    u32::from(instruction.flags() & 0x7F)
+                };
+                if old_vt > 0
+                    && let Some(&new_vt) = id_remap.get(&old_vt)
+                {
+                    let new_vt_u16 = u16::try_from(new_vt).map_err(|_| {
+                        solix_common::diagnostics::EmissionError::ContainerSerializationFailed {
+                            reason: format!(
+                                "Compacted AllocArray class ID {new_vt} exceeds 16-bit limit"
+                            ),
+                        }
+                    })?;
+                    let new_flags = 0x80 | ((new_vt as u8) & 0x7F);
+                    *instruction = Instruction::format_a(
+                        OpCode::AllocArray,
+                        new_flags,
+                        instruction.dst(),
+                        instruction.src1(),
+                        new_vt_u16,
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Applies static whole-program reachability analysis and dead-code elimination.
@@ -934,13 +1220,16 @@ impl<'program> StaticLinker<'program> {
 /// In static mode, imports reachable functions, classes, and static globals from
 /// `dependency_programs`, rewrites `OpCode::CallExtern` / `OpCode::AllocObjectExtern` to
 /// `OpCode::CallDirect` / `OpCode::AllocObject`, and prunes unreachable functions.
+///
+/// # Errors
+/// Returns `EmissionError` if compacted `vtable_id`s exceed opcode encoding bounds.
 pub fn apply_reachability_and_static_linking(
     program: &mut BinaryProgram,
     dependency_programs: &[BinaryProgram],
     is_static_mode: bool,
-) {
+) -> Result<(), solix_common::diagnostics::EmissionError> {
     if !is_static_mode {
-        return;
+        return Ok(());
     }
 
     let mut linker = StaticLinker::new(program, dependency_programs);
@@ -948,4 +1237,118 @@ pub fn apply_reachability_and_static_linking(
     linker.discover_reachable();
     linker.rewrite_external_instructions();
     linker.prune_and_remap();
+    compact_program_vtables(
+        linker.program,
+        &linker.call_interface_ifaces,
+        &linker.tuple_instanceof_vts,
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_reachability_and_static_linking;
+    use solix_common::bytecode::{
+        BinaryProgram, CompiledClass, CompiledFunction, Instruction, OpCode,
+    };
+
+    #[test]
+    fn test_static_linker_compacts_interfaces_below_u8_limit_when_many_classes_exist() {
+        let mut dep = BinaryProgram::new();
+        dep.package_name = "many_classes_dep".to_string();
+        let mut dep_impl = CompiledClass::new("DepImpl", 9, None, 8);
+        dep_impl.itable.push((10, vec![1]));
+        dep.classes.push(dep_impl);
+        dep.classes
+            .push(CompiledClass::new("DepIface", 10, None, 8));
+
+        let mut dep_entry = CompiledFunction::new("dep_call", 0, 1, 2);
+        dep_entry.instructions.push(Instruction::format_call(
+            OpCode::CallInterface,
+            0,
+            10 << 8,
+            0,
+            1,
+        ));
+        dep_entry
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+        let mut dep_method = CompiledFunction::new("DepImpl::ping", 0, 1, 1);
+        dep_method
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+        let mut dep_helper = CompiledFunction::new("dep_alloc_all", 0, 1, 2);
+        dep_helper
+            .instructions
+            .push(Instruction::format_a(OpCode::AllocObject, 0, 0, 9, 8));
+        dep_helper
+            .instructions
+            .push(Instruction::format_call(OpCode::CallDirect, 0, 0, 0, 0));
+        dep_helper
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+
+        dep.functions.push(dep_entry);
+        dep.functions.push(dep_method);
+        dep.functions.push(dep_helper);
+
+        let mut program = BinaryProgram::new();
+        for class_idx in 1..=260u32 {
+            program.classes.push(CompiledClass::new(
+                format!("LocalClass{class_idx}"),
+                class_idx,
+                None,
+                8,
+            ));
+        }
+        let ext_idx = program
+            .constant_pool
+            .add_string("dep_alloc_all")
+            .expect("add constant pool string");
+        let mut main_fn = CompiledFunction::new("Main::main", 0, 0, 2);
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::AllocObject, 0, 0, 260, 8));
+        main_fn.instructions.push(Instruction::format_call(
+            OpCode::CallExtern,
+            0,
+            ext_idx,
+            0,
+            0,
+        ));
+        main_fn
+            .instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+        program.functions.push(main_fn);
+        program.entry_point = Some("Main::main".to_string());
+        program.entry_point_id = Some(0);
+
+        apply_reachability_and_static_linking(&mut program, &[dep], true)
+            .expect("compacting interfaces below 255 must succeed");
+
+        let compacted_iface = program
+            .classes
+            .iter()
+            .find(|cls| cls.symbol == "DepIface")
+            .expect("DepIface must be imported");
+        assert!(
+            compacted_iface.vtable_id >= 1 && compacted_iface.vtable_id <= 255,
+            "DepIface must receive compact low ID <= 255, got {}",
+            compacted_iface.vtable_id
+        );
+        let call_iface_inst = program
+            .functions
+            .iter()
+            .flat_map(|func| func.instructions.iter())
+            .find(|inst| inst.raw_opcode() == OpCode::CallInterface as u8)
+            .copied()
+            .expect("CallInterface instruction must exist");
+        assert_eq!(
+            u32::from(call_iface_inst.call_target() >> 8),
+            compacted_iface.vtable_id,
+            "CallInterface target high byte must match compacted interface ID"
+        );
+    }
 }

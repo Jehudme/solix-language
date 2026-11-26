@@ -367,14 +367,22 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     // 5. Compile class descriptors
     let mut compiled_classes = Vec::new();
     if let Some(artifacts) = &context.binding_artifacts {
+        let mut ordered_layouts: Vec<&ClassLayout> = artifacts.layouts.values().collect();
+        ordered_layouts.sort_by_key(|layout| {
+            let is_interface = artifacts
+                .symbol_table
+                .get_symbol(layout.class_symbol_id)
+                .is_some_and(|entry| matches!(entry.symbol_type, Type::Interface { .. }));
+            (u8::from(!is_interface), layout.vtable_id)
+        });
         let mut iface_to_id = HashMap::new();
-        for layout in artifacts.layouts.values() {
+        for layout in &ordered_layouts {
             let simple = extract_simple_class_name(&layout.class_name);
             iface_to_id.insert(layout.class_name.clone(), layout.vtable_id);
-            iface_to_id.insert(simple, layout.vtable_id);
+            iface_to_id.entry(simple).or_insert(layout.vtable_id);
         }
 
-        for layout in artifacts.layouts.values() {
+        for layout in ordered_layouts {
             if let Some(entry) = artifacts.symbol_table.get_symbol(layout.class_symbol_id)
                 && entry.modifiers.contains(&Modifier::Extern)
             {
@@ -1009,7 +1017,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
         &mut program,
         &context.options.dependency_binaries,
         is_static_mode,
-    );
+    )?;
 
     program.package_name = context.options.package_name.clone();
     program.package_version = context.options.package_version.clone();

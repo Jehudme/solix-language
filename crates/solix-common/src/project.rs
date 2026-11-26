@@ -1532,6 +1532,9 @@ impl SlxpPackage {
 
         let mut manifest_option = None;
         let mut binaries = Vec::new();
+        let mut pending_bin_slxb: Vec<(String, Vec<u8>)> = Vec::new();
+        let mut seen_binary_hashes: std::collections::HashSet<[u8; 32]> =
+            std::collections::HashSet::new();
         let mut secondary_binaries = Vec::new();
         let mut native_libraries = Vec::new();
         let mut native_entry_names: std::collections::HashMap<PathBuf, String> =
@@ -1589,6 +1592,7 @@ impl SlxpPackage {
                     .map_err(|io_error| EmissionError::ContainerSerializationFailed {
                         reason: format!("failed to read root binary '{entry_name}': {io_error}"),
                     })?;
+                seen_binary_hashes.insert(crate::hash::sha256_bytes(&binary_bytes));
                 let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
                     EmissionError::ContainerSerializationFailed {
                         reason: format!(
@@ -1604,12 +1608,7 @@ impl SlxpPackage {
                     .map_err(|io_error| EmissionError::ContainerSerializationFailed {
                         reason: format!("failed to read binary '{entry_name}': {io_error}"),
                     })?;
-                let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
-                    EmissionError::ContainerSerializationFailed {
-                        reason: format!("failed to decode binary '{entry_name}': {deser_error}"),
-                    }
-                })?;
-                binaries.push(binary);
+                pending_bin_slxb.push((entry_name, binary_bytes));
             } else if entry_name.starts_with("lib/") && entry_name.ends_with(".slxb") {
                 let mut binary_bytes = Vec::new();
                 file_entry
@@ -1821,6 +1820,20 @@ impl SlxpPackage {
                     });
                 }
             }
+        }
+
+        for (entry_name, binary_bytes) in pending_bin_slxb {
+            // `solix build` writes `bin/<pkg>.slxb` as a legacy copy alongside root `binaries.slxb`;
+            // deduplicating by SHA-256 preserves legacy-only archives while preventing duplicate runtime loads.
+            if !seen_binary_hashes.insert(crate::hash::sha256_bytes(&binary_bytes)) {
+                continue;
+            }
+            let binary = BinaryProgram::from_bytes(&binary_bytes).map_err(|deser_error| {
+                EmissionError::ContainerSerializationFailed {
+                    reason: format!("failed to decode binary '{entry_name}': {deser_error}"),
+                }
+            })?;
+            binaries.push(binary);
         }
 
         // If no bin/*.slxb was discovered, probe root *.slxb entries as fallback
@@ -2788,6 +2801,41 @@ profiles:
         assert!(
             profile_explicit_debug.verify_checksum,
             "Explicit verify_checksum = true must be respected"
+        );
+    }
+
+    #[test]
+    fn test_slxp_package_ignores_duplicate_legacy_bin_copy_when_root_binaries_present() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let stage_dir = temp_dir.path().join("stage");
+        let bin_dir = stage_dir.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create stage bin dir");
+
+        let manifest_yaml = r#"configuration:
+  name: dup_copy_pkg
+  version: "0.1.0"
+profiles:
+  release: {}
+"#;
+        fs::write(stage_dir.join("manifest.yaml"), manifest_yaml).expect("write manifest.yaml");
+
+        let mut program = BinaryProgram::new();
+        program.package_name = "dup_copy_pkg".to_string();
+        let binary_bytes = program.to_bytes();
+        // Stage both root `binaries.slxb` and identical legacy `bin/<pkg>.slxb` (matching `solix build`).
+        fs::write(stage_dir.join("binaries.slxb"), &binary_bytes).expect("write root binaries");
+        fs::write(bin_dir.join("dup_copy_pkg.slxb"), &binary_bytes).expect("write legacy bin copy");
+
+        let package_path = temp_dir.path().join("dup_copy_pkg.slxp");
+        SlxpPackage::pack_directory(&stage_dir, &package_path).expect("pack slxp");
+
+        let extract_cache = temp_dir.path().join("cache");
+        let loaded = SlxpPackage::extract_and_load(&package_path, &extract_cache)
+            .expect("extract and load slxp");
+        assert_eq!(
+            loaded.binaries.len(),
+            1,
+            "Duplicate legacy bin/<pkg>.slxb copy of root binaries.slxb must not be double-loaded"
         );
     }
 }
