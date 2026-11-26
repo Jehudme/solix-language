@@ -1,6 +1,6 @@
 configuration:
   name: raylib
-  version: "5.6.1"
+  version: "6.0.0"
   description: Solix Raylib 1-to-1 Complete Bindings
   license: zlib/libpng
   authors: []
