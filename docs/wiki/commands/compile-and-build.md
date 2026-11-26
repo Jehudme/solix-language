@@ -17,6 +17,7 @@ solix compile package [path] [options]
 * `--deps-source <path>`: External source dependency file (`.slx`) to include directly.
 * `--deps-package <path>`: External package container (`.slxp`) to link against.
 * `--deps-binaries <path>`: External binary container (`.slxb`) to link against.
+* `--deps-file <path>`: External binary (`.slxb`) or package archive (`.slxp`) dependency file path (shorthand `-l`).
 * `-n, --name <name>`: Package or module identifier name.
 * `-V, --version <semver>`: Semantic version embedded into binary metadata [default: `0.1.0`].
 * `--description <desc>`: Package description string.

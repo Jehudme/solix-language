@@ -70,5 +70,5 @@ Normative contracts for the standard library modules live under [`libraries/soli
 
 ## 4. CLI Toolchain & Language Server Specifications ([`tools/`](tools/README.md))
 
-* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): Subcommand specifications and [`manifest.toml`](tools/cli/manifest.md) contract.
+* [**CLI Specifications (`tools/cli/`)**](tools/cli/README.md): Subcommand specifications and [`manifest.yaml`](tools/cli/manifest.md) contract.
 * [**Language Server Specifications (`tools/lsp/`)**](tools/lsp/README.md): [`protocol.md`](tools/lsp/protocol.md), [`navigation.md`](tools/lsp/navigation.md), [`intelligence.md`](tools/lsp/intelligence.md).

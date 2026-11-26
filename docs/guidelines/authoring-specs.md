@@ -73,7 +73,8 @@ docs/spec/
     ├── install.md              # 'solix install' command and options
     ├── uninstall.md            # 'solix uninstall' command and options
     ├── list.md                 # 'solix list' command and options
-    └── manifest.md             # 'manifest.toml' specification
+    ├── fmt.md                  # 'solix fmt' command and options
+    └── manifest.md             # 'manifest.yaml' specification
 ```
 
 ### 3.2 Opcode Specification Schema

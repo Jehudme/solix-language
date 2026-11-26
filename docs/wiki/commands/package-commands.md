@@ -26,6 +26,7 @@ solix new package <path> [options]
 * `--lib`: Generates a library package (`src/lib.slx`) instead of an application.
 * `--native [LANG]`: Scaffolds a dual-mode native subproject in `natives/` (`rust` [default], `c`, or `cpp`).
 * `--no-native`: Omits the native subproject in `natives/`.
+* `--no-std`: Omits the default `solix` standard library dependency (`solix`).
 * `-d, --deps <pkg@ver>`: Adds dependency in `pkg@ver` format (can be repeated).
 * `--force`: Overwrites existing `manifest.yaml` (or legacy `manifest.toml`) if present in the target directory.
 
@@ -152,8 +153,13 @@ solix list [options]
 ```
 
 ### Key Options & Flags
-* `--json`: Emits the package inventory as machine-readable JSON.
+* `--filter <substring>`: Filters listed packages by case-insensitive substring match on name.
+* `--profile <name>`: Filters entries by build profile (`release`, `debug`, `test`).
 * `--kind <package|binaries>`: Filters by container kind.
+* `--sort <name|version|profile>`: Sorts listed rows by field [default: `name`].
+* `--reverse`: Reverses sort order.
+* `--json`: Emits the package inventory as machine-readable JSON.
+* `-o, --output <file>`: Writes inventory output to `<file>` instead of `stdout`.
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
 
 ### Practical Examples

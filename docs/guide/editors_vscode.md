@@ -16,7 +16,7 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 - **Document Highlights**: Distinguishes read usages from mutating write usages.
 - **Call & Type Hierarchies**: Incoming/outgoing call trees and subtype/supertype navigation.
 - **Autocompletion**:
-  - Strict Solix v2.0 `.` (instance) vs `::` (static/enum) auto-rewrites.
+  - Strict Solix v3 `.` (instance) vs `::` (static/enum) auto-rewrites.
   - Postfix completions: `.if`, `.notnull`, `.println`, `.ret`.
   - Contextual keywords and member completions with full markdown documentation resolution.
 - **Hover Inspection**: Markdown tooltips displaying symbol kinds, type signatures, `sizeof: XXB` instance byte sizes, field `+XB` offsets, and doc comments.
@@ -30,7 +30,7 @@ The official Solix Visual Studio Code extension (`editors/vscode`) provides firs
 - **Code Formatting**: Standardized 4-space indentation preserving inline comments and doc blocks (`Shift+Alt+F`).
 
 ### Modern Syntax & Disassembly Highlighting
-- **108-Token TextMate Grammar**: Complete syntax highlighting matching Solix v2.0 (`syntaxes/solix.tmLanguage.json`).
+- **TextMate Grammar**: Complete syntax highlighting matching Solix v3 (`syntaxes/solix.tmLanguage.json`).
 - **Register VM Disassembly Syntax**: Dedicated grammar for inspecting 64-bit Register VM instructions, registers (`r0`..`r65535`), offsets, and mnemonics (`syntaxes/solix-disasm.tmLanguage.json`).
 - **Smart Doc-Comment Auto-Continuation**: `onEnterRules` automatically continue `/// ` and `/** */` blocks.
 

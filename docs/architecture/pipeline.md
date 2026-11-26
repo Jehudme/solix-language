@@ -82,7 +82,7 @@ If any phase encounters one or more diagnostic errors, subsequent phases halt im
   - Pre-evaluates enum declarations and collects variant values using signed 64-bit integer tracking with wrapping increments, safely accommodating negative explicit values and auto-increment sequences without arithmetic overflow.
 
 ### 2.6. Binary Packaging & Serialization
-- **Input**: `CompiledProgram` and manifest configuration (`manifest.toml`).
+- **Input**: `CompiledProgram` and manifest configuration (`manifest.yaml`).
 - **Output**: Binary file on disk (`.slxb` or `.slxp`).
 - **Responsibilities**:
   - Serializes magic headers (`SLXB` / `SLXC`), schema versions, and dependency manifests.

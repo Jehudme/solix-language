@@ -16,10 +16,10 @@ The official Visual Studio Code extension for the **Solix** programming language
   - CodeLens buttons for `▶ Run Main` and `▶ Run Test`.
   - Code actions and Quick Fixes for error codes (`E0226`, `E0201`, `E0284`).
   - Symbol rename and 4-space code formatting preserving comments.
-- **Syntax Highlighting**: Complete 108-token Solix v2.0 TextMate grammar with scope resolution and destructor highlighting.
+- **Syntax Highlighting**: Complete Solix v3 TextMate grammar with scope resolution and destructor highlighting.
 - **Bytecode Disassembly Preview**: Inspect 64-bit Register VM bytecode side-by-side (`Solix: Inspect 64-Bit Register VM Disassembly`).
 - **Exported API Header Preview**: Reconstruct public `.slx` API headers side-by-side (`Solix: Inspect Exported Public API`).
-- **Snippets**: Solix v2.0 idiomatic snippets.
+- **Snippets**: Solix v3 idiomatic snippets.
 
 ## Requirements
 

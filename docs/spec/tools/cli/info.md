@@ -49,14 +49,14 @@ solix info solix
 Output:
 ```text
 === Solix Package Container Inspection (.slxp) ===
-Package:          /home/user/.solix/packages/solix-release@2.0.0/solix.slxp
+Package:          /home/user/.solix/packages/solix-release@3.0.1/solix.slxp
 File Size:        1.5 MB (1572864 bytes)
 SHA-256:          46747ea15ac6f2f15d462438a63fb9ef71581361ab5facca844c97a488d24812
 Build Profile:    release
 Platforms:        linux-x86_64, macos-arm64, windows-x86_64
 Exported Symbols: 1872
 Cache Status:     Cached (verified SHA-256 match in ~/.solix/cache/)
-Package:          solix v2.0.0
+Package:          solix v3.0.1
 Description:      Solix Standard Library
 License:          Apache-2.0
 

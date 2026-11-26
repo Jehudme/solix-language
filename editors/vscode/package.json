@@ -1,7 +1,7 @@
 {
     "name": "solix",
     "displayName": "Solix",
-    "description": "Official language support for Solix v2.0 (Language Server, 108-token grammar, formatting, and task runner)",
+    "description": "Official language support for Solix v3 (Language Server, TextMate grammar, formatting, and task runner)",
     "version": "3.0.1",
     "publisher": "solix",
     "license": "MIT",

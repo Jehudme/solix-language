@@ -95,7 +95,7 @@ endif()
 | `SolixNativeFunctionPtr` | `SolixCValue (*)(void* vm_context, const SolixCValue* args, uint32_t arg_count, SolixCValue* out_error)` | Canonical native function pointer signature |
 | `SolixRegisterCallback` | `void (*)(const char* symbol_name, SolixNativeFunctionPtr fn_ptr)` | VM registration callback passed into `solix_register_natives` |
 | `SolixNativeEntry` | `{ const char* symbol_name; SolixNativeFunctionPtr fn_ptr; }` | Symbol-to-function descriptor used by `SOLIX_REGISTER_MODULE` |
-| `SolixVmContext` | `{ magic, vm_ptr, alloc_string, read_bytes, get_vm_metric, collect_cycles, set_cycle_threshold, get_field_i32, set_field_i32, alloc_chars, alloc_byte_array, alloc_array, array_len, array_get_u64, array_set_u64, get_class_vtable_id, alloc_object, read_field_u64, write_field_u64 }` | Live VM callback vtable supplied by `vm_context` |
+| `SolixVmContext` | `{ magic, vm_ptr, get_field_i32, set_field_i32, read_bytes, alloc_string, alloc_chars, alloc_byte_array, alloc_array, array_len, array_get_u64, array_set_u64, alloc_object, read_field_u64, write_field_u64, get_class_vtable_id, get_vm_metric, collect_cycles, set_cycle_threshold }` | Live VM callback vtable supplied by `vm_context` |
 
 ---
 
@@ -149,7 +149,7 @@ Always extract and validate `const SolixVmContext*` with `solix_vm_context_from_
 | `solix_vm_get_metric` | `(const SolixVmContext* ctx, uint32_t metric_id)` | `uint64_t` | Reads a VM runtime metric (`0..=55`) |
 | `solix_vm_collect_cycles` | `(const SolixVmContext* ctx)` | `uint64_t` | Runs the Bacon & Rajan cycle collector and returns reclaimed object count |
 | `solix_vm_set_cycle_threshold` | `(const SolixVmContext* ctx, uint32_t threshold)` | `void` | Adjusts the cycle collector candidate threshold |
-| `solix_vm_set_error` | `(const SolixVmContext* ctx, SolixCValue* out_error, const char* message)` | `bool` | Allocates `message` on the VM heap and writes it to `*out_error` (`false` if unavailable) |
+| `solix_vm_set_error` | `(void* raw_vm_context, SolixCValue* out_error, const char* message)` | `void` | Allocates `message` on the VM heap and writes it to `*out_error` (falls back to a non-null scalar tag if unavailable) |
 
 ---
 

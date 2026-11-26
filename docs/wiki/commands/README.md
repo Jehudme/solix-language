@@ -17,12 +17,12 @@ The Solix toolchain provides a unified command-line executable (`solix`) for pro
 | `export` | Exports packages or compiled binaries for distribution | [Package Commands](package-commands.md) | [`docs/spec/tools/cli/export.md`](../../spec/tools/cli/export.md) |
 | `uninstall` | Removes packages or versions from local store | [Package Commands](package-commands.md#3-solix-uninstall) | [`docs/spec/tools/cli/uninstall.md`](../../spec/tools/cli/uninstall.md) |
 | `list` | Lists installed packages and versions | [Package Commands](package-commands.md#4-solix-list) | [`docs/spec/tools/cli/list.md`](../../spec/tools/cli/list.md) |
-| `clean` | Removes project build artifacts and intermediate caches | [Clean Command](../../spec/tools/cli/clean.md) | [`docs/spec/tools/cli/clean.md`](../../spec/tools/cli/clean.md) |
-| `lsp` | Starts the 32-feature Solix Language Server | [LSP Reference](lsp.md) | [`docs/spec/tools/lsp/protocol.md`](../../spec/tools/lsp/protocol.md) |
-| `dap` | Starts the Solix Debug Adapter Protocol service | [DAP Reference](dap.md) | [`docs/wiki/commands/dap.md`](dap.md) |
-| `fmt` | Formats Solix source code to specification | [Formatter Reference](fmt.md) | [`docs/spec/tools/lsp/protocol.md`](../../spec/tools/lsp/protocol.md) |
-| `doc` | Generates HTML or Markdown API docs from source | [Doc Generator Spec](../../spec/tools/cli/doc.md) | [`docs/spec/tools/cli/doc.md`](../../spec/tools/cli/doc.md) |
-| `wiki` | Opens the bundled versioned offline docs portal | [Offline Wiki Spec](../../spec/tools/cli/wiki.md) | [`docs/spec/tools/cli/wiki.md`](../../spec/tools/cli/wiki.md) |
+| `clean` | Removes project build artifacts and intermediate caches | [Utility Commands](utility-commands.md#1-solix-clean) | [`docs/spec/tools/cli/clean.md`](../../spec/tools/cli/clean.md) |
+| `lsp` | Starts the 32-feature Solix Language Server | [LSP Reference](lsp.md) | [`docs/spec/tools/cli/lsp.md`](../../spec/tools/cli/lsp.md) |
+| `dap` | Starts the Solix Debug Adapter Protocol service | [DAP Reference](dap.md) | [`docs/spec/tools/cli/dap.md`](../../spec/tools/cli/dap.md) |
+| `fmt` | Formats Solix source code to specification | [Formatter Reference](fmt.md) | [`docs/spec/tools/cli/fmt.md`](../../spec/tools/cli/fmt.md) |
+| `doc` | Generates HTML or Markdown API docs from source | [Utility Commands](utility-commands.md#2-solix-doc) | [`docs/spec/tools/cli/doc.md`](../../spec/tools/cli/doc.md) |
+| `wiki` | Opens the bundled versioned offline docs portal | [Utility Commands](utility-commands.md#3-solix-wiki) | [`docs/spec/tools/cli/wiki.md`](../../spec/tools/cli/wiki.md) |
 
 ---
 
