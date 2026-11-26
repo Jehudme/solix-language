@@ -99,7 +99,9 @@ pub fn bind_context(
 
     // Pass 3: Detailed Type Checking & Expression Traversal
     for (source_index, ast_option) in context.ast.iter().enumerate() {
-        let source_id = source_index as u16;
+        let Ok(source_id) = u16::try_from(source_index) else {
+            break;
+        };
         if context.is_external_source(source_id) {
             continue;
         }
@@ -150,11 +152,13 @@ pub fn bind_context(
     // Validate entry point(s)
     let mut main_methods = Vec::new();
     for (source_index, ast_option) in context.ast.iter().enumerate() {
-        if context.is_external_source(source_index as u16) {
+        let Ok(source_id) = u16::try_from(source_index) else {
+            break;
+        };
+        if context.is_external_source(source_id) {
             continue;
         }
         if let Some(program_ast) = ast_option {
-            let source_id = source_index as u16;
             let source_text = context
                 .sources
                 .get(source_index)
@@ -495,7 +499,9 @@ fn validate_static_field_dependencies(
         std::collections::HashMap::new();
 
     for (source_index, ast_option) in ast_list.iter().enumerate() {
-        let source_id = source_index as u16;
+        let Ok(source_id) = u16::try_from(source_index) else {
+            break;
+        };
         let source_text = sources
             .get(source_index)
             .map(|text| text.as_str())

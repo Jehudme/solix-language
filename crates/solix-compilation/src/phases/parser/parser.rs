@@ -36,9 +36,13 @@ pub fn parse_context(context: &mut CompilationContext) -> Result<AstMetaData, Ve
         context.ast.resize_with(sources_count, || None);
     }
 
-    for source_index in 0..sources_count {
-        let source_id = source_index as u16;
-        let source_text = &context.sources[source_index];
+    for (source_index, source_text) in context.sources.iter().enumerate() {
+        let Ok(source_id) = u16::try_from(source_index) else {
+            accumulated_errors.push(ParsingError::SourceLimitExceeded {
+                span: miette::SourceSpan::from((0usize, 0usize)),
+            });
+            return Err(accumulated_errors);
+        };
         let tokens: &[Token] = context
             .tokens
             .get(source_index)
@@ -120,9 +124,13 @@ pub fn parse_context_resilient(context: &mut CompilationContext) -> Vec<ParsingE
         context.ast.resize_with(sources_count, || None);
     }
 
-    for source_index in 0..sources_count {
-        let source_id = source_index as u16;
-        let source_text = &context.sources[source_index];
+    for (source_index, source_text) in context.sources.iter().enumerate() {
+        let Ok(source_id) = u16::try_from(source_index) else {
+            accumulated_errors.push(ParsingError::SourceLimitExceeded {
+                span: miette::SourceSpan::from((0usize, 0usize)),
+            });
+            return accumulated_errors;
+        };
         let tokens: &[Token] = context
             .tokens
             .get(source_index)
@@ -4583,6 +4591,85 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
         }
     }
 
+    fn decode_escape_sequence(
+        &mut self,
+        span: Span,
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    ) -> char {
+        match chars.next() {
+            Some('n') => '\n',
+            Some('t') => '\t',
+            Some('r') => '\r',
+            Some('\\') => '\\',
+            Some('\'') => '\'',
+            Some('"') => '"',
+            Some('0') => '\0',
+            Some('x') => {
+                if let (Some(first_hex), Some(second_hex)) = (chars.next(), chars.next())
+                    && let (Some(high_nibble), Some(low_nibble)) =
+                        (first_hex.to_digit(16), second_hex.to_digit(16))
+                    && let Some(decoded) = char::from_u32((high_nibble << 4) | low_nibble)
+                {
+                    decoded
+                } else {
+                    self.record_error(ParsingError::InvalidEscapeSequence {
+                        span: span.to_source_span(),
+                    });
+                    '\0'
+                }
+            }
+            Some('u') => {
+                if chars.peek().copied() != Some('{') {
+                    self.record_error(ParsingError::InvalidEscapeSequence {
+                        span: span.to_source_span(),
+                    });
+                    return '\0';
+                }
+                let _ = chars.next(); // consume '{'
+                let mut value: u32 = 0;
+                let mut digit_count: usize = 0;
+                let mut closed = false;
+                let mut valid_digits = true;
+
+                for ch in chars.by_ref() {
+                    if ch == '}' {
+                        closed = true;
+                        break;
+                    }
+                    if let Some(digit) = ch.to_digit(16) {
+                        digit_count += 1;
+                        if digit_count > 6 {
+                            valid_digits = false;
+                        } else {
+                            value = (value << 4) | digit;
+                        }
+                    } else {
+                        valid_digits = false;
+                    }
+                }
+
+                if closed
+                    && valid_digits
+                    && (1..=6).contains(&digit_count)
+                    && let Some(decoded) = char::from_u32(value)
+                {
+                    decoded
+                } else {
+                    self.record_error(ParsingError::InvalidEscapeSequence {
+                        span: span.to_source_span(),
+                    });
+                    '\0'
+                }
+            }
+            _ => {
+                self.record_error(ParsingError::InvalidEscapeSequence {
+                    span: span.to_source_span(),
+                });
+                '\0'
+            }
+        }
+    }
+
     fn parse_string_literal(&mut self, span: Span) -> Result<String, ParsingError> {
         let raw = self.get_lexeme(span);
         if !raw.starts_with('"') || !raw.ends_with('"') || raw.len() < 2 {
@@ -4595,38 +4682,8 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
 
         while let Some(ch) = chars.next() {
             if ch == '\\' {
-                match chars.next() {
-                    Some('n') => result.push('\n'),
-                    Some('t') => result.push('\t'),
-                    Some('r') => result.push('\r'),
-                    Some('\\') => result.push('\\'),
-                    Some('\'') => result.push('\''),
-                    Some('"') => result.push('"'),
-                    Some('0') => result.push('\0'),
-                    Some('x') => {
-                        let hex_one = chars.next();
-                        let hex_two = chars.next();
-                        if let (Some(first), Some(second)) = (hex_one, hex_two) {
-                            let hex_str = format!("{}{}", first, second);
-                            if let Ok(byte_val) = u8::from_str_radix(&hex_str, 16) {
-                                result.push(byte_val as char);
-                            } else {
-                                self.record_error(ParsingError::InvalidEscapeSequence {
-                                    span: span.to_source_span(),
-                                });
-                            }
-                        } else {
-                            self.record_error(ParsingError::InvalidEscapeSequence {
-                                span: span.to_source_span(),
-                            });
-                        }
-                    }
-                    _ => {
-                        self.record_error(ParsingError::InvalidEscapeSequence {
-                            span: span.to_source_span(),
-                        });
-                    }
-                }
+                let decoded = self.decode_escape_sequence(span, &mut chars);
+                result.push(decoded);
             } else {
                 result.push(ch);
             }
@@ -4652,45 +4709,11 @@ impl<'tokens, 'source> ParserState<'tokens, 'source> {
             return Ok('\0');
         }
 
-        let mut chars = inner.chars();
+        let mut chars = inner.chars().peekable();
         let first = chars.next().unwrap_or('\0');
 
         let decoded_char = if first == '\\' {
-            match chars.next() {
-                Some('n') => '\n',
-                Some('t') => '\t',
-                Some('r') => '\r',
-                Some('\\') => '\\',
-                Some('\'') => '\'',
-                Some('"') => '"',
-                Some('0') => '\0',
-                Some('x') => {
-                    let hex_one = chars.next();
-                    let hex_two = chars.next();
-                    if let (Some(first_hex), Some(second_hex)) = (hex_one, hex_two) {
-                        let hex_str = format!("{}{}", first_hex, second_hex);
-                        if let Ok(byte_val) = u8::from_str_radix(&hex_str, 16) {
-                            byte_val as char
-                        } else {
-                            self.record_error(ParsingError::InvalidEscapeSequence {
-                                span: span.to_source_span(),
-                            });
-                            '\0'
-                        }
-                    } else {
-                        self.record_error(ParsingError::InvalidEscapeSequence {
-                            span: span.to_source_span(),
-                        });
-                        '\0'
-                    }
-                }
-                _ => {
-                    self.record_error(ParsingError::InvalidEscapeSequence {
-                        span: span.to_source_span(),
-                    });
-                    '\0'
-                }
-            }
+            self.decode_escape_sequence(span, &mut chars)
         } else {
             first
         };

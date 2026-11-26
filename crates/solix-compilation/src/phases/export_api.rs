@@ -121,7 +121,9 @@ pub fn generate_api_header(context: &CompilationContext) -> String {
     let is_debug = context.options.profile == crate::CompilationContext::BuildProfile::Debug;
 
     for (source_index, ast_option) in context.ast.iter().enumerate() {
-        let source_id = source_index as u16;
+        let Ok(source_id) = u16::try_from(source_index) else {
+            break;
+        };
         if context.is_external_source(source_id) {
             continue;
         }

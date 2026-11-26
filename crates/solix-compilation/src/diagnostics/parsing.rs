@@ -519,7 +519,7 @@ pub enum ParsingError {
     #[error("Invalid escape sequence in literal")]
     #[diagnostic(
         code(solix::parser::invalid_escape_sequence),
-        help(r#"Valid escape sequences are: \n, \t, \r, \\, \', \", \0, \xHH."#)
+        help(r#"Valid escape sequences are: \n, \t, \r, \\, \', \", \0, \xHH, \u{{H...}}."#)
     )]
     InvalidEscapeSequence {
         #[label("invalid escape sequence")]
@@ -588,6 +588,18 @@ pub enum ParsingError {
     InvalidExternModifier {
         modifier: String,
         #[label("conflicting modifier combination")]
+        span: SourceSpan,
+    },
+
+    #[error("Compilation source file limit exceeded (maximum 65,536 sources)")]
+    #[diagnostic(
+        code(solix::parser::source_limit_exceeded),
+        help(
+            "Reduce the number of source files or consolidate modules to stay within the 65,536-source index limit."
+        )
+    )]
+    SourceLimitExceeded {
+        #[label("source limit exceeded")]
         span: SourceSpan,
     },
 
@@ -1158,6 +1170,7 @@ impl ParsingError {
             Self::InvalidOperatorModifier { .. } => "E0200",
             Self::DotNotAllowedInTypePath { .. } => "E0157",
             Self::UnknownControlFlowKeyword { .. } => "E0158",
+            Self::SourceLimitExceeded { .. } => "E0159",
         }
     }
 
@@ -1263,7 +1276,8 @@ impl ParsingError {
             | Self::InvalidFreeFunctionModifier { span, .. }
             | Self::InvalidOperatorModifier { span, .. }
             | Self::UnknownControlFlowKeyword { span, .. }
-            | Self::DotNotAllowedInTypePath { span } => *span,
+            | Self::DotNotAllowedInTypePath { span }
+            | Self::SourceLimitExceeded { span } => *span,
         }
     }
 
@@ -1311,6 +1325,9 @@ mod tests {
             span: dummy_span,
         };
         assert_eq!(error_unknown_control.error_code(), "E0158");
+
+        let error_source_limit = ParsingError::SourceLimitExceeded { span: dummy_span };
+        assert_eq!(error_source_limit.error_code(), "E0159");
     }
 
     #[test]

@@ -163,7 +163,9 @@ pub fn execute_pass2_type_hierarchy(
 
     // 1. Resolve base classes and interfaces
     for (source_index, ast_option) in source_asts.iter().enumerate() {
-        let source_id = source_index as u16;
+        let Ok(source_id) = u16::try_from(source_index) else {
+            break;
+        };
         accumulated_errors.current_source_id = source_id;
         let source_text = source_texts
             .get(source_index)

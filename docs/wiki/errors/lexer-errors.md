@@ -1,4 +1,4 @@
-# Lexical Error Codes (`E0000`, `E0011` – `E0016`)
+# Lexical Error Codes (`E0000`, `E0011` – `E0018`)
 
 This section documents all lexical analysis diagnostics emitted during tokenization by [`crates/solix-compilation/src/phases/lexing/lexer.rs`](../../../crates/solix-compilation/src/phases/lexing/lexer.rs) and defined in [`LexingError`](../../../crates/solix-compilation/src/diagnostics/lexing.rs).
 
@@ -101,3 +101,25 @@ This section documents all lexical analysis diagnostics emitted during tokenizat
   ```solix
   int32 counter_value = 123;
   ```
+
+---
+
+### `E0017`: Malformed Numeric Literal
+* **Cause:** Numeric literal contains invalid underscore separators (leading after prefix, trailing, or consecutive underscores) or an exponent (`e`/`E`) without any exponent digits.
+* **Help:** Numeric literals cannot have leading, trailing, or consecutive underscores, and exponents require at least one digit.
+* **Bad Code:**
+  ```solix
+  int32 bad_sep = 1__0;
+  float64 bad_exp = 1.0e+;
+  ```
+* **Fixed Code:**
+  ```solix
+  int32 good_sep = 1_000;
+  float64 good_exp = 1.0e+2;
+  ```
+
+---
+
+### `E0018`: Compilation Source File Limit Exceeded
+* **Cause:** More than 65,536 source files were registered in a single compilation context (`Span::id` `u16` address space).
+* **Help:** Reduce the number of source files or consolidate modules to stay within the 65,536-source index limit.

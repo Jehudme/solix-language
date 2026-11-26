@@ -37,9 +37,11 @@ pub fn lex_context(context: &mut CompilationContext) -> Result<MetaData, Vec<Lex
     context.tokens.clear();
     context.tokens.resize(sources_count, Vec::new());
 
-    for source_index in 0..sources_count {
-        let source_id = source_index as u16;
-        let source_text = &context.sources[source_index];
+    for (source_index, source_text) in context.sources.iter().enumerate() {
+        let Ok(source_id) = u16::try_from(source_index) else {
+            accumulated_errors.push(LexingError::source_limit_exceeded());
+            return Err(accumulated_errors);
+        };
         total_bytes += source_text.len();
 
         let (tokens, errors) = tokenize_source(source_id, source_text);
@@ -161,20 +163,52 @@ impl<'source> LexerState<'source> {
         }
     }
 
+    fn consume_digits_with_underscores<Predicate>(
+        &mut self,
+        leading_digit_present: bool,
+        is_digit: Predicate,
+    ) -> (bool, bool)
+    where
+        Predicate: Fn(u8) -> bool,
+    {
+        let mut has_digit = false;
+        let mut prev_was_underscore = false;
+        let mut saw_any_char = leading_digit_present;
+        let mut invalid_underscore = false;
+
+        while let Some(byte) = self.peek() {
+            if is_digit(byte) {
+                has_digit = true;
+                prev_was_underscore = false;
+                saw_any_char = true;
+                self.advance();
+            } else if byte == b'_' {
+                if !saw_any_char || prev_was_underscore {
+                    invalid_underscore = true;
+                }
+                prev_was_underscore = true;
+                saw_any_char = true;
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        if prev_was_underscore {
+            invalid_underscore = true;
+        }
+
+        (has_digit, invalid_underscore)
+    }
+
     fn handle_number(&mut self, first_byte: u8) {
         // Hexadecimal literal: 0x... or 0X...
         if first_byte == b'0' && matches!(self.peek(), Some(b'x' | b'X')) {
             self.advance(); // consume 'x' or 'X'
-            let hex_start = self.cursor;
-            while let Some(byte) = self.peek() {
-                if byte.is_ascii_hexdigit() || byte == b'_' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
+            let (has_hex_digit, invalid_underscore) =
+                self.consume_digits_with_underscores(false, |byte| byte.is_ascii_hexdigit());
 
-            if self.cursor == hex_start {
+            if !has_hex_digit || invalid_underscore {
                 let token = self.add_token(TokenKind::Number);
                 self.errors.push(LexingError::malformed_hex(token));
                 return;
@@ -192,16 +226,10 @@ impl<'source> LexerState<'source> {
         // Binary literal: 0b... or 0B...
         if first_byte == b'0' && matches!(self.peek(), Some(b'b' | b'B')) {
             self.advance(); // consume 'b' or 'B'
-            let binary_start = self.cursor;
-            while let Some(byte) = self.peek() {
-                if matches!(byte, b'0' | b'1' | b'_') {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
+            let (has_binary_digit, invalid_underscore) =
+                self.consume_digits_with_underscores(false, |byte| matches!(byte, b'0' | b'1'));
 
-            if self.cursor == binary_start {
+            if !has_binary_digit || invalid_underscore {
                 let token = self.add_token(TokenKind::Number);
                 self.errors.push(LexingError::malformed_binary(token));
                 return;
@@ -221,13 +249,13 @@ impl<'source> LexerState<'source> {
                 .peek()
                 .is_some_and(|byte| byte.is_ascii_digit() || byte == b'_');
 
-        // Decimal digits
-        while let Some(byte) = self.peek() {
-            if byte.is_ascii_digit() || byte == b'_' {
-                self.advance();
-            } else {
-                break;
-            }
+        let mut has_numeric_error = false;
+
+        // Decimal digits (first_byte is already an ASCII digit)
+        let (_has_more_digits, int_invalid_underscore) =
+            self.consume_digits_with_underscores(true, |byte| byte.is_ascii_digit());
+        if int_invalid_underscore {
+            has_numeric_error = true;
         }
 
         // Fractional part
@@ -244,6 +272,7 @@ impl<'source> LexerState<'source> {
                             after_byte.is_ascii_digit()
                                 || *after_byte == b'+'
                                 || *after_byte == b'-'
+                                || *after_byte == b'_'
                         });
                     is_suffix_f || is_exponent
                 }
@@ -255,12 +284,10 @@ impl<'source> LexerState<'source> {
 
         if is_fractional {
             self.advance(); // consume '.'
-            while let Some(byte) = self.peek() {
-                if byte.is_ascii_digit() || byte == b'_' {
-                    self.advance();
-                } else {
-                    break;
-                }
+            let (_has_frac_digit, frac_invalid_underscore) =
+                self.consume_digits_with_underscores(false, |byte| byte.is_ascii_digit());
+            if frac_invalid_underscore {
+                has_numeric_error = true;
             }
 
             // Optional exponent part
@@ -269,12 +296,10 @@ impl<'source> LexerState<'source> {
                 if matches!(self.peek(), Some(b'+' | b'-')) {
                     self.advance();
                 }
-                while let Some(byte) = self.peek() {
-                    if byte.is_ascii_digit() || byte == b'_' {
-                        self.advance();
-                    } else {
-                        break;
-                    }
+                let (has_exp_digit, exp_invalid_underscore) =
+                    self.consume_digits_with_underscores(false, |byte| byte.is_ascii_digit());
+                if !has_exp_digit || exp_invalid_underscore {
+                    has_numeric_error = true;
                 }
             }
 
@@ -284,7 +309,9 @@ impl<'source> LexerState<'source> {
             }
 
             let token = self.add_token(TokenKind::Number);
-            if has_leading_zero {
+            if has_numeric_error {
+                self.errors.push(LexingError::malformed_number(token));
+            } else if has_leading_zero {
                 self.errors.push(LexingError::leading_zero_integer(token));
             }
             return;
@@ -296,12 +323,10 @@ impl<'source> LexerState<'source> {
             if matches!(self.peek(), Some(b'+' | b'-')) {
                 self.advance();
             }
-            while let Some(byte) = self.peek() {
-                if byte.is_ascii_digit() || byte == b'_' {
-                    self.advance();
-                } else {
-                    break;
-                }
+            let (has_exp_digit, exp_invalid_underscore) =
+                self.consume_digits_with_underscores(false, |byte| byte.is_ascii_digit());
+            if !has_exp_digit || exp_invalid_underscore {
+                has_numeric_error = true;
             }
 
             if matches!(self.peek(), Some(b'f' | b'F')) {
@@ -309,7 +334,9 @@ impl<'source> LexerState<'source> {
             }
 
             let token = self.add_token(TokenKind::Number);
-            if has_leading_zero {
+            if has_numeric_error {
+                self.errors.push(LexingError::malformed_number(token));
+            } else if has_leading_zero {
                 self.errors.push(LexingError::leading_zero_integer(token));
             }
             return;
@@ -321,7 +348,9 @@ impl<'source> LexerState<'source> {
         }
 
         let token = self.add_token(TokenKind::Number);
-        if has_leading_zero {
+        if has_numeric_error {
+            self.errors.push(LexingError::malformed_number(token));
+        } else if has_leading_zero {
             self.errors.push(LexingError::leading_zero_integer(token));
         }
     }
@@ -369,7 +398,7 @@ impl<'source> LexerState<'source> {
                 return;
             }
 
-            if byte == b'\n' {
+            if byte == b'\n' || byte == b'\r' {
                 // Character literals cannot span lines
                 break;
             }

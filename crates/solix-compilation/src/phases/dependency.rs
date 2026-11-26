@@ -311,7 +311,9 @@ fn ingest_package_api_source(
         })?
     };
 
-    let source_id = context.add_source(source_name, &source_code);
+    let source_id = context
+        .add_source(source_name, &source_code)
+        .map_err(|diagnostic| vec![diagnostic])?;
     context.mark_external_source(source_id);
 
     if !program.export_manifest.exported_ast_bytes.is_empty() {

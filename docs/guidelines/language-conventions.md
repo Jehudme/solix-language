@@ -80,7 +80,7 @@ All code authored in `crates/*` **MUST** adhere to the following binding invaria
 
 | Error Code Range | Subsystem Domain | Description & Examples |
 | :--- | :--- | :--- |
-| **`E0000` – `E0099`** | **Lexer / Lexical Analysis** | Unterminated string/char literals, unterminated comments, invalid hex/binary/decimal literals, unrecognized tokens (`E0000`, `E0011`–`E0016`). |
+| **`E0000` – `E0099`** | **Lexer / Lexical Analysis** | Unterminated string/char literals, unterminated comments, invalid hex/binary/decimal literals, source index limits, unrecognized tokens (`E0000`, `E0011`–`E0018`). |
 | **`E0101` – `E0200`** | **Parser / Syntax Analysis** | Missing delimiters, invalid type paths (`E0157`), unknown control-flow keywords (`E0158`), invalid modifiers (`E0160`–`E0200`). |
 | **`E0201` – `E0299`, `E0315` – `E0323`** | **Type Binder & Semantics** | Undefined symbols, type mismatches, inheritance/interface cycles (`E0204`/`E0323`), switch/exception/const validation. |
 | **`E0301` – `E0314`** | **Bytecode Emitter & Binary (`EmissionError`)** | Constant pool/register/argument/jump limits, invalid magic/version, corrupt `.slxb` containers, export manifests. |
