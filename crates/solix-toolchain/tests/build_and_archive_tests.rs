@@ -3183,16 +3183,14 @@ fn test_verify_docker_daemon_active_or_actionable_error() {
 
 #[test]
 fn test_cross_and_dockcross_image_mappings_for_all_triples() {
-    let supported_triples = [
+    let linux_and_windows_triples = [
         "x86_64-unknown-linux-gnu",
         "aarch64-unknown-linux-gnu",
         "x86_64-pc-windows-gnu",
         "x86_64-pc-windows-msvc",
-        "x86_64-apple-darwin",
-        "aarch64-apple-darwin",
     ];
 
-    for target_triple in supported_triples {
+    for target_triple in linux_and_windows_triples {
         let cross_image = solix_toolchain::cross_image_for_triple(target_triple);
         assert!(
             cross_image.contains("ghcr.io/cross-rs/"),
@@ -3211,6 +3209,19 @@ fn test_cross_and_dockcross_image_mappings_for_all_triples() {
         );
     }
 
+    for darwin_triple in ["x86_64-apple-darwin", "aarch64-apple-darwin"] {
+        assert_eq!(
+            solix_toolchain::cross_image_for_triple(darwin_triple),
+            solix_toolchain::APPLE_DARWIN_CROSS_IMAGE,
+            "Darwin cross image for {darwin_triple} must resolve to canonical OSXCross container"
+        );
+        assert_eq!(
+            solix_toolchain::dockcross_image_for_triple(darwin_triple),
+            Some(solix_toolchain::APPLE_DARWIN_CROSS_IMAGE),
+            "Darwin CMake container image for {darwin_triple} must resolve to canonical OSXCross container"
+        );
+    }
+
     assert_eq!(
         solix_toolchain::cross_image_for_triple("x86_64-pc-windows-msvc"),
         "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
@@ -3218,30 +3229,28 @@ fn test_cross_and_dockcross_image_mappings_for_all_triples() {
 }
 
 #[test]
-fn test_apple_host_strategy_and_multi_platform_resolution() {
-    assert_eq!(
-        solix_toolchain::select_cargo_strategy("x86_64-apple-darwin", "aarch64-apple-darwin", true)
-            .expect("apple-on-apple strategy"),
-        solix_toolchain::CargoBuildStrategy::HostAppleSdk
-    );
-    assert_eq!(
-        solix_toolchain::select_cargo_strategy(
+fn test_docker_strategy_and_multi_platform_resolution() {
+    for target_triple in [
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-gnu",
+    ] {
+        for host_triple in [
             "aarch64-apple-darwin",
-            "aarch64-apple-darwin",
-            false
-        )
-        .expect("apple-on-apple strategy"),
-        solix_toolchain::CargoBuildStrategy::HostAppleSdk
-    );
-    assert_eq!(
-        solix_toolchain::select_cargo_strategy(
             "x86_64-unknown-linux-gnu",
-            "aarch64-apple-darwin",
-            false
-        )
-        .expect("linux-on-apple strategy must still mandate docker"),
-        solix_toolchain::CargoBuildStrategy::Docker
-    );
+            "x86_64-pc-windows-msvc",
+        ] {
+            for docker_flag in [true, false] {
+                assert_eq!(
+                    solix_toolchain::select_cargo_strategy(target_triple, host_triple, docker_flag)
+                        .expect("strategy resolution must succeed"),
+                    solix_toolchain::CargoBuildStrategy::Docker,
+                    "Universal Docker strategy must apply for target={target_triple} on host={host_triple}"
+                );
+            }
+        }
+    }
 
     let all_platforms = vec!["all".to_string()];
     let docker_bucket_triples = solix_toolchain::resolve_native_triples_for_test(
@@ -3290,13 +3299,208 @@ fn test_apple_host_strategy_and_multi_platform_resolution() {
 }
 
 #[test]
-fn test_apple_target_on_non_macos_host_reports_actionable_diagnostic() {
-    if cfg!(target_os = "macos") {
-        return;
+fn test_prepare_effective_cross_config_and_osxcross_env() {
+    let temp_dir = tempfile::tempdir().expect("create tempdir");
+    let config_cache_dir = temp_dir.path().join("cross-cache");
+
+    // 1. Fresh crate with zero Cross.toml targeting Apple Darwin receives full OSXCross config.
+    let generated_x64 = solix_toolchain::prepare_effective_cross_config(
+        None,
+        &config_cache_dir,
+        "user_plugin",
+        "x86_64-apple-darwin",
+        None,
+    )
+    .expect("generate Cross.toml without existing file")
+    .expect("Darwin target must yield generated Cross.toml path");
+    let parsed_x64: toml::Value =
+        toml::from_str(&fs::read_to_string(&generated_x64).expect("read generated x64 Cross.toml"))
+            .expect("parse generated x64 Cross.toml");
+    assert_eq!(
+        parsed_x64["target"]["x86_64-apple-darwin"]["image"].as_str(),
+        Some(solix_toolchain::APPLE_DARWIN_CROSS_IMAGE)
+    );
+    let passthrough_list = parsed_x64["build"]["env"]["passthrough"]
+        .as_array()
+        .expect("build.env.passthrough array");
+    for expected_var in [
+        "SOLIX_NATIVE_BUILD",
+        "OSXCROSS_HOST",
+        "MACOSX_DEPLOYMENT_TARGET",
+        "CMAKE_OSX_DEPLOYMENT_TARGET",
+        "CMAKE_TOOLCHAIN_FILE_x86_64_apple_darwin",
+        "CC_x86_64_apple_darwin",
+        "CXX_x86_64_apple_darwin",
+        "AR_x86_64_apple_darwin",
+        "RANLIB_x86_64_apple_darwin",
+        "CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER",
+        "CARGO_TARGET_X86_64_APPLE_DARWIN_AR",
+    ] {
+        assert!(
+            passthrough_list
+                .iter()
+                .any(|item| item.as_str() == Some(expected_var)),
+            "Generated Cross.toml must pass through {expected_var}"
+        );
     }
 
+    // 2. Existing Cross.toml with Linux rules and unreachable Darwin image is preserved and upgraded.
+    let existing_cross_toml = temp_dir.path().join("Cross.toml");
+    fs::write(
+        &existing_cross_toml,
+        r#"[target.x86_64-unknown-linux-gnu]
+pre-build = ["apt-get update"]
+
+[target.aarch64-apple-darwin]
+image = "ghcr.io/cross-rs/aarch64-apple-darwin:edge"
+
+[build.env]
+passthrough = ["CUSTOM_FLAG"]
+"#,
+    )
+    .expect("write existing Cross.toml");
+    let merged_arm64 = solix_toolchain::prepare_effective_cross_config(
+        Some(&existing_cross_toml),
+        &config_cache_dir,
+        "custom_pkg",
+        "aarch64-apple-darwin",
+        None,
+    )
+    .expect("merge Cross.toml")
+    .expect("Darwin target must produce merged Cross.toml");
+    let parsed_arm64: toml::Value =
+        toml::from_str(&fs::read_to_string(&merged_arm64).expect("read merged Cross.toml"))
+            .expect("parse merged Cross.toml");
+    assert_eq!(
+        parsed_arm64["target"]["x86_64-unknown-linux-gnu"]["pre-build"][0].as_str(),
+        Some("apt-get update")
+    );
+    assert_eq!(
+        parsed_arm64["target"]["aarch64-apple-darwin"]["image"].as_str(),
+        Some(solix_toolchain::APPLE_DARWIN_CROSS_IMAGE)
+    );
+    let merged_passthrough = parsed_arm64["build"]["env"]["passthrough"]
+        .as_array()
+        .expect("merged passthrough array");
+    assert!(
+        merged_passthrough
+            .iter()
+            .any(|item| item.as_str() == Some("CUSTOM_FLAG"))
+    );
+    assert!(
+        merged_passthrough
+            .iter()
+            .any(|item| item.as_str() == Some("CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER"))
+    );
+
+    // 3. Explicit custom Cross.toml image is respected, and explicit docker_image override wins.
+    let custom_cross_toml = temp_dir.path().join("CustomCross.toml");
+    fs::write(
+        &custom_cross_toml,
+        "[target.x86_64-apple-darwin]\nimage = \"myorg/custom-osxcross:v2\"\n",
+    )
+    .expect("write custom Cross.toml");
+    let preserved_path = solix_toolchain::prepare_effective_cross_config(
+        Some(&custom_cross_toml),
+        &config_cache_dir,
+        "custom_img",
+        "x86_64-apple-darwin",
+        None,
+    )
+    .expect("preserve custom image")
+    .expect("merged file");
+    let parsed_preserved: toml::Value =
+        toml::from_str(&fs::read_to_string(&preserved_path).expect("read custom merged"))
+            .expect("parse custom merged");
+    assert_eq!(
+        parsed_preserved["target"]["x86_64-apple-darwin"]["image"].as_str(),
+        Some("myorg/custom-osxcross:v2")
+    );
+
+    let overridden_path = solix_toolchain::prepare_effective_cross_config(
+        Some(&custom_cross_toml),
+        &config_cache_dir,
+        "override_img",
+        "x86_64-apple-darwin",
+        Some("ghcr.io/example/darwin-override:v9"),
+    )
+    .expect("apply docker_image override")
+    .expect("override file");
+    let parsed_override: toml::Value =
+        toml::from_str(&fs::read_to_string(&overridden_path).expect("read override"))
+            .expect("parse override");
+    assert_eq!(
+        parsed_override["target"]["x86_64-apple-darwin"]["image"].as_str(),
+        Some("ghcr.io/example/darwin-override:v9")
+    );
+
+    // 4. Fresh crate with zero Cross.toml for Windows GNU / Linux receives canonical :edge image
+    //    and SOLIX_NATIVE_BUILD passthrough automatically.
+    for (non_darwin_triple, expected_image) in [
+        (
+            "x86_64-pc-windows-gnu",
+            "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge",
+        ),
+        (
+            "x86_64-unknown-linux-gnu",
+            "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:edge",
+        ),
+    ] {
+        let generated_path = solix_toolchain::prepare_effective_cross_config(
+            None,
+            &config_cache_dir,
+            "zero_config_user",
+            non_darwin_triple,
+            None,
+        )
+        .expect("generate Cross.toml for non-Darwin target")
+        .expect("must synthesize Cross.toml when none exists");
+        let parsed_doc: toml::Value = toml::from_str(
+            &fs::read_to_string(&generated_path).expect("read generated non-Darwin Cross.toml"),
+        )
+        .expect("parse generated non-Darwin Cross.toml");
+        assert_eq!(
+            parsed_doc["target"][non_darwin_triple]["image"].as_str(),
+            Some(expected_image)
+        );
+        let passthrough = parsed_doc["build"]["env"]["passthrough"]
+            .as_array()
+            .expect("passthrough array");
+        assert!(
+            passthrough
+                .iter()
+                .any(|item| item.as_str() == Some("SOLIX_NATIVE_BUILD"))
+        );
+    }
+
+    // 5. Verify OSXCross compiler/linker env maps cleanly and stays empty for Linux targets.
+    assert!(solix_toolchain::osxcross_cargo_env_vars("x86_64-unknown-linux-gnu").is_empty());
+    let arm64_env: std::collections::BTreeMap<String, String> =
+        solix_toolchain::osxcross_cargo_env_vars("aarch64-apple-darwin")
+            .into_iter()
+            .collect();
+    assert_eq!(
+        arm64_env.get("OSXCROSS_HOST").map(String::as_str),
+        Some("aarch64-apple-darwin24.5")
+    );
+    assert_eq!(
+        arm64_env
+            .get("CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER")
+            .map(String::as_str),
+        Some("aarch64-apple-darwin24.5-clang")
+    );
+    assert_eq!(
+        arm64_env
+            .get("CMAKE_TOOLCHAIN_FILE_aarch64_apple_darwin")
+            .map(String::as_str),
+        Some("/osxcross/toolchain.cmake")
+    );
+}
+
+#[test]
+fn test_apple_target_on_any_host_passes_check_env_with_docker() {
     let workspace = HermeticCliWorkspace::create().expect("create workspace");
-    let project_root = workspace.root_path().join("apple_diagnostic_pkg");
+    let project_root = workspace.root_path().join("apple_universal_pkg");
     let native_dir = project_root.join("natives").join("sample_native");
     fs::create_dir_all(project_root.join("src")).expect("create src");
     fs::create_dir_all(native_dir.join("src")).expect("create native src");
@@ -3304,7 +3508,7 @@ fn test_apple_target_on_non_macos_host_reports_actionable_diagnostic() {
     fs::write(
         project_root.join("manifest.yaml"),
         r#"configuration:
-  name: apple_diagnostic_pkg
+  name: apple_universal_pkg
   version: "0.1.0"
 
 profiles:
@@ -3331,7 +3535,9 @@ profiles:
     .expect("write native Cargo.toml");
     fs::write(native_dir.join("src").join("lib.rs"), "").expect("write lib.rs");
 
-    if solix_toolchain::verify_docker_daemon_active().is_err() {
+    if solix_toolchain::verify_docker_daemon_active().is_err()
+        || solix_toolchain::find_executable_in_path("cross").is_none()
+    {
         return;
     }
 
@@ -3349,14 +3555,8 @@ profiles:
         target: None,
     });
     assert!(
-        build_result.is_err(),
-        "Targeting apple-darwin on non-macOS host without custom osxcross image must return actionable diagnostic"
-    );
-    let err_text = build_result
-        .expect_err("expected diagnostic error")
-        .to_string();
-    assert!(
-        err_text.contains("osxcross") || err_text.contains("Apple macOS SDK"),
-        "Diagnostic error must explain Apple SDK / osxcross constraint, got: {err_text}"
+        build_result.is_ok(),
+        "Targeting apple-darwin with Docker + cross must pass check-env universally, got: {:?}",
+        build_result.err()
     );
 }

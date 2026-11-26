@@ -180,14 +180,14 @@ Native subprojects strictly inherit the parent profile's `platforms` setting. Al
 
 > [!NOTE]
 > **Mandatory Containerized Cross-Compilation (`docker: true`):**
-> Containerized compilation executes all native subproject builds inside standardized `cross-rs` or `dockcross` containers. Containerized execution is mandated for all native subprojects to eliminate host cross-compiler prerequisites (`cmake`, `zig`, `mingw-w64`) and prevent microarchitecture instruction set leaks (such as unconstrained AVX2/AVX-512).
+> Containerized compilation executes all native subproject builds inside standardized containers (`ghcr.io/cross-rs/*` and `dockcross/*` for Linux/Windows, plus the auto-provisioned OSXCross image `solix/apple-darwin-cross:15.5-ubuntu` for `x86_64-apple-darwin` and `aarch64-apple-darwin`). Containerized execution is mandated for all native subprojects to eliminate host cross-compiler prerequisites (`cmake`, `zig`, `mingw-w64`, Xcode) and prevent microarchitecture instruction set leaks (such as unconstrained AVX2/AVX-512).
 > Containerized toolchain caches (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) are isolated from host compilation directories to prevent host-compiled build scripts from leaking into container environments.
 
 ---
 
 ### 5. `supported_platforms` & `native_library_checksums` Metadata (Generated)
 
-During `.slxp` packaging, `solix build` and `scripts/release/merge_bundled_packages.py` embed top-level `supported_platforms` and cryptographic FIPS 180-4 SHA-256 digests (`native_library_checksums`) inside the packaged `manifest.yaml` across host and cross-compiled target directories (`bin/<target_triple>/`):
+During `.slxp` packaging, `solix build` embeds top-level `supported_platforms` and cryptographic FIPS 180-4 SHA-256 digests (`native_library_checksums`) inside the packaged `manifest.yaml` across host and cross-compiled target directories (`bin/<target_triple>/`):
 
 ```yaml
 supported_platforms:

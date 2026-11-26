@@ -240,8 +240,8 @@ profiles:
 ```
 
 * **Mandatory Containerization:** All native library subprojects (Cargo and CMake) mandate Docker containerization across all compilation targets, eliminating host cross-compiler prerequisites and preventing host instruction set leaks.
-* **Rust Natives (`Cargo.toml`):** Solix compiles via `cross` or official images (`ghcr.io/cross-rs/<target>:edge`).
-* **CMake Natives (`CMakeLists.txt`):** Solix compiles via `dockcross/<target>` images (e.g. `dockcross/linux-arm64`).
+* **Rust Natives (`Cargo.toml`):** Solix compiles via `cross` using official `ghcr.io/cross-rs/<target>:edge` images for Linux/Windows and the automatically built OSXCross image (`solix/apple-darwin-cross:15.5-ubuntu`) for Apple Darwin (`x86_64-apple-darwin`, `aarch64-apple-darwin`), automatically injecting target `Cross.toml` and compiler configuration even when a project has no manual `Cross.toml`.
+* **CMake Natives (`CMakeLists.txt`):** Solix compiles via `dockcross/<target>` images (e.g. `dockcross/linux-arm64`) for Linux/Windows and `solix/apple-darwin-cross:15.5-ubuntu` (OSXCross toolchain `/osxcross/toolchain.cmake`) for Apple Darwin.
 * **Cache Isolation:** Solix automatically segregates container target directories (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, preventing host-compiled build scripts from failing inside container environments.
 
 > [!NOTE]

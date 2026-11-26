@@ -17,8 +17,9 @@ pub mod run;
 pub mod wiki;
 
 pub use build::{
-    CargoBuildStrategy, cross_image_for_triple, dockcross_image_for_triple, execute_build,
-    resolve_cargo_target_cache_dir, resolve_cmake_target_cache_dir,
+    APPLE_DARWIN_CROSS_IMAGE, CargoBuildStrategy, cross_image_for_triple,
+    dockcross_image_for_triple, execute_build, osxcross_cargo_env_vars,
+    prepare_effective_cross_config, resolve_cargo_target_cache_dir, resolve_cmake_target_cache_dir,
     resolve_native_triples_for_test, select_cargo_strategy, verify_docker_daemon_active,
     write_zig_toolchain_file_for_test,
 };
