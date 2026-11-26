@@ -71,8 +71,13 @@ def run_cmake_ctest(source_dir: Path, build_dir: Path, label: str) -> None:
     )
 
 
-def verify_new_native_smoke(repo_root: Path, solix_cmd: list[str], scratch_root: Path) -> None:
-    """Scaffolds a fresh project with C, C++, and Rust native modules and runs both modes."""
+def verify_new_native_smoke(
+    repo_root: Path,
+    solix_cmd: list[str],
+    scratch_root: Path,
+    standalone_only: bool = False,
+) -> None:
+    """Scaffolds a fresh project with C, C++, and Rust native modules and runs verification."""
     app_dir = scratch_root / "smoke_polyglot_app"
     run_step(
         [*solix_cmd, "new", str(app_dir), "--no-native"],
@@ -115,6 +120,9 @@ def verify_new_native_smoke(repo_root: Path, solix_cmd: list[str], scratch_root:
         cwd=repo_root,
         label="smoke standalone mod_rust: cargo test",
     )
+
+    if standalone_only:
+        return
 
     # Wire Solix main.slx calling all 3 generated native modules simultaneously
     (app_dir / "src" / "main.slx").write_text(
@@ -167,6 +175,11 @@ def main() -> None:
         default=None,
         help="Path to the solix CLI binary to invoke.",
     )
+    parser.add_argument(
+        "--standalone-only",
+        action="store_true",
+        help="Run host standalone C/C++/Rust FFI and scaffold tests without Docker plugin builds.",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent.parent
@@ -203,30 +216,31 @@ def main() -> None:
             label="example rust_backend standalone: cargo test",
         )
 
-        # 4. Dual-backend example Solix build & execution for all profiles
-        for profile in ("cmake_backend", "rust_backend", "release"):
-            run_step(
-                [
-                    *solix_cmd,
-                    "build",
-                    str(dual_example_dir),
-                    "--profile",
-                    profile,
-                    "--target",
-                    "host",
-                ],
-                cwd=repo_root,
-                label=f"examples/ffi_dual_backend: build [{profile}]",
-            )
-            archive_path = dual_example_dir / "build" / profile / "ffi_dual_backend.slxarc"
-            run_step(
-                [*solix_cmd, "run", str(archive_path)],
-                cwd=repo_root,
-                label=f"examples/ffi_dual_backend: run [{profile}]",
-            )
+        # 4. Dual-backend example Solix build & execution for all profiles (Docker hosts)
+        if not args.standalone_only:
+            for profile in ("cmake_backend", "rust_backend", "release"):
+                run_step(
+                    [
+                        *solix_cmd,
+                        "build",
+                        str(dual_example_dir),
+                        "--profile",
+                        profile,
+                        "--target",
+                        "host",
+                    ],
+                    cwd=repo_root,
+                    label=f"examples/ffi_dual_backend: build [{profile}]",
+                )
+                archive_path = dual_example_dir / "build" / profile / "ffi_dual_backend.slxarc"
+                run_step(
+                    [*solix_cmd, "run", str(archive_path)],
+                    cwd=repo_root,
+                    label=f"examples/ffi_dual_backend: run [{profile}]",
+                )
 
         # 5. `solix new` + `solix new native` cross-language dual-mode smoke test
-        verify_new_native_smoke(repo_root, solix_cmd, scratch)
+        verify_new_native_smoke(repo_root, solix_cmd, scratch, standalone_only=args.standalone_only)
 
     print("\nALL FFI C/C++/Rust AND DUAL-BACKEND VERIFICATION CHECKS PASSED.")
 

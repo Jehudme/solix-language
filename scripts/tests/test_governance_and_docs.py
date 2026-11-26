@@ -462,6 +462,7 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
             self.assertNotIn('target-branch: "master"', dependabot_raw)
 
         sha_pin_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+        local_action_re = re.compile(r"^\./\.github/actions/[A-Za-z0-9_.-]+$")
         for workflow_file in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
             wf_text = workflow_file.read_text(encoding="utf-8")
             if yaml is not None:
@@ -483,11 +484,35 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                 stripped = raw_line.strip()
                 if stripped.startswith(("uses:", "- uses:")):
                     action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                    if local_action_re.match(action_spec):
+                        action_manifest = REPO_ROOT / action_spec.lstrip("./") / "action.yml"
+                        self.assertTrue(
+                            action_manifest.is_file(),
+                            f"Missing local composite action manifest for {action_spec}",
+                        )
+                        continue
                     self.assertRegex(
                         action_spec,
                         sha_pin_re,
                         f"Unpinned GitHub Action in {workflow_file.name}: {action_spec}",
                     )
+
+        actions_dir = REPO_ROOT / ".github" / "actions"
+        if actions_dir.is_dir():
+            for action_file in sorted(actions_dir.glob("*/action.yml")):
+                action_text = action_file.read_text(encoding="utf-8")
+                if yaml is not None:
+                    parsed_action = yaml.safe_load(action_text)
+                    self.assertIsInstance(parsed_action, dict, f"{action_file} invalid YAML")
+                for raw_line in action_text.splitlines():
+                    stripped = raw_line.strip()
+                    if stripped.startswith(("uses:", "- uses:")):
+                        action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                        self.assertRegex(
+                            action_spec,
+                            sha_pin_re,
+                            f"Unpinned GitHub Action in {action_file}: {action_spec}",
+                        )
 
 
 class ReleaseTrainVersionCalculationTests(unittest.TestCase):

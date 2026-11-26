@@ -117,7 +117,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "CI Workflows & Release Governance",
-        "pattern": r"^\.github/workflows/",
+        "pattern": r"^\.github/(workflows|actions)/",
         "required_docs": [
             "docs/guidelines/pr-and-release-governance.md",
             "docs/guidelines/branching-conventions.md",
