@@ -2,6 +2,13 @@
 
 All notable changes to the Solix C/C++ FFI SDK (`solix::ffi`) will be documented in this file.
 
+## [3.0.1] - 2026-11-26
+
+### Bug Fixes
+
+- *(release)* Limit pre-publish cargo package dry-run to leaf crates (#279) (#281)
+- *(release)* Sync solix-ffi version and verify pre-promotion crate parity (#279) (#280)
+
 ## [3.0.0] - 2026-11-26
 
 ### Bug Fixes
