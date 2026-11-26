@@ -675,9 +675,15 @@ fn verify_build_environment(
         );
         for triple in &entry.target_triples {
             if entry.backend == NativeBackend::Cargo {
-                let cross_version = require_tool_version("cross", &["--version"])
-                    .context("Cargo native containerized compilation mandates 'cross' (cross-rs). Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH.")?;
-                println!("  [check] {cross_version} (for {triple} via cross-rs container)");
+                let cross_exe = find_executable("cross").ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Cargo native containerized compilation mandates 'cross' (cross-rs). Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH."
+                    )
+                })?;
+                println!(
+                    "  [check] cross ({}) (for {triple} via cross-rs container)",
+                    cross_exe.display()
+                );
             } else {
                 println!("  [check] {docker_version} (for {triple} via Docker container)");
             }
@@ -709,32 +715,6 @@ fn dirs_home() -> Option<PathBuf> {
 fn find_executable(tool_name: &str) -> Option<PathBuf> {
     let search_path = build_search_path_env();
     crate::process::find_executable_in_search_paths(tool_name, &search_path)
-}
-
-fn require_tool_version(tool_name: &str, version_args: &[&str]) -> Result<String> {
-    let exe_path = find_executable(tool_name).ok_or_else(|| {
-        anyhow::anyhow!("[verify] Required build tool '{tool_name}' was not found on PATH")
-    })?;
-    let mut version_command = crate::process::create_process_command(&exe_path);
-    let output = version_command
-        .args(version_args)
-        .env("PATH", build_search_path_env())
-        .output()
-        .with_context(|| format!("failed to execute '{}'", exe_path.display()))?;
-    if !output.status.success() {
-        bail!(
-            "[verify] Tool '{}' returned non-zero status on '{}'",
-            exe_path.display(),
-            version_args.join(" ")
-        );
-    }
-    let stdout_line = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or(tool_name)
-        .trim()
-        .to_string();
-    Ok(format!("{stdout_line} ({})", exe_path.display()))
 }
 
 /// Selects the native Cargo build strategy for the given target triple.

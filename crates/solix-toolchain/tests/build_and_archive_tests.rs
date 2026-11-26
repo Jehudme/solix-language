@@ -62,9 +62,36 @@ fn host_cdylib_filename(base_name: &str) -> String {
     }
 }
 
-/// Returns true if Docker is installed and the Docker daemon is reachable.
+/// Returns true if Docker is installed, reachable, and supports Linux containers.
 fn is_docker_available() -> bool {
-    solix_toolchain::verify_docker_daemon_active().is_ok()
+    if solix_toolchain::verify_docker_daemon_active().is_err() {
+        return false;
+    }
+    let Some(docker_exe) = solix_toolchain::find_executable_in_path("docker") else {
+        return false;
+    };
+    let Ok(output) = solix_toolchain::create_process_command(&docker_exe)
+        .args(["version", "--format", "{{.Server.Os}}"])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "linux"
+}
+
+/// Returns true if Linux-container Docker and `cross` are both available on PATH.
+fn is_cross_container_available() -> bool {
+    if !is_docker_available() {
+        return false;
+    }
+    if solix_toolchain::find_executable_in_path("cross").is_some() {
+        return true;
+    }
+    let home_dir = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    home_dir.is_some_and(|home| {
+        let cargo_bin = PathBuf::from(home).join(".cargo").join("bin");
+        solix_toolchain::find_executable_in_search_paths("cross", cargo_bin.as_os_str()).is_some()
+    })
 }
 
 // ============================================================================
@@ -272,9 +299,9 @@ public class Main {
 
 #[test]
 fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
-    if !is_docker_available() {
+    if !is_cross_container_available() {
         eprintln!(
-            "[test] Skipping test_end_to_end_untitled_rust_template_build_and_run_all_profiles: Docker daemon is not active in this test runner environment."
+            "[test] Skipping test_end_to_end_untitled_rust_template_build_and_run_all_profiles: Docker/cross container environment is not active in this test runner."
         );
         return;
     }
@@ -417,9 +444,9 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
 
 #[test]
 fn test_run_with_direct_native_library_flag() {
-    if !is_docker_available() {
+    if !is_cross_container_available() {
         eprintln!(
-            "[test] Skipping test_run_with_direct_native_library_flag: Docker daemon is not active in this test runner environment."
+            "[test] Skipping test_run_with_direct_native_library_flag: Docker/cross container environment is not active in this test runner."
         );
         return;
     }
@@ -576,9 +603,9 @@ public class Main {
 
 #[test]
 fn test_info_command_on_slxarc_archive() {
-    if !is_docker_available() {
+    if !is_cross_container_available() {
         eprintln!(
-            "[test] Skipping test_info_command_on_slxarc_archive: Docker daemon is not active in this test runner environment."
+            "[test] Skipping test_info_command_on_slxarc_archive: Docker/cross container environment is not active in this test runner."
         );
         return;
     }
@@ -1176,9 +1203,9 @@ public class TestRunner {
 
 #[test]
 fn test_static_release_build_bundles_dependency_natives_and_runs_standalone() {
-    if !is_docker_available() {
+    if !is_cross_container_available() {
         eprintln!(
-            "[test] Skipping test_static_release_build_bundles_dependency_natives_and_runs_standalone: Docker daemon is not active in this test runner environment."
+            "[test] Skipping test_static_release_build_bundles_dependency_natives_and_runs_standalone: Docker/cross container environment is not active in this test runner."
         );
         return;
     }
@@ -2000,9 +2027,9 @@ finally:
 
 #[test]
 fn test_solix_build_check_env_flag_executes_preflight_only() {
-    if !is_docker_available() {
+    if !is_cross_container_available() {
         eprintln!(
-            "[test] Skipping test_solix_build_check_env_flag_executes_preflight_only: Docker daemon is not active in this test runner environment."
+            "[test] Skipping test_solix_build_check_env_flag_executes_preflight_only: Docker/cross container environment is not active in this test runner."
         );
         return;
     }
@@ -2286,9 +2313,9 @@ profiles:
 
 #[test]
 fn test_manifest_yaml_auto_detects_cargo_with_solix_native_feature() {
-    if !is_docker_available() {
+    if !is_cross_container_available() {
         eprintln!(
-            "[test] Skipping test_manifest_yaml_auto_detects_cargo_with_solix_native_feature: Docker daemon is not active in this test runner environment."
+            "[test] Skipping test_manifest_yaml_auto_detects_cargo_with_solix_native_feature: Docker/cross container environment is not active in this test runner."
         );
         return;
     }
