@@ -951,6 +951,38 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("<!-- solix-pr-benchmark -->", sync_text)
         self.assertIn("<!-- solix-pr-coverage -->", sync_text)
 
+    def test_release_workflow_separates_docker_and_macos_buckets(self) -> None:
+        release_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("platform: linux,windows", release_text)
+        self.assertIn("platform: macos", release_text)
+        self.assertIn(
+            '--require-targets "x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,x86_64-apple-darwin,aarch64-apple-darwin"',
+            release_text,
+        )
+
+        for cross_toml_rel in (
+            "libraries/raylib/natives/raylib/Cross.toml",
+            "libraries/solixlib/natives/solixlib_native/Cross.toml",
+        ):
+            cross_text = (REPO_ROOT / cross_toml_rel).read_text(encoding="utf-8")
+            self.assertNotIn("ghcr.io/cross-rs/x86_64-apple-darwin:edge", cross_text)
+            self.assertNotIn("ghcr.io/cross-rs/aarch64-apple-darwin:edge", cross_text)
+
+        sys.path.insert(0, str(SCRIPTS_DIR / "release"))
+        try:
+            import build_default_libraries  # noqa: E402
+
+            self.assertTrue(build_default_libraries.is_cross_target_triple("linux,windows"))
+            self.assertTrue(build_default_libraries.is_cross_target_triple("macos"))
+            self.assertTrue(build_default_libraries.is_cross_target_triple("all"))
+            self.assertFalse(build_default_libraries.is_cross_target_triple("host"))
+            self.assertFalse(build_default_libraries.is_cross_target_triple(None))
+        finally:
+            if str(SCRIPTS_DIR / "release") in sys.path:
+                sys.path.remove(str(SCRIPTS_DIR / "release"))
+
 
 if __name__ == "__main__":
     unittest.main()

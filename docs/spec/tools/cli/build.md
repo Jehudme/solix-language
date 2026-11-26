@@ -28,12 +28,12 @@ solix build [path] [options]
 | `--debug` | | Flag | `false` | Shorthand for `--profile debug`. |
 | `--release` | | Flag | `false` | Shorthand for `--profile release`. |
 | `--test` | | Flag | `false` | Shorthand for `--profile test`. |
-| `--platform <platform>` | | String | None | Filters build and native compilation to a designated target platform or OS family (e.g. `linux`, `windows`, `macos`). |
+| `--platform <platform>` | | String | None | Filters build and native compilation to one or more comma-separated platforms or OS families (e.g. `linux,windows`, `macos`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 | `--install` | `-i` | Flag | `false` | Automatically installs the built `.slxp` package into the package store. |
 | `--force` | `-f` | Flag | `false` | Overwrites existing installed package when paired with `--install`. |
 | `--check-env` | `--verify-only` | Flag | `false` | Runs Phase 0 pre-flight environment and toolchain verification without compiling or packaging. |
-| `--target <triple>` | | String | `None` | Compiles native projects for a single target triple or `"host"` (also reads `SOLIX_TARGET_TRIPLE`). |
+| `--target <triple>` | | String | `None` | Compiles native projects for one or more comma-separated target triples or `"host"` (also reads `SOLIX_TARGET_TRIPLE`). |
 
 ---
 
@@ -60,7 +60,7 @@ flowchart TD
 * **Modern Container Emission:** Emits standard `.slxp` (Solix Package) format containing root `binaries.slxb` and target-tripled `bin/<target>/` native shared libraries.
 * **Optimized Container Manifest Metadata:** Embedded `manifest.yaml` inside package archives retains pure declarative metadata for active profiles while stripping developer-only hooks (`pre_compile`, `post_compile`) and transient compiler internals.
 * **Cross-Platform Tool Invocation:** Native build toolchains (`cargo`, `cmake`, `zig`) are located respecting host executable formats and `PATHEXT` on Windows, ensuring `.cmd` and `.bat` wrappers are cleanly dispatched without error 193.
-* **Mandatory Containerized Docker Native Compilation:** All native library subprojects (Cargo and CMake backends) mandate Docker containerization across all compilation targets. Native builds execute hermetically inside standardized, target-specific cross container images (`ghcr.io/cross-rs/*` and `dockcross/*`), eliminating host cross-compiler toolchain installation requirements (`cmake`, `zig`, `mingw-w64`) and preventing host instruction set leaks (such as AVX2). Container runs automatically propagate host user and group permissions (`-u <uid>:<gid>`) on Unix to ensure all created artifacts match host filesystem ownership.
+* **Containerized Docker Native Compilation & Apple SDK Builds:** All Linux and Windows native library subprojects (Cargo and CMake backends) mandate Docker containerization across compilation targets using standardized cross container images (`ghcr.io/cross-rs/*` and `dockcross/*`), eliminating host cross-compiler toolchain installation requirements (`mingw-w64`, `aarch64-linux-gnu-gcc`, `zig`) and preventing host instruction set leaks (such as AVX2). Because `cross-rs` and `dockcross` cannot publicly redistribute Apple's macOS SDK, `*-apple-darwin` targets build natively against Xcode / Apple SDK when running on macOS hosts (unless a custom local `osxcross` image is configured in `Cross.toml` or `manifest.yaml` `docker_image`). Container runs automatically propagate host user and group permissions (`-u <uid>:<gid>`) on Unix to ensure all created artifacts match host filesystem ownership.
 * **Target Container Image Mapping:** When cross-compiling, Solix maps target triples to their official images. Windows GNU and MSVC targets (`x86_64-pc-windows-gnu` and `x86_64-pc-windows-msvc`) map to canonical `ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge` sysroots, while CMake native modules leverage target dockcross images.
 * **Cargo Native Cross-Runner Mandate:** When compiling Cargo native crates, Solix invokes `cross` to execute builds inside the target container environment, eliminating host cross-toolchain dependencies while respecting crate-level `Cross.toml` configuration files via `CROSS_CONFIG`.
 * **Containerized Target Directory Isolation:** When compiling native dependencies in containers, Solix automatically segregates cargo and cmake build caches (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, avoiding dynamic linker mismatches between host and container glibc environments.

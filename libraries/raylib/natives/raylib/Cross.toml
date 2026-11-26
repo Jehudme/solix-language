@@ -18,14 +18,6 @@ pre-build = [
     "apt-get update && apt-get install --assume-yes cmake"
 ]
 
-[target.x86_64-apple-darwin]
-image = "ghcr.io/cross-rs/x86_64-apple-darwin:edge"
-pre-build = [
-    "apt-get update && apt-get install --assume-yes cmake"
-]
-
-[target.aarch64-apple-darwin]
-image = "ghcr.io/cross-rs/aarch64-apple-darwin:edge"
-pre-build = [
-    "apt-get update && apt-get install --assume-yes cmake"
-]
+# Apple Darwin targets (x86_64-apple-darwin, aarch64-apple-darwin) are compiled via
+# native Xcode / Apple SDK on macOS runners (or a user-provided local osxcross image),
+# because cross-rs does not distribute public macOS SDK containers on ghcr.io.
