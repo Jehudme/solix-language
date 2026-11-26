@@ -65,7 +65,11 @@ pub fn dockcross_image_for_triple(triple: &str) -> Option<&'static str> {
 /// Resolves the canonical cross-rs container image name for a target triple.
 #[must_use]
 pub fn cross_image_for_triple(triple: &str) -> String {
-    format!("ghcr.io/cross-rs/{triple}:edge")
+    let canonical_triple = match triple {
+        "x86_64-pc-windows-msvc" => "x86_64-pc-windows-gnu",
+        other => other,
+    };
+    format!("ghcr.io/cross-rs/{canonical_triple}:edge")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -670,8 +674,9 @@ fn verify_build_environment(
             entry.target_triples.join(", ")
         );
         for triple in &entry.target_triples {
-            if entry.backend == NativeBackend::Cargo && find_executable("cross").is_some() {
-                let cross_version = require_tool_version("cross", &["--version"])?;
+            if entry.backend == NativeBackend::Cargo {
+                let cross_version = require_tool_version("cross", &["--version"])
+                    .context("Cargo native containerized compilation mandates 'cross' (cross-rs). Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH.")?;
                 println!("  [check] {cross_version} (for {triple} via cross-rs container)");
             } else {
                 println!("  [check] {docker_version} (for {triple} via Docker container)");
@@ -795,7 +800,12 @@ fn compile_cargo_native(
             entry.name, entry.native_profile, triple
         );
 
-        let mut command = if let Some(cross_executable) = find_executable("cross") {
+        let cross_executable = find_executable("cross").ok_or_else(|| {
+            anyhow::anyhow!(
+                "Cargo native containerized compilation for '{triple}' mandates 'cross'. Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH."
+            )
+        })?;
+        let mut command = {
             let mut cross_command = crate::process::create_process_command(&cross_executable);
             cross_command.arg("build");
             cross_command
@@ -821,40 +831,6 @@ fn compile_cargo_native(
                 cross_command.env("CROSS_CONTAINER_OPTS", combined_opts);
             }
             cross_command
-        } else if let Some(docker_executable) = find_executable("docker") {
-            let image = entry
-                .docker_image
-                .clone()
-                .unwrap_or_else(|| cross_image_for_triple(triple));
-            let mut docker_command = crate::process::create_process_command(&docker_executable);
-            let manifest_relative = cargo_manifest
-                .strip_prefix(project_root)
-                .unwrap_or(&cargo_manifest);
-            let target_dir_relative = cargo_target_dir
-                .strip_prefix(project_root)
-                .unwrap_or(&cargo_target_dir);
-            docker_command.args(["run", "--rm"]);
-            docker_command
-                .arg("-v")
-                .arg(format!("{}:/work", project_root.display()));
-            if let Some(ref rust_ffi_dir) = ffi_rust_source_dir {
-                docker_command.arg("-v").arg(format!(
-                    "{}:{}:ro",
-                    rust_ffi_dir.display(),
-                    rust_ffi_dir.display()
-                ));
-            }
-            docker_command.args(["-w", "/work"]);
-            docker_command.arg(&image);
-            docker_command.args(["cargo", "build"]);
-            docker_command.arg("--manifest-path").arg(manifest_relative);
-            docker_command.arg("--target-dir").arg(target_dir_relative);
-            docker_command
-        } else {
-            bail!(
-                "Cannot build containerized native dependency '{}' for target '{triple}': neither 'cross' nor 'docker' executable was found on PATH. Containerized native compilation mandates Docker.",
-                entry.name
-            );
         };
 
         if is_release {

@@ -3113,6 +3113,7 @@ fn test_cross_and_dockcross_image_mappings_for_all_triples() {
         "x86_64-unknown-linux-gnu",
         "aarch64-unknown-linux-gnu",
         "x86_64-pc-windows-gnu",
+        "x86_64-pc-windows-msvc",
         "x86_64-apple-darwin",
         "aarch64-apple-darwin",
     ];
@@ -3135,4 +3136,9 @@ fn test_cross_and_dockcross_image_mappings_for_all_triples() {
             "dockcross image for {target_triple} must be canonical dockcross image: {dockcross_image_str}"
         );
     }
+
+    assert_eq!(
+        solix_toolchain::cross_image_for_triple("x86_64-pc-windows-msvc"),
+        "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
+    );
 }

@@ -177,6 +177,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev gcc
 
+      - name: Install cross runner for post-bump check
+        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
+        run: |
+          if ! command -v cross >/dev/null 2>&1; then
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
+          fi
+
       - name: Run post-bump workspace verification and packaging dry-run
         env:
           BUNDLED_CACHE_HIT: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
@@ -337,7 +344,7 @@ jobs:
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         run: |
           if ! command -v cross >/dev/null 2>&1; then
-            cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5 || true
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
 
       - name: Build host solix toolchain and universal bundled packages

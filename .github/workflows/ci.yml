@@ -331,8 +331,15 @@ jobs:
       - name: Build solix toolchain binary
         run: cargo build --bin solix
 
+      - name: Install cross runner
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v cross >/dev/null 2>&1; then
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
+          fi
+
       - name: Build and stage default first-party libraries
-        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.bundled-libs-cache.outputs.cache-hit != 'true'
         run: python3 scripts/release/build_default_libraries.py --target host
 
       - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
@@ -487,6 +494,12 @@ jobs:
             printf 'b3f68e625481fed9b16444174f3fa5ebcdbde4a1878803a35eabe2dcefcdc41a  %s\n' \
               "$RUNNER_TEMP/cargo-llvm-cov.tar.gz" | sha256sum -c -
             tar -xzf "$RUNNER_TEMP/cargo-llvm-cov.tar.gz" -C ~/.cache/solix-ci-tools/cargo-llvm-cov cargo-llvm-cov
+          fi
+
+      - name: Install cross runner
+        run: |
+          if ! command -v cross >/dev/null 2>&1; then
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
 
       - name: Stage docs and bundled packages for coverage suite
