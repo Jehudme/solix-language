@@ -648,7 +648,7 @@ This section documents all semantic binding and type-checking diagnostics emitte
 ### `E0272`: Uninitialized Variable Used
 * **Diagnostic Message:** `Local variable '<variable_name>' used before being initialized`
 * **Variant:** `BindingError::UninitializedVariableUsed`
-* **Resolution:** Initialize local variables before reading their value.
+* **Resolution:** Initialize local variables before reading their value or applying compound updates (`+=`, `++`, etc.). Pass 3 enforces definite assignment across conditionals, exhaustive `switch` branches, loops, and `try`/`catch`/`finally` handlers.
 
 ---
 

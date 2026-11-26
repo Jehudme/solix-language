@@ -480,6 +480,7 @@ impl<'ctx> Emitter<'ctx> {
     ) -> Result<(), EmissionError> {
         let reg_discriminant = self.emit_expression(&switch_stmt.discriminant, None)?;
         let mut case_exit_patches = Vec::new();
+        let mut pending_body_jumps: Vec<usize> = Vec::new();
         let mut switch_break_context = LoopContext {
             break_patches: Vec::new(),
             continue_patches: Vec::new(),
@@ -812,21 +813,42 @@ impl<'ctx> Emitter<'ctx> {
                 }
             }
 
-            for stmt in &case_clause.statements {
-                self.emit_statement(stmt, loop_stack)?;
-            }
+            if case_clause.statements.is_empty() {
+                // Grouped empty label (e.g. `case 1: case 2: ...`): jump over subsequent case
+                // comparisons directly into the next non-empty case or `default` body.
+                let body_jump = self.emit_instruction(
+                    Instruction::format_c(OpCode::Jump, 0, 0, 0),
+                    Some(case_clause.span),
+                );
+                pending_body_jumps.push(body_jump as usize);
+            } else {
+                let body_start_pc = self.function.instructions.len() as i32;
+                for body_jump_pc in pending_body_jumps.drain(..) {
+                    let offset = body_start_pc - body_jump_pc as i32;
+                    self.patch_jump_offset(body_jump_pc, offset);
+                }
+                for stmt in &case_clause.statements {
+                    self.emit_statement(stmt, loop_stack)?;
+                }
 
-            let exit_jump = self.emit_instruction(
-                Instruction::format_c(OpCode::Jump, 0, 0, 0),
-                Some(case_clause.span),
-            );
-            case_exit_patches.push(exit_jump as usize);
+                let exit_jump = self.emit_instruction(
+                    Instruction::format_c(OpCode::Jump, 0, 0, 0),
+                    Some(case_clause.span),
+                );
+                case_exit_patches.push(exit_jump as usize);
+            }
 
             let next_case_pc = self.function.instructions.len() as i32;
             for fail_jump_pc in case_failure_jumps {
                 let offset = next_case_pc - fail_jump_pc as i32;
                 self.patch_jump_offset(fail_jump_pc, offset);
             }
+        }
+
+        let default_or_exit_pc = self.function.instructions.len() as i32;
+        for body_jump_pc in pending_body_jumps.drain(..) {
+            let offset = default_or_exit_pc - body_jump_pc as i32;
+            self.patch_jump_offset(body_jump_pc, offset);
         }
 
         if let Some(default_stmts) = &switch_stmt.default_case {
@@ -877,14 +899,50 @@ impl<'ctx> Emitter<'ctx> {
                 self.allocator.free_temp(evaluated_return_register);
                 evaluated_return_register = converted_register;
             }
-            let is_returning_owned_local = matches!(
+            let aliases_local = matches!(
                 return_value_expression,
                 Expression::Identifier { span }
                     if self.allocator.lookup_local(self.get_lexeme(*span))
                         == Some(evaluated_return_register)
-                        && self.function.reference_registers.contains(&evaluated_return_register)
             );
-            if !is_returning_owned_local
+            let is_returning_owned_local = aliases_local
+                && self
+                    .function
+                    .reference_registers
+                    .contains(&evaluated_return_register);
+
+            // When `finally` blocks run after evaluating a local return variable, snapshot the
+            // value into a dedicated temp (and retain if reference-typed) so `finally` mutations or
+            // nullifications cannot corrupt or free the return value before `ReturnValue`.
+            let mut active_return_register = evaluated_return_register;
+            let mut allocated_saved_return_temp = false;
+            if !self.finally_stack.is_empty() && aliases_local {
+                let saved_reg = self.allocator.alloc_temp()?;
+                self.emit_instruction(
+                    Instruction::format_a(OpCode::Mov, 0, saved_reg, evaluated_return_register, 0),
+                    Some(return_stmt.span),
+                );
+                if self
+                    .function
+                    .reference_registers
+                    .contains(&evaluated_return_register)
+                    || self
+                        .query_type(return_value_expression.span())
+                        .is_reference_type()
+                    || matches!(
+                        self.query_type(return_value_expression.span()),
+                        solix_common::types::Type::GenericParameter { .. }
+                            | solix_common::types::Type::Unresolved(_)
+                    )
+                {
+                    self.emit_instruction(
+                        Instruction::format_a(OpCode::IncRef, 0, saved_reg, 0, 0),
+                        Some(return_stmt.span),
+                    );
+                }
+                active_return_register = saved_reg;
+                allocated_saved_return_temp = true;
+            } else if !is_returning_owned_local
                 && (self
                     .query_type(return_value_expression.span())
                     .is_reference_type()
@@ -903,11 +961,14 @@ impl<'ctx> Emitter<'ctx> {
 
             self.emit_active_finally_blocks_up_to(0)?;
 
-            self.emit_return_arc_cleanup(Some(evaluated_return_register));
+            self.emit_return_arc_cleanup(Some(active_return_register));
             self.emit_instruction(
-                Instruction::format_a(OpCode::ReturnValue, 0, evaluated_return_register, 0, 0),
+                Instruction::format_a(OpCode::ReturnValue, 0, active_return_register, 0, 0),
                 Some(return_stmt.span),
             );
+            if allocated_saved_return_temp {
+                self.allocator.free_temp(active_return_register);
+            }
             self.allocator.free_temp(evaluated_return_register);
         } else {
             self.emit_active_finally_blocks_up_to(0)?;

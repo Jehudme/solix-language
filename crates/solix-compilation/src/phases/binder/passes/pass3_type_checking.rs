@@ -175,6 +175,12 @@ pub struct TypeCheckingVisitor<'ctx> {
     pub lambda_stack: Vec<LambdaContext>,
     pub next_vtable_id: &'ctx mut u32,
     pub source_texts: &'ctx [String],
+    /// Local variable SymbolIds declared inside the current callable scope for definite assignment checks.
+    pub tracked_locals: std::collections::HashSet<SymbolId>,
+    /// Local variable SymbolIds definitely assigned along the current control-flow path.
+    pub initialized_locals: std::collections::HashSet<SymbolId>,
+    /// Temporarily holds the target `Identifier` span of a plain assignment so LHS writes do not trigger `E0272`.
+    pub suppress_uninit_ident_check: Option<Span>,
 }
 
 fn get_qualified_member_path(expression: &Expression, source_text: &str) -> Option<String> {
@@ -392,6 +398,15 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                     .resolve_symbol(self.source_id, identifier_name)
                 {
                     self.resolved_symbols.insert(*span, symbol_id);
+                    if self.suppress_uninit_ident_check != Some(*span)
+                        && self.tracked_locals.contains(&symbol_id)
+                        && !self.initialized_locals.contains(&symbol_id)
+                    {
+                        self.errors.push(BindingError::UninitializedVariableUsed {
+                            variable_name: identifier_name.to_string(),
+                            span: span.to_source_span(),
+                        });
+                    }
                     if let Some(symbol_entry) = self.symbol_table.get_symbol(symbol_id) {
                         symbol_entry.symbol_type.clone()
                     } else {
@@ -2000,8 +2015,25 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                 self.validate_lambda_captures(captures);
                 self.evaluate_lambda_with_expected(parameters, body, None)
             }
-            Expression::Assignment { target, value, .. } => {
+            Expression::Assignment {
+                target,
+                operator,
+                value,
+                ..
+            } => {
+                let is_plain_assign = matches!(operator, TokenKind::OperatorAssign);
+                let plain_ident_span = if is_plain_assign {
+                    if let Expression::Identifier { span } = &**target {
+                        self.suppress_uninit_ident_check = Some(*span);
+                        Some(*span)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let target_type = self.evaluate_expression_type(target);
+                self.suppress_uninit_ident_check = None;
 
                 // Check const and L-value assignment
                 match &**target {
@@ -2098,6 +2130,12 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                         found: value_type.to_string(),
                         span: value.span().to_source_span(),
                     });
+                }
+                if let Some(ident_span) = plain_ident_span
+                    && let Some(&sym_id) = self.resolved_symbols.get(&ident_span)
+                    && self.tracked_locals.contains(&sym_id)
+                {
+                    self.initialized_locals.insert(sym_id);
                 }
                 target_type
             }
@@ -2215,6 +2253,7 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
             return_types: Vec::new(),
             expected_return: expected_return.clone(),
         });
+        let saved_initialized_locals = self.initialized_locals.clone();
 
         let return_type = match body {
             LambdaBody::Expression(expr) => {
@@ -2249,6 +2288,7 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
             }
         };
 
+        self.initialized_locals = saved_initialized_locals;
         self.lambda_stack.pop();
         self.current_method_return_type = previous_return;
         self.symbol_table.exit_scope();
@@ -2894,6 +2934,8 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
         self.is_static_method = node.modifiers.contains(&Modifier::Static);
 
         self.symbol_table.enter_scope();
+        let saved_tracked_locals = std::mem::take(&mut self.tracked_locals);
+        let saved_initialized_locals = std::mem::take(&mut self.initialized_locals);
 
         for (slot_index, parameter) in node.parameters.iter().enumerate() {
             let param_name = if parameter.name_span.end as usize <= self.source_text.len() {
@@ -3013,6 +3055,8 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             }
         }
 
+        self.tracked_locals = saved_tracked_locals;
+        self.initialized_locals = saved_initialized_locals;
         self.symbol_table.exit_scope();
         self.current_method_return_type = previous_return;
         self.is_static_method = previous_static;
@@ -3021,6 +3065,8 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
 
     fn visit_constructor_declaration(&mut self, node: &ConstructorDeclaration) {
         self.symbol_table.enter_scope();
+        let saved_tracked_locals = std::mem::take(&mut self.tracked_locals);
+        let saved_initialized_locals = std::mem::take(&mut self.initialized_locals);
         for (slot_index, parameter) in node.parameters.iter().enumerate() {
             let param_name = if parameter.name_span.end as usize <= self.source_text.len() {
                 &self.source_text
@@ -3172,6 +3218,8 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
         for statement in &node.body.statements {
             self.visit_statement(statement);
         }
+        self.tracked_locals = saved_tracked_locals;
+        self.initialized_locals = saved_initialized_locals;
         self.symbol_table.exit_scope();
     }
 
@@ -3184,9 +3232,13 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
         self.is_inside_destructor = true;
 
         self.symbol_table.enter_scope();
+        let saved_tracked_locals = std::mem::take(&mut self.tracked_locals);
+        let saved_initialized_locals = std::mem::take(&mut self.initialized_locals);
         for statement in &node.body.statements {
             self.visit_statement(statement);
         }
+        self.tracked_locals = saved_tracked_locals;
+        self.initialized_locals = saved_initialized_locals;
         self.symbol_table.exit_scope();
 
         self.is_inside_destructor = previous_destructor;
@@ -3208,6 +3260,8 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
         self.is_static_method = node.modifiers.contains(&Modifier::Static);
 
         self.symbol_table.enter_scope();
+        let saved_tracked_locals = std::mem::take(&mut self.tracked_locals);
+        let saved_initialized_locals = std::mem::take(&mut self.initialized_locals);
 
         for (slot_index, parameter) in node.parameters.iter().enumerate() {
             let param_name = if parameter.name_span.end as usize <= self.source_text.len() {
@@ -3272,6 +3326,8 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             self.visit_statement(statement);
         }
 
+        self.tracked_locals = saved_tracked_locals;
+        self.initialized_locals = saved_initialized_locals;
         self.symbol_table.exit_scope();
         self.current_method_return_type = previous_return;
         self.is_static_method = previous_static;
@@ -3471,6 +3527,10 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
             symbol_id: var_id,
         });
         self.resolved_symbols.insert(node.name_span, var_id);
+        self.tracked_locals.insert(var_id);
+        if node.initializer.is_some() {
+            self.initialized_locals.insert(var_id);
+        }
         self.node_types
             .insert(node.name_span, declared_type.clone());
         self.node_types.insert(node.span, declared_type);
@@ -3565,9 +3625,23 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 span: node.condition.span().to_source_span(),
             });
         }
+        let before_if = self.initialized_locals.clone();
         self.visit_statement(&node.then_branch);
+        let after_then = self.initialized_locals.clone();
+        let then_terminates = statement_definitely_returns(&node.then_branch);
+
         if let Some(else_branch) = &node.else_branch {
+            self.initialized_locals = before_if;
             self.visit_statement(else_branch);
+            let else_terminates = statement_definitely_returns(else_branch);
+            if !then_terminates && !else_terminates {
+                self.initialized_locals
+                    .retain(|sym_id| after_then.contains(sym_id));
+            } else if !then_terminates && else_terminates {
+                self.initialized_locals = after_then;
+            }
+        } else {
+            self.initialized_locals = before_if;
         }
     }
 
@@ -3580,12 +3654,15 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 span: node.condition.span().to_source_span(),
             });
         }
+        let before_loop = self.initialized_locals.clone();
         self.loop_depth += 1;
         self.visit_statement(&node.body);
         self.loop_depth -= 1;
+        self.initialized_locals = before_loop;
     }
 
     fn visit_do_while_statement(&mut self, node: &DoWhileStatement) {
+        let before_loop = self.initialized_locals.clone();
         self.loop_depth += 1;
         self.visit_statement(&node.body);
         self.loop_depth -= 1;
@@ -3597,6 +3674,9 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 span: node.condition.span().to_source_span(),
             });
         }
+        if statement_definitely_returns(&node.body) {
+            self.initialized_locals = before_loop;
+        }
     }
 
     fn visit_for_statement(&mut self, node: &ForStatement) {
@@ -3604,6 +3684,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
         if let Some(init) = &node.initializer {
             self.visit_statement(init);
         }
+        let before_loop = self.initialized_locals.clone();
         if let Some(cond) = &node.condition {
             let cond_type = self.evaluate_expression_type(cond);
             if cond_type != Type::Primitive(PrimitiveKind::Bool) {
@@ -3614,18 +3695,21 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 });
             }
         }
-        if let Some(update) = &node.update {
-            self.evaluate_expression_type(update);
-        }
         self.loop_depth += 1;
         self.visit_statement(&node.body);
         self.loop_depth -= 1;
+        if let Some(update) = &node.update {
+            self.evaluate_expression_type(update);
+        }
+        self.initialized_locals = before_loop;
         self.symbol_table.exit_scope();
     }
 
     fn visit_switch_statement(&mut self, node: &SwitchStatement) {
         let discriminant_type = self.evaluate_expression_type(&node.discriminant);
         self.switch_depth += 1;
+        let before_switch = self.initialized_locals.clone();
+        let mut switch_exit_intersection: Option<std::collections::HashSet<SymbolId>> = None;
         let mut seen_cases = std::collections::HashSet::new();
 
         for case_clause in &node.cases {
@@ -3787,14 +3871,42 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 }
             }
 
-            for statement in &case_clause.statements {
-                self.visit_statement(statement);
+            if !case_clause.statements.is_empty() {
+                self.initialized_locals = before_switch.clone();
+                for statement in &case_clause.statements {
+                    self.visit_statement(statement);
+                }
+                if !case_clause
+                    .statements
+                    .iter()
+                    .any(statement_definitely_returns)
+                {
+                    let branch_state = &self.initialized_locals;
+                    match &mut switch_exit_intersection {
+                        Some(acc) => acc.retain(|sym_id| branch_state.contains(sym_id)),
+                        None => switch_exit_intersection = Some(branch_state.clone()),
+                    }
+                }
             }
         }
 
+        let mut switch_is_exhaustive = node.default_case.is_some();
+        let trailing_empty_without_default = node.default_case.is_none()
+            && node
+                .cases
+                .last()
+                .is_some_and(|clause| clause.statements.is_empty());
         if let Some(default_statements) = &node.default_case {
+            self.initialized_locals = before_switch.clone();
             for statement in default_statements {
                 self.visit_statement(statement);
+            }
+            if !default_statements.iter().any(statement_definitely_returns) {
+                let branch_state = &self.initialized_locals;
+                match &mut switch_exit_intersection {
+                    Some(acc) => acc.retain(|sym_id| branch_state.contains(sym_id)),
+                    None => switch_exit_intersection = Some(branch_state.clone()),
+                }
             }
         } else if let Type::Enum { ref symbol_name } = discriminant_type {
             let variant_symbols: std::collections::HashSet<SymbolId> = self
@@ -3823,8 +3935,15 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                     enum_name: symbol_name.clone(),
                     span: node.span.to_source_span(),
                 });
+            } else {
+                switch_is_exhaustive = true;
             }
         }
+        self.initialized_locals = if switch_is_exhaustive && !trailing_empty_without_default {
+            switch_exit_intersection.unwrap_or(before_switch)
+        } else {
+            before_switch
+        };
         self.switch_depth -= 1;
     }
 
@@ -3836,7 +3955,14 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
     }
 
     fn visit_try_statement(&mut self, node: &TryStatement) {
+        let before_try = self.initialized_locals.clone();
         self.visit_block_statement(&node.try_block);
+        let try_terminates = block_definitely_returns(&node.try_block);
+        let mut merged_try_catch = if try_terminates {
+            None
+        } else {
+            Some(self.initialized_locals.clone())
+        };
 
         let mut caught_symbols: Vec<SymbolId> = Vec::new();
         for catch_clause in &node.catch_clauses {
@@ -3902,11 +4028,24 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 caught_symbols.push(resolved_symbol_identifier);
             }
 
+            self.initialized_locals = before_try.clone();
             self.visit_catch_clause(catch_clause);
+            if !block_definitely_returns(&catch_clause.block) {
+                let catch_state = &self.initialized_locals;
+                match &mut merged_try_catch {
+                    Some(acc) => acc.retain(|sym_id| catch_state.contains(sym_id)),
+                    None => merged_try_catch = Some(catch_state.clone()),
+                }
+            }
         }
 
+        let after_try_catch = merged_try_catch.unwrap_or_else(|| before_try.clone());
         if let Some(finally_block) = &node.finally_block {
+            self.initialized_locals = before_try;
             self.visit_block_statement(finally_block);
+            self.initialized_locals.extend(after_try_catch);
+        } else {
+            self.initialized_locals = after_try_catch;
         }
     }
 
@@ -4335,11 +4474,19 @@ fn statement_definitely_returns(statement: &Statement) -> bool {
         Statement::Switch(switch_stmt) => {
             if let Some(default_stmts) = &switch_stmt.default_case {
                 let default_returns = default_stmts.iter().any(statement_definitely_returns);
-                let cases_return = switch_stmt
-                    .cases
-                    .iter()
-                    .all(|clause| clause.statements.iter().any(statement_definitely_returns));
-                default_returns && cases_return
+                let mut next_target_returns = default_returns;
+                for clause in switch_stmt.cases.iter().rev() {
+                    let clause_returns = if clause.statements.is_empty() {
+                        next_target_returns
+                    } else {
+                        clause.statements.iter().any(statement_definitely_returns)
+                    };
+                    if !clause_returns {
+                        return false;
+                    }
+                    next_target_returns = clause_returns;
+                }
+                default_returns
             } else {
                 false
             }

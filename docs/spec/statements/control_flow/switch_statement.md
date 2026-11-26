@@ -4,6 +4,8 @@
 
 A `SwitchStatement` evaluates a discriminant expression and branches to matching `case` clauses, falling back to an optional `default` branch when no candidate matches. In Solix `v3.x`, the `switch` statement supports universal primitives, strings, enums, class equality overloading (`operator ==` / `operator !=`), tuple value equality, and runtime `instanceof` pattern matching.
 
+Grouped empty `case` labels (such as `case 1: case 2: return 5;` or `case 3: default: return 9;`) share the subsequent non-empty `case` (or `default`) block without skipping intermediate comparisons when previous labels fail, and definite-return analysis traces grouped fall-through cleanly. Non-empty `case` arms implicitly branch to the end of the `switch` statement unless exited early.
+
 ---
 
 ## 2. Supported Discriminant and Case Types

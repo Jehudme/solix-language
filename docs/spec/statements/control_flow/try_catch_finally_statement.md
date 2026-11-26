@@ -38,3 +38,8 @@ Jump <try_end_ip>
 
 // --- End (<try_end_ip>) ---
 ```
+
+### Nested `finally` Unwinding & Local Return Snapshot Preservation
+- When a `return` statement inside `try` (or `catch`) returns a local variable while `finally` blocks are active, the emitter snapshots the return register into a temporary register (and emits `IncRef` for reference-typed returns) before running `finally` handlers so assignments or `null` overwrites inside `finally` cannot corrupt or prematurely release the already-evaluated return value.
+- `emit_active_finally_blocks_up_to` pops one active `finally` frame per step rather than truncating all pending frames upfront, ensuring an early `return`, `break`, or `continue` inside a nested `finally` block still unwinds enclosing outer `finally` handlers cleanly.
+```
