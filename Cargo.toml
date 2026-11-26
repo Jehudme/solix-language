@@ -35,7 +35,6 @@ solix-dap = { path = "crates/solix-dap", version = "3.0.1" }
 thiserror = "2.0"
 anyhow = "1.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # CLI tooling
 clap = { version = "4.5", features = ["derive"] }
@@ -50,10 +49,6 @@ miette = { version = "7.4", features = ["fancy"] }
 # Language Server Protocol & Async
 tower-lsp = "0.20"
 tokio = { version = "1.54.1", features = ["full"] }
-
-# Compiler & Lexer utilities
-compact_str = { version = "0.10", features = ["serde"] }
-unicode-ident = "1.0"
 
 # Testing utilities
 tempfile = "3.13"

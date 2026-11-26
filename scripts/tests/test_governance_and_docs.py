@@ -462,6 +462,7 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
             self.assertNotIn('target-branch: "master"', dependabot_raw)
 
         sha_pin_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+        local_action_re = re.compile(r"^\./\.github/actions/[A-Za-z0-9_.-]+$")
         for workflow_file in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
             wf_text = workflow_file.read_text(encoding="utf-8")
             if yaml is not None:
@@ -483,11 +484,35 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                 stripped = raw_line.strip()
                 if stripped.startswith(("uses:", "- uses:")):
                     action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                    if local_action_re.match(action_spec):
+                        action_manifest = REPO_ROOT / action_spec.removeprefix("./") / "action.yml"
+                        self.assertTrue(
+                            action_manifest.is_file(),
+                            f"Missing local composite action manifest for {action_spec}",
+                        )
+                        continue
                     self.assertRegex(
                         action_spec,
                         sha_pin_re,
                         f"Unpinned GitHub Action in {workflow_file.name}: {action_spec}",
                     )
+
+        actions_dir = REPO_ROOT / ".github" / "actions"
+        if actions_dir.is_dir():
+            for action_file in sorted(actions_dir.glob("*/action.yml")):
+                action_text = action_file.read_text(encoding="utf-8")
+                if yaml is not None:
+                    parsed_action = yaml.safe_load(action_text)
+                    self.assertIsInstance(parsed_action, dict, f"{action_file} invalid YAML")
+                for raw_line in action_text.splitlines():
+                    stripped = raw_line.strip()
+                    if stripped.startswith(("uses:", "- uses:")):
+                        action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                        self.assertRegex(
+                            action_spec,
+                            sha_pin_re,
+                            f"Unpinned GitHub Action in {action_file}: {action_spec}",
+                        )
 
 
 class ReleaseTrainVersionCalculationTests(unittest.TestCase):
@@ -1005,11 +1030,32 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("--remove-label", ci_text)
         self.assertIn("pr-benchmark:", ci_text)
         self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
+        self.assertIn("<!-- solix-pr-coverage -->", ci_text)
         self.assertIn("Publish benchmark report to Step Summary", ci_text)
         self.assertIn(
             "pr-benchmark:\n    name: PR Performance Benchmark (vs dev)\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
             ci_text,
         )
+        self.assertNotIn("  push:\n    branches:\n      - dev", ci_text)
+        self.assertIn("key: solix-dev-bench-bin-", ci_text)
+        self.assertIn("CARGO_TARGET_DIR=", ci_text)
+        self.assertIn("./.github/actions/solix-setup", ci_text)
+        self.assertNotIn("EmbarkStudios/cargo-deny-action", ci_text)
+        self.assertIn("cargo-deny-0.19.0", ci_text)
+        self.assertIn("codeql:", ci_text)
+        self.assertIn("staged-offline-docs", ci_text)
+        self.assertFalse((REPO_ROOT / ".github" / "workflows" / "codeql.yml").exists())
+
+        setup_action_text = (
+            REPO_ROOT / ".github" / "actions" / "solix-setup" / "action.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("bundled-libs-key-prefix", setup_action_text)
+
+        dev_release_text = (REPO_ROOT / ".github" / "workflows" / "dev-release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("solix-bundled-dev-all", dev_release_text)
+        self.assertIn("key: solix-ci-llvm-cov-0.9.1", dev_release_text)
 
     def test_pr_discussion_sync_workflow_handles_artifacts_and_comments(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

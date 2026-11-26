@@ -1,0 +1,98 @@
+name: Solix Job Setup
+description: Shared Rust toolchain, Cargo cache, Python/Node setup, and bundled package cache restore.
+
+inputs:
+  enable-rust:
+    description: Install Rust toolchain
+    required: false
+    default: "true"
+  rust-components:
+    description: Comma-separated rustup components
+    required: false
+    default: ""
+  rust-targets:
+    description: Comma-separated rustup targets
+    required: false
+    default: ""
+  enable-rust-cache:
+    description: Enable Swatinem/rust-cache
+    required: false
+    default: "true"
+  rust-cache-shared-key:
+    description: Shared key passed to Swatinem/rust-cache (preferred when non-empty)
+    required: false
+    default: ""
+  rust-cache-prefix-key:
+    description: Prefix key passed to Swatinem/rust-cache when shared-key is empty
+    required: false
+    default: ""
+  enable-python:
+    description: Set up Python 3.12
+    required: false
+    default: "true"
+  enable-node:
+    description: Set up Node.js 22 with npm cache for editors/vscode
+    required: false
+    default: "false"
+  restore-bundled-libs:
+    description: Restore cached bundled packages into crates/solix-toolchain/assets/packages
+    required: false
+    default: "false"
+  bundled-libs-key-prefix:
+    description: Cache key prefix for bundled first-party packages
+    required: false
+    default: "solix-bundled"
+
+outputs:
+  bundled-libs-cache-hit:
+    description: Whether bundled package cache hit
+    value: ${{ steps.bundled-libs-cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      if: inputs.enable-rust == 'true'
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+      with:
+        toolchain: stable
+        components: ${{ inputs.rust-components }}
+        targets: ${{ inputs.rust-targets }}
+
+    - name: Cache Cargo dependencies (shared key)
+      if: inputs.enable-rust == 'true' && inputs.enable-rust-cache == 'true' && inputs.rust-cache-shared-key != ''
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        shared-key: ${{ inputs.rust-cache-shared-key }}
+
+    - name: Cache Cargo dependencies (prefix key)
+      if: inputs.enable-rust == 'true' && inputs.enable-rust-cache == 'true' && inputs.rust-cache-shared-key == '' && inputs.rust-cache-prefix-key != ''
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        prefix-key: ${{ inputs.rust-cache-prefix-key }}
+
+    - name: Cache Cargo dependencies (default)
+      if: inputs.enable-rust == 'true' && inputs.enable-rust-cache == 'true' && inputs.rust-cache-shared-key == '' && inputs.rust-cache-prefix-key == ''
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+    - name: Set up Python
+      if: inputs.enable-python == 'true'
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+      with:
+        python-version: "3.12"
+
+    - name: Set up Node.js
+      if: inputs.enable-node == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      with:
+        node-version: "22"
+        cache: "npm"
+        cache-dependency-path: editors/vscode/package-lock.json
+
+    - name: Restore cached bundled first-party libraries
+      id: bundled-libs-cache
+      if: inputs.restore-bundled-libs == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: crates/solix-toolchain/assets/packages
+        key: ${{ inputs.bundled-libs-key-prefix }}-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}

@@ -14,16 +14,22 @@ import * as rpc from 'vscode-jsonrpc/node';
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 function locateSolixBinary() {
+    const exeSuffix = process.platform === 'win32' ? '.exe' : '';
+    if (process.env.SOLIX_BIN && fs.existsSync(process.env.SOLIX_BIN)) {
+        const isToolchain = !path.basename(process.env.SOLIX_BIN, exeSuffix).endsWith('solix-lsp');
+        return { binaryPath: process.env.SOLIX_BIN, isToolchain };
+    }
+
     const candidates = [
-        path.resolve(currentDir, '../../../target/debug/solix'),
-        path.resolve(currentDir, '../../../target/release/solix'),
-        path.resolve(currentDir, '../../../target/debug/solix-lsp'),
-        path.resolve(currentDir, '../../../target/release/solix-lsp'),
+        path.resolve(currentDir, `../../../target/debug/solix${exeSuffix}`),
+        path.resolve(currentDir, `../../../target/release/solix${exeSuffix}`),
+        path.resolve(currentDir, `../../../target/debug/solix-lsp${exeSuffix}`),
+        path.resolve(currentDir, `../../../target/release/solix-lsp${exeSuffix}`),
     ];
 
     for (const candidate of candidates) {
         if (fs.existsSync(candidate)) {
-            const isToolchain = !candidate.endsWith('solix-lsp');
+            const isToolchain = !path.basename(candidate, exeSuffix).endsWith('solix-lsp');
             return { binaryPath: candidate, isToolchain };
         }
     }
