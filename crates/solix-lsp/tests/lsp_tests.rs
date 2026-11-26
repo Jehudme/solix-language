@@ -51,11 +51,30 @@ fn create_hermetic_bundled_solver(
         .join("solix-toolchain")
         .join("assets")
         .join("packages");
+    let expected_dirs: Option<std::collections::HashSet<String>> =
+        std::fs::read_to_string(bundled_root.join("bundled_manifest.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|manifest| {
+                manifest.get("packages")?.as_array().map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.get("archive_rel_path")?.as_str())
+                        .filter_map(|rel| rel.split('/').next().map(str::to_string))
+                        .collect()
+                })
+            });
     if let Ok(entries) = std::fs::read_dir(&bundled_root) {
         for entry in entries.flatten() {
             let source_path = entry.path();
-            if source_path.is_dir() {
-                let target_dir = temp_store.path().join(entry.file_name());
+            let dir_name = entry.file_name();
+            let is_expected = expected_dirs.as_ref().is_none_or(|allowed| {
+                dir_name
+                    .to_str()
+                    .is_some_and(|name_str| allowed.contains(name_str))
+            });
+            if source_path.is_dir() && is_expected {
+                let target_dir = temp_store.path().join(&dir_name);
                 let _ = std::fs::create_dir_all(&target_dir);
                 if let Ok(files) = std::fs::read_dir(&source_path) {
                     for file_entry in files.flatten() {
