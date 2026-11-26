@@ -696,11 +696,12 @@ pub fn classify_allocations(
                 continue;
             };
 
-            // Non-aggregates (classes with destructors, inheritance, or reference fields) must escape
+            // Non-aggregates (classes with destructors, inheritance, or reference/weak fields) must escape
             if class_descriptor.destructor_id.is_some()
                 || class_descriptor.base_vtable_id.is_some()
                 || !class_descriptor.itable.is_empty()
                 || !class_descriptor.reference_field_offsets.is_empty()
+                || !class_descriptor.weak_field_offsets.is_empty()
             {
                 allocation_categories.insert(
                     instruction_index,

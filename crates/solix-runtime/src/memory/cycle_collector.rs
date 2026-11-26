@@ -91,6 +91,17 @@ pub fn get_outgoing_references(
     children
 }
 
+/// Batch output from Bacon & Rajan (2001) cycle detection before physical heap reclamation.
+#[derive(Debug, Default)]
+pub(crate) struct CollectedCycleBatch {
+    /// Confirmed garbage cycle addresses ready for destructor invocation & heap reclamation.
+    pub reclaimed_addresses: Vec<u32>,
+    /// Candidate roots deferred due to microsecond budget exhaustion.
+    pub deferred_roots: Vec<u32>,
+    /// Trial reference-count decrements performed per `(parent_address, child_address)` edge.
+    pub trial_decrements: std::collections::HashMap<(u32, u32), u32>,
+}
+
 /// Phase 1: MarkGray (Trial Deletion)
 ///
 /// Iteratively simulates removing candidate roots by decrementing reference counts
@@ -99,6 +110,16 @@ pub fn mark_gray(
     heap: &mut VirtualHeap,
     context: &RuntimeContext,
     start_address: u32,
+) -> Result<(), RuntimeError> {
+    let mut unused_log = std::collections::HashMap::new();
+    mark_gray_tracked(heap, context, start_address, &mut unused_log)
+}
+
+fn mark_gray_tracked(
+    heap: &mut VirtualHeap,
+    context: &RuntimeContext,
+    start_address: u32,
+    trial_decrements: &mut std::collections::HashMap<(u32, u32), u32>,
 ) -> Result<(), RuntimeError> {
     let mut worklist = vec![start_address];
     while let Some(current_address) = worklist.pop() {
@@ -113,6 +134,9 @@ pub fn mark_gray(
                 if child_header.ref_count != MAX_REF_COUNT && child_header.ref_count > 0 {
                     child_header.ref_count -= 1;
                     heap.write_header(child_address, child_header)?;
+                    *trial_decrements
+                        .entry((current_address, child_address))
+                        .or_insert(0) += 1;
                 }
                 if child_header.color != GcColor::Gray {
                     worklist.push(child_address);
@@ -153,6 +177,32 @@ pub fn scan(
     Ok(())
 }
 
+fn scan_tracked(
+    heap: &mut VirtualHeap,
+    context: &RuntimeContext,
+    start_address: u32,
+    trial_decrements: &mut std::collections::HashMap<(u32, u32), u32>,
+) -> Result<(), RuntimeError> {
+    let mut worklist = vec![start_address];
+    while let Some(current_address) = worklist.pop() {
+        let mut header = heap.read_header(current_address)?;
+        if header.color == GcColor::Gray {
+            if header.ref_count > 0 {
+                scan_black_tracked(heap, context, current_address, trial_decrements)?;
+            } else {
+                header.color = GcColor::White;
+                heap.write_header(current_address, header)?;
+
+                let child_pointers = get_outgoing_references(heap, context, current_address);
+                for child_address in child_pointers {
+                    worklist.push(child_address);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Restores reference counts decremented during trial deletion and repaints nodes Black iteratively.
 pub fn scan_black(
     heap: &mut VirtualHeap,
@@ -168,7 +218,50 @@ pub fn scan_black(
         let child_pointers = get_outgoing_references(heap, context, current_address);
         for child_address in child_pointers {
             let mut child_header = heap.read_header(child_address)?;
-            if child_header.ref_count != MAX_REF_COUNT {
+            let was_black_zero =
+                child_header.color == GcColor::Black && child_header.ref_count == 0;
+            // Never latch `MAX_REF_COUNT - 1` into immortal `MAX_REF_COUNT`, and never inflate an
+            // already-Black 0-ref block that could not have had an edge trial-decremented.
+            if child_header.ref_count < MAX_REF_COUNT.saturating_sub(1) && !was_black_zero {
+                child_header.ref_count += 1;
+                heap.write_header(child_address, child_header)?;
+            }
+            if child_header.color != GcColor::Black {
+                child_header.color = GcColor::Black;
+                heap.write_header(child_address, child_header)?;
+                worklist.push(child_address);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn scan_black_tracked(
+    heap: &mut VirtualHeap,
+    context: &RuntimeContext,
+    start_address: u32,
+    trial_decrements: &mut std::collections::HashMap<(u32, u32), u32>,
+) -> Result<(), RuntimeError> {
+    let mut worklist = vec![start_address];
+    let mut header = heap.read_header(start_address)?;
+    header.color = GcColor::Black;
+    heap.write_header(start_address, header)?;
+
+    while let Some(current_address) = worklist.pop() {
+        let child_pointers = get_outgoing_references(heap, context, current_address);
+        for child_address in child_pointers {
+            let mut child_header = heap.read_header(child_address)?;
+            let should_restore = trial_decrements
+                .get_mut(&(current_address, child_address))
+                .is_some_and(|pending_count| {
+                    if *pending_count > 0 {
+                        *pending_count -= 1;
+                        true
+                    } else {
+                        false
+                    }
+                });
+            if should_restore && child_header.ref_count < MAX_REF_COUNT.saturating_sub(1) {
                 child_header.ref_count += 1;
                 heap.write_header(child_address, child_header)?;
             }
@@ -191,8 +284,31 @@ pub fn collect_white(
     start_address: u32,
     freed_addresses: &mut HashSet<u32>,
 ) -> Result<u64, RuntimeError> {
-    let mut worklist = vec![start_address];
     let mut to_deallocate = Vec::new();
+    collect_white_addresses(
+        heap,
+        context,
+        start_address,
+        freed_addresses,
+        &mut to_deallocate,
+    )?;
+
+    let mut collected_total = 0u64;
+    for block_address in to_deallocate {
+        heap.force_deallocate(block_address)?;
+        collected_total += 1;
+    }
+    Ok(collected_total)
+}
+
+fn collect_white_addresses(
+    heap: &mut VirtualHeap,
+    context: &RuntimeContext,
+    start_address: u32,
+    freed_addresses: &mut HashSet<u32>,
+    to_deallocate: &mut Vec<u32>,
+) -> Result<(), RuntimeError> {
+    let mut worklist = vec![start_address];
 
     while let Some(current_address) = worklist.pop() {
         if freed_addresses.contains(&current_address) {
@@ -215,30 +331,27 @@ pub fn collect_white(
             }
         }
     }
-
-    let mut collected_total = 0u64;
-    for block_address in to_deallocate {
-        heap.force_deallocate(block_address)?;
-        collected_total += 1;
-    }
-    Ok(collected_total)
+    Ok(())
 }
 
-/// Orchestrates Bacon & Rajan (2001) Synchronous Cycle Collection across suspect purple roots.
-///
-/// Returns `(collected_count, deferred_roots)`.
-pub fn run_cycle_collection(
+/// Detects cyclic garbage blocks without deallocating them so the VM can execute
+/// class destructors safely before calling `force_deallocate`.
+pub(crate) fn collect_cycles_deferred(
     heap: &mut VirtualHeap,
     context: &RuntimeContext,
     roots: &[u32],
     budget_microseconds: Option<u64>,
-) -> Result<(u64, Vec<u32>), RuntimeError> {
+    active_destructors: Option<&HashSet<u32>>,
+) -> Result<CollectedCycleBatch, RuntimeError> {
     let collection_start_time = Instant::now();
     let mut valid_roots = Vec::new();
 
     for candidate_address in roots {
         let address = *candidate_address;
         if address == 0 {
+            continue;
+        }
+        if active_destructors.is_some_and(|active_set| active_set.contains(&address)) {
             continue;
         }
         let Ok(header) = heap.read_header(address) else {
@@ -272,28 +385,57 @@ pub fn run_cycle_collection(
         roots_to_process.push(*root_address);
     }
 
+    let mut trial_decrements = std::collections::HashMap::new();
+
     // Phase 1: MarkGray (Trial Deletion)
     for root_address in &roots_to_process {
         let current_header = heap.read_header(*root_address)?;
         if current_header.color == GcColor::Purple {
-            mark_gray(heap, context, *root_address)?;
+            mark_gray_tracked(heap, context, *root_address, &mut trial_decrements)?;
         }
     }
 
     // Phase 2: Scan
     for root_address in &roots_to_process {
-        scan(heap, context, *root_address)?;
+        scan_tracked(heap, context, *root_address, &mut trial_decrements)?;
     }
 
-    // Phase 3: CollectWhite
-    let mut total_reclaimed_blocks = 0u64;
+    // Phase 3: CollectWhite (gather addresses before freeing so destructors run cleanly)
+    let mut reclaimed_addresses = Vec::new();
     let mut freed_addresses = HashSet::new();
     for root_address in &roots_to_process {
-        total_reclaimed_blocks +=
-            collect_white(heap, context, *root_address, &mut freed_addresses)?;
+        collect_white_addresses(
+            heap,
+            context,
+            *root_address,
+            &mut freed_addresses,
+            &mut reclaimed_addresses,
+        )?;
     }
 
-    Ok((total_reclaimed_blocks, deferred_roots))
+    Ok(CollectedCycleBatch {
+        reclaimed_addresses,
+        deferred_roots,
+        trial_decrements,
+    })
+}
+
+/// Orchestrates Bacon & Rajan (2001) Synchronous Cycle Collection across suspect purple roots.
+///
+/// Returns `(collected_count, deferred_roots)`.
+pub fn run_cycle_collection(
+    heap: &mut VirtualHeap,
+    context: &RuntimeContext,
+    roots: &[u32],
+    budget_microseconds: Option<u64>,
+) -> Result<(u64, Vec<u32>), RuntimeError> {
+    let batch = collect_cycles_deferred(heap, context, roots, budget_microseconds, None)?;
+    let mut reclaimed_count = 0u64;
+    for block_address in batch.reclaimed_addresses {
+        heap.force_deallocate(block_address)?;
+        reclaimed_count += 1;
+    }
+    Ok((reclaimed_count, batch.deferred_roots))
 }
 
 /// Stateful cycle collector controller managing the purple root candidate buffer.

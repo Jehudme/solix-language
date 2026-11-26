@@ -2366,12 +2366,13 @@ impl VirtualMachine {
     #[cold]
     #[inline(never)]
     fn execute_get_field_slow(
-        &self,
+        &mut self,
         obj_addr: u32,
         offset: usize,
         raw_flags: u8,
     ) -> Result<Value, VmTrap> {
         let field_addr = obj_addr + offset as u32;
+        let is_weak_flag = (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) != 0;
         let field_type_tag = if raw_flags > 1 {
             Some(raw_flags >> 1)
         } else {
@@ -2428,6 +2429,21 @@ impl VirtualMachine {
                 }
             }
         };
+
+        if let Value::Ref(target_addr) = val {
+            let is_weak_field = is_weak_flag || {
+                let vtable_id = self.heap.read_u32(obj_addr).unwrap_or(0);
+                self.context
+                    .get_class_by_vtable_id(vtable_id)
+                    .is_some_and(|cls| cls.weak_field_offsets.contains(&offset))
+            };
+            if is_weak_field
+                && (target_addr == 0 || !self.heap.validate_weak_slot(field_addr, target_addr))
+            {
+                let _ = self.heap.write_u64(field_addr, Value::TAG_NULL);
+                return Ok(Value::Null);
+            }
+        }
         Ok(val)
     }
 
@@ -2485,6 +2501,11 @@ impl VirtualMachine {
                 let old_raw = self.heap.read_u64(field_addr).unwrap_or(0);
                 let old_val = Value::from_raw_u64(old_raw);
                 self.heap.write_u64(field_addr, val.to_raw_u64())?;
+                if is_weak {
+                    let target_addr = if let Value::Ref(addr) = val { addr } else { 0 };
+                    self.heap
+                        .record_weak_slot(obj_addr, field_addr, target_addr);
+                }
                 if let Value::Ref(child_addr) = val
                     && !is_weak
                     && !is_move
@@ -4923,7 +4944,9 @@ impl VirtualMachine {
                         let field_addr = obj_addr + offset as u32;
                         let raw_flags = inst.flags();
                         let dst_idx = inst.dst() as usize;
-                        if raw_flags > 1 {
+                        if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) == 0
+                            && raw_flags > 1
+                        {
                             match raw_flags >> 1 {
                                 5 | 6 => unsafe {
                                     *reg_base.add(dst_idx) = Value::I32(read_heap_u32_or_zero(

@@ -25,10 +25,9 @@ FieldDeclaration : [AccessModifier] ['weak'] Type Identifier [ '=' Expression ] 
 
 ## 3. Semantics & Compiler Rules
 
-- **ARC Non-Owning**: Storing an object reference into a `weak` field does not trigger an `INC_REF` bytecode instruction.
-- **Cycle Prevention**: Solix's memory manager registers the address of the weak field with the target object's weak reference list in the runtime.
-- **Automatic Nullification**: When the referenced object's reference count drops to 0 and it is freed, the runtime clears all registered weak fields pointing to that object, setting them to `null`.
-- Accessing a `weak` reference reads the current pointer directly without retaining unless assigned to a local strong variable.
+- **ARC Non-Owning**: Storing an object reference into a `weak` field emits `SetField` with `FLAG_WEAK` (`0x01`), bypassing reference-count increments and decrements.
+- **Cycle Prevention**: Solix's `VirtualHeap` assigns a monotonic generation token to the weak target (`weak_live_targets`) and binds the slot address to `(target_addr, generation)`.
+- **Generation-Validated Nullification**: When the referenced object is deallocated (whether by ARC drop or cycle collection), its generation token is removed; subsequent `GetField` (`FLAG_WEAK`) reads fail validation, overwrite the stale field slot with `null`, and return `null` cleanly even if the address has been recycled for a new allocation.
 
 ## 4. Code Examples
 

@@ -275,3 +275,102 @@ fn test_negative_invalid_threshold_rejection_e0341() {
         "Diagnostic message must explain threshold constraint"
     );
 }
+
+#[test]
+fn test_cyclic_objects_run_destructors_on_collection() {
+    // Regression test (#292.5): cyclic objects with ~ClassName() must execute destructors
+    // safely during cycle collection without use-after-free or skipping surviving external fields.
+    let source_code = r#"
+        class ExternalGuard {
+            public static int32 ext_destroyed = 0;
+            public int32 id;
+            public ExternalGuard(int32 id) {
+                this.id = id;
+            }
+            ~ExternalGuard() {
+                ExternalGuard::ext_destroyed = ExternalGuard::ext_destroyed + 1;
+            }
+        }
+
+        class CyclicResource {
+            public static int32 destroyed_count = 0;
+            public static int32 peer_valid_count = 0;
+            public static ExternalGuard live_guard = null;
+            public CyclicResource peer;
+            public ExternalGuard external;
+            public int32 tag;
+
+            public CyclicResource(int32 tag, ExternalGuard ext) {
+                this.tag = tag;
+                this.external = ext;
+                this.peer = null;
+            }
+
+            ~CyclicResource() {
+                CyclicResource::destroyed_count = CyclicResource::destroyed_count + 1;
+                if (this.peer != null && this.peer.tag != 0) {
+                    CyclicResource::peer_valid_count = CyclicResource::peer_valid_count + 1;
+                }
+                this.external = null;
+            }
+        }
+
+        void spawn_cycle(ExternalGuard shared_external) {
+            CyclicResource first = new CyclicResource(11, shared_external);
+            CyclicResource second = new CyclicResource(22, shared_external);
+            first.peer = second;
+            second.peer = first;
+        }
+
+        public int32 main() {
+            ExternalGuard survivor = new ExternalGuard(777);
+            CyclicResource::live_guard = survivor;
+            spawn_cycle(survivor);
+            return 0;
+        }
+
+        public int32 read_and_cleanup() {
+            int32 result = (CyclicResource::destroyed_count * 1000)
+                + (CyclicResource::peer_valid_count * 100)
+                + (ExternalGuard::ext_destroyed * 10)
+                + CyclicResource::live_guard.id;
+            CyclicResource::live_guard = null;
+            return result;
+        }
+    "#;
+
+    let compiled_program = compile_source(source_code);
+    let options = RuntimeOptions::new()
+        .with_binary(compiled_program)
+        .with_cycle_collector(true)
+        .with_cycle_threshold(1024);
+    let context = RuntimeContext::new(options).expect("Runtime context construction must succeed");
+    let mut virtual_machine = VirtualMachine::new(context);
+
+    let init_result = virtual_machine
+        .invoke_entry("main", &[])
+        .expect("main must execute cleanly");
+    assert_eq!(init_result, Value::I32(0));
+
+    let collected = virtual_machine
+        .collect_cycles()
+        .expect("Cycle collection must succeed");
+    assert!(
+        collected >= 2,
+        "Expected at least 2 collected cyclic blocks, got {collected}"
+    );
+
+    let summary = virtual_machine
+        .invoke_entry("read_and_cleanup", &[])
+        .expect("read_and_cleanup must execute cleanly");
+    // 2 destructors ran, both saw valid peer, survivor.id remained intact (777)
+    assert_eq!(summary, Value::I32(2 * 1000 + 2 * 100 + 777));
+
+    virtual_machine
+        .shutdown()
+        .expect("VM shutdown must succeed cleanly");
+    assert!(
+        virtual_machine.verify_clean_memory().is_ok(),
+        "All cyclic and external blocks must reclaim cleanly after shutdown"
+    );
+}

@@ -773,7 +773,12 @@ impl<'ctx> Emitter<'ctx> {
                 }
                 let offset = self.resolve_field_offset(object.span(), &member_name);
                 let field_tag = self.resolve_field_type_tag(object.span(), &member_name);
-                let flags = field_tag << 1;
+                let weak_flag = if self.is_weak_field(object.span(), &member_name) {
+                    solix_common::bytecode::instruction::FLAG_WEAK
+                } else {
+                    0
+                };
+                let flags = (field_tag << 1) | weak_flag;
                 let r_obj = self.emit_expression(object, None)?;
                 let dst = self.resolve_dst(target_reg)?;
                 self.emit_instruction(
@@ -2913,10 +2918,15 @@ impl<'ctx> Emitter<'ctx> {
                         0
                     };
                     let cur_val = self.allocator.alloc_temp()?;
+                    let weak_flag = if is_weak {
+                        solix_common::bytecode::instruction::FLAG_WEAK
+                    } else {
+                        0
+                    };
                     self.emit_instruction(
                         Instruction::format_a(
                             OpCode::GetField,
-                            field_tag << 1,
+                            (field_tag << 1) | weak_flag,
                             cur_val,
                             r_obj,
                             offset,
@@ -3448,8 +3458,19 @@ impl<'ctx> Emitter<'ctx> {
 
             if !matches!(operator, TokenKind::OperatorAssign) {
                 let r_cur = self.allocator.alloc_temp()?;
+                let weak_flag = if is_weak {
+                    solix_common::bytecode::instruction::FLAG_WEAK
+                } else {
+                    0
+                };
                 self.emit_instruction(
-                    Instruction::format_a(OpCode::GetField, field_tag << 1, r_cur, r_obj, offset),
+                    Instruction::format_a(
+                        OpCode::GetField,
+                        (field_tag << 1) | weak_flag,
+                        r_cur,
+                        r_obj,
+                        offset,
+                    ),
                     Some(*mem_span),
                 );
                 let operand_type = self.query_type(target.span());

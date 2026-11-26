@@ -109,3 +109,84 @@ fn test_arc_cascade_drop_child_references() {
     // Both Parent and Child must be completely freed with zero leaks!
     assert!(vm.verify_clean_memory().is_ok());
 }
+
+#[test]
+fn test_cycle_collector_symmetric_refcount_restoration() {
+    use solix_runtime::memory::cycle_collector::{run_cycle_collection, scan_black};
+    use solix_runtime::memory::layout::{BlockTag, GcColor, MAX_REF_COUNT};
+
+    let mut binary = BinaryProgram::new();
+    let mut node_class = CompiledClass::new("Node", 1, None, 24);
+    node_class.reference_field_offsets = vec![8, 16];
+    binary.classes.push(node_class);
+
+    let options = RuntimeOptions::new().with_binary(binary);
+    let context = RuntimeContext::new(options).expect("build context");
+    let mut vm = VirtualMachine::new(context);
+
+    let root_addr = vm.heap.allocate(24, BlockTag::Object).expect("alloc root");
+    let near_max_addr = vm
+        .heap
+        .allocate(24, BlockTag::Object)
+        .expect("alloc near_max");
+    let zero_rc_addr = vm
+        .heap
+        .allocate(24, BlockTag::Object)
+        .expect("alloc zero_rc");
+
+    vm.heap.write_u64(root_addr, 1).unwrap();
+    vm.heap.write_u64(near_max_addr, 1).unwrap();
+    vm.heap.write_u64(zero_rc_addr, 1).unwrap();
+
+    // root holds references to near_max_addr (field +8) and zero_rc_addr (field +16).
+    vm.heap
+        .write_u64(root_addr + 8, Value::Ref(near_max_addr).to_raw_u64())
+        .unwrap();
+    vm.heap
+        .write_u64(root_addr + 16, Value::Ref(zero_rc_addr).to_raw_u64())
+        .unwrap();
+
+    // root has an external reference (ref_count = 2) and is marked Purple.
+    let mut root_hdr = vm.heap.read_header(root_addr).unwrap();
+    root_hdr.ref_count = 2;
+    root_hdr.color = GcColor::Purple;
+    vm.heap.write_header(root_addr, root_hdr).unwrap();
+
+    // near_max sits one increment below MAX_REF_COUNT; must NOT latch to MAX_REF_COUNT.
+    let mut near_hdr = vm.heap.read_header(near_max_addr).unwrap();
+    near_hdr.ref_count = MAX_REF_COUNT - 1;
+    near_hdr.color = GcColor::Black;
+    vm.heap.write_header(near_max_addr, near_hdr).unwrap();
+
+    // zero_rc starts at 0; mark_gray skips decrementing 0, so scan_black must NOT inflate to 1.
+    let mut zero_hdr = vm.heap.read_header(zero_rc_addr).unwrap();
+    zero_hdr.ref_count = 0;
+    zero_hdr.color = GcColor::Black;
+    vm.heap.write_header(zero_rc_addr, zero_hdr).unwrap();
+
+    let (reclaimed, _deferred) =
+        run_cycle_collection(&mut vm.heap, &vm.context, &[root_addr], None)
+            .expect("cycle collection succeeds");
+    assert_eq!(reclaimed, 0);
+
+    let after_near_hdr = vm.heap.read_header(near_max_addr).unwrap();
+    assert_eq!(
+        after_near_hdr.ref_count,
+        MAX_REF_COUNT - 1,
+        "MAX_REF_COUNT - 1 must restore symmetrically without latching to immortal MAX_REF_COUNT"
+    );
+
+    let after_zero_hdr = vm.heap.read_header(zero_rc_addr).unwrap();
+    assert_eq!(
+        after_zero_hdr.ref_count, 0,
+        "Un-decremented 0-ref child must not inflate to ref_count = 1 during scan_black"
+    );
+
+    // Direct standalone scan_black must also never latch MAX_REF_COUNT - 1 into MAX_REF_COUNT.
+    scan_black(&mut vm.heap, &vm.context, root_addr).expect("standalone scan_black succeeds");
+    assert_eq!(
+        vm.heap.read_header(near_max_addr).unwrap().ref_count,
+        MAX_REF_COUNT - 1
+    );
+    assert_eq!(vm.heap.read_header(zero_rc_addr).unwrap().ref_count, 0);
+}
