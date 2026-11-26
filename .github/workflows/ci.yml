@@ -42,7 +42,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python environment
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           enable-rust: "false"
           enable-rust-cache: "false"
@@ -265,7 +265,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust, Cargo cache, Python, and Node.js
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-components: rustfmt, clippy
           rust-cache-shared-key: ci-linux
@@ -349,7 +349,7 @@ jobs:
 
       - name: Set up Rust, Cargo cache, Python, Node.js, and bundled package cache
         id: setup
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-cache-prefix-key: ci-test-${{ matrix.os }}
           enable-node: "true"
@@ -378,7 +378,7 @@ jobs:
         run: cargo build --bin solix
 
       - name: Install cross runner
-        if: runner.os == 'Linux' && steps.setup.outputs.bundled-libs-cache-hit != 'true'
+        if: runner.os == 'Linux'
         run: |
           rustup component add rust-src
           if ! command -v cross >/dev/null 2>&1; then
@@ -519,7 +519,7 @@ jobs:
 
       - name: Set up Rust with llvm-tools, Cargo cache, Python, and bundled package cache
         id: setup
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-components: llvm-tools-preview
           rust-cache-prefix-key: ci-llvm-cov-linux
@@ -553,7 +553,6 @@ jobs:
           fi
 
       - name: Install cross runner
-        if: steps.setup.outputs.bundled-libs-cache-hit != 'true'
         run: |
           rustup component add rust-src
           if ! command -v cross >/dev/null 2>&1; then
@@ -672,7 +671,7 @@ jobs:
 
       - name: Set up Rust, Cargo cache, Python, and bundled package cache
         id: setup
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-cache-prefix-key: pr-bench
           restore-bundled-libs: "true"
@@ -704,7 +703,6 @@ jobs:
           sudo apt-get install -y cmake libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev lua5.4 luajit gcc
 
       - name: Install cross runner
-        if: steps.setup.outputs.bundled-libs-cache-hit != 'true'
         run: |
           rustup component add rust-src
           if ! command -v cross >/dev/null 2>&1; then

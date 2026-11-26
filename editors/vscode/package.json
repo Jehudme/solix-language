@@ -295,7 +295,7 @@
         "watch": "esbuild src/extension.ts --bundle --outfile=build/dist/extension.js --external:vscode --format=cjs --platform=node --watch",
         "test:unit": "npm run compile:unit && node --test test/unit/*.test.mjs",
         "test:contract": "node --test test/contract/*.test.mjs",
-        "test:grammar": "vscode-tmgrammar-test -g syntaxes/solix.tmLanguage.json 'test/grammar/*.slx'",
+        "test:grammar": "vscode-tmgrammar-test -g syntaxes/solix.tmLanguage.json \"test/grammar/*.slx\"",
         "test:client-rpc": "node test/client_rpc.test.mjs",
         "test:dap-rpc": "node test/dap_rpc.test.mjs",
         "test": "npm run test:unit && npm run test:contract && npm run test:grammar && npm run test:client-rpc && npm run test:dap-rpc",

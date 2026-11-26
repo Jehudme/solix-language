@@ -60,7 +60,7 @@ jobs:
 
       - name: Set up Rust, Cargo cache, Python, and bundled package cache
         id: setup
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-cache-shared-key: ci-linux
           restore-bundled-libs: "true"
@@ -340,7 +340,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js environment
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           enable-rust: "false"
           enable-rust-cache: "false"
@@ -400,7 +400,7 @@ jobs:
           prefix-key: release-libs-universal
 
       - name: Set up Python environment
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           enable-rust: "false"
           enable-rust-cache: "false"
@@ -541,7 +541,7 @@ jobs:
 
       - name: Set up Rust, Cargo cache, Python, and bundled package cache
         id: setup
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-cache-prefix-key: release-bench
           restore-bundled-libs: "true"
@@ -664,7 +664,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Rust, Cargo cache, and Python
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           rust-targets: ${{ join(matrix.targets, ',') }}
           rust-cache-prefix-key: release-dist-${{ matrix.runner }}-${{ join(matrix.targets, '-') }}
@@ -975,7 +975,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python environment
-        uses: ./.github/actions/solix-setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
           enable-rust: "false"
           enable-rust-cache: "false"

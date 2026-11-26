@@ -76,7 +76,7 @@ Every PR targeting `dev`, push to `dev`, and scheduled weekly security run execu
 2. **`cargo-audit` (`--deny warnings`):** Scans `Cargo.lock` against RustSec vulnerability, yanked-crate, and soundness advisories.
 3. **`actionlint`, `zizmor`, and Consolidated `CodeQL`**: Statically analyzes `.github/workflows/*.yml` and `.github/actions/*/action.yml` for YAML issues, script injection, overly permissive tokens, Python/Actions security patterns, and unpinned actions.
 4. **`cargo-llvm-cov` Coverage Gate**: Enforces a minimum workspace line coverage floor (`55%`) in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) using `llvm-tools-preview`. [`scripts/ci/render_coverage_summary.py`](../../scripts/ci/render_coverage_summary.py) formats llvm-cov summary metrics into a structured GitHub Flavored Markdown table aggregating total, executed, and missed lines and function coverage percentages by crate subsystem alongside collapsible raw details.
-5. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` and `.github/actions/*/action.yml` **MUST** pin full 40-character commit SHAs alongside version comments (while internal shared composite setup references `./.github/actions/solix-setup`), with top-level `permissions: contents: read`.
+5. **Immutable SHA Pinning:** Third-party GitHub Actions in `.github/workflows/*.yml` and `.github/actions/*/action.yml` **MUST** pin full 40-character commit SHAs alongside version comments (while internal shared composite setup references `./.github/actions/solix-setup` annotated with `# zizmor: ignore[self-repository]` until `actionlint` adds support for GitHub's `$/` self-repository syntax), with top-level `permissions: contents: read`.
 
 ---
 
