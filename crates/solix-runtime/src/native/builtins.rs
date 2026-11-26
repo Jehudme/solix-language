@@ -49,7 +49,7 @@ fn format_vm_value(vm: &VirtualMachine, val: &Value) -> String {
                             .unwrap_or_else(|_| format!("{val}"));
                     }
                 }
-                format!("{val} (tag={:?})", header.tag)
+                format!("{val} (tag={})", header.tag)
             } else {
                 format!("{val}")
             }

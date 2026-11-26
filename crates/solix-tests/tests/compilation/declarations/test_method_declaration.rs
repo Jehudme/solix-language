@@ -168,8 +168,8 @@ fn test_case_4_8_missing_return_suppressed_when_method_has_syntax_errors() {
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic_item| diagnostic_item.error_code() == "E0202"),
-        "Must emit E0202 for whilje keyword typo, got: {diagnostics:?}"
+            .any(|diagnostic_item| diagnostic_item.error_code() == "E0158"),
+        "Must emit E0158 for whilje keyword typo, got: {diagnostics:?}"
     );
     assert!(
         !diagnostics

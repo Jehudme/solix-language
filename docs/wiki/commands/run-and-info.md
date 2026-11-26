@@ -21,6 +21,9 @@ solix run source <file.slx> [options] [-- [guest_args...]]
 * `--inline-threshold <N>`: Inlining statement threshold limit for in-memory source compilation [default: `8`].
 * `--heap-size <size>`: Configures VirtualHeap capacity limit (e.g. `16MB`, `64MB`, `1GB`) [default: `32MB`]. Returns `RuntimeError::OutOfMemory` immediately if initial constant pool string interning exceeds this limit.
 * `--max-stack <depth>`: Maximum call stack frame depth [default: `1024`].
+* `--cycle-collector <on|off>`: Enables or disables Bacon & Rajan cyclic garbage collection during execution [default: `on`].
+* `--cycle-threshold <count>`: Cycle root buffer threshold triggering collection [default: `256`]. Values of `0` fail with `[E0341]`.
+* `--cycle-budget-us <microseconds>`: Optional incremental time budget per collection step in microseconds.
 * `-v, --verbose`: Prints VM execution summary and heap statistics upon completion.
 * `--safe`: Executes in defensive safe mode with bounds checking and invariant assertions.
 * `--metrics [<format>]`: Prints runtime execution telemetry and memory profiling (`text` or `json`).

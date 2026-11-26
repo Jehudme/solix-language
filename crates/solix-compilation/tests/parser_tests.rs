@@ -248,7 +248,7 @@ fn test_negative_master_syntax_fixture_detects_all_errors() {
 
 #[test]
 fn test_strict_namespace_type_path_syntax() {
-    // 1. Dot syntax in type paths MUST fail with E0201
+    // 1. Dot syntax in type paths MUST fail with E0157
     let invalid_dot_type_source = "solix.collections.List<int32> items;";
     let tokens_invalid = lex_source(0, invalid_dot_type_source).expect("Lexing succeeds");
     let parse_result_invalid = parse_source(0, &tokens_invalid, invalid_dot_type_source);
@@ -260,8 +260,8 @@ fn test_strict_namespace_type_path_syntax() {
     assert!(
         detected_errors
             .iter()
-            .any(|error| error.error_code() == "E0201"),
-        "Expected E0201 (DotNotAllowedInTypePath) when using '.' in type annotation"
+            .any(|error| error.error_code() == "E0157"),
+        "Expected E0157 (DotNotAllowedInTypePath) when using '.' in type annotation"
     );
 
     // 2. Scope resolution syntax '::' in type paths MUST succeed
@@ -365,14 +365,14 @@ public class Main {
     );
     let errors = parse_result.expect_err("Parsing errors");
 
-    // Exactly one diagnostic must be emitted: E0202 (UnknownControlFlowKeyword) with suggestion "while"
+    // Exactly one diagnostic must be emitted: E0158 (UnknownControlFlowKeyword) with suggestion "while"
     assert_eq!(
         errors.len(),
         1,
         "Expected exactly 1 diagnostic for misspelled keyword, but got {}: {errors:?}",
         errors.len()
     );
-    assert_eq!(errors[0].error_code(), "E0202");
+    assert_eq!(errors[0].error_code(), "E0158");
     let formatted_error = format!("{}", errors[0]);
     assert!(formatted_error.contains("whilje"));
 

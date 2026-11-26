@@ -53,6 +53,9 @@ solix <subcommand> --help
 | [`clean`](clean.md) | Cleans project build artifacts and intermediate caches | [clean.md](clean.md) |
 | [`uninstall`](uninstall.md) | Removes an installed package or specific version from the local package store | [uninstall.md](uninstall.md) |
 | [`list`](list.md) | Lists all installed packages and versions in the local package store | [list.md](list.md) |
+| [`fmt`](fmt.md) | Formats Solix source files cleanly to standardized 4-space style | [fmt.md](fmt.md) |
+| [`lsp`](lsp.md) | Starts the Language Server Protocol (LSP) service over `--stdio` | [lsp.md](lsp.md) |
+| [`dap`](dap.md) | Starts the Debug Adapter Protocol (DAP) service over `--stdio` or TCP | [dap.md](dap.md) |
 | [`doc`](doc.md) | Generates API documentation from source code comments in HTML or Markdown | [doc.md](doc.md) |
 | [`wiki`](wiki.md) | Opens the bundled versioned offline HTML documentation portal in your browser | [wiki.md](wiki.md) |
 
@@ -89,6 +92,9 @@ solix <subcommand> --help
 - [**`clean` Subcommand**](clean.md): Cleaning project build artifacts (`build/`) and intermediate caches (`build/.cache/`).
 - [**`uninstall` Subcommand**](uninstall.md): Removing packages and versions from the local store.
 - [**`list` Subcommand**](list.md): Listing installed packages with tabular and `--json` formatting.
+- [**`fmt` Subcommand**](fmt.md): Formatting `.slx` source files and checking style compliance (`--check`).
+- [**`lsp` Subcommand**](lsp.md): Starting the LSP 3.17 language server (`--stdio`, `--pkg-dir`).
+- [**`dap` Subcommand**](dap.md): Starting the Debug Adapter Protocol server (`--stdio`, `--port`).
 - [**`doc` Subcommand**](doc.md): Generating static HTML and Markdown API documentation with doc comment parsing.
 - [**`wiki` Subcommand**](wiki.md): Launching or exporting the bundled versioned offline documentation portal.
 - [**Project Manifest (`manifest.yaml`) Specification**](manifest.md): Complete schema documentation for project manifests.

@@ -87,6 +87,7 @@ TRIGGER_MATRIX = [
         "pattern": r"^(crates/solix-runtime/src/native/|ffi/)",
         "required_docs": [
             "docs/spec/native_interop.md",
+            "docs/wiki/ffi/",
             "docs/guide/09_native_plugins.md",
         ],
     },
@@ -98,12 +99,29 @@ TRIGGER_MATRIX = [
         ],
     },
     {
-        "name": "Scaffolding & Build Automation",
-        "pattern": r"^crates/solix-toolchain/assets/scripts/(solix_scaffold|solix_build)\.py",
+        "name": "Project Manifest & Scaffolding",
+        "pattern": r"^(crates/solix-toolchain/assets/scripts/(solix_scaffold|solix_build)\.py|crates/solix-toolchain/src/commands/new\.rs|crates/solix-common/src/project\.rs)$",
         "required_docs": [
             "docs/spec/tools/cli/new.md",
             "docs/spec/tools/cli/manifest.md",
+            "docs/wiki/commands/package-commands.md",
             "docs/guide/01_getting_started.md",
+        ],
+    },
+    {
+        "name": "Diagnostics & Error Codes",
+        "pattern": r"^crates/(solix-common|solix-compilation|solix-runtime)/src/(diagnostics/|exceptions/errors\.rs)",
+        "required_docs": [
+            "docs/wiki/errors/",
+            "docs/spec/diagnostics.md",
+        ],
+    },
+    {
+        "name": "VS Code Extension & Grammars",
+        "pattern": r"^editors/vscode/(src/|syntaxes/|package\.json|README\.md)",
+        "required_docs": [
+            "docs/guide/editors_vscode.md",
+            "editors/vscode/README.md",
         ],
     },
     {
@@ -117,7 +135,7 @@ TRIGGER_MATRIX = [
     },
     {
         "name": "CI Workflows & Release Governance",
-        "pattern": r"^\.github/workflows/",
+        "pattern": r"^\.github/(workflows|actions)/",
         "required_docs": [
             "docs/guidelines/pr-and-release-governance.md",
             "docs/guidelines/branching-conventions.md",
@@ -130,6 +148,8 @@ TRIGGER_MATRIX = [
         "pattern": r"^scripts/(ci|docs|release|bench)/.*\.py$",
         "required_docs": [
             "docs/guidelines/pr-and-release-governance.md",
+            "docs/guidelines/documentation-update-protocol.md",
+            "docs/guidelines/authoring-docs.md",
             "CONTRIBUTING.md",
             "docs/spec/tools/cli/wiki.md",
         ],

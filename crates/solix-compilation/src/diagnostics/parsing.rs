@@ -1156,8 +1156,8 @@ impl ParsingError {
             Self::InvalidEnumModifier { .. } => "E0198",
             Self::InvalidFreeFunctionModifier { .. } => "E0199",
             Self::InvalidOperatorModifier { .. } => "E0200",
-            Self::DotNotAllowedInTypePath { .. } => "E0201",
-            Self::UnknownControlFlowKeyword { .. } => "E0202",
+            Self::DotNotAllowedInTypePath { .. } => "E0157",
+            Self::UnknownControlFlowKeyword { .. } => "E0158",
         }
     }
 
@@ -1303,14 +1303,14 @@ mod tests {
         assert_eq!(error_invalid_op_mod.error_code(), "E0200");
 
         let error_dot_in_type = ParsingError::DotNotAllowedInTypePath { span: dummy_span };
-        assert_eq!(error_dot_in_type.error_code(), "E0201");
+        assert_eq!(error_dot_in_type.error_code(), "E0157");
 
         let error_unknown_control = ParsingError::UnknownControlFlowKeyword {
             identifier: "whilje".to_string(),
             suggestion: "while".to_string(),
             span: dummy_span,
         };
-        assert_eq!(error_unknown_control.error_code(), "E0202");
+        assert_eq!(error_unknown_control.error_code(), "E0158");
     }
 
     #[test]

@@ -3007,7 +3007,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                 };
                 self.errors.push(BindingError::MissingReturn {
                     method_name: method_name.to_string(),
-                    expected_type: format!("{return_type:?}"),
+                    expected_type: return_type.to_string(),
                     span: node.span.to_source_span(),
                 });
             }
@@ -3639,7 +3639,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                     .to_string()
             } else {
                 match &case_clause.case_value {
-                    Expression::Literal { value, .. } => format!("{value:?}"),
+                    Expression::Literal { value, .. } => value.to_string(),
                     _ => String::new(),
                 }
             };

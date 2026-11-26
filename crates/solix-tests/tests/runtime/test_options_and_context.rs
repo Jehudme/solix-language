@@ -45,8 +45,12 @@ fn test_load_binary_bytes_corrupted() {
     match result {
         Err(RuntimeError::BinaryLoadError { reason }) => {
             assert!(
-                reason.contains("InvalidMagic"),
-                "Expected InvalidMagic in reason, got {reason}"
+                reason.contains("Invalid binary magic header"),
+                "Expected human-readable magic header error in reason, got {reason}"
+            );
+            assert!(
+                !reason.contains("InvalidMagic"),
+                "Must not leak Rust Debug enum name in reason: {reason}"
             );
         }
         _ => panic!("Expected BinaryLoadError"),

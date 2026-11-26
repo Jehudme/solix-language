@@ -3,9 +3,6 @@ name: Solix Continuous Integration
 run-name: "CI | ${{ github.event_name == 'pull_request' && format('PR #{0} ({1})', github.event.pull_request.number, github.head_ref) || format('{0} ({1})', github.ref_name, github.event_name) }}"
 
 on:
-  push:
-    branches:
-      - dev
   pull_request:
     branches:
       - dev
@@ -31,6 +28,8 @@ jobs:
     name: Sensitive-Path Risk Audit
     if: github.event_name == 'pull_request' && github.base_ref == 'dev'
     runs-on: ubuntu-latest
+    outputs:
+      has_codeql_changes: ${{ steps.collect.outputs.has_codeql_changes }}
     permissions:
       contents: read
       pull-requests: write
@@ -42,12 +41,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.repo.fork == false && github.sha || github.base_ref }}
           persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+      - name: Set up Python environment
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
-          python-version: "3.12"
+          enable-rust: "false"
+          enable-rust-cache: "false"
+          enable-python: "true"
 
       - name: Collect changed PR files from GitHub API and run non-blocking audit
+        id: collect
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -62,6 +64,18 @@ jobs:
             --emit-annotations \
             --step-summary
           printf '%s\n' "$PR_NUMBER" > "$RUNNER_TEMP/risk-audit/pr_number.txt"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          from pathlib import Path
+
+          files = json.loads((Path(os.environ["RUNNER_TEMP"]) / "risk-audit" / "changed_files.json").read_text(encoding="utf-8"))
+          has_codeql_changes = any(
+              entry.get("filename", "").startswith(".github/") or entry.get("filename", "").endswith(".py")
+              for entry in files
+          )
+          print(f"has_codeql_changes={'true' if has_codeql_changes else 'false'}")
+          PY
 
       - name: Upload risk audit artifact for discussion sync
         if: always()
@@ -133,7 +147,6 @@ jobs:
     name: Security & Supply-Chain Audit
     if: >-
       (github.event_name == 'schedule')
-      || (github.event_name == 'push')
       || (github.event_name == 'workflow_dispatch')
       || (github.event_name == 'pull_request' && github.base_ref == 'dev')
     runs-on: ubuntu-latest
@@ -148,7 +161,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/solix-ci-tools
-          key: solix-ci-tools-linux-actionlint-1.7.12-cargo-audit-0.23.0
+          key: solix-ci-tools-linux-actionlint-1.7.12-cargo-audit-0.23.0-cargo-deny-0.19.0
 
       - name: Run actionlint with checksum-verified release binary
         run: |
@@ -170,8 +183,18 @@ jobs:
           annotations: true
           persona: regular
 
-      - name: Run cargo-deny license, source & advisory policy
-        uses: EmbarkStudios/cargo-deny-action@81891abc19297b21343b15ef67dc61e4aea74fda # v2.1.4
+      - name: Run cargo-deny with checksum-verified cached binary
+        run: |
+          mkdir -p ~/.cache/solix-ci-tools/cargo-deny
+          if [ ! -x ~/.cache/solix-ci-tools/cargo-deny/cargo-deny ]; then
+            curl --proto '=https' --tlsv1.2 -fsSL \
+              "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.0/cargo-deny-0.19.0-x86_64-unknown-linux-musl.tar.gz" \
+              -o "$RUNNER_TEMP/cargo-deny.tar.gz"
+            printf '0e8c2aa59128612c90d9e09c02204e912f29a5b8d9a64671b94608cbe09e064f  %s\n' \
+              "$RUNNER_TEMP/cargo-deny.tar.gz" | sha256sum -c -
+            tar -xzf "$RUNNER_TEMP/cargo-deny.tar.gz" -C ~/.cache/solix-ci-tools/cargo-deny --strip-components=1 cargo-deny-0.19.0-x86_64-unknown-linux-musl/cargo-deny
+          fi
+          ~/.cache/solix-ci-tools/cargo-deny/cargo-deny check
 
       - name: Run cargo-audit RustSec vulnerability & unsoundness scanner
         run: |
@@ -186,11 +209,52 @@ jobs:
           fi
           ~/.cache/solix-ci-tools/cargo-audit/cargo-audit audit --deny warnings --ignore RUSTSEC-2025-0141
 
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    needs:
+      - pr-risk-audit
+    if: >-
+      (!cancelled())
+      && (
+        github.event_name == 'schedule'
+        || github.event_name == 'workflow_dispatch'
+        || (
+          github.event_name == 'pull_request'
+          && github.base_ref == 'dev'
+          && needs.pr-risk-audit.result == 'success'
+          && needs.pr-risk-audit.outputs.has_codeql_changes == 'true'
+        )
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - actions
+          - python
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: "/language:${{ matrix.language }}"
+
   lint-and-docs:
     name: Lint, Formatting & Documentation Gate
     if: >-
-      (github.event_name == 'push')
-      || (github.event_name == 'workflow_dispatch')
+      (github.event_name == 'workflow_dispatch')
       || (github.event_name == 'pull_request' && github.base_ref == 'dev')
     runs-on: ubuntu-latest
     steps:
@@ -200,28 +264,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+      - name: Set up Rust, Cargo cache, Python, and Node.js
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
-          toolchain: stable
-          components: rustfmt, clippy
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          shared-key: ci-linux
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: editors/vscode/package-lock.json
+          rust-components: rustfmt, clippy
+          rust-cache-shared-key: ci-linux
+          enable-node: "true"
 
       - name: Enforce rustfmt formatting
         run: cargo fmt --all -- --check
@@ -269,11 +317,19 @@ jobs:
           npm run package
           test -f build/solix-language.vsix
 
+      - name: Upload staged offline wiki docs for downstream jobs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: staged-offline-docs
+          path: crates/solix-toolchain/assets/docs/
+          retention-days: 1
+
   test-matrix:
     name: Test Matrix (${{ matrix.os }})
+    needs:
+      - lint-and-docs
     if: >-
-      (github.event_name == 'push')
-      || (github.event_name == 'workflow_dispatch')
+      (github.event_name == 'workflow_dispatch')
       || (github.event_name == 'pull_request' && github.base_ref == 'dev')
     runs-on: ${{ matrix.os }}
     strategy:
@@ -291,20 +347,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+      - name: Set up Rust, Cargo cache, Python, Node.js, and bundled package cache
+        id: setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
-          toolchain: stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          prefix-key: ci-test-${{ matrix.os }}
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: "3.12"
+          rust-cache-prefix-key: ci-test-${{ matrix.os }}
+          enable-node: "true"
+          restore-bundled-libs: "true"
+          bundled-libs-key-prefix: solix-bundled
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -318,15 +368,11 @@ jobs:
           command -v cmake >/dev/null 2>&1 || brew install cmake
           command -v lua >/dev/null 2>&1 || brew install lua
 
-      - name: Stage offline solix wiki documentation portal
-        run: python3 scripts/docs/build_docs_site.py
-
-      - name: Restore cached bundled first-party libraries
-        id: bundled-libs-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Download staged offline solix wiki portal
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          path: crates/solix-toolchain/assets/packages
-          key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
+          name: staged-offline-docs
+          path: crates/solix-toolchain/assets/docs/
 
       - name: Build solix toolchain binary
         run: cargo build --bin solix
@@ -340,7 +386,7 @@ jobs:
           fi
 
       - name: Build and stage default first-party libraries
-        if: runner.os == 'Linux' && steps.bundled-libs-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.setup.outputs.bundled-libs-cache-hit != 'true'
         run: python3 scripts/release/build_default_libraries.py --target host
 
       - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
@@ -414,7 +460,6 @@ jobs:
           "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxp
 
       - name: Run FFI C/C++/Rust matrix and dual-backend example suite
-        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -424,10 +469,13 @@ jobs:
           else
             SOLIX_EXE="$(pwd)/target/debug/solix"
           fi
-          python3 scripts/tests/run_ffi_suite.py --solix-binary "$SOLIX_EXE"
+          if [ "$CURRENT_OS" = "Linux" ]; then
+            python3 scripts/tests/run_ffi_suite.py --solix-binary "$SOLIX_EXE"
+          else
+            python3 scripts/tests/run_ffi_suite.py --solix-binary "$SOLIX_EXE" --standalone-only
+          fi
 
       - name: Run End-to-End Command & Option Lifecycle Matrix (GL-0009)
-        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -437,15 +485,15 @@ jobs:
           else
             SOLIX_EXE="$(pwd)/target/debug/solix"
           fi
-          python3 scripts/tests/test_cli_lifecycle_matrix.py --solix-binary "$SOLIX_EXE"
+          if [ "$CURRENT_OS" = "Linux" ]; then
+            python3 scripts/tests/test_cli_lifecycle_matrix.py --solix-binary "$SOLIX_EXE"
+          else
+            python3 scripts/tests/test_cli_lifecycle_matrix.py --solix-binary "$SOLIX_EXE" --pure-solix-only
+          fi
 
-      - name: Verify stripped release build on dev push
-        if: runner.os == 'Linux' && github.event_name == 'push'
-        run: cargo build --release --bin solix
-
-      - name: Run headless VS Code LSP & DAP JSON-RPC harness (Linux)
-        if: runner.os == 'Linux'
+      - name: Run headless VS Code LSP & DAP JSON-RPC harness
         working-directory: editors/vscode
+        shell: bash
         run: |
           npm ci
           npm run compile
@@ -453,27 +501,30 @@ jobs:
 
   coverage:
     name: Workspace Code Coverage Gate
+    needs:
+      - lint-and-docs
     if: >-
-      (github.event_name == 'push')
-      || (github.event_name == 'workflow_dispatch')
+      (github.event_name == 'workflow_dispatch')
       || (github.event_name == 'pull_request' && github.base_ref == 'dev')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain with llvm-tools
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+      - name: Set up Rust with llvm-tools, Cargo cache, Python, and bundled package cache
+        id: setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
-          toolchain: stable
-          components: llvm-tools-preview
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          prefix-key: ci-llvm-cov-linux
+          rust-components: llvm-tools-preview
+          rust-cache-prefix-key: ci-llvm-cov-linux
+          restore-bundled-libs: "true"
+          bundled-libs-key-prefix: solix-bundled
 
       - name: Cache prebuilt cargo-llvm-cov binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -481,10 +532,11 @@ jobs:
           path: ~/.cache/solix-ci-tools/cargo-llvm-cov
           key: solix-ci-llvm-cov-0.9.1
 
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+      - name: Download staged offline solix wiki portal
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          python-version: "3.12"
+          name: staged-offline-docs
+          path: crates/solix-toolchain/assets/docs/
 
       - name: Install Linux dependencies and cargo-llvm-cov
         run: |
@@ -507,13 +559,19 @@ jobs:
             curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
 
-      - name: Stage docs and bundled packages for coverage suite
+      - name: Build binary and stage bundled packages for coverage suite
+        env:
+          BUNDLED_CACHE_HIT: ${{ steps.setup.outputs.bundled-libs-cache-hit }}
         run: |
-          python3 scripts/docs/build_docs_site.py
           cargo build --bin solix
-          python3 scripts/release/build_default_libraries.py --target host --solix-binary target/debug/solix
+          if [ "$BUNDLED_CACHE_HIT" != "true" ]; then
+            python3 scripts/release/build_default_libraries.py --target host --solix-binary target/debug/solix
+            cargo build --bin solix
+          fi
 
       - name: Run cargo-llvm-cov coverage gate (>= 55% workspace lines)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           export PATH="$HOME/.cache/solix-ci-tools/cargo-llvm-cov:$PATH"
           SOLIX_BIN="$(pwd)/target/debug/solix"
@@ -522,7 +580,7 @@ jobs:
 
           mkdir -p "$RUNNER_TEMP/pr-coverage"
           CHANGED_FILES=""
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
             git fetch origin dev:origin/dev --depth=20 || git fetch origin dev || true
             CHANGED_FILES=$(git diff --name-only origin/dev...HEAD | tr '\n' ',' || true)
           fi
@@ -536,9 +594,11 @@ jobs:
 
       - name: Stage coverage PR number
         if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           mkdir -p "$RUNNER_TEMP/pr-coverage"
-          printf '%s\n' "${{ github.event.pull_request.number }}" > "$RUNNER_TEMP/pr-coverage/pr_number.txt"
+          printf '%s\n' "$PR_NUMBER" > "$RUNNER_TEMP/pr-coverage/pr_number.txt"
 
       - name: Upload coverage report artifact for discussion sync
         if: github.event_name == 'pull_request'
@@ -549,9 +609,55 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+      - name: Post or update sticky PR coverage comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+
+          coverage_file = Path(os.environ["RUNNER_TEMP"]) / "pr-coverage" / "coverage.md"
+          if not coverage_file.is_file():
+              raise SystemExit(0)
+          comment_body = coverage_file.read_text(encoding="utf-8")
+          repository_name = os.environ["REPO_NAME"]
+          pull_request_number = os.environ["PR_NUMBER"]
+
+          try:
+              comments_raw = subprocess.check_output(
+                  ["gh", "api", "--paginate", f"repos/{repository_name}/issues/{pull_request_number}/comments"],
+                  text=True,
+              )
+              comments_payload = json.loads(comments_raw)
+              existing_comment_identifier = None
+              for current_comment in comments_payload:
+                  if "<!-- solix-pr-coverage -->" in (current_comment.get("body") or ""):
+                      existing_comment_identifier = current_comment["id"]
+                      break
+
+              if existing_comment_identifier:
+                  subprocess.run(
+                      ["gh", "api", "--method", "PATCH", f"repos/{repository_name}/issues/comments/{existing_comment_identifier}", "-f", f"body={comment_body}"],
+                      check=True,
+                  )
+              else:
+                  subprocess.run(
+                      ["gh", "api", "--method", "POST", f"repos/{repository_name}/issues/{pull_request_number}/comments", "-f", f"body={comment_body}"],
+                      check=True,
+                  )
+          except subprocess.CalledProcessError as called_process_error:
+              print(f"[NOTICE] Unable to post coverage comment: {called_process_error}")
+          PY
+
   pr-benchmark:
     name: PR Performance Benchmark (vs dev)
     if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+    needs:
+      - lint-and-docs
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -563,28 +669,33 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+      - name: Set up Rust, Cargo cache, Python, and bundled package cache
+        id: setup
+        uses: ./.github/actions/solix-setup # zizmor: ignore[self-repository] actionlint v1.7.12 lacks dollar-slash syntax support
         with:
-          toolchain: stable
+          rust-cache-prefix-key: pr-bench
+          restore-bundled-libs: "true"
+          bundled-libs-key-prefix: solix-bundled-release
 
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          prefix-key: pr-bench
+      - name: Resolve current origin/dev commit SHA
+        id: dev-sha
+        run: |
+          git fetch origin dev:origin/dev --depth=20 || git fetch origin dev || true
+          DEV_COMMIT=$(git rev-parse origin/dev)
+          echo "sha=${DEV_COMMIT}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+      - name: Cache origin/dev baseline release binary
+        id: dev-bin-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          python-version: "3.12"
+          path: ${{ runner.temp }}/dev-bench-bin
+          key: solix-dev-bench-bin-${{ runner.os }}-${{ steps.dev-sha.outputs.sha }}
 
-      - name: Set up Node.js for headless VS Code / LSP / DAP tests
-        if: runner.os == 'Linux'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+      - name: Download staged offline solix wiki portal
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: editors/vscode/package-lock.json
+          name: staged-offline-docs
+          path: crates/solix-toolchain/assets/docs/
 
       - name: Install Linux benchmark dependencies
         run: |
@@ -599,17 +710,21 @@ jobs:
           fi
 
       - name: Build release Solix binary and stage bundled libraries
+        env:
+          BUNDLED_CACHE_HIT: ${{ steps.setup.outputs.bundled-libs-cache-hit }}
         run: |
           cargo build --release --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
+          if [ "$BUNDLED_CACHE_HIT" != "true" ]; then
+            python3 scripts/release/build_default_libraries.py --profiles release --target host --solix-binary target/release/solix
+            cargo build --release --bin solix
+          fi
 
       - name: Benchmark PR head vs current dev branch on same host
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          mkdir -p "$RUNNER_TEMP/pr-bench"
-          git fetch origin dev:origin/dev --depth=20 || git fetch origin dev || true
+          mkdir -p "$RUNNER_TEMP/pr-bench" "$RUNNER_TEMP/dev-bench-bin"
 
           # 1. Benchmark PR head
           python3 scripts/bench/solix_bench.py run \
@@ -621,20 +736,24 @@ jobs:
             --label "PR #${PR_NUMBER}" \
             --save-baseline "$RUNNER_TEMP/pr-bench/pr_baseline.json"
 
-          # 2. Build dev binary on the same runner via temporary worktree
-          git worktree add "$RUNNER_TEMP/dev_worktree" origin/dev
-          cargo build --manifest-path "$RUNNER_TEMP/dev_worktree/Cargo.toml" --release --bin solix
+          # 2. Reuse cached dev binary or build dev binary sharing CARGO_TARGET_DIR
+          DEV_BIN="$RUNNER_TEMP/dev-bench-bin/solix"
+          if [ ! -x "$DEV_BIN" ]; then
+            git worktree add "$RUNNER_TEMP/dev_worktree" origin/dev
+            CARGO_TARGET_DIR="$(pwd)/target" cargo build --manifest-path "$RUNNER_TEMP/dev_worktree/Cargo.toml" --release --bin solix
+            cp target/release/solix "$DEV_BIN"
+            chmod +x "$DEV_BIN"
+            git worktree remove --force "$RUNNER_TEMP/dev_worktree" || true
+          fi
 
           python3 scripts/bench/solix_bench.py run \
             --pin-cpu \
             --warmup 2 \
             --iterations 5 \
-            --solix-bin "$RUNNER_TEMP/dev_worktree/target/release/solix" \
+            --solix-bin "$DEV_BIN" \
             --solix-only \
             --label "dev" \
             --save-baseline "$RUNNER_TEMP/pr-bench/dev_baseline.json"
-
-          git worktree remove --force "$RUNNER_TEMP/dev_worktree" || true
 
           # 3. Compare without --cross-language (Solix workloads only)
           python3 scripts/bench/solix_bench.py compare \

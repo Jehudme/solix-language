@@ -1,162 +1,111 @@
-# Solix Standard Library (`solixlib`) Architecture & Scaffolding
+# Solix Standard Library (`solix`) Architecture & Scaffolding
 
-This document specifies the layout, build pipeline, and package lifecycle of the Solix standard library (`solixlib`).
+This document specifies the layout, build pipeline, and package lifecycle of the bundled Solix standard library (`libraries/solixlib/`).
 
 ---
 
 ## 1. Architectural Philosophy
 
-The Solix standard library (`solixlib`) is intentionally **decoupled** from the compiler and VM launcher executable (`solix`). Unlike traditional languages that bundle hardcoded stdlib sources or link them statically into the CLI runner:
+The Solix standard library (`solix`) is structured as a first-party Solix package rather than hardcoded runtime sources:
 
-1. **Strict Codebase Separation**: The pure Solix code and the companion C/C++ native code reside cleanly within the project (`solixlib/src/` and `solixlib/native/`), with pre-compiled shared objects placed directly in `solixlib/lib/`.
-2. **First-Class Package**: The standard library is a standard Solix project governed by [`manifest.toml`](../../tools/cli/manifest.md).
-3. **Deterministic SemVer Versioning**: Projects declare dependencies on specific stdlib versions (e.g. `0.1.0`), preventing breaking runtime changes across compiler upgrades.
-4. **Opt-In (`no_std` Ready)**: Embedded or minimal applications can omit standard library dependencies entirely.
-5. **Dogfooding**: The standard library exercises the Solix package manager, project dependency resolution, multi-pass type binder, and dynamic shared library auto-discovery.
+1. **Clean Separation:** Pure Solix modules (`src/solix/...`) and the companion Rust FFI plugin (`natives/solixlib_native/`) live side-by-side inside `libraries/solixlib/`.
+2. **First-Class Manifest (`manifest.yaml`):** Governed directly by [`manifest.yaml`](../../tools/cli/manifest.md) with self-contained `release`, `debug`, and `test` profiles.
+3. **Deterministic SemVer & Bootstrapping:** Consumer projects pin compatible versions via `dependencies: { solix: { version: "..." } }`, while `solix` automatically installs bundled releases into `~/.solix/packages` on first run unless `--no-std` is used.
+4. **Opt-In (`--no-std`):** Bare-metal or self-contained projects omit the standard library cleanly via `solix new --no-std`.
+5. **Dogfooding:** Exercises the same dependency solver (`ClientModuleSolver`), FFI macro SDK (`solix-ffi`), and `.slxp` container staging used by third-party libraries.
 
 ---
 
 ## 2. Directory Layout
 
-```
-solixlib/
-├── manifest.json                # Canonical package manifest (name: "solixlib", version: "0.1.0")
-├── lib/                         # Destination for compiled native shared libraries
-│   ├── libsolixlib_native.so    # Linux shared library
-│   ├── solixlib_native.dll      # Windows dynamic link library
-│   └── libsolixlib_native.dylib # macOS dynamic library
-├── src/                         # Pure Solix declarations and implementations
-│   └── solix/
-│       └── core/
-│           └── Internal.slx     # Core internal package declaration
-├── scripts/
-│   └── build_native.py          # Multi-platform Zig/Cargo cross-compilation script
-│
-└── native/                      # 100% Pure C/C++ Companion Project
-    ├── CargoLists.txt           # Companion Cargo project building solixlib_native
-    └── src/
-        └── lib.rs         # solix_register_natives registration hook
+```text
+libraries/solixlib/
+├── manifest.yaml                    # Package manifest (name: "solix", profiles: release/debug/test)
+├── src/
+│   └── solix/                       # Pure Solix stdlib modules (core, collections, io, json, net, text, sync, ...)
+├── tests/                           # Standard library integration & unit test suite
+├── scripts/                         # Optional cross-target helper scripts
+└── natives/
+    └── solixlib_native/             # Companion Rust FFI bridge crate (`solix-ffi`)
+        ├── Cargo.toml               # `crate-type = ["cdylib", "rlib"]`, optional `solix-native` feature
+        ├── Cross.toml
+        └── src/
+            └── lib.rs               # `solix_register_natives` registration entrypoint
 ```
 
 ---
 
-## 3. Package Manifest (`solixlib/manifest.json`)
+## 3. Package Manifest (`libraries/solixlib/manifest.yaml`)
 
-```json
-{
-  "project": "solixlib",
-  "version": "0.1.0",
-  "author": "Solix Engine Team",
-  "description": "Standard Library for the Solix Programming Language",
-  "license": "MIT",
-  "dependencies": [
-    {
-      "type": "source",
-      "path": "src/solix/core/Internal.slx"
-    }
-  ],
-  "profiles": {
-    "debug": {
-      "output_directory": "build/debug",
-      "exe_filename": "solixlib.slxb",
-      "compilation": {
-        "entry_point": "main",
-        "multithreaded": false
-      }
-    },
-    "release": {
-      "output_directory": "build/release",
-      "exe_filename": "solixlib.slxb",
-      "pre_compile": [
-        "python3 scripts/build_native.py"
-      ],
-      "compilation": {
-        "entry_point": "main",
-        "multithreaded": false
-      }
-    }
-  }
-}
+```yaml
+configuration:
+  name: solix
+  version: "2.2.0"
+  description: Solix Standard Library
+  license: Apache-2.0
+  authors: []
+
+profiles:
+  release:
+    optimization_level: 3
+    inline_threshold: 16
+    debug_symbols: false
+    static: true
+    sources:
+      - src
+    platforms:
+      - all
+    natives:
+      solixlib_native:
+        profile: release
+        docker: true
+
+  debug:
+    optimization_level: 0
+    inline_threshold: 8
+    debug_symbols: true
+    static: false
+    sources:
+      - src
+    platforms:
+      - host
+    natives:
+      solixlib_native:
+        profile: debug
 ```
 
 ---
 
-## 4. Native Companion Shared Library (`solixlib/native/CargoLists.txt`)
+## 4. Native Companion Plugin (`natives/solixlib_native`)
 
-The native companion library (`solixlib_native`) is built via Cargo and configured to deposit its compiled binaries directly into `solixlib/lib/`:
-
-```cargo
-add_library(solixlib_native SHARED
-    src/lib.rs
-)
-
-target_include_directories(solixlib_native PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/include
-    ${CMAKE_SOURCE_DIR}/core/src
-)
-
-set(SOLIXLIB_OUTPUT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib")
-
-set_target_properties(solixlib_native PROPERTIES
-    OUTPUT_NAME "solixlib_native"
-    RUNTIME_OUTPUT_DIRECTORY "${SOLIXLIB_OUTPUT_LIB_DIR}"
-    LIBRARY_OUTPUT_DIRECTORY "${SOLIXLIB_OUTPUT_LIB_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${SOLIXLIB_OUTPUT_LIB_DIR}"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${SOLIXLIB_OUTPUT_LIB_DIR}"
-    LIBRARY_OUTPUT_DIRECTORY_DEBUG "${SOLIXLIB_OUTPUT_LIB_DIR}"
-    LIBRARY_OUTPUT_DIRECTORY_RELEASE "${SOLIXLIB_OUTPUT_LIB_DIR}"
-)
-```
-
-The native hook in `solixlib/native/src/lib.rs` exports the standard registration function:
-
-```cpp
-#include "solix/native.h"
-#include "solix native ffi"
-
-extern "C" SOLIX_EXPORT void solix_register_natives(solix::NativeRegistry &registry) {
-    (void)registry;
-    // Native function registrations will be added in subsequent phases
-}
-```
+The native companion library (`solixlib_native`) builds through `solix build` using the Rust FFI SDK (`solix-ffi`) and outputs platform-indexed shared libraries (`libsolixlib_native.so`, `solixlib_native.dll`, `libsolixlib_native.dylib`) under `build/<profile>/stage/bin/<target_triple>/` before packaging into the `.slxp` archive.
 
 ---
 
-## 5. Build and Installation Lifecycle
+## 5. Build, Verification & Installation Lifecycle
 
-### Step 1: Compile Native Companion
-- **Host Development Build**: Building the Solix engine automatically compiles `solixlib_native` for the host platform via Cargo:
-  ```bash
-  cargo --build build
-  ```
-  This compiles `solixlib_native` and places it in `solixlib/lib/`.
-- **Multi-Platform Cross-Compilation**: During release packaging or standalone cross-compilation:
-  ```bash
-  python3 solixlib/scripts/build_native.py
-  ```
-  This cross-compiles `.so` (Linux), `.dll` (Windows), and `.dylib` (macOS) into `solixlib/lib/` using Zig.
-
-### Step 2: Install into Local Registry
+### Step 1: Build and Stage Locally
 ```bash
-solix install solixlib
-```
-The package manager copies `manifest.json`, `src/`, and `lib/` into:
-`$SOLIX_HOME/installed/<hash_id>/`
-and registers `solixlib` version `0.1.0` in `$SOLIX_HOME/installed.json`.
+# Build standard library package and host native plugin
+solix build libraries/solixlib --profile release --install --force
 
-### Step 3: Consumer Dependency Resolution
-In consumer projects, reference `solixlib` in `manifest.toml`:
-```json
-{
-  "project": "my_application",
-  "version": "1.0.0",
-  "dependencies": [
-    { "type": "source", "path": "src/main.slx" },
-    { "type": "project", "name": "solixlib", "version": "0.1.0" }
-  ]
-}
+# Execute standard library test suite
+solix build libraries/solixlib --profile test
+solix run libraries/solixlib/build/test/solix.slxp
 ```
-When running `solix run .`:
-1. `DependencyManager` resolves `solixlib` from `$SOLIX_HOME`.
-2. The compiler ingests the standard library source files.
-3. The VM auto-discovers and loads `solixlib_native` from the package's `./lib/` folder.
+
+### Step 2: Consumer Dependency Declaration
+In consumer projects (`manifest.yaml`), reference the `solix` standard library under active profiles:
+```yaml
+profiles:
+  release:
+    entrypoint: Main::main
+    optimization_level: 3
+    sources:
+      - src
+    dependencies:
+      solix:
+        version: "2.2.0"
+        profile: release
+```
+When running `solix build` or `solix run`, `ClientModuleSolver` resolves the matching package profile from `~/.solix/packages` and loads the host native shared library from `bin/<target_triple>/` inside the `.slxp` archive.

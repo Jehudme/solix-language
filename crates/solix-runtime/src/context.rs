@@ -984,10 +984,13 @@ impl RuntimeContext {
     /// Reads and deserializes a `BinaryProgram` from a disk file path.
     fn load_binary_file(path: &Path) -> Result<BinaryProgram, RuntimeError> {
         let bytes = fs::read(path).map_err(|err| RuntimeError::BinaryLoadError {
-            reason: format!("failed to read file '{path:?}': {err}"),
+            reason: format!("failed to read file '{}': {err}", path.display()),
         })?;
         BinaryProgram::from_bytes(&bytes).map_err(|err| RuntimeError::BinaryLoadError {
-            reason: format!("failed to deserialize binary from '{path:?}': {err:?}"),
+            reason: format!(
+                "failed to deserialize binary from '{}': {err}",
+                path.display()
+            ),
         })
     }
 

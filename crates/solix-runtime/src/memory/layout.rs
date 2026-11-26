@@ -112,6 +112,25 @@ impl BlockTag {
     }
 }
 
+impl std::fmt::Display for BlockTag {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::Raw => "raw",
+            Self::Object => "object",
+            Self::ArrayU8 => "uint8[]",
+            Self::ArrayI32 => "int32[]",
+            Self::ArrayI64 => "int64[]",
+            Self::ArrayF64 => "float64[]",
+            Self::ArrayRef => "ref[]",
+            Self::Tuple => "tuple",
+            Self::Closure => "closure",
+            Self::String => "string",
+            Self::ObjectPod => "pod_object",
+        };
+        formatter.write_str(label)
+    }
+}
+
 /// 8-byte metadata header positioned immediately prior to each dynamic payload.
 ///
 /// Bit layout:

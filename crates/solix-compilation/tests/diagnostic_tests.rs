@@ -97,3 +97,253 @@ fn test_compilation_diagnostic_wrapping_and_codes() {
     assert_eq!(custom_diag.error_code(), "P9999");
     assert_eq!(custom_diag.source_span().unwrap().offset(), 10);
 }
+
+#[test]
+fn test_diagnostics_have_no_debug_leaks_and_unique_codes() {
+    use solix_common::diagnostics::ManifestError;
+    use std::collections::HashMap;
+
+    let dummy = Span::new(0, 1, 5);
+    let dummy_span = dummy.to_source_span();
+    let dummy_tok = Token::new(TokenKind::Unknown, dummy);
+
+    let missing_ret = BindingError::MissingReturn {
+        method_name: "compute".to_string(),
+        expected_type: "int32".to_string(),
+        span: dummy_span,
+    };
+    let missing_ret_msg = missing_ret.to_string();
+    assert_eq!(
+        missing_ret_msg,
+        "Non-void function 'compute' must return a value of type 'int32'"
+    );
+    assert!(!missing_ret_msg.contains("Primitive("));
+
+    let ambig = BindingError::AmbiguousImport {
+        symbol_name: "Widget".to_string(),
+        candidates: vec!["ui::Widget".to_string(), "net::Widget".to_string()],
+        span: dummy_span,
+    };
+    let ambig_msg = ambig.to_string();
+    assert_eq!(
+        ambig_msg,
+        "Ambiguous imported symbol 'Widget'; matches candidates: ui::Widget, net::Widget"
+    );
+    assert!(!ambig_msg.contains("[\""));
+
+    assert_eq!(
+        ParsingError::DotNotAllowedInTypePath { span: dummy_span }.error_code(),
+        "E0157"
+    );
+    assert_eq!(
+        ParsingError::UnknownControlFlowKeyword {
+            identifier: "whil".to_string(),
+            suggestion: "while".to_string(),
+            span: dummy_span,
+        }
+        .error_code(),
+        "E0158"
+    );
+    assert_eq!(
+        BindingError::AssertMessageNotString {
+            found: "int32".to_string(),
+            span: dummy_span,
+        }
+        .error_code(),
+        "E0317"
+    );
+    assert_eq!(
+        BindingError::CyclicInterfaceInheritance {
+            interface_name: "Proto".to_string(),
+            span: dummy_span,
+        }
+        .error_code(),
+        "E0323"
+    );
+
+    let sample_variants: Vec<(&'static str, &'static str)> = vec![
+        (
+            "LexingError::UnknownToken",
+            LexingError::unknown_token(dummy_tok).error_code(),
+        ),
+        (
+            "ParsingError::ExpectedSemicolon",
+            ParsingError::ExpectedSemicolon { span: dummy_span }.error_code(),
+        ),
+        (
+            "ParsingError::DotNotAllowedInTypePath",
+            ParsingError::DotNotAllowedInTypePath { span: dummy_span }.error_code(),
+        ),
+        (
+            "ParsingError::UnknownControlFlowKeyword",
+            ParsingError::UnknownControlFlowKeyword {
+                identifier: "x".to_string(),
+                suggestion: "y".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::UndefinedSymbol",
+            BindingError::undefined_symbol("missing", dummy).error_code(),
+        ),
+        (
+            "BindingError::DuplicateSymbol",
+            BindingError::DuplicateSymbol {
+                symbol_name: "dup".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::CyclicInheritance",
+            BindingError::CyclicInheritance {
+                class_name: "A".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::CyclicInterfaceInheritance",
+            BindingError::CyclicInterfaceInheritance {
+                interface_name: "I".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::AssertMessageNotString",
+            BindingError::AssertMessageNotString {
+                found: "bool".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::GenericInstantiationDepthExceeded",
+            BindingError::GenericInstantiationDepthExceeded {
+                class_name: "G".to_string(),
+                maximum_depth: 64,
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::CyclicStaticFieldDependency",
+            BindingError::CyclicStaticFieldDependency {
+                cycle_path: "A.x -> B.y -> A.x".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::VirtualCallInDestructorForbidden",
+            BindingError::VirtualCallInDestructorForbidden {
+                method_name: "m".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::SymbolCollidesWithPackageName",
+            BindingError::SymbolCollidesWithPackageName {
+                symbol_name: "p".to_string(),
+                package_name: "p".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "BindingError::InexhaustiveEnumSwitch",
+            BindingError::InexhaustiveEnumSwitch {
+                enum_name: "E".to_string(),
+                span: dummy_span,
+            }
+            .error_code(),
+        ),
+        (
+            "EmissionError::ConstantPoolOverflow",
+            EmissionError::ConstantPoolOverflow { count: 1, max: 1 }.error_code(),
+        ),
+        (
+            "EmissionError::RegisterOverflow",
+            EmissionError::RegisterOverflow {
+                register_index: 1,
+                max: 1,
+            }
+            .error_code(),
+        ),
+        (
+            "EmissionError::ArgumentCountOverflow",
+            EmissionError::ArgumentCountOverflow {
+                argument_count: 1,
+                max: 1,
+            }
+            .error_code(),
+        ),
+        (
+            "EmissionError::JumpOffsetOverflow",
+            EmissionError::JumpOffsetOverflow { offset: 1 }.error_code(),
+        ),
+        (
+            "EmissionError::InvalidMagic",
+            EmissionError::InvalidMagic { found: *b"XXXX" }.error_code(),
+        ),
+        (
+            "EmissionError::UnsupportedVersion",
+            EmissionError::UnsupportedVersion {
+                expected_major: 1,
+                expected_minor: 0,
+                found_major: 2,
+                found_minor: 0,
+            }
+            .error_code(),
+        ),
+        (
+            "ManifestError::ParseFailed",
+            ManifestError::ParseFailed {
+                filename: "manifest.yaml".to_string(),
+                line: None,
+                column: None,
+                field_path: None,
+                message: "err".to_string(),
+                snippet: String::new(),
+            }
+            .error_code(),
+        ),
+    ];
+
+    let mut seen: HashMap<&'static str, &'static str> = HashMap::new();
+    for (variant_name, code) in sample_variants {
+        if let Some(previous) = seen.insert(code, variant_name) {
+            panic!("Duplicate error code '{code}' shared by '{previous}' and '{variant_name}'");
+        }
+    }
+}
+
+#[test]
+fn test_real_missing_return_diagnostic_formats_canonical_solix_type() {
+    use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+    use solix_compilation::phases::{binder::bind, lexing::lex, parser::parse};
+
+    let source = "int32 compute_total() { int32 local_val = 42; }";
+    let mut context =
+        CompilationContext::new(CompilationOptions::new().with_source("test.slx", source));
+    lex(&mut context).expect("lex succeeds");
+    parse(&mut context).expect("parse succeeds");
+    let bind_err = bind(&mut context).expect_err("missing return must fail binding");
+    let formatted = bind_err
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        formatted.contains("Non-void function 'compute_total'"),
+        "got: {formatted}"
+    );
+    assert!(formatted.contains("'int32'"), "got: {formatted}");
+    assert!(
+        !formatted.contains("Primitive("),
+        "leaked Primitive Debug syntax: {formatted}"
+    );
+}

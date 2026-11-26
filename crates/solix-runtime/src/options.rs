@@ -182,7 +182,7 @@ impl RuntimeOptions {
     pub fn with_binary_bytes(mut self, bytes: &[u8]) -> Result<Self, RuntimeError> {
         let binary =
             BinaryProgram::from_bytes(bytes).map_err(|err| RuntimeError::BinaryLoadError {
-                reason: format!("{err:?}"),
+                reason: format!("{err}"),
             })?;
         self.binaries.push(binary);
         Ok(self)

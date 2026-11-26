@@ -462,6 +462,7 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
             self.assertNotIn('target-branch: "master"', dependabot_raw)
 
         sha_pin_re = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+        local_action_re = re.compile(r"^\./\.github/actions/[A-Za-z0-9_.-]+$")
         for workflow_file in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
             wf_text = workflow_file.read_text(encoding="utf-8")
             if yaml is not None:
@@ -483,11 +484,35 @@ class SecurityAndPackagingRegressionTests(unittest.TestCase):
                 stripped = raw_line.strip()
                 if stripped.startswith(("uses:", "- uses:")):
                     action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                    if local_action_re.match(action_spec):
+                        action_manifest = REPO_ROOT / action_spec.removeprefix("./") / "action.yml"
+                        self.assertTrue(
+                            action_manifest.is_file(),
+                            f"Missing local composite action manifest for {action_spec}",
+                        )
+                        continue
                     self.assertRegex(
                         action_spec,
                         sha_pin_re,
                         f"Unpinned GitHub Action in {workflow_file.name}: {action_spec}",
                     )
+
+        actions_dir = REPO_ROOT / ".github" / "actions"
+        if actions_dir.is_dir():
+            for action_file in sorted(actions_dir.glob("*/action.yml")):
+                action_text = action_file.read_text(encoding="utf-8")
+                if yaml is not None:
+                    parsed_action = yaml.safe_load(action_text)
+                    self.assertIsInstance(parsed_action, dict, f"{action_file} invalid YAML")
+                for raw_line in action_text.splitlines():
+                    stripped = raw_line.strip()
+                    if stripped.startswith(("uses:", "- uses:")):
+                        action_spec = stripped.split("uses:", 1)[1].split("#", 1)[0].strip().strip("\"'")
+                        self.assertRegex(
+                            action_spec,
+                            sha_pin_re,
+                            f"Unpinned GitHub Action in {action_file}: {action_spec}",
+                        )
 
 
 class ReleaseTrainVersionCalculationTests(unittest.TestCase):
@@ -703,6 +728,82 @@ class ReleaseTrainVersionCalculationTests(unittest.TestCase):
                 script_content,
                 f"test_cli_lifecycle_matrix.py must execute subcommand '{subcommand}'",
             )
+
+    def test_verify_docs_error_cli_ffi_and_hygiene_gates(self) -> None:
+        # Real repo must pass all automated parity and hygiene gates cleanly.
+        self.assertEqual(verify_docs.check_cli_flag_parity(REPO_ROOT / "crates" / "solix-toolchain" / "src" / "cli.rs", REPO_ROOT / "docs"), [])
+        self.assertEqual(verify_docs.check_error_code_parity(REPO_ROOT, REPO_ROOT / "docs"), [])
+        self.assertEqual(verify_docs.check_diagnostic_message_hygiene(REPO_ROOT), [])
+        self.assertEqual(verify_docs.check_ffi_symbol_parity(REPO_ROOT, REPO_ROOT / "docs"), [])
+
+        # Synthetic negative cases must be rejected cleanly.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "crates" / "solix-compilation" / "src" / "diagnostics").mkdir(parents=True)
+            (root / "crates" / "solix-common" / "src" / "diagnostics").mkdir(parents=True)
+            (root / "crates" / "solix-toolchain" / "src").mkdir(parents=True)
+            (root / "crates" / "solix-runtime" / "src" / "native").mkdir(parents=True)
+            (root / "ffi" / "c" / "include").mkdir(parents=True)
+            (root / "docs" / "wiki" / "errors").mkdir(parents=True)
+            (root / "docs" / "wiki" / "commands").mkdir(parents=True)
+            (root / "docs" / "wiki" / "ffi").mkdir(parents=True)
+            (root / "docs" / "spec" / "tools" / "cli").mkdir(parents=True)
+
+            # 1. Missing error code, stale doc error code, duplicate formal code, and {:?} / manifest.toml leak
+            (root / "crates" / "solix-compilation" / "src" / "diagnostics" / "binding.rs").write_text(
+                '#[error("Bad: {candidates:?}")]\n#[diagnostic(code(solix::b), help("Check manifest.toml"))]\nSelf::Missing => "E0299"\nSelf::Dup => "E0299"\n',
+                encoding="utf-8",
+            )
+            (root / "docs" / "wiki" / "errors" / "binder-errors.md").write_text(
+                "### `E0002`: Removed Code\n",
+                encoding="utf-8",
+            )
+            err_parity = verify_docs.check_error_code_parity(root, root / "docs")
+            self.assertTrue(any("Duplicate formal diagnostic code 'E0299'" in msg for msg in err_parity))
+            self.assertTrue(any("Active diagnostic code 'E0299'" in msg for msg in err_parity))
+            self.assertTrue(any("Stale diagnostic code 'E0002'" in msg for msg in err_parity))
+
+            hygiene_errs = verify_docs.check_diagnostic_message_hygiene(root)
+            self.assertTrue(any("Debug formatting" in msg for msg in hygiene_errs))
+            self.assertTrue(any("manifest.toml" in msg for msg in hygiene_errs))
+
+            # 2. Undocumented CLI flag
+            (root / "crates" / "solix-toolchain" / "src" / "cli.rs").write_text(
+                "pub struct RunArgs {\n    #[arg(long)]\n    pub cycle_threshold: usize,\n}\n",
+                encoding="utf-8",
+            )
+            (root / "docs" / "spec" / "tools" / "cli" / "run.md").write_text("# empty\n", encoding="utf-8")
+            (root / "docs" / "wiki" / "commands" / "run.md").write_text("# empty\n", encoding="utf-8")
+            cli_errs = verify_docs.check_cli_flag_parity(
+                root / "crates" / "solix-toolchain" / "src" / "cli.rs", root / "docs"
+            )
+            self.assertEqual(len(cli_errs), 2)
+            self.assertTrue(all("--cycle-threshold" in msg for msg in cli_errs))
+
+            # 3. Missing FFI symbol & stale term pattern
+            (root / "crates" / "solix-runtime" / "src" / "native" / "ffi.rs").write_text(
+                'pub unsafe extern "C" fn solix_vm_get_field_i32() {}\n', encoding="utf-8"
+            )
+            (root / "docs" / "wiki" / "ffi" / "c-cpp-sdk.md").write_text(
+                "Uses `solix_vm_get_field` on Solix v2.0\n", encoding="utf-8"
+            )
+            ffi_errs = verify_docs.check_ffi_symbol_parity(root, root / "docs")
+            self.assertTrue(any("solix_vm_get_field_i32" in msg for msg in ffi_errs))
+            term_errs = verify_docs.check_deprecated_terms(
+                [root / "docs" / "wiki" / "ffi" / "c-cpp-sdk.md"]
+            )
+            self.assertTrue(any("solix_vm_get_field" in msg for msg in term_errs))
+            self.assertTrue(any("Solix v2.0" in msg for msg in term_errs))
+
+        # New Trigger Matrix rules detect unsynced diagnostic/extension changes
+        diag_violations = doc_sync_check.check_trigger_matrix(
+            ["crates/solix-compilation/src/diagnostics/binding.rs"]
+        )
+        self.assertTrue(any("Diagnostics & Error Codes" in msg for msg in diag_violations))
+        vscode_violations = doc_sync_check.check_trigger_matrix(
+            ["editors/vscode/src/extension.ts"]
+        )
+        self.assertTrue(any("VS Code Extension" in msg for msg in vscode_violations))
 
 
 class SolixBenchCliTests(unittest.TestCase):
@@ -929,11 +1030,32 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("--remove-label", ci_text)
         self.assertIn("pr-benchmark:", ci_text)
         self.assertIn("<!-- solix-pr-benchmark -->", ci_text)
+        self.assertIn("<!-- solix-pr-coverage -->", ci_text)
         self.assertIn("Publish benchmark report to Step Summary", ci_text)
         self.assertIn(
             "pr-benchmark:\n    name: PR Performance Benchmark (vs dev)\n    if: github.event_name == 'pull_request' && github.base_ref == 'dev'\n",
             ci_text,
         )
+        self.assertNotIn("  push:\n    branches:\n      - dev", ci_text)
+        self.assertIn("key: solix-dev-bench-bin-", ci_text)
+        self.assertIn("CARGO_TARGET_DIR=", ci_text)
+        self.assertIn("./.github/actions/solix-setup", ci_text)
+        self.assertNotIn("EmbarkStudios/cargo-deny-action", ci_text)
+        self.assertIn("cargo-deny-0.19.0", ci_text)
+        self.assertIn("codeql:", ci_text)
+        self.assertIn("staged-offline-docs", ci_text)
+        self.assertFalse((REPO_ROOT / ".github" / "workflows" / "codeql.yml").exists())
+
+        setup_action_text = (
+            REPO_ROOT / ".github" / "actions" / "solix-setup" / "action.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("bundled-libs-key-prefix", setup_action_text)
+
+        dev_release_text = (REPO_ROOT / ".github" / "workflows" / "dev-release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("solix-bundled-dev-all", dev_release_text)
+        self.assertIn("key: solix-ci-llvm-cov-0.9.1", dev_release_text)
 
     def test_pr_discussion_sync_workflow_handles_artifacts_and_comments(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

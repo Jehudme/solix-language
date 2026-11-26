@@ -221,6 +221,47 @@ impl RuntimeErrorCode {
     pub const fn as_i32(self) -> i32 {
         self as i32
     }
+
+    /// Returns the standardized runtime trap identifier string (e.g. `"R0005"`).
+    #[must_use]
+    pub const fn code_str(self) -> &'static str {
+        match self {
+            Self::Success => "R0000",
+            Self::OutOfMemory => "R0001",
+            Self::StackOverflow => "R0002",
+            Self::DivideByZero => "R0003",
+            Self::IndexOutOfBounds => "R0004",
+            Self::NullReferenceAccess => "R0005",
+            Self::InvalidCast => "R0006",
+            Self::FunctionNotFound => "R0007",
+            Self::EntryPointNotFound => "R0008",
+            Self::InvalidInstruction => "R0009",
+            Self::InvalidOpCode => "R0010",
+            Self::InvalidFieldOffset => "R0011",
+            Self::InvalidStaticOffset => "R0012",
+            Self::BinaryLoadError => "R0013",
+            Self::UserException => "R0014",
+            Self::NativeFunctionError => "R0015",
+            Self::SecurityViolation => "R0016",
+            Self::TypeMismatch => "R0017",
+            Self::AssertionFailed => "R0018",
+            Self::MemoryLeak => "R0019",
+            Self::InvalidEntryPointSignature => "R0020",
+            Self::ExplicitExit => "R0021",
+            Self::SharedLibraryError => "R0022",
+            Self::DependencyError => "R0023",
+            Self::DuplicateSymbolDefinition => "R0024",
+            Self::NativeLibraryChecksumMismatch => "R0025",
+            Self::InvalidOperand => "R0026",
+            Self::ArrayStoreMismatch => "R0027",
+        }
+    }
+}
+
+impl std::fmt::Display for RuntimeErrorCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.code_str())
+    }
 }
 
 impl RuntimeError {

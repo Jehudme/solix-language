@@ -14,7 +14,7 @@
 
 In the legacy Solix v1.x documentation, content suffered from severe structural entanglement: user tutorials explained low-level compiler memory layouts, language specifications included introductory syntax guides, and error code descriptions were scattered across unrelated documents. This lack of role boundaries caused massive duplication, maintenance fatigue, and rapid documentation drift.
 
-This guideline formalizes the **Tripartite Documentation Architecture** for Solix v2.0:
+This guideline formalizes the **Tripartite Documentation Architecture** for Solix v3:
 1. **User Guides (`docs/guide/`) — "How to Use It":** Practical, task-oriented learning paths designed for software engineers writing Solix applications. Guides deliberately avoid deep VM internals and instead link directly to specifications and wiki articles.
 2. **Formal Specifications (`docs/spec/`) — "How It Works Under the Hood":** Normative, authoritative engineering contracts detailing Rust compilation passes, 64-bit Register VM instructions, memory block headers, and binary container formats.
 3. **Atomic Reference Wiki (`docs/wiki/`) — "Fast Dictionary Reference":** Granular, self-contained cheat sheets and lookup dictionaries for individual error codes, keywords, primitives, and CLI subcommands.
@@ -34,7 +34,7 @@ All documentation authors **MUST** adhere to the following normative invariants:
    * Every wiki error code page **MUST** link to the specification pass that emitted the diagnostic (e.g., `E0105` links to `docs/spec/statements/declarations.md`).
 3. **Zero Legacy Artifact Rule:**
    * Documentation **MUST NEVER** reference obsolete Solix v1.x concepts (`solix.json`, `.slxbin`, stack VM opcodes `PUSH_CONST`, dot-access for static members `Math.add`, or generic error tags `[E_BIND]`).
-   * All documents **MUST** reflect modern Solix v2.0 reality: register-based 64-bit VM, scope resolution `::`, `manifest.yaml` (legacy `manifest.toml`), `.slxb` / `.slxp`, and granular error codes (`E0000`–`E0299`, `R0001`–`R0024`).
+   * All documents **MUST** reflect modern Solix v3 reality: register-based 64-bit VM, scope resolution `::`, `manifest.yaml` (legacy `manifest.toml`), `.slxb` / `.slxp`, and granular error codes (`E0000`–`E0405`, `E9001`, `R0000`–`R0027`).
 4. **Code Verification Mandate & Single-Letter Variable Prohibition (GL-0011):**
    * All Solix and Rust code snippets across guides, specs, and wiki articles **MUST** be valid, compilable code.
    * Single-letter variable names (`x`, `y`, `i`, `n`, `s`, `v`, `e`, etc.) are **STRICTLY FORBIDDEN** across all documentation and examples. Use descriptive, self-documenting identifiers (e.g., `coord_x`, `coord_y`, `index`, `element`, `item_count`, `error_value`).
@@ -58,7 +58,7 @@ Every keyword article **MUST** follow this exact 6-section structure:
 | :--- | :--- |
 | **Keyword** | `<keyword_name>` |
 | **Category** | Control Flow / Declaration / Expression / Modifier |
-| **Introduced** | Solix v1.0 / v2.0 |
+| **Introduced** | Solix v3.x |
 | **Related** | [`<related_keyword>`](<link_to_related>) |
 
 ---
@@ -344,7 +344,7 @@ User guides **MUST** provide a tutorial learning path:
 ## Prerequisites
 | Prerequisite | Minimum Version | Notes |
 | :--- | :--- | :--- |
-| Solix CLI | 2.0+ | `solix --version` |
+| Solix CLI | 3.0+ | `solix --version` |
 
 ---
 

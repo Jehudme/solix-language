@@ -68,22 +68,25 @@ All code authored in `crates/*` **MUST** adhere to the following binding invaria
      * **Source Code Span:** Concrete source code coordinates (`SourceSpan`) annotated with a contextual label (`#[label("...")]`).
      * **Actionable Help / Remedy:** Helpful suggestion guiding the user on how to resolve the error (`#[help("...")]`).
 
-3. **Mandatory Unbroken Causal Chaining with `#[source]`:**
+3. **Diagnostic Authoring & Message Hygiene Rule:**
+   * All user-facing error messages and formatting builders **MUST** format Solix types, AST literals, values, binary tags, and errors via human-readable `Display` implementations (`.to_string()`, `{return_type}`, `{err}`) — **NEVER** leak Rust `Debug` syntax (`{:?}`, such as `Primitive(Int32)`, `["a"]`, or raw byte slices `[80, 75]`) into `#[error(...)]`, `#[help(...)]`, or error builder strings.
+   * Every diagnostic variant **MUST** allocate a globally unique `E`/`R` error code across the entire workspace within the subsystem ranges below, avoid hardcoded `main`-only or `manifest.toml` wording where configurable `manifest.yaml` entry points (`profiles.<profile>.entrypoint` or `--entry`) apply, and match `docs/wiki/errors/` (verified by `python3 scripts/ci/verify_docs.py`).
+4. **Mandatory Unbroken Causal Chaining with `#[source]`:**
    * When any error variant wraps an inner error (whether a sub-enum, an underlying I/O error, or an operating system error), it **MUST** annotate the field with `#[source]` (or use `#[from]` which implies `#[source]`).
    * The causal chain from root `SolixError` down to the leaf cause **MUST NOT** be broken or erased.
    * The entire error hierarchy **MUST** implement `std::error::Error::source(&self)` so that tools, logs, diagnostics, and test harnesses can programmatically traverse the complete causal tree.
 
-4. **Standard Error Code Allocation Table:**
+5. **Standard Error Code Allocation Table:**
 
 | Error Code Range | Subsystem Domain | Description & Examples |
 | :--- | :--- | :--- |
-| **`E0001` – `E0099`** | **Lexer / Lexical Analysis** | Unterminated string literals, invalid escape sequences, unrecognized characters, numeric format overflow. |
-| **`E0100` – `E0199`** | **Parser / Syntax Analysis** | Missing closing delimiters, unexpected tokens, invalid statement headers, illegal expression syntax. |
-| **`E0200` – `E0299`** | **Binder / Scope Resolution** | Undeclared identifiers, duplicate variable definitions, invalid shadowing, unknown type names. |
-| **`E0300` – `E0399`** | **Type Checker & Inference** | Incompatible type assignments, cyclic class inheritance, method signature mismatches, invalid generic arguments. |
-| **`E0400` – `E0499`** | **Codegen & Bytecode Assembler**| Jump offset overflow, unresolved branch targets, register index exhaustion, invalid opcode emission. |
-| **`E0500` – `E0599`** | **Virtual Machine & Runtime** | Operand stack underflow, division by zero, null reference dereference, out of memory, invalid native call. |
-| **`E0600` – `E0699`** | **Package & Project Manifest** | Corrupted `solix.toml` manifest, cyclic package dependencies, incompatible toolchain version. |
+| **`E0000` – `E0099`** | **Lexer / Lexical Analysis** | Unterminated string/char literals, unterminated comments, invalid hex/binary/decimal literals, unrecognized tokens (`E0000`, `E0011`–`E0016`). |
+| **`E0101` – `E0200`** | **Parser / Syntax Analysis** | Missing delimiters, invalid type paths (`E0157`), unknown control-flow keywords (`E0158`), invalid modifiers (`E0160`–`E0200`). |
+| **`E0201` – `E0299`, `E0315` – `E0323`** | **Type Binder & Semantics** | Undefined symbols, type mismatches, inheritance/interface cycles (`E0204`/`E0323`), switch/exception/const validation. |
+| **`E0301` – `E0314`** | **Bytecode Emitter & Binary (`EmissionError`)** | Constant pool/register/argument/jump limits, invalid magic/version, corrupt `.slxb` containers, export manifests. |
+| **`E0330` – `E0399`, `E9001`** | **Stdlib, Toolchain CLI & Custom Plugins** | `mount://` read-only writes, UTF-8/JSON/socket/compression errors, cycle collector threshold (`E0341`), custom lint phases (`E9001`). |
+| **`E0401` – `E0499`** | **Package & Project Manifest (`ManifestError`)** | Schema validation, removed `inherits`, missing `profiles.release`, unknown root keys, manifest I/O errors. |
+| **`R0000` – `R0027`** | **Virtual Machine & Runtime (`RuntimeErrorCode`)** | Execution traps, division by zero, null dereferences, stack overflow, array store mismatches, explicit exits. |
 
 ### 2.4 Code Simplicity & Comment Discipline
 1. **Simplicity Over Cleverness:** Prefer straightforward, obvious code over convoluted macro metaprogramming or complex trait gymnastics. Code that is easy to read, audit, and reason about is inherently more secure.

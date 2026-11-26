@@ -34,6 +34,9 @@ solix run <binaries...> [options] [-- [guest_args...]]
 | `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for AST inlining when compiling `.slx` sources. |
 | `--heap-size <size>` | | String | `"32MB"` | Virtual heap allocation capacity limit (e.g., `"16MB"`, `"64MB"`, `"1GB"`). |
 | `--max-stack <depth>` | | Integer | `1024` | Maximum call stack frame depth limit. |
+| `--cycle-collector <mode>` | | String | `"on"` | Controls the Bacon & Rajan cycle collector (`on`/`true`/`1` or `off`/`false`/`0`). |
+| `--cycle-threshold <count>` | | Integer | `256` | Potential-cycle candidate buffer threshold triggering background collection (must be `>= 1`, otherwise halts with `[E0341]`). |
+| `--cycle-budget-us <us>` | | Integer | None | Optional per-pause microsecond time budget for incremental cycle collection steps. |
 | `--verbose` | `-v` | Flag | `false` | Prints VM execution statistics and memory report upon process completion. |
 | `--safe` | | Flag | `false` | Executes in safe mode with defensive invariant validation and strict bounds checking. |
 | `--metrics [<format>]` | | Optional String | None (`text` if flag only) | Prints runtime execution telemetry and memory statistics formatted as `text` or `json` (enables per-instruction telemetry tracking via `RuntimeOptions::with_metrics_tracking(true)`, and reports guest-only `active_guest_objects()` leaks excluding immortal constant-pool strings). |

@@ -116,7 +116,11 @@ fn function_not_found_error(function_id: u32) -> VmTrap {
 fn f64_pair_type_mismatch_error(left_val: &Value, right_val: &Value) -> VmTrap {
     VmTrap::from_error(RuntimeError::TypeMismatch {
         expected: "Float64 and Float64".to_string(),
-        found: format!("{left_val:?}, {right_val:?}"),
+        found: format!(
+            "{} ({left_val}), {} ({right_val})",
+            left_val.type_name(),
+            right_val.type_name()
+        ),
     })
 }
 
@@ -125,7 +129,12 @@ fn f64_pair_type_mismatch_error(left_val: &Value, right_val: &Value) -> VmTrap {
 fn mul_add_f64_type_mismatch_cold(left_val: &Value, right_val: &Value, acc_val: &Value) -> VmTrap {
     VmTrap::from_error(RuntimeError::TypeMismatch {
         expected: "Float64, Float64, and Float64".to_string(),
-        found: format!("{left_val:?}, {right_val:?}, {acc_val:?}"),
+        found: format!(
+            "{} ({left_val}), {} ({right_val}), {} ({acc_val})",
+            left_val.type_name(),
+            right_val.type_name(),
+            acc_val.type_name()
+        ),
     })
 }
 
@@ -134,7 +143,7 @@ fn mul_add_f64_type_mismatch_cold(left_val: &Value, right_val: &Value, acc_val: 
 fn f64_type_mismatch_error(found_val: &Value) -> VmTrap {
     VmTrap::from_error(RuntimeError::TypeMismatch {
         expected: "Float64".to_string(),
-        found: format!("{found_val:?}"),
+        found: format!("{} ({found_val})", found_val.type_name()),
     })
 }
 
@@ -193,7 +202,7 @@ fn constant_pool_symbol_index_error(pool_idx: usize) -> RuntimeError {
 fn constant_pool_symbol_type_error(pool_val: &ConstantPoolValue) -> RuntimeError {
     RuntimeError::TypeMismatch {
         expected: "string symbol".to_string(),
-        found: format!("{pool_val:?}"),
+        found: format!("{pool_val}"),
     }
 }
 

@@ -124,7 +124,9 @@ def execute_step_expecting_failure(
 
 
 def run_full_lifecycle_matrix(
-    solix_binary_path: Path, repository_root: Path
+    solix_binary_path: Path,
+    repository_root: Path,
+    pure_solix_only: bool = False,
 ) -> None:
     """Executes the complete hermetic CLI lifecycle matrix across all toolchain commands."""
     solix_executable_string = str(solix_binary_path.resolve())
@@ -177,51 +179,52 @@ def run_full_lifecycle_matrix(
                 f"Expected manifest.yaml at {manifest_file_path} after project initialization"
             )
 
-        # Attach dual-backend native libraries: Rust and CMake C
-        execute_step(
-            [
-                solix_executable_string,
-                "new",
-                "native",
-                "native_rust",
-                "--project",
-                str(application_directory),
-                "--lang",
-                "rust",
-                "--profile",
-                "release,debug,test",
-                "--platforms",
-                "host",
-            ],
-            working_directory=workspace_path,
-            step_description="Scaffold Rust native library via 'solix new native native_rust'",
-            environment_variables=execution_environment,
-        )
+        if not pure_solix_only:
+            # Attach dual-backend native libraries: Rust and CMake C
+            execute_step(
+                [
+                    solix_executable_string,
+                    "new",
+                    "native",
+                    "native_rust",
+                    "--project",
+                    str(application_directory),
+                    "--lang",
+                    "rust",
+                    "--profile",
+                    "release,debug,test",
+                    "--platforms",
+                    "host",
+                ],
+                working_directory=workspace_path,
+                step_description="Scaffold Rust native library via 'solix new native native_rust'",
+                environment_variables=execution_environment,
+            )
 
-        execute_step(
-            [
-                solix_executable_string,
-                "new",
-                "native",
-                "native_c",
-                "--project",
-                str(application_directory),
-                "--lang",
-                "c",
-                "--profile",
-                "release,debug,test",
-                "--platforms",
-                "host",
-            ],
-            working_directory=workspace_path,
-            step_description="Scaffold C native library via 'solix new native native_c'",
-            environment_variables=execution_environment,
-        )
+            execute_step(
+                [
+                    solix_executable_string,
+                    "new",
+                    "native",
+                    "native_c",
+                    "--project",
+                    str(application_directory),
+                    "--lang",
+                    "c",
+                    "--profile",
+                    "release,debug,test",
+                    "--platforms",
+                    "host",
+                ],
+                working_directory=workspace_path,
+                step_description="Scaffold C native library via 'solix new native native_c'",
+                environment_variables=execution_environment,
+            )
 
-        # Write application entrypoints exercising both native bridges
-        application_source_path = application_directory / "src" / "main.slx"
-        application_source_path.write_text(
-            """package lifecycle_app;
+            # Write application entrypoints exercising both native bridges
+            application_source_path = application_directory / "src" / "main.slx"
+            application_source_path.write_text(
+                """package lifecycle_app;
 
 public class NativeRustNative {
     native public static int32 add(int32 left_value, int32 right_value);
@@ -242,12 +245,12 @@ public class Main {
     }
 }
 """,
-            encoding="utf-8",
-        )
+                encoding="utf-8",
+            )
 
-        test_source_path = application_directory / "tests" / "test_main.slx"
-        test_source_path.write_text(
-            """package lifecycle_app.tests;
+            test_source_path = application_directory / "tests" / "test_main.slx"
+            test_source_path.write_text(
+                """package lifecycle_app.tests;
 
 import lifecycle_app.NativeRustNative;
 import lifecycle_app.NativeCNative;
@@ -263,8 +266,42 @@ public class TestRunner {
     }
 }
 """,
-            encoding="utf-8",
-        )
+                encoding="utf-8",
+            )
+        else:
+            application_source_path = application_directory / "src" / "main.slx"
+            application_source_path.write_text(
+                """package lifecycle_app;
+
+public class Main {
+    public static int32 main() {
+        int32 computed_total = 20 + 22;
+        if (computed_total == 42) {
+            return 0;
+        }
+        return 1;
+    }
+}
+""",
+                encoding="utf-8",
+            )
+
+            test_source_path = application_directory / "tests" / "test_main.slx"
+            test_source_path.write_text(
+                """package lifecycle_app.tests;
+
+public class TestRunner {
+    public static int32 test() {
+        int32 computed_total = 21 + 21;
+        if (computed_total == 42) {
+            return 0;
+        }
+        return 1;
+    }
+}
+""",
+                encoding="utf-8",
+            )
 
         # Also test legacy/simple root scaffolding invocation
         auxiliary_project_directory = workspace_path / "auxiliary_scaffold"
@@ -412,9 +449,9 @@ public class TestRunner {
             environment_variables=execution_environment,
         )
 
-        # Test building solixlib standard library under test profile as mandated by user
+        # Test building solixlib standard library under test profile when Docker native builds are enabled
         solixlib_directory = repository_root / "libraries" / "solixlib"
-        if solixlib_directory.is_dir():
+        if not pure_solix_only and solixlib_directory.is_dir():
             execute_step(
                 [
                     solix_executable_string,
@@ -1053,6 +1090,11 @@ def main() -> int:
         default=None,
         help="Path to the compiled solix toolchain executable binary",
     )
+    parser.add_argument(
+        "--pure-solix-only",
+        action="store_true",
+        help="Run all 14 CLI command lifecycle phases in pure-Solix mode without Docker native builds",
+    )
     argument_values = parser.parse_args()
 
     repository_root = Path(__file__).resolve().parent.parent.parent
@@ -1068,6 +1110,7 @@ def main() -> int:
         run_full_lifecycle_matrix(
             solix_binary_path=resolved_binary,
             repository_root=repository_root,
+            pure_solix_only=argument_values.pure_solix_only,
         )
         return 0
     except Exception as execution_error:

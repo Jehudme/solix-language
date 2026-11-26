@@ -1247,7 +1247,7 @@ fn setup_runtime_for_target(
             .execute(&mut compilation_context)
             .map_err(|diagnostics| {
                 let error_details: Vec<String> =
-                    diagnostics.iter().map(|diag| format!("{diag:?}")).collect();
+                    diagnostics.iter().map(ToString::to_string).collect();
                 anyhow::anyhow!(
                     "Compilation failed with {} diagnostics: {}",
                     diagnostics.len(),

@@ -291,7 +291,7 @@ fn test_enum_switch_duplicate_cases_covering_subset_rejected() {
         }
     "#;
     // Failed is not covered even though there are 4 case clauses (one is a duplicate of Completed)
-    assert_compile_error(source_code, "E0306");
+    assert_compile_error(source_code, "E0322");
 }
 
 // ============================================================================
