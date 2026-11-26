@@ -124,7 +124,7 @@ public class TreeNode {
 
 ### 4.1. Weak Reference Mechanics
 1. Both `SetField` and `GetField` targeting a `weak` field encode `FLAG_WEAK` (`0x01`), bypassing reference-count increments/decrements and fast-path unchecked reads/writes (while `escape_analysis` preserves heap identity for any class with `weak_field_offsets`).
-2. `VirtualHeap` maintains monotonic per-target allocation generation tokens (`weak_live_targets`) and binds each active weak field slot address to `(target_addr, generation)` (`weak_slot_generations`, indexed per owning object in `weak_slots_by_owner`).
+2. `VirtualHeap` lazily allocates an optional boxed `WeakTracker` (`weak_tracker`) containing monotonic per-target generation tokens (`live_targets`) and weak slot records `(target_addr, generation)` (`slot_generations`, indexed per owning object in `slots_by_owner`) — keeping zero memory/pointer overhead when weak fields are unused.
 3. When any object or POD block is deallocated (`deallocate`, `force_deallocate`, or `deallocate_pod_fast`), its generation token is invalidated; any subsequent `GetField` (`FLAG_WEAK`) fails generation validation, zeroes the stale heap slot to `null`, and returns `null`, eliminating dangling-pointer use-after-free and type confusion across heap address reuse.
 
 ### 4.2. Collection Destructors & Intrusive Lifecycle

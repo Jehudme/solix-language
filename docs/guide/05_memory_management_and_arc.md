@@ -150,7 +150,7 @@ public class Widget {
 }
 ```
 
-Internally, `weak` fields emit `FLAG_WEAK` (`0x01`) on both `SetField` and `GetField` opcodes. `VirtualHeap` tracks monotonic per-target allocation generation tokens (`weak_live_targets`) alongside weak slot records (`weak_slot_generations`). When an object is deallocated (including via `force_deallocate` or POD fast deallocation), its target generation token is invalidated; any subsequent `GetField` read validates the generation token and lazily clears stale weak fields to `null`, preventing use-after-free and type confusion even if the freed address is immediately reused.
+Internally, `weak` fields emit `FLAG_WEAK` (`0x01`) on both `SetField` and `GetField` opcodes. `VirtualHeap` lazily allocates a boxed `WeakTracker` (`weak_tracker`) storing monotonic per-target allocation generation tokens (`live_targets`) alongside weak slot records (`slot_generations`). When an object is deallocated (including via `force_deallocate` or POD fast deallocation), its target generation token is invalidated; any subsequent `GetField` read validates the generation token and lazily clears stale weak fields to `null`, preventing use-after-free and type confusion even if the freed address is immediately reused.
 
 ---
 
@@ -221,7 +221,7 @@ When an object's `ref_count` reaches zero:
 
 1. **User-Defined Destructor Invocation**: If the class (or any base class in its inheritance hierarchy) defines a destructor (`~ClassName()`), the runtime invokes it immediately (including for unreachable cyclic graphs reclaimed by synchronous Bacon & Rajan cycle collection, shielded by `active_destructors`). Subclass destructors execute first, followed automatically by parent class destructors in reverse-inheritance order.
 2. **Cascading Field Cleanup**: The runtime walks all **reference-type fields** in the object's layout and calls `DEC_REF` on each, recursively freeing nested resources.
-3. **Weak Reference Invalidation**: Generation tokens registered in `weak_live_targets` for this target address (and weak slot records owned by it) are invalidated so subsequent weak reads resolve to `null`.
+3. **Weak Reference Invalidation**: Generation tokens registered in `VirtualHeap`'s `weak_tracker` (`live_targets`) for this target address (and weak slot records owned by it) are invalidated so subsequent weak reads resolve to `null`.
 4. **Header Invalidation**: The header word at `address - 1` is overwritten with a freed-block descriptor.
 5. **Memory Reclamation**: The block is added to the **free block list** for immediate reuse.
 

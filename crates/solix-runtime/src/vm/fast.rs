@@ -4944,56 +4944,47 @@ impl VirtualMachine {
                         let field_addr = obj_addr + offset as u32;
                         let raw_flags = inst.flags();
                         let dst_idx = inst.dst() as usize;
-                        if (raw_flags & solix_common::bytecode::instruction::FLAG_WEAK) == 0
-                            && raw_flags > 1
-                        {
-                            match raw_flags >> 1 {
-                                5 | 6 => unsafe {
-                                    *reg_base.add(dst_idx) = Value::I32(read_heap_u32_or_zero(
-                                        &self.heap.buffer,
-                                        field_addr,
-                                    )
-                                        as i32);
-                                },
-                                7 | 8 => unsafe {
-                                    *reg_base.add(dst_idx) = Value::I64(read_heap_u64_or_zero(
-                                        &self.heap.buffer,
-                                        field_addr,
-                                    )
-                                        as i64);
-                                },
-                                10 => unsafe {
-                                    *reg_base.add(dst_idx) = Value::F64(f64::from_bits(
-                                        read_heap_u64_or_zero(&self.heap.buffer, field_addr),
-                                    ));
-                                },
-                                12 => {
-                                    let raw = read_heap_u64_or_zero(&self.heap.buffer, field_addr);
-                                    unsafe {
-                                        if raw == 0 || raw == Value::TAG_NULL {
-                                            *reg_base.add(dst_idx) = Value::Null;
-                                        } else if (raw & Value::TAG_MASK) == Value::TAG_REF {
-                                            *reg_base.add(dst_idx) = Value::Ref(raw as u32);
-                                        } else if (raw & Value::TAG_MASK) == 0 {
-                                            *reg_base.add(dst_idx) =
-                                                Value::Ref((raw & 0xFFFF_FFFF) as u32);
-                                        } else {
-                                            *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    let val =
-                                        self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
-                                    unsafe {
-                                        *reg_base.add(dst_idx) = val;
+                        // Encode `field_tag << 1` matches: odd (`FLAG_WEAK` = 1) & untagged (0) fall
+                        // cleanly into the cold path in a single jump-table match with zero extra branch.
+                        match raw_flags {
+                            10 | 12 => unsafe {
+                                *reg_base.add(dst_idx) =
+                                    Value::I32(
+                                        read_heap_u32_or_zero(&self.heap.buffer, field_addr) as i32,
+                                    );
+                            },
+                            14 | 16 => unsafe {
+                                *reg_base.add(dst_idx) =
+                                    Value::I64(
+                                        read_heap_u64_or_zero(&self.heap.buffer, field_addr) as i64,
+                                    );
+                            },
+                            20 => unsafe {
+                                *reg_base.add(dst_idx) = Value::F64(f64::from_bits(
+                                    read_heap_u64_or_zero(&self.heap.buffer, field_addr),
+                                ));
+                            },
+                            24 => {
+                                let raw = read_heap_u64_or_zero(&self.heap.buffer, field_addr);
+                                unsafe {
+                                    if raw == 0 || raw == Value::TAG_NULL {
+                                        *reg_base.add(dst_idx) = Value::Null;
+                                    } else if (raw & Value::TAG_MASK) == Value::TAG_REF {
+                                        *reg_base.add(dst_idx) = Value::Ref(raw as u32);
+                                    } else if (raw & Value::TAG_MASK) == 0 {
+                                        *reg_base.add(dst_idx) =
+                                            Value::Ref((raw & 0xFFFF_FFFF) as u32);
+                                    } else {
+                                        *reg_base.add(dst_idx) = Value::from_raw_u64(raw);
                                     }
                                 }
                             }
-                        } else {
-                            let val = self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
-                            unsafe {
-                                *reg_base.add(dst_idx) = val;
+                            _ => {
+                                let val =
+                                    self.execute_get_field_slow(obj_addr, offset, raw_flags)?;
+                                unsafe {
+                                    *reg_base.add(dst_idx) = val;
+                                }
                             }
                         }
                     }
