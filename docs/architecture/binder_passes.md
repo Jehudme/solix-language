@@ -25,7 +25,7 @@ flowchart TD
   - Records the active package declaration from `PackageStatement` (e.g. `package solix.io;`).
   - Registers all `ClassDeclaration`, `InterfaceDeclaration`, and `EnumDeclaration` identifiers in the global symbol table using their fully qualified names (`SymbolTable`).
   - Collects `alias` declarations and queues `import` / `extern import` statements for dependency resolution.
-  - Validates that type names are globally unique within their declaring package namespace.
+  - Validates that type names are globally unique within their declaring package namespace and enforces checked `u16` source ID bounds (`<= 65,536` sources).
 
 ---
 
@@ -39,6 +39,7 @@ flowchart TD
   - Calculates field byte offsets adhering to natural alignment boundaries ([`crates/solix-compilation/src/phases/binder/layout.rs`](../../crates/solix-compilation/src/phases/binder/layout.rs)).
   - Assigns unique sequential `vtable_id` numbers to all classes and constructs virtual method tables.
   - Qualifies member symbols (methods, fields, constructors, destructors, operators) using effective fully qualified class names (`package::Class::member(...)`) in `fully_qualified_name`, preventing member collision across distinct namespaces sharing identical class names.
+  - Runs type-aware call normalization ([`call_normalizer.rs`](../../crates/solix-compilation/src/phases/binder/call_normalizer.rs)) with lexical variable/parameter scopes, inheritance-hierarchy resolution, and field/return type lookup (injecting default arguments and variadic tuples strictly within matched class/function boundaries with zero cross-class fallback).
 
 ---
 

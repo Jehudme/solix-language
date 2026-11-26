@@ -71,7 +71,8 @@ When `git diff origin/dev...HEAD` reveals modifications in any left-hand subsyst
 | **Diagnostics & Error Codes**<br>`crates/*/src/diagnostics/`<br>`crates/solix-runtime/src/exceptions/errors.rs` | `docs/wiki/errors/*.md` (`E0000`–`E0405`, `E9001`, `R0000`–`R0027`) | `docs/spec/diagnostics.md` | Relevant subsystem architecture/guide docs |
 | **VS Code Extension & Grammars**<br>`editors/vscode/(src\|syntaxes\|package.json\|README.md)` | N/A | N/A | `docs/guide/editors_vscode.md`<br>`editors/vscode/README.md` |
 | **LSP & Formatting Subsystem**<br>`crates/solix-lsp/src/`<br>`crates/solix-toolchain/src/commands/(lsp\|fmt).rs` | `docs/wiki/commands/lsp.md`<br>`docs/wiki/commands/fmt.md` | `docs/spec/tools/lsp/protocol.md`<br>`docs/spec/tools/cli/fmt.md` | `docs/guide/editors_vscode.md` |
-| **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(ci\|docs\|release\|bench)/*.py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/guidelines/pr-and-release-governance.md`<br>`docs/guidelines/branching-conventions.md`<br>`docs/guide/release.md` |
+| **Benchmarks & Telemetry**<br>`scripts/bench/*.py` | N/A | N/A | `docs/guide/benchmarks.md` |
+| **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(ci\|docs\|release)/*.py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/guidelines/pr-and-release-governance.md`<br>`docs/guidelines/branching-conventions.md`<br>`docs/guide/release.md` |
 
 > [!NOTE]
 > User-facing documentation (`docs/guide/`, `docs/wiki/`, `docs/spec/`, `docs/architecture/`) **MUST** remain inside the main Git repository. [`scripts/docs/build_docs_site.py`](../../../scripts/docs/build_docs_site.py) compiles these files into the offline `solix wiki` bundle matching every binary release version, and optional one-way GitHub Wiki mirroring reads from this Git Single Source of Truth.

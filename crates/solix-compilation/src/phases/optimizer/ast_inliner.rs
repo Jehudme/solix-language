@@ -24,9 +24,18 @@ const MAX_INLINE_DEPTH: usize = 4;
 struct InlinableFunctionInfo {
     parameter_names: Vec<String>,
     parameter_types: Vec<TypeAnnotation>,
+    parameter_semantic_types: Vec<Option<Type>>,
     return_type_annotation: TypeAnnotation,
+    resolved_return_type: Option<Type>,
     body_statements: Vec<Statement>,
     has_this_receiver: bool,
+}
+
+#[derive(Clone, Copy)]
+struct EnclosingClassContext<'class> {
+    qualified_name: &'class str,
+    simple_fallback: Option<&'class str>,
+    name_span: Span,
 }
 
 /// AST inliner compilation phase.
@@ -83,6 +92,11 @@ impl CompilationPhase for AstInlinerPhase {
             }
         }
 
+        let symbol_table = context
+            .binding_artifacts
+            .as_ref()
+            .map(|artifacts| &artifacts.symbol_table);
+
         for (source_index, ast_option) in context.ast.iter().enumerate() {
             let Ok(source_id) = u16::try_from(source_index) else {
                 break;
@@ -110,9 +124,10 @@ impl CompilationPhase for AstInlinerPhase {
                         try_register_inlinable_method(
                             method,
                             None,
-                            None,
                             inline_threshold,
+                            source_id,
                             &context.sources,
+                            symbol_table,
                             &mut inlinable_functions,
                         );
                     }
@@ -125,12 +140,9 @@ impl CompilationPhase for AstInlinerPhase {
                             ""
                         };
 
-                        let fully_qualified_class = context
-                            .binding_artifacts
-                            .as_ref()
-                            .and_then(|artifacts| {
-                                artifacts
-                                    .symbol_table
+                        let fully_qualified_class = symbol_table
+                            .and_then(|table| {
+                                table
                                     .symbols
                                     .iter()
                                     .find(|entry| {
@@ -198,6 +210,12 @@ impl CompilationPhase for AstInlinerPhase {
                             }
                         }
 
+                        let class_ctx = EnclosingClassContext {
+                            qualified_name: &fully_qualified_class,
+                            simple_fallback,
+                            name_span: class_decl.name_span,
+                        };
+
                         for member in &class_decl.members {
                             if let ClassMember::Method(method) = member {
                                 let method_name = if source_index < context.sources.len() {
@@ -217,10 +235,11 @@ impl CompilationPhase for AstInlinerPhase {
                                 }
                                 try_register_inlinable_method(
                                     method,
-                                    Some(&fully_qualified_class),
-                                    simple_fallback,
+                                    Some(class_ctx),
                                     inline_threshold,
+                                    source_id,
                                     &context.sources,
+                                    symbol_table,
                                     &mut inlinable_functions,
                                 );
                             }
@@ -240,7 +259,9 @@ impl CompilationPhase for AstInlinerPhase {
 
         let ast_count = context.ast.len();
         for ast_index in 0..ast_count {
-            let source_id = ast_index as u16;
+            let Ok(source_id) = u16::try_from(ast_index) else {
+                break;
+            };
             if context.is_external_source(source_id) {
                 continue;
             }
@@ -357,10 +378,11 @@ fn try_flatten_guard_returns(statements: &[Statement]) -> Option<Expression> {
 /// Evaluates whether a method is eligible for automatic inlining and registers its metadata.
 fn try_register_inlinable_method(
     method: &MethodDeclaration,
-    enclosing_class: Option<&str>,
-    simple_class_fallback: Option<&str>,
+    enclosing_class: Option<EnclosingClassContext<'_>>,
     inline_threshold: usize,
+    source_id: u16,
     sources: &[String],
+    symbol_table: Option<&crate::phases::binder::symbols::SymbolTable>,
     inlinable_functions: &mut HashMap<String, InlinableFunctionInfo>,
 ) {
     // Prohibit virtual, override, native, abstract, extern, or generic methods
@@ -454,9 +476,23 @@ fn try_register_inlinable_method(
         return;
     }
 
-    // Collect parameter names and types
+    let source_text = sources
+        .get(source_id as usize)
+        .map(String::as_str)
+        .unwrap_or("");
+    let resolved_return_type = symbol_table.map(|table| {
+        crate::phases::binder::type_resolver::resolve_type_annotation(
+            source_id,
+            source_text,
+            &method.return_type,
+            table,
+        )
+    });
+
+    // Collect parameter names, AST types, and optional semantic types
     let mut parameter_names = Vec::with_capacity(method.parameters.len());
     let mut parameter_types = Vec::with_capacity(method.parameters.len());
+    let mut parameter_semantic_types = Vec::with_capacity(method.parameters.len());
 
     for parameter in &method.parameters {
         let param_source_index = parameter.name_span.id as usize;
@@ -467,23 +503,35 @@ fn try_register_inlinable_method(
             [parameter.name_span.start as usize..parameter.name_span.end as usize];
         parameter_names.push(param_name.to_string());
         parameter_types.push(parameter.param_type.clone());
+        let param_semantic = symbol_table.map(|table| {
+            crate::phases::binder::type_resolver::resolve_type_annotation(
+                source_id,
+                source_text,
+                &parameter.param_type,
+                table,
+            )
+        });
+        parameter_semantic_types.push(param_semantic);
     }
 
     let info = InlinableFunctionInfo {
         parameter_names,
         parameter_types,
+        parameter_semantic_types,
         return_type_annotation: method.return_type.clone(),
+        resolved_return_type,
         body_statements: effective_statements,
         has_this_receiver: false,
     };
 
-    if let Some(class_name) = enclosing_class {
+    if let Some(class_ctx) = enclosing_class {
+        let class_name = class_ctx.qualified_name;
         let qualified_colon = format!("{class_name}::{method_name}");
         let qualified_dot = qualified_colon.replace("::", ".");
         if method.modifiers.contains(&Modifier::Static) {
             inlinable_functions.insert(qualified_colon.clone(), info.clone());
             inlinable_functions.insert(qualified_dot, info.clone());
-            if let Some(simple_class) = simple_class_fallback {
+            if let Some(simple_class) = class_ctx.simple_fallback {
                 let simple_qualified = format!("{simple_class}::{method_name}");
                 inlinable_functions.insert(simple_qualified, info);
             }
@@ -508,15 +556,26 @@ fn try_register_inlinable_method(
                 .any(|stmt| statement_references_ident(stmt, sources, "this"));
 
             if is_primitive_return && accesses_this {
+                let this_type_annotation = TypeAnnotation::Named {
+                    span: class_ctx.name_span,
+                    path: vec![class_ctx.name_span],
+                };
+                let this_semantic_type = Type::Class {
+                    symbol_name: class_ctx.qualified_name.to_string(),
+                    type_arguments: Vec::new(),
+                };
                 let mut instance_info = info;
                 instance_info.has_this_receiver = true;
                 instance_info.parameter_names.insert(0, "this".to_string());
                 instance_info
                     .parameter_types
-                    .insert(0, method.return_type.clone());
+                    .insert(0, this_type_annotation);
+                instance_info
+                    .parameter_semantic_types
+                    .insert(0, Some(this_semantic_type));
                 inlinable_functions.insert(qualified_colon.clone(), instance_info.clone());
                 inlinable_functions.insert(qualified_dot, instance_info.clone());
-                if let Some(simple_class) = simple_class_fallback {
+                if let Some(simple_class) = class_ctx.simple_fallback {
                     let simple_qualified = format!("{simple_class}::{method_name}");
                     inlinable_functions.insert(simple_qualified, instance_info);
                 }
@@ -1134,12 +1193,15 @@ fn try_collect_local_lambda(
         }
     }
 
+    let param_count = parameter_types.len();
     Some((
         var_name.to_string(),
         InlinableFunctionInfo {
             parameter_names,
             parameter_types,
+            parameter_semantic_types: vec![None; param_count],
             return_type_annotation,
+            resolved_return_type: None,
             body_statements: effective_statements,
             has_this_receiver: false,
         },
@@ -1950,15 +2012,72 @@ fn transform_expression(
     {
         let (target_symbol, this_receiver_arg) = match callee.as_ref() {
             Expression::Identifier { span: id_span } => {
-                let source_index = id_span.id as usize;
-                if source_index < context.sources.len() {
-                    let source = &context.sources[source_index];
-                    (
-                        Some(source[id_span.start as usize..id_span.end as usize].to_string()),
-                        None,
-                    )
+                if let Some(artifacts) = context.binding_artifacts.as_ref() {
+                    if let Some(&symbol_id) = artifacts
+                        .resolved_symbols
+                        .get(id_span)
+                        .or_else(|| artifacts.resolved_symbols.get(&callee.span()))
+                        && let Some(symbol_entry) = artifacts.symbol_table.get_symbol(symbol_id)
+                    {
+                        if context.is_external_source(symbol_entry.source_id) {
+                            (None, None)
+                        } else if let Some(parent_id) = symbol_entry.parent_symbol {
+                            if let Some(parent_class) = artifacts.symbol_table.get_symbol(parent_id)
+                            {
+                                let fully_qualified = format!(
+                                    "{}::{}",
+                                    parent_class.fully_qualified_name, symbol_entry.name
+                                );
+                                let colon_key = fully_qualified.replace('.', "::");
+                                let dot_key = fully_qualified.replace("::", ".");
+                                let matched_key = if inlinable_functions.contains_key(&colon_key) {
+                                    Some(colon_key)
+                                } else if inlinable_functions.contains_key(&dot_key) {
+                                    Some(dot_key)
+                                } else if inlinable_functions.contains_key(&fully_qualified) {
+                                    Some(fully_qualified)
+                                } else {
+                                    None
+                                };
+                                if let Some(key) = matched_key
+                                    && inlinable_functions
+                                        .get(&key)
+                                        .is_some_and(|info| !info.has_this_receiver)
+                                {
+                                    (Some(key), None)
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            }
+                        } else if inlinable_functions
+                            .get(&symbol_entry.name)
+                            .is_some_and(|info| !info.has_this_receiver)
+                        {
+                            (Some(symbol_entry.name.clone()), None)
+                        } else {
+                            (None, None)
+                        }
+                    } else {
+                        (None, None)
+                    }
                 } else {
-                    (None, None)
+                    let source_index = id_span.id as usize;
+                    if source_index < context.sources.len() {
+                        let source = &context.sources[source_index];
+                        let name = &source[id_span.start as usize..id_span.end as usize];
+                        if inlinable_functions
+                            .get(name)
+                            .is_some_and(|info| !info.has_this_receiver)
+                        {
+                            (Some(name.to_string()), None)
+                        } else {
+                            (None, None)
+                        }
+                    } else {
+                        (None, None)
+                    }
                 }
             }
             Expression::MemberAccess {
@@ -2130,10 +2249,21 @@ fn inline_call_into_block(
         let param_type = target_info.parameter_types[param_index].clone();
 
         // Record argument's type for the synthetic renamed_span so Emitter knows its type
-        if let Some(artifacts) = context.binding_artifacts.as_mut()
-            && let Some(evaluated_type) = artifacts.node_types.get(&arg_expr.span()).cloned()
-        {
-            artifacts.node_types.insert(renamed_span, evaluated_type);
+        if let Some(artifacts) = context.binding_artifacts.as_mut() {
+            let inferred_param_type =
+                artifacts
+                    .node_types
+                    .get(&arg_expr.span())
+                    .cloned()
+                    .or_else(|| {
+                        target_info
+                            .parameter_semantic_types
+                            .get(param_index)
+                            .and_then(|semantic_type| semantic_type.clone())
+                    });
+            if let Some(evaluated_type) = inferred_param_type {
+                artifacts.node_types.insert(renamed_span, evaluated_type);
+            }
         }
 
         let param_decl = VariableDeclarationStatement {
@@ -2203,39 +2333,49 @@ fn inline_call_into_block(
 
     // 4. Update semantic binding expression_types so query_type works on the inlined block
     if let Some(artifacts) = context.binding_artifacts.as_mut()
-        && let std::collections::hash_map::Entry::Vacant(vacant_entry) =
-            artifacts.node_types.entry(call_span)
+        && !artifacts.node_types.contains_key(&call_span)
     {
-        let resolved_return_type = match &target_info.return_type_annotation {
-            TypeAnnotation::Primitive {
-                span: type_span, ..
-            } => {
-                let src_id = type_span.id as usize;
-                if src_id < context.sources.len() {
-                    let text =
-                        &context.sources[src_id][type_span.start as usize..type_span.end as usize];
-                    match text {
-                        "int8" => Type::Primitive(solix_common::PrimitiveKind::Int8),
-                        "int16" => Type::Primitive(solix_common::PrimitiveKind::Int16),
-                        "int32" => Type::Primitive(solix_common::PrimitiveKind::Int32),
-                        "int64" => Type::Primitive(solix_common::PrimitiveKind::Int64),
-                        "uint8" => Type::Primitive(solix_common::PrimitiveKind::UInt8),
-                        "uint16" => Type::Primitive(solix_common::PrimitiveKind::UInt16),
-                        "uint32" => Type::Primitive(solix_common::PrimitiveKind::UInt32),
-                        "uint64" => Type::Primitive(solix_common::PrimitiveKind::UInt64),
-                        "float32" => Type::Primitive(solix_common::PrimitiveKind::Float32),
-                        "float64" => Type::Primitive(solix_common::PrimitiveKind::Float64),
-                        "bool" => Type::Primitive(solix_common::PrimitiveKind::Bool),
-                        "char" => Type::Primitive(solix_common::PrimitiveKind::Char),
-                        _ => Type::Primitive(solix_common::PrimitiveKind::Void),
+        let resolved_return_type = target_info.resolved_return_type.clone().unwrap_or_else(|| {
+            match &target_info.return_type_annotation {
+                TypeAnnotation::Primitive {
+                    span: type_span, ..
+                } => {
+                    let src_id = type_span.id as usize;
+                    if src_id < context.sources.len() {
+                        let text = &context.sources[src_id]
+                            [type_span.start as usize..type_span.end as usize];
+                        match text {
+                            "int8" => Type::Primitive(solix_common::PrimitiveKind::Int8),
+                            "int16" => Type::Primitive(solix_common::PrimitiveKind::Int16),
+                            "int32" => Type::Primitive(solix_common::PrimitiveKind::Int32),
+                            "int64" => Type::Primitive(solix_common::PrimitiveKind::Int64),
+                            "uint8" => Type::Primitive(solix_common::PrimitiveKind::UInt8),
+                            "uint16" => Type::Primitive(solix_common::PrimitiveKind::UInt16),
+                            "uint32" => Type::Primitive(solix_common::PrimitiveKind::UInt32),
+                            "uint64" => Type::Primitive(solix_common::PrimitiveKind::UInt64),
+                            "float32" => Type::Primitive(solix_common::PrimitiveKind::Float32),
+                            "float64" => Type::Primitive(solix_common::PrimitiveKind::Float64),
+                            "bool" => Type::Primitive(solix_common::PrimitiveKind::Bool),
+                            "char" => Type::Primitive(solix_common::PrimitiveKind::Char),
+                            _ => Type::Primitive(solix_common::PrimitiveKind::Void),
+                        }
+                    } else {
+                        Type::Primitive(solix_common::PrimitiveKind::Void)
                     }
-                } else {
-                    Type::Primitive(solix_common::PrimitiveKind::Void)
                 }
+                other_annotation => crate::phases::binder::type_resolver::resolve_type_annotation(
+                    call_span.id,
+                    context
+                        .sources
+                        .get(call_span.id as usize)
+                        .map(String::as_str)
+                        .unwrap_or(""),
+                    other_annotation,
+                    &artifacts.symbol_table,
+                ),
             }
-            _ => Type::Primitive(solix_common::PrimitiveKind::Int32),
-        };
-        vacant_entry.insert(resolved_return_type);
+        });
+        artifacts.node_types.insert(call_span, resolved_return_type);
     }
 
     Expression::Block {
@@ -2254,6 +2394,9 @@ fn allocate_synthetic_identifier(context: &mut CompilationContext, name: &str) -
     {
         found_index
     } else {
+        if u16::try_from(context.sources.len()).is_err() {
+            return Span::default();
+        }
         context.sources.push(String::new());
         context.source_names.push("<inliner_synthetic>".to_string());
         if context.ast.len() < context.sources.len() {
@@ -2262,10 +2405,13 @@ fn allocate_synthetic_identifier(context: &mut CompilationContext, name: &str) -
         context.sources.len() - 1
     };
 
+    let Ok(synthetic_source_id) = u16::try_from(synthetic_source_index) else {
+        return Span::default();
+    };
     let start_offset = context.sources[synthetic_source_index].len() as u32;
     context.sources[synthetic_source_index].push_str(name);
     let end_offset = context.sources[synthetic_source_index].len() as u32;
-    Span::new(synthetic_source_index as u16, start_offset, end_offset)
+    Span::new(synthetic_source_id, start_offset, end_offset)
 }
 
 /// Recursively collects local variable declaration names inside statement blocks.

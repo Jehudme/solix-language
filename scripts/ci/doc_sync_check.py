@@ -144,8 +144,15 @@ TRIGGER_MATRIX = [
         ],
     },
     {
+        "name": "Benchmarks & Telemetry",
+        "pattern": r"^scripts/bench/.*\.py$",
+        "required_docs": [
+            "docs/guide/benchmarks.md",
+        ],
+    },
+    {
         "name": "Governance & Offline Docs Scripts",
-        "pattern": r"^scripts/(ci|docs|release|bench)/.*\.py$",
+        "pattern": r"^scripts/(ci|docs|release)/.*\.py$",
         "required_docs": [
             "docs/guidelines/pr-and-release-governance.md",
             "docs/guidelines/documentation-update-protocol.md",

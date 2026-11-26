@@ -8,7 +8,7 @@ This guide specifies the architecture, measurement methodology, hardware telemet
 
 Micro-benchmarks must isolate runtime virtual machine dispatch throughput from language compilation overhead. The Solix benchmark suite employs a two-tier evaluation architecture:
 
-1. **Pre-Compilation Separation**: Prior to entering timed benchmark iterations, Solix source files (`*.slx`) are pre-compiled into a standalone bytecode container (`*.slxb`) via `solix compile <sources> -o <binary>.slxb --profile release`. The compiler phase duration is measured and reported as `Precompile (ms)`.
+1. **Pre-Compilation Separation**: Prior to entering timed benchmark iterations, Solix source files (`*.slx`) are pre-compiled into a standalone bytecode container (`*.slxb`) via `solix compile <sources> -o <binary>.slxb --profile release`. The compiler phase duration is warmed up once and sampled across three passes (reporting the median as `Precompile (ms)`).
 2. **Pure Virtual Machine Dispatch**: Timed loop iterations execute directly against pre-compiled bytecode containers via `solix run <binary>.slxb` (or `solix run <binary>.slxb --safe`). This eliminates lexing, AST parsing, symbol binding, type inference, AST inlining, and bytecode emission from VM execution measurements.
 3. **Comparative Language Parity**: Identical algorithms implemented in C (`gcc -O3 -lm`), Lua, LuaJIT, and Python 3 are verified for output checksum parity before comparative timings are recorded.
 

@@ -92,9 +92,10 @@ pub fn bind_context(
         accumulated_errors.extend(errors);
     }
 
-    crate::phases::binder::call_normalizer::normalize_call_sites(
+    crate::phases::binder::call_normalizer::normalize_call_sites_with_symbols(
         &mut context.ast,
         &context.sources,
+        Some(&symbol_table),
     );
 
     // Pass 3: Detailed Type Checking & Expression Traversal
