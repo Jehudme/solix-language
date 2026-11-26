@@ -2,6 +2,17 @@
 
 All notable changes to this Solix package are documented in this file.
 
+## [2.2.0] - 2026-11-26
+
+### Bug Fixes
+
+- *(release)* Split macOS Xcode and Docker Linux/Windows bundled builds
+
+### Features
+
+- *(toolchain)* Containerize apple darwin cross-compilation everywhere (#276) (#277)
+- *(toolchain)* Mandate docker cross-compilation for native library builds (#253, #251) (#271)
+
 ## [2.1.1] - 2026-11-25
 
 ### Bug Fixes

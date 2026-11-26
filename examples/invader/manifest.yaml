@@ -1,6 +1,6 @@
 configuration:
   name: invader
-  version: "1.1.0"
+  version: "2.0.0"
   description: Cyber Neon Space Invaders Arcade Showcase built with Solix, Raylib and Solixlib
   license: Apache-2.0
   authors: []
@@ -18,10 +18,10 @@ profiles:
       - all
     dependencies:
       raylib:
-        version: "5.6.1"
+        version: "6.0.0"
         profile: release
       solix:
-        version: "2.1.1"
+        version: "2.2.0"
         profile: release
 
   debug:
@@ -36,10 +36,10 @@ profiles:
       - host
     dependencies:
       raylib:
-        version: "5.6.1"
+        version: "6.0.0"
         profile: release
       solix:
-        version: "2.1.1"
+        version: "2.2.0"
         profile: release
 
   test:
@@ -55,8 +55,8 @@ profiles:
       - host
     dependencies:
       raylib:
-        version: "5.6.1"
+        version: "6.0.0"
         profile: release
       solix:
-        version: "2.1.1"
+        version: "2.2.0"
         profile: release

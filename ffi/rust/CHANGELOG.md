@@ -2,6 +2,29 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [3.0.0] - 2026-11-26
+
+### Bug Fixes
+
+- *(tests)* Handle windows-msvc host triple in multi-platform resolution test
+- *(release)* Split macOS Xcode and Docker Linux/Windows bundled builds
+- *(toolchain)* Resolve default solix dependency from bundled manifest
+- *(manifest)* Provide line, column, and contextual diagnostics for manifest parse errors (#247) (#268)
+- *(templates)* Migrate project templates and examples to clean manifest.yaml (#246) (#267)
+- *(vscode)* Synchronize extension versioning and honor force flag (#264) (#265)
+
+### Features
+
+- *(toolchain)* Containerize apple darwin cross-compilation everywhere (#276) (#277)
+- *(toolchain)* Mandate docker cross-compilation for native library builds (#253, #251) (#271)
+- *(bench)* Add java runtime and compiler to cross-language benchmark suite (#245) (#270)
+- *(compiler)* Improve parser recovery, vscode discovery, and conditional checksums (#248, #249, #250) (#269)
+- *(toolchain)* Scaffold clean manifest with default solix dependency (#244) (#266)
+
+### Refactoring
+
+- *(raylib)* Emit root pascalcase functions and use solix-ffi (#272) (#273)
+
 ## [2.0.1] - 2026-11-25
 
 ### Bug Fixes
