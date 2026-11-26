@@ -217,4 +217,7 @@ The Language Server extracts doc comments (`///` and `/** ... */`) directly into
 1. **Completion Item Documentation**: Declarations in `textDocument/completion` results attach their doc comment string directly in `CompletionItem.documentation` upfront, allowing code completions in VS Code to immediately display formatted markdown descriptions without requiring a secondary `completionItem/resolve` round-trip.
 2. **Signature Help Parameter Documentation**: When signature help triggers on active parameter typing (`textDocument/signatureHelp`), structured `@param <name> <description>` tags are extracted from the callee's doc comments and attached to the corresponding `ParameterInformation.documentation`. Editors render the active parameter's description alongside its type in the signature tooltip.
 
+### 7.9 Multi-File Workspace Path Normalization & Windows Verbatim Prefix Stripping
+When discovering and analyzing project source files across workspace directories (`analyze_document`), file paths and document URIs are normalized using `solix_common::strip_windows_verbatim_prefix`. On Windows environments where path canonicalization injects `\\?\` prefixes (e.g. `\\?\C:\project\...`), stripping verbatim prefixes guarantees that target file comparisons and document dictionary keys align consistently between `Url::from_file_path` conversions and disk paths, preventing duplicate document registration and spurious duplicate symbol diagnostics.
+
 
