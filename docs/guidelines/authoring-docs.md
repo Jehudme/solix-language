@@ -66,15 +66,15 @@ docs/
 │   ├── package-solver-and-linking.md
 │   ├── native_interop.md
 │   ├── statements/         # Statement & Expression Compilation Mechanics with Bytecode
-│   ├── libraries/          # Standard Library v2.0.0 Formal Specifications
+│   ├── libraries/          # Standard Library v3.x Formal Specifications
 │   └── tools/              # CLI and LSP Tooling Specifications
 ├── architecture/           # Compiler Pipeline, Binder Passes, VirtualHeap, ARC & Exceptions
 ├── wiki/                   # Atomic Reference Wiki ("Fast Dictionary Reference")
 │   ├── README.md           # Master Wiki Index
-│   ├── errors/             # E0000..E0350 compiler errors & R0001..R0024 runtime traps
-│   ├── primitives/         # All 14 built-in primitive types & aliases
-│   ├── commands/           # solix compile, build, run, new, install, list, info
-│   └── keywords/           # 45+ reserved keywords grouped by syntactic category
+│   ├── errors/             # E0000..E0405, E9001 compiler/toolchain errors & R0000..R0027 runtime traps
+│   ├── primitives/         # All built-in primitive types & aliases
+│   ├── commands/           # solix compile, build, run, new, install, list, info, fmt, lsp, dap, clean, doc, wiki
+│   └── keywords/           # Reserved keywords grouped by syntactic category
 ├── guidelines/             # Engineering guidelines suite (GL-0001 - GL-0014)
 └── archive/                # Historical, deprecated, or superseded specifications
 ```
@@ -233,6 +233,6 @@ Reviewers and documentation maintainers **MUST** enforce the following checklist
 - [ ] **Rustdoc Coverage:** All new or updated public items in Rust crates contain `///` doc comments with `# Examples` passing `cargo test --doc`.
 - [ ] **Clap Option Synchronization:** CLI option names, short aliases, types, and defaults match `clap` source definitions byte-for-byte.
 - [ ] **Diagnostic Code Match:** Error codes and messages match `miette` definitions in compiler crates.
-- [ ] **Automated Drift & Link Verification (`scripts/ci/verify_docs.py`):** Passes `python3 scripts/ci/verify_docs.py` with zero defects, verifying complete subcommand coverage, deprecated term absence, link integrity, and `manifest.toml` section completeness.
+- [ ] **Automated Drift & Link Verification (`scripts/ci/verify_docs.py`):** Passes `python3 scripts/ci/verify_docs.py` with zero defects, verifying complete subcommand & `--long` CLI flag parity, diagnostic error-code coverage & `{:?}` hygiene, FFI `solix_vm_*` helper parity, deprecated term absence, link integrity, and `manifest.yaml` section completeness.
 - [ ] **No Aspirational Claims:** Unimplemented syntax is strictly excluded from active guides and wiki pages.
 - [ ] **Archival Discipline:** Deprecated specifications are moved to `docs/archive/` with the mandatory `[!CAUTION]` alert banner.

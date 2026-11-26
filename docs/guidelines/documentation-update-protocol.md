@@ -43,12 +43,13 @@ All contributors and CI verification pipelines **MUST** enforce the following ru
    ```
 5. **No Single-Letter Variables Mandate (GL-0011):**
    All code snippets in updated documentation **MUST NOT** use single-letter variable names (`x`, `y`, `i`, `n`, `s`, `v`, `e`). Every identifier must be descriptive (`coord_x`, `coord_y`, `index`, `item_count`, `error_val`).
-6. **No Legacy Syntax in Documentation:**
-   All new and updated documentation **MUST** use modern Solix v2.0 semantics:
+6. **No Legacy Syntax or Debug Leaks in Documentation & Diagnostics:**
+   All new and updated documentation **MUST** use modern Solix v3 semantics:
    * Scope resolution `::` for static methods, static fields, and enums (`Math::sin`, `Color::Red`).
    * `.slxb` and `.slxp` container extensions.
    * `manifest.yaml` (legacy `manifest.toml`) package metadata.
-   * Canonical diagnostic error codes (`E0000`–`E0299`, `R0001`–`R0024`).
+   * Canonical unique diagnostic error codes (`E0000`–`E0405`, `E9001`, `R0000`–`R0027`) with user-facing `Display` formatting (`GL-0011` Diagnostic Hygiene Rule — zero `{:?}` leaks).
+   * Complete CLI flag parity between `crates/solix-toolchain/src/cli.rs` and both `docs/spec/tools/cli/*.md` and `docs/wiki/commands/*.md`, and exact FFI symbol parity between `ffi/c/include/solix_ffi.h` / `crates/solix-runtime/src/native/ffi.rs` and `docs/wiki/ffi/c-cpp-sdk.md`.
 
 ---
 
@@ -64,10 +65,12 @@ When `git diff origin/dev...HEAD` reveals modifications in any left-hand subsyst
 | **Type Binder & Semantics**<br>`crates/solix-compilation/src/phases/binder/` | `docs/wiki/errors/binder-errors.md` (`E0201`–`E0299`) | `docs/spec/types.md` | `docs/architecture/binder_passes.md`<br>`docs/guide/04_classes_and_oop.md` |
 | **Emitter & Bytecode Codegen**<br>`crates/solix-compilation/src/phases/emitter/` | N/A | `docs/spec/vm_isa.md`<br>`docs/spec/disassembly-format-slxasm.md`<br>`docs/spec/statements/*.md` (Register VM lowering listings) | `docs/architecture/pipeline.md` |
 | **Register VM & Opcodes**<br>`crates/solix-runtime/src/vm/`<br>`crates/solix-common/src/bytecode/` | `docs/wiki/errors/runtime-errors.md` (`R0001`–`R0024`) | `docs/spec/vm_isa.md` | `docs/architecture/memory_model.md`<br>`docs/architecture/arc_internals.md`<br>`docs/architecture/exception_unwinding.md`<br>`docs/guide/05_memory_management_and_arc.md` |
-| **Native Interop & FFI**<br>`crates/solix-runtime/src/native/` | N/A | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
+| **Native Interop & FFI**<br>`crates/solix-runtime/src/native/`<br>`ffi/` | `docs/wiki/ffi/*.md` | `docs/spec/native_interop.md` | `docs/guide/09_native_plugins.md` |
 | **Standard Library**<br>`libraries/solixlib/src/` | N/A | `docs/spec/libraries/solixlib/*.md` | `docs/guide/` (relevant guides) |
-| **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/solix_scaffold.py`<br>`crates/solix-toolchain/assets/scripts/solix_build.py` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
-| **LSP & Formatting Subsystem**<br>`crates/solix-lsp/src/`<br>`crates/solix-toolchain/src/commands/(lsp\|fmt).rs` | `docs/wiki/commands/lsp.md`<br>`docs/wiki/commands/fmt.md` | `docs/spec/tools/lsp/protocol.md` | `docs/guide/editors_vscode.md` |
+| **Project Manifest & Scaffolding**<br>`crates/solix-toolchain/assets/scripts/solix_(scaffold\|build).py`<br>`crates/solix-toolchain/src/commands/new.rs`<br>`crates/solix-common/src/project.rs` | `docs/wiki/commands/package-commands.md` | `docs/spec/tools/cli/new.md`<br>`docs/spec/tools/cli/manifest.md` | `docs/guide/01_getting_started.md`<br>`docs/guide/packaging_and_resources.md` |
+| **Diagnostics & Error Codes**<br>`crates/*/src/diagnostics/`<br>`crates/solix-runtime/src/exceptions/errors.rs` | `docs/wiki/errors/*.md` (`E0000`–`E0405`, `E9001`, `R0000`–`R0027`) | `docs/spec/diagnostics.md` | Relevant subsystem architecture/guide docs |
+| **VS Code Extension & Grammars**<br>`editors/vscode/(src\|syntaxes\|package.json\|README.md)` | N/A | N/A | `docs/guide/editors_vscode.md`<br>`editors/vscode/README.md` |
+| **LSP & Formatting Subsystem**<br>`crates/solix-lsp/src/`<br>`crates/solix-toolchain/src/commands/(lsp\|fmt).rs` | `docs/wiki/commands/lsp.md`<br>`docs/wiki/commands/fmt.md` | `docs/spec/tools/lsp/protocol.md`<br>`docs/spec/tools/cli/fmt.md` | `docs/guide/editors_vscode.md` |
 | **CI Workflows & Release Governance**<br>`.github/workflows/`<br>`scripts/(ci\|docs\|release\|bench)/*.py` | N/A | `docs/spec/tools/cli/wiki.md` | `CONTRIBUTING.md`<br>`docs/guidelines/pr-and-release-governance.md`<br>`docs/guidelines/branching-conventions.md`<br>`docs/guide/release.md` |
 
 > [!NOTE]
@@ -102,16 +105,22 @@ Match each modified file against Section 3's Trigger Matrix. For example, if `cr
 - Ensure `docs/wiki/commands/` reflects all added/modified flags.
 - Ensure `docs/guide/01_getting_started.md` documents the practical developer usage.
 
-### Step 3: Run Automated Sync Checker
+### Step 3: Run Automated Sync & Parity Checkers
 ```bash
 python3 scripts/ci/doc_sync_check.py --base origin/dev
 python3 scripts/ci/doc_sync_check.py --all-docs
+python3 scripts/ci/verify_docs.py
 ```
 
 ### Step 4: Verify Markdown Links
 ```bash
 python3 scripts/ci/verify_doc_links.py
 ```
+
+### Step 4a: Diagnostic, CLI Flag & FFI Checklist
+- [ ] Every added or renamed error code (`E0xxx`, `R0xxx`, `E9001`) is unique, formats Solix types cleanly without `{:?}`, and has an entry in `docs/wiki/errors/*.md`.
+- [ ] Every visible CLI flag in `cli.rs` appears in both `docs/spec/tools/cli/*.md` and `docs/wiki/commands/*.md`.
+- [ ] Every exported `solix_vm_*` FFI helper in `ffi/c/include/solix_ffi.h` and `crates/solix-runtime/src/native/ffi.rs` matches `docs/wiki/ffi/c-cpp-sdk.md`.
 
 ### Step 5: Double Verification Pass
 Execute two consecutive clean test passes:
