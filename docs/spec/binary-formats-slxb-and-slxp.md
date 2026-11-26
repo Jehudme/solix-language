@@ -45,6 +45,10 @@ Every compiled `.slxb` file consists of a 16-byte fixed container header followe
 └────────────────────────────────────────────────────────┘
 ```
 
+### Strict Validation & Overflow Guarantees
+* **`try_to_bytes()` Checked Encoding**: Validates `u32` section item counts and UTF-8 string byte lengths via `u32::try_from`, returning `EmissionError::CorruptBinaryContainer` cleanly if any container limit or JSON metadata serialization fails instead of truncating with `as u32` or masking errors.
+* **`from_bytes()` Strict Decoding**: Rejects invalid boolean/option flag bytes (`> 1`, expecting strictly `0` or `1`), rejects malformed JSON `Type` descriptors rather than coercing to `Void`, enforces platform `usize` conversions and `MAX_INSTANCE_SIZE_BYTES` (`64 MiB`) class-size sanity limits, and pre-validates capacity via `ByteReader::checked_capacity`.
+
 ---
 
 ## 2. `.slxp` Package Container Layout
@@ -78,3 +82,4 @@ package.slxp (ZIP Container)
 * **Strict Loading Rule**: The runtime ONLY loads and registers libraries whose filenames start with `native_` (or platform equivalent `libnative_`).
 * **Transitive Dependency Isolation**: Auxiliary or transitive support libraries located in `bin/<target>/` that do not start with `native_` remain un-registered in the Solix VM FFI symbol table, ensuring dependencies cannot collide with user FFI bindings.
 * **Hermetic Search**: The runtime never searches host system `PATH` or arbitrary system directories; all native symbols are resolved strictly from the active package's `bin/<target>/` location.
+* **Root Binary Deduplication & Interface Bounds**: When an archive bundles both root `binaries.slxb` and a byte-identical legacy `bin/<package>.slxb` alias, `SlxarcArchive::extract_and_load` deduplicates them by SHA-256 digest before runtime loading; across multi-module loads, `RuntimeContext` rejects relocated `CallInterface` interface IDs exceeding the 8-bit opcode ceiling (`255`) rather than wrapping.

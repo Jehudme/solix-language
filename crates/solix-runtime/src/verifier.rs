@@ -9,19 +9,81 @@
 
 use crate::context::LoadedBinary;
 use crate::exceptions::RuntimeError;
-use solix_common::bytecode::{CompiledFunction, Instruction, OpCode};
+use solix_common::bytecode::{CompiledClass, CompiledFunction, Instruction, OpCode};
+use std::collections::HashMap;
+
+struct ClassVerificationIndex {
+    has_class_metadata: bool,
+    class_sizes_by_vtable: HashMap<u32, usize>,
+    max_instance_size: usize,
+    max_vtable_len: usize,
+    max_iface_slots: HashMap<u32, usize>,
+}
+
+impl ClassVerificationIndex {
+    fn from_classes(all_classes: &[CompiledClass]) -> Self {
+        let mut class_sizes_by_vtable = HashMap::with_capacity(all_classes.len());
+        let mut max_instance_size = 0usize;
+        let mut max_vtable_len = 0usize;
+        let mut max_iface_slots: HashMap<u32, usize> = HashMap::new();
+
+        for class_desc in all_classes {
+            class_sizes_by_vtable.insert(class_desc.vtable_id, class_desc.instance_size);
+            max_instance_size = max_instance_size.max(class_desc.instance_size);
+            max_vtable_len = max_vtable_len.max(class_desc.vtable.len());
+            for (iface_id, methods) in &class_desc.itable {
+                max_iface_slots
+                    .entry(*iface_id)
+                    .and_modify(|cur| *cur = (*cur).max(methods.len()))
+                    .or_insert(methods.len());
+            }
+        }
+
+        Self {
+            has_class_metadata: !all_classes.is_empty(),
+            class_sizes_by_vtable,
+            max_instance_size,
+            max_vtable_len,
+            max_iface_slots,
+        }
+    }
+}
 
 /// Verifies that all compiled functions across all loaded binaries satisfy bytecode safety proofs.
 ///
 /// # Errors
 /// Returns `RuntimeError::BinaryLoadError` if any register, branch target, constant pool index,
-/// or static variable offset violates integrity bounds.
+/// class/vtable/field operand, or static variable offset violates integrity bounds.
 pub fn verify_program(
     loaded_binaries: &[LoadedBinary],
     all_functions: &[CompiledFunction],
     total_static_space: u32,
 ) -> Result<(), RuntimeError> {
+    let flattened_classes: Vec<CompiledClass> = loaded_binaries
+        .iter()
+        .flat_map(|binary_unit| binary_unit.classes.iter().cloned())
+        .collect();
+    verify_program_with_classes(
+        loaded_binaries,
+        all_functions,
+        &flattened_classes,
+        total_static_space,
+    )
+}
+
+/// Verifies that all compiled functions satisfy bytecode safety proofs using relocated class tables.
+///
+/// # Errors
+/// Returns `RuntimeError::BinaryLoadError` if any register, branch target, constant pool index,
+/// class/vtable/field operand, or static variable offset violates integrity bounds.
+pub fn verify_program_with_classes(
+    loaded_binaries: &[LoadedBinary],
+    all_functions: &[CompiledFunction],
+    all_classes: &[CompiledClass],
+    total_static_space: u32,
+) -> Result<(), RuntimeError> {
     let total_functions = all_functions.len();
+    let class_index = ClassVerificationIndex::from_classes(all_classes);
     for (global_function_index, func) in all_functions.iter().enumerate() {
         let register_count = func.num_registers;
         let instruction_count = func.instructions.len();
@@ -30,15 +92,10 @@ pub fn verify_program(
             .iter()
             .find(|binary_unit| {
                 let start_index = binary_unit.function_id_offset as usize;
-                let end_index = start_index + binary_unit.function_count;
+                let Some(end_index) = start_index.checked_add(binary_unit.function_count) else {
+                    return false;
+                };
                 global_function_index >= start_index && global_function_index < end_index
-            })
-            .or_else(|| {
-                loaded_binaries.iter().find(|binary_unit| {
-                    (func.static_base_offset >= binary_unit.static_base_offset)
-                        && (func.static_base_offset
-                            <= binary_unit.static_base_offset + binary_unit.static_space_size)
-                })
             })
             .map_or(0, |binary_unit| binary_unit.constant_pool.values.len());
 
@@ -100,6 +157,7 @@ pub fn verify_program(
                 total_static_space,
                 owning_binary_pool_len,
                 total_functions,
+                &class_index,
                 &func.symbol,
             )?;
         }
@@ -118,6 +176,7 @@ fn verify_instruction(
     total_static_space: u32,
     constant_pool_len: usize,
     total_functions: usize,
+    class_index: &ClassVerificationIndex,
     function_symbol: &str,
 ) -> Result<(), RuntimeError> {
     let raw_opcode = instruction.raw_opcode();
@@ -145,15 +204,29 @@ fn verify_instruction(
     };
 
     let check_branch_target = |instruction_offset: i32| -> Result<(), RuntimeError> {
-        let target_program_counter = (instruction_index as i32) + instruction_offset;
-        if target_program_counter < 0 || (target_program_counter as usize) > instruction_count {
-            Err(RuntimeError::BinaryLoadError {
+        let target_signed = i32::try_from(instruction_index)
+            .ok()
+            .and_then(|pc_i32| pc_i32.checked_add(instruction_offset));
+        match target_signed {
+            Some(target_program_counter)
+                if target_program_counter >= 0
+                    && (target_program_counter as usize) <= instruction_count =>
+            {
+                Ok(())
+            }
+            Some(target_program_counter) => Err(RuntimeError::BinaryLoadError {
                 reason: format!(
                     "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: branch target {target_program_counter} is out of bounds (instruction count: {instruction_count})"
                 ),
-            })
-        } else {
-            Ok(())
+            }),
+            None => {
+                let wide_target = (instruction_index as i64) + i64::from(instruction_offset);
+                Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: branch target {wide_target} is out of bounds (instruction count: {instruction_count})"
+                    ),
+                })
+            }
         }
     };
 
@@ -374,6 +447,33 @@ fn verify_instruction(
                     });
                 }
             }
+            if class_index.has_class_metadata {
+                if opcode == OpCode::CallInterface {
+                    let target = instruction.call_target();
+                    let iface_id = (target >> 8) as u32;
+                    let slot = (target & 0xFF) as usize;
+                    if iface_id != 0
+                        && let Some(&method_count) = class_index.max_iface_slots.get(&iface_id)
+                        && slot >= method_count
+                    {
+                        return Err(RuntimeError::BinaryLoadError {
+                            reason: format!(
+                                "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: CallInterface target (interface {iface_id}, slot {slot}) exceeds loaded method count {method_count}"
+                            ),
+                        });
+                    }
+                } else {
+                    let slot = (instruction.call_target() & 0x7FFF) as usize;
+                    if slot >= class_index.max_vtable_len {
+                        return Err(RuntimeError::BinaryLoadError {
+                            reason: format!(
+                                "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: virtual method slot {slot} exceeds max vtable length {}",
+                                class_index.max_vtable_len
+                            ),
+                        });
+                    }
+                }
+            }
         }
 
         OpCode::Return => {}
@@ -388,6 +488,24 @@ fn verify_instruction(
 
         OpCode::AllocObject => {
             check_reg(instruction.dst(), "dst")?;
+            if class_index.has_class_metadata {
+                let vtable_id = instruction.src1() as u32;
+                let alloc_size = instruction.src2() as usize;
+                let Some(&expected_size) = class_index.class_sizes_by_vtable.get(&vtable_id) else {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: AllocObject vtable ID {vtable_id} does not match any loaded class"
+                        ),
+                    });
+                };
+                if alloc_size < 8 || alloc_size < expected_size {
+                    return Err(RuntimeError::BinaryLoadError {
+                        reason: format!(
+                            "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: AllocObject size {alloc_size} violates class header/instance size requirement ({expected_size} bytes)"
+                        ),
+                    });
+                }
+            }
         }
 
         OpCode::AllocObjectExtern => {
@@ -405,11 +523,27 @@ fn verify_instruction(
         OpCode::GetField | OpCode::GetFieldI32 | OpCode::GetFieldF64 => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "object_reg")?;
+            check_field_bounds(
+                class_index,
+                opcode,
+                instruction.flags(),
+                instruction.src2() as usize,
+                function_symbol,
+                instruction_index,
+            )?;
         }
 
         OpCode::SetField | OpCode::SetFieldI32 | OpCode::SetFieldF64 => {
             check_reg(instruction.dst(), "value_reg")?;
             check_reg(instruction.src1(), "object_reg")?;
+            check_field_bounds(
+                class_index,
+                opcode,
+                instruction.flags(),
+                instruction.src2() as usize,
+                function_symbol,
+                instruction_index,
+            )?;
         }
 
         OpCode::GetStatic
@@ -463,11 +597,29 @@ fn verify_instruction(
 
         OpCode::AllocTuple => {
             check_reg(instruction.dst(), "dst")?;
+            const MAX_TUPLE_ELEMENTS: u16 = 4096;
+            let tuple_count = instruction.src1();
+            if tuple_count > MAX_TUPLE_ELEMENTS {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: tuple element count {tuple_count} exceeds maximum {MAX_TUPLE_ELEMENTS}"
+                    ),
+                });
+            }
         }
 
         OpCode::GetTuple => {
             check_reg(instruction.dst(), "dst")?;
             check_reg(instruction.src1(), "tuple_reg")?;
+            const MAX_TUPLE_ELEMENTS: u16 = 4096;
+            let tuple_slot = instruction.src2();
+            if tuple_slot >= MAX_TUPLE_ELEMENTS {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: tuple slot index {tuple_slot} exceeds maximum {MAX_TUPLE_ELEMENTS}"
+                    ),
+                });
+            }
         }
 
         OpCode::PackClosure => {
@@ -568,9 +720,16 @@ fn verify_instruction(
         OpCode::ForLoopI32 => {
             check_reg(instruction.dst(), "idx_reg")?;
             check_reg(instruction.src1(), "bound_reg")?;
-            if (instruction.flags() & 0x80) != 0 {
-                let step_reg = (instruction.flags() & 0x1F) as u16;
+            let loop_flags = instruction.flags();
+            if (loop_flags & 0x80) != 0 {
+                let step_reg = (loop_flags & 0x1F) as u16;
                 check_reg(step_reg, "step_reg")?;
+            } else if (loop_flags & 0x0F) != 0 {
+                return Err(RuntimeError::BinaryLoadError {
+                    reason: format!(
+                        "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: invalid ForLoopI32 reserved flags 0x{loop_flags:02X}"
+                    ),
+                });
             }
             let offset = instruction.src2() as i16 as i32;
             check_branch_target(offset)?;
@@ -599,5 +758,47 @@ fn verify_instruction(
         }
     }
 
+    Ok(())
+}
+
+fn check_field_bounds(
+    class_index: &ClassVerificationIndex,
+    opcode: OpCode,
+    flags: u8,
+    field_offset: usize,
+    function_symbol: &str,
+    instruction_index: usize,
+) -> Result<(), RuntimeError> {
+    if !class_index.has_class_metadata {
+        return Ok(());
+    }
+    let tag_bits = match opcode {
+        OpCode::GetField if flags > 1 => flags >> 1,
+        OpCode::SetField => (flags & !solix_common::bytecode::instruction::FLAG_MOVE) >> 1,
+        _ => 0,
+    };
+    let min_width = match opcode {
+        OpCode::GetFieldF64 | OpCode::SetFieldF64 => 8usize,
+        OpCode::GetFieldI32 | OpCode::SetFieldI32 => 4usize,
+        _ => match tag_bits {
+            7 | 8 | 10 | 12 => 8,
+            5 | 6 | 9 => 4,
+            3 | 4 => 2,
+            _ => 1,
+        },
+    };
+    if field_offset < 8
+        || !field_offset.is_multiple_of(4)
+        || field_offset
+            .checked_add(min_width)
+            .is_none_or(|end_offset| end_offset > class_index.max_instance_size)
+    {
+        return Err(RuntimeError::BinaryLoadError {
+            reason: format!(
+                "AOT verifier failed in function '{function_symbol}' at PC {instruction_index}: field offset {field_offset} (width {min_width}) violates object bounds/alignment (max instance size: {})",
+                class_index.max_instance_size
+            ),
+        });
+    }
     Ok(())
 }

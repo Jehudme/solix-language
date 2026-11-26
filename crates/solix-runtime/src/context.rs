@@ -518,8 +518,15 @@ impl RuntimeContext {
                                 let old_iface_id = target >> 8;
                                 if old_iface_id > 0 {
                                     let slot = target & 0xFF;
-                                    let new_target =
-                                        ((old_iface_id + vtable_offset as u16) << 8) | slot;
+                                    let new_iface_id = u32::from(old_iface_id)
+                                        .checked_add(vtable_offset)
+                                        .filter(|&relocated_id| relocated_id <= u32::from(u8::MAX))
+                                        .ok_or_else(|| RuntimeError::BinaryLoadError {
+                                            reason: format!(
+                                                "Relocated CallInterface interface ID ({old_iface_id} + {vtable_offset}) exceeds 8-bit opcode encoding limit (255)"
+                                            ),
+                                        })?;
+                                    let new_target = ((new_iface_id as u16) << 8) | slot;
                                     *inst = Instruction::format_call(
                                         OpCode::CallInterface,
                                         inst.call_dst(),
@@ -783,8 +790,13 @@ impl RuntimeContext {
             }
         }
 
-        // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, and static space
-        crate::verifier::verify_program(&loaded_binaries, &all_functions, current_static_offset)?;
+        // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, class tables, and static space
+        crate::verifier::verify_program_with_classes(
+            &loaded_binaries,
+            &all_functions,
+            &all_classes,
+            current_static_offset,
+        )?;
 
         // Append a sentinel `OpCode::Return` to functions whose execution can reach `instructions.len()`
         // so `run_fast_trap::<false, _>` never needs a per-instruction `pc >= inst_len` bounds check.

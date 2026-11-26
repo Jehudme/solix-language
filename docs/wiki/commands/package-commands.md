@@ -142,6 +142,9 @@ solix export package <path> --output <destination.slxp>
 solix export binaries <path> --output <destination.slxb>
 ```
 
+> [!NOTE]
+> Package archives (`.slxp` / `.slxarc`) load the root `binaries.slxb` container as the primary program and deduplicate any byte-identical legacy `bin/<package>.slxb` alias by SHA-256 during extraction.
+
 ---
 
 ## 5. `solix list`

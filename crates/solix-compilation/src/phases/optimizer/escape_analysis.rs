@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 
 use solix_common::bytecode::{CompiledClass, CompiledFunction, Instruction, OpCode};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Lifetime and escape classification of a heap-allocated aggregate or reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -606,6 +606,55 @@ fn find_constructor_call(
     None
 }
 
+/// Builds forward CFG successor lists for instructions within `[0..inst_limit)`.
+fn build_forward_cfg_successors(function: &CompiledFunction, inst_limit: usize) -> Vec<Vec<usize>> {
+    let mut cfg_successors = vec![Vec::new(); inst_limit];
+    let total_insts = function.instructions.len();
+
+    for pc_index in 0..inst_limit {
+        let instruction = &function.instructions[pc_index];
+        let raw_opcode = instruction.raw_opcode();
+        let successors = &mut cfg_successors[pc_index];
+
+        let is_unconditional_terminator = raw_opcode == OpCode::Jump as u8
+            || raw_opcode == OpCode::Return as u8
+            || raw_opcode == OpCode::ReturnValue as u8
+            || raw_opcode == OpCode::Throw as u8
+            || raw_opcode == OpCode::Exit as u8
+            || raw_opcode == OpCode::TailCallDirect as u8;
+
+        if !is_unconditional_terminator && pc_index + 1 < inst_limit {
+            successors.push(pc_index + 1);
+        }
+
+        if let Some(target_pc) = decode_branch_target(instruction, pc_index, total_insts)
+            && target_pc < inst_limit
+            && !successors.contains(&target_pc)
+        {
+            successors.push(target_pc);
+        }
+
+        for handler in &function.exception_handlers {
+            let try_start = handler.try_start_pc as usize;
+            let try_end = handler.try_end_pc as usize;
+            if pc_index >= try_start && pc_index < try_end {
+                let handler_pc = handler.handler_pc as usize;
+                if handler_pc < inst_limit && !successors.contains(&handler_pc) {
+                    successors.push(handler_pc);
+                }
+                if let Some(finally_pc_val) = handler.finally_pc {
+                    let finally_pc = finally_pc_val as usize;
+                    if finally_pc < inst_limit && !successors.contains(&finally_pc) {
+                        successors.push(finally_pc);
+                    }
+                }
+            }
+        }
+    }
+
+    cfg_successors
+}
+
 /// Performs flow-sensitive escape analysis on a compiled function, classifying
 /// candidate heap allocations into `NoEscape`, `ArgEscape`, or `GlobalEscape`.
 pub fn classify_allocations(
@@ -615,6 +664,7 @@ pub fn classify_allocations(
 ) -> HashMap<usize, (u16, EscapeCategory)> {
     let mut allocation_categories = HashMap::new();
     let inst_count = function.instructions.len();
+    let cfg_successors = build_forward_cfg_successors(function, inst_count);
     let mut jump_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
     let mut backward_loops: Vec<(usize, usize)> = Vec::new();
 
@@ -703,87 +753,125 @@ pub fn classify_allocations(
             }
 
             let scan_end = enclosing_outer_back.map_or(inst_count, |outer_back| outer_back + 1);
-            let mut target_registers = HashSet::new();
-            target_registers.insert(allocated_register);
-            let mut ever_aliased_registers = target_registers.clone();
+            let mut ever_aliased_registers = HashSet::new();
+            ever_aliased_registers.insert(allocated_register);
             let mut overall_category = EscapeCategory::NoEscape;
 
-            for (inspection_index, inspection_instruction) in function
-                .instructions
-                .iter()
-                .enumerate()
-                .take(scan_end)
-                .skip(instruction_index + 1)
-            {
-                let raw_opcode = inspection_instruction.raw_opcode();
+            let start_pc = instruction_index + 1;
+            if start_pc < scan_end {
+                let mut in_aliases: Vec<Option<HashSet<u16>>> = vec![None; scan_end];
+                let mut worklist = VecDeque::new();
+                in_aliases[start_pc] = Some(HashSet::from([allocated_register]));
+                worklist.push_back(start_pc);
 
-                // Check for aliasing assignment or register overwrite
-                if raw_opcode == OpCode::Mov as u8 {
-                    let source_register = inspection_instruction.src1();
-                    let destination_register = inspection_instruction.dst();
-                    if target_registers.contains(&source_register) {
-                        target_registers.insert(destination_register);
-                        ever_aliased_registers.insert(destination_register);
-                    } else {
-                        target_registers.remove(&destination_register);
-                    }
-                    continue;
-                }
+                while let Some(inspection_index) = worklist.pop_front() {
+                    let Some(mut aliases) = in_aliases[inspection_index].clone() else {
+                        continue;
+                    };
+                    let inspection_instruction = &function.instructions[inspection_index];
+                    let raw_opcode = inspection_instruction.raw_opcode();
 
-                // Check CallDirect (constructor or pure getter vs escaping call):
-                if raw_opcode == OpCode::CallDirect as u8 {
-                    let argument_base = inspection_instruction.arg_base();
-                    let argument_count = inspection_instruction.arg_count() as u16;
-                    let call_dst = inspection_instruction.call_dst();
-
-                    let is_immediate_constructor =
-                        Some(inspection_index) == constructor_call_pc_index;
-
-                    if is_immediate_constructor {
-                        if let Some(window_base) = constructor_window_base {
-                            target_registers.remove(&window_base);
+                    if raw_opcode == OpCode::Switch as u8 {
+                        if !aliases.is_empty() {
+                            overall_category = EscapeCategory::GlobalEscape;
+                            break;
                         }
-                    } else if argument_count == 1 && target_registers.contains(&argument_base) {
-                        let getter_offset = all_functions
-                            .get(inspection_instruction.call_target() as usize)
-                            .and_then(analyze_forwarding_getter);
-                        if getter_offset.is_some() {
-                            target_registers.remove(&call_dst);
-                            continue;
+                    } else if raw_opcode == OpCode::Mov as u8 {
+                        let source_register = inspection_instruction.src1();
+                        let destination_register = inspection_instruction.dst();
+                        if aliases.contains(&source_register) {
+                            aliases.insert(destination_register);
+                            ever_aliased_registers.insert(destination_register);
+                        } else {
+                            aliases.remove(&destination_register);
                         }
-                        overall_category = EscapeCategory::GlobalEscape;
-                        break;
-                    } else {
-                        for reg_offset in 0..argument_count {
-                            if target_registers.contains(&(argument_base + reg_offset)) {
+                    } else if raw_opcode == OpCode::CallDirect as u8 {
+                        let argument_base = inspection_instruction.arg_base();
+                        let argument_count = inspection_instruction.arg_count() as u16;
+                        let call_dst = inspection_instruction.call_dst();
+
+                        let is_immediate_constructor =
+                            Some(inspection_index) == constructor_call_pc_index;
+
+                        if is_immediate_constructor {
+                            if let Some(window_base) = constructor_window_base {
+                                aliases.remove(&window_base);
+                            }
+                            aliases.remove(&call_dst);
+                        } else if argument_count == 1 && aliases.contains(&argument_base) {
+                            let getter_offset = all_functions
+                                .get(inspection_instruction.call_target() as usize)
+                                .and_then(analyze_forwarding_getter);
+                            if getter_offset.is_some() {
+                                aliases.remove(&call_dst);
+                            } else {
                                 overall_category = EscapeCategory::GlobalEscape;
                                 break;
                             }
+                        } else {
+                            let mut escaped_via_call = false;
+                            for reg_offset in 0..argument_count {
+                                if aliases.contains(&(argument_base + reg_offset)) {
+                                    escaped_via_call = true;
+                                    break;
+                                }
+                            }
+                            if escaped_via_call {
+                                overall_category = EscapeCategory::GlobalEscape;
+                                break;
+                            }
+                            aliases.remove(&call_dst);
                         }
-                        if overall_category == EscapeCategory::GlobalEscape {
-                            break;
+                    } else {
+                        if let Some(category) =
+                            evaluate_instruction_escape(inspection_instruction, &aliases)
+                        {
+                            if category == EscapeCategory::GlobalEscape {
+                                overall_category = EscapeCategory::GlobalEscape;
+                                break;
+                            } else if category == EscapeCategory::ArgEscape
+                                && overall_category == EscapeCategory::NoEscape
+                            {
+                                overall_category = EscapeCategory::ArgEscape;
+                            }
+                        }
+
+                        if raw_opcode == OpCode::UnpackCaptures as u8 {
+                            let capture_base = inspection_instruction.arg_base();
+                            let capture_count = inspection_instruction.arg_count() as u16;
+                            for reg_offset in 0..capture_count {
+                                aliases.remove(&(capture_base + reg_offset));
+                            }
+                        } else if let Some(written_reg) =
+                            instruction_write_dst(inspection_instruction)
+                        {
+                            aliases.remove(&written_reg);
                         }
                     }
-                    target_registers.remove(&call_dst);
-                    continue;
-                }
 
-                if let Some(category) =
-                    evaluate_instruction_escape(inspection_instruction, &target_registers)
-                {
-                    if category == EscapeCategory::GlobalEscape {
-                        overall_category = EscapeCategory::GlobalEscape;
-                        break;
-                    } else if category == EscapeCategory::ArgEscape
-                        && overall_category == EscapeCategory::NoEscape
-                    {
-                        overall_category = EscapeCategory::ArgEscape;
+                    for &succ_pc in &cfg_successors[inspection_index] {
+                        if succ_pc <= instruction_index || succ_pc >= scan_end {
+                            continue;
+                        }
+                        let changed = match &mut in_aliases[succ_pc] {
+                            Some(existing) => {
+                                let mut updated = false;
+                                for &alias_reg in &aliases {
+                                    if existing.insert(alias_reg) {
+                                        updated = true;
+                                    }
+                                }
+                                updated
+                            }
+                            slot @ None => {
+                                *slot = Some(aliases.clone());
+                                true
+                            }
+                        };
+                        if changed {
+                            worklist.push_back(succ_pc);
+                        }
                     }
-                }
-
-                // Clear overwritten registers from live aliases
-                if let Some(written_reg) = instruction_write_dst(inspection_instruction) {
-                    target_registers.remove(&written_reg);
                 }
             }
 
@@ -953,9 +1041,9 @@ fn try_scalar_replace_one(
     let constructor_target_func_index = ctor_info.map(|(_, _, func_id)| func_id);
 
     // Phase A: Pre-validate all constructor args, getter reads, and field reads before mutating anything
-    let mut sim_aliases = HashSet::new();
-    sim_aliases.insert(allocated_register);
-    let mut ever_aliases = sim_aliases.clone();
+    let mut initial_known_fields: HashSet<u16> = HashSet::new();
+    let mut ever_aliases = HashSet::from([allocated_register]);
+    let mut sim_check_aliases = HashSet::from([allocated_register]);
     let mut sim_known_fields: HashSet<u16> = HashSet::new();
 
     let ctor_field_to_param = if let (Some(target_func_idx), Some(_)) =
@@ -968,6 +1056,7 @@ fn try_scalar_replace_one(
             return false;
         };
         for &offset in field_to_param.keys() {
+            initial_known_fields.insert(offset);
             sim_known_fields.insert(offset);
         }
         Some(field_to_param)
@@ -1016,70 +1105,159 @@ fn try_scalar_replace_one(
     }
 
     let mut last_use_or_write_pc = allocation_pc;
-    let mut sim_check_aliases = HashSet::new();
-    sim_check_aliases.insert(allocated_register);
-    let mut can_finish = true;
-    for (inspection_index, &inst) in function
-        .instructions
-        .iter()
-        .enumerate()
-        .take(rewrite_limit)
-        .skip(allocation_pc + 1)
-    {
-        let raw_opcode = inst.raw_opcode();
+    let mut may_aliases: Vec<Option<HashSet<u16>>> = vec![None; rewrite_limit];
+    let mut must_aliases: Vec<Option<HashSet<u16>>> = vec![None; rewrite_limit];
+    let mut must_known_fields: Vec<Option<HashSet<u16>>> = vec![None; rewrite_limit];
 
-        if raw_opcode == OpCode::Mov as u8 {
-            if sim_aliases.contains(&inst.src1()) {
-                sim_aliases.insert(inst.dst());
-                ever_aliases.insert(inst.dst());
-                sim_check_aliases.insert(inst.dst());
-            } else {
-                sim_aliases.remove(&inst.dst());
-            }
-            continue;
-        }
+    if allocation_pc + 1 < rewrite_limit {
+        let cfg_successors = build_forward_cfg_successors(function, rewrite_limit);
+        let start_pc = allocation_pc + 1;
+        may_aliases[start_pc] = Some(HashSet::from([allocated_register]));
+        must_aliases[start_pc] = Some(HashSet::from([allocated_register]));
+        must_known_fields[start_pc] = Some(initial_known_fields);
+        let mut worklist = VecDeque::from([start_pc]);
 
-        if raw_opcode == OpCode::SetField as u8 && sim_aliases.contains(&inst.src1()) {
-            sim_known_fields.insert(inst.src2());
-            last_use_or_write_pc = inspection_index;
-        } else if raw_opcode == OpCode::GetField as u8 && sim_aliases.contains(&inst.src1()) {
-            if !sim_known_fields.contains(&inst.src2()) {
+        while let Some(inspection_index) = worklist.pop_front() {
+            let (Some(mut cur_may), Some(mut cur_must), Some(mut cur_known)) = (
+                may_aliases[inspection_index].clone(),
+                must_aliases[inspection_index].clone(),
+                must_known_fields[inspection_index].clone(),
+            ) else {
+                continue;
+            };
+
+            let inst = function.instructions[inspection_index];
+            let raw_opcode = inst.raw_opcode();
+
+            if raw_opcode == OpCode::Switch as u8 && !cur_may.is_empty() {
                 return false;
             }
-            last_use_or_write_pc = inspection_index;
-        } else if raw_opcode == OpCode::CallDirect as u8 {
-            let arg_base = inst.arg_base();
-            let arg_count = inst.arg_count();
-            let is_ctor = Some(inspection_index) == constructor_call_pc;
-            if is_ctor {
-                sim_aliases.remove(&arg_base);
-                last_use_or_write_pc = inspection_index;
-            } else if arg_count == 1 && sim_aliases.contains(&arg_base) {
-                let Some(getter_func) = all_functions.get(inst.call_target() as usize) else {
-                    return false;
-                };
-                let Some(getter_offset) = analyze_forwarding_getter(getter_func) else {
-                    return false;
-                };
-                if !sim_known_fields.contains(&getter_offset) {
+            if cur_may
+                .iter()
+                .any(|&reg| !cur_must.contains(&reg) && instruction_reads_reg(&inst, reg))
+            {
+                return false;
+            }
+
+            if raw_opcode == OpCode::Mov as u8 {
+                if cur_must.contains(&inst.src1()) {
+                    cur_may.insert(inst.dst());
+                    cur_must.insert(inst.dst());
+                    ever_aliases.insert(inst.dst());
+                    sim_check_aliases.insert(inst.dst());
+                } else {
+                    cur_may.remove(&inst.dst());
+                    cur_must.remove(&inst.dst());
+                }
+            } else if raw_opcode == OpCode::SetField as u8 && cur_must.contains(&inst.src1()) {
+                cur_known.insert(inst.src2());
+                sim_known_fields.insert(inst.src2());
+                last_use_or_write_pc = last_use_or_write_pc.max(inspection_index);
+            } else if raw_opcode == OpCode::GetField as u8 && cur_must.contains(&inst.src1()) {
+                if !cur_known.contains(&inst.src2()) {
                     return false;
                 }
-                last_use_or_write_pc = inspection_index;
-            } else {
-                for offset in 0..arg_count as u16 {
-                    if sim_aliases.contains(&(arg_base + offset)) {
-                        can_finish = false;
-                        break;
+                last_use_or_write_pc = last_use_or_write_pc.max(inspection_index);
+                cur_may.remove(&inst.dst());
+                cur_must.remove(&inst.dst());
+            } else if raw_opcode == OpCode::CallDirect as u8 {
+                let arg_base = inst.arg_base();
+                let arg_count = inst.arg_count();
+                let call_dst = inst.call_dst();
+                let is_ctor = Some(inspection_index) == constructor_call_pc;
+                if is_ctor {
+                    cur_may.remove(&arg_base);
+                    cur_must.remove(&arg_base);
+                    cur_may.remove(&call_dst);
+                    cur_must.remove(&call_dst);
+                    last_use_or_write_pc = last_use_or_write_pc.max(inspection_index);
+                } else if arg_count == 1 && cur_must.contains(&arg_base) {
+                    let Some(getter_func) = all_functions.get(inst.call_target() as usize) else {
+                        return false;
+                    };
+                    let Some(getter_offset) = analyze_forwarding_getter(getter_func) else {
+                        return false;
+                    };
+                    if !cur_known.contains(&getter_offset) {
+                        return false;
+                    }
+                    cur_may.remove(&call_dst);
+                    cur_must.remove(&call_dst);
+                    last_use_or_write_pc = last_use_or_write_pc.max(inspection_index);
+                } else {
+                    for offset in 0..arg_count as u16 {
+                        if cur_may.contains(&(arg_base + offset)) {
+                            return false;
+                        }
+                    }
+                    cur_may.remove(&call_dst);
+                    cur_must.remove(&call_dst);
+                }
+            } else if raw_opcode == OpCode::UnpackCaptures as u8 {
+                let capture_base = inst.arg_base();
+                let capture_count = inst.arg_count() as u16;
+                for offset in 0..capture_count {
+                    let capture_reg = capture_base + offset;
+                    cur_may.remove(&capture_reg);
+                    cur_must.remove(&capture_reg);
+                }
+            } else if let Some(written) = instruction_write_dst(&inst) {
+                cur_may.remove(&written);
+                cur_must.remove(&written);
+            }
+
+            for &succ_pc in &cfg_successors[inspection_index] {
+                if succ_pc <= allocation_pc || succ_pc >= rewrite_limit {
+                    continue;
+                }
+                let mut changed = false;
+
+                match &mut may_aliases[succ_pc] {
+                    Some(existing_may) => {
+                        for &reg in &cur_may {
+                            if existing_may.insert(reg) {
+                                changed = true;
+                            }
+                        }
+                    }
+                    slot @ None => {
+                        *slot = Some(cur_may.clone());
+                        changed = true;
                     }
                 }
-                if !can_finish {
-                    return false;
+
+                match &mut must_aliases[succ_pc] {
+                    Some(existing_must) => {
+                        let prev_len = existing_must.len();
+                        existing_must.retain(|reg| cur_must.contains(reg));
+                        if existing_must.len() != prev_len {
+                            changed = true;
+                        }
+                    }
+                    slot @ None => {
+                        *slot = Some(cur_must.clone());
+                        changed = true;
+                    }
+                }
+
+                match &mut must_known_fields[succ_pc] {
+                    Some(existing_known) => {
+                        let prev_len = existing_known.len();
+                        existing_known.retain(|field| cur_known.contains(field));
+                        if existing_known.len() != prev_len {
+                            changed = true;
+                        }
+                    }
+                    slot @ None => {
+                        *slot = Some(cur_known.clone());
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    worklist.push_back(succ_pc);
                 }
             }
-        }
-
-        if let Some(written) = instruction_write_dst(&inst) {
-            sim_aliases.remove(&written);
         }
     }
 
@@ -1087,6 +1265,7 @@ fn try_scalar_replace_one(
     if ctor_plan.len() == 1
         && sim_known_fields.len() == 1
         && let Some((_offset, Some((writer_pc, _)))) = ctor_plan.first()
+        && let Some(ctor_pc) = constructor_call_pc
     {
         let reads_alloc_in_ctor_setup = function.instructions[(allocation_pc + 1)..*writer_pc]
             .iter()
@@ -1100,7 +1279,15 @@ fn try_scalar_replace_one(
                 }
                 instruction_reads_reg(setup_inst, allocated_register)
             });
-        if !reads_alloc_in_ctor_setup {
+        let overwrites_alloc_before_last_use =
+            ((ctor_pc + 1)..=last_use_or_write_pc).any(|pc_idx| {
+                let later = &function.instructions[pc_idx];
+                instruction_write_dst(later) == Some(allocated_register)
+                    || (later.raw_opcode() == OpCode::UnpackCaptures as u8
+                        && allocated_register >= later.arg_base()
+                        && allocated_register < later.arg_base() + later.arg_count() as u16)
+            });
+        if !reads_alloc_in_ctor_setup && !overwrites_alloc_before_last_use {
             reuse_alloc_reg_as_single_field = true;
         }
     }
@@ -1203,31 +1390,29 @@ fn try_scalar_replace_one(
     }
 
     // 3. Rewrite Mov aliases, SetField, GetField, pure getter CallDirect, and DecRef/IncRef
-    let mut rewrite_aliases = HashSet::new();
-    rewrite_aliases.insert(allocated_register);
-
     for current_index in (allocation_pc + 1)..rewrite_limit {
         if ignored_ctor_writer_pcs.contains(&current_index) {
             continue;
         }
+        let Some(pc_must_aliases) = must_aliases
+            .get(current_index)
+            .and_then(|entry| entry.as_ref())
+        else {
+            continue;
+        };
         let current_instruction = function.instructions[current_index];
         let raw_opcode = current_instruction.raw_opcode();
 
         if raw_opcode == OpCode::Mov as u8 {
-            let src_reg = current_instruction.src1();
-            let dst_reg = current_instruction.dst();
-            if rewrite_aliases.contains(&src_reg) {
-                rewrite_aliases.insert(dst_reg);
+            if pc_must_aliases.contains(&current_instruction.src1()) {
                 function.instructions[current_index] =
                     Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
-            } else {
-                rewrite_aliases.remove(&dst_reg);
             }
             continue;
         }
 
         if raw_opcode == OpCode::SetField as u8
-            && rewrite_aliases.contains(&current_instruction.src1())
+            && pc_must_aliases.contains(&current_instruction.src1())
         {
             let offset = current_instruction.src2();
             let value_register = current_instruction.dst();
@@ -1247,7 +1432,7 @@ fn try_scalar_replace_one(
         }
 
         if raw_opcode == OpCode::GetField as u8
-            && rewrite_aliases.contains(&current_instruction.src1())
+            && pc_must_aliases.contains(&current_instruction.src1())
         {
             let offset = current_instruction.src2();
             let destination_register = current_instruction.dst();
@@ -1260,7 +1445,6 @@ fn try_scalar_replace_one(
                     0,
                 );
             }
-            rewrite_aliases.remove(&destination_register);
             continue;
         }
 
@@ -1269,7 +1453,7 @@ fn try_scalar_replace_one(
             let arg_count = current_instruction.arg_count();
             let call_dst = current_instruction.call_dst();
             if arg_count == 1
-                && rewrite_aliases.contains(&arg_base)
+                && pc_must_aliases.contains(&arg_base)
                 && let Some(getter_offset) = all_functions
                     .get(current_instruction.call_target() as usize)
                     .and_then(analyze_forwarding_getter)
@@ -1283,25 +1467,13 @@ fn try_scalar_replace_one(
                         Instruction::format_a(OpCode::Mov, 0, call_dst, source_value_register, 0);
                 }
             }
-            rewrite_aliases.remove(&call_dst);
             continue;
         }
 
         if (raw_opcode == OpCode::DecRef as u8 || raw_opcode == OpCode::IncRef as u8)
-            && rewrite_aliases.contains(&current_instruction.dst())
+            && pc_must_aliases.contains(&current_instruction.dst())
         {
             function.instructions[current_index] = Instruction::format_a(OpCode::Nop, 0, 0, 0, 0);
-            continue;
-        }
-
-        if current_instruction.raw_opcode() == OpCode::UnpackCaptures as u8 {
-            let cap_base = current_instruction.arg_base();
-            let cap_count = current_instruction.arg_count() as u16;
-            for cap_reg in cap_base..cap_base + cap_count {
-                rewrite_aliases.remove(&cap_reg);
-            }
-        } else if let Some(written) = instruction_write_dst(&current_instruction) {
-            rewrite_aliases.remove(&written);
         }
     }
 

@@ -348,3 +348,283 @@ platforms = ["{host_triple}"]
         "Archive with tampered native SHA-256 checksum MUST fail verification"
     );
 }
+
+#[test]
+fn test_slxb_rejects_invalid_flag_bytes_malformed_type_json_and_huge_instance_size() {
+    use solix_common::diagnostics::EmissionError;
+
+    let mut program = BinaryProgram::new();
+    program
+        .classes
+        .push(CompiledClass::new("SizedObj", 0, None, 24));
+    let mut func = CompiledFunction::new("main", 0, 0, 2);
+    func.instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    program.functions.push(func);
+    program.entry_point_id = Some(0);
+
+    let valid_bytes = program
+        .try_to_bytes()
+        .expect("Valid BinaryProgram must serialize cleanly");
+
+    // 1. Corrupt option/bool flag byte at Header entry_point_id tag (offset 12) to > 1
+    let mut bad_flag = valid_bytes.clone();
+    bad_flag[12] = 2;
+    assert!(
+        matches!(
+            BinaryProgram::from_bytes(&bad_flag),
+            Err(EmissionError::CorruptBinaryContainer { section, .. }) if section == "Header"
+        ),
+        "Flag byte > 1 must return CorruptBinaryContainer instead of coercing to false/None"
+    );
+
+    // 2. Corrupt JSON Type descriptor inside Functions section
+    let mut bad_json = valid_bytes.clone();
+    let json_pos = bad_json
+        .windows(b"{\"Primitive\"".len())
+        .position(|window| window == b"{\"Primitive\"")
+        .expect("Serialized function return_type JSON must be present");
+    bad_json[json_pos] = b'!';
+    assert!(
+        matches!(
+            BinaryProgram::from_bytes(&bad_json),
+            Err(EmissionError::CorruptBinaryContainer { section, .. }) if section == "Functions"
+        ),
+        "Malformed Type JSON descriptor must return CorruptBinaryContainer instead of Void"
+    );
+
+    // 3. Inject unreasonable class instance_size (128 MiB > MAX_INSTANCE_SIZE_BYTES)
+    let mut bad_size = valid_bytes;
+    let needle = 24u64.to_le_bytes();
+    let class_name_pos = bad_size
+        .windows(b"SizedObj".len())
+        .position(|window| window == b"SizedObj")
+        .expect("Serialized class symbol must be present");
+    let size_offset = bad_size[class_name_pos..]
+        .windows(8)
+        .position(|window| window == needle)
+        .map(|rel| class_name_pos + rel)
+        .expect("Class instance_size u64 must follow symbol");
+    bad_size[size_offset..size_offset + 8].copy_from_slice(&(128u64 * 1024 * 1024).to_le_bytes());
+    assert!(
+        matches!(
+            BinaryProgram::from_bytes(&bad_size),
+            Err(EmissionError::CorruptBinaryContainer { section, .. }) if section == "Classes"
+        ),
+        "Unreasonable instance_size must return CorruptBinaryContainer in Classes"
+    );
+}
+
+#[test]
+fn test_verifier_rejects_i32_branch_overflow_and_object_tuple_step_bounds() {
+    use solix_runtime::LoadedBinary;
+    use solix_runtime::verifier::verify_program;
+
+    let make_class_prog = |inst: Instruction, num_regs: u16| {
+        let mut program = BinaryProgram::new();
+        let mut obj_class = CompiledClass::new("Obj", 0, None, 16);
+        obj_class.itable.push((1, vec![0]));
+        program.classes.push(obj_class);
+        let mut func = CompiledFunction::new("main", 0, 0, num_regs);
+        func.instructions.push(inst);
+        func.instructions
+            .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+        program.functions.push(func);
+        program.entry_point_id = Some(0);
+        program
+    };
+
+    // 1. i32::MAX branch offset at PC 1 (would panic on checked-less `+` in debug or wrap in release)
+    let mut overflow_branch = BinaryProgram::new();
+    let mut func_branch = CompiledFunction::new("branch_overflow", 0, 0, 2);
+    func_branch
+        .instructions
+        .push(Instruction::format_a(OpCode::Nop, 0, 0, 0, 0));
+    func_branch
+        .instructions
+        .push(Instruction::format_c(OpCode::Jump, 0, 0, i32::MAX));
+    overflow_branch.functions.push(func_branch);
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(overflow_branch)).is_err(),
+        "PC + i32::MAX branch offset must fail cleanly without overflow panic"
+    );
+
+    // 2. ForLoopI32 dynamic step register out of window & invalid low flags
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::ForLoopI32, 0x80 | 5, 0, 1, -1i16 as u16),
+            3,
+        )))
+        .is_err(),
+        "ForLoopI32 step register exceeding num_registers must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::ForLoopI32, 0x03, 0, 1, -1i16 as u16),
+            4,
+        )))
+        .is_err(),
+        "ForLoopI32 reserved low flags without 0x80 must fail verifier"
+    );
+
+    // 3. AllocObject unknown vtable_id & undersized allocation when class metadata is present
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::AllocObject, 0, 0, 99, 16),
+            2,
+        )))
+        .is_err(),
+        "AllocObject with unknown vtable_id must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::AllocObject, 0, 0, 0, 4),
+            2,
+        )))
+        .is_err(),
+        "AllocObject smaller than class instance_size must fail verifier"
+    );
+
+    // 4. Field offset bounds & alignment checks (header overwrite, unaligned, past max_instance_size)
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::GetField, 0, 1, 0, 4),
+            2,
+        )))
+        .is_err(),
+        "GetField into 8-byte object header (< 8) must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::GetFieldI32, 0, 1, 0, 9),
+            2,
+        )))
+        .is_err(),
+        "Unaligned GetFieldI32 offset must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::SetFieldF64, 0, 1, 0, 12),
+            2,
+        )))
+        .is_err(),
+        "SetFieldF64 exceeding max_instance_size must fail verifier"
+    );
+
+    // 5. Tuple excessive element count / slot bounds & virtual/interface slot bounds
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::AllocTuple, 0, 0, 4097, 0),
+            2,
+        )))
+        .is_err(),
+        "AllocTuple beyond MAX_TUPLE_ELEMENTS must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_a(OpCode::GetTuple, 0, 1, 0, 4096),
+            2,
+        )))
+        .is_err(),
+        "GetTuple slot beyond MAX_TUPLE_ELEMENTS must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_call(OpCode::CallVirtual, 0, 0, 0, 1),
+            2,
+        )))
+        .is_err(),
+        "CallVirtual out-of-range vtable slot must fail verifier"
+    );
+    assert!(
+        RuntimeContext::new(RuntimeOptions::new().with_binary(make_class_prog(
+            Instruction::format_call(OpCode::CallInterface, 0, (1 << 8) | 5, 0, 1),
+            2,
+        )))
+        .is_err(),
+        "CallInterface out-of-range method slot must fail verifier"
+    );
+
+    // 6. Owning binary constant pool isolation must not fall back to another zero-static binary
+    let mut first_pool = solix_common::bytecode::ConstantPool::new();
+    let _ = first_pool.add_string("first_bin_const");
+    let first_unit = LoadedBinary {
+        binary_id: 0,
+        static_base_offset: 0,
+        function_id_offset: 0,
+        static_space_size: 0,
+        entry_point_id: None,
+        entry_point_symbol: None,
+        constant_pool: first_pool,
+        classes: Vec::new(),
+        function_count: 1,
+        is_debug_profile: false,
+        source_files: Vec::new(),
+    };
+    let second_unit = LoadedBinary {
+        binary_id: 1,
+        static_base_offset: 0,
+        function_id_offset: 1,
+        static_space_size: 0,
+        entry_point_id: None,
+        entry_point_symbol: None,
+        constant_pool: solix_common::bytecode::ConstantPool::new(),
+        classes: Vec::new(),
+        function_count: 1,
+        is_debug_profile: false,
+        source_files: Vec::new(),
+    };
+    let f0 = CompiledFunction::new("bin0_fn", 0, 0, 1);
+    let mut f1 = CompiledFunction::new("bin1_fn", 0, 0, 1);
+    f1.instructions
+        .push(Instruction::format_b(OpCode::LoadConst, 0, 0, 0));
+    assert!(
+        verify_program(&[first_unit, second_unit], &[f0, f1], 0).is_err(),
+        "Second binary with empty pool must not resolve constant index 0 via static_base_offset fallback"
+    );
+
+    // 7. Relocating CallInterface across loaded modules must reject iface_id > 255 instead of wrapping u8
+    let mut mod_a = BinaryProgram::new();
+    for class_idx in 0..250u32 {
+        mod_a.classes.push(CompiledClass::new(
+            format!("ModAClass{class_idx}"),
+            class_idx,
+            None,
+            8,
+        ));
+    }
+    let mut func_a = CompiledFunction::new("mod_a_fn", 0, 0, 1);
+    func_a
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    mod_a.functions.push(func_a);
+
+    let mut mod_b = BinaryProgram::new();
+    let mut iface_b = CompiledClass::new("ModBIface", 7, None, 8);
+    iface_b.itable.push((7, vec![0]));
+    mod_b.classes.push(iface_b);
+    let mut func_b = CompiledFunction::new("mod_b_main", 0, 0, 2);
+    func_b.instructions.push(Instruction::format_call(
+        OpCode::CallInterface,
+        0,
+        7 << 8,
+        1,
+        1,
+    ));
+    func_b
+        .instructions
+        .push(Instruction::format_a(OpCode::Return, 0, 0, 0, 0));
+    mod_b.functions.push(func_b);
+    mod_b.entry_point = Some("mod_b_main".to_string());
+
+    let err_reloc = RuntimeContext::new(
+        RuntimeOptions::new().with_binary(mod_a).with_binary(mod_b),
+    )
+    .expect_err(
+        "CallInterface iface_id > 255 after relocation must fail cleanly instead of truncating",
+    );
+    assert!(
+        err_reloc.to_string().contains("255"),
+        "Unexpected error message for relocated CallInterface overflow: {err_reloc}"
+    );
+}

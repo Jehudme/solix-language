@@ -1937,3 +1937,218 @@ fn test_optimizer_relocation_exactness_with_dead_code_and_fused_superinstruction
         );
     }
 }
+
+#[test]
+fn test_escape_analysis_conditional_alias_overwrite_before_return() {
+    let source_code = r#"
+        public class Point {
+            public int32 x;
+            public int32 y;
+
+            public Point(int32 x_val, int32 y_val) {
+                this.x = x_val;
+                this.y = y_val;
+            }
+        }
+
+        Point choose_point(bool should_override) {
+            Point first_point = new Point(10, 20);
+            Point selected_point = first_point;
+            if (should_override) {
+                selected_point = new Point(30, 40);
+            }
+            return selected_point;
+        }
+
+        int32 main() {
+            Point default_pt = choose_point(false);
+            Point override_pt = choose_point(true);
+            return (default_pt.x * 1000) + override_pt.y;
+        }
+    "#;
+    let (context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(
+        execution_result,
+        Value::I32(10_040),
+        "Returning conditionally overwritten alias must preserve the un-overwritten branch allocation"
+    );
+
+    let artifacts = context.emission_artifacts.as_ref().unwrap();
+    let choose_func = artifacts
+        .program
+        .functions
+        .iter()
+        .find(|func| func.symbol.contains("choose_point"))
+        .expect("choose_point function must exist");
+    let alloc_count = choose_func
+        .instructions
+        .iter()
+        .filter(|inst| inst.raw_opcode() == OpCode::AllocObject as u8)
+        .count();
+    assert_eq!(
+        alloc_count, 2,
+        "Both candidate allocations in choose_point must remain heap-allocated"
+    );
+
+    let categories = escape_analysis::classify_allocations(
+        choose_func,
+        &artifacts.program.classes,
+        &artifacts.program.functions,
+    );
+    assert!(
+        categories
+            .values()
+            .all(|&(_reg, cat)| cat == EscapeCategory::GlobalEscape),
+        "All allocations reachable via conditional alias merge before return must classify as GlobalEscape: {categories:?}"
+    );
+}
+
+#[test]
+fn test_escape_analysis_sra_conditional_alias_overwrite_before_field_read() {
+    let source_code = r#"
+        public class BoxedPair {
+            public int32 x;
+            public int32 y;
+
+            public BoxedPair(int32 x_val, int32 y_val) {
+                this.x = x_val;
+                this.y = y_val;
+            }
+        }
+
+        int32 read_selected(bool should_override) {
+            BoxedPair first_pair = new BoxedPair(11, 22);
+            BoxedPair second_pair = new BoxedPair(33, 44);
+            BoxedPair selected_pair = first_pair;
+            if (should_override) {
+                selected_pair = second_pair;
+            }
+            return selected_pair.x + selected_pair.y;
+        }
+
+        int32 main() {
+            int32 first_sum = read_selected(false);
+            int32 second_sum = read_selected(true);
+            return (first_sum * 100) + second_sum;
+        }
+    "#;
+    let (_context, execution_result) = compile_and_execute(source_code);
+    assert_eq!(
+        execution_result,
+        Value::I32(3_377),
+        "SRA must not scalar-replace an allocation whose alias is conditionally overwritten before field reads"
+    );
+
+    // Also test synthetic CFG where linear forward scan would falsely assume alias safety
+    let mut cfg_func = solix_common::bytecode::CompiledFunction::new("cfg_alias_join", 1, 0, 8);
+    cfg_func.instructions = vec![
+        Instruction::format_a(OpCode::AllocObject, 0, 1, 0, 16), // r1 = first (non-escaping)
+        Instruction::format_a(OpCode::LoadI32, 0, 2, 10, 0),
+        Instruction::format_a(OpCode::Mov, 0, 3, 1, 0), // r3 = r1 (selected = first)
+        Instruction::format_c(OpCode::JumpIfFalse, 0, 0, 3), // if !param -> merge (pc 6)
+        Instruction::format_a(OpCode::AllocObject, 0, 4, 0, 16), // r4 = second
+        Instruction::format_a(OpCode::Mov, 0, 3, 4, 0), // r3 = r4 (linear overwrite!)
+        Instruction::format_a(OpCode::ReturnValue, 0, 3, 0, 0), // return r3 (join!)
+    ];
+    let class_desc = solix_common::bytecode::CompiledClass {
+        symbol: "Box".to_string(),
+        vtable_id: 0,
+        base_vtable_id: None,
+        instance_size: 16,
+        reference_field_offsets: Vec::new(),
+        weak_field_offsets: Vec::new(),
+        vtable: Vec::new(),
+        itable: Vec::new(),
+        destructor_id: None,
+        field_types: Vec::new(),
+        field_names: Vec::new(),
+    };
+    let categories =
+        escape_analysis::classify_allocations(&cfg_func, &[class_desc], &[cfg_func.clone()]);
+    assert_eq!(
+        categories.get(&0).map(|&(_reg, cat)| cat),
+        Some(EscapeCategory::GlobalEscape),
+        "First allocation must be marked GlobalEscape when conditional branch preserves alias across join"
+    );
+}
+
+#[test]
+fn test_relocate_jump_instruction_guards_range_and_optimizer_emits_error() {
+    use solix_common::bytecode::{BinaryProgram, CompiledFunction};
+    use solix_common::diagnostics::EmissionError;
+    use solix_compilation::CompilationDiagnostic;
+    use solix_compilation::phases::emitter::EmissionArtifacts;
+    use solix_compilation::phases::optimizer::bytecode_optimizer::{
+        BytecodeOptimizerPhase, relocate_jump_instruction,
+    };
+    use solix_compilation::phases::phase::CompilationPhase;
+
+    // 1. Direct boundary checks for Format-A 16-bit signed relative branches
+    let fmt_a_branch = Instruction::format_a(OpCode::JumpIfLtI32, 0, 0, 1, 1);
+    assert!(relocate_jump_instruction(fmt_a_branch, 0, 32_767).is_ok());
+    assert!(relocate_jump_instruction(fmt_a_branch, 32_768, 0).is_ok());
+    assert!(matches!(
+        relocate_jump_instruction(fmt_a_branch, 0, 32_768),
+        Err(EmissionError::JumpOffsetOverflow { offset: 32_768 })
+    ));
+    assert!(matches!(
+        relocate_jump_instruction(fmt_a_branch, 32_769, 0),
+        Err(EmissionError::JumpOffsetOverflow { offset: -32_769 })
+    ));
+
+    // Format-C 32-bit branch accommodates > i16::MAX without error
+    let fmt_c_branch = Instruction::format_c(OpCode::Jump, 0, 0, 1);
+    let relocated_c = relocate_jump_instruction(fmt_c_branch, 0, 40_000)
+        .expect("Format-C Jump must encode offsets beyond i16::MAX");
+    assert_eq!(relocated_c.jump_offset(), 40_000);
+
+    // 2. Full BytecodeOptimizerPhase returns clean EmissionError instead of silent wrapping
+    let mut huge_func = CompiledFunction::new("huge_branch", 0, 0, 4);
+    huge_func.instructions.reserve(32_776);
+    let mut leaf_helper = CompiledFunction::new("leaf_add", 0, 1, 3);
+    leaf_helper
+        .instructions
+        .push(Instruction::format_b_signed(OpCode::LoadI32, 0, 2, 7));
+    leaf_helper
+        .instructions
+        .push(Instruction::format_a(OpCode::AddI32, 0, 1, 0, 2));
+    leaf_helper
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 1, 0, 0));
+
+    // Caller has JumpIfLtI32 at PC 0 -> PC 32_767 (+32_767) and a CallDirect leaf_add inside [1..32_767];
+    // inlining leaf_add expands the span past +32_767 so relocate_jump_instruction must error cleanly.
+    huge_func
+        .instructions
+        .push(Instruction::format_a(OpCode::JumpIfLtI32, 0, 0, 1, 32_767));
+    huge_func
+        .instructions
+        .push(Instruction::format_call(OpCode::CallDirect, 2, 1, 3, 1));
+    huge_func
+        .instructions
+        .resize(32_768, Instruction::format_a(OpCode::Bxor, 0, 0, 0, 1));
+    huge_func
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 2, 0, 0));
+
+    let mut program = BinaryProgram::new();
+    program.functions.push(huge_func);
+    program.functions.push(leaf_helper);
+
+    let mut context = CompilationContext::new(CompilationOptions::new().with_inline_threshold(16));
+    context.emission_artifacts = Some(EmissionArtifacts {
+        program,
+        functions_by_source: Vec::new(),
+    });
+
+    let opt_result = BytecodeOptimizerPhase::new().run(&mut context);
+    assert!(
+        matches!(
+            opt_result.as_ref().map_err(Vec::as_slice),
+            Err([CompilationDiagnostic::Emit(
+                EmissionError::JumpOffsetOverflow { .. }
+            )])
+        ),
+        "BytecodeOptimizerPhase must return EmissionError::JumpOffsetOverflow when inlining overflows Format-A branch: {opt_result:?}"
+    );
+}
