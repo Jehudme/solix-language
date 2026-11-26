@@ -837,26 +837,34 @@ impl WorkspaceManager {
             let discovered_files = Self::discover_project_sources(project_root);
             let mut map = HashMap::new();
 
-            for file_path in discovered_files {
-                let file_url = Url::from_file_path(&file_path).ok();
-                let file_name = file_path.to_string_lossy().to_string();
+            let normalized_target_path = target_path
+                .as_ref()
+                .map(|path| solix_common::strip_windows_verbatim_prefix(path.clone()));
 
-                let file_content = if let Some(url) = &file_url {
-                    if url == target_uri {
-                        current_content.to_string()
-                    } else if let Some(open_doc) = self.documents.get(url) {
-                        open_doc.content.clone()
-                    } else {
-                        std::fs::read_to_string(&file_path).unwrap_or_default()
-                    }
+            for file_path in discovered_files {
+                let normalized_file_path = solix_common::strip_windows_verbatim_prefix(file_path);
+                let file_url = Url::from_file_path(&normalized_file_path).ok();
+                let file_name = normalized_file_path.to_string_lossy().to_string();
+
+                let is_target = normalized_target_path
+                    .as_ref()
+                    .is_some_and(|target| target == &normalized_file_path)
+                    || file_url.as_ref() == Some(target_uri);
+
+                let file_content = if is_target {
+                    current_content.to_string()
+                } else if let Some(open_doc) =
+                    file_url.as_ref().and_then(|url| self.documents.get(url))
+                {
+                    open_doc.content.clone()
                 } else {
-                    std::fs::read_to_string(&file_path).unwrap_or_default()
+                    std::fs::read_to_string(&normalized_file_path).unwrap_or_default()
                 };
 
                 map.insert(file_name, file_content);
             }
 
-            let target_name = target_path
+            let target_name = normalized_target_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_else(|| target_uri.to_string());

@@ -1145,6 +1145,15 @@ fn compile_cmake_native(
         let archive_cache_cmake = cmake_path_string(&archive_cache_in_container);
         let mut configure_command = crate::process::create_process_command(&docker_executable);
         configure_command.args(["run", "--rm"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(metadata) = project_root.metadata() {
+                let user_id = metadata.uid();
+                let group_id = metadata.gid();
+                configure_command.args(["-u", &format!("{user_id}:{group_id}")]);
+            }
+        }
         configure_command
             .arg("-v")
             .arg(format!("{}:/work", project_root.display()));
@@ -1218,6 +1227,15 @@ fn compile_cmake_native(
 
         let mut build_command = crate::process::create_process_command(&docker_executable);
         build_command.args(["run", "--rm"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(metadata) = project_root.metadata() {
+                let user_id = metadata.uid();
+                let group_id = metadata.gid();
+                build_command.args(["-u", &format!("{user_id}:{group_id}")]);
+            }
+        }
         build_command
             .arg("-v")
             .arg(format!("{}:/work", project_root.display()));

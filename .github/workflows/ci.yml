@@ -243,7 +243,7 @@ jobs:
           elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
             BASE_REF="$BEFORE_SHA"
           else
-            BASE_REF="HEAD~1"
+            BASE_REF="origin/dev"
           fi
           python3 scripts/ci/doc_sync_check.py --base "$BASE_REF"
           python3 scripts/ci/doc_sync_check.py --all-docs
@@ -327,6 +327,8 @@ jobs:
         with:
           path: crates/solix-toolchain/assets/packages
           key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
+          restore-keys: |
+            solix-bundled-${{ runner.os }}-
 
       - name: Build solix toolchain binary
         run: cargo build --bin solix

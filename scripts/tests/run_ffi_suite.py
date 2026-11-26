@@ -172,7 +172,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent.parent
     solix_cmd = resolve_solix_binary(repo_root, args.solix_binary)
 
-    with tempfile.TemporaryDirectory(prefix="solix-ffi-suite-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="solix-ffi-suite-", ignore_cleanup_errors=True) as tmp_dir:
         scratch = Path(tmp_dir)
 
         # 1. C/C++ CMake SDK CTest
