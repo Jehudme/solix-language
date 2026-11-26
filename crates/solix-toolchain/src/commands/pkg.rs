@@ -306,8 +306,8 @@ pub(crate) fn install_package_artifact_with_options(
         let primary_binary_key = format!("bin/{package_name}.slxb");
         if let Some((_, primary_binary)) = inspection.binaries.iter().find(|(entry_name, _)| {
             entry_name == "binaries.slxb" || entry_name == &primary_binary_key
-        }) {
-            let binary_raw_bytes = primary_binary.to_bytes();
+        }) && let Ok(binary_raw_bytes) = primary_binary.try_to_bytes()
+        {
             let _ = cache.put_cached_binary(
                 package_name,
                 package_version,

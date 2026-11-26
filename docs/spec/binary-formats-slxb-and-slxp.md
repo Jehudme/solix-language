@@ -45,6 +45,10 @@ Every compiled `.slxb` file consists of a 16-byte fixed container header followe
 └────────────────────────────────────────────────────────┘
 ```
 
+### Strict Validation & Overflow Guarantees
+* **`try_to_bytes()` Checked Encoding**: Validates `u32` section item counts and UTF-8 string byte lengths via `u32::try_from`, returning `EmissionError::CorruptBinaryContainer` cleanly if any container limit or JSON metadata serialization fails instead of truncating with `as u32` or masking errors.
+* **`from_bytes()` Strict Decoding**: Rejects invalid boolean/option flag bytes (`> 1`, expecting strictly `0` or `1`), rejects malformed JSON `Type` descriptors rather than coercing to `Void`, enforces platform `usize` conversions and `MAX_INSTANCE_SIZE_BYTES` (`64 MiB`) class-size sanity limits, and pre-validates capacity via `ByteReader::checked_capacity`.
+
 ---
 
 ## 2. `.slxp` Package Container Layout

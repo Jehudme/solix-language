@@ -226,6 +226,15 @@ impl BinaryProgram {
     /// Serializes the binary program into raw bytes in the `SLXB` format.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
+        self.try_to_bytes().unwrap_or_default()
+    }
+
+    /// Serializes the binary program into raw bytes in the `SLXB` format with overflow checks.
+    ///
+    /// # Errors
+    /// Returns `EmissionError::CorruptBinaryContainer` if any container section count, string length,
+    /// or serialized JSON descriptor exceeds valid `SLXB` bounds or fails serialization.
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, EmissionError> {
         let mut buffer = Vec::new();
         // 1. Header
         buffer.extend_from_slice(&self.magic);
@@ -244,7 +253,7 @@ impl BinaryProgram {
         match &self.entry_point_symbol {
             Some(sym) => {
                 buffer.push(1);
-                write_string(&mut buffer, sym);
+                write_checked_string(&mut buffer, sym, "Header")?;
             }
             None => buffer.push(0),
         }
@@ -253,19 +262,21 @@ impl BinaryProgram {
         buffer.extend_from_slice(&self.static_space_size.to_le_bytes());
 
         // 2. Static Symbols Map
-        buffer.extend_from_slice(&(self.static_symbols_map.len() as u32).to_le_bytes());
+        let static_sym_len = checked_u32_len(self.static_symbols_map.len(), "StaticSymbols")?;
+        buffer.extend_from_slice(&static_sym_len.to_le_bytes());
         for (symbol, slot) in &self.static_symbols_map {
-            write_string(&mut buffer, symbol);
+            write_checked_string(&mut buffer, symbol, "StaticSymbols")?;
             buffer.extend_from_slice(&slot.to_le_bytes());
         }
 
         // 3. Constant Pool
-        buffer.extend_from_slice(&(self.constant_pool.values.len() as u32).to_le_bytes());
+        let pool_len = checked_u32_len(self.constant_pool.values.len(), "ConstantPool")?;
+        buffer.extend_from_slice(&pool_len.to_le_bytes());
         for val in &self.constant_pool.values {
             match val {
-                ConstantPoolValue::Int64(i) => {
+                ConstantPoolValue::Int64(int_val) => {
                     buffer.push(1);
-                    buffer.extend_from_slice(&i.to_le_bytes());
+                    buffer.extend_from_slice(&int_val.to_le_bytes());
                 }
                 ConstantPoolValue::Float64(bits) => {
                     buffer.push(2);
@@ -273,15 +284,16 @@ impl BinaryProgram {
                 }
                 ConstantPoolValue::String(text) => {
                     buffer.push(3);
-                    write_string(&mut buffer, text);
+                    write_checked_string(&mut buffer, text, "ConstantPool")?;
                 }
             }
         }
 
         // 4. Classes
-        buffer.extend_from_slice(&(self.classes.len() as u32).to_le_bytes());
+        let class_len = checked_u32_len(self.classes.len(), "Classes")?;
+        buffer.extend_from_slice(&class_len.to_le_bytes());
         for cls in &self.classes {
-            write_string(&mut buffer, &cls.symbol);
+            write_checked_string(&mut buffer, &cls.symbol, "Classes")?;
             buffer.extend_from_slice(&cls.vtable_id.to_le_bytes());
             match cls.base_vtable_id {
                 Some(base) => {
@@ -293,28 +305,33 @@ impl BinaryProgram {
             buffer.extend_from_slice(&(cls.instance_size as u64).to_le_bytes());
 
             // Reference field offsets
-            buffer.extend_from_slice(&(cls.reference_field_offsets.len() as u32).to_le_bytes());
+            let ref_len = checked_u32_len(cls.reference_field_offsets.len(), "Classes")?;
+            buffer.extend_from_slice(&ref_len.to_le_bytes());
             for &offset in &cls.reference_field_offsets {
                 buffer.extend_from_slice(&(offset as u64).to_le_bytes());
             }
 
             // Weak field offsets
-            buffer.extend_from_slice(&(cls.weak_field_offsets.len() as u32).to_le_bytes());
+            let weak_len = checked_u32_len(cls.weak_field_offsets.len(), "Classes")?;
+            buffer.extend_from_slice(&weak_len.to_le_bytes());
             for &offset in &cls.weak_field_offsets {
                 buffer.extend_from_slice(&(offset as u64).to_le_bytes());
             }
 
             // VTable
-            buffer.extend_from_slice(&(cls.vtable.len() as u32).to_le_bytes());
+            let vtable_len = checked_u32_len(cls.vtable.len(), "Classes")?;
+            buffer.extend_from_slice(&vtable_len.to_le_bytes());
             for &func_id in &cls.vtable {
                 buffer.extend_from_slice(&func_id.to_le_bytes());
             }
 
             // ITable
-            buffer.extend_from_slice(&(cls.itable.len() as u32).to_le_bytes());
+            let itable_len = checked_u32_len(cls.itable.len(), "Classes")?;
+            buffer.extend_from_slice(&itable_len.to_le_bytes());
             for (iface_id, methods) in &cls.itable {
                 buffer.extend_from_slice(&iface_id.to_le_bytes());
-                buffer.extend_from_slice(&(methods.len() as u32).to_le_bytes());
+                let method_len = checked_u32_len(methods.len(), "Classes")?;
+                buffer.extend_from_slice(&method_len.to_le_bytes());
                 for &method_id in methods {
                     buffer.extend_from_slice(&method_id.to_le_bytes());
                 }
@@ -330,51 +347,57 @@ impl BinaryProgram {
             }
 
             // Field types
-            buffer.extend_from_slice(&(cls.field_types.len() as u32).to_le_bytes());
+            let field_types_len = checked_u32_len(cls.field_types.len(), "Classes")?;
+            buffer.extend_from_slice(&field_types_len.to_le_bytes());
             for &(offset, tag) in &cls.field_types {
                 buffer.extend_from_slice(&(offset as u64).to_le_bytes());
                 buffer.push(tag);
             }
 
             // Field names (offset, name, type_name)
-            buffer.extend_from_slice(&(cls.field_names.len() as u32).to_le_bytes());
+            let field_names_len = checked_u32_len(cls.field_names.len(), "Classes")?;
+            buffer.extend_from_slice(&field_names_len.to_le_bytes());
             for (field_offset, field_name, field_type_name) in &cls.field_names {
                 buffer.extend_from_slice(&(*field_offset as u64).to_le_bytes());
-                write_string(&mut buffer, field_name);
-                write_string(&mut buffer, field_type_name);
+                write_checked_string(&mut buffer, field_name, "Classes")?;
+                write_checked_string(&mut buffer, field_type_name, "Classes")?;
             }
         }
 
         // 5. Functions
-        buffer.extend_from_slice(&(self.functions.len() as u32).to_le_bytes());
+        let func_len = checked_u32_len(self.functions.len(), "Functions")?;
+        buffer.extend_from_slice(&func_len.to_le_bytes());
         for func in &self.functions {
-            write_string(&mut buffer, &func.symbol);
+            write_checked_string(&mut buffer, &func.symbol, "Functions")?;
             buffer.extend_from_slice(&func.source_id.to_le_bytes());
             buffer.extend_from_slice(&func.param_count.to_le_bytes());
             buffer.extend_from_slice(&func.num_registers.to_le_bytes());
             buffer.extend_from_slice(&func.static_base_offset.to_le_bytes());
 
             // Instructions
-            buffer.extend_from_slice(&(func.instructions.len() as u32).to_le_bytes());
+            let inst_len = checked_u32_len(func.instructions.len(), "Functions")?;
+            buffer.extend_from_slice(&inst_len.to_le_bytes());
             for inst in &func.instructions {
                 buffer.extend_from_slice(&inst.to_le_bytes());
             }
 
             // Reference registers
-            buffer.extend_from_slice(&(func.reference_registers.len() as u32).to_le_bytes());
+            let ref_reg_len = checked_u32_len(func.reference_registers.len(), "Functions")?;
+            buffer.extend_from_slice(&ref_reg_len.to_le_bytes());
             for &reg in &func.reference_registers {
                 buffer.extend_from_slice(&reg.to_le_bytes());
             }
 
             // Exception handlers
-            buffer.extend_from_slice(&(func.exception_handlers.len() as u32).to_le_bytes());
+            let handler_len = checked_u32_len(func.exception_handlers.len(), "Functions")?;
+            buffer.extend_from_slice(&handler_len.to_le_bytes());
             for handler in &func.exception_handlers {
                 buffer.extend_from_slice(&handler.try_start_pc.to_le_bytes());
                 buffer.extend_from_slice(&handler.try_end_pc.to_le_bytes());
                 match &handler.catch_type_symbol {
                     Some(symbol) => {
                         buffer.push(1);
-                        write_string(&mut buffer, symbol);
+                        write_checked_string(&mut buffer, symbol, "Functions")?;
                     }
                     None => buffer.push(0),
                 }
@@ -387,14 +410,16 @@ impl BinaryProgram {
                     }
                     None => buffer.push(0),
                 }
-                buffer.extend_from_slice(&(handler.try_ref_regs.len() as u32).to_le_bytes());
+                let try_ref_len = checked_u32_len(handler.try_ref_regs.len(), "Functions")?;
+                buffer.extend_from_slice(&try_ref_len.to_le_bytes());
                 for &ref_register in &handler.try_ref_regs {
                     buffer.extend_from_slice(&ref_register.to_le_bytes());
                 }
             }
 
             // Source map
-            buffer.extend_from_slice(&(func.source_map.len() as u32).to_le_bytes());
+            let source_map_len = checked_u32_len(func.source_map.len(), "Functions")?;
+            buffer.extend_from_slice(&source_map_len.to_le_bytes());
             for entry in &func.source_map {
                 buffer.extend_from_slice(&entry.instruction_pc.to_le_bytes());
                 buffer.extend_from_slice(&entry.span.id.to_le_bytes());
@@ -405,11 +430,12 @@ impl BinaryProgram {
             }
 
             // Local variables
-            buffer.extend_from_slice(&(func.local_variables.len() as u32).to_le_bytes());
+            let local_vars_len = checked_u32_len(func.local_variables.len(), "Functions")?;
+            buffer.extend_from_slice(&local_vars_len.to_le_bytes());
             for var_entry in &func.local_variables {
                 buffer.extend_from_slice(&var_entry.register.to_le_bytes());
-                write_string(&mut buffer, &var_entry.name);
-                write_string(&mut buffer, &var_entry.type_name);
+                write_checked_string(&mut buffer, &var_entry.name, "Functions")?;
+                write_checked_string(&mut buffer, &var_entry.type_name, "Functions")?;
                 buffer.extend_from_slice(&var_entry.start_pc.to_le_bytes());
                 buffer.extend_from_slice(&var_entry.end_pc.to_le_bytes());
                 buffer.push(if var_entry.is_parameter { 1 } else { 0 });
@@ -417,19 +443,30 @@ impl BinaryProgram {
 
             // Function visibility & signature
             buffer.push(if func.is_public { 1 } else { 0 });
-            let return_type_json = serde_json::to_string(&func.return_type).unwrap_or_default();
-            write_string(&mut buffer, &return_type_json);
-            buffer.extend_from_slice(&(func.parameter_types.len() as u32).to_le_bytes());
+            let return_type_json = serde_json::to_string(&func.return_type).map_err(|err| {
+                EmissionError::CorruptBinaryContainer {
+                    section: "Functions".to_string(),
+                    details: format!("Failed to serialize return type descriptor: {err}"),
+                }
+            })?;
+            write_checked_string(&mut buffer, &return_type_json, "Functions")?;
+            let param_types_len = checked_u32_len(func.parameter_types.len(), "Functions")?;
+            buffer.extend_from_slice(&param_types_len.to_le_bytes());
             for parameter_type in &func.parameter_types {
-                let parameter_type_json = serde_json::to_string(parameter_type).unwrap_or_default();
-                write_string(&mut buffer, &parameter_type_json);
+                let parameter_type_json = serde_json::to_string(parameter_type).map_err(|err| {
+                    EmissionError::CorruptBinaryContainer {
+                        section: "Functions".to_string(),
+                        details: format!("Failed to serialize parameter type descriptor: {err}"),
+                    }
+                })?;
+                write_checked_string(&mut buffer, &parameter_type_json, "Functions")?;
             }
         }
 
         // 6. Metadata and Export Manifest
-        write_string(&mut buffer, &self.package_name);
-        write_string(&mut buffer, &self.package_version);
-        write_string(&mut buffer, &self.package_description);
+        write_checked_string(&mut buffer, &self.package_name, "Metadata")?;
+        write_checked_string(&mut buffer, &self.package_version, "Metadata")?;
+        write_checked_string(&mut buffer, &self.package_description, "Metadata")?;
 
         let mut manifest_to_serialize = self.export_manifest.clone();
         if manifest_to_serialize.entry_point.is_none() {
@@ -445,8 +482,14 @@ impl BinaryProgram {
             manifest_to_serialize.dynamic_libraries = self.dynamic_libraries.clone();
         }
 
-        let manifest_bytes = serde_json::to_vec(&manifest_to_serialize).unwrap_or_default();
-        buffer.extend_from_slice(&(manifest_bytes.len() as u32).to_le_bytes());
+        let manifest_bytes = serde_json::to_vec(&manifest_to_serialize).map_err(|err| {
+            EmissionError::CorruptBinaryContainer {
+                section: "ExportManifest".to_string(),
+                details: format!("Failed to serialize export manifest: {err}"),
+            }
+        })?;
+        let manifest_len = checked_u32_len(manifest_bytes.len(), "ExportManifest")?;
+        buffer.extend_from_slice(&manifest_len.to_le_bytes());
         buffer.extend_from_slice(&manifest_bytes);
 
         // 7. Section 7: Exported AST (raw binary bytes)
@@ -455,10 +498,11 @@ impl BinaryProgram {
         } else {
             &self.export_manifest.exported_ast_bytes
         };
-        buffer.extend_from_slice(&(ast_slice.len() as u32).to_le_bytes());
+        let ast_len = checked_u32_len(ast_slice.len(), "ExportedAst")?;
+        buffer.extend_from_slice(&ast_len.to_le_bytes());
         buffer.extend_from_slice(ast_slice);
 
-        buffer
+        Ok(buffer)
     }
 
     /// Deserializes a `BinaryProgram` from raw bytes.
@@ -489,15 +533,15 @@ impl BinaryProgram {
 
         let flags = reader.read_u32("Header")?;
 
-        let has_entry_point_id = reader.read_u8("Header")?;
-        let entry_point_id = if has_entry_point_id == 1 {
+        let has_entry_point_id = reader.read_flag_bool("Header")?;
+        let entry_point_id = if has_entry_point_id {
             Some(reader.read_u32("Header")?)
         } else {
             None
         };
 
-        let has_entry_symbol = reader.read_u8("Header")?;
-        let entry_point_symbol = if has_entry_symbol == 1 {
+        let has_entry_symbol = reader.read_flag_bool("Header")?;
+        let entry_point_symbol = if has_entry_symbol {
             Some(reader.read_string("Header")?)
         } else {
             None
@@ -542,26 +586,27 @@ impl BinaryProgram {
         for _ in 0..class_count {
             let symbol = reader.read_string("Classes")?;
             let vtable_id = reader.read_u32("Classes")?;
-            let has_base = reader.read_u8("Classes")?;
-            let base_vtable_id = if has_base == 1 {
+            let has_base = reader.read_flag_bool("Classes")?;
+            let base_vtable_id = if has_base {
                 Some(reader.read_u32("Classes")?)
             } else {
                 None
             };
-            let instance_size = reader.read_u64("Classes")? as usize;
+            let instance_size = reader.read_u64_usize("Classes", MAX_INSTANCE_SIZE_BYTES)?;
 
             let ref_count = reader.read_u32("Classes")? as usize;
             let mut reference_field_offsets =
                 Vec::with_capacity(reader.checked_capacity(ref_count, 8, "Classes")?);
             for _ in 0..ref_count {
-                reference_field_offsets.push(reader.read_u64("Classes")? as usize);
+                reference_field_offsets
+                    .push(reader.read_u64_usize("Classes", MAX_INSTANCE_SIZE_BYTES)?);
             }
 
             let weak_count = reader.read_u32("Classes")? as usize;
             let mut weak_field_offsets =
                 Vec::with_capacity(reader.checked_capacity(weak_count, 8, "Classes")?);
             for _ in 0..weak_count {
-                weak_field_offsets.push(reader.read_u64("Classes")? as usize);
+                weak_field_offsets.push(reader.read_u64_usize("Classes", MAX_INSTANCE_SIZE_BYTES)?);
             }
 
             let vtable_len = reader.read_u32("Classes")? as usize;
@@ -583,8 +628,8 @@ impl BinaryProgram {
                 itable.push((iface_id, methods));
             }
 
-            let has_destructor = reader.read_u8("Classes")?;
-            let destructor_id = if has_destructor == 1 {
+            let has_destructor = reader.read_flag_bool("Classes")?;
+            let destructor_id = if has_destructor {
                 Some(reader.read_u32("Classes")?)
             } else {
                 None
@@ -601,7 +646,7 @@ impl BinaryProgram {
             let mut field_types =
                 Vec::with_capacity(reader.checked_capacity(field_types_len, 9, "Classes")?);
             for _ in 0..field_types_len {
-                let offset = reader.read_u64("Classes")? as usize;
+                let offset = reader.read_u64_usize("Classes", MAX_INSTANCE_SIZE_BYTES)?;
                 let tag = reader.read_u8("Classes")?;
                 field_types.push((offset, tag));
             }
@@ -611,7 +656,7 @@ impl BinaryProgram {
             let mut field_names =
                 Vec::with_capacity(reader.checked_capacity(field_names_len, 16, "Classes")?);
             for _ in 0..field_names_len {
-                let offset = reader.read_u64("Classes")? as usize;
+                let offset = reader.read_u64_usize("Classes", MAX_INSTANCE_SIZE_BYTES)?;
                 let name = reader.read_string("Classes")?;
                 let type_name = reader.read_string("Classes")?;
                 field_names.push((offset, name, type_name));
@@ -655,16 +700,16 @@ impl BinaryProgram {
             for _ in 0..handler_count {
                 let try_start_pc = reader.read_u32("Functions")?;
                 let try_end_pc = reader.read_u32("Functions")?;
-                let has_type = reader.read_u8("Functions")?;
-                let catch_type_symbol = if has_type == 1 {
+                let has_type = reader.read_flag_bool("Functions")?;
+                let catch_type_symbol = if has_type {
                     Some(reader.read_string("Functions")?)
                 } else {
                     None
                 };
                 let catch_reg = reader.read_u16("Functions")?;
                 let handler_pc = reader.read_u32("Functions")?;
-                let has_finally = reader.read_u8("Functions")?;
-                let finally_pc = if has_finally == 1 {
+                let has_finally = reader.read_flag_bool("Functions")?;
+                let finally_pc = if has_finally {
                     Some(reader.read_u32("Functions")?)
                 } else {
                     None
@@ -715,7 +760,7 @@ impl BinaryProgram {
                 let type_name = reader.read_string("Functions")?;
                 let start_pc = reader.read_u32("Functions")?;
                 let end_pc = reader.read_u32("Functions")?;
-                let is_parameter = reader.read_u8("Functions")? == 1;
+                let is_parameter = reader.read_flag_bool("Functions")?;
                 local_variables.push(LocalVariableDebugInfo {
                     register,
                     name,
@@ -727,15 +772,29 @@ impl BinaryProgram {
                 });
             }
 
-            let is_public = reader.read_u8("Functions")? == 1;
+            let is_public = reader.read_flag_bool("Functions")?;
             let return_type_str = reader.read_string("Functions")?;
-            let return_type = serde_json::from_str(&return_type_str).unwrap_or_default();
+            let return_type = serde_json::from_str(&return_type_str).map_err(|err| {
+                EmissionError::CorruptBinaryContainer {
+                    section: "Functions".to_string(),
+                    details: format!(
+                        "Malformed JSON return type descriptor '{return_type_str}': {err}"
+                    ),
+                }
+            })?;
             let parameter_types_len = reader.read_u32("Functions")? as usize;
             let mut parameter_types =
                 Vec::with_capacity(reader.checked_capacity(parameter_types_len, 4, "Functions")?);
             for _ in 0..parameter_types_len {
                 let param_type_str = reader.read_string("Functions")?;
-                let param_type = serde_json::from_str(&param_type_str).unwrap_or_default();
+                let param_type = serde_json::from_str(&param_type_str).map_err(|err| {
+                    EmissionError::CorruptBinaryContainer {
+                        section: "Functions".to_string(),
+                        details: format!(
+                            "Malformed JSON parameter type descriptor '{param_type_str}': {err}"
+                        ),
+                    }
+                })?;
                 parameter_types.push(param_type);
             }
 
@@ -820,12 +879,28 @@ impl BinaryProgram {
     }
 }
 
-fn write_string(buffer: &mut Vec<u8>, text: &str) {
-    let bytes = text.as_bytes();
-    buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-    buffer.extend_from_slice(bytes);
+const MAX_INSTANCE_SIZE_BYTES: usize = 64 * 1024 * 1024;
+
+fn checked_u32_len(len: usize, section: &str) -> Result<u32, EmissionError> {
+    u32::try_from(len).map_err(|_| EmissionError::CorruptBinaryContainer {
+        section: section.to_string(),
+        details: format!("Element count or byte length {len} exceeds u32 container limit"),
+    })
 }
 
+fn write_checked_string(
+    buffer: &mut Vec<u8>,
+    text: &str,
+    section: &str,
+) -> Result<(), EmissionError> {
+    let bytes = text.as_bytes();
+    let len_u32 = checked_u32_len(bytes.len(), section)?;
+    buffer.extend_from_slice(&len_u32.to_le_bytes());
+    buffer.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Safe bounds-checked binary reader preventing integer overflow and buffer over-reads.
 struct ByteReader<'buf> {
     data: &'buf [u8],
     offset: usize,
@@ -881,6 +956,19 @@ impl<'buf> ByteReader<'buf> {
         Ok(bytes[0])
     }
 
+    fn read_flag_bool(&mut self, section: &str) -> Result<bool, EmissionError> {
+        match self.read_u8(section)? {
+            0 => Ok(false),
+            1 => Ok(true),
+            invalid_tag => Err(EmissionError::CorruptBinaryContainer {
+                section: section.to_string(),
+                details: format!(
+                    "Invalid boolean/option flag byte 0x{invalid_tag:02X} (expected 0 or 1)"
+                ),
+            }),
+        }
+    }
+
     fn read_u16(&mut self, section: &str) -> Result<u16, EmissionError> {
         let bytes = self.read_bytes(2, section)?;
         let mut arr = [0u8; 2];
@@ -907,6 +995,25 @@ impl<'buf> ByteReader<'buf> {
         let mut arr = [0u8; 8];
         arr.copy_from_slice(bytes);
         Ok(u64::from_le_bytes(arr))
+    }
+
+    fn read_u64_usize(
+        &mut self,
+        section: &str,
+        max_allowed: usize,
+    ) -> Result<usize, EmissionError> {
+        let raw = self.read_u64(section)?;
+        let value = usize::try_from(raw).map_err(|_| EmissionError::CorruptBinaryContainer {
+            section: section.to_string(),
+            details: format!("Size value {raw} exceeds host pointer width"),
+        })?;
+        if value > max_allowed {
+            return Err(EmissionError::CorruptBinaryContainer {
+                section: section.to_string(),
+                details: format!("Size value {value} exceeds maximum allowed limit {max_allowed}"),
+            });
+        }
+        Ok(value)
     }
 
     fn read_string(&mut self, section: &str) -> Result<String, EmissionError> {

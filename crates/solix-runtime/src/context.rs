@@ -783,8 +783,13 @@ impl RuntimeContext {
             }
         }
 
-        // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, and static space
-        crate::verifier::verify_program(&loaded_binaries, &all_functions, current_static_offset)?;
+        // Tier 1 AOT Bytecode Verifier: verify register windows, branch targets, class tables, and static space
+        crate::verifier::verify_program_with_classes(
+            &loaded_binaries,
+            &all_functions,
+            &all_classes,
+            current_static_offset,
+        )?;
 
         // Append a sentinel `OpCode::Return` to functions whose execution can reach `instructions.len()`
         // so `run_fast_trap::<false, _>` never needs a per-instruction `pc >= inst_len` bounds check.

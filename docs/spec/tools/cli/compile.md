@@ -1,6 +1,6 @@
 # `solix compile` — Source File Compilation
 
-The `compile` subcommand compiles one or more Solix source files (`*.slx`) into an executable binary container (`*.slxb`), performing lexing, parsing, multi-pass type binding, semantic analysis, optimization, and 64-bit Register VM bytecode emission.
+The `compile` subcommand compiles one or more Solix source files (`*.slx`) into an executable binary container (`*.slxb`), performing lexing, parsing, multi-pass type binding, semantic analysis, optimization, 64-bit Register VM bytecode emission, and checked container serialization (`BinaryProgram::try_to_bytes()`).
 
 ---
 

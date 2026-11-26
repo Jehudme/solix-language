@@ -454,7 +454,10 @@ pub fn execute_compile_source(args: CompileSourceArgs) -> Result<()> {
         .as_ref()
         .context("Missing emission artifacts")?;
 
-    let binary_bytes = artifacts.program.to_bytes();
+    let binary_bytes = artifacts
+        .program
+        .try_to_bytes()
+        .context("Failed to serialize compiled binary program")?;
 
     if let Some(parent) = output_path.parent()
         && !parent.as_os_str().is_empty()

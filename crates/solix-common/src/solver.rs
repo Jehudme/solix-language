@@ -898,14 +898,15 @@ impl ClientModuleSolver {
             })?;
 
             // 3. Populate authenticated extraction cache
-            let primary_bytes = primary_program.to_bytes();
-            let _ = self.package_cache.put_cached_binary(
-                package_name,
-                version,
-                &archive_candidate,
-                &primary_program,
-                &primary_bytes,
-            );
+            if let Ok(primary_bytes) = primary_program.try_to_bytes() {
+                let _ = self.package_cache.put_cached_binary(
+                    package_name,
+                    version,
+                    &archive_candidate,
+                    &primary_program,
+                    &primary_bytes,
+                );
+            }
 
             let mut solved_package = SolvedPackage::new(package_name, version, primary_program);
             for secondary in loaded_archive.secondary_binaries {
