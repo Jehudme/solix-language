@@ -9,6 +9,7 @@ use crate::CompilationContext::CompilationContext;
 use crate::CompilationDiagnostic;
 use crate::phases::phase::CompilationPhase;
 use solix_common::bytecode::{CompiledFunction, Instruction, OpCode, SourceMapEntry};
+use solix_common::diagnostics::EmissionError;
 use std::collections::{HashMap, HashSet};
 
 /// Post-emission bytecode optimizer implementing [`CompilationPhase`].
@@ -50,7 +51,8 @@ impl CompilationPhase for BytecodeOptimizerPhase {
                 &class_descriptors,
                 &function_descriptors,
                 pool_ref,
-            );
+            )
+            .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
         }
 
         // Inline small leaf constructors and pure leaf arithmetic functions across callers
@@ -96,14 +98,17 @@ impl CompilationPhase for BytecodeOptimizerPhase {
                         func_idx,
                         &optimized_snapshot,
                         allow_arith_inline,
-                    ) {
+                    )
+                    .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?
+                    {
                         round_changed = true;
                         optimize_function(
                             compiled_function,
                             &class_descriptors,
                             &optimized_snapshot,
                             pool_ref,
-                        );
+                        )
+                        .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
                     }
                 }
                 if !round_changed {
@@ -115,12 +120,16 @@ impl CompilationPhase for BytecodeOptimizerPhase {
         for (func_idx, compiled_function) in
             emission_artifacts.program.functions.iter_mut().enumerate()
         {
-            rotate_bottom_tested_loops(compiled_function);
-            optimize_peephole_passes(compiled_function, true, pool_ref);
-            hoist_loop_invariant_constants(compiled_function);
+            rotate_bottom_tested_loops(compiled_function)
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+            optimize_peephole_passes(compiled_function, true, pool_ref)
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
+            hoist_loop_invariant_constants(compiled_function)
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
             eliminate_common_subexpressions(compiled_function);
             elide_borrowed_local_arc_ops(compiled_function);
-            optimize_peephole_passes(compiled_function, true, pool_ref);
+            optimize_peephole_passes(compiled_function, true, pool_ref)
+                .map_err(|emission_err| vec![CompilationDiagnostic::from(emission_err)])?;
             fuse_post_licm_add_load_band(compiled_function);
             propagate_entry_constants(compiled_function, true);
             transform_binary_additive_self_recursion(compiled_function, func_idx);
@@ -186,26 +195,26 @@ fn optimize_function(
     classes: &[solix_common::bytecode::CompiledClass],
     all_functions: &[CompiledFunction],
     constant_pool: Option<&solix_common::bytecode::ConstantPool>,
-) {
+) -> Result<(), EmissionError> {
     super::escape_analysis::apply_scalar_replacement(function, classes, all_functions);
     super::escape_analysis::apply_arc_elision(function);
     elide_redundant_arc_ops(function);
-    optimize_peephole_passes(function, false, constant_pool);
+    optimize_peephole_passes(function, false, constant_pool)?;
     elide_borrowed_local_arc_ops(function);
     elide_fresh_null_set_fields(function);
     propagate_entry_constants(function, false);
-    optimize_peephole_passes(function, false, constant_pool);
-    hoist_loop_invariant_constants(function);
+    optimize_peephole_passes(function, false, constant_pool)?;
+    hoist_loop_invariant_constants(function)?;
     eliminate_common_subexpressions(function);
     if eliminate_dead_pack_closures(function) {
         elide_redundant_arc_ops(function);
     }
     for _ in 0..4 {
-        if !specialize_diamond_pack_closure_calls(function) {
+        if !specialize_diamond_pack_closure_calls(function)? {
             break;
         }
     }
-    optimize_peephole_passes(function, false, constant_pool);
+    optimize_peephole_passes(function, false, constant_pool)
 }
 
 /// Returns `true` if `reg` holds a guaranteed immortal/null/FnPtr value throughout an immutable local array
@@ -1118,13 +1127,15 @@ fn is_pure_diamond_setup_inst(inst: Instruction) -> bool {
 
 /// Specializes branch-diamond zero-capture `PackClosure` assignments feeding a single
 /// `CallCallable` at the diamond merge block into direct `CallDirect` calls inside each arm.
-fn specialize_diamond_pack_closure_calls(function: &mut CompiledFunction) -> bool {
+fn specialize_diamond_pack_closure_calls(
+    function: &mut CompiledFunction,
+) -> Result<bool, EmissionError> {
     if !function.exception_handlers.is_empty() {
-        return false;
+        return Ok(false);
     }
     let inst_count = function.instructions.len();
     if inst_count < 5 {
-        return false;
+        return Ok(false);
     }
 
     let critical_targets = collect_critical_targets(function);
@@ -1293,15 +1304,15 @@ fn specialize_diamond_pack_closure_calls(function: &mut CompiledFunction) -> boo
                     .get(target_old_pc)
                     .copied()
                     .unwrap_or(old_pc_to_new_pc[inst_count]);
-                final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+                final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc)?;
             }
             final_instructions.push(final_inst);
         }
         apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
-        return true;
+        return Ok(true);
     }
 
-    false
+    Ok(false)
 }
 
 /// Propagates single-definition entry-block `LoadI32` constants into binary ALU instructions
@@ -1938,7 +1949,7 @@ fn inline_leaf_functions(
     caller_index: usize,
     all_functions: &[CompiledFunction],
     allow_arith_inline: bool,
-) -> bool {
+) -> Result<bool, EmissionError> {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum LeafKind {
         None,
@@ -2021,7 +2032,7 @@ fn inline_leaf_functions(
             && leaf_kinds[inst.call_target() as usize] != LeafKind::None
     });
     if !has_candidate {
-        return false;
+        return Ok(false);
     }
 
     let mut jump_targets: Vec<Option<usize>> = Vec::with_capacity(inst_count);
@@ -2148,7 +2159,7 @@ fn inline_leaf_functions(
     }
 
     if !any_inlined {
-        return false;
+        return Ok(false);
     }
 
     old_pc_to_new_pc[inst_count] = rebuilt.len() as u32;
@@ -2161,12 +2172,12 @@ fn inline_leaf_functions(
             } else {
                 old_pc_to_new_pc[inst_count]
             };
-            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc)?;
         }
         final_instructions.push(final_inst);
     }
     apply_pc_relocation(caller, final_instructions, &old_pc_to_new_pc);
-    true
+    Ok(true)
 }
 
 /// Executes convergent multi-pass peephole fusion and redundant `Mov` elimination
@@ -2175,10 +2186,10 @@ fn optimize_peephole_passes(
     function: &mut CompiledFunction,
     allow_imm_branch_fusion: bool,
     constant_pool: Option<&solix_common::bytecode::ConstantPool>,
-) {
+) -> Result<(), EmissionError> {
     let original_count = function.instructions.len();
     if original_count == 0 {
-        return;
+        return Ok(());
     }
 
     let critical_targets = collect_critical_targets(function);
@@ -3335,12 +3346,13 @@ fn optimize_peephole_passes(
             } else {
                 stream.len() as u32
             };
-            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc)?;
         }
         final_instructions.push(final_inst);
     }
 
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+    Ok(())
 }
 
 /// Checks whether `inst` is a hoistable pure arithmetic operation (`MulI32`, `AddI32`, `SubI32`,
@@ -3460,10 +3472,10 @@ struct HoistCacheKey {
 /// Hoists loop-invariant constant loads (`LoadI32`, `LoadI64`, `LoadF64`, `LoadBool`,
 /// `LoadConst`) and pure loop-invariant arithmetic above loop bodies into fresh registers and
 /// rewrites in-loop consumers.
-fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
+fn hoist_loop_invariant_constants(function: &mut CompiledFunction) -> Result<(), EmissionError> {
     let inst_count = function.instructions.len();
     if inst_count < 3 {
-        return;
+        return Ok(());
     }
 
     let critical_targets = collect_critical_targets(function);
@@ -3492,7 +3504,7 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     }
 
     if loops_by_header.is_empty() {
-        return;
+        return Ok(());
     }
 
     // Process innermost loops first so inner loop invariants can hoist out cleanly.
@@ -3703,7 +3715,7 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
     }
 
     if !hoisted_any {
-        return;
+        return Ok(());
     }
 
     // Rebuild instruction list with hoisted preheaders and exact forward vs back-edge targets
@@ -3754,12 +3766,13 @@ fn hoist_loop_invariant_constants(function: &mut CompiledFunction) {
             } else {
                 old_pc_to_new_pc[inst_count]
             };
-            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+            final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc)?;
         }
         final_instructions.push(final_inst);
     }
 
     apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
+    Ok(())
 }
 
 /// Inverts a loop-exit conditional guard into a bottom-tested loop continuation guard.
@@ -3837,7 +3850,7 @@ fn invert_loop_guard(instruction: Instruction, back_offset: i32) -> Option<Instr
 /// 2-instruction pure guard `(Alu + JumpIf* -> exit; ...; Jump -> header)` loops into bottom-tested
 /// loops, eliminating one unconditional `Jump` dispatch per iteration. When no internal `continue`
 /// jumps to `header`, preserves the top exit guard so `ForLoopI32` peephole fusion remains unblocked.
-fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
+fn rotate_bottom_tested_loops(function: &mut CompiledFunction) -> Result<(), EmissionError> {
     let inst_count = function.instructions.len();
     if inst_count < 3
         || function
@@ -3845,7 +3858,7 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
             .iter()
             .any(|inst| inst.raw_opcode() == OpCode::Switch as u8)
     {
-        return;
+        return Ok(());
     }
 
     let critical_targets = collect_critical_targets(function);
@@ -3941,22 +3954,34 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
                 // and `ADD_I32_IMM`/`ADD_I32` + `JUMP_IF_LT(E)_I32` fuses into `ForLoopI32`.
                 function.instructions[loop_end] = inverted_guard;
             } else {
-                let entry_offset = (loop_end as i32) - (header_pc as i32);
-                function.instructions[header_pc] =
-                    Instruction::format_c(OpCode::Jump, 0, 0, entry_offset);
-                function.instructions[loop_end] = inverted_guard;
-
-                for (pc_idx, inst_slot) in function
+                let entry_offset_i64 = (loop_end as i64) - (header_pc as i64);
+                let entry_offset = i32::try_from(entry_offset_i64).map_err(|_| {
+                    EmissionError::JumpOffsetOverflow {
+                        offset: entry_offset_i64,
+                    }
+                })?;
+                let loop_end_u32 =
+                    u32::try_from(loop_end).map_err(|_| EmissionError::JumpOffsetOverflow {
+                        offset: i64::try_from(loop_end).unwrap_or(i64::MAX),
+                    })?;
+                let mut relocated_continues = Vec::new();
+                for (pc_idx, inst) in function
                     .instructions
-                    .iter_mut()
+                    .iter()
                     .enumerate()
                     .take(loop_end)
                     .skip(body_pc)
                 {
-                    let inst = *inst_slot;
-                    if decode_jump_target(inst, pc_idx, inst_count) == Some(header_pc) {
-                        *inst_slot = relocate_jump_instruction(inst, pc_idx, loop_end as u32);
+                    if decode_jump_target(*inst, pc_idx, inst_count) == Some(header_pc) {
+                        let relocated = relocate_jump_instruction(*inst, pc_idx, loop_end_u32)?;
+                        relocated_continues.push((pc_idx, relocated));
                     }
+                }
+                function.instructions[header_pc] =
+                    Instruction::format_c(OpCode::Jump, 0, 0, entry_offset);
+                function.instructions[loop_end] = inverted_guard;
+                for (pc_idx, relocated) in relocated_continues {
+                    function.instructions[pc_idx] = relocated;
                 }
             }
 
@@ -4045,13 +4070,15 @@ fn rotate_bottom_tested_loops(function: &mut CompiledFunction) {
                     .get(target_old_pc)
                     .copied()
                     .unwrap_or(old_pc_to_new_pc[cur_len]);
-                final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc);
+                final_inst = relocate_jump_instruction(final_inst, new_pc, target_new_pc)?;
             }
             final_instructions.push(final_inst);
         }
         apply_pc_relocation(function, final_instructions, &old_pc_to_new_pc);
         break;
     }
+
+    Ok(())
 }
 
 /// Decodes a branch or jump instruction's absolute target PC within `[0..=inst_count]`.
@@ -4088,12 +4115,18 @@ fn decode_jump_target(
 }
 
 /// Rewrites the signed PC jump offset of a branch/jump instruction cleanly.
-fn relocate_jump_instruction(
+///
+/// # Errors
+/// Returns `EmissionError::JumpOffsetOverflow` if the relocated branch offset exceeds the
+/// signed integer range of the target instruction encoding (`i16` for Format-A, `i32` for Format-C).
+pub fn relocate_jump_instruction(
     instruction: Instruction,
     new_pc: usize,
     target_new_pc: u32,
-) -> Instruction {
-    let new_offset = (target_new_pc as i32) - (new_pc as i32);
+) -> Result<Instruction, EmissionError> {
+    let new_pc_i64 = i64::try_from(new_pc)
+        .map_err(|_| EmissionError::JumpOffsetOverflow { offset: i64::MAX })?;
+    let new_offset = i64::from(target_new_pc) - new_pc_i64;
     let raw_opcode = instruction.raw_opcode();
 
     if (OpCode::JumpIfLtI32 as u8..=OpCode::JumpIfNeqI32 as u8).contains(&raw_opcode)
@@ -4106,29 +4139,33 @@ fn relocate_jump_instruction(
         || raw_opcode == OpCode::JumpIfLtI64 as u8
         || raw_opcode == OpCode::JumpIfLteI64 as u8
     {
+        let offset_i16 = i16::try_from(new_offset)
+            .map_err(|_| EmissionError::JumpOffsetOverflow { offset: new_offset })?;
         if let Some(opcode) = OpCode::from_raw_u8(raw_opcode) {
-            return Instruction::format_a(
+            return Ok(Instruction::format_a(
                 opcode,
                 instruction.flags(),
                 instruction.dst(),
                 instruction.src1(),
-                new_offset as i16 as u16,
-            );
+                offset_i16 as u16,
+            ));
         }
     } else if (raw_opcode == OpCode::Jump as u8
         || raw_opcode == OpCode::JumpIfTrue as u8
         || raw_opcode == OpCode::JumpIfFalse as u8)
         && let Some(opcode) = OpCode::from_raw_u8(raw_opcode)
     {
-        return Instruction::format_c(
+        let offset_i32 = i32::try_from(new_offset)
+            .map_err(|_| EmissionError::JumpOffsetOverflow { offset: new_offset })?;
+        return Ok(Instruction::format_c(
             opcode,
             instruction.flags(),
             instruction.cond_reg(),
-            new_offset,
-        );
+            offset_i32,
+        ));
     }
 
-    instruction
+    Ok(instruction)
 }
 
 /// Returns `true` if `opcode` strictly writes a primitive or null value (never a heap reference).
@@ -5666,7 +5703,9 @@ fn transform_binary_additive_self_recursion(function: &mut CompiledFunction, sel
         return;
     }
 
-    let target_u16 = self_func_idx as u16;
+    let Ok(target_u16) = u16::try_from(self_func_idx) else {
+        return;
+    };
     let rewritten = vec![
         Instruction::format_a(OpCode::JumpIfI32Imm, guard_flags, 0, jump_guard.src1(), 2),
         Instruction::format_a(OpCode::ReturnValue, 0, 0, 0, 0),
