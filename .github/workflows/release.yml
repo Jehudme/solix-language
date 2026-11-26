@@ -296,22 +296,10 @@ jobs:
           path: editors/vscode/build/solix-language.vsix
 
   build-bundled-libs:
-    name: Build Bundled Libraries (${{ matrix.label }})
+    name: Build Universal Bundled Libraries (Docker Containerized)
     needs:
       - prepare-release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: Linux & Windows (Docker)
-            bucket: docker
-            runner: ubuntu-latest
-            platform: linux,windows
-          - label: macOS (Xcode SDK)
-            bucket: macos
-            runner: macos-latest
-            platform: macos
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout branch for dry-run
         if: inputs.dry_run
@@ -331,91 +319,69 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: crates/solix-toolchain/assets/packages
-          key: solix-bundled-release-${{ matrix.bucket }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
+          key: solix-bundled-release-universal-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
 
       - name: Install Rust toolchain
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
-          targets: ${{ matrix.bucket == 'macos' && 'x86_64-apple-darwin,aarch64-apple-darwin' || 'x86_64-unknown-linux-gnu' }}
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Cache Cargo dependencies
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: release-libs-${{ matrix.bucket }}
+          prefix-key: release-libs-universal
 
       - name: Set up Python
-        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
 
-      - name: Install cross runner
-        if: steps.bundled-libs-cache.outputs.cache-hit != 'true' && matrix.bucket == 'docker'
+      - name: Install cross runner and host prerequisites
+        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         run: |
           if ! command -v cross >/dev/null 2>&1; then
             curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
+          if ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+          fi
 
-      - name: Ensure CMake is available on macOS
-        if: steps.bundled-libs-cache.outputs.cache-hit != 'true' && matrix.bucket == 'macos'
-        run: command -v cmake >/dev/null 2>&1 || brew install cmake
-
-      - name: Build host solix toolchain and bundled packages
+      - name: Build universal bundled packages across all 5 desktop targets
         if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
         shell: bash
-        env:
-          TARGET_PLATFORMS: ${{ matrix.platform }}
         run: |
           cargo build --release --bin solix
-          python3 scripts/release/build_default_libraries.py --profiles release --platform "$TARGET_PLATFORMS" --no-install --solix-binary target/release/solix
+          python3 scripts/release/build_default_libraries.py --profiles release --no-install --solix-binary target/release/solix
 
-      - name: Upload bundled packages artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: bundled-packages-${{ matrix.bucket }}
-          path: crates/solix-toolchain/assets/packages/
-
-  merge-universal-bundled-packages:
-    name: Merge Universal Bundled Packages Artifact
-    needs:
-      - prepare-release
-      - build-bundled-libs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout branch for dry-run
-        if: inputs.dry_run
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Checkout master release commit
-        if: (!inputs.dry_run)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: master
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with:
-          python-version: "3.12"
-
-      - name: Download Docker and macOS bundled packages
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          pattern: bundled-packages-*
-          path: staging-bundled-libs
-
-      - name: Merge Linux/Windows and macOS archives into universal packages
+      - name: Verify universal cross-platform binaries in bundled archives
         run: |
-          python3 scripts/release/merge_bundled_packages.py \
-            --input-dirs staging-bundled-libs/bundled-packages-* \
-            --output-dir crates/solix-toolchain/assets/packages \
-            --profiles release \
-            --require-targets "x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,x86_64-apple-darwin,aarch64-apple-darwin"
+          python3 - <<'PY'
+          import pathlib
+          import zipfile
+
+          required_triples = (
+              "x86_64-unknown-linux-gnu",
+              "aarch64-unknown-linux-gnu",
+              "x86_64-pc-windows-gnu",
+              "x86_64-apple-darwin",
+              "aarch64-apple-darwin",
+          )
+          archives = sorted(pathlib.Path("crates/solix-toolchain/assets/packages").glob("*/*.slxarc"))
+          if not archives:
+              raise SystemExit("ERROR: no .slxarc archives found in crates/solix-toolchain/assets/packages")
+          for archive_path in archives:
+              with zipfile.ZipFile(archive_path) as archive:
+                  names = archive.namelist()
+              if archive_path.parent.name.startswith("raylib-"):
+                  for triple in required_triples:
+                      prefix = f"bin/{triple}/"
+                      if not any(name.startswith(prefix) and not name.endswith("/") for name in names):
+                          raise SystemExit(f"ERROR: {archive_path} missing native binary under {prefix}")
+              print(f"Verified universal archive: {archive_path} ({len(names)} entries)")
+          PY
 
       - name: Upload universal cross-platform bundled packages artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -595,7 +561,7 @@ jobs:
     needs:
       - prepare-release
       - plan
-      - merge-universal-bundled-packages
+      - build-bundled-libs
       - build-vscode-extension
     if: ${{ fromJson(needs.plan.outputs.val).ci.github.artifacts_matrix.include != null }}
     strategy:
@@ -828,7 +794,7 @@ jobs:
       - prepare-release
       - plan
       - build-vscode-extension
-      - merge-universal-bundled-packages
+      - build-bundled-libs
       - build-local-artifacts
       - build-global-artifacts
       - benchmark-release
@@ -836,7 +802,7 @@ jobs:
       always()
       && needs.prepare-release.outputs.dry_run != 'true'
       && needs.prepare-release.result == 'success'
-      && needs.merge-universal-bundled-packages.result == 'success'
+      && needs.build-bundled-libs.result == 'success'
       && needs.build-local-artifacts.result == 'success'
       && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success')
       && needs.build-vscode-extension.result == 'success'

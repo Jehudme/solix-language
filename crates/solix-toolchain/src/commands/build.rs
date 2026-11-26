@@ -49,22 +49,55 @@ struct ResolvedNativeEntry {
     docker_image: Option<String>,
 }
 
-/// Resolves the canonical dockcross container image name for a target triple.
+/// Canonical local Docker image tag used for Apple Darwin cross-compilation via OSXCross SDK.
+pub const APPLE_DARWIN_CROSS_IMAGE: &str = "solix/apple-darwin-cross:15.5-ubuntu";
+
+const APPLE_DARWIN_IMAGE_SCHEMA_LABEL: &str = "org.solix.osxcross.schema";
+const APPLE_DARWIN_IMAGE_SCHEMA_VERSION: &str = "15.5-ubuntu-v1";
+const APPLE_DARWIN_OSXCROSS_TOOLCHAIN_CMAKE: &str = "/osxcross/toolchain.cmake";
+const APPLE_DARWIN_DEPLOYMENT_TARGET: &str = "11.0";
+const APPLE_DARWIN_DOCKERFILE: &str = "\
+FROM --platform=linux/amd64 ghcr.io/crazy-max/osxcross:15.5-ubuntu AS osxcross
+FROM --platform=linux/amd64 ghcr.io/cross-rs/x86_64-unknown-linux-gnu:edge
+
+LABEL org.solix.osxcross.schema=\"15.5-ubuntu-v1\"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    clang \\
+    lld \\
+    cmake \\
+    pkg-config \\
+    libssl-dev \\
+    libxml2-dev \\
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=osxcross /osxcross /osxcross
+ENV PATH=\"/osxcross/bin:${PATH}\"
+ENV LD_LIBRARY_PATH=\"/osxcross/lib:${LD_LIBRARY_PATH}\"
+ENV OSXCROSS_TARGET_DIR=\"/osxcross\"
+ENV OSXCROSS_TARGET=\"darwin24.5\"
+ENV OSXCROSS_SDK=\"/osxcross/SDK/MacOSX15.5.sdk\"
+ENV CMAKE_OSX_SYSROOT=\"/osxcross/SDK/MacOSX15.5.sdk\"
+";
+
+/// Resolves the canonical container image name for CMake cross-compilation of a target triple.
 #[must_use]
 pub fn dockcross_image_for_triple(triple: &str) -> Option<&'static str> {
     match triple {
         "x86_64-unknown-linux-gnu" => Some("dockcross/linux-x64"),
         "aarch64-unknown-linux-gnu" => Some("dockcross/linux-arm64"),
         "x86_64-pc-windows-gnu" | "x86_64-pc-windows-msvc" => Some("dockcross/windows-static-x64"),
-        "x86_64-apple-darwin" => Some("dockcross/darwin-x64"),
-        "aarch64-apple-darwin" => Some("dockcross/darwin-arm64"),
+        "x86_64-apple-darwin" | "aarch64-apple-darwin" => Some(APPLE_DARWIN_CROSS_IMAGE),
         _ => None,
     }
 }
 
-/// Resolves the canonical cross-rs container image name for a target triple.
+/// Resolves the canonical container image name for Cargo/cross-rs compilation of a target triple.
 #[must_use]
 pub fn cross_image_for_triple(triple: &str) -> String {
+    if is_apple_darwin_triple(triple) {
+        return APPLE_DARWIN_CROSS_IMAGE.to_string();
+    }
     let canonical_triple = match triple {
         "x86_64-pc-windows-msvc" => "x86_64-pc-windows-gnu",
         other => other,
@@ -72,10 +105,10 @@ pub fn cross_image_for_triple(triple: &str) -> String {
     format!("ghcr.io/cross-rs/{canonical_triple}:edge")
 }
 
+/// Native Cargo compilation strategy across all supported target platforms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CargoBuildStrategy {
     Docker,
-    HostAppleSdk,
 }
 
 /// Executes the `build` subcommand using declarative `manifest.yaml` (or legacy fallback).
@@ -698,10 +731,16 @@ pub fn verify_docker_daemon_active() -> Result<String> {
     ))
 }
 
-fn uses_host_apple_sdk(entry: &ResolvedNativeEntry, target_triple: &str) -> bool {
-    target_triple.ends_with("-apple-darwin")
-        && host_target_triple().ends_with("-apple-darwin")
-        && entry.docker_image.is_none()
+fn is_apple_darwin_triple(triple: &str) -> bool {
+    triple.ends_with("-apple-darwin")
+}
+
+fn osxcross_host_for_triple(triple: &str) -> Option<&'static str> {
+    match triple {
+        "x86_64-apple-darwin" => Some("x86_64-apple-darwin24.5"),
+        "aarch64-apple-darwin" => Some("aarch64-apple-darwin24.5"),
+        _ => None,
+    }
 }
 
 fn cross_toml_custom_image(cargo_manifest: &Path, triple: &str) -> Option<String> {
@@ -724,27 +763,254 @@ fn cross_toml_custom_image(cargo_manifest: &Path, triple: &str) -> Option<String
     Some(image_value.to_string())
 }
 
-fn ensure_apple_cross_container_available(
+fn apple_darwin_uses_canonical_image(
     entry: &ResolvedNativeEntry,
     cargo_manifest: Option<&Path>,
     triple: &str,
-) -> Result<()> {
-    if !triple.ends_with("-apple-darwin") || uses_host_apple_sdk(entry, triple) {
-        return Ok(());
+) -> bool {
+    if !is_apple_darwin_triple(triple) || entry.docker_image.is_some() {
+        return false;
     }
-    if entry.docker_image.is_some() {
-        return Ok(());
-    }
-    if let Some(manifest_path) = cargo_manifest
-        && cross_toml_custom_image(manifest_path, triple).is_some()
+    cargo_manifest
+        .and_then(|manifest_path| cross_toml_custom_image(manifest_path, triple))
+        .is_none_or(|configured| configured == APPLE_DARWIN_CROSS_IMAGE)
+}
+
+fn ensure_apple_darwin_docker_image(docker_executable: &Path) -> Result<()> {
+    let format_arg = format!("{{{{index .Config.Labels \"{APPLE_DARWIN_IMAGE_SCHEMA_LABEL}\"}}}}");
+    let mut inspect_command = crate::process::create_process_command(docker_executable);
+    let inspect_output = inspect_command
+        .args([
+            "image",
+            "inspect",
+            APPLE_DARWIN_CROSS_IMAGE,
+            "--format",
+            &format_arg,
+        ])
+        .env("PATH", build_search_path_env())
+        .output();
+
+    if let Ok(output) = inspect_output
+        && output.status.success()
+        && String::from_utf8_lossy(&output.stdout).trim() == APPLE_DARWIN_IMAGE_SCHEMA_VERSION
     {
         return Ok(());
     }
-    bail!(
-        "Cross-compiling Apple target '{triple}' for '{}' from host '{}' requires building on macOS (e.g. '--platform macos' on macOS) or configuring a custom local osxcross Docker image in Cross.toml / manifest.yaml ('docker_image'), because cross-rs and dockcross do not publish public Apple macOS SDK images. Filter targets on this host with '--platform linux,windows'.",
-        entry.name,
-        host_target_triple()
+
+    println!(
+        "  [docker] Building canonical OSXCross container '{APPLE_DARWIN_CROSS_IMAGE}' for Apple Darwin targets..."
     );
+    let context_dir = tempfile::tempdir()
+        .context("failed to allocate temporary Docker build context for OSXCross image")?;
+    fs::write(
+        context_dir.path().join("Dockerfile"),
+        APPLE_DARWIN_DOCKERFILE,
+    )
+    .context("failed to write OSXCross container Dockerfile")?;
+
+    let mut build_command = crate::process::create_process_command(docker_executable);
+    let build_status = build_command
+        .args(["build", "-t", APPLE_DARWIN_CROSS_IMAGE])
+        .arg(context_dir.path())
+        .env("PATH", build_search_path_env())
+        .status()
+        .with_context(|| {
+            format!("failed to invoke docker build for '{APPLE_DARWIN_CROSS_IMAGE}'")
+        })?;
+    if !build_status.success() {
+        bail!(
+            "Failed to build canonical OSXCross container image '{APPLE_DARWIN_CROSS_IMAGE}'. Ensure Docker can pull 'ghcr.io/crazy-max/osxcross:15.5-ubuntu' and 'ghcr.io/cross-rs/x86_64-unknown-linux-gnu:edge'."
+        );
+    }
+    Ok(())
+}
+
+/// Returns OSXCross compiler, linker, and CMake toolchain environment variables for Darwin triples.
+#[must_use]
+pub fn osxcross_cargo_env_vars(triple: &str) -> Vec<(String, String)> {
+    let Some(osxcross_host) = osxcross_host_for_triple(triple) else {
+        return Vec::new();
+    };
+    let underscored = triple.replace('-', "_");
+    let upper_underscored = underscored.to_ascii_uppercase();
+    let clang_binary = format!("{osxcross_host}-clang");
+    let clangxx_binary = format!("{osxcross_host}-clang++");
+    let archiver_binary = format!("{osxcross_host}-ar");
+    let ranlib_binary = format!("{osxcross_host}-ranlib");
+    vec![
+        ("OSXCROSS_HOST".to_string(), osxcross_host.to_string()),
+        (
+            format!("CMAKE_TOOLCHAIN_FILE_{underscored}"),
+            APPLE_DARWIN_OSXCROSS_TOOLCHAIN_CMAKE.to_string(),
+        ),
+        (
+            "MACOSX_DEPLOYMENT_TARGET".to_string(),
+            APPLE_DARWIN_DEPLOYMENT_TARGET.to_string(),
+        ),
+        (
+            "CMAKE_OSX_DEPLOYMENT_TARGET".to_string(),
+            APPLE_DARWIN_DEPLOYMENT_TARGET.to_string(),
+        ),
+        (format!("CC_{underscored}"), clang_binary.clone()),
+        (format!("CXX_{underscored}"), clangxx_binary),
+        (format!("AR_{underscored}"), archiver_binary.clone()),
+        (format!("RANLIB_{underscored}"), ranlib_binary),
+        (
+            format!("CARGO_TARGET_{upper_underscored}_LINKER"),
+            clang_binary,
+        ),
+        (
+            format!("CARGO_TARGET_{upper_underscored}_AR"),
+            archiver_binary,
+        ),
+    ]
+}
+
+fn merge_passthrough_env_entries(root_table: &mut toml::Table, required_keys: &[String]) {
+    let build_value = root_table
+        .entry("build")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if !build_value.is_table() {
+        *build_value = toml::Value::Table(toml::Table::new());
+    }
+    let Some(build_table) = build_value.as_table_mut() else {
+        return;
+    };
+
+    let env_value = build_table
+        .entry("env")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if !env_value.is_table() {
+        *env_value = toml::Value::Table(toml::Table::new());
+    }
+    let Some(env_table) = env_value.as_table_mut() else {
+        return;
+    };
+
+    let passthrough_value = env_table
+        .entry("passthrough")
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    if !passthrough_value.is_array() {
+        *passthrough_value = toml::Value::Array(Vec::new());
+    }
+    let Some(passthrough_array) = passthrough_value.as_array_mut() else {
+        return;
+    };
+
+    for required_key in required_keys {
+        let already_present = passthrough_array
+            .iter()
+            .any(|item| item.as_str() == Some(required_key.as_str()));
+        if !already_present {
+            passthrough_array.push(toml::Value::String(required_key.clone()));
+        }
+    }
+}
+
+/// Generates or merges a `Cross.toml` configuration for container cross-compilation.
+///
+/// For any native Cargo target triple, produces a merged `Cross.toml` inside `output_dir`
+/// wiring `[target.<triple>].image` (to `cross_image_for_triple(triple)` or custom overrides)
+/// and `[build.env].passthrough` (including `SOLIX_NATIVE_BUILD` and OSXCross compiler/linker
+/// variables for Darwin targets) while preserving user settings and custom target image overrides.
+///
+/// # Errors
+/// Returns an error if an existing `Cross.toml` fails to parse or writing the merged config fails.
+pub fn prepare_effective_cross_config(
+    existing_cross_toml: Option<&Path>,
+    output_dir: &Path,
+    entry_name: &str,
+    triple: &str,
+    explicit_docker_image: Option<&str>,
+) -> Result<Option<PathBuf>> {
+    let existing_file = existing_cross_toml.filter(|candidate| candidate.is_file());
+    let is_darwin = is_apple_darwin_triple(triple);
+
+    let mut root_table = match existing_file {
+        Some(path_ref) => {
+            let raw_text = fs::read_to_string(path_ref).with_context(|| {
+                format!("failed to read Cross.toml at '{}'", path_ref.display())
+            })?;
+            toml::from_str::<toml::Table>(&raw_text).with_context(|| {
+                format!("failed to parse Cross.toml at '{}'", path_ref.display())
+            })?
+        }
+        None => toml::Table::new(),
+    };
+
+    let target_section = root_table
+        .entry("target")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    if !target_section.is_table() {
+        *target_section = toml::Value::Table(toml::Table::new());
+    }
+    if let Some(target_map) = target_section.as_table_mut() {
+        let triple_entry = target_map
+            .entry(triple)
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        if !triple_entry.is_table() {
+            *triple_entry = toml::Value::Table(toml::Table::new());
+        }
+        if let Some(triple_table) = triple_entry.as_table_mut() {
+            if let Some(custom_image) = explicit_docker_image {
+                triple_table.insert(
+                    "image".to_string(),
+                    toml::Value::String(custom_image.to_string()),
+                );
+            } else {
+                let unreachable_darwin_default = format!("ghcr.io/cross-rs/{triple}:edge");
+                let existing_image = triple_table
+                    .get("image")
+                    .and_then(|val| val.as_str())
+                    .map(str::trim)
+                    .filter(|img| !img.is_empty());
+                let should_populate_canonical = match existing_image {
+                    None => true,
+                    Some(img) if is_darwin => img == unreachable_darwin_default,
+                    Some(_) => false,
+                };
+                if should_populate_canonical {
+                    triple_table.insert(
+                        "image".to_string(),
+                        toml::Value::String(cross_image_for_triple(triple)),
+                    );
+                }
+            }
+        }
+    }
+
+    let mut required_passthrough = vec!["SOLIX_NATIVE_BUILD".to_string()];
+    for (env_key, _) in osxcross_cargo_env_vars(triple) {
+        required_passthrough.push(env_key);
+    }
+    merge_passthrough_env_entries(&mut root_table, &required_passthrough);
+
+    fs::create_dir_all(output_dir).with_context(|| {
+        format!(
+            "failed to create cross config cache directory '{}'",
+            output_dir.display()
+        )
+    })?;
+    let sanitized_name: String = entry_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let generated_path = output_dir.join(format!("Cross.{sanitized_name}.{triple}.toml"));
+    let serialized =
+        toml::to_string_pretty(&root_table).context("failed to serialize effective Cross.toml")?;
+    fs::write(&generated_path, serialized).with_context(|| {
+        format!(
+            "failed to write effective Cross.toml to '{}'",
+            generated_path.display()
+        )
+    })?;
+    Ok(Some(generated_path))
 }
 
 fn verify_build_environment(
@@ -765,19 +1031,8 @@ fn verify_build_environment(
         return Ok(());
     }
 
-    let needs_docker = native_entries.iter().any(|entry| {
-        entry
-            .target_triples
-            .iter()
-            .any(|triple| !uses_host_apple_sdk(entry, triple))
-    });
-    let docker_version = if needs_docker {
-        let active_docker = verify_docker_daemon_active()?;
-        println!("  [check] {active_docker} (Docker daemon active)");
-        Some(active_docker)
-    } else {
-        None
-    };
+    let docker_version = verify_docker_daemon_active()?;
+    println!("  [check] {docker_version} (Docker daemon active)");
 
     for entry in native_entries {
         println!(
@@ -787,30 +1042,19 @@ fn verify_build_environment(
             entry.target_triples.join(", ")
         );
         for triple in &entry.target_triples {
-            if uses_host_apple_sdk(entry, triple) {
-                if entry.backend == NativeBackend::Cargo {
-                    let cargo_exe = find_executable("cargo").ok_or_else(|| {
-                        anyhow::anyhow!("Native macOS Cargo compilation requires 'cargo' on PATH.")
-                    })?;
-                    println!(
-                        "  [check] cargo ({}) (for {triple} via native Xcode/Apple SDK)",
-                        cargo_exe.display()
-                    );
-                } else {
-                    let cmake_exe = find_executable("cmake").ok_or_else(|| {
-                        anyhow::anyhow!("Native macOS CMake compilation requires 'cmake' on PATH.")
-                    })?;
-                    println!(
-                        "  [check] cmake ({}) (for {triple} via native Xcode/Apple SDK)",
-                        cmake_exe.display()
-                    );
-                }
-                continue;
-            }
-
             let cargo_manifest =
                 (entry.backend == NativeBackend::Cargo).then(|| entry.directory.join("Cargo.toml"));
-            ensure_apple_cross_container_available(entry, cargo_manifest.as_deref(), triple)?;
+            let target_container_label = if let Some(ref custom_image) = entry.docker_image {
+                custom_image.clone()
+            } else if entry.backend == NativeBackend::Cargo {
+                cargo_manifest
+                    .as_deref()
+                    .and_then(|manifest_path| cross_toml_custom_image(manifest_path, triple))
+                    .unwrap_or_else(|| cross_image_for_triple(triple))
+            } else {
+                dockcross_image_for_triple(triple)
+                    .map_or_else(|| "custom Docker image".to_string(), str::to_string)
+            };
 
             if entry.backend == NativeBackend::Cargo {
                 let cross_exe = find_executable("cross").ok_or_else(|| {
@@ -819,11 +1063,13 @@ fn verify_build_environment(
                     )
                 })?;
                 println!(
-                    "  [check] cross ({}) (for {triple} via cross-rs container)",
+                    "  [check] cross ({}) (for {triple} via container '{target_container_label}')",
                     cross_exe.display()
                 );
-            } else if let Some(ref docker_label) = docker_version {
-                println!("  [check] {docker_label} (for {triple} via Docker container)");
+            } else {
+                println!(
+                    "  [check] {docker_version} (for {triple} via container '{target_container_label}')"
+                );
             }
         }
     }
@@ -857,20 +1103,16 @@ fn find_executable(tool_name: &str) -> Option<PathBuf> {
 
 /// Selects the native Cargo build strategy for the given target triple.
 ///
-/// Containerized Docker compilation (`Docker`) is mandated across Linux and Windows targets,
-/// while Apple Darwin targets on macOS hosts compile natively against the host Apple/Xcode SDK
-/// (`HostAppleSdk`) because cross-rs does not distribute public macOS SDK containers.
+/// Containerized Docker compilation (`Docker`) is mandated across all supported desktop targets
+/// (Linux, Windows, and Apple Darwin via OSXCross).
 ///
 /// # Errors
-/// Returns `Ok` with the deterministic build strategy for `(target_triple, host_triple)`.
+/// Returns `Ok(CargoBuildStrategy::Docker)` unconditionally.
 pub fn select_cargo_strategy(
-    target_triple: &str,
-    host_triple: &str,
+    _target_triple: &str,
+    _host_triple: &str,
     _is_docker: bool,
 ) -> Result<CargoBuildStrategy> {
-    if target_triple.ends_with("-apple-darwin") && host_triple.ends_with("-apple-darwin") {
-        return Ok(CargoBuildStrategy::HostAppleSdk);
-    }
     Ok(CargoBuildStrategy::Docker)
 }
 
@@ -915,71 +1157,69 @@ fn compile_cargo_native(
 
     let ffi_rust_source_dir = resolve_ffi_rust_source_dir(project_root);
     let uses_git_solix_ffi = cargo_uses_git_solix_ffi(&cargo_manifest);
+    let cargo_target_dir = resolve_cargo_target_cache_dir(cache_dir, true);
+    let cross_config_cache_dir = cache_dir.join("cross");
+    let native_crate_dir = cargo_manifest.parent().unwrap_or(project_root);
+    let existing_cross_toml = native_crate_dir.join("Cross.toml");
 
     for triple in &entry.target_triples {
-        let uses_apple_host_sdk = uses_host_apple_sdk(entry, triple);
-        let cargo_target_dir = resolve_cargo_target_cache_dir(cache_dir, !uses_apple_host_sdk);
-        let strategy_label = if uses_apple_host_sdk {
-            "Xcode/Apple SDK"
-        } else {
-            "Docker"
-        };
+        if apple_darwin_uses_canonical_image(entry, Some(&cargo_manifest), triple) {
+            let docker_executable = find_executable("docker").ok_or_else(|| {
+                anyhow::anyhow!(
+                    "[verify] Required build tool 'docker' was not found on PATH. Containerized native compilation mandates Docker."
+                )
+            })?;
+            ensure_apple_darwin_docker_image(&docker_executable)?;
+        }
+
         println!(
-            "  [cargo] Building '{}' ({}, target: {}, strategy: {strategy_label})...",
+            "  [cargo] Building '{}' ({}, target: {}, strategy: Docker)...",
             entry.name, entry.native_profile, triple
         );
 
-        let mut command = if uses_apple_host_sdk {
-            let cargo_executable = find_executable("cargo").ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Native macOS Cargo compilation for '{triple}' requires 'cargo' on PATH."
-                )
-            })?;
-            let mut cargo_command = crate::process::create_process_command(&cargo_executable);
-            cargo_command.arg("build");
-            cargo_command
-                .arg("--manifest-path")
-                .arg(&cargo_manifest)
-                .arg("--target-dir")
-                .arg(&cargo_target_dir);
-            cargo_command
-        } else {
-            ensure_apple_cross_container_available(entry, Some(&cargo_manifest), triple)?;
-            let cross_executable = find_executable("cross").ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Cargo native containerized compilation for '{triple}' mandates 'cross'. Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH."
-                )
-            })?;
-            let mut cross_command = crate::process::create_process_command(&cross_executable);
-            cross_command.arg("build");
-            cross_command
-                .arg("--manifest-path")
-                .arg(&cargo_manifest)
-                .arg("--target-dir")
-                .arg(&cargo_target_dir);
-            let native_crate_dir = cargo_manifest.parent().unwrap_or(project_root);
-            let cross_toml = native_crate_dir.join("Cross.toml");
-            if cross_toml.exists() {
-                cross_command.env("CROSS_CONFIG", &cross_toml);
-            }
-            if let Some(ref rust_ffi_dir) = ffi_rust_source_dir {
-                let existing_container_opts =
-                    std::env::var("CROSS_CONTAINER_OPTS").unwrap_or_default();
-                let mount_flag =
-                    format!("-v {}:{}", rust_ffi_dir.display(), rust_ffi_dir.display());
-                let combined_opts = if existing_container_opts.is_empty() {
-                    mount_flag
-                } else {
-                    format!("{existing_container_opts} {mount_flag}")
-                };
-                cross_command.env("CROSS_CONTAINER_OPTS", combined_opts);
-            }
-            cross_command
-        };
+        let cross_executable = find_executable("cross").ok_or_else(|| {
+            anyhow::anyhow!(
+                "Cargo native containerized compilation for '{triple}' mandates 'cross'. Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH."
+            )
+        })?;
+        let mut command = crate::process::create_process_command(&cross_executable);
+        command.arg("build");
+        command
+            .arg("--manifest-path")
+            .arg(&cargo_manifest)
+            .arg("--target-dir")
+            .arg(&cargo_target_dir);
+
+        if let Some(effective_cross_config) = prepare_effective_cross_config(
+            Some(&existing_cross_toml),
+            &cross_config_cache_dir,
+            &entry.name,
+            triple,
+            entry.docker_image.as_deref(),
+        )? {
+            command.env("CROSS_CONFIG", &effective_cross_config);
+        }
+
+        if let Some(ref rust_ffi_dir) = ffi_rust_source_dir {
+            let existing_container_opts = std::env::var("CROSS_CONTAINER_OPTS").unwrap_or_default();
+            let mount_flag = format!("-v {}:{}", rust_ffi_dir.display(), rust_ffi_dir.display());
+            let combined_opts = if existing_container_opts.is_empty() {
+                mount_flag
+            } else {
+                format!("{existing_container_opts} {mount_flag}")
+            };
+            command.env("CROSS_CONTAINER_OPTS", combined_opts);
+        }
+
+        for (env_key, env_value) in osxcross_cargo_env_vars(triple) {
+            command.env(env_key, env_value);
+        }
 
         if is_release {
             command.arg("--release");
-            command.env("CARGO_PROFILE_RELEASE_STRIP", "symbols");
+            if !is_apple_darwin_triple(triple) {
+                command.env("CARGO_PROFILE_RELEASE_STRIP", "symbols");
+            }
         }
         if entry.has_solix_native_feature && !flags_specify_features {
             command.args(["--features", "solix-native"]);
@@ -1223,109 +1463,64 @@ fn write_executable_script(script_path: &Path, body: &str) -> Result<()> {
     Ok(())
 }
 
-fn compile_cmake_native_host_apple(
-    entry: &ResolvedNativeEntry,
+fn build_cmake_docker_command(
+    docker_executable: &Path,
     project_root: &Path,
-    cmake_build_dir: &Path,
-    stage_triple_dir: &Path,
-    archive_cache_dir: &Path,
-    triple: &str,
+    entry: &ResolvedNativeEntry,
     ffi_c_source_dir: Option<&Path>,
-) -> Result<()> {
-    let cmake_build_type = if entry.native_profile.eq_ignore_ascii_case("release") {
-        "Release"
-    } else {
-        "Debug"
-    };
-    let cmake_executable = find_executable("cmake").ok_or_else(|| {
-        anyhow::anyhow!("Native macOS CMake compilation for '{triple}' requires 'cmake' on PATH.")
-    })?;
-    let osx_arch = if triple.starts_with("x86_64-") {
-        "x86_64"
-    } else {
-        "arm64"
-    };
-    let stage_triple_cmake = cmake_path_string(stage_triple_dir);
-    let archive_cache_cmake = cmake_path_string(archive_cache_dir);
+    triple: &str,
+    container_image: &str,
+) -> Command {
+    let entry_dir_in_container = entry
+        .directory
+        .strip_prefix(project_root)
+        .map(|relative_path| PathBuf::from("/work").join(relative_path))
+        .unwrap_or_else(|_| entry.directory.clone());
 
-    let mut configure_command = crate::process::create_process_command(&cmake_executable);
-    configure_command
-        .current_dir(project_root)
-        .env("PATH", build_search_path_env())
-        .env("SOLIX_NATIVE_BUILD", "1");
+    let mut command = crate::process::create_process_command(docker_executable);
+    command.args(["run", "--rm"]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(metadata) = project_root.metadata() {
+            let user_id = metadata.uid();
+            let group_id = metadata.gid();
+            command.args(["-u", &format!("{user_id}:{group_id}")]);
+        }
+    }
+    command
+        .arg("-v")
+        .arg(format!("{}:/work", project_root.display()));
+    if !entry.directory.starts_with(project_root) {
+        command.arg("-v").arg(format!(
+            "{}:{}",
+            entry.directory.display(),
+            entry_dir_in_container.display()
+        ));
+    }
     if let Some(local_ffi_dir) = ffi_c_source_dir {
-        configure_command.env("SOLIX_FFI_SOURCE_DIR", cmake_path_string(local_ffi_dir));
+        if let Ok(relative_ffi) = local_ffi_dir.strip_prefix(project_root) {
+            command.args([
+                "-e",
+                &format!("SOLIX_FFI_SOURCE_DIR=/work/{}", relative_ffi.display()),
+            ]);
+        } else {
+            command
+                .arg("-v")
+                .arg(format!("{}:/ffi_c:ro", local_ffi_dir.display()));
+            command.args(["-e", "SOLIX_FFI_SOURCE_DIR=/ffi_c"]);
+        }
     }
-    configure_command.args(["-S"]);
-    configure_command.arg(cmake_path_string(&entry.directory));
-    configure_command.args(["-B"]);
-    configure_command.arg(cmake_path_string(cmake_build_dir));
-    configure_command.arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"));
-    configure_command.arg("-DCMAKE_SYSTEM_NAME=Darwin");
-    configure_command.arg(format!("-DCMAKE_OSX_ARCHITECTURES={osx_arch}"));
-    configure_command.arg("-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0");
-    configure_command.arg("-DSOLIX_NATIVE_BUILD=ON");
-    configure_command.arg("-DBUILD_SHARED_LIBS=ON");
-    configure_command.arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON");
-    configure_command.arg("-DBUILD_TESTING=OFF");
-    configure_command.arg(format!(
-        "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={stage_triple_cmake}"
-    ));
-    configure_command.arg(format!(
-        "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
-    ));
-    configure_command.arg(format!(
-        "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
-    ));
-    configure_command.arg(format!(
-        "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={stage_triple_cmake}"
-    ));
-    configure_command.arg(format!(
-        "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
-    ));
-    configure_command.arg(format!(
-        "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
-    ));
-    configure_command.arg(format!(
-        "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={archive_cache_cmake}"
-    ));
-    for flag in &entry.flags {
-        configure_command.arg(flag);
+    if let Some(osxcross_host) = osxcross_host_for_triple(triple) {
+        command.args(["-e", &format!("OSXCROSS_HOST={osxcross_host}")]);
+        command.args([
+            "-e",
+            &format!("MACOSX_DEPLOYMENT_TARGET={APPLE_DARWIN_DEPLOYMENT_TARGET}"),
+        ]);
     }
-
-    let configure_status = configure_command.status().with_context(|| {
-        format!(
-            "failed to configure CMake project '{}' for macOS target '{triple}'",
-            entry.name
-        )
-    })?;
-    if !configure_status.success() {
-        bail!(
-            "macOS cmake configure failed for '{}' (target: '{triple}')",
-            entry.name
-        );
-    }
-
-    let mut build_command = crate::process::create_process_command(&cmake_executable);
-    build_command
-        .current_dir(project_root)
-        .env("PATH", build_search_path_env())
-        .args(["--build"])
-        .arg(cmake_path_string(cmake_build_dir))
-        .args(["--config", cmake_build_type]);
-    let build_status = build_command.status().with_context(|| {
-        format!(
-            "failed to build CMake project '{}' for macOS target '{triple}'",
-            entry.name
-        )
-    })?;
-    if !build_status.success() {
-        bail!(
-            "macOS cmake build failed for '{}' (target: '{triple}')",
-            entry.name
-        );
-    }
-    Ok(())
+    command.args(["-w", "/work"]);
+    command.arg(container_image);
+    command
 }
 
 fn compile_cmake_native(
@@ -1337,15 +1532,23 @@ fn compile_cmake_native(
     let is_release = entry.native_profile.eq_ignore_ascii_case("release");
     let cmake_build_type = if is_release { "Release" } else { "Debug" };
     let ffi_c_source_dir = resolve_ffi_c_source_dir(project_root);
+    let docker_executable = find_executable("docker").ok_or_else(|| {
+        anyhow::anyhow!(
+            "[verify] Required build tool 'docker' was not found on PATH. Containerized native compilation mandates Docker."
+        )
+    })?;
 
     for triple in &entry.target_triples {
-        let uses_apple_host_sdk = uses_host_apple_sdk(entry, triple);
+        if apple_darwin_uses_canonical_image(entry, None, triple) {
+            ensure_apple_darwin_docker_image(&docker_executable)?;
+        }
+
         let cmake_build_dir = resolve_cmake_target_cache_dir(
             cache_dir,
             &entry.name,
             &entry.native_profile,
             triple,
-            !uses_apple_host_sdk,
+            true,
         );
         let stage_triple_dir = stage_bin_dir.join(triple);
         let archive_cache_dir = cache_dir.join("archives").join(&entry.name).join(triple);
@@ -1353,51 +1556,18 @@ fn compile_cmake_native(
         fs::create_dir_all(&stage_triple_dir)?;
         fs::create_dir_all(&archive_cache_dir)?;
 
-        if uses_apple_host_sdk {
-            println!(
-                "  [cmake] Building '{}' ({cmake_build_type}, target: {triple} via native Xcode/Apple SDK)...",
-                entry.name
-            );
-            compile_cmake_native_host_apple(
-                entry,
-                project_root,
-                &cmake_build_dir,
-                &stage_triple_dir,
-                &archive_cache_dir,
-                triple,
-                ffi_c_source_dir.as_deref(),
-            )?;
-            let mut staged_count = count_shared_libs_in_dir(&stage_triple_dir);
-            if staged_count == 0 {
-                staged_count += copy_shared_libs_recursive(&cmake_build_dir, &stage_triple_dir)?;
-            }
-            if staged_count == 0 {
-                bail!(
-                    "macOS CMake build succeeded for '{}' ({triple}) but emitted no shared library (.dylib)",
-                    entry.name
-                );
-            }
-            continue;
-        }
-
-        ensure_apple_cross_container_available(entry, None, triple)?;
-        let docker_executable = find_executable("docker").ok_or_else(|| {
-            anyhow::anyhow!(
-                "[verify] Required build tool 'docker' was not found on PATH. Containerized native compilation mandates Docker."
-            )
-        })?;
         println!(
             "  [cmake] Building '{}' ({cmake_build_type}, target: {triple} via Docker container)...",
             entry.name
         );
 
-        let dockcross_image = entry
+        let container_image = entry
             .docker_image
             .clone()
             .or_else(|| dockcross_image_for_triple(triple).map(str::to_string))
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "No default dockcross image known for target '{triple}'. Please specify 'docker_image: <image>' in manifest.yaml"
+                    "No default container image known for target '{triple}'. Please specify 'docker_image: <image>' in manifest.yaml"
                 )
             })?;
 
@@ -1421,47 +1591,35 @@ fn compile_cmake_native(
 
         let stage_triple_cmake = cmake_path_string(&stage_triple_in_container);
         let archive_cache_cmake = cmake_path_string(&archive_cache_in_container);
-        let mut configure_command = crate::process::create_process_command(&docker_executable);
-        configure_command.args(["run", "--rm"]);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if let Ok(metadata) = project_root.metadata() {
-                let user_id = metadata.uid();
-                let group_id = metadata.gid();
-                configure_command.args(["-u", &format!("{user_id}:{group_id}")]);
-            }
-        }
-        configure_command
-            .arg("-v")
-            .arg(format!("{}:/work", project_root.display()));
-        if !entry.directory.starts_with(project_root) {
-            configure_command.arg("-v").arg(format!(
-                "{}:{}",
-                entry.directory.display(),
-                entry_dir_in_container.display()
-            ));
-        }
-        if let Some(ref local_ffi_dir) = ffi_c_source_dir {
-            if let Ok(relative_ffi) = local_ffi_dir.strip_prefix(project_root) {
-                configure_command.args([
-                    "-e",
-                    &format!("SOLIX_FFI_SOURCE_DIR=/work/{}", relative_ffi.display()),
-                ]);
-            } else {
-                configure_command
-                    .arg("-v")
-                    .arg(format!("{}:/ffi_c:ro", local_ffi_dir.display()));
-                configure_command.args(["-e", "SOLIX_FFI_SOURCE_DIR=/ffi_c"]);
-            }
-        }
-        configure_command.args(["-w", "/work"]);
-        configure_command.arg(&dockcross_image);
+        let mut configure_command = build_cmake_docker_command(
+            &docker_executable,
+            project_root,
+            entry,
+            ffi_c_source_dir.as_deref(),
+            triple,
+            &container_image,
+        );
         configure_command.args(["cmake", "-S"]);
         configure_command.arg(cmake_path_string(&entry_dir_in_container));
-        configure_command.arg("-B");
+        configure_command.args(["-B"]);
         configure_command.arg(cmake_path_string(&build_dir_in_container));
         configure_command.arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"));
+        if is_apple_darwin_triple(triple) {
+            let osx_arch = if triple.starts_with("x86_64-") {
+                "x86_64"
+            } else {
+                "arm64"
+            };
+            configure_command.arg(format!(
+                "-DCMAKE_TOOLCHAIN_FILE={APPLE_DARWIN_OSXCROSS_TOOLCHAIN_CMAKE}"
+            ));
+            configure_command.arg(format!("-DCMAKE_OSX_ARCHITECTURES={osx_arch}"));
+            configure_command.arg(format!(
+                "-DCMAKE_OSX_DEPLOYMENT_TARGET={APPLE_DARWIN_DEPLOYMENT_TARGET}"
+            ));
+            configure_command.arg("-DCMAKE_INSTALL_RPATH=@loader_path");
+            configure_command.arg("-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON");
+        }
         configure_command.arg("-DSOLIX_NATIVE_BUILD=ON");
         configure_command.arg("-DBUILD_SHARED_LIBS=ON");
         configure_command.arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON");
@@ -1492,53 +1650,25 @@ fn compile_cmake_native(
         }
         let configure_status = configure_command.status().with_context(|| {
             format!(
-                "failed to configure CMake project '{}' via dockcross container",
-                entry.name
+                "failed to configure CMake project '{}' via Docker container '{}'",
+                entry.name, container_image
             )
         })?;
         if !configure_status.success() {
             bail!(
-                "dockcross cmake configure failed for '{}' (target: '{triple}')",
+                "Docker CMake configure failed for '{}' (target: '{triple}', image: '{container_image}')",
                 entry.name
             );
         }
 
-        let mut build_command = crate::process::create_process_command(&docker_executable);
-        build_command.args(["run", "--rm"]);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if let Ok(metadata) = project_root.metadata() {
-                let user_id = metadata.uid();
-                let group_id = metadata.gid();
-                build_command.args(["-u", &format!("{user_id}:{group_id}")]);
-            }
-        }
-        build_command
-            .arg("-v")
-            .arg(format!("{}:/work", project_root.display()));
-        if !entry.directory.starts_with(project_root) {
-            build_command.arg("-v").arg(format!(
-                "{}:{}",
-                entry.directory.display(),
-                entry_dir_in_container.display()
-            ));
-        }
-        if let Some(ref local_ffi_dir) = ffi_c_source_dir {
-            if let Ok(relative_ffi) = local_ffi_dir.strip_prefix(project_root) {
-                build_command.args([
-                    "-e",
-                    &format!("SOLIX_FFI_SOURCE_DIR=/work/{}", relative_ffi.display()),
-                ]);
-            } else {
-                build_command
-                    .arg("-v")
-                    .arg(format!("{}:/ffi_c:ro", local_ffi_dir.display()));
-                build_command.args(["-e", "SOLIX_FFI_SOURCE_DIR=/ffi_c"]);
-            }
-        }
-        build_command.args(["-w", "/work"]);
-        build_command.arg(&dockcross_image);
+        let mut build_command = build_cmake_docker_command(
+            &docker_executable,
+            project_root,
+            entry,
+            ffi_c_source_dir.as_deref(),
+            triple,
+            &container_image,
+        );
         build_command.args([
             "cmake",
             "--build",
@@ -1548,13 +1678,13 @@ fn compile_cmake_native(
         ]);
         let build_status = build_command.status().with_context(|| {
             format!(
-                "failed to build CMake project '{}' via dockcross container",
-                entry.name
+                "failed to build CMake project '{}' via Docker container '{}'",
+                entry.name, container_image
             )
         })?;
         if !build_status.success() {
             bail!(
-                "dockcross cmake build failed for '{}' (target: '{triple}')",
+                "Docker CMake build failed for '{}' (target: '{triple}', image: '{container_image}')",
                 entry.name
             );
         }
@@ -1565,7 +1695,7 @@ fn compile_cmake_native(
         }
         if staged_count == 0 {
             bail!(
-                "dockcross CMake build succeeded for '{}' ({triple}) but emitted no shared library (.so/.dll/.dylib)",
+                "Docker CMake build succeeded for '{}' ({triple}) but emitted no shared library (.so/.dll/.dylib)",
                 entry.name
             );
         }

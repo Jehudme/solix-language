@@ -951,22 +951,30 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertIn("<!-- solix-pr-benchmark -->", sync_text)
         self.assertIn("<!-- solix-pr-coverage -->", sync_text)
 
-    def test_release_workflow_separates_docker_and_macos_buckets(self) -> None:
+    def test_release_workflow_uses_single_runner_universal_docker_builds(self) -> None:
         release_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("platform: linux,windows", release_text)
-        self.assertIn("platform: macos", release_text)
-        self.assertIn(
-            '--require-targets "x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,x86_64-apple-darwin,aarch64-apple-darwin"',
-            release_text,
-        )
+        self.assertIn("Build Universal Bundled Libraries (Docker Containerized)", release_text)
+        self.assertNotIn("merge-universal-bundled-packages:", release_text)
+        self.assertNotIn("merge_bundled_packages.py", release_text)
+        self.assertNotIn("runner: macos-latest", release_text)
+        self.assertIn("name: bundled-packages-universal", release_text)
+        for required_triple in (
+            "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "x86_64-pc-windows-gnu",
+            "x86_64-apple-darwin",
+            "aarch64-apple-darwin",
+        ):
+            self.assertIn(required_triple, release_text)
 
         for cross_toml_rel in (
             "libraries/raylib/natives/raylib/Cross.toml",
             "libraries/solixlib/natives/solixlib_native/Cross.toml",
         ):
             cross_text = (REPO_ROOT / cross_toml_rel).read_text(encoding="utf-8")
+            self.assertIn('image = "solix/apple-darwin-cross:15.5-ubuntu"', cross_text)
             self.assertNotIn("ghcr.io/cross-rs/x86_64-apple-darwin:edge", cross_text)
             self.assertNotIn("ghcr.io/cross-rs/aarch64-apple-darwin:edge", cross_text)
 
