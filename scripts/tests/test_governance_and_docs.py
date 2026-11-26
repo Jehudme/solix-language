@@ -748,6 +748,7 @@ class SolixBenchCliTests(unittest.TestCase):
                                 "solix_fast": {"median_ms": 100.0, "rss_kb": 10000},
                                 "python3": {"median_ms": 400.0, "rss_kb": 20000},
                                 "lua": {"median_ms": 120.0, "rss_kb": 4000},
+                                "java": {"median_ms": 80.0, "rss_kb": 35000},
                             }
                         },
                     }
@@ -780,6 +781,8 @@ class SolixBenchCliTests(unittest.TestCase):
             rendered_md = md_out.read_text(encoding="utf-8")
             self.assertIn("### Multi-Baseline Benchmark Comparison", rendered_md)
             self.assertIn("### Cross-Language Comparison", rendered_md)
+            self.assertIn("Java (ms)", rendered_md)
+            self.assertIn("80.00", rendered_md)
             self.assertIn("4.00x", rendered_md)
 
             parsed_json = json.loads(json_out.read_text(encoding="utf-8"))
@@ -853,6 +856,30 @@ class SolixBenchCliTests(unittest.TestCase):
             self.assertIn("compile_ms", solix_stats)
             self.assertIn("cold_start_ms", solix_stats)
             self.assertGreater(solix_stats["compile_ms"], 0.0)
+
+    def test_solix_bench_java_engine_resolution_and_compilation(self) -> None:
+        """Tests that solix_bench resolves javac/java and compiles Java workloads."""
+        benchmark_runner = solix_bench.BenchmarkRunner(REPO_ROOT)
+        resolved_javac = benchmark_runner.resolve_engine("javac")
+        resolved_java = benchmark_runner.resolve_engine("java")
+        if not resolved_javac or not resolved_java:
+            self.skipTest("javac or java not available on host system")
+
+        fibonacci_workload_dir = REPO_ROOT / "benchmarks" / "workloads" / "01_fib_recursive"
+        java_files = list(fibonacci_workload_dir.glob("*.java"))
+        self.assertTrue(java_files, "Expected Fib.java to exist in 01_fib_recursive")
+
+        compiled_target = benchmark_runner.compile_java_workload(java_files[0])
+        self.assertIsNotNone(compiled_target)
+        output_directory, main_class_name = compiled_target
+        self.assertEqual(main_class_name, "Fib")
+        self.assertTrue((output_directory / "Fib.class").is_file())
+
+        exit_code, standard_output, _, _ = benchmark_runner.execute_command(
+            [resolved_java, "-cp", str(output_directory), main_class_name]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("RESULT: 317811", standard_output)
 
     def test_execute_command_measures_independent_child_memory(self) -> None:
         benchmark_runner = solix_bench.BenchmarkRunner(REPO_ROOT)
