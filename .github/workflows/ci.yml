@@ -336,6 +336,7 @@ jobs:
       - name: Install cross runner
         if: runner.os == 'Linux'
         run: |
+          rustup component add rust-src
           if ! command -v cross >/dev/null 2>&1; then
             curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
@@ -500,6 +501,7 @@ jobs:
 
       - name: Install cross runner
         run: |
+          rustup component add rust-src
           if ! command -v cross >/dev/null 2>&1; then
             curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi

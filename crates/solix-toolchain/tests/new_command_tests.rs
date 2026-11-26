@@ -126,7 +126,14 @@ fn test_solix_new_default_application() {
         "Legacy lib/ directory must not be created"
     );
 
-    // Build debug profile via pure-Rust builder
+    // Build debug profile via pure-Rust builder when Docker/cross containerization is available
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping build verification in test_solix_new_default_application: Docker/cross container environment is not active."
+        );
+        return;
+    }
+
     let build_arguments = BuildArgs {
         path: target_project_directory.clone(),
         platform: None,
@@ -532,6 +539,13 @@ public class Main {
         }
 
         // Full Solix plugin build & execution combining Rust + C + C++!
+        if !is_cross_container_available() {
+            eprintln!(
+                "[test] Skipping containerized build verification in test_solix_new_native_subcommand_c_cpp_and_rust_dual_mode: Docker/cross container environment is not active."
+            );
+            return;
+        }
+
         let build_cli = Cli::try_parse_from([
             "solix",
             "build",
@@ -567,4 +581,30 @@ public class Main {
             42
         );
     }
+}
+
+fn is_cross_container_available() -> bool {
+    if solix_toolchain::verify_docker_daemon_active().is_err() {
+        return false;
+    }
+    let Some(docker_exe) = solix_toolchain::find_executable_in_path("docker") else {
+        return false;
+    };
+    let Ok(output) = solix_toolchain::create_process_command(&docker_exe)
+        .args(["version", "--format", "{{.Server.Os}}"])
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != "linux" {
+        return false;
+    }
+    if solix_toolchain::find_executable_in_path("cross").is_some() {
+        return true;
+    }
+    let home_dir = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    home_dir.is_some_and(|home| {
+        let cargo_bin = std::path::PathBuf::from(home).join(".cargo").join("bin");
+        solix_toolchain::find_executable_in_search_paths("cross", cargo_bin.as_os_str()).is_some()
+    })
 }
