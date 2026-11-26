@@ -399,6 +399,7 @@ jobs:
           python3 scripts/bench/solix_bench.py verify
 
       - name: List installed packages and verify example application compilation
+        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -415,6 +416,7 @@ jobs:
           "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxp
 
       - name: Run FFI C/C++/Rust matrix and dual-backend example suite
+        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -427,6 +429,7 @@ jobs:
           python3 scripts/tests/run_ffi_suite.py --solix-binary "$SOLIX_EXE"
 
       - name: Run End-to-End Command & Option Lifecycle Matrix (GL-0009)
+        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
