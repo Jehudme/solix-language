@@ -168,7 +168,7 @@ profiles:
         profile: release
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.1.1"
         profile: release
 
   debug:
@@ -186,7 +186,7 @@ profiles:
         profile: debug
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.1.1"
         profile: release
 
   test:
@@ -205,9 +205,12 @@ profiles:
         profile: debug
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.1.1"
         profile: release
 ```
+
+> [!NOTE]
+> The default `solix` standard library dependency pinned in newly generated manifests tracks the active bundled `solix` library version in `bundled_manifest.json` (which releases independently from the `solix` toolchain crate SemVer). Pass `--no-std` to omit the default `solix` dependency, or `-d solix@<version>` to pin an explicit version.
 
 > [!TIP]
 > Pass `--native c` or `--native cpp` to `solix new` to generate a dual-mode CMake project instead of Rust, or add a native library to an existing project later using `solix new native <name> --project . --lang <rust|c|cpp>`. See the [`manifest.yaml` Wiki](../wiki/manifest.md).

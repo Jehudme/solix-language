@@ -40,7 +40,7 @@ profiles:
         profile: release
     dependencies:
       solix:
-        version: "2.0.1"
+        version: "2.1.1"
         profile: release
       raylib:
         version: "5.6.1"
