@@ -243,7 +243,7 @@ jobs:
           elif [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
             BASE_REF="$BEFORE_SHA"
           else
-            BASE_REF="HEAD~1"
+            BASE_REF="origin/dev"
           fi
           python3 scripts/ci/doc_sync_check.py --base "$BASE_REF"
           python3 scripts/ci/doc_sync_check.py --all-docs
@@ -327,12 +327,22 @@ jobs:
         with:
           path: crates/solix-toolchain/assets/packages
           key: solix-bundled-${{ runner.os }}-${{ hashFiles('libraries/**', 'crates/solix-common/src/**', 'crates/solix-compilation/src/**', 'crates/solix-toolchain/assets/scripts/**', 'scripts/release/build_default_libraries.py') }}
+          restore-keys: |
+            solix-bundled-${{ runner.os }}-
 
       - name: Build solix toolchain binary
         run: cargo build --bin solix
 
+      - name: Install cross runner
+        if: runner.os == 'Linux'
+        run: |
+          rustup component add rust-src
+          if ! command -v cross >/dev/null 2>&1; then
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
+          fi
+
       - name: Build and stage default first-party libraries
-        if: steps.bundled-libs-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.bundled-libs-cache.outputs.cache-hit != 'true'
         run: python3 scripts/release/build_default_libraries.py --target host
 
       - name: Run workspace tests (including embedded solix wiki and Zip-Slip checks)
@@ -389,6 +399,7 @@ jobs:
           python3 scripts/bench/solix_bench.py verify
 
       - name: List installed packages and verify example application compilation
+        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -405,6 +416,7 @@ jobs:
           "$SOLIX_EXE" run examples/breakout/build/test/breakout.slxp
 
       - name: Run FFI C/C++/Rust matrix and dual-backend example suite
+        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -417,6 +429,7 @@ jobs:
           python3 scripts/tests/run_ffi_suite.py --solix-binary "$SOLIX_EXE"
 
       - name: Run End-to-End Command & Option Lifecycle Matrix (GL-0009)
+        if: runner.os == 'Linux'
         shell: bash
         env:
           CURRENT_OS: ${{ runner.os }}
@@ -487,6 +500,13 @@ jobs:
             printf 'b3f68e625481fed9b16444174f3fa5ebcdbde4a1878803a35eabe2dcefcdc41a  %s\n' \
               "$RUNNER_TEMP/cargo-llvm-cov.tar.gz" | sha256sum -c -
             tar -xzf "$RUNNER_TEMP/cargo-llvm-cov.tar.gz" -C ~/.cache/solix-ci-tools/cargo-llvm-cov cargo-llvm-cov
+          fi
+
+      - name: Install cross runner
+        run: |
+          rustup component add rust-src
+          if ! command -v cross >/dev/null 2>&1; then
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
           fi
 
       - name: Stage docs and bundled packages for coverage suite

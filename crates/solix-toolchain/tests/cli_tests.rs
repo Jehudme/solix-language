@@ -1953,6 +1953,7 @@ class Main {
         pkg_dir.to_str().expect("valid path"),
     ])
     .expect("parse compile package");
+    strip_solix_dep_if_unbundled(&pkg_dir.join("manifest.yaml"));
     assert_eq!(run(compile_pkg_cli).expect("compile package"), 0);
     assert!(pkg_dir.join("binaries.slxb").exists());
 }
@@ -2019,7 +2020,51 @@ public class Main {
         package_dir.to_str().expect("valid path"),
     ])
     .expect("parse run package cli");
+    strip_solix_dep_if_unbundled(&package_dir.join("manifest.yaml"));
     assert_eq!(run(run_package_cli).expect("run package succeeds"), 77);
+}
+
+fn has_staged_bundled_packages() -> bool {
+    let packages_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("packages");
+    let Ok(entries) = std::fs::read_dir(packages_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.is_dir()
+            && std::fs::read_dir(path).is_ok_and(|sub_entries| {
+                sub_entries
+                    .flatten()
+                    .any(|sub| sub.path().extension().is_some_and(|ext| ext == "slxarc"))
+            })
+    })
+}
+
+fn strip_solix_dep_if_unbundled(manifest_path: &std::path::Path) {
+    if has_staged_bundled_packages() {
+        return;
+    }
+    let Ok(raw_manifest) = std::fs::read_to_string(manifest_path) else {
+        return;
+    };
+    let mut filtered_lines = Vec::new();
+    let mut skipping_deps = false;
+    for line in raw_manifest.lines() {
+        if line.trim() == "dependencies:" {
+            skipping_deps = true;
+            continue;
+        }
+        if skipping_deps {
+            if line.starts_with("      ") || line.trim().is_empty() {
+                continue;
+            }
+            skipping_deps = false;
+        }
+        filtered_lines.push(line);
+    }
+    let _ = std::fs::write(manifest_path, format!("{}\n", filtered_lines.join("\n")));
 }
 
 #[test]

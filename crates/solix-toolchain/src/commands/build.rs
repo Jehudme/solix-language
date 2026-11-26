@@ -46,19 +46,7 @@ struct ResolvedNativeEntry {
     target_triples: Vec<String>,
     flags: Vec<String>,
     has_solix_native_feature: bool,
-    strategy: Option<String>,
-    docker: bool,
     docker_image: Option<String>,
-}
-
-impl ResolvedNativeEntry {
-    fn is_docker_strategy(&self) -> bool {
-        self.docker
-            || self.strategy.as_deref().is_some_and(|strategy_name| {
-                strategy_name.eq_ignore_ascii_case("docker")
-                    || strategy_name.eq_ignore_ascii_case("container")
-            })
-    }
 }
 
 /// Resolves the canonical dockcross container image name for a target triple.
@@ -77,16 +65,15 @@ pub fn dockcross_image_for_triple(triple: &str) -> Option<&'static str> {
 /// Resolves the canonical cross-rs container image name for a target triple.
 #[must_use]
 pub fn cross_image_for_triple(triple: &str) -> String {
-    format!("ghcr.io/cross-rs/{triple}:edge")
+    let canonical_triple = match triple {
+        "x86_64-pc-windows-msvc" => "x86_64-pc-windows-gnu",
+        other => other,
+    };
+    format!("ghcr.io/cross-rs/{canonical_triple}:edge")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CargoBuildStrategy {
-    NativeClang,
-    Zigbuild,
-    CargoXwin,
-    SystemCross,
-    HostCargo,
+pub enum CargoBuildStrategy {
     Docker,
 }
 
@@ -534,7 +521,6 @@ fn discover_native_entries(
             NativeBackend::Cmake => false,
         };
 
-        let is_docker = native_cfg.is_docker_strategy();
         entries.push(ResolvedNativeEntry {
             name: native_name,
             directory: native_dir,
@@ -543,8 +529,6 @@ fn discover_native_entries(
             target_triples,
             flags: native_cfg.flags,
             has_solix_native_feature,
-            strategy: native_cfg.strategy,
-            docker: is_docker,
             docker_image: native_cfg.docker_image,
         });
     }
@@ -628,6 +612,39 @@ fn resolve_native_triples(
     }
 }
 
+/// Verifies that Docker is installed and the Docker daemon is reachable.
+///
+/// # Errors
+/// Returns an actionable error if Docker is missing from PATH or if the Docker daemon is unreachable.
+pub fn verify_docker_daemon_active() -> Result<String> {
+    let docker_executable = find_executable("docker").ok_or_else(|| {
+        anyhow::anyhow!(
+            "[verify] Required build tool 'docker' was not found on PATH. Containerized native compilation mandates Docker."
+        )
+    })?;
+    let mut version_command = crate::process::create_process_command(&docker_executable);
+    let output = version_command
+        .args(["version", "--format", "{{.Server.Version}}"])
+        .env("PATH", build_search_path_env())
+        .output()
+        .with_context(|| format!("failed to execute '{}'", docker_executable.display()))?;
+    if !output.status.success() {
+        bail!(
+            "Docker daemon is unreachable. Containerized compilation requires Docker. Please start the Docker daemon (e.g., `sudo systemctl start docker` or launch Docker Desktop) and retry."
+        );
+    }
+    let server_version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if server_version.is_empty() {
+        bail!(
+            "Docker daemon is unreachable. Containerized compilation requires Docker. Please start the Docker daemon (e.g., `sudo systemctl start docker` or launch Docker Desktop) and retry."
+        );
+    }
+    Ok(format!(
+        "Docker v{server_version} ({})",
+        docker_executable.display()
+    ))
+}
+
 fn verify_build_environment(
     native_entries: &[ResolvedNativeEntry],
     resolved_profile: &ResolvedProfile,
@@ -646,25 +663,8 @@ fn verify_build_environment(
         return Ok(());
     }
 
-    let host_triple = host_target_triple();
-    let has_cargo = native_entries
-        .iter()
-        .any(|entry| entry.backend == NativeBackend::Cargo);
-    let has_cmake = native_entries
-        .iter()
-        .any(|entry| entry.backend == NativeBackend::Cmake);
-
-    if has_cargo {
-        let cargo_ver = require_tool_version("cargo", &["--version"])?;
-        let rustc_ver = require_tool_version("rustc", &["--version"])?;
-        println!("  [check] {cargo_ver}");
-        println!("  [check] {rustc_ver}");
-    }
-
-    if has_cmake {
-        let cmake_ver = require_tool_version("cmake", &["--version"])?;
-        println!("  [check] {cmake_ver}");
-    }
+    let docker_version = verify_docker_daemon_active()?;
+    println!("  [check] {docker_version} (Docker daemon active)");
 
     for entry in native_entries {
         println!(
@@ -674,33 +674,18 @@ fn verify_build_environment(
             entry.target_triples.join(", ")
         );
         for triple in &entry.target_triples {
-            let is_cross = triple != host_triple;
-            if entry.is_docker_strategy() {
-                if entry.backend == NativeBackend::Cargo && find_executable("cross").is_some() {
-                    let cross_version = require_tool_version("cross", &["--version"])?;
-                    println!("  [check] {cross_version} (for {triple} via cross-rs container)");
-                } else {
-                    let docker_version = require_tool_version("docker", &["--version"])?;
-                    println!("  [check] {docker_version} (for {triple} via Docker container)");
-                }
-                continue;
-            }
-            match entry.backend {
-                NativeBackend::Cargo => {
-                    if is_cross {
-                        let strategy = select_cargo_strategy(triple, host_triple, false)?;
-                        if matches!(strategy, CargoBuildStrategy::Zigbuild) {
-                            let zig_ver = require_tool_version("zig", &["version"])?;
-                            println!("  [check] zig {zig_ver} (for {triple})");
-                        }
-                    }
-                }
-                NativeBackend::Cmake => {
-                    if is_cross {
-                        let zig_ver = require_tool_version("zig", &["version"])?;
-                        println!("  [check] zig {zig_ver} (for {triple})");
-                    }
-                }
+            if entry.backend == NativeBackend::Cargo {
+                let cross_exe = find_executable("cross").ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Cargo native containerized compilation mandates 'cross' (cross-rs). Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH."
+                    )
+                })?;
+                println!(
+                    "  [check] cross ({}) (for {triple} via cross-rs container)",
+                    cross_exe.display()
+                );
+            } else {
+                println!("  [check] {docker_version} (for {triple} via Docker container)");
             }
         }
     }
@@ -732,140 +717,18 @@ fn find_executable(tool_name: &str) -> Option<PathBuf> {
     crate::process::find_executable_in_search_paths(tool_name, &search_path)
 }
 
-fn require_tool_version(tool_name: &str, version_args: &[&str]) -> Result<String> {
-    let exe_path = find_executable(tool_name).ok_or_else(|| {
-        anyhow::anyhow!("[verify] Required build tool '{tool_name}' was not found on PATH")
-    })?;
-    let mut version_command = crate::process::create_process_command(&exe_path);
-    let output = version_command
-        .args(version_args)
-        .env("PATH", build_search_path_env())
-        .output()
-        .with_context(|| format!("failed to execute '{}'", exe_path.display()))?;
-    if !output.status.success() {
-        bail!(
-            "[verify] Tool '{}' returned non-zero status on '{}'",
-            exe_path.display(),
-            version_args.join(" ")
-        );
-    }
-    let stdout_line = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or(tool_name)
-        .trim()
-        .to_string();
-    Ok(format!("{stdout_line} ({})", exe_path.display()))
-}
-
-fn select_cargo_strategy(
-    target_triple: &str,
-    host_triple: &str,
-    is_docker: bool,
+/// Selects the native Cargo build strategy for the given target triple.
+///
+/// Containerized Docker compilation is mandated for all targets.
+///
+/// # Errors
+/// Always returns `Ok(CargoBuildStrategy::Docker)` in the mandated containerized model.
+pub fn select_cargo_strategy(
+    _target_triple: &str,
+    _host_triple: &str,
+    _is_docker: bool,
 ) -> Result<CargoBuildStrategy> {
-    if is_docker {
-        return Ok(CargoBuildStrategy::Docker);
-    }
-    let is_exact_host = target_triple == host_triple;
-    let is_darwin_on_darwin = cfg!(target_os = "macos") && target_triple.contains("apple-darwin");
-    let is_msvc_target = target_triple.contains("-pc-windows-msvc");
-    let has_zigbuild = find_executable("cargo-zigbuild").is_some();
-    let has_zig = find_executable("zig").is_some();
-    let has_xwin = find_executable("cargo-xwin").is_some();
-
-    if is_darwin_on_darwin {
-        return Ok(CargoBuildStrategy::NativeClang);
-    }
-    if is_exact_host {
-        return Ok(CargoBuildStrategy::HostCargo);
-    }
-    if has_zigbuild && has_zig && !is_msvc_target {
-        return Ok(CargoBuildStrategy::Zigbuild);
-    }
-    if has_xwin && is_msvc_target && !cfg!(target_os = "windows") {
-        return Ok(CargoBuildStrategy::CargoXwin);
-    }
-    if !is_exact_host && system_cross_gcc_for(target_triple).is_some() {
-        return Ok(CargoBuildStrategy::SystemCross);
-    }
-
-    if is_msvc_target {
-        bail!(
-            "Cannot cross-compile Cargo target '{target_triple}' on host '{host_triple}': requires Windows MSVC host or cargo-xwin"
-        );
-    }
-    if has_zigbuild && !has_zig {
-        bail!(
-            "Cannot cross-compile Cargo target '{target_triple}': cargo-zigbuild found but 'zig' executable is missing in PATH"
-        );
-    }
-    bail!(
-        "Cannot cross-compile Cargo target '{target_triple}' on host '{host_triple}': install zig + cargo-zigbuild"
-    )
-}
-
-fn system_cross_gcc_for(target_triple: &str) -> Option<(&'static str, &'static str)> {
-    let (cc_name, ar_name) = match target_triple {
-        "aarch64-unknown-linux-gnu" => ("aarch64-linux-gnu-gcc", "aarch64-linux-gnu-ar"),
-        "x86_64-pc-windows-gnu" => ("x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-ar"),
-        _ => return None,
-    };
-    if find_executable(cc_name).is_some() {
-        Some((cc_name, ar_name))
-    } else {
-        None
-    }
-}
-
-fn ensure_rustup_target_installed(
-    target_triple: &str,
-    search_path: &std::ffi::OsStr,
-) -> Result<()> {
-    let auto_rustup_disabled = std::env::var("SOLIX_NO_AUTO_RUSTUP")
-        .map(|val| {
-            matches!(
-                val.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes"
-            )
-        })
-        .unwrap_or(false);
-    let Some(rustup_exe) = find_executable("rustup") else {
-        return Ok(());
-    };
-    let mut list_cmd = crate::process::create_process_command(&rustup_exe);
-    let list_output = list_cmd
-        .args(["target", "list", "--installed"])
-        .env("PATH", search_path)
-        .output();
-    let Ok(list_res) = list_output else {
-        return Ok(());
-    };
-    if !list_res.status.success() {
-        return Ok(());
-    }
-    let installed_text = String::from_utf8_lossy(&list_res.stdout);
-    if installed_text
-        .lines()
-        .any(|line| line.trim() == target_triple)
-    {
-        return Ok(());
-    }
-    if auto_rustup_disabled {
-        bail!(
-            "Rust target '{target_triple}' is not installed (SOLIX_NO_AUTO_RUSTUP=1); run `rustup target add {target_triple}`"
-        );
-    }
-    println!("  [rustup] Installing target stdlib '{target_triple}'...");
-    let mut add_cmd = crate::process::create_process_command(&rustup_exe);
-    let add_status = add_cmd
-        .args(["target", "add", target_triple])
-        .env("PATH", search_path)
-        .status()
-        .context("failed to invoke rustup target add")?;
-    if !add_status.success() {
-        bail!("Failed to install Rust target '{target_triple}' via rustup");
-    }
-    Ok(())
+    Ok(CargoBuildStrategy::Docker)
 }
 
 #[must_use]
@@ -899,7 +762,6 @@ fn compile_cargo_native(
     cache_dir: &Path,
     stage_bin_dir: &Path,
 ) -> Result<()> {
-    let host_triple = host_target_triple();
     let cargo_manifest = entry.directory.join("Cargo.toml");
     let is_release = entry.native_profile.eq_ignore_ascii_case("release");
     let profile_subdir = if is_release { "release" } else { "debug" };
@@ -910,84 +772,47 @@ fn compile_cargo_native(
 
     let ffi_rust_source_dir = resolve_ffi_rust_source_dir(project_root);
     let uses_git_solix_ffi = cargo_uses_git_solix_ffi(&cargo_manifest);
-    let zig_exe_option = find_executable("zig");
 
     for triple in &entry.target_triples {
-        let strategy = select_cargo_strategy(triple, host_triple, entry.is_docker_strategy())?;
-        let is_docker = matches!(strategy, CargoBuildStrategy::Docker);
-        let cargo_target_dir = resolve_cargo_target_cache_dir(cache_dir, is_docker);
-        let is_exact_host = triple == host_triple;
-        if !is_exact_host && !is_docker {
-            ensure_rustup_target_installed(triple, &search_path)?;
-        }
-
-        let subcommand = match strategy {
-            CargoBuildStrategy::Zigbuild => "zigbuild",
-            CargoBuildStrategy::CargoXwin => "xwin",
-            _ => "build",
-        };
+        let cargo_target_dir = resolve_cargo_target_cache_dir(cache_dir, true);
         println!(
-            "  [cargo] Building '{}' ({}, target: {}, strategy: {:?})...",
-            entry.name, entry.native_profile, triple, strategy
+            "  [cargo] Building '{}' ({}, target: {}, strategy: Docker)...",
+            entry.name, entry.native_profile, triple
         );
 
-        let mut command = if matches!(strategy, CargoBuildStrategy::Docker) {
-            if let Some(cross_executable) = find_executable("cross") {
-                let mut cross_command = crate::process::create_process_command(&cross_executable);
-                cross_command.arg("build");
-                cross_command
-                    .arg("--manifest-path")
-                    .arg(&cargo_manifest)
-                    .arg("--target-dir")
-                    .arg(&cargo_target_dir);
-                let native_crate_dir = cargo_manifest.parent().unwrap_or(project_root);
-                let cross_toml = native_crate_dir.join("Cross.toml");
-                if cross_toml.exists() {
-                    cross_command.env("CROSS_CONFIG", &cross_toml);
-                }
-                cross_command
-            } else if let Some(docker_executable) = find_executable("docker") {
-                let image = entry
-                    .docker_image
-                    .clone()
-                    .unwrap_or_else(|| cross_image_for_triple(triple));
-                let mut cmd = crate::process::create_process_command(&docker_executable);
-                let manifest_relative = cargo_manifest
-                    .strip_prefix(project_root)
-                    .unwrap_or(&cargo_manifest);
-                let target_dir_relative = cargo_target_dir
-                    .strip_prefix(project_root)
-                    .unwrap_or(&cargo_target_dir);
-                cmd.args(["run", "--rm"]);
-                cmd.arg("-v")
-                    .arg(format!("{}:/work", project_root.display()));
-                cmd.args(["-w", "/work"]);
-                cmd.arg(&image);
-                cmd.args(["cargo", "build"]);
-                cmd.arg("--manifest-path").arg(manifest_relative);
-                cmd.arg("--target-dir").arg(target_dir_relative);
-                cmd
-            } else {
-                bail!(
-                    "Cannot build containerized native dependency '{}' for target '{triple}': neither 'cross' nor 'docker' executable was found on PATH",
-                    entry.name
-                );
-            }
-        } else {
-            let cargo_executable =
-                find_executable("cargo").unwrap_or_else(|| PathBuf::from("cargo"));
-            let mut cmd = crate::process::create_process_command(&cargo_executable);
-            if matches!(strategy, CargoBuildStrategy::CargoXwin) {
-                cmd.args(["xwin", "build"]);
-            } else {
-                cmd.arg(subcommand);
-            }
-            cmd.arg("--manifest-path")
+        let cross_executable = find_executable("cross").ok_or_else(|| {
+            anyhow::anyhow!(
+                "Cargo native containerized compilation for '{triple}' mandates 'cross'. Please install cross (e.g. `cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5` or download from https://github.com/cross-rs/cross/releases) and ensure it is on PATH."
+            )
+        })?;
+        let mut command = {
+            let mut cross_command = crate::process::create_process_command(&cross_executable);
+            cross_command.arg("build");
+            cross_command
+                .arg("--manifest-path")
                 .arg(&cargo_manifest)
                 .arg("--target-dir")
                 .arg(&cargo_target_dir);
-            cmd
+            let native_crate_dir = cargo_manifest.parent().unwrap_or(project_root);
+            let cross_toml = native_crate_dir.join("Cross.toml");
+            if cross_toml.exists() {
+                cross_command.env("CROSS_CONFIG", &cross_toml);
+            }
+            if let Some(ref rust_ffi_dir) = ffi_rust_source_dir {
+                let existing_container_opts =
+                    std::env::var("CROSS_CONTAINER_OPTS").unwrap_or_default();
+                let mount_flag =
+                    format!("-v {}:{}", rust_ffi_dir.display(), rust_ffi_dir.display());
+                let combined_opts = if existing_container_opts.is_empty() {
+                    mount_flag
+                } else {
+                    format!("{existing_container_opts} {mount_flag}")
+                };
+                cross_command.env("CROSS_CONTAINER_OPTS", combined_opts);
+            }
+            cross_command
         };
+
         if is_release {
             command.arg("--release");
             command.env("CARGO_PROFILE_RELEASE_STRIP", "symbols");
@@ -1002,12 +827,7 @@ fn compile_cargo_native(
                 "patch.\"https://github.com/Jehudme/solix-language.git\".solix-ffi.path=\"{patch_path}\""
             ));
         }
-        let uses_explicit_target_flag = !(matches!(strategy, CargoBuildStrategy::HostCargo)
-            && cfg!(target_os = "linux")
-            && is_exact_host);
-        if uses_explicit_target_flag {
-            command.args(["--target", triple]);
-        }
+        command.args(["--target", triple]);
         for flag in &entry.flags {
             command.arg(flag);
         }
@@ -1017,63 +837,6 @@ fn compile_cargo_native(
             .env("PATH", &search_path)
             .env("SOLIX_NATIVE_BUILD", "1")
             .env("CARGO_TARGET_DIR", &cargo_target_dir);
-
-        if matches!(strategy, CargoBuildStrategy::HostCargo)
-            && cfg!(target_os = "linux")
-            && is_exact_host
-        {
-            let existing_flags = std::env::var("RUSTFLAGS").unwrap_or_default();
-            command.env(
-                "RUSTFLAGS",
-                format!("-C link-arg=-L/usr/lib {existing_flags}"),
-            );
-        }
-
-        if matches!(strategy, CargoBuildStrategy::SystemCross)
-            && let Some((cross_cc, cross_ar)) = system_cross_gcc_for(triple)
-            && let Some(cc_path) = find_executable(cross_cc)
-        {
-            let underscored = triple.replace('-', "_");
-            let upper = underscored.to_ascii_uppercase();
-            command.env(format!("CARGO_TARGET_{upper}_LINKER"), &cc_path);
-            command.env(format!("CC_{underscored}"), &cc_path);
-            if let Some(ar_path) = find_executable(cross_ar) {
-                command.env(format!("AR_{underscored}"), ar_path);
-            }
-        }
-
-        if matches!(strategy, CargoBuildStrategy::Zigbuild)
-            && !is_exact_host
-            && let Some(ref zig_exe) = zig_exe_option
-        {
-            let toolchains_dir = cargo_target_dir.join("toolchains");
-            if let Ok(toolchain_path) = write_zig_toolchain_file(&toolchains_dir, triple, zig_exe) {
-                let bin_dir = toolchains_dir.join("bin");
-                let wrapper_ext = if cfg!(windows) { ".cmd" } else { "" };
-                let cc_wrapper = bin_dir.join(format!("zig-cc-{triple}{wrapper_ext}"));
-                let cxx_wrapper = bin_dir.join(format!("zig-cxx-{triple}{wrapper_ext}"));
-                let ar_wrapper = bin_dir.join(format!("zig-ar{wrapper_ext}"));
-                let ranlib_wrapper = bin_dir.join(format!("zig-ranlib{wrapper_ext}"));
-
-                let underscored = triple.replace('-', "_");
-                command.env(format!("CC_{underscored}"), &cc_wrapper);
-                command.env(format!("CXX_{underscored}"), &cxx_wrapper);
-                command.env(format!("AR_{underscored}"), &ar_wrapper);
-                command.env(format!("RANLIB_{underscored}"), &ranlib_wrapper);
-                command.env(
-                    format!("CMAKE_TOOLCHAIN_FILE_{underscored}"),
-                    &toolchain_path,
-                );
-                command.env("CMAKE_TOOLCHAIN_FILE", &toolchain_path);
-
-                let current_path = std::env::var("PATH").unwrap_or_default();
-                let path_separator = if cfg!(windows) { ";" } else { ":" };
-                command.env(
-                    "PATH",
-                    format!("{}{path_separator}{current_path}", bin_dir.display()),
-                );
-            }
-        }
 
         let status = command.status().with_context(|| {
             format!("failed to invoke cargo for native project '{}'", entry.name)
@@ -1085,11 +848,7 @@ fn compile_cargo_native(
             );
         }
 
-        let emitted_dir = if uses_explicit_target_flag {
-            cargo_target_dir.join(triple).join(profile_subdir)
-        } else {
-            cargo_target_dir.join(profile_subdir)
-        };
+        let emitted_dir = cargo_target_dir.join(triple).join(profile_subdir);
         let stage_triple_dir = stage_bin_dir.join(triple);
         let staged_count = copy_shared_libs_flat(&emitted_dir, &stage_triple_dir)?;
         if staged_count == 0 {
@@ -1306,20 +1065,18 @@ fn compile_cmake_native(
     cache_dir: &Path,
     stage_bin_dir: &Path,
 ) -> Result<()> {
-    let cmake_exe = find_executable("cmake")
-        .ok_or_else(|| anyhow::anyhow!("Required build tool 'cmake' not found in PATH"))?;
-    let host_triple = host_target_triple();
+    let docker_executable = find_executable("docker").ok_or_else(|| {
+        anyhow::anyhow!(
+            "[verify] Required build tool 'docker' was not found on PATH. Containerized native compilation mandates Docker."
+        )
+    })?;
     let is_release = entry.native_profile.eq_ignore_ascii_case("release");
     let cmake_build_type = if is_release { "Release" } else { "Debug" };
-    let search_path = build_search_path_env();
     let ffi_c_source_dir = resolve_ffi_c_source_dir(project_root);
-    let zig_exe_option = find_executable("zig");
-    let ninja_available = find_executable("ninja").is_some();
 
     for triple in &entry.target_triples {
-        let is_cross = triple != host_triple;
         println!(
-            "  [cmake] Building '{}' ({cmake_build_type}, target: {triple})...",
+            "  [cmake] Building '{}' ({cmake_build_type}, target: {triple} via Docker container)...",
             entry.name
         );
 
@@ -1328,7 +1085,7 @@ fn compile_cmake_native(
             &entry.name,
             &entry.native_profile,
             triple,
-            entry.is_docker_strategy(),
+            true,
         );
         let stage_triple_dir = stage_bin_dir.join(triple);
         let archive_cache_dir = cache_dir.join("archives").join(&entry.name).join(triple);
@@ -1336,217 +1093,170 @@ fn compile_cmake_native(
         fs::create_dir_all(&stage_triple_dir)?;
         fs::create_dir_all(&archive_cache_dir)?;
 
-        if entry.is_docker_strategy() {
-            let docker_exe = find_executable("docker").ok_or_else(|| {
+        let dockcross_image = entry
+            .docker_image
+            .clone()
+            .or_else(|| dockcross_image_for_triple(triple).map(str::to_string))
+            .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Cannot cross-compile CMake project '{}' for target '{triple}': 'docker' not found on PATH",
-                    entry.name
+                    "No default dockcross image known for target '{triple}'. Please specify 'docker_image: <image>' in manifest.yaml"
                 )
             })?;
-            let dockcross_image = entry
-                .docker_image
-                .clone()
-                .or_else(|| dockcross_image_for_triple(triple).map(str::to_string))
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "No default dockcross image known for target '{triple}'. Please specify 'docker_image: <image>' in manifest.yaml"
-                    )
-                })?;
 
-            let stage_triple_cmake = cmake_path_string(&stage_triple_dir);
-            let archive_cache_cmake = cmake_path_string(&archive_cache_dir);
-            let mut cfg_cmd = crate::process::create_process_command(&docker_exe);
-            cfg_cmd.args(["run", "--rm"]);
-            cfg_cmd
-                .arg("-v")
-                .arg(format!("{}:/work", project_root.display()));
-            cfg_cmd.args(["-w", "/work"]);
-            cfg_cmd.arg(&dockcross_image);
-            cfg_cmd.args(["cmake", "-S"]);
-            cfg_cmd.arg(cmake_path_string(&entry.directory));
-            cfg_cmd.arg("-B");
-            cfg_cmd.arg(cmake_path_string(&cmake_build_dir));
-            cfg_cmd.arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"));
-            cfg_cmd.arg("-DSOLIX_NATIVE_BUILD=ON");
-            cfg_cmd.arg("-DBUILD_SHARED_LIBS=ON");
-            cfg_cmd.arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON");
-            cfg_cmd.arg("-DBUILD_TESTING=OFF");
-            cfg_cmd.arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={stage_triple_cmake}"
-            ));
-            cfg_cmd.arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
-            ));
-            cfg_cmd.arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
-            ));
-            cfg_cmd.arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={stage_triple_cmake}"
-            ));
-            cfg_cmd.arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
-            ));
-            cfg_cmd.arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
-            ));
-            cfg_cmd.arg(format!(
-                "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={archive_cache_cmake}"
-            ));
-            for flag in &entry.flags {
-                cfg_cmd.arg(flag);
-            }
-            let cfg_status = cfg_cmd.status().with_context(|| {
-                format!(
-                    "failed to configure CMake project '{}' via dockcross container",
-                    entry.name
-                )
-            })?;
-            if !cfg_status.success() {
-                bail!(
-                    "dockcross cmake configure failed for '{}' (target: '{triple}')",
-                    entry.name
-                );
-            }
+        let entry_dir_in_container = entry
+            .directory
+            .strip_prefix(project_root)
+            .map(|relative_path| PathBuf::from("/work").join(relative_path))
+            .unwrap_or_else(|_| entry.directory.clone());
+        let build_dir_in_container = cmake_build_dir
+            .strip_prefix(project_root)
+            .map(|relative_path| PathBuf::from("/work").join(relative_path))
+            .unwrap_or_else(|_| cmake_build_dir.clone());
+        let stage_triple_in_container = stage_triple_dir
+            .strip_prefix(project_root)
+            .map(|relative_path| PathBuf::from("/work").join(relative_path))
+            .unwrap_or_else(|_| stage_triple_dir.clone());
+        let archive_cache_in_container = archive_cache_dir
+            .strip_prefix(project_root)
+            .map(|relative_path| PathBuf::from("/work").join(relative_path))
+            .unwrap_or_else(|_| archive_cache_dir.clone());
 
-            let mut build_cmd = crate::process::create_process_command(&docker_exe);
-            build_cmd.args(["run", "--rm"]);
-            build_cmd
-                .arg("-v")
-                .arg(format!("{}:/work", project_root.display()));
-            build_cmd.args(["-w", "/work"]);
-            build_cmd.arg(&dockcross_image);
-            build_cmd.args([
-                "cmake",
-                "--build",
-                &cmake_path_string(&cmake_build_dir),
-                "--config",
-                cmake_build_type,
-            ]);
-            let build_status = build_cmd.status().with_context(|| {
-                format!(
-                    "failed to build CMake project '{}' via dockcross container",
-                    entry.name
-                )
-            })?;
-            if !build_status.success() {
-                bail!(
-                    "dockcross cmake build failed for '{}' (target: '{triple}')",
-                    entry.name
-                );
+        let stage_triple_cmake = cmake_path_string(&stage_triple_in_container);
+        let archive_cache_cmake = cmake_path_string(&archive_cache_in_container);
+        let mut configure_command = crate::process::create_process_command(&docker_executable);
+        configure_command.args(["run", "--rm"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(metadata) = project_root.metadata() {
+                let user_id = metadata.uid();
+                let group_id = metadata.gid();
+                configure_command.args(["-u", &format!("{user_id}:{group_id}")]);
             }
-
-            let mut staged_count = count_shared_libs_in_dir(&stage_triple_dir);
-            if staged_count == 0 {
-                staged_count += copy_shared_libs_recursive(&cmake_build_dir, &stage_triple_dir)?;
-            }
-            if staged_count == 0 {
-                bail!(
-                    "dockcross CMake build succeeded for '{}' ({triple}) but emitted no shared library (.so/.dll/.dylib)",
-                    entry.name
-                );
-            }
-            continue;
         }
-
-        let toolchain_option = if is_cross {
-            let zig_exe = zig_exe_option.as_ref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Cannot cross-compile CMake project '{}' for target '{triple}' without 'zig' in PATH",
-                    entry.name
-                )
-            })?;
-            Some(write_zig_toolchain_file(
-                &cache_dir.join("toolchains"),
-                triple,
-                zig_exe,
-            )?)
-        } else {
-            None
-        };
-
-        let mut cfg_cmd = crate::process::create_process_command(&cmake_exe);
-        let stage_triple_cmake = cmake_path_string(&stage_triple_dir);
-        let archive_cache_cmake = cmake_path_string(&archive_cache_dir);
-        cfg_cmd
-            .arg("-S")
-            .arg(cmake_path_string(&entry.directory))
-            .arg("-B")
-            .arg(cmake_path_string(&cmake_build_dir))
-            .arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"))
-            .arg("-DSOLIX_NATIVE_BUILD=ON")
-            .arg("-DBUILD_SHARED_LIBS=ON")
-            .arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON")
-            .arg("-DBUILD_TESTING=OFF")
-            .arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={stage_triple_cmake}"
-            ))
-            .arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
-            ))
-            .arg(format!(
-                "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
-            ))
-            .arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={stage_triple_cmake}"
-            ))
-            .arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
-            ))
-            .arg(format!(
-                "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
-            ))
-            .arg(format!(
-                "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={archive_cache_cmake}"
-            ));
-
-        if ninja_available && (!cfg!(windows) || is_cross) {
-            cfg_cmd.args(["-G", "Ninja"]);
-        }
-        if let Some(ref toolchain_path) = toolchain_option {
-            cfg_cmd.arg(format!(
-                "-DCMAKE_TOOLCHAIN_FILE={}",
-                cmake_path_string(toolchain_path)
+        configure_command
+            .arg("-v")
+            .arg(format!("{}:/work", project_root.display()));
+        if !entry.directory.starts_with(project_root) {
+            configure_command.arg("-v").arg(format!(
+                "{}:{}",
+                entry.directory.display(),
+                entry_dir_in_container.display()
             ));
         }
-        if is_release && !triple.contains("apple-darwin") && !triple.contains("-msvc") {
-            cfg_cmd.arg("-DCMAKE_SHARED_LINKER_FLAGS=-s");
+        if let Some(ref local_ffi_dir) = ffi_c_source_dir {
+            if let Ok(relative_ffi) = local_ffi_dir.strip_prefix(project_root) {
+                configure_command.args([
+                    "-e",
+                    &format!("SOLIX_FFI_SOURCE_DIR=/work/{}", relative_ffi.display()),
+                ]);
+            } else {
+                configure_command
+                    .arg("-v")
+                    .arg(format!("{}:/ffi_c:ro", local_ffi_dir.display()));
+                configure_command.args(["-e", "SOLIX_FFI_SOURCE_DIR=/ffi_c"]);
+            }
         }
+        configure_command.args(["-w", "/work"]);
+        configure_command.arg(&dockcross_image);
+        configure_command.args(["cmake", "-S"]);
+        configure_command.arg(cmake_path_string(&entry_dir_in_container));
+        configure_command.arg("-B");
+        configure_command.arg(cmake_path_string(&build_dir_in_container));
+        configure_command.arg(format!("-DCMAKE_BUILD_TYPE={cmake_build_type}"));
+        configure_command.arg("-DSOLIX_NATIVE_BUILD=ON");
+        configure_command.arg("-DBUILD_SHARED_LIBS=ON");
+        configure_command.arg("-DCMAKE_POSITION_INDEPENDENT_CODE=ON");
+        configure_command.arg("-DBUILD_TESTING=OFF");
+        configure_command.arg(format!(
+            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={stage_triple_cmake}"
+        ));
+        configure_command.arg(format!(
+            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
+        ));
+        configure_command.arg(format!(
+            "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
+        ));
+        configure_command.arg(format!(
+            "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={stage_triple_cmake}"
+        ));
+        configure_command.arg(format!(
+            "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={stage_triple_cmake}"
+        ));
+        configure_command.arg(format!(
+            "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG={stage_triple_cmake}"
+        ));
+        configure_command.arg(format!(
+            "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY={archive_cache_cmake}"
+        ));
         for flag in &entry.flags {
-            cfg_cmd.arg(flag);
+            configure_command.arg(flag);
         }
-
-        cfg_cmd.current_dir(project_root).env("PATH", &search_path);
-        cfg_cmd.env("SOLIX_NATIVE_BUILD", "1");
-        if let Some(ref ffi_dir) = ffi_c_source_dir {
-            cfg_cmd.env("SOLIX_FFI_SOURCE_DIR", cmake_path_string(ffi_dir));
-        }
-
-        let cfg_status = cfg_cmd
-            .status()
-            .with_context(|| format!("failed to invoke cmake configure for '{}'", entry.name))?;
-        if !cfg_status.success() {
+        let configure_status = configure_command.status().with_context(|| {
+            format!(
+                "failed to configure CMake project '{}' via dockcross container",
+                entry.name
+            )
+        })?;
+        if !configure_status.success() {
             bail!(
-                "CMake configure failed for '{}' (target: '{triple}')",
+                "dockcross cmake configure failed for '{}' (target: '{triple}')",
                 entry.name
             );
         }
 
-        let mut build_cmd = crate::process::create_process_command(&cmake_exe);
-        build_cmd
-            .arg("--build")
-            .arg(&cmake_build_dir)
-            .arg("--config")
-            .arg(cmake_build_type)
-            .arg("--parallel")
-            .current_dir(project_root)
-            .env("PATH", &search_path);
-
-        let build_status = build_cmd
-            .status()
-            .with_context(|| format!("failed to invoke cmake build for '{}'", entry.name))?;
+        let mut build_command = crate::process::create_process_command(&docker_executable);
+        build_command.args(["run", "--rm"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if let Ok(metadata) = project_root.metadata() {
+                let user_id = metadata.uid();
+                let group_id = metadata.gid();
+                build_command.args(["-u", &format!("{user_id}:{group_id}")]);
+            }
+        }
+        build_command
+            .arg("-v")
+            .arg(format!("{}:/work", project_root.display()));
+        if !entry.directory.starts_with(project_root) {
+            build_command.arg("-v").arg(format!(
+                "{}:{}",
+                entry.directory.display(),
+                entry_dir_in_container.display()
+            ));
+        }
+        if let Some(ref local_ffi_dir) = ffi_c_source_dir {
+            if let Ok(relative_ffi) = local_ffi_dir.strip_prefix(project_root) {
+                build_command.args([
+                    "-e",
+                    &format!("SOLIX_FFI_SOURCE_DIR=/work/{}", relative_ffi.display()),
+                ]);
+            } else {
+                build_command
+                    .arg("-v")
+                    .arg(format!("{}:/ffi_c:ro", local_ffi_dir.display()));
+                build_command.args(["-e", "SOLIX_FFI_SOURCE_DIR=/ffi_c"]);
+            }
+        }
+        build_command.args(["-w", "/work"]);
+        build_command.arg(&dockcross_image);
+        build_command.args([
+            "cmake",
+            "--build",
+            &cmake_path_string(&build_dir_in_container),
+            "--config",
+            cmake_build_type,
+        ]);
+        let build_status = build_command.status().with_context(|| {
+            format!(
+                "failed to build CMake project '{}' via dockcross container",
+                entry.name
+            )
+        })?;
         if !build_status.success() {
             bail!(
-                "CMake build failed for '{}' (target: '{triple}')",
+                "dockcross cmake build failed for '{}' (target: '{triple}')",
                 entry.name
             );
         }
@@ -1557,7 +1267,7 @@ fn compile_cmake_native(
         }
         if staged_count == 0 {
             bail!(
-                "CMake build succeeded for '{}' ({triple}) but emitted no shared library (.so/.dll/.dylib)",
+                "dockcross CMake build succeeded for '{}' ({triple}) but emitted no shared library (.so/.dll/.dylib)",
                 entry.name
             );
         }

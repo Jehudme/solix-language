@@ -71,6 +71,7 @@ solix new native c_bridge --project . --lang c
 Dual-mode layout ensures that:
 * **Outside `solix build`:** `cargo build` / `cargo test` and `cmake` / `ctest` compile your C, C++, or Rust library cleanly with zero Solix dependency.
 * **Inside `solix build`:** Solix automatically detects `Cargo.toml` (passing `--features solix-native` and `SOLIX_NATIVE_BUILD=1`) or `CMakeLists.txt` (passing `-DSOLIX_NATIVE_BUILD=ON` and `SOLIX_NATIVE_BUILD=1`) with zero manual `type` field in `manifest.yaml`.
+* **Standalone `solix-ffi` Crate:** The `solix-ffi` SDK located in `ffi/rust` is packaged as an independent, self-contained crate (version 2.0.1, edition 2024). It can be consumed via Git dependency or local patch in containerized compilation pipelines.
 
 ### 3.1. Option A — Rust Native Bridge (`ffi/rust`, `solix-ffi`)
 
@@ -235,29 +236,16 @@ profiles:
     natives:
       heavy_native_module:
         profile: release
-        strategy: docker # Compiles via cross (Rust) or dockcross (CMake)
+        docker: true # Containerized execution is mandated for native subprojects
 ```
 
+* **Mandatory Containerization:** All native library subprojects (Cargo and CMake) mandate Docker containerization across all compilation targets, eliminating host cross-compiler prerequisites and preventing host instruction set leaks.
 * **Rust Natives (`Cargo.toml`):** Solix compiles via `cross` or official images (`ghcr.io/cross-rs/<target>:edge`).
 * **CMake Natives (`CMakeLists.txt`):** Solix compiles via `dockcross/<target>` images (e.g. `dockcross/linux-arm64`).
 * **Cache Isolation:** Solix automatically segregates container target directories (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) from host build caches, preventing host-compiled build scripts from failing inside container environments.
-* **Native Target Platform Overrides:** Complex native bridges that rely on host-installed desktop SDKs (such as desktop GUI libraries requiring X11) can override the parent profile's target platforms using `natives.<name>.platforms`:
-  ```yaml
-  profiles:
-    release:
-      platforms:
-        - all
-      natives:
-        gui_native:
-          profile: release
-          platforms:
-            - host
-            - windows-x86_64
-  ```
-  This allows pure Solix bytecode archives to remain universal across all platforms while constraining native binary bundling to validated desktop targets.
 
 > [!NOTE]
-> Containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild and targeted sysroots, but it is practical and sufficient for complex dependencies with extensive system libraries.
+> Containerized compilation ensures 100% reproducible and identical binary output across every host operating system, packaging multi-platform shared libraries directly from a single runner.
 
 ---
 

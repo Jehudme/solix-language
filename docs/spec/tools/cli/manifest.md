@@ -170,8 +170,8 @@ Native subprojects strictly inherit the parent profile's `platforms` setting. Al
 | `path` | String | `natives/<key>` | Relative path from project root to the native Cargo or CMake directory. |
 | `profile` | String | Parent Solix profile | Native optimization profile (`debug` or `release`). |
 | `flags` | List of Strings | `[]` | Extra CMake (`-D...`) or Cargo (`--features ...`) flags. |
-| `strategy` | String | Auto-detected | Compilation strategy (`"host"`, `"zigbuild"`, `"docker"` / `"container"`). |
-| `docker` | Boolean | `false` | Shorthand to force containerized cross-compilation (`cross` for Rust, `dockcross` for CMake). |
+| `strategy` | String | `"docker"` | Mandated compilation strategy (`"docker"` / `"container"`). |
+| `docker` | Boolean | `true` | Containerized cross-compilation default (`cross` for Rust, `dockcross` for CMake). |
 | `docker_image` | String | Standard image | Custom Docker container image override. |
 
 > [!NOTE]
@@ -179,8 +179,8 @@ Native subprojects strictly inherit the parent profile's `platforms` setting. Al
 > Solix automatically registers native FFI modules whose library filenames begin with `__native_<name>.<extension>` (or `lib__native_<name>.<extension>`). Auxiliary shared libraries packaged in `bin/<target_triple>/` that do not follow this prefix are copied for dynamic linking but are not registered as Solix FFI modules.
 
 > [!NOTE]
-> **Containerized Cross-Compilation (`strategy: docker`):**
-> Containerized compilation executes native builds inside `cross-rs` or `dockcross` containers. While containerized compilation is not the most optimal or lightweight mechanism for cross-compilation compared to hermetic native Zigbuild, it is practical and sufficient for complex native libraries with extensive system library requirements (such as X11, Wayland, or audio drivers).
+> **Mandatory Containerized Cross-Compilation (`docker: true`):**
+> Containerized compilation executes all native subproject builds inside standardized `cross-rs` or `dockcross` containers. Containerized execution is mandated for all native subprojects to eliminate host cross-compiler prerequisites (`cmake`, `zig`, `mingw-w64`) and prevent microarchitecture instruction set leaks (such as unconstrained AVX2/AVX-512).
 > Containerized toolchain caches (`build/.cache/cargo-docker` and `build/.cache/cmake-docker`) are isolated from host compilation directories to prevent host-compiled build scripts from leaking into container environments.
 
 ---

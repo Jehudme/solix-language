@@ -68,6 +68,12 @@ jobs:
           fi
           echo "$HOME/.cache/solix-ci-tools/cargo-llvm-cov" >> "$GITHUB_PATH"
 
+      - name: Install cross runner
+        run: |
+          if ! command -v cross >/dev/null 2>&1; then
+            curl -fsSL https://github.com/cross-rs/cross/releases/download/v0.2.5/cross-x86_64-unknown-linux-musl.tar.gz | sudo tar -xz -C /usr/local/bin || true
+          fi
+
       - name: Build release and debug Solix binaries and stage default packages
         run: |
           python3 scripts/docs/build_docs_site.py

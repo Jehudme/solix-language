@@ -62,6 +62,38 @@ fn host_cdylib_filename(base_name: &str) -> String {
     }
 }
 
+/// Returns true if Docker is installed, reachable, and supports Linux containers.
+fn is_docker_available() -> bool {
+    if solix_toolchain::verify_docker_daemon_active().is_err() {
+        return false;
+    }
+    let Some(docker_exe) = solix_toolchain::find_executable_in_path("docker") else {
+        return false;
+    };
+    let Ok(output) = solix_toolchain::create_process_command(&docker_exe)
+        .args(["version", "--format", "{{.Server.Os}}"])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "linux"
+}
+
+/// Returns true if Linux-container Docker and `cross` are both available on PATH.
+fn is_cross_container_available() -> bool {
+    if !is_docker_available() {
+        return false;
+    }
+    if solix_toolchain::find_executable_in_path("cross").is_some() {
+        return true;
+    }
+    let home_dir = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    home_dir.is_some_and(|home| {
+        let cargo_bin = PathBuf::from(home).join(".cargo").join("bin");
+        solix_toolchain::find_executable_in_search_paths("cross", cargo_bin.as_os_str()).is_some()
+    })
+}
+
 // ============================================================================
 // Test B.1: manifest.toml Parsing & Minimal Schema Enforcement
 // ============================================================================
@@ -267,6 +299,12 @@ public class Main {
 
 #[test]
 fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping test_end_to_end_untitled_rust_template_build_and_run_all_profiles: Docker/cross container environment is not active in this test runner."
+        );
+        return;
+    }
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
     let template_source = locate_template_source();
     let project_root = workspace.root_path().join("untitled-rust");
@@ -406,6 +444,12 @@ fn test_end_to_end_untitled_rust_template_build_and_run_all_profiles() {
 
 #[test]
 fn test_run_with_direct_native_library_flag() {
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping test_run_with_direct_native_library_flag: Docker/cross container environment is not active in this test runner."
+        );
+        return;
+    }
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
     let template_source = locate_template_source();
     let project_root = workspace.root_path().join("template_native_build");
@@ -559,6 +603,12 @@ public class Main {
 
 #[test]
 fn test_info_command_on_slxarc_archive() {
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping test_info_command_on_slxarc_archive: Docker/cross container environment is not active in this test runner."
+        );
+        return;
+    }
     let workspace = HermeticCliWorkspace::create().expect("Failed to create workspace");
     let template_source = locate_template_source();
     let project_root = workspace.root_path().join("info_test_project");
@@ -1153,6 +1203,12 @@ public class TestRunner {
 
 #[test]
 fn test_static_release_build_bundles_dependency_natives_and_runs_standalone() {
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping test_static_release_build_bundles_dependency_natives_and_runs_standalone: Docker/cross container environment is not active in this test runner."
+        );
+        return;
+    }
     let workspace = HermeticCliWorkspace::create().expect("create workspace");
     let store_dir = workspace.root_path().join("pkg_store");
     let empty_store_dir = workspace.root_path().join("empty_pkg_store");
@@ -1971,6 +2027,12 @@ finally:
 
 #[test]
 fn test_solix_build_check_env_flag_executes_preflight_only() {
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping test_solix_build_check_env_flag_executes_preflight_only: Docker/cross container environment is not active in this test runner."
+        );
+        return;
+    }
     let workspace = HermeticCliWorkspace::create().expect("create workspace");
     let template_source = locate_template_source();
     let project_root = workspace.root_path().join("preflight_proj");
@@ -2059,6 +2121,12 @@ sources = ["src"]
 
 #[test]
 fn test_manifest_yaml_declarative_cmake_project_build_and_hooks() {
+    if !is_docker_available() {
+        eprintln!(
+            "[test] Skipping test_manifest_yaml_declarative_cmake_project_build_and_hooks: Docker daemon is not active in this test runner environment."
+        );
+        return;
+    }
     let cmake_probe = std::process::Command::new("cmake")
         .arg("--version")
         .output();
@@ -2245,6 +2313,12 @@ profiles:
 
 #[test]
 fn test_manifest_yaml_auto_detects_cargo_with_solix_native_feature() {
+    if !is_cross_container_available() {
+        eprintln!(
+            "[test] Skipping test_manifest_yaml_auto_detects_cargo_with_solix_native_feature: Docker/cross container environment is not active in this test runner."
+        );
+        return;
+    }
     let workspace = HermeticCliWorkspace::create().expect("create workspace");
     let project_root = workspace.root_path().join("cargo_yaml_demo");
     fs::create_dir_all(project_root.join("src")).expect("create src dir");
@@ -3027,5 +3101,118 @@ profiles:
     assert_eq!(
         run(build_force_cli).expect("build --install --force must succeed"),
         0
+    );
+}
+
+// ============================================================================
+// Test Docker Containerization Strategy & Verification (Issues #253 & #251)
+// ============================================================================
+
+#[test]
+fn test_docker_strategy_mandated_for_all_target_triples() {
+    let supported_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-gnu",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ];
+
+    for target_triple in supported_triples {
+        for docker_flag in [true, false] {
+            let strategy_result = solix_toolchain::select_cargo_strategy(
+                target_triple,
+                "x86_64-unknown-linux-gnu",
+                docker_flag,
+            );
+            assert!(
+                strategy_result.is_ok(),
+                "select_cargo_strategy must succeed for {target_triple}"
+            );
+            assert_eq!(
+                strategy_result.unwrap(),
+                solix_toolchain::CargoBuildStrategy::Docker,
+                "Containerized Docker strategy must be selected for {target_triple} regardless of docker flag"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_native_target_config_defaults_to_docker() {
+    let default_config = solix_common::project::NativeTargetConfig {
+        docker: None,
+        ..Default::default()
+    };
+    assert!(
+        default_config.is_docker_strategy(),
+        "NativeTargetConfig must default to docker strategy when docker field is omitted"
+    );
+
+    let explicit_docker_config = solix_common::project::NativeTargetConfig {
+        docker: Some(true),
+        ..Default::default()
+    };
+    assert!(
+        explicit_docker_config.is_docker_strategy(),
+        "NativeTargetConfig must report true when docker is explicitly true"
+    );
+}
+
+#[test]
+fn test_verify_docker_daemon_active_or_actionable_error() {
+    let daemon_result = solix_toolchain::verify_docker_daemon_active();
+    match daemon_result {
+        Ok(version_info) => {
+            assert!(
+                version_info.contains("Docker"),
+                "Version string must identify Docker runtime: {version_info}"
+            );
+        }
+        Err(diagnostic_error) => {
+            let error_message = diagnostic_error.to_string();
+            assert!(
+                error_message.contains("Docker")
+                    || error_message.contains("docker")
+                    || error_message.contains("daemon is unreachable"),
+                "Diagnostic error must provide actionable Docker instructions: {error_message}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_cross_and_dockcross_image_mappings_for_all_triples() {
+    let supported_triples = [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-pc-windows-gnu",
+        "x86_64-pc-windows-msvc",
+        "x86_64-apple-darwin",
+        "aarch64-apple-darwin",
+    ];
+
+    for target_triple in supported_triples {
+        let cross_image = solix_toolchain::cross_image_for_triple(target_triple);
+        assert!(
+            cross_image.contains("ghcr.io/cross-rs/"),
+            "cross image for {target_triple} must be canonical cross-rs image: {cross_image}"
+        );
+
+        let dockcross_image = solix_toolchain::dockcross_image_for_triple(target_triple);
+        assert!(
+            dockcross_image.is_some(),
+            "dockcross image must be defined for {target_triple}"
+        );
+        let dockcross_image_str = dockcross_image.unwrap();
+        assert!(
+            dockcross_image_str.starts_with("dockcross/"),
+            "dockcross image for {target_triple} must be canonical dockcross image: {dockcross_image_str}"
+        );
+    }
+
+    assert_eq!(
+        solix_toolchain::cross_image_for_triple("x86_64-pc-windows-msvc"),
+        "ghcr.io/cross-rs/x86_64-pc-windows-gnu:edge"
     );
 }
