@@ -134,7 +134,7 @@ Profiles govern compiler optimization, AST function inlining, debug symbol emiss
 | `platforms` | List of Strings | `["host"]` | OS names or architecture targets (see Platform Expansion below). |
 | `pre_compile` | List of Strings | `[]` | Shell/tool commands run sequentially before native and Solix compilation. |
 | `post_compile` | List of Strings | `[]` | Shell/tool commands run sequentially after `.slxp` package packaging. |
-| `dependencies` | Mapping | `{}` | Profile-scoped dependency map (`name -> { version, profile }`). |
+| `dependencies` | Mapping | `{}` | Profile-scoped dependency map (`name -> { version, profile }`, where `version` is semver or `>=`/`^`/`~`/`=`/`*` constraint). |
 | `natives` | Mapping | `{}` | Native subprojects compiled automatically for this profile. |
 | `libraries` | List of Strings | `[]` | External pre-compiled shared libraries (`.so`, `.dll`, `.dylib`) verified across all profile target platforms under `bin/<target_triple>/`. |
 
