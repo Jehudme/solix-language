@@ -2,22 +2,18 @@
 
 #![forbid(unsafe_code)]
 
-use crate::cli::{AddArgs, CheckArgs, CompilePackageArgs, InitArgs, TestArgs};
-use crate::commands::compile::{collect_slx_sources_recursively, execute_compile_package};
-use crate::diagnostics::render_diagnostics;
+use crate::cli::{AddArgs, BuildArgs, CheckArgs, CompilePackageArgs, InitArgs, TestArgs};
+use crate::commands::build::execute_build;
+use crate::commands::compile::execute_compile_package;
 use crate::registry::parse_package_spec;
 use crate::solver::{ClientModuleSolver, resolve_package_store_dir};
 use anyhow::{Context, Result, bail};
 use solix_common::ModuleSolver;
-use solix_common::project::{DependencySpec, ProjectManifest, find_manifest_path};
-use solix_common::solver::DependencyRequirement;
-use solix_compilation::CompilationContext::{BuildProfile, CompilationContext, CompilationOptions};
-use solix_compilation::CompilationPipeline;
+use solix_common::project::{DependencySpec, ProjectManifest, SlxarcArchive, find_manifest_path};
 use solix_runtime::native::builtins::{builtin_print, builtin_println};
 use solix_runtime::{RuntimeContext, RuntimeOptions, VirtualMachine};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -40,8 +36,8 @@ pub fn execute_check(args: CheckArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Executes `solix test [PATH] [--filter <pattern>]` by compiling with the `test` profile
-/// and running all discovered zero-argument `test_*` functions/methods.
+/// Executes `solix test [PATH] [--filter <pattern>]` by building the `test` profile
+/// (including any native libraries) and running all discovered zero-argument `test_*` functions/methods.
 ///
 /// # Errors
 /// Returns an error if compilation fails or any executed test fails.
@@ -64,69 +60,50 @@ pub fn execute_test(args: TestArgs) -> Result<i32> {
         .resolve_profile(&args.profile)
         .map_err(|err| anyhow::anyhow!("Failed to resolve profile '{}': {err}", args.profile))?;
 
-    let mut source_files: Vec<PathBuf> = Vec::new();
-    for source_root in &resolved_profile.sources {
-        let candidate_path = project_root.join(source_root);
-        if candidate_path.is_dir() {
-            collect_slx_sources_recursively(&candidate_path, &mut source_files)?;
-        } else if candidate_path.is_file() {
-            source_files.push(candidate_path);
-        }
-    }
-    if source_files.is_empty() {
-        bail!("No .slx source files found for profile '{}'", args.profile);
-    }
+    execute_build(BuildArgs {
+        path: project_root.clone(),
+        platform: None,
+        profile: Some(args.profile.clone()),
+        debug: false,
+        release: false,
+        test: false,
+        pkg_dir: args.pkg_dir.clone(),
+        install: false,
+        force: true,
+        check_env: false,
+        target: None,
+    })?;
+
+    let package_name = &manifest.configuration.name;
+    let build_dir = project_root.join("build").join(&args.profile);
+    let slxp_path = build_dir.join(format!("{package_name}.slxp"));
+    let slxarc_path = build_dir.join(format!("{package_name}.slxarc"));
+    let archive_path = if slxp_path.exists() {
+        slxp_path
+    } else if slxarc_path.exists() {
+        slxarc_path
+    } else {
+        bail!(
+            "Built test archive not found under '{}'",
+            build_dir.display()
+        );
+    };
+
+    let extract_temp = tempfile::Builder::new().prefix("solix_test_").tempdir()?;
+    let loaded_archive = SlxarcArchive::extract_and_load(&archive_path, extract_temp.path())?;
+    let primary_program = loaded_archive
+        .binaries
+        .first()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("Test archive contains no primary bytecode binary"))?;
 
     let store_directory = resolve_package_store_dir(args.pkg_dir.as_deref());
     let _ = crate::assets::ensure_bundled_packages_installed(&store_directory);
     let solver = Arc::new(ClientModuleSolver::with_store_dir(store_directory));
 
-    let mut options = CompilationOptions::new()
-        .with_profile(BuildProfile::Test)
-        .with_package_metadata(
-            &manifest.configuration.name,
-            &manifest.configuration.version,
-            manifest.configuration.description.as_deref().unwrap_or(""),
-        )
-        .with_solver(solver.clone())
-        .with_verify_checksums(!args.no_verify);
-
-    if let Some(entry_sym) = resolved_profile.entrypoint.clone() {
-        options = options.with_entry_point(Some(entry_sym));
-    }
-    for (dep_name, dep_spec) in &resolved_profile.dependencies {
-        if let Ok(parsed_ver) = solix_common::solver::PackageVersion::parse(&dep_spec.version) {
-            let mut req = DependencyRequirement::new(dep_name.clone(), parsed_ver);
-            if !dep_spec.profile.is_empty() {
-                req = req.with_profile(dep_spec.profile.clone());
-            }
-            options = options.with_dependency_spec(req);
-        }
-    }
-    for source_path in &source_files {
-        let content = fs::read_to_string(source_path)?;
-        options = options.with_source(source_path.display().to_string(), content);
-    }
-
-    let mut context = CompilationContext::new(options);
-    let mut pipeline = CompilationPipeline::standard();
-    if let Err(diagnostics) = pipeline.execute(&mut context) {
-        render_diagnostics(&context.source_names, &context.sources, &diagnostics);
-        bail!(
-            "Test compilation aborted due to {} error(s).",
-            diagnostics.len()
-        );
-    }
-
-    let program = context
-        .emission_artifacts
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("Test compilation produced no bytecode artifacts"))?
-        .program;
-
     // Discover zero-arg test_* functions or fall back to configured test entrypoint
     let mut test_candidates: Vec<(u32, String)> = Vec::new();
-    for (func_idx, func_info) in program.functions.iter().enumerate() {
+    for (func_idx, func_info) in primary_program.functions.iter().enumerate() {
         let short_name = func_info
             .symbol
             .rsplit("::")
@@ -144,13 +121,13 @@ pub fn execute_test(args: TestArgs) -> Result<i32> {
 
     if test_candidates.is_empty()
         && let Some(entry_sym) = resolved_profile.entrypoint
-        && let Some(entry_idx) = program.functions.iter().position(|func| {
+        && let Some(entry_idx) = primary_program.functions.iter().position(|func| {
             func.symbol == entry_sym || func.symbol.ends_with(&format!("::{entry_sym}"))
         })
     {
         test_candidates.push((
             entry_idx as u32,
-            program.functions[entry_idx].symbol.clone(),
+            primary_program.functions[entry_idx].symbol.clone(),
         ));
     }
 
@@ -164,15 +141,24 @@ pub fn execute_test(args: TestArgs) -> Result<i32> {
     let mut failed_count = 0usize;
 
     for (func_id, func_name) in &test_candidates {
-        let runtime_options = RuntimeOptions::new()
+        let mut runtime_options = RuntimeOptions::new()
             .with_heap_size(32 * 1024 * 1024)
             .with_solver(solver.clone())
             .with_native_function("println", builtin_println)
             .with_native_function("print", builtin_print)
             .with_native_function("Console::println", builtin_println)
             .with_native_function("Console::print", builtin_print)
-            .with_verify_checksums(!args.no_verify)
-            .with_binary(program.clone());
+            .with_verify_checksums(!args.no_verify);
+
+        for native_lib in &loaded_archive.native_libraries {
+            runtime_options = runtime_options.with_native_library(native_lib.clone());
+        }
+        for binary_prog in &loaded_archive.binaries {
+            runtime_options = runtime_options.with_binary(binary_prog.clone());
+        }
+        for secondary_prog in &loaded_archive.secondary_binaries {
+            runtime_options = runtime_options.with_binary(secondary_prog.clone());
+        }
 
         let runtime_ctx = RuntimeContext::new(runtime_options)
             .map_err(|err| anyhow::anyhow!("Runtime initialization failed: {err}"))?;
