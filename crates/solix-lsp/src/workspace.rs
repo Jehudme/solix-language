@@ -302,6 +302,15 @@ impl WorkspaceManager {
         self.solver.clone()
     }
 
+    /// Returns package names of all dependency binaries currently cached in memory.
+    #[must_use]
+    pub fn cached_dependency_package_names(&self) -> Vec<String> {
+        self.cached_dependencies
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
+    }
+
     /// Attempts to find and parse the `ProjectManifest` corresponding to a document URI.
     #[must_use]
     pub fn project_manifest_for_uri(
@@ -923,6 +932,7 @@ impl WorkspaceManager {
             codes: sources_map,
             dependency_specs,
             dependency_binaries: cached_binaries,
+            implicit_link_dependency_binaries: false,
             ..Default::default()
         };
         if let Some(solver) = &self.solver {

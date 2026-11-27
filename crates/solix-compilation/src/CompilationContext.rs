@@ -107,6 +107,9 @@ pub struct CompilationOptions {
     pub emit_export_metadata: bool,
     /// Declared dynamic shared library dependencies required by this compilation.
     pub dynamic_libraries: Vec<String>,
+    /// Whether `dependency_binaries` are treated as implicitly linked CLI packages (default true).
+    /// Language servers set this to false so cached manifest dependencies still require explicit `import`.
+    pub implicit_link_dependency_binaries: bool,
 }
 
 impl Default for CompilationOptions {
@@ -136,7 +139,15 @@ impl CompilationOptions {
             verify_checksums: true,
             emit_export_metadata: true,
             dynamic_libraries: Vec::new(),
+            implicit_link_dependency_binaries: true,
         }
+    }
+
+    /// Sets whether preloaded `dependency_binaries` bypass explicit `import` checks.
+    #[must_use]
+    pub fn with_implicit_link_dependency_binaries(mut self, implicit_link: bool) -> Self {
+        self.implicit_link_dependency_binaries = implicit_link;
+        self
     }
 
     /// Sets declared dynamic shared library dependencies.
@@ -336,14 +347,16 @@ impl CompilationContext {
         let solver = options.solver.clone();
 
         let mut cli_linked_packages = HashSet::new();
-        for binary in &options.dependency_binaries {
-            let package_name = if !binary.package_name.is_empty() {
-                &binary.package_name
-            } else {
-                &binary.export_manifest.package_name
-            };
-            if !package_name.is_empty() {
-                cli_linked_packages.insert(package_name.clone());
+        if options.implicit_link_dependency_binaries {
+            for binary in &options.dependency_binaries {
+                let package_name = if !binary.package_name.is_empty() {
+                    &binary.package_name
+                } else {
+                    &binary.export_manifest.package_name
+                };
+                if !package_name.is_empty() {
+                    cli_linked_packages.insert(package_name.clone());
+                }
             }
         }
 

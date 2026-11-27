@@ -1529,3 +1529,319 @@ fn test_lsp_signature_help_utf8_mid_character_offset_safety() {
     // Verified that calling signature help at mid-codepoint offset does not panic
     let _ = signature_help_result;
 }
+
+#[test]
+fn test_e0201_persists_across_did_open_and_did_change_with_cached_dependencies() {
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|parent| parent.parent())
+        .expect("repo root")
+        .to_path_buf();
+    let (_temp_store, bundled_solver) = create_hermetic_bundled_solver(&repo_root);
+    let project_dir = tempfile::tempdir().expect("create temp project");
+    let src_dir = project_dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).expect("create src dir");
+    std::fs::write(
+        project_dir.path().join("manifest.yaml"),
+        "package:\n  name: pong\n  version: 0.1.0\ndependencies:\n  raylib: \">=5.5.0\"\n",
+    )
+    .expect("write manifest");
+
+    let main_path = src_dir.join("main.slx");
+    let main_uri = Url::from_file_path(&main_path).expect("file URI");
+    let source_v1 = concat!(
+        "package pong;\n",
+        "public class Main {\n",
+        "    public static int32 main() {\n",
+        "        InitWindow(800, 600, \"pong\");\n",
+        "        return 0;\n",
+        "    }\n",
+        "}\n"
+    );
+    std::fs::write(&main_path, source_v1).expect("write main.slx");
+
+    let workspace =
+        WorkspaceManager::new(Some(project_dir.path().to_path_buf()), Some(bundled_solver));
+    let open_snap = workspace.did_open(main_uri.clone(), 1, source_v1.to_string());
+    let open_e0201_count = open_snap
+        .diagnostics
+        .iter()
+        .filter(|diag| {
+            matches!(
+                &diag.code,
+                Some(NumberOrString::String(code_str)) if code_str == "E0201"
+            )
+        })
+        .count();
+    assert!(
+        open_e0201_count >= 1,
+        "Expected E0201 for unimported InitWindow on didOpen, got: {:?}",
+        open_snap.diagnostics
+    );
+
+    // Edit file so didChange runs with cached raylib BinaryProgram
+    let source_v2 = source_v1.replace("800", "1024");
+    let change_snap = workspace.did_change(&main_uri, 2, source_v2);
+    let change_e0201_count = change_snap
+        .diagnostics
+        .iter()
+        .filter(|diag| {
+            matches!(
+                &diag.code,
+                Some(NumberOrString::String(code_str)) if code_str == "E0201"
+            )
+        })
+        .count();
+    assert_eq!(
+        change_e0201_count, open_e0201_count,
+        "E0201 diagnostics must persist across didChange when dependencies are cached"
+    );
+}
+
+#[test]
+fn test_bare_completion_excludes_enum_variants_while_scope_resolution_includes_them() {
+    let (workspace, test_uri) = create_test_workspace();
+    let source = concat!(
+        "public enum Color {\n",
+        "    RED,\n",
+        "    WHITE\n",
+        "}\n",
+        "public class Main {\n",
+        "    public static void main() {\n",
+        "        \n",
+        "    }\n",
+        "}\n"
+    );
+    let snapshot = workspace.did_open(test_uri.clone(), 1, source.to_string());
+    let bare_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: test_uri.clone(),
+            },
+            position: Position {
+                line: 6,
+                character: 8,
+            },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: None,
+    };
+    let bare_list = completions(&workspace, &snapshot, &bare_params);
+    assert!(
+        !bare_list.items.iter().any(|item| item.label == "WHITE"),
+        "Bare completion must NOT suggest unscoped enum variant WHITE"
+    );
+    assert!(
+        !bare_list.items.iter().any(|item| item.label == "RED"),
+        "Bare completion must NOT suggest unscoped enum variant RED"
+    );
+
+    let scoped_source = source.replace("        \n", "        Color::\n");
+    let scoped_snap = workspace.did_change(&test_uri, 2, scoped_source);
+    let scoped_params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: test_uri },
+            position: Position {
+                line: 6,
+                character: 15,
+            },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: None,
+    };
+    let scoped_list = completions(&workspace, &scoped_snap, &scoped_params);
+    assert!(
+        scoped_list.items.iter().any(|item| item.label == "WHITE"),
+        "Scope resolution completion after Color:: MUST suggest WHITE"
+    );
+}
+
+#[test]
+fn test_quick_fix_e0201_multi_level_import_after_package_and_ambiguous_namespaces() {
+    let workspace = WorkspaceManager::new(None, None);
+    let alpha_uri = Url::parse("file:///workspace/alpha.slx").unwrap();
+    let beta_uri = Url::parse("file:///workspace/beta.slx").unwrap();
+    let main_uri = Url::parse("file:///workspace/main.slx").unwrap();
+
+    workspace.did_open(
+        alpha_uri,
+        1,
+        "package alpha.ui;\npublic class Widget {}\n".to_string(),
+    );
+    workspace.did_open(
+        beta_uri,
+        1,
+        "package beta.ui;\npublic class Widget {}\n".to_string(),
+    );
+    let main_source = concat!(
+        "package app.main;\n",
+        "public class Runner {\n",
+        "    public static void main() {\n",
+        "        Widget item;\n",
+        "    }\n",
+        "}\n"
+    );
+    let main_snap = workspace.did_open(main_uri.clone(), 1, main_source.to_string());
+    let e0201_diag = main_snap
+        .diagnostics
+        .iter()
+        .find(|diag| {
+            matches!(
+                &diag.code,
+                Some(NumberOrString::String(code_str)) if code_str == "E0201"
+            )
+        })
+        .expect("expected E0201 diagnostic for Widget")
+        .clone();
+
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier {
+            uri: main_uri.clone(),
+        },
+        range: e0201_diag.range,
+        context: CodeActionContext {
+            diagnostics: vec![e0201_diag],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+    let actions = code_actions(&workspace, &main_snap, &params);
+    let titles: Vec<String> = actions
+        .iter()
+        .filter_map(|act| match act {
+            CodeActionOrCommand::CodeAction(ca) => Some(ca.title.clone()),
+            CodeActionOrCommand::Command(_) => None,
+        })
+        .collect();
+
+    assert!(
+        titles
+            .iter()
+            .any(|title| title == "Import 'alpha.ui.Widget'"),
+        "Expected exact import for alpha.ui.Widget, got: {titles:?}"
+    );
+    assert!(
+        titles
+            .iter()
+            .any(|title| title == "Import all from 'alpha.ui.*'"),
+        "Expected wildcard import for alpha.ui.*, got: {titles:?}"
+    );
+    assert!(
+        titles
+            .iter()
+            .any(|title| title == "Import 'beta.ui.Widget'"),
+        "Expected exact import for beta.ui.Widget, got: {titles:?}"
+    );
+    assert!(
+        titles
+            .iter()
+            .any(|title| title == "Import all from 'beta.ui.*'"),
+        "Expected wildcard import for beta.ui.*, got: {titles:?}"
+    );
+
+    // Ensure every import edit inserts AFTER `package app.main;` (line >= 1)
+    for act in &actions {
+        if let CodeActionOrCommand::CodeAction(ca) = act
+            && ca.title.starts_with("Import ")
+            && let Some(edit) = &ca.edit
+            && let Some(changes) = &edit.changes
+            && let Some(edits) = changes.get(&main_uri)
+        {
+            for text_edit in edits {
+                assert!(
+                    text_edit.range.start.line >= 1,
+                    "Import edit must be placed after package statement, got line {}: {:?}",
+                    text_edit.range.start.line,
+                    ca.title
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_quick_fix_e0212_missing_return_and_override_and_wiki_routing() {
+    let (workspace, test_uri) = create_test_workspace();
+    let source = concat!(
+        "public class Main {\n",
+        "    public static int32 main() {\n",
+        "        int32 count = 1;\n",
+        "    }\n",
+        "}\n"
+    );
+    let snapshot = workspace.did_open(test_uri.clone(), 1, source.to_string());
+    let e0212_diag = snapshot
+        .diagnostics
+        .iter()
+        .find(|diag| {
+            matches!(
+                &diag.code,
+                Some(NumberOrString::String(code_str)) if code_str == "E0212"
+            )
+        })
+        .expect("expected E0212 diagnostic")
+        .clone();
+
+    let params = CodeActionParams {
+        text_document: TextDocumentIdentifier {
+            uri: test_uri.clone(),
+        },
+        range: e0212_diag.range,
+        context: CodeActionContext {
+            diagnostics: vec![e0212_diag],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+    let actions = code_actions(&workspace, &snapshot, &params);
+    assert!(
+        actions.iter().any(|act| match act {
+            CodeActionOrCommand::CodeAction(ca) => ca.title == "Insert 'return 0;'",
+            CodeActionOrCommand::Command(_) => false,
+        }),
+        "Expected Insert 'return 0;' quick fix for E0212"
+    );
+
+    // E0284 (DestructorInvocationDirect) must NOT trigger Add 'override' modifier
+    let e0284_diag = Diagnostic {
+        range: Range::new(Position::new(1, 4), Position::new(1, 10)),
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String("E0284".to_string())),
+        message: "Cannot invoke destructor directly".to_string(),
+        ..Default::default()
+    };
+    let e0284_params = CodeActionParams {
+        text_document: TextDocumentIdentifier { uri: test_uri },
+        range: e0284_diag.range,
+        context: CodeActionContext {
+            diagnostics: vec![e0284_diag],
+            only: None,
+            trigger_kind: None,
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+    let e0284_actions = code_actions(&workspace, &snapshot, &e0284_params);
+    assert!(
+        !e0284_actions.iter().any(|act| match act {
+            CodeActionOrCommand::CodeAction(ca) => ca.title.contains("override"),
+            CodeActionOrCommand::Command(_) => false,
+        }),
+        "E0284 must not emit an override quick fix"
+    );
+
+    // E0306 binder error must route to binder-errors.md
+    let e0306_desc = solix_lsp::diagnostics::make_code_description("E0306")
+        .expect("expected code description for E0306");
+    assert!(
+        e0306_desc.href.as_str().contains("binder-errors.md#e0306"),
+        "E0306 should link to binder-errors.md#e0306, got {}",
+        e0306_desc.href
+    );
+}

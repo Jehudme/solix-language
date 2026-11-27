@@ -220,4 +220,18 @@ The Language Server extracts doc comments (`///` and `/** ... */`) directly into
 ### 7.9 Multi-File Workspace Path Normalization & Windows Verbatim Prefix Stripping
 When discovering and analyzing project source files across workspace directories (`analyze_document`), file paths and document URIs are normalized using `solix_common::strip_windows_verbatim_prefix`. On Windows environments where path canonicalization injects `\\?\` prefixes (e.g. `\\?\C:\project\...`), stripping verbatim prefixes guarantees that target file comparisons and document dictionary keys align consistently between `Url::from_file_path` conversions and disk paths, preventing duplicate document registration and spurious duplicate symbol diagnostics.
 
+### 7.10 Cached-Dependency Import Parity & Scoped Enum Completion Filtering
+1. **Cached-Dependency Import Enforcement**: `WorkspaceManager` sets `implicit_link_dependency_binaries = false` on `CompilationOptions` so preloaded in-memory dependency archives cached after `textDocument/didOpen` are not promoted to `cli_linked_packages`. Subsequent `textDocument/didChange` passes continue reporting `E0201` diagnostics for unimported dependency symbols, matching `solix build`.
+2. **Scoped Enum & Member Filtering**: Bare identifier completion (`handle_general_completion`) excludes `EnumVariant` entries (parented by `Type::Enum`) as well as out-of-scope class members, constructors, destructors, and operators. Enum variants such as `WHITE` are suggested exclusively after `EnumName::` in `handle_scope_resolution_completion`.
+
+### 7.11 Multi-Level Namespace Quick Fixes & Error Wiki Routing
+`textDocument/codeAction` provides diagnostic-driven Quick Fixes (`CodeActionKind::QUICKFIX`) with `package`-aware edit placement:
+- **`E0201` (Undefined Symbol)**: Discovers matching public classes, interfaces, enums, functions, and static fields across workspace snapshots and resolved dependency package indices (`PackageNamespaceIndex`), offering both exact (`import pkg.ns.Symbol;`) and namespace wildcard (`import pkg.ns.*;`) imports inserted after the `package` statement and existing `import` declarations, plus Levenshtein typo replacement candidates.
+- **`E0212` (Missing Return)**: Inserts `return 0;` (or type-appropriate default `return`) before the closing brace of non-void methods/functions.
+- **`E0226` / `E0227` (Access Delimiter)**: Rewrites `.` <-> `::` for static vs instance member access.
+- **`E0207` / `E0268` / `E0282` / `E0283` (Override & Visibility)**: Adds or removes `override` accurately (without misrouting `E0284`) and widens narrowing override visibility to `public`.
+- **`E0206` / `E0265` / `E0306` / `E0271` / `W0001` / `E0101` / `E0112` / `E0153` / `E0192`**: Generates missing method stubs, inserts `default` switch arms, removes unreachable statements, inserts/removes semicolons, removes duplicate `package` statements, and converts multi-character `'...'` literals to `"..."` strings.
+- **Documentation Links**: `make_code_description` and phase-specific diagnostic builders route `E00*` to `lexer-errors.md`, `E01*` to `parser-errors.md`, `E02*` and binder `E0301`-`E0316` to `binder-errors.md`, and `E03*` runtime diagnostics to `runtime-errors.md`.
+
+
 
