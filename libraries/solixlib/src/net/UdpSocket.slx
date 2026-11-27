@@ -58,6 +58,10 @@ public class UdpSocket {
         return UdpSocket::native_set_write_timeout(this.socket_id, timeout_ms);
     }
 
+    ~UdpSocket() {
+        this.close();
+    }
+
     public void close() {
         if (this.socket_id > 0) {
             UdpSocket::native_close(this.socket_id);

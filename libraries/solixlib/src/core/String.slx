@@ -16,6 +16,8 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
     private static native int64 native_last_index_of(string haystack, string needle);
     private static native string native_chars_to_string(char[] characters);
     private static native char[] native_string_to_chars(string text);
+    private static native int8[] native_to_utf8_bytes(string text);
+    private static native string native_from_utf8_bytes(int8[] raw_bytes);
     private static native string native_format(string format_template, string[] arguments);
     private static native string native_format_spec(string value, string specifier);
 
@@ -615,6 +617,31 @@ public class String implements IStringable, IHashable, IEquatable<String>, IComp
 
     public char[] to_chars() {
         return String::native_string_to_chars(this.data);
+    }
+
+    public int8[] to_utf8_bytes() {
+        return String::native_to_utf8_bytes(this.data);
+    }
+
+    public static String from_utf8_bytes(int8[] raw_bytes) {
+        if (raw_bytes == null || raw_bytes.length == 0) {
+            return new String("");
+        }
+        return new String(String::native_from_utf8_bytes(raw_bytes));
+    }
+
+    public static String from_utf8_bytes(int8[] raw_bytes, int32 offset, int32 count) {
+        if (raw_bytes == null || count <= 0) {
+            return new String("");
+        }
+        if (offset < 0 || offset > raw_bytes.length || count > raw_bytes.length - offset) {
+            throw new IndexOutOfBoundsException("UTF-8 slice offset/count out of bounds", offset, 0, raw_bytes.length);
+        }
+        int8[] sliced_bytes = new int8[count];
+        for (int32 copy_index = 0; copy_index < count; copy_index = copy_index + 1) {
+            sliced_bytes[copy_index] = raw_bytes[offset + copy_index];
+        }
+        return String::from_utf8_bytes(sliced_bytes);
     }
 
     public int32 hash_code() {

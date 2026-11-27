@@ -328,6 +328,34 @@ pub unsafe fn alloc_solix_bytes(vm_context: *mut c_void, bytes: &[u8]) -> u32 {
     }
 }
 
+/// Allocates a `string[]` array (`type_tag = 13`) on the guest heap from Rust string slices.
+pub unsafe fn alloc_solix_string_array(vm_context: *mut c_void, items: &[&str]) -> u32 {
+    if vm_context.is_null() {
+        return 0;
+    }
+    let context_ref = unsafe { &*(vm_context as *const SolixVmContext) };
+    if context_ref.magic != SOLIX_VM_CONTEXT_MAGIC {
+        return 0;
+    }
+    let item_count = u32::try_from(items.len()).unwrap_or(0);
+    let array_address = unsafe { (context_ref.alloc_array)(context_ref.vm_ptr, item_count, 13) };
+    if array_address == 0 {
+        return 0;
+    }
+    for (item_index, item_text) in items.iter().take(item_count as usize).enumerate() {
+        let string_address = unsafe { alloc_solix_string(vm_context, item_text) };
+        unsafe {
+            (context_ref.array_set_u64)(
+                context_ref.vm_ptr,
+                array_address,
+                item_index as u32,
+                u64::from(string_address),
+            );
+        }
+    }
+    array_address
+}
+
 /// Writes a 64-bit integer into an out-box array at index 0.
 pub unsafe fn write_out_box_i64(vm_context: *mut c_void, out_box_address: u32, value: i64) {
     if out_box_address == 0 || vm_context.is_null() {

@@ -363,3 +363,148 @@ fn test_weak_reference_field_layout_and_assignment_emission() {
     assert_eq!(set_field_inst.src1(), local_node); // r_obj
     assert_eq!(set_field_inst.src2(), 16); // field offset
 }
+
+#[test]
+fn test_overloaded_string_vs_boxed_methods_static_null_and_super_ctor() {
+    use solix_compilation::CompilationContext::{CompilationContext, CompilationOptions};
+
+    let source_code = r#"
+public class BoxedStr {
+    public string raw_value;
+    public BoxedStr(string initial) {
+        this.raw_value = initial;
+    }
+    public string unwrap() {
+        return this.raw_value;
+    }
+}
+
+public class GenericMap<KeyType, ValueType> {
+    public GenericMap() {}
+}
+
+public class BaseCustomException {
+    public string message;
+    public BaseCustomException() {
+        this.message = "";
+    }
+    public BaseCustomException(string message) {
+        this.message = message;
+    }
+}
+
+public class DerivedCustomException extends BaseCustomException {
+    public DerivedCustomException() : super("default") {}
+    public DerivedCustomException(string message) : super(message) {}
+}
+
+public class OverloadTarget {
+    public int32 process(string raw_text) {
+        return this.process(new BoxedStr(raw_text));
+    }
+    public int32 process(BoxedStr boxed) {
+        return boxed.unwrap().length;
+    }
+
+    public static int32 dispatch(string verb, string path) {
+        return OverloadTarget::dispatch(new BoxedStr(verb), new BoxedStr(path), null, null);
+    }
+    public static int32 dispatch(
+        BoxedStr verb,
+        BoxedStr path,
+        BoxedStr body,
+        GenericMap<BoxedStr, BoxedStr> headers
+    ) {
+        int32 total = verb.unwrap().length + path.unwrap().length;
+        if (body != null) {
+            total = total + body.unwrap().length;
+        }
+        return total;
+    }
+}
+
+public class Main {
+    public static int32 main() {
+        OverloadTarget target = new OverloadTarget();
+        DerivedCustomException err = new DerivedCustomException("boom");
+        return target.process("hello") + OverloadTarget::dispatch("GET", "/ok") + err.message.length;
+    }
+}
+"#;
+
+    let mut options = CompilationOptions::new().with_source("overload_regression.slx", source_code);
+    options.profile = solix_compilation::CompilationContext::BuildProfile::Debug;
+    options.inline_threshold = 0;
+    options.bytecode_optimization = false;
+    let mut context = CompilationContext::new(options);
+    context
+        .execute()
+        .expect("Overloaded (string) vs (BoxedStr), static null generic arg, and super(msg) must compile cleanly");
+
+    let program = &context
+        .emission_artifacts
+        .as_ref()
+        .expect("emission artifacts present")
+        .program;
+
+    let find_func = |prefix: &str| {
+        program
+            .functions
+            .iter()
+            .enumerate()
+            .find(|(_, func)| func.symbol.starts_with(prefix))
+            .unwrap_or_else(|| panic!("missing function starting with '{prefix}'"))
+    };
+
+    let (process_str_idx, process_str_fn) = find_func("OverloadTarget::process(string)");
+    let (process_boxed_idx, _) = find_func("OverloadTarget::process(BoxedStr)");
+    assert_ne!(
+        process_str_idx, process_boxed_idx,
+        "Overloaded instance methods differing by parameter types must receive distinct IDs"
+    );
+    let calls_self_virtual_or_direct = process_str_fn.instructions.iter().any(|inst| {
+        inst.opcode(0).ok() == Some(OpCode::CallDirect)
+            && inst.call_target() as usize == process_str_idx
+    });
+    assert!(
+        !calls_self_virtual_or_direct,
+        "process(string) must not emit recursive CallDirect to itself"
+    );
+
+    let (dispatch_2_idx, dispatch_2_fn) = find_func("OverloadTarget::dispatch(string,string)");
+    let (dispatch_4_idx, _) =
+        find_func("OverloadTarget::dispatch(BoxedStr,BoxedStr,BoxedStr,GenericMap");
+    let dispatch_2_calls_4 = dispatch_2_fn.instructions.iter().any(|inst| {
+        inst.opcode(0).ok() == Some(OpCode::CallDirect)
+            && inst.call_target() as usize == dispatch_4_idx
+    });
+    assert!(
+        dispatch_2_calls_4,
+        "2-arg OverloadTarget::dispatch(string, string) passing null generic args must call 4-arg target #{dispatch_4_idx}, not itself #{dispatch_2_idx}"
+    );
+
+    let base_ctor_empty_idx = program
+        .functions
+        .iter()
+        .enumerate()
+        .find(|(_, func)| func.symbol == "BaseCustomException::constructor")
+        .map(|(index, _)| index)
+        .expect("BaseCustomException::constructor present");
+    let base_ctor_str_idx = program
+        .functions
+        .iter()
+        .enumerate()
+        .find(|(_, func)| func.symbol == "BaseCustomException::constructor(string)")
+        .map(|(index, _)| index)
+        .expect("BaseCustomException::constructor(string) present");
+    let (_, derived_ctor_fn) = find_func("DerivedCustomException::constructor(string)");
+    assert_ne!(base_ctor_empty_idx, base_ctor_str_idx);
+    let calls_base_str_ctor = derived_ctor_fn.instructions.iter().any(|inst| {
+        inst.opcode(0).ok() == Some(OpCode::CallDirect)
+            && inst.call_target() as usize == base_ctor_str_idx
+    });
+    assert!(
+        calls_base_str_ctor,
+        "DerivedCustomException(string) : super(message) must call BaseCustomException::constructor(string)"
+    );
+}

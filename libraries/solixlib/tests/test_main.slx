@@ -7,6 +7,8 @@ import solix.tests.TestMath;
 import solix.tests.TestTime;
 import solix.tests.TestSystem;
 import solix.tests.TestCrypto;
+import solix.tests.TestJson;
+import solix.tests.TestNet;
 import solix.io.Console;
 
 class TestRunner {
@@ -15,7 +17,6 @@ class TestRunner {
         if (result != 0) {
             return 100 + result;
         }
-        result = TestCollections::run_all_tests();
         result = TestCollections::run_all_tests();
         if (result != 0) {
             return 200 + result;
@@ -39,6 +40,14 @@ class TestRunner {
         result = TestCrypto::run_all_tests();
         if (result != 0) {
             return 700 + result;
+        }
+        result = TestJson::run_all_tests();
+        if (result != 0) {
+            return 800 + result;
+        }
+        result = TestNet::run_all_tests();
+        if (result != 0) {
+            return 900 + result;
         }
         return 0;
     }

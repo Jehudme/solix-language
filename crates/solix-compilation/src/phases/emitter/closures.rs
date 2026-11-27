@@ -572,6 +572,7 @@ pub fn synthesize_lambda_function(
     class_layouts: Option<&HashMap<String, ClassLayout>>,
     function_ids: Option<&HashMap<String, u32>>,
     direct_method_targets: Option<&HashMap<(u32, usize), u32>>,
+    resolved_call_targets: Option<&HashMap<Span, u32>>,
     static_layout: Option<&StaticLayout>,
     synthesized_functions: Option<&mut Vec<CompiledFunction>>,
 ) -> Result<CompiledFunction, EmissionError> {
@@ -643,6 +644,9 @@ pub fn synthesize_lambda_function(
             }
             if let Some(direct_targets) = direct_method_targets {
                 emitter = emitter.with_direct_method_targets(direct_targets);
+            }
+            if let Some(call_targets) = resolved_call_targets {
+                emitter = emitter.with_resolved_call_targets(call_targets);
             }
             if let Some(slayout) = static_layout {
                 emitter = emitter.with_static_layout(slayout);

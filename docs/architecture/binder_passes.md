@@ -52,6 +52,7 @@ flowchart TD
   - Records inferred lambda expression types (`node_types`) for both variable declarations and assignments so member/array closure assignments emit balanced ARC cleanup.
   - Enforces `const` variable immutability.
   - Distinguishes instance method calls (`receiver.method()`) from static method invocations using scope resolution (`ClassName::method()`).
+  - Records exact overload-resolved `SymbolId` targets in `resolved_symbols` across method calls (`member_span`), constructor instantiations (`NewInstance` outer span), and subclass constructor chains (`ConstructorDeclaration` `super(...)` span) so bytecode emission disambiguates `null` and widened arguments deterministically.
   - Analyzes control flow exits (`break`, `continue`, `return`, `throw`) and registers required reference count decrements (`DecRef`) for variables leaving scope.
 
 ---

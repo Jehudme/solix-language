@@ -1,0 +1,111 @@
+package solix.tests;
+
+import solix.core.String;
+import solix.json.JsonArray;
+import solix.json.JsonObject;
+import solix.json.JsonValue;
+
+public class TestJson {
+    public static int32 run_all_tests() {
+        if (!TestJson::test_pointer_escaping_null_vs_empty_and_unescaping()) {
+            return 1;
+        }
+        if (!TestJson::test_dom_predicates_and_builders()) {
+            return 2;
+        }
+        return 0;
+    }
+
+    public static bool test_pointer_escaping_null_vs_empty_and_unescaping() {
+        String payload = new String("{\"a/b\": \"line1\\n\\\"line2\\\"\", \"tilde~key\": 99, \"empty\": \"\", \"nil\": null, \"ok\": true, \"num\": 3.5, \"arr\": [10, 20]}");
+        JsonValue doc = JsonValue::parse(payload);
+
+        JsonValue slash_val = doc.get("a/b");
+        if (slash_val == null || !slash_val.is_string()) {
+            return false;
+        }
+        if (!slash_val.as_string().equals(new String("line1\n\"line2\""))) {
+            return false;
+        }
+
+        JsonValue tilde_val = doc.get("tilde~key");
+        if (tilde_val == null || !tilde_val.is_number() || tilde_val.as_int64() != 99L) {
+            return false;
+        }
+
+        // Empty string JSON value must NOT be confused with missing key or null
+        JsonValue empty_val = doc.get("empty");
+        if (empty_val == null || empty_val.is_null() || !empty_val.is_string()) {
+            return false;
+        }
+        if (!empty_val.as_string().is_empty()) {
+            return false;
+        }
+
+        JsonValue null_val = doc.get("nil");
+        if (null_val == null || !null_val.is_null() || null_val.is_string()) {
+            return false;
+        }
+
+        JsonValue missing_val = doc.get("does_not_exist");
+        if (missing_val != null) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static bool test_dom_predicates_and_builders() {
+        JsonObject nested = new JsonObject()
+            .set("item/name", "escaped \"value\"")
+            .set("count", 42)
+            .set("ratio", 1.5)
+            .set("active", true)
+            .set_null("extra");
+
+        JsonArray arr = new JsonArray()
+            .add("alpha")
+            .add(nested);
+
+        JsonObject root_builder = new JsonObject()
+            .set("items", arr)
+            .set("empty_text", "");
+
+        JsonValue parsed = root_builder.to_json_value();
+        if (!parsed.is_object() || parsed.size() != 2 || !parsed.has("items")) {
+            return false;
+        }
+        if (!parsed.get_string_or("empty_text", "fallback").is_empty()) {
+            return false;
+        }
+        if (!parsed.get_string_or("absent", "fallback").equals(new String("fallback"))) {
+            return false;
+        }
+
+        JsonValue items_node = parsed.get("items");
+        if (items_node == null || !items_node.is_array() || items_node.size() != 2) {
+            return false;
+        }
+        JsonValue nested_node = items_node.get(1);
+        if (nested_node == null || !nested_node.is_object()) {
+            return false;
+        }
+        if (!nested_node.get_string_or("item/name", "").equals(new String("escaped \"value\""))) {
+            return false;
+        }
+        if (nested_node.get_int64_or("count", 0L) != 42L) {
+            return false;
+        }
+        if (nested_node.get_float64_or("ratio", 0.0) < 1.4 || nested_node.get_float64_or("ratio", 0.0) > 1.6) {
+            return false;
+        }
+        if (!nested_node.get_bool_or("active", false)) {
+            return false;
+        }
+        if (parsed.keys().length != 2) {
+            return false;
+        }
+
+        return true;
+    }
+}

@@ -226,17 +226,24 @@ fn test_deflate_negative_corrupted_payload_throws_e0334() {
 
 mod bridge_hardening_tests {
     use solixlib_native::fs_path::{file_native_read_all_bytes, file_native_read_all_text};
+    use solixlib_native::json_bridge::{
+        json_native_decode_string, json_native_encode_string, json_native_keys,
+        json_native_pointer_query, json_native_size, json_native_type_kind,
+    };
     use solixlib_native::net_bridge::{
         socket_native_close, socket_native_set_read_timeout, socket_native_set_write_timeout,
         tcp_listener_native_accept, tcp_listener_native_bind, tcp_stream_native_connect_timeout,
         tcp_stream_native_read, tcp_stream_native_write,
     };
+    use solixlib_native::string_prim::{
+        string_native_from_utf8_bytes, string_native_to_utf8_bytes,
+    };
     use solixlib_native::sys_process::{
         env_native_get_all_env, env_native_get_env, env_native_set_env,
     };
     use solixlib_native::{
-        alloc_solix_chars, read_solix_chars, solix_register_natives, SolixCValue, SolixVmContext,
-        SOLIX_VM_CONTEXT_MAGIC,
+        alloc_solix_bytes, alloc_solix_chars, read_solix_bytes, read_solix_chars,
+        solix_register_natives, SolixCValue, SolixVmContext, SOLIX_VM_CONTEXT_MAGIC,
     };
     use std::collections::HashMap;
     use std::ffi::{c_char, c_void};
@@ -246,6 +253,7 @@ mod bridge_hardening_tests {
         StringUtf8(Vec<u8>),
         CharArray(Vec<u32>),
         ByteArray(Vec<u8>),
+        U64Array(Vec<u64>),
     }
 
     struct MockBridgeHeap {
@@ -273,12 +281,27 @@ mod bridge_hardening_tests {
         0
     }
     unsafe extern "C" fn mock_set_i32(_: *mut c_void, _: u32, _: u32, _: i32) {}
-    unsafe extern "C" fn mock_array_get(_: *mut c_void, _: u32, _: u32) -> u64 {
-        0
+    unsafe extern "C" fn mock_array_get(vm_ptr: *mut c_void, addr: u32, index: u32) -> u64 {
+        let heap = unsafe { &*(vm_ptr as *const MockBridgeHeap) };
+        match heap.entries.get(&addr) {
+            Some(MockHeapItem::U64Array(elements)) => {
+                elements.get(index as usize).copied().unwrap_or(0)
+            }
+            _ => 0,
+        }
     }
-    unsafe extern "C" fn mock_array_set(_: *mut c_void, _: u32, _: u32, _: u64) {}
-    unsafe extern "C" fn mock_alloc_array(_: *mut c_void, _: u32, _: u8) -> u32 {
-        0
+    unsafe extern "C" fn mock_array_set(vm_ptr: *mut c_void, addr: u32, index: u32, value: u64) {
+        let heap = unsafe { &mut *(vm_ptr as *mut MockBridgeHeap) };
+        if let Some(MockHeapItem::U64Array(elements)) = heap.entries.get_mut(&addr) {
+            let slot = index as usize;
+            if slot < elements.len() {
+                elements[slot] = value;
+            }
+        }
+    }
+    unsafe extern "C" fn mock_alloc_array(vm_ptr: *mut c_void, len: u32, _elem_type: u8) -> u32 {
+        let heap = unsafe { &mut *(vm_ptr as *mut MockBridgeHeap) };
+        heap.insert(MockHeapItem::U64Array(vec![0u64; len as usize]))
     }
     unsafe extern "C" fn mock_alloc_object(_: *mut c_void, _: u32, _: u32) -> u32 {
         0
@@ -342,6 +365,7 @@ mod bridge_hardening_tests {
             Some(MockHeapItem::StringUtf8(bytes)) => bytes.len() as u32,
             Some(MockHeapItem::CharArray(chars)) => chars.len() as u32,
             Some(MockHeapItem::ByteArray(bytes)) => bytes.len() as u32,
+            Some(MockHeapItem::U64Array(elements)) => elements.len() as u32,
             None => 0,
         }
     }
@@ -364,7 +388,7 @@ mod bridge_hardening_tests {
                     .collect();
                 text.into_bytes()
             }
-            None => Vec::new(),
+            Some(MockHeapItem::U64Array(_)) | None => Vec::new(),
         };
         let copy_len = encoded.len().min(cap as usize);
         if !out_buf.is_null() && copy_len > 0 {
@@ -558,6 +582,188 @@ mod bridge_hardening_tests {
         assert!(closed.as_bool());
         let _ = tcp_listener_native_bind;
         let _ = tcp_stream_native_write;
+    }
+
+    #[test]
+    fn test_json_bridge_pointer_distinguishes_empty_null_missing_and_utf8() {
+        let mut heap = MockBridgeHeap::new();
+        let mut ctx = make_mock_ctx(&mut heap);
+        let ctx_ptr = (&mut ctx as *mut SolixVmContext).cast::<c_void>();
+
+        let json_payload =
+            r#"{"empty":"","nullable":null,"a/b":{"~tile":42},"arr":[1,2,3],"flag":true}"#;
+        let json_addr = unsafe { alloc_solix_chars(ctx_ptr, json_payload) };
+
+        let mut query_err = SolixCValue::null();
+        let empty_ptr = unsafe { alloc_solix_chars(ctx_ptr, "/empty") };
+        let empty_args = [
+            SolixCValue::ref_val(json_addr),
+            SolixCValue::ref_val(empty_ptr),
+        ];
+        let empty_res =
+            unsafe { json_native_pointer_query(ctx_ptr, empty_args.as_ptr(), 2, &mut query_err) };
+        assert!(query_err.is_null());
+        assert_eq!(
+            unsafe { read_solix_chars(ctx_ptr, empty_res.as_ref()) },
+            "\"\""
+        );
+
+        let null_ptr = unsafe { alloc_solix_chars(ctx_ptr, "/nullable") };
+        let null_args = [
+            SolixCValue::ref_val(json_addr),
+            SolixCValue::ref_val(null_ptr),
+        ];
+        let null_res =
+            unsafe { json_native_pointer_query(ctx_ptr, null_args.as_ptr(), 2, &mut query_err) };
+        assert!(query_err.is_null());
+        assert_eq!(
+            unsafe { read_solix_chars(ctx_ptr, null_res.as_ref()) },
+            "null"
+        );
+
+        let missing_ptr = unsafe { alloc_solix_chars(ctx_ptr, "/does_not_exist") };
+        let missing_args = [
+            SolixCValue::ref_val(json_addr),
+            SolixCValue::ref_val(missing_ptr),
+        ];
+        let missing_res =
+            unsafe { json_native_pointer_query(ctx_ptr, missing_args.as_ptr(), 2, &mut query_err) };
+        assert!(query_err.is_null());
+        assert!(missing_res.is_null(), "missing pointer must return null");
+
+        let escaped_ptr = unsafe { alloc_solix_chars(ctx_ptr, "/a~1b/~0tile") };
+        let escaped_args = [
+            SolixCValue::ref_val(json_addr),
+            SolixCValue::ref_val(escaped_ptr),
+        ];
+        let escaped_res =
+            unsafe { json_native_pointer_query(ctx_ptr, escaped_args.as_ptr(), 2, &mut query_err) };
+        assert_eq!(
+            unsafe { read_solix_chars(ctx_ptr, escaped_res.as_ref()) },
+            "42"
+        );
+
+        let kind_args = [SolixCValue::ref_val(json_addr)];
+        assert_eq!(
+            unsafe { json_native_type_kind(ctx_ptr, kind_args.as_ptr(), 1, &mut query_err) }
+                .as_i32(),
+            5
+        );
+        assert_eq!(
+            unsafe { json_native_size(ctx_ptr, kind_args.as_ptr(), 1, &mut query_err) }.as_i32(),
+            5
+        );
+        let keys_res = unsafe { json_native_keys(ctx_ptr, kind_args.as_ptr(), 1, &mut query_err) };
+        let keys_len = unsafe { mock_array_len(ctx.vm_ptr, keys_res.as_ref()) };
+        assert_eq!(keys_len, 5);
+
+        let quoted = unsafe { alloc_solix_chars(ctx_ptr, r#""hi \"café\"\n""#) };
+        let decode_args = [SolixCValue::ref_val(quoted)];
+        let decoded =
+            unsafe { json_native_decode_string(ctx_ptr, decode_args.as_ptr(), 1, &mut query_err) };
+        assert_eq!(
+            unsafe { read_solix_chars(ctx_ptr, decoded.as_ref()) },
+            "hi \"café\"\n"
+        );
+
+        let encode_args = [SolixCValue::ref_val(decoded.as_ref())];
+        let encoded =
+            unsafe { json_native_encode_string(ctx_ptr, encode_args.as_ptr(), 1, &mut query_err) };
+        assert_eq!(
+            unsafe { read_solix_chars(ctx_ptr, encoded.as_ref()) },
+            r#""hi \"café\"\n""#
+        );
+
+        let utf8_sample = "café 🚀 日本語";
+        let sample_chars = unsafe { alloc_solix_chars(ctx_ptr, utf8_sample) };
+        let utf8_bytes = unsafe {
+            string_native_to_utf8_bytes(
+                ctx_ptr,
+                [SolixCValue::ref_val(sample_chars)].as_ptr(),
+                1,
+                &mut query_err,
+            )
+        };
+        assert_eq!(
+            unsafe { read_solix_bytes(ctx_ptr, utf8_bytes.as_ref()) }.len(),
+            20
+        );
+        let restored = unsafe {
+            string_native_from_utf8_bytes(ctx_ptr, [utf8_bytes].as_ptr(), 1, &mut query_err)
+        };
+        assert_eq!(
+            unsafe { read_solix_chars(ctx_ptr, restored.as_ref()) },
+            utf8_sample
+        );
+    }
+
+    #[test]
+    fn test_tcp_loopback_multi_chunk_transfer_exceeding_160kb() {
+        use std::io::Write;
+        use std::sync::mpsc;
+
+        let mut heap = MockBridgeHeap::new();
+        let mut ctx = make_mock_ctx(&mut heap);
+        let ctx_ptr = (&mut ctx as *mut SolixVmContext).cast::<c_void>();
+
+        let server = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = server.local_addr().expect("local addr").port();
+        let payload_len = 170 * 1024;
+        let expected_payload: Vec<u8> = (0..payload_len)
+            .map(|byte_index| b'A' + (byte_index % 26) as u8)
+            .collect();
+        let server_payload = expected_payload.clone();
+
+        let (done_tx, done_rx) = mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let (mut conn, _) = server.accept().expect("accept loopback client");
+            for chunk in server_payload.chunks(4096) {
+                conn.write_all(chunk).expect("write server chunk");
+            }
+            conn.flush().expect("flush");
+            conn.shutdown(std::net::Shutdown::Write)
+                .expect("shutdown write");
+            let _ = done_tx.send(());
+        });
+
+        let endpoint = format!("127.0.0.1:{port}");
+        let ep_addr = unsafe { alloc_solix_chars(ctx_ptr, &endpoint) };
+        let mut err = SolixCValue::null();
+        let conn_args = [SolixCValue::ref_val(ep_addr), SolixCValue::i32_val(2000)];
+        let client_val =
+            unsafe { tcp_stream_native_connect_timeout(ctx_ptr, conn_args.as_ptr(), 2, &mut err) };
+        assert!(err.is_null());
+        let client_id = client_val.as_i64();
+        assert!(client_id > 0);
+
+        let mut collected = Vec::with_capacity(payload_len);
+        loop {
+            let read_args = [SolixCValue::i64_val(client_id), SolixCValue::i32_val(16384)];
+            let mut read_err = SolixCValue::null();
+            let chunk_val =
+                unsafe { tcp_stream_native_read(ctx_ptr, read_args.as_ptr(), 2, &mut read_err) };
+            assert!(read_err.is_null(), "unexpected read error");
+            let chunk_bytes = unsafe { read_solix_bytes(ctx_ptr, chunk_val.as_ref()) };
+            if chunk_bytes.is_empty() {
+                break;
+            }
+            collected.extend_from_slice(&chunk_bytes);
+        }
+        assert_eq!(collected.len(), payload_len);
+        assert_eq!(collected, expected_payload);
+
+        let closed = unsafe {
+            socket_native_close(
+                ctx_ptr,
+                [SolixCValue::i64_val(client_id)].as_ptr(),
+                1,
+                &mut err,
+            )
+        };
+        assert!(closed.as_bool());
+        done_rx.recv().expect("server thread finished");
+        handle.join().expect("join server thread");
+        let _ = alloc_solix_bytes;
     }
 
     #[test]

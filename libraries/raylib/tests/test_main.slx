@@ -110,6 +110,68 @@ public class TestRunner {
             return 16;
         }
 
+        // Test 13: Vector2 / Vector3 OOP math operators & helpers
+        Vector2 pos_a = new Vector2(3, 4);
+        Vector2 vel_a = new Vector2(1.0, 2.0);
+        Vector2 moved = pos_a + (vel_a * 2.0);
+        if (moved.x != (float32)5.0 || moved.y != (float32)8.0) {
+            return 17;
+        }
+        Vector2 diff = moved - pos_a;
+        if (diff != new Vector2(2, 4)) {
+            return 18;
+        }
+        float32 len_a = pos_a.length();
+        if (len_a < (float32)4.99 || len_a > (float32)5.01) {
+            return 19;
+        }
+        Vector2 unit_a = pos_a.normalized();
+        if (unit_a.length() < (float32)0.99 || unit_a.length() > (float32)1.01) {
+            return 20;
+        }
+        if (pos_a.dot(Vector2::UNIT_X) != (float32)3.0) {
+            return 21;
+        }
+
+        Vector3 basis_x = new Vector3(1, 0, 0);
+        Vector3 basis_y = new Vector3(0, 1, 0);
+        Vector3 cross_z = basis_x.cross(basis_y);
+        if (cross_z != Vector3::UNIT_Z) {
+            return 22;
+        }
+        Matrix identity_mat = Matrix::identity();
+        Matrix doubled_mat = identity_mat * 2;
+        if (doubled_mat.m0 != (float32)2.0 || (identity_mat * identity_mat) != identity_mat) {
+            return 23;
+        }
+
+        // Test 14: Color hex/int constructors + Rectangle geometry helpers
+        Color hex_color = Color::from_hex(0x11223344);
+        if (hex_color.r != (uint8)0x11 || hex_color.g != (uint8)0x22
+            || hex_color.b != (uint8)0x33 || hex_color.a != (uint8)0x44) {
+            return 24;
+        }
+        Color semi = new Color(100, 150, 200).with_alpha(128);
+        if (semi.a != (uint8)128 || semi != new Color(100, 150, 200, 128)) {
+            return 25;
+        }
+
+        Rectangle bounds = new Rectangle(10, 20, 100, 50);
+        if (!bounds.contains(new Vector2(50, 40)) || bounds.contains(new Vector2(200, 40))) {
+            return 26;
+        }
+        if (!bounds.overlaps(new Rectangle(90, 30, 40, 40))
+            || bounds.center() != new Vector2(60, 45)) {
+            return 27;
+        }
+
+        // Test 15: ManagedImage RAII wrapper lifecycle (CPU-safe headless test)
+        ManagedImage managed_img = new ManagedImage(GenImageColor(4, 4, Color::RED));
+        if (!managed_img.is_valid()) {
+            return 28;
+        }
+        managed_img.dispose();
+
         return 0;
     }
 }

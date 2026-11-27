@@ -1592,9 +1592,9 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                 Type::Primitive(PrimitiveKind::Void)
             }
             Expression::NewInstance {
+                span,
                 instance_type,
                 arguments,
-                ..
             } => {
                 let resolved_type = resolve_type_annotation(
                     self.source_id,
@@ -1681,6 +1681,7 @@ impl<'ctx> TypeCheckingVisitor<'ctx> {
                                         );
                                     }
                                 }
+                                self.resolved_symbols.insert(*span, ctor_id);
                                 found_ctor = true;
                                 break;
                             }
@@ -3177,6 +3178,7 @@ impl<'ctx> AstVisitor for TypeCheckingVisitor<'ctx> {
                                             )
                                     });
                                 if types_match {
+                                    self.resolved_symbols.insert(node.span, member_id);
                                     for (expected_param, argument_expr) in
                                         parameter_types.iter().zip(super_args.iter())
                                     {

@@ -1,12 +1,44 @@
 //! String manipulation and numeric primitive native functions.
 
 use crate::{
-    alloc_solix_chars, alloc_solix_string, read_solix_chars, register_symbol_variants,
-    write_out_box_f64, write_out_box_i64, NativeCFunctionPtr, RegisterNativeCallback, SolixCValue,
+    alloc_solix_bytes, alloc_solix_chars, alloc_solix_string, read_solix_bytes, read_solix_chars,
+    register_symbol_variants, write_out_box_f64, write_out_box_i64, NativeCFunctionPtr,
+    RegisterNativeCallback, SolixCValue,
 };
 use std::ffi::c_void;
 
 // --- String Natives ---
+
+pub unsafe extern "C" fn string_native_to_utf8_bytes(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::ref_val(unsafe { alloc_solix_bytes(vm_context, &[]) });
+    }
+    let text_address = unsafe { (*args.add(0)).as_ref() };
+    let utf8_bytes = unsafe { read_solix_bytes(vm_context, text_address) };
+    let allocated_address = unsafe { alloc_solix_bytes(vm_context, &utf8_bytes) };
+    SolixCValue::ref_val(allocated_address)
+}
+
+pub unsafe extern "C" fn string_native_from_utf8_bytes(
+    vm_context: *mut c_void,
+    args: *const SolixCValue,
+    arg_count: u32,
+    _out_error: *mut SolixCValue,
+) -> SolixCValue {
+    if arg_count == 0 || args.is_null() {
+        return SolixCValue::ref_val(unsafe { alloc_solix_string(vm_context, "") });
+    }
+    let bytes_address = unsafe { (*args.add(0)).as_ref() };
+    let raw_bytes = unsafe { read_solix_bytes(vm_context, bytes_address) };
+    let decoded_text = String::from_utf8_lossy(&raw_bytes);
+    let allocated_address = unsafe { alloc_solix_string(vm_context, &decoded_text) };
+    SolixCValue::ref_val(allocated_address)
+}
 
 pub unsafe extern "C" fn string_native_from_int(
     vm_context: *mut c_void,
@@ -1158,6 +1190,22 @@ pub unsafe fn register_string_prim_natives(
                 "String::native_string_to_chars",
             ],
             string_native_string_to_chars,
+        ),
+        (
+            &[
+                "String_native_to_utf8_bytes",
+                "solix_core_String_native_to_utf8_bytes",
+                "String::native_to_utf8_bytes",
+            ],
+            string_native_to_utf8_bytes,
+        ),
+        (
+            &[
+                "String_native_from_utf8_bytes",
+                "solix_core_String_native_from_utf8_bytes",
+                "String::native_from_utf8_bytes",
+            ],
+            string_native_from_utf8_bytes,
         ),
     ];
 

@@ -730,6 +730,114 @@ public class Vector2 {
         this.x = init_x;
         this.y = init_y;
     }
+
+    public Vector2(float64 init_x, float64 init_y) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+    }
+
+    public Vector2(int32 init_x, int32 init_y) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+    }
+
+    public static Vector2 ZERO = new Vector2((float32)0.0, (float32)0.0);
+    public static Vector2 ONE = new Vector2((float32)1.0, (float32)1.0);
+    public static Vector2 UNIT_X = new Vector2((float32)1.0, (float32)0.0);
+    public static Vector2 UNIT_Y = new Vector2((float32)0.0, (float32)1.0);
+
+    public Vector2 operator+(Vector2 other) {
+        if (other == null) { return new Vector2(this.x, this.y); }
+        return new Vector2(this.x + other.x, this.y + other.y);
+    }
+
+    public Vector2 operator-(Vector2 other) {
+        if (other == null) { return new Vector2(this.x, this.y); }
+        return new Vector2(this.x - other.x, this.y - other.y);
+    }
+
+    public Vector2 operator*(Vector2 other) {
+        if (other == null) { return new Vector2(this.x, this.y); }
+        return new Vector2(this.x * other.x, this.y * other.y);
+    }
+
+    public Vector2 operator/(Vector2 other) {
+        if (other == null) { return new Vector2(this.x, this.y); }
+        return new Vector2(this.x / other.x, this.y / other.y);
+    }
+
+    public Vector2 operator*(float32 scalar_val) {
+        return new Vector2(this.x * scalar_val, this.y * scalar_val);
+    }
+
+    public Vector2 operator*(float64 scalar_val) {
+        return new Vector2(this.x * (float32)scalar_val, this.y * (float32)scalar_val);
+    }
+
+    public Vector2 operator*(int32 scalar_val) {
+        return new Vector2(this.x * (float32)scalar_val, this.y * (float32)scalar_val);
+    }
+
+    public Vector2 operator/(float32 scalar_val) {
+        return new Vector2(this.x / scalar_val, this.y / scalar_val);
+    }
+
+    public Vector2 operator/(float64 scalar_val) {
+        return new Vector2(this.x / (float32)scalar_val, this.y / (float32)scalar_val);
+    }
+
+    public Vector2 operator/(int32 scalar_val) {
+        return new Vector2(this.x / (float32)scalar_val, this.y / (float32)scalar_val);
+    }
+
+    public bool equals(Vector2 other) {
+        if (other == null) { return false; }
+        return this.x == other.x && this.y == other.y;
+    }
+
+    public bool operator==(Vector2 other) {
+        return this.equals(other);
+    }
+
+    public bool operator!=(Vector2 other) {
+        return !this.equals(other);
+    }
+
+    public Vector2 negated() {
+        return new Vector2(-this.x, -this.y);
+    }
+
+    public float32 dot(Vector2 other) {
+        if (other == null) { return (float32)0.0; }
+        return (this.x * other.x) + (this.y * other.y);
+    }
+
+    public float32 length_squared() {
+        return (this.x * this.x) + (this.y * this.y);
+    }
+
+    public float32 length() {
+        return _raylib_sqrt_f32(this.length_squared());
+    }
+
+    public Vector2 normalized() {
+        float32 magnitude = this.length();
+        if (magnitude <= (float32)0.0) {
+            return new Vector2((float32)0.0, (float32)0.0);
+        }
+        float32 inv_length = (float32)1.0 / magnitude;
+        return new Vector2(this.x * inv_length, this.y * inv_length);
+    }
+
+    public float32 distance_to(Vector2 other) {
+        if (other == null) { return this.length(); }
+        return _raylib_sqrt_f32(((this.x - other.x) * (this.x - other.x)) + ((this.y - other.y) * (this.y - other.y)));
+    }
+
+    public Vector2 lerp(Vector2 target, float32 amount) {
+        if (target == null) { return new Vector2(this.x, this.y); }
+        return new Vector2(this.x + ((target.x - this.x) * amount), this.y + ((target.y - this.y) * amount));
+    }
 }
 
 /// Vector3, 3 components
@@ -751,6 +859,126 @@ public class Vector3 {
         this.x = init_x;
         this.y = init_y;
         this.z = init_z;
+    }
+
+    public Vector3(float64 init_x, float64 init_y, float64 init_z) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+        this.z = (float32)init_z;
+    }
+
+    public Vector3(int32 init_x, int32 init_y, int32 init_z) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+        this.z = (float32)init_z;
+    }
+
+    public static Vector3 ZERO = new Vector3((float32)0.0, (float32)0.0, (float32)0.0);
+    public static Vector3 ONE = new Vector3((float32)1.0, (float32)1.0, (float32)1.0);
+    public static Vector3 UNIT_X = new Vector3((float32)1.0, (float32)0.0, (float32)0.0);
+    public static Vector3 UNIT_Y = new Vector3((float32)0.0, (float32)1.0, (float32)0.0);
+    public static Vector3 UNIT_Z = new Vector3((float32)0.0, (float32)0.0, (float32)1.0);
+
+    public Vector3 operator+(Vector3 other) {
+        if (other == null) { return new Vector3(this.x, this.y, this.z); }
+        return new Vector3(this.x + other.x, this.y + other.y, this.z + other.z);
+    }
+
+    public Vector3 operator-(Vector3 other) {
+        if (other == null) { return new Vector3(this.x, this.y, this.z); }
+        return new Vector3(this.x - other.x, this.y - other.y, this.z - other.z);
+    }
+
+    public Vector3 operator*(Vector3 other) {
+        if (other == null) { return new Vector3(this.x, this.y, this.z); }
+        return new Vector3(this.x * other.x, this.y * other.y, this.z * other.z);
+    }
+
+    public Vector3 operator/(Vector3 other) {
+        if (other == null) { return new Vector3(this.x, this.y, this.z); }
+        return new Vector3(this.x / other.x, this.y / other.y, this.z / other.z);
+    }
+
+    public Vector3 operator*(float32 scalar_val) {
+        return new Vector3(this.x * scalar_val, this.y * scalar_val, this.z * scalar_val);
+    }
+
+    public Vector3 operator*(float64 scalar_val) {
+        return new Vector3(this.x * (float32)scalar_val, this.y * (float32)scalar_val, this.z * (float32)scalar_val);
+    }
+
+    public Vector3 operator*(int32 scalar_val) {
+        return new Vector3(this.x * (float32)scalar_val, this.y * (float32)scalar_val, this.z * (float32)scalar_val);
+    }
+
+    public Vector3 operator/(float32 scalar_val) {
+        return new Vector3(this.x / scalar_val, this.y / scalar_val, this.z / scalar_val);
+    }
+
+    public Vector3 operator/(float64 scalar_val) {
+        return new Vector3(this.x / (float32)scalar_val, this.y / (float32)scalar_val, this.z / (float32)scalar_val);
+    }
+
+    public Vector3 operator/(int32 scalar_val) {
+        return new Vector3(this.x / (float32)scalar_val, this.y / (float32)scalar_val, this.z / (float32)scalar_val);
+    }
+
+    public bool equals(Vector3 other) {
+        if (other == null) { return false; }
+        return this.x == other.x && this.y == other.y && this.z == other.z;
+    }
+
+    public bool operator==(Vector3 other) {
+        return this.equals(other);
+    }
+
+    public bool operator!=(Vector3 other) {
+        return !this.equals(other);
+    }
+
+    public Vector3 negated() {
+        return new Vector3(-this.x, -this.y, -this.z);
+    }
+
+    public float32 dot(Vector3 other) {
+        if (other == null) { return (float32)0.0; }
+        return (this.x * other.x) + (this.y * other.y) + (this.z * other.z);
+    }
+
+    public float32 length_squared() {
+        return (this.x * this.x) + (this.y * this.y) + (this.z * this.z);
+    }
+
+    public float32 length() {
+        return _raylib_sqrt_f32(this.length_squared());
+    }
+
+    public Vector3 normalized() {
+        float32 magnitude = this.length();
+        if (magnitude <= (float32)0.0) {
+            return new Vector3((float32)0.0, (float32)0.0, (float32)0.0);
+        }
+        float32 inv_length = (float32)1.0 / magnitude;
+        return new Vector3(this.x * inv_length, this.y * inv_length, this.z * inv_length);
+    }
+
+    public float32 distance_to(Vector3 other) {
+        if (other == null) { return this.length(); }
+        return _raylib_sqrt_f32(((this.x - other.x) * (this.x - other.x)) + ((this.y - other.y) * (this.y - other.y)) + ((this.z - other.z) * (this.z - other.z)));
+    }
+
+    public Vector3 lerp(Vector3 target, float32 amount) {
+        if (target == null) { return new Vector3(this.x, this.y, this.z); }
+        return new Vector3(this.x + ((target.x - this.x) * amount), this.y + ((target.y - this.y) * amount), this.z + ((target.z - this.z) * amount));
+    }
+
+    public Vector3 cross(Vector3 other) {
+        if (other == null) { return new Vector3(); }
+        return new Vector3(
+            (this.y * other.z) - (this.z * other.y),
+            (this.z * other.x) - (this.x * other.z),
+            (this.x * other.y) - (this.y * other.x)
+        );
     }
 }
 
@@ -777,6 +1005,120 @@ public class Vector4 {
         this.y = init_y;
         this.z = init_z;
         this.w = init_w;
+    }
+
+    public Vector4(float64 init_x, float64 init_y, float64 init_z, float64 init_w) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+        this.z = (float32)init_z;
+        this.w = (float32)init_w;
+    }
+
+    public Vector4(int32 init_x, int32 init_y, int32 init_z, int32 init_w) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+        this.z = (float32)init_z;
+        this.w = (float32)init_w;
+    }
+
+    public static Vector4 ZERO = new Vector4((float32)0.0, (float32)0.0, (float32)0.0, (float32)0.0);
+    public static Vector4 ONE = new Vector4((float32)1.0, (float32)1.0, (float32)1.0, (float32)1.0);
+    public static Vector4 UNIT_X = new Vector4((float32)1.0, (float32)0.0, (float32)0.0, (float32)0.0);
+    public static Vector4 UNIT_Y = new Vector4((float32)0.0, (float32)1.0, (float32)0.0, (float32)0.0);
+    public static Vector4 UNIT_Z = new Vector4((float32)0.0, (float32)0.0, (float32)1.0, (float32)0.0);
+    public static Vector4 UNIT_W = new Vector4((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);
+
+    public Vector4 operator+(Vector4 other) {
+        if (other == null) { return new Vector4(this.x, this.y, this.z, this.w); }
+        return new Vector4(this.x + other.x, this.y + other.y, this.z + other.z, this.w + other.w);
+    }
+
+    public Vector4 operator-(Vector4 other) {
+        if (other == null) { return new Vector4(this.x, this.y, this.z, this.w); }
+        return new Vector4(this.x - other.x, this.y - other.y, this.z - other.z, this.w - other.w);
+    }
+
+    public Vector4 operator*(Vector4 other) {
+        if (other == null) { return new Vector4(this.x, this.y, this.z, this.w); }
+        return new Vector4(this.x * other.x, this.y * other.y, this.z * other.z, this.w * other.w);
+    }
+
+    public Vector4 operator/(Vector4 other) {
+        if (other == null) { return new Vector4(this.x, this.y, this.z, this.w); }
+        return new Vector4(this.x / other.x, this.y / other.y, this.z / other.z, this.w / other.w);
+    }
+
+    public Vector4 operator*(float32 scalar_val) {
+        return new Vector4(this.x * scalar_val, this.y * scalar_val, this.z * scalar_val, this.w * scalar_val);
+    }
+
+    public Vector4 operator*(float64 scalar_val) {
+        return new Vector4(this.x * (float32)scalar_val, this.y * (float32)scalar_val, this.z * (float32)scalar_val, this.w * (float32)scalar_val);
+    }
+
+    public Vector4 operator*(int32 scalar_val) {
+        return new Vector4(this.x * (float32)scalar_val, this.y * (float32)scalar_val, this.z * (float32)scalar_val, this.w * (float32)scalar_val);
+    }
+
+    public Vector4 operator/(float32 scalar_val) {
+        return new Vector4(this.x / scalar_val, this.y / scalar_val, this.z / scalar_val, this.w / scalar_val);
+    }
+
+    public Vector4 operator/(float64 scalar_val) {
+        return new Vector4(this.x / (float32)scalar_val, this.y / (float32)scalar_val, this.z / (float32)scalar_val, this.w / (float32)scalar_val);
+    }
+
+    public Vector4 operator/(int32 scalar_val) {
+        return new Vector4(this.x / (float32)scalar_val, this.y / (float32)scalar_val, this.z / (float32)scalar_val, this.w / (float32)scalar_val);
+    }
+
+    public bool equals(Vector4 other) {
+        if (other == null) { return false; }
+        return this.x == other.x && this.y == other.y && this.z == other.z && this.w == other.w;
+    }
+
+    public bool operator==(Vector4 other) {
+        return this.equals(other);
+    }
+
+    public bool operator!=(Vector4 other) {
+        return !this.equals(other);
+    }
+
+    public Vector4 negated() {
+        return new Vector4(-this.x, -this.y, -this.z, -this.w);
+    }
+
+    public float32 dot(Vector4 other) {
+        if (other == null) { return (float32)0.0; }
+        return (this.x * other.x) + (this.y * other.y) + (this.z * other.z) + (this.w * other.w);
+    }
+
+    public float32 length_squared() {
+        return (this.x * this.x) + (this.y * this.y) + (this.z * this.z) + (this.w * this.w);
+    }
+
+    public float32 length() {
+        return _raylib_sqrt_f32(this.length_squared());
+    }
+
+    public Vector4 normalized() {
+        float32 magnitude = this.length();
+        if (magnitude <= (float32)0.0) {
+            return new Vector4((float32)0.0, (float32)0.0, (float32)0.0, (float32)0.0);
+        }
+        float32 inv_length = (float32)1.0 / magnitude;
+        return new Vector4(this.x * inv_length, this.y * inv_length, this.z * inv_length, this.w * inv_length);
+    }
+
+    public float32 distance_to(Vector4 other) {
+        if (other == null) { return this.length(); }
+        return _raylib_sqrt_f32(((this.x - other.x) * (this.x - other.x)) + ((this.y - other.y) * (this.y - other.y)) + ((this.z - other.z) * (this.z - other.z)) + ((this.w - other.w) * (this.w - other.w)));
+    }
+
+    public Vector4 lerp(Vector4 target, float32 amount) {
+        if (target == null) { return new Vector4(this.x, this.y, this.z, this.w); }
+        return new Vector4(this.x + ((target.x - this.x) * amount), this.y + ((target.y - this.y) * amount), this.z + ((target.z - this.z) * amount), this.w + ((target.w - this.w) * amount));
     }
 }
 
@@ -832,6 +1174,157 @@ public class Matrix {
         this.m7 = (float32)0.0;
         this.m11 = (float32)0.0;
         this.m15 = (float32)0.0;
+    }
+
+    public static Matrix identity() {
+        Matrix result = new Matrix();
+        result.m0 = (float32)1.0;
+        result.m5 = (float32)1.0;
+        result.m10 = (float32)1.0;
+        result.m15 = (float32)1.0;
+        return result;
+    }
+
+    public Matrix operator+(Matrix other) {
+        Matrix result = new Matrix();
+        if (other == null) { return this; }
+        result.m0 = this.m0 + other.m0;
+        result.m4 = this.m4 + other.m4;
+        result.m8 = this.m8 + other.m8;
+        result.m12 = this.m12 + other.m12;
+        result.m1 = this.m1 + other.m1;
+        result.m5 = this.m5 + other.m5;
+        result.m9 = this.m9 + other.m9;
+        result.m13 = this.m13 + other.m13;
+        result.m2 = this.m2 + other.m2;
+        result.m6 = this.m6 + other.m6;
+        result.m10 = this.m10 + other.m10;
+        result.m14 = this.m14 + other.m14;
+        result.m3 = this.m3 + other.m3;
+        result.m7 = this.m7 + other.m7;
+        result.m11 = this.m11 + other.m11;
+        result.m15 = this.m15 + other.m15;
+        return result;
+    }
+
+    public Matrix operator-(Matrix other) {
+        Matrix result = new Matrix();
+        if (other == null) { return this; }
+        result.m0 = this.m0 - other.m0;
+        result.m4 = this.m4 - other.m4;
+        result.m8 = this.m8 - other.m8;
+        result.m12 = this.m12 - other.m12;
+        result.m1 = this.m1 - other.m1;
+        result.m5 = this.m5 - other.m5;
+        result.m9 = this.m9 - other.m9;
+        result.m13 = this.m13 - other.m13;
+        result.m2 = this.m2 - other.m2;
+        result.m6 = this.m6 - other.m6;
+        result.m10 = this.m10 - other.m10;
+        result.m14 = this.m14 - other.m14;
+        result.m3 = this.m3 - other.m3;
+        result.m7 = this.m7 - other.m7;
+        result.m11 = this.m11 - other.m11;
+        result.m15 = this.m15 - other.m15;
+        return result;
+    }
+
+    public Matrix operator*(float32 scalar_val) {
+        Matrix result = new Matrix();
+        result.m0 = this.m0 * scalar_val;
+        result.m4 = this.m4 * scalar_val;
+        result.m8 = this.m8 * scalar_val;
+        result.m12 = this.m12 * scalar_val;
+        result.m1 = this.m1 * scalar_val;
+        result.m5 = this.m5 * scalar_val;
+        result.m9 = this.m9 * scalar_val;
+        result.m13 = this.m13 * scalar_val;
+        result.m2 = this.m2 * scalar_val;
+        result.m6 = this.m6 * scalar_val;
+        result.m10 = this.m10 * scalar_val;
+        result.m14 = this.m14 * scalar_val;
+        result.m3 = this.m3 * scalar_val;
+        result.m7 = this.m7 * scalar_val;
+        result.m11 = this.m11 * scalar_val;
+        result.m15 = this.m15 * scalar_val;
+        return result;
+    }
+
+    public Matrix operator*(float64 scalar_val) {
+        Matrix result = new Matrix();
+        result.m0 = this.m0 * (float32)scalar_val;
+        result.m4 = this.m4 * (float32)scalar_val;
+        result.m8 = this.m8 * (float32)scalar_val;
+        result.m12 = this.m12 * (float32)scalar_val;
+        result.m1 = this.m1 * (float32)scalar_val;
+        result.m5 = this.m5 * (float32)scalar_val;
+        result.m9 = this.m9 * (float32)scalar_val;
+        result.m13 = this.m13 * (float32)scalar_val;
+        result.m2 = this.m2 * (float32)scalar_val;
+        result.m6 = this.m6 * (float32)scalar_val;
+        result.m10 = this.m10 * (float32)scalar_val;
+        result.m14 = this.m14 * (float32)scalar_val;
+        result.m3 = this.m3 * (float32)scalar_val;
+        result.m7 = this.m7 * (float32)scalar_val;
+        result.m11 = this.m11 * (float32)scalar_val;
+        result.m15 = this.m15 * (float32)scalar_val;
+        return result;
+    }
+
+    public Matrix operator*(int32 scalar_val) {
+        Matrix result = new Matrix();
+        result.m0 = this.m0 * (float32)scalar_val;
+        result.m4 = this.m4 * (float32)scalar_val;
+        result.m8 = this.m8 * (float32)scalar_val;
+        result.m12 = this.m12 * (float32)scalar_val;
+        result.m1 = this.m1 * (float32)scalar_val;
+        result.m5 = this.m5 * (float32)scalar_val;
+        result.m9 = this.m9 * (float32)scalar_val;
+        result.m13 = this.m13 * (float32)scalar_val;
+        result.m2 = this.m2 * (float32)scalar_val;
+        result.m6 = this.m6 * (float32)scalar_val;
+        result.m10 = this.m10 * (float32)scalar_val;
+        result.m14 = this.m14 * (float32)scalar_val;
+        result.m3 = this.m3 * (float32)scalar_val;
+        result.m7 = this.m7 * (float32)scalar_val;
+        result.m11 = this.m11 * (float32)scalar_val;
+        result.m15 = this.m15 * (float32)scalar_val;
+        return result;
+    }
+
+    public Matrix operator*(Matrix other) {
+        Matrix result = new Matrix();
+        if (other == null) { return result; }
+        result.m0 = (this.m0 * other.m0) + (this.m4 * other.m1) + (this.m8 * other.m2) + (this.m12 * other.m3);
+        result.m4 = (this.m0 * other.m4) + (this.m4 * other.m5) + (this.m8 * other.m6) + (this.m12 * other.m7);
+        result.m8 = (this.m0 * other.m8) + (this.m4 * other.m9) + (this.m8 * other.m10) + (this.m12 * other.m11);
+        result.m12 = (this.m0 * other.m12) + (this.m4 * other.m13) + (this.m8 * other.m14) + (this.m12 * other.m15);
+        result.m1 = (this.m1 * other.m0) + (this.m5 * other.m1) + (this.m9 * other.m2) + (this.m13 * other.m3);
+        result.m5 = (this.m1 * other.m4) + (this.m5 * other.m5) + (this.m9 * other.m6) + (this.m13 * other.m7);
+        result.m9 = (this.m1 * other.m8) + (this.m5 * other.m9) + (this.m9 * other.m10) + (this.m13 * other.m11);
+        result.m13 = (this.m1 * other.m12) + (this.m5 * other.m13) + (this.m9 * other.m14) + (this.m13 * other.m15);
+        result.m2 = (this.m2 * other.m0) + (this.m6 * other.m1) + (this.m10 * other.m2) + (this.m14 * other.m3);
+        result.m6 = (this.m2 * other.m4) + (this.m6 * other.m5) + (this.m10 * other.m6) + (this.m14 * other.m7);
+        result.m10 = (this.m2 * other.m8) + (this.m6 * other.m9) + (this.m10 * other.m10) + (this.m14 * other.m11);
+        result.m14 = (this.m2 * other.m12) + (this.m6 * other.m13) + (this.m10 * other.m14) + (this.m14 * other.m15);
+        result.m3 = (this.m3 * other.m0) + (this.m7 * other.m1) + (this.m11 * other.m2) + (this.m15 * other.m3);
+        result.m7 = (this.m3 * other.m4) + (this.m7 * other.m5) + (this.m11 * other.m6) + (this.m15 * other.m7);
+        result.m11 = (this.m3 * other.m8) + (this.m7 * other.m9) + (this.m11 * other.m10) + (this.m15 * other.m11);
+        result.m15 = (this.m3 * other.m12) + (this.m7 * other.m13) + (this.m11 * other.m14) + (this.m15 * other.m15);
+        return result;
+    }
+
+    public bool equals(Matrix other) {
+        if (other == null) { return false; }
+        return this.m0 == other.m0 && this.m4 == other.m4 && this.m8 == other.m8 && this.m12 == other.m12 && this.m1 == other.m1 && this.m5 == other.m5 && this.m9 == other.m9 && this.m13 == other.m13 && this.m2 == other.m2 && this.m6 == other.m6 && this.m10 == other.m10 && this.m14 == other.m14 && this.m3 == other.m3 && this.m7 == other.m7 && this.m11 == other.m11 && this.m15 == other.m15;
+    }
+
+    public bool operator==(Matrix other) {
+        return this.equals(other);
+    }
+
+    public bool operator!=(Matrix other) {
+        return !this.equals(other);
     }
 }
 
@@ -913,6 +1406,62 @@ public class Color {
     public static Color MAGENTA = new Color((uint8)255, (uint8)0, (uint8)255, (uint8)255);
     /// My own White (raylib logo)
     public static Color RAYWHITE = new Color((uint8)245, (uint8)245, (uint8)245, (uint8)255);
+
+    public Color(int32 init_r, int32 init_g, int32 init_b) {
+        this.r = (uint8)(init_r < 0 ? 0 : (init_r > 255 ? 255 : init_r));
+        this.g = (uint8)(init_g < 0 ? 0 : (init_g > 255 ? 255 : init_g));
+        this.b = (uint8)(init_b < 0 ? 0 : (init_b > 255 ? 255 : init_b));
+        this.a = (uint8)255;
+    }
+
+    public Color(int32 init_r, int32 init_g, int32 init_b, int32 init_a) {
+        this.r = (uint8)(init_r < 0 ? 0 : (init_r > 255 ? 255 : init_r));
+        this.g = (uint8)(init_g < 0 ? 0 : (init_g > 255 ? 255 : init_g));
+        this.b = (uint8)(init_b < 0 ? 0 : (init_b > 255 ? 255 : init_b));
+        this.a = (uint8)(init_a < 0 ? 0 : (init_a > 255 ? 255 : init_a));
+    }
+
+    public static Color from_hex(int32 rgba_hex) {
+        uint8 red_byte = (uint8)((rgba_hex >> 24) & 255);
+        uint8 green_byte = (uint8)((rgba_hex >> 16) & 255);
+        uint8 blue_byte = (uint8)((rgba_hex >> 8) & 255);
+        uint8 alpha_byte = (uint8)(rgba_hex & 255);
+        return new Color(red_byte, green_byte, blue_byte, alpha_byte);
+    }
+
+    public static Color from_rgb(int32 rgb_hex) {
+        uint8 red_byte = (uint8)((rgb_hex >> 16) & 255);
+        uint8 green_byte = (uint8)((rgb_hex >> 8) & 255);
+        uint8 blue_byte = (uint8)(rgb_hex & 255);
+        return new Color(red_byte, green_byte, blue_byte, (uint8)255);
+    }
+
+    public Color with_alpha(int32 alpha_byte) {
+        return new Color(this.r, this.g, this.b, (uint8)(alpha_byte < 0 ? 0 : (alpha_byte > 255 ? 255 : alpha_byte)));
+    }
+
+    public Color with_alpha(float32 alpha_norm) {
+        int32 scaled_alpha = (int32)(alpha_norm * (float32)255.0);
+        return new Color(this.r, this.g, this.b, (uint8)(scaled_alpha < 0 ? 0 : (scaled_alpha > 255 ? 255 : scaled_alpha)));
+    }
+
+    public Color with_alpha(float64 alpha_norm) {
+        int32 scaled_alpha = (int32)(alpha_norm * 255.0);
+        return new Color(this.r, this.g, this.b, (uint8)(scaled_alpha < 0 ? 0 : (scaled_alpha > 255 ? 255 : scaled_alpha)));
+    }
+
+    public bool equals(Color other) {
+        if (other == null) { return false; }
+        return this.r == other.r && this.g == other.g && this.b == other.b && this.a == other.a;
+    }
+
+    public bool operator==(Color other) {
+        return this.equals(other);
+    }
+
+    public bool operator!=(Color other) {
+        return !this.equals(other);
+    }
 }
 
 /// Rectangle, 4 components
@@ -938,6 +1487,77 @@ public class Rectangle {
         this.y = init_y;
         this.width = init_width;
         this.height = init_height;
+    }
+
+    public Rectangle(float64 init_x, float64 init_y, float64 init_width, float64 init_height) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+        this.width = (float32)init_width;
+        this.height = (float32)init_height;
+    }
+
+    public Rectangle(int32 init_x, int32 init_y, int32 init_width, int32 init_height) {
+        this.x = (float32)init_x;
+        this.y = (float32)init_y;
+        this.width = (float32)init_width;
+        this.height = (float32)init_height;
+    }
+
+    public Rectangle(Vector2 pos_vec, Vector2 size_vec) {
+        this.x = (pos_vec != null) ? pos_vec.x : (float32)0.0;
+        this.y = (pos_vec != null) ? pos_vec.y : (float32)0.0;
+        this.width = (size_vec != null) ? size_vec.x : (float32)0.0;
+        this.height = (size_vec != null) ? size_vec.y : (float32)0.0;
+    }
+
+    public Vector2 position() {
+        return new Vector2(this.x, this.y);
+    }
+
+    public Vector2 size() {
+        return new Vector2(this.width, this.height);
+    }
+
+    public Vector2 center() {
+        return new Vector2(this.x + (this.width * (float32)0.5), this.y + (this.height * (float32)0.5));
+    }
+
+    public bool contains(Vector2 point) {
+        if (point == null) { return false; }
+        return this.contains(point.x, point.y);
+    }
+
+    public float32 right() {
+        return this.x + this.width;
+    }
+
+    public float32 bottom() {
+        return this.y + this.height;
+    }
+
+    public bool contains(float32 point_x, float32 point_y) {
+        return point_x >= this.x && point_x <= (this.x + this.width) && point_y >= this.y && point_y <= (this.y + this.height);
+    }
+
+    public bool overlaps(Rectangle other) {
+        if (other == null) { return false; }
+        return (this.x < other.x + other.width)
+            && (this.x + this.width > other.x)
+            && (this.y < other.y + other.height)
+            && (this.y + this.height > other.y);
+    }
+
+    public bool equals(Rectangle other) {
+        if (other == null) { return false; }
+        return this.x == other.x && this.y == other.y && this.width == other.width && this.height == other.height;
+    }
+
+    public bool operator==(Rectangle other) {
+        return this.equals(other);
+    }
+
+    public bool operator!=(Rectangle other) {
+        return !this.equals(other);
     }
 }
 
@@ -1695,6 +2315,10 @@ public class AutomationEventList {
 /// Quaternion, 4 components (Vector4 alias)
 public class Quaternion extends Vector4 {
     public Quaternion() {}
+
+    public Quaternion(float32 init_x, float32 init_y, float32 init_z, float32 init_w) : super(init_x, init_y, init_z, init_w) {}
+    public Quaternion(float64 init_x, float64 init_y, float64 init_z, float64 init_w) : super(init_x, init_y, init_z, init_w) {}
+    public static Quaternion IDENTITY = new Quaternion((float32)0.0, (float32)0.0, (float32)0.0, (float32)1.0);
 }
 
 /// Texture2D, same as Texture
@@ -2958,3 +3582,382 @@ public native void DetachAudioStreamProcessor(AudioStream stream, uint64 process
 public native void AttachAudioMixedProcessor(uint64 processor);
 /// Detach audio stream processor from the entire audio pipeline
 public native void DetachAudioMixedProcessor(uint64 processor);
+
+// ===========================================================================
+// Internal Vector Math Helpers
+// ===========================================================================
+float32 _raylib_sqrt_f32(float32 value) {
+    if (value <= (float32)0.0) {
+        return (float32)0.0;
+    }
+    float64 scaled_val = (float64)value;
+    float64 scale_factor = 1.0;
+    while (scaled_val >= 4.0) {
+        scaled_val = scaled_val * 0.25;
+        scale_factor = scale_factor * 2.0;
+    }
+    while (scaled_val < 0.25) {
+        scaled_val = scaled_val * 4.0;
+        scale_factor = scale_factor * 0.5;
+    }
+    float64 approx = scaled_val > 1.0 ? scaled_val * 0.5 : 1.0;
+    for (int32 step_index = 0; step_index < 8; step_index = step_index + 1) {
+        approx = 0.5 * (approx + (scaled_val / approx));
+    }
+    return (float32)(approx * scale_factor);
+}
+
+// ===========================================================================
+// Managed RAII GPU / Audio Resource Wrappers
+// ===========================================================================
+public class ManagedTexture {
+    public Texture2D resource;
+    private bool owns_resource;
+
+    public ManagedTexture(Texture2D handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedTexture load(string file_name) {
+        return new ManagedTexture(LoadTexture(file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.id != (uint32)0);
+    }
+
+    public Texture2D get() {
+        return this.resource;
+    }
+
+    public Texture2D release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.id != (uint32)0)) {
+            UnloadTexture(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedTexture() {
+        this.dispose();
+    }
+}
+
+public class ManagedRenderTexture {
+    public RenderTexture2D resource;
+    private bool owns_resource;
+
+    public ManagedRenderTexture(RenderTexture2D handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedRenderTexture load(int32 width, int32 height) {
+        return new ManagedRenderTexture(LoadRenderTexture(width, height));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.id != (uint32)0);
+    }
+
+    public RenderTexture2D get() {
+        return this.resource;
+    }
+
+    public RenderTexture2D release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.id != (uint32)0)) {
+            UnloadRenderTexture(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedRenderTexture() {
+        this.dispose();
+    }
+}
+
+public class ManagedImage {
+    public Image resource;
+    private bool owns_resource;
+
+    public ManagedImage(Image handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedImage load(string file_name) {
+        return new ManagedImage(LoadImage(file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.data != (uint64)0);
+    }
+
+    public Image get() {
+        return this.resource;
+    }
+
+    public Image release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.data != (uint64)0)) {
+            UnloadImage(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedImage() {
+        this.dispose();
+    }
+}
+
+public class ManagedShader {
+    public Shader resource;
+    private bool owns_resource;
+
+    public ManagedShader(Shader handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedShader load(string vs_file_name, string fs_file_name) {
+        return new ManagedShader(LoadShader(vs_file_name, fs_file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.id != (uint32)0);
+    }
+
+    public Shader get() {
+        return this.resource;
+    }
+
+    public Shader release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.id != (uint32)0)) {
+            UnloadShader(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedShader() {
+        this.dispose();
+    }
+}
+
+public class ManagedFont {
+    public Font resource;
+    private bool owns_resource;
+
+    public ManagedFont(Font handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedFont load(string file_name) {
+        return new ManagedFont(LoadFont(file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.texture != null && this.resource.texture.id != (uint32)0);
+    }
+
+    public Font get() {
+        return this.resource;
+    }
+
+    public Font release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.texture != null && this.resource.texture.id != (uint32)0)) {
+            UnloadFont(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedFont() {
+        this.dispose();
+    }
+}
+
+public class ManagedModel {
+    public Model resource;
+    private bool owns_resource;
+
+    public ManagedModel(Model handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedModel load(string file_name) {
+        return new ManagedModel(LoadModel(file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.meshes != (uint64)0);
+    }
+
+    public Model get() {
+        return this.resource;
+    }
+
+    public Model release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.meshes != (uint64)0)) {
+            UnloadModel(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedModel() {
+        this.dispose();
+    }
+}
+
+public class ManagedSound {
+    public Sound resource;
+    private bool owns_resource;
+
+    public ManagedSound(Sound handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedSound load(string file_name) {
+        return new ManagedSound(LoadSound(file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.frameCount != (uint32)0);
+    }
+
+    public Sound get() {
+        return this.resource;
+    }
+
+    public Sound release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.frameCount != (uint32)0)) {
+            UnloadSound(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedSound() {
+        this.dispose();
+    }
+}
+
+public class ManagedMusic {
+    public Music resource;
+    private bool owns_resource;
+
+    public ManagedMusic(Music handle) {
+        this.resource = handle;
+        this.owns_resource = handle != null;
+    }
+
+    public static ManagedMusic load(string file_name) {
+        return new ManagedMusic(LoadMusicStream(file_name));
+    }
+
+    public bool is_valid() {
+        return this.resource != null && (this.resource.frameCount != (uint32)0);
+    }
+
+    public Music get() {
+        return this.resource;
+    }
+
+    public Music release() {
+        this.owns_resource = false;
+        return this.resource;
+    }
+
+    public void dispose() {
+        if (this.owns_resource && this.resource != null && (this.resource.frameCount != (uint32)0)) {
+            UnloadMusicStream(this.resource);
+        }
+        this.owns_resource = false;
+    }
+
+    ~ManagedMusic() {
+        this.dispose();
+    }
+}
+
+// ===========================================================================
+// Scoped Frame & Mode Guards
+// ===========================================================================
+public void with_drawing(void(*)() draw_callback) {
+    BeginDrawing();
+    try {
+        if (draw_callback != null) {
+            draw_callback();
+        }
+    } finally {
+        EndDrawing();
+    }
+}
+
+public void with_mode_2d(Camera2D camera, void(*)() draw_callback) {
+    BeginMode2D(camera);
+    try {
+        if (draw_callback != null) {
+            draw_callback();
+        }
+    } finally {
+        EndMode2D();
+    }
+}
+
+public void with_mode_3d(Camera3D camera, void(*)() draw_callback) {
+    BeginMode3D(camera);
+    try {
+        if (draw_callback != null) {
+            draw_callback();
+        }
+    } finally {
+        EndMode3D();
+    }
+}
+
+public void with_texture_mode(RenderTexture2D target, void(*)() draw_callback) {
+    BeginTextureMode(target);
+    try {
+        if (draw_callback != null) {
+            draw_callback();
+        }
+    } finally {
+        EndTextureMode();
+    }
+}
+

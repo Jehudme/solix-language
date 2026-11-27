@@ -1,5 +1,6 @@
 package solix.collections;
 
+import solix.core.IComparable;
 import solix.core.IStringable;
 import solix.core.String;
 import solix.core.StringBuilder;
@@ -12,7 +13,7 @@ class TreeMapNode<K, V> {
     public int32 height;
     public TreeMapNode<K, V> left_child;
     public TreeMapNode<K, V> right_child;
-    public TreeMapNode<K, V> parent_node;
+    public weak TreeMapNode<K, V> parent_node;
 
     public TreeMapNode(K initial_key, V initial_value, TreeMapNode<K, V> initial_parent) {
         this.key = initial_key;
@@ -53,6 +54,12 @@ public class TreeMap<K, V> implements IMap<K, V>, IStringable {
         }
         if (second_key == null) {
             return 1;
+        }
+        if (first_key instanceof String && second_key instanceof String) {
+            return ((String)first_key).compare_to((String)second_key);
+        }
+        if (first_key instanceof IComparable) {
+            return ((IComparable<K>)first_key).compare_to(second_key);
         }
         if (first_key < second_key) {
             return -1;
@@ -283,6 +290,10 @@ public class TreeMap<K, V> implements IMap<K, V>, IStringable {
         } else {
             parent_node.right_child = replacement_child;
         }
+
+        node_to_remove.left_child = null;
+        node_to_remove.right_child = null;
+        node_to_remove.parent_node = null;
 
         this.entry_count = this.entry_count - 1;
         this.rebalance_ancestors(parent_node);
