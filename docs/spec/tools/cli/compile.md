@@ -44,7 +44,7 @@ solix compile package [path] [options]
 | `--inline-threshold <N>` | | Integer | `8` | Maximum statement threshold for `AstInlinerPhase` function inlining. |
 | `--link <mode>` | | String | `"dynamic"` | Linking mode for dependencies and emission: `dynamic` (default) or `static`. |
 | `--static` | | Flag | `false` | Shorthand for static linking mode (`--link static`), merging dependencies into a single self-contained binary. |
-| `--no-verify` | | Flag | `false` | Bypasses dependency cryptographic SHA-256 checksum verification (aliases `--ignore-checksum`, `--yolo`). |
+| `--no-verify` | | Flag | `false` | Bypasses dependency cryptographic SHA-256 checksum verification (visible alias `--ignore-checksum`). |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for resolving package dependencies. |
 | `--install` | | Flag | `false` | Automatically installs the compiled binary container into the local package store upon success (alias `--sync`). |
 | `--force-install` | `-f` | Flag | `false` | Overwrites existing package artifacts when `--install` is active (alias `--force`). |
