@@ -2,6 +2,13 @@
 
 All notable changes to this Solix package are documented in this file.
 
+## [2.2.1] - 2026-11-27
+
+### Bug Fixes
+
+- *(solixlib, raylib, compiler)* Harden stdlib net/json/collections, overload resolution, and Raylib OOP ergonomics (#314)
+- *(ffi,stdlib)* Harden C-unwind FFI ABI, Raylib bindgen, and solixlib_native safety (#313)
+
 ## [2.2.0] - 2026-11-26
 
 ### Bug Fixes
