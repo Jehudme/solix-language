@@ -8,7 +8,7 @@ typedef struct {
 
 int main(void) {
     int total = 0;
-    for (int i = 0; i < 50000; i++) {
+    for (int i = 0; i < 300000; i++) {
         Point *p = (Point *)malloc(sizeof(Point));
         p->x = i;
         p->y = i * 2;
@@ -16,8 +16,8 @@ int main(void) {
         free(p);
     }
 
-    if (total == 1602441352) {
-        printf("RESULT: 1602441352\n");
+    if (total == 1855563824) {
+        printf("RESULT: 1855563824\n");
     } else {
         printf("FAIL\n");
     }

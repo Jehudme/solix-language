@@ -83,12 +83,16 @@ fn test_compare_releases_table_generation() {
         .expect("Reading generated markdown output must succeed");
 
     assert!(
+        rendered_markdown.contains("### Benchmark Environment"),
+        "Markdown must include Benchmark Environment telemetry header"
+    );
+    assert!(
         rendered_markdown.contains("### Performance Benchmarks vs v1.2.0 (`v2.0.0`)"),
         "Markdown must include the target heading"
     );
     assert!(
         rendered_markdown.contains(
-            "| Workload | Previous (ms) | Current (ms) | Speedup | Memory Diff | Status |"
+            "| Workload | Prev VM (ms) | Curr VM (ms) | VM Speedup | Prev Compile (ms) | Curr Compile (ms) | Compile Diff | Prev RSS (KB) | Curr RSS (KB) | RSS Diff | Status |"
         ),
         "Markdown must include table header"
     );

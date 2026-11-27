@@ -8,9 +8,9 @@ This guide specifies the architecture, measurement methodology, hardware telemet
 
 Micro-benchmarks must isolate runtime virtual machine dispatch throughput from language compilation overhead. The Solix benchmark suite employs a two-tier evaluation architecture:
 
-1. **Pre-Compilation Separation**: Prior to entering timed benchmark iterations, Solix source files (`*.slx`) are pre-compiled into a standalone bytecode container (`*.slxb`) via `solix compile <sources> -o <binary>.slxb --profile release`. The compiler phase duration is warmed up once and sampled across three passes (reporting the median as `Precompile (ms)`).
+1. **Pre-Compilation Separation**: Prior to entering timed benchmark iterations, Solix source files (`*.slx`) are pre-compiled into a standalone bytecode container (`*.slxb`) via `solix compile <sources> -o <binary>.slxb --profile release`. The compiler phase duration is warmed up once and sampled across three passes (reporting the median as `Precompile (ms)`). Likewise, Lua comparative workloads (`*.lua`) are pre-compiled into bytecode (`*.luac`) via `luac -o <binary>.luac <source>.lua` (when `luac` is available) before timed execution on `lua`, matching C (`gcc -O3`), Java (`javac`), and Solix AOT parity.
 2. **Pure Virtual Machine Dispatch**: Timed loop iterations execute directly against pre-compiled bytecode containers via `solix run <binary>.slxb` (or `solix run <binary>.slxb --safe`). This eliminates lexing, AST parsing, symbol binding, type inference, AST inlining, and bytecode emission from VM execution measurements.
-3. **Comparative Language Parity**: Identical algorithms implemented in C (`gcc -O3 -lm`), Lua, LuaJIT, and Python 3 are verified for output checksum parity before comparative timings are recorded.
+3. **Comparative Language Parity**: Identical algorithms implemented in C (`gcc -O3 -lm`), Java (`javac` / `java`), Lua (`luac` + `lua`), LuaJIT, and Python 3 are verified for output checksum parity before comparative timings are recorded. Workloads are scaled to run for sustained durations so JIT engines (OpenJDK HotSpot C2 and LuaJIT) reach steady-state compiled execution.
 
 ---
 
@@ -30,7 +30,7 @@ To deliver statistically robust performance metrics across varied host runners, 
 
 ## 3. Hardware Telemetry Extraction
 
-Every benchmark run captures host machine hardware telemetry stored in the baseline JSON metadata and displayed in terminal / markdown headers:
+Every benchmark run captures host machine hardware telemetry stored in the baseline JSON metadata and rendered in a `### Benchmark Environment` Markdown table at the top of release and comparison reports (and bannered in console output):
 
 * **CPU Model**: Extracted from `/proc/cpuinfo` on Linux, `sysctl machdep.cpu.brand_string` on macOS, or `wmic cpu get name` on Windows.
 * **CPU Logical Cores**: Number of available processing units detected by the operating system kernel.
@@ -95,3 +95,10 @@ python3 scripts/bench/solix_bench.py compare \
 * `--threshold-pct`: Percentage regression threshold before flagging a workload as slower (default: `5.0%`).
 * `--min-delta-ms`: Minimum absolute millisecond variance required before flagging a change, preventing sub-millisecond noise from failing CI runs (default: `0.5 ms`).
 * `--fail-on-regression`: Exits with non-zero status code if any workload regresses beyond the configured threshold.
+
+---
+
+## 5. Markdown Report Schemas
+
+1. **Self-Comparison Table (`compare`):** Reports explicit `Prev` and `Curr` columns plus deltas across VM execution (`Prev VM (ms)`, `Curr VM (ms)`, `VM Speedup`), precompilation (`Prev Compile (ms)`, `Curr Compile (ms)`, `Compile Diff`), peak memory (`Prev RSS (KB)`, `Curr RSS (KB)`, `RSS Diff`), and `Status`, followed by an explanatory `Column Glossary` callout.
+2. **Cross-Language Table (`--cross-language` / `run --format markdown`):** Focuses on steady-state runtime throughput across engines: `Workload`, `Solix VM (ms)`, `Python 3 (ms)`, `Lua (ms)`, `LuaJIT (ms)`, `C -O3 (ms)`, and `Java (ms)`.

@@ -15,14 +15,14 @@ class FnPtrApp {
 
     public static void main() {
         int32 total = 0;
-        for (int32 i = 0; i < 100000; i = i + 1) {
+        for (int32 i = 0; i < 400000; i = i + 1) {
             int32 idx = i % 3;
             int32(*)(int32) f = (idx == 0) ? FnPtrApp::fn1 : ((idx == 1) ? FnPtrApp::fn2 : FnPtrApp::fn3);
             total = (total + f(i % 50)) & 0x7FFFFFFF;
         }
 
-        if (total == 8266617) {
-            println("RESULT: 8266617");
+        if (total == 33066617) {
+            println("RESULT: 33066617");
         } else {
             println("FAIL");
         }

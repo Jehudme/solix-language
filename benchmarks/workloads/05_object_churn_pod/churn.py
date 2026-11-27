@@ -7,11 +7,11 @@ class Point:
 
 if __name__ == "__main__":
     total = 0
-    for i in range(50000):
+    for i in range(300000):
         p = Point(i, i * 2)
         total = (total + p.x + p.y) & 0x7FFFFFFF
 
-    if total == 1602441352:
-        print("RESULT: 1602441352")
+    if total == 1855563824:
+        print("RESULT: 1855563824")
     else:
         print("FAIL")

@@ -11,13 +11,13 @@ static int process(const char *s, int factor) {
 int main(void) {
     const char *words[3] = { "alpha", "beta", "gamma" };
     int total = 0;
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < 300000; i++) {
         const char *w = words[i % 3];
         total = (total + process(w, i % 20)) & 0x7FFFFFFF;
     }
 
-    if (total == 3166647) {
-        printf("RESULT: 3166647\n");
+    if (total == 9500000) {
+        printf("RESULT: 9500000\n");
     } else {
         printf("FAIL\n");
     }

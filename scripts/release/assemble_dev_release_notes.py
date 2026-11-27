@@ -26,6 +26,19 @@ def read_report_section(report_file_path: Optional[Path], fallback_message: str)
     return fallback_message
 
 
+def build_environment_banner_fallback() -> str:
+    """Renders a fallback Benchmark Environment table when the benchmark report lacks one."""
+    bench_scripts_dir = Path(__file__).resolve().parent.parent / "bench"
+    if str(bench_scripts_dir) not in sys.path:
+        sys.path.insert(0, str(bench_scripts_dir))
+    try:
+        import solix_bench  # type: ignore
+
+        return solix_bench.render_benchmark_environment_markdown().rstrip()
+    except Exception:
+        return ""
+
+
 def assemble_dev_release_notes(
     repository_name: str,
     commit_short_hash: str,
@@ -39,6 +52,10 @@ def assemble_dev_release_notes(
     benchmark_markdown = read_report_section(
         benchmark_report_path, "Benchmark telemetry report not generated."
     )
+    if "### Benchmark Environment" not in benchmark_markdown:
+        env_banner = build_environment_banner_fallback()
+        if env_banner:
+            benchmark_markdown = f"{env_banner}\n\n{benchmark_markdown}"
     coverage_markdown = read_report_section(
         coverage_report_path, "Coverage telemetry report not generated."
     )

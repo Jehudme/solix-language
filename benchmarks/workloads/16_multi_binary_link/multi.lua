@@ -3,12 +3,12 @@ local function compute(x, y)
 end
 
 local total = 0
-for i = 0, 49999 do
+for i = 0, 299999 do
     total = (total + compute(i % 100, i % 50)) % 2147483648
 end
 
-if total == 16000000 then
-    print("RESULT: 16000000")
+if total == 96000000 then
+    print("RESULT: 96000000")
 else
     print("FAIL")
 end

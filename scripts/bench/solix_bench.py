@@ -269,6 +269,7 @@ class BenchmarkRunner:
             shutil.which("taskset") if (pin_cpu and OS_NAME == "Linux") else None
         )
         self.c_bins_cache: Dict[str, Path] = {}
+        self.lua_bins_cache: Dict[str, Path] = {}
         self.java_bins_cache: Dict[str, Tuple[Path, str]] = {}
         self.solix_bins_cache: Dict[str, Tuple[Path, float]] = {}
 
@@ -281,6 +282,7 @@ class BenchmarkRunner:
                 "solix": "./target/release/solix",
                 "python3": "python3",
                 "lua": "lua",
+                "luac": "luac",
                 "luajit": "luajit",
                 "gcc": "gcc",
                 "javac": "javac",
@@ -290,7 +292,7 @@ class BenchmarkRunner:
         }
 
     def resolve_engine(self, engine_name: str) -> Optional[str]:
-        """Resolves executable path for `solix`, `python3`, `lua`, `luajit`, `gcc`, `javac`, or `java`."""
+        """Resolves executable path for `solix`, `python3`, `lua`, `luac`, `luajit`, `gcc`, `javac`, or `java`."""
         if engine_name == "solix":
             if self.solix_bin_override and Path(self.solix_bin_override).exists():
                 return str(Path(self.solix_bin_override).resolve())
@@ -321,6 +323,13 @@ class BenchmarkRunner:
             if resolved_py and "WindowsApps" not in resolved_py:
                 return resolved_py
             return sys.executable
+
+        if engine_name == "luac":
+            for candidate in (cmd, "luac5.4", "luac"):
+                resolved_luac = shutil.which(candidate)
+                if resolved_luac:
+                    return resolved_luac
+            return None
 
         return shutil.which(cmd)
 
@@ -364,6 +373,34 @@ class BenchmarkRunner:
             )
             if res.returncode == 0 and out_bin.exists():
                 self.c_bins_cache[str(c_file)] = out_bin
+                return out_bin
+        except Exception:
+            pass
+        return None
+
+    def compile_lua_workload(self, lua_file: Path) -> Optional[Path]:
+        """Precompiles a Lua comparative workload via `luac` into temp bytecode cache."""
+        if str(lua_file) in self.lua_bins_cache:
+            return self.lua_bins_cache[str(lua_file)]
+        luac_bin = self.resolve_engine("luac")
+        if not luac_bin:
+            return None
+        temp_build_dir = Path(tempfile.gettempdir()) / "solix_bench_build"
+        temp_build_dir.mkdir(parents=True, exist_ok=True)
+        out_bin = temp_build_dir / f"{lua_file.parent.name}_{lua_file.stem}.luac"
+        try:
+            cmd = [luac_bin, "-o", str(out_bin), str(lua_file)]
+            res = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            if res.returncode == 0 and out_bin.exists():
+                self.lua_bins_cache[str(lua_file)] = out_bin
                 return out_bin
         except Exception:
             pass
@@ -554,7 +591,9 @@ class BenchmarkRunner:
         lua_bin = self.resolve_engine("lua")
         lua_files = sorted(workload_dir.glob("*.lua"))
         if lua_bin and lua_files:
-            code, out, _, _ = self.execute_command([lua_bin, str(lua_files[0])])
+            compiled_luac = self.compile_lua_workload(lua_files[0])
+            lua_target = str(compiled_luac) if compiled_luac else str(lua_files[0])
+            code, out, _, _ = self.execute_command([lua_bin, lua_target])
             results["lua"] = (
                 self.extract_result_checksum(out) if code == 0 else None
             )
@@ -791,9 +830,11 @@ class BenchmarkRunner:
 
             lua_files = sorted(wdir.glob("*.lua"))
             if lua_bin and lua_files:
+                compiled_luac = self.compile_lua_workload(lua_files[0])
+                lua_target = str(compiled_luac) if compiled_luac else str(lua_files[0])
                 results["workloads"][wname]["lua"] = (
                     self.benchmark_workload_engine(
-                        [lua_bin, str(lua_files[0])],
+                        [lua_bin, lua_target],
                         warmup_runs=warmup,
                         timed_runs=iterations,
                         scale_iterations=scale_iterations,
@@ -988,13 +1029,23 @@ def compare_benchmarks(
 
         current_median_ms = float(current_entry.get("median_ms", 0.0))
         previous_median_ms = float(previous_entry.get("median_ms", 0.0))
+        current_compile_ms = float(current_entry.get("compile_ms", 0.0))
+        previous_compile_ms = float(previous_entry.get("compile_ms", 0.0))
         current_rss_kb = int(current_entry.get("rss_kb", 0))
         previous_rss_kb = int(previous_entry.get("rss_kb", 0))
+        compile_diff_ms = (
+            round(current_compile_ms - previous_compile_ms, 2)
+            if current_compile_ms > 0.0 and previous_compile_ms > 0.0
+            else None
+        )
 
         row_metric: Dict[str, Any] = {
             "workload": workload_name,
             "current_ms": current_median_ms,
             "previous_ms": previous_median_ms,
+            "current_compile_ms": current_compile_ms,
+            "previous_compile_ms": previous_compile_ms,
+            "compile_diff_ms": compile_diff_ms,
             "current_rss_kb": current_rss_kb,
             "previous_rss_kb": previous_rss_kb,
             "speedup_ratio": 1.0,
@@ -1241,6 +1292,38 @@ def format_ascii_table(headers: List[str], rows: List[List[str]]) -> str:
     return "\n".join(lines)
 
 
+def render_benchmark_environment_markdown(
+    telemetry: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Renders host hardware telemetry as a structured Markdown table."""
+    resolved = dict(telemetry) if telemetry else {}
+    if not resolved.get("cpu_model") or not resolved.get("cpu_cores"):
+        resolved = get_hardware_telemetry()
+
+    cpu_model = str(resolved.get("cpu_model") or "Unknown CPU")
+    cpu_cores = int(resolved.get("cpu_cores") or 1)
+    total_ram_mb = int(resolved.get("total_ram_mb") or 0)
+    os_kernel = str(resolved.get("os_kernel") or platform.platform())
+    arch = str(resolved.get("arch") or platform.machine())
+
+    ram_display = f"{total_ram_mb:,} MB RAM" if total_ram_mb > 0 else "Unknown"
+    os_display = (
+        os_kernel
+        if f"({arch})" in os_kernel
+        else f"{os_kernel} ({arch})"
+    )
+
+    lines = [
+        "### Benchmark Environment",
+        "| Property | Host Specification |",
+        "| :--- | :--- |",
+        f"| **CPU Model** | {cpu_model} ({cpu_cores} Cores) |",
+        f"| **Physical Memory** | {ram_display} |",
+        f"| **Operating System** | {os_display} |",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def render_cross_language_markdown(benchmark_data: Dict[str, Any]) -> str:
     """Renders cross-language comparison section in GitHub Flavored Markdown."""
     rows = extract_cross_language_rows(benchmark_data)
@@ -1258,30 +1341,18 @@ def render_cross_language_markdown(benchmark_data: Dict[str, Any]) -> str:
 
     lines = ["\n### Cross-Language Comparison\n"]
     lines.append(
-        "| Workload | Precompile (ms) | Solix VM (ms) | Cold Start (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | Java (ms) | vs Python | Solix RSS (KB) |"
+        "| Workload | Solix VM (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | Java (ms) |"
     )
-    lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for row in rows:
-        compile_str = (
-            f"{row['solix_compile_ms']:.2f}"
-            if row.get("solix_compile_ms", 0.0) > 0.0
-            else "-"
-        )
-        cold_str = (
-            f"{row['solix_cold_ms']:.2f}"
-            if row.get("solix_cold_ms", 0.0) > 0.0
-            else "-"
-        )
         solix_str = f"**{row['solix_ms']:.2f}**" if row["solix_ms"] > 0.0 else "-"
         py_str = f"{row['python3_ms']:.2f}" if row["python3_ms"] > 0.0 else "-"
         lua_str = f"{row['lua_ms']:.2f}" if row["lua_ms"] > 0.0 else "-"
         luajit_str = f"{row['luajit_ms']:.2f}" if row["luajit_ms"] > 0.0 else "-"
         c_str = f"{row['c_ms']:.2f}" if row["c_ms"] > 0.0 else "-"
         java_str = f"{row['java_ms']:.2f}" if row.get("java_ms", 0.0) > 0.0 else "-"
-        vs_py = f"{row['vs_python']:.2f}x" if row["vs_python"] is not None else "-"
-        rss_str = f"{row['solix_rss_kb']}" if row["solix_rss_kb"] > 0 else "-"
         lines.append(
-            f"| `{row['workload']}` | {compile_str} | {solix_str} | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {java_str} | {vs_py} | {rss_str} |"
+            f"| `{row['workload']}` | {solix_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {java_str} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -1346,44 +1417,24 @@ def render_run_console_table(
     if include_cross_language:
         headers = [
             "Workload",
-            "Precompile (ms)",
-            "Solix (ms)",
-            "Cold (ms)",
+            "Solix VM (ms)",
             "Python 3 (ms)",
             "Lua (ms)",
             "LuaJIT (ms)",
             "C -O3 (ms)",
             "Java (ms)",
-            "vs Python",
-            "RSS (KB)",
         ]
         table_rows = []
         for row in cross_rows:
-            compile_val = (
-                f"{row['solix_compile_ms']:.2f}"
-                if row.get("solix_compile_ms", 0.0) > 0.0
-                else "-"
-            )
-            cold_val = (
-                f"{row['solix_cold_ms']:.2f}"
-                if row.get("solix_cold_ms", 0.0) > 0.0
-                else "-"
-            )
             table_rows.append(
                 [
                     row["workload"],
-                    compile_val,
                     f"{row['solix_ms']:.2f}" if row["solix_ms"] > 0 else "-",
-                    cold_val,
                     f"{row['python3_ms']:.2f}" if row["python3_ms"] > 0 else "-",
                     f"{row['lua_ms']:.2f}" if row["lua_ms"] > 0 else "-",
                     f"{row['luajit_ms']:.2f}" if row["luajit_ms"] > 0 else "-",
                     f"{row['c_ms']:.2f}" if row["c_ms"] > 0 else "-",
                     f"{row['java_ms']:.2f}" if row.get("java_ms", 0.0) > 0 else "-",
-                    f"{row['vs_python']:.2f}x"
-                    if row["vs_python"] is not None
-                    else "-",
-                    str(row["solix_rss_kb"]),
                 ]
             )
         return telemetry_banner + format_ascii_table(headers, table_rows)
@@ -1424,14 +1475,8 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
     lines: List[str] = []
 
     telemetry = metadata.get("telemetry", {})
-    cpu_model = telemetry.get("cpu_model") or metadata.get("cpu_model")
-    cores = telemetry.get("cpu_cores") or metadata.get("cpu_cores")
-    ram_mb = telemetry.get("total_ram_mb") or metadata.get("total_ram_mb")
-    kernel = telemetry.get("os_kernel") or metadata.get("os_kernel")
-    if cpu_model and cores:
-        lines.append(
-            f"> [!NOTE]\n> **Hardware Telemetry:** {cpu_model} ({cores} cores) | {ram_mb} MB RAM | {kernel}\n"
-        )
+    lines.append(render_benchmark_environment_markdown(telemetry).rstrip())
+    lines.append("")
 
     if mode == "parity":
         lines.append(
@@ -1455,27 +1500,18 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             )
     else:
         lines.append(
-            "| Workload | Precompile (ms) | Solix (ms) | Cold (ms) | Python (ms) | Lua (ms) | LuaJIT (ms) | C (ms) | Java (ms) | Speedup vs Python | RSS (KB) |"
+            "| Workload | Solix VM (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | Java (ms) |"
         )
-        lines.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
         for wname, edata in sorted(workloads.items()):
-            compile_ms = edata.get("solix_fast", {}).get("compile_ms", 0.0)
-            cold_ms = edata.get("solix_fast", {}).get("cold_start_ms", 0.0)
             solix_ms = edata.get("solix_fast", {}).get("median_ms", 0.0)
             py_ms = edata.get("python3", {}).get("median_ms", 0.0)
             lua_ms = edata.get("lua", {}).get("median_ms", 0.0)
             luajit_ms = edata.get("luajit", {}).get("median_ms", 0.0)
             c_ms = edata.get("c", {}).get("median_ms", 0.0)
             java_ms = edata.get("java", {}).get("median_ms", 0.0)
-            rss_kb = edata.get("solix_fast", {}).get("rss_kb", 0)
 
-            compile_str = f"{compile_ms:.2f}" if compile_ms > 0 else "-"
-            cold_str = f"{cold_ms:.2f}" if cold_ms > 0 else "-"
-            speedup_str = (
-                f"{(py_ms / solix_ms):.2f}x"
-                if solix_ms > 0 and py_ms > 0
-                else "N/A"
-            )
+            solix_str = f"**{solix_ms:.2f}**" if solix_ms > 0 else "-"
             lua_str = f"{lua_ms:.2f}" if lua_ms > 0 else "-"
             luajit_str = f"{luajit_ms:.2f}" if luajit_ms > 0 else "-"
             c_str = f"{c_ms:.2f}" if c_ms > 0 else "-"
@@ -1483,7 +1519,7 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             py_str = f"{py_ms:.2f}" if py_ms > 0 else "-"
 
             lines.append(
-                f"| `{wname}` | {compile_str} | **{solix_ms:.2f}** | {cold_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {java_str} | {speedup_str} | {rss_kb} |"
+                f"| `{wname}` | {solix_str} | {py_str} | {lua_str} | {luajit_str} | {c_str} | {java_str} |"
             )
 
         lines.append("")
@@ -1491,16 +1527,12 @@ def render_run_markdown_table(benchmark_data: Dict[str, Any]) -> str:
             "> [!TIP]\n"
             "> **Cross-Language Column Glossary:**\n"
             "> - **Workload:** Standardized algorithm executed across all language runtimes.\n"
-            "> - **Precompile (ms):** Solix compilation latency (`solix compile`) from source code to bytecode.\n"
-            "> - **Solix (ms):** Median execution time of the compiled Solix binary on the fast register Virtual Machine.\n"
-            "> - **Cold (ms):** Cold-start execution time (clean process invocation including compilation and execution).\n"
-            "> - **Python (ms):** Median execution time of CPython 3.12.\n"
-            "> - **Lua (ms):** Median execution time of the standard Lua 5.4 interpreter.\n"
+            "> - **Solix VM (ms):** Median execution time of the compiled Solix binary on the fast register Virtual Machine.\n"
+            "> - **Python 3 (ms):** Median execution time of CPython 3.\n"
+            "> - **Lua (ms):** Median execution time of precompiled Lua bytecode (`luac`) on the standard Lua interpreter.\n"
             "> - **LuaJIT (ms):** Median execution time of the LuaJIT 2.1 JIT compiler.\n"
-            "> - **C (ms):** Median execution time of native C compiled with GCC `-O3`.\n"
-            "> - **Java (ms):** Median execution time of OpenJDK JVM HotSpot.\n"
-            "> - **Speedup vs Python:** Speedup ratio of Solix relative to CPython (`Python / Solix`).\n"
-            "> - **RSS (KB):** Peak Resident Set Size memory consumption in kilobytes."
+            "> - **C -O3 (ms):** Median execution time of native C compiled with GCC `-O3`.\n"
+            "> - **Java (ms):** Median execution time of OpenJDK JVM HotSpot."
         )
 
     return "\n".join(lines)
@@ -1512,6 +1544,7 @@ def render_markdown_comparison_table(
     current_tag_label: str = "Current Release",
     same_host: bool = False,
     cross_language_data: Optional[Dict[str, Any]] = None,
+    telemetry: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Renders formatted GitHub Flavored Markdown table for release notes or PR comments."""
     workload_rows: List[Dict[str, Any]] = comparison_results.get("workloads", [])
@@ -1520,25 +1553,47 @@ def render_markdown_comparison_table(
         row.get("previous_ms", 0.0) > 0.0 for row in workload_rows
     )
 
-    markdown_lines: List[str] = []
+    resolved_telemetry = telemetry
+    if not resolved_telemetry and cross_language_data:
+        resolved_telemetry = cross_language_data.get("metadata", {}).get("telemetry")
+
+    markdown_lines: List[str] = [
+        render_benchmark_environment_markdown(resolved_telemetry).rstrip(),
+        "",
+    ]
 
     if has_previous_data:
         markdown_lines.append(
             f"### Performance Benchmarks vs {previous_tag_label} (`{current_tag_label}`)\n"
         )
         markdown_lines.append(
-            "| Workload | Previous (ms) | Current (ms) | Speedup | Memory Diff | Status |"
+            "| Workload | Prev VM (ms) | Curr VM (ms) | VM Speedup | Prev Compile (ms) | Curr Compile (ms) | Compile Diff | Prev RSS (KB) | Curr RSS (KB) | RSS Diff | Status |"
         )
-        markdown_lines.append("| :--- | :--- | :--- | :--- | :--- | :--- |")
+        markdown_lines.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
 
         for row in workload_rows:
             workload_name = row["workload"]
-            previous_ms = row["previous_ms"]
-            current_ms = row["current_ms"]
-            speedup_pct = row["speedup_pct"]
-            speedup_ratio = row["speedup_ratio"]
-            memory_diff_mb = row["memory_diff_mb"]
+            previous_ms = float(row.get("previous_ms", 0.0))
+            current_ms = float(row.get("current_ms", 0.0))
+            previous_compile_ms = float(row.get("previous_compile_ms", 0.0))
+            current_compile_ms = float(row.get("current_compile_ms", 0.0))
+            previous_rss_kb = int(row.get("previous_rss_kb", 0))
+            current_rss_kb = int(row.get("current_rss_kb", 0))
+            speedup_pct = float(row.get("speedup_pct", 0.0))
+            speedup_ratio = float(row.get("speedup_ratio", 1.0))
+            memory_diff_mb = float(row.get("memory_diff_mb", 0.0))
             badge = row["badge"]
+
+            prev_vm_cell = f"{previous_ms:.2f}" if previous_ms > 0.0 else "-"
+            curr_vm_cell = f"{current_ms:.2f}" if current_ms > 0.0 else "-"
+            prev_compile_cell = (
+                f"{previous_compile_ms:.2f}" if previous_compile_ms > 0.0 else "-"
+            )
+            curr_compile_cell = (
+                f"{current_compile_ms:.2f}" if current_compile_ms > 0.0 else "-"
+            )
+            prev_rss_cell = f"{previous_rss_kb}" if previous_rss_kb > 0 else "-"
+            curr_rss_cell = f"{current_rss_kb}" if current_rss_kb > 0 else "-"
 
             if previous_ms > 0.0 and current_ms > 0.0:
                 speedup_sign = "+" if speedup_pct >= 0.0 else ""
@@ -1546,19 +1601,27 @@ def render_markdown_comparison_table(
                     f"{speedup_sign}{speedup_pct:.1f}% ({speedup_ratio:.2f}x)"
                 )
                 memory_sign = "+" if memory_diff_mb >= 0.0 else ""
-                memory_formatted = f"{memory_sign}{memory_diff_mb:.1f} MB"
-                markdown_lines.append(
-                    f"| `{workload_name}` | {previous_ms:.2f} ms | {current_ms:.2f} ms | "
-                    f"{speedup_formatted} | {memory_formatted} | {badge} |"
-                )
-            elif current_ms > 0.0:
-                markdown_lines.append(
-                    f"| `{workload_name}` | - | {current_ms:.2f} ms | - | - | {badge} |"
+                memory_formatted = (
+                    f"{memory_sign}{memory_diff_mb:.1f} MB"
+                    if (previous_rss_kb > 0 or current_rss_kb > 0)
+                    else "-"
                 )
             else:
-                markdown_lines.append(
-                    f"| `{workload_name}` | {previous_ms:.2f} ms | - | - | - | {badge} |"
-                )
+                speedup_formatted = "-"
+                memory_formatted = "-"
+
+            if previous_compile_ms > 0.0 and current_compile_ms > 0.0:
+                compile_diff_val = current_compile_ms - previous_compile_ms
+                compile_sign = "+" if compile_diff_val >= 0.0 else ""
+                compile_diff_formatted = f"{compile_sign}{compile_diff_val:.2f} ms"
+            else:
+                compile_diff_formatted = "-"
+
+            markdown_lines.append(
+                f"| `{workload_name}` | {prev_vm_cell} | {curr_vm_cell} | {speedup_formatted} | "
+                f"{prev_compile_cell} | {curr_compile_cell} | {compile_diff_formatted} | "
+                f"{prev_rss_cell} | {curr_rss_cell} | {memory_formatted} | {badge} |"
+            )
 
         geomean = summary_data.get("geometric_mean_speedup", 1.0)
         total_mem = summary_data.get("total_memory_diff_mb", 0.0)
@@ -1583,10 +1646,12 @@ def render_markdown_comparison_table(
             "> [!TIP]\n"
             "> **Column Glossary:**\n"
             "> - **Workload:** Standardized benchmark workload evaluating compiler and runtime performance.\n"
-            "> - **Previous (ms):** Median wall-clock execution time (in milliseconds) of the baseline release.\n"
-            "> - **Current (ms):** Median wall-clock execution time (in milliseconds) of the current pull request branch.\n"
-            "> - **Speedup:** Execution ratio relative to previous baseline (`Previous / Current`); positive indicates faster execution.\n"
-            "> - **Memory Diff:** Resident Set Size memory consumption delta compared to baseline (`Current - Previous`).\n"
+            "> - **Prev VM (ms) / Curr VM (ms):** Median wall-clock execution time (in milliseconds) of the baseline and current builds.\n"
+            "> - **VM Speedup:** Execution ratio relative to previous baseline (`Prev VM / Curr VM`); positive indicates faster execution.\n"
+            "> - **Prev Compile (ms) / Curr Compile (ms):** Precompilation latency (`solix compile`) in milliseconds for the baseline and current builds.\n"
+            "> - **Compile Diff:** Precompilation time delta compared to baseline (`Curr Compile - Prev Compile`); negative indicates faster compilation.\n"
+            "> - **Prev RSS (KB) / Curr RSS (KB):** Peak Resident Set Size memory consumption (in kilobytes) of the baseline and current builds.\n"
+            "> - **RSS Diff:** Resident Set Size memory consumption delta compared to baseline (`Curr RSS - Prev RSS` in MB); negative indicates lower memory usage.\n"
             "> - **Status:** Performance classification (`FASTER` = speedup above threshold, `STABLE` = within ±5% margin, `SLOWER` = regressed)."
         )
     else:
@@ -1651,13 +1716,22 @@ def render_multi_baseline_console(multi_results: Dict[str, Any]) -> str:
 def render_multi_baseline_markdown(
     multi_results: Dict[str, Any],
     cross_language_data: Optional[Dict[str, Any]] = None,
+    telemetry: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Renders multi-baseline comparison in GitHub Flavored Markdown."""
     labels = multi_results.get("labels", [])
     rows = multi_results.get("workloads", [])
     summary = multi_results.get("summary", {})
 
-    lines = [f"### Multi-Baseline Benchmark Comparison ({' vs '.join(labels)})\n"]
+    resolved_telemetry = telemetry
+    if not resolved_telemetry and cross_language_data:
+        resolved_telemetry = cross_language_data.get("metadata", {}).get("telemetry")
+
+    lines = [
+        render_benchmark_environment_markdown(resolved_telemetry).rstrip(),
+        "",
+        f"### Multi-Baseline Benchmark Comparison ({' vs '.join(labels)})\n",
+    ]
     header_cols = (
         ["Workload"]
         + [f"{label} (ms)" for label in labels]
@@ -2214,6 +2288,7 @@ def _handle_compare(args: argparse.Namespace, root_dir: Path) -> int:
         cross_language_data=current_benchmark_data
         if args.cross_language
         else None,
+        telemetry=current_benchmark_data.get("metadata", {}).get("telemetry"),
     )
 
     fmt = "markdown" if args.format == "auto" else args.format

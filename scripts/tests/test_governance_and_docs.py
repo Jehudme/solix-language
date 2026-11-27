@@ -880,11 +880,15 @@ class SolixBenchCliTests(unittest.TestCase):
             self.assertIn("2.00x", proc.stdout)
 
             rendered_md = md_out.read_text(encoding="utf-8")
+            self.assertIn("### Benchmark Environment", rendered_md)
             self.assertIn("### Multi-Baseline Benchmark Comparison", rendered_md)
             self.assertIn("### Cross-Language Comparison", rendered_md)
-            self.assertIn("Java (ms)", rendered_md)
+            self.assertIn(
+                "| Workload | Solix VM (ms) | Python 3 (ms) | Lua (ms) | LuaJIT (ms) | C -O3 (ms) | Java (ms) |",
+                rendered_md,
+            )
             self.assertIn("80.00", rendered_md)
-            self.assertIn("4.00x", rendered_md)
+            self.assertNotIn("vs Python", rendered_md)
 
             parsed_json = json.loads(json_out.read_text(encoding="utf-8"))
             self.assertEqual(parsed_json["labels"], ["v1.4.0", "v1.5.0", "v1.6.0"])
@@ -982,6 +986,29 @@ class SolixBenchCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("RESULT: 317811", standard_output)
 
+    def test_solix_bench_lua_engine_resolution_and_luac_compilation(self) -> None:
+        """Tests that solix_bench resolves luac and precompiles Lua workloads to .luac."""
+        benchmark_runner = solix_bench.BenchmarkRunner(REPO_ROOT)
+        resolved_luac = benchmark_runner.resolve_engine("luac")
+        resolved_lua = benchmark_runner.resolve_engine("lua")
+        if not resolved_luac or not resolved_lua:
+            self.skipTest("luac or lua not available on host system")
+
+        fibonacci_workload_dir = REPO_ROOT / "benchmarks" / "workloads" / "01_fib_recursive"
+        lua_files = list(fibonacci_workload_dir.glob("*.lua"))
+        self.assertTrue(lua_files, "Expected fib.lua to exist in 01_fib_recursive")
+
+        compiled_luac = benchmark_runner.compile_lua_workload(lua_files[0])
+        self.assertIsNotNone(compiled_luac)
+        self.assertTrue(compiled_luac.is_file())
+        self.assertEqual(compiled_luac.suffix, ".luac")
+
+        exit_code, standard_output, _, _ = benchmark_runner.execute_command(
+            [resolved_lua, str(compiled_luac)]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("RESULT: 317811", standard_output)
+
     def test_execute_command_measures_independent_child_memory(self) -> None:
         benchmark_runner = solix_bench.BenchmarkRunner(REPO_ROOT)
         exit_code, standard_output, duration_milliseconds, peak_rss_kilobytes = (
@@ -1001,6 +1028,11 @@ class SolixBenchCliTests(unittest.TestCase):
                     "workload": "01_fib_recursive",
                     "previous_ms": 10.0,
                     "current_ms": 9.5,
+                    "previous_compile_ms": 4.5,
+                    "current_compile_ms": 4.2,
+                    "compile_diff_ms": -0.3,
+                    "previous_rss_kb": 10240,
+                    "current_rss_kb": 9012,
                     "speedup_pct": 5.0,
                     "speedup_ratio": 1.05,
                     "memory_diff_mb": -1.2,
@@ -1020,10 +1052,17 @@ class SolixBenchCliTests(unittest.TestCase):
             previous_tag_label="v1.9.0",
             current_tag_label="PR #182",
         )
+        self.assertIn("### Benchmark Environment", markdown)
+        self.assertIn(
+            "| Workload | Prev VM (ms) | Curr VM (ms) | VM Speedup | Prev Compile (ms) | Curr Compile (ms) | Compile Diff | Prev RSS (KB) | Curr RSS (KB) | RSS Diff | Status |",
+            markdown,
+        )
         self.assertIn("Column Glossary", markdown)
         self.assertIn("**Workload:**", markdown)
-        self.assertIn("**Speedup:**", markdown)
-        self.assertIn("**Memory Diff:**", markdown)
+        self.assertIn("**Prev VM (ms) / Curr VM (ms):**", markdown)
+        self.assertIn("**VM Speedup:**", markdown)
+        self.assertIn("**Compile Diff:**", markdown)
+        self.assertIn("**RSS Diff:**", markdown)
 
     def test_ci_workflow_removes_sensitive_label_and_includes_pr_benchmark(self) -> None:
         ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

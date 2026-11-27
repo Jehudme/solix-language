@@ -4,12 +4,12 @@ local adder = function(n)
 end
 
 local total = 0
-for i = 0, 49999 do
+for i = 0, 399999 do
     total = (total + adder(i % 100)) % 2147483648
 end
 
-if total == 2825000 then
-    print("RESULT: 2825000")
+if total == 22600000 then
+    print("RESULT: 22600000")
 else
     print("FAIL")
 end
