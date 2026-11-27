@@ -573,3 +573,103 @@ public class Main {
     let static_result = static_vm.run().expect("Static execution must succeed");
     assert_eq!(static_result, Value::I32(135));
 }
+
+#[test]
+fn test_static_linking_relocates_f64_imm_constant_pool_indices() {
+    // Regression test for #327: AddF64Imm, SubF64Imm, MulF64Imm encode a u16 constant pool
+    // index in src2(). StaticLinker must relocate these indices when importing dependency
+    // functions whose constant pool is larger than the consumer binary's constant pool.
+    let mut dependency_binary = BinaryProgram::new();
+    dependency_binary.package_name = "f64_imm_lib".to_string();
+
+    for padding_idx in 0..40 {
+        dependency_binary
+            .constant_pool
+            .add_string(format!("padding_const_{padding_idx}"))
+            .expect("add padding constant");
+    }
+
+    let add_const_idx = dependency_binary
+        .constant_pool
+        .add_f64(10.5)
+        .expect("add f64 constant 10.5");
+    let sub_const_idx = dependency_binary
+        .constant_pool
+        .add_f64(2.5)
+        .expect("add f64 constant 2.5");
+    let mul_const_idx = dependency_binary
+        .constant_pool
+        .add_f64(4.0)
+        .expect("add f64 constant 4.0");
+
+    // f64_imm_lib::calc(input: float64) -> ((input + 10.5) - 2.5) * 4.0
+    let mut calc_function = CompiledFunction::new("f64_imm_lib::calc", 1, 0, 4);
+    calc_function.instructions.push(Instruction::format_a(
+        OpCode::AddF64Imm,
+        0,
+        1,
+        0,
+        add_const_idx,
+    ));
+    calc_function.instructions.push(Instruction::format_a(
+        OpCode::SubF64Imm,
+        0,
+        2,
+        1,
+        sub_const_idx,
+    ));
+    calc_function.instructions.push(Instruction::format_a(
+        OpCode::MulF64Imm,
+        0,
+        3,
+        2,
+        mul_const_idx,
+    ));
+    calc_function
+        .instructions
+        .push(Instruction::format_a(OpCode::ReturnValue, 0, 3, 0, 0));
+    dependency_binary.functions.push(calc_function);
+
+    let consumer_source = r#"
+package app;
+
+extern public float64 f64_imm_lib::calc(float64 input_val);
+
+public int32 main() {
+    float64 computed = f64_imm_lib::calc(2.0);
+    if (computed == 40.0) {
+        return 40;
+    }
+    return 0;
+}
+"#;
+
+    let mut static_options = CompilationOptions::new()
+        .with_profile(BuildProfile::Release)
+        .with_link_mode(LinkMode::Static)
+        .with_source("consumer.slx", consumer_source);
+    static_options.dependency_binaries.push(dependency_binary);
+
+    let mut static_context = CompilationContext::new(static_options);
+    CompilationPipeline::standard()
+        .execute(&mut static_context)
+        .expect("Static compilation must succeed");
+    let static_artifacts = static_context
+        .emit_context()
+        .expect("Static emission must succeed");
+
+    // Consumer constant pool is much smaller than 40+, so unrelocated src2() indices
+    // would fail AOT verification in RuntimeContext::new.
+    assert!(
+        static_artifacts.program.constant_pool.values.len() < add_const_idx as usize,
+        "Test requires consumer constant pool to be smaller than dependency's original index"
+    );
+
+    let static_runtime =
+        RuntimeContext::new(RuntimeOptions::new().with_binary(static_artifacts.program.clone()))
+            .expect("AOT verifier and runtime init must succeed after constant pool relocation");
+    let mut static_vm = VirtualMachine::new(static_runtime);
+    let static_result = static_vm.run().expect("Static execution must succeed");
+    // ((2.0 + 10.5) - 2.5) * 4.0 = 40.0 -> 40
+    assert_eq!(static_result, Value::I32(40));
+}

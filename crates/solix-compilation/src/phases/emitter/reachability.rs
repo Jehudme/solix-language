@@ -428,6 +428,21 @@ impl<'program> StaticLinker<'program> {
                         u32::from(new_const),
                     );
                 }
+            } else if raw_op == OpCode::AddF64Imm as u8
+                || raw_op == OpCode::SubF64Imm as u8
+                || raw_op == OpCode::MulF64Imm as u8
+            {
+                if let Ok(opcode) = instruction.opcode(0) {
+                    let new_const =
+                        relocate_constant(self.program, dep_program, instruction.src2());
+                    *instruction = Instruction::format_a(
+                        opcode,
+                        instruction.flags(),
+                        instruction.dst(),
+                        instruction.src1(),
+                        new_const,
+                    );
+                }
             } else if raw_op == OpCode::CallExtern as u8 || raw_op == OpCode::CallSymbol as u8 {
                 if let Ok(opcode) = instruction.opcode(0) {
                     let new_const = relocate_constant_string(
