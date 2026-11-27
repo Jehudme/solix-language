@@ -7,17 +7,18 @@ The `solix dap` subcommand starts the official Solix Debug Adapter Protocol (DAP
 ## 1. Synopsis
 
 ```bash
-solix dap [options]
+solix dap [path] [options]
 ```
 
 ---
 
 ## 2. Key Options & Flags
 
+* `[path]`: Optional project root directory [default: `.`].
 * `--stdio`: Runs the debug adapter over standard input and standard output streams [default: `true`].
 * `--port <PORT>`: Runs the debug adapter listening on a local TCP socket port for terminal debugger connections.
 * `-h, --help`: Prints command help information.
-* `-V, --version`: Prints version information for `solix-dap`.
+* `-V, --version`: Prints version information for the unified `solix` CLI.
 
 ---
 

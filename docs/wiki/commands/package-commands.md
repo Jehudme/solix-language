@@ -18,7 +18,7 @@ solix new package <path> [options]
 * `<path>`: Target directory for the new package.
 * `--name <name>`: Package identifier name [default: directory name].
 * `--version <version>`: Initial semantic version [default: `0.1.0`].
-* `--description <desc>`: Package description [default: `A Solix project`].
+* `--description <desc>`: Package description [default: `A Solix package` for `new package`, `A Solix project` for `solix new`].
 * `--license <id>`: SPDX license identifier [default: `Apache-2.0`].
 * `--author <name>`: Author attribution (can be repeated).
 * `--main <symbol>`: Main entry point symbol [default: `Main::main`].
@@ -138,8 +138,8 @@ solix uninstall binaries math_utils
 Exports a compiled package or binary container for distribution:
 
 ```bash
-solix export package <path> --output <destination.slxp>
-solix export binaries <path> --output <destination.slxb>
+solix export package [path] [--output <destination.slxp>] [-p, --profile <profile>] [--pkg-dir <dir>]
+solix export binaries [path] [--output <destination.slxb>] [-p, --profile <profile>] [--pkg-dir <dir>]
 ```
 
 > [!NOTE]
@@ -156,11 +156,11 @@ solix list [options]
 ```
 
 ### Key Options & Flags
-* `--filter <substring>`: Filters listed packages by case-insensitive substring match on name.
+* `-f, --filter <substring>`: Filters listed packages by case-insensitive substring match on name or description.
 * `--profile <name>`: Filters entries by build profile (`release`, `debug`, `test`).
-* `--kind <package|binaries>`: Filters by container kind.
-* `--sort <name|version|profile>`: Sorts listed rows by field [default: `name`].
-* `--reverse`: Reverses sort order.
+* `-k, --kind <package|binaries>`: Filters by container kind.
+* `--sort <name|version|date|size|profile>`: Sorts listed rows by field [default: `name`].
+* `-r, --reverse`: Reverses sort order.
 * `--json`: Emits the package inventory as machine-readable JSON.
 * `-o, --output <file>`: Writes inventory output to `<file>` instead of `stdout`.
 * `--pkg-dir <dir>`: Package store root directory override [default: `~/.solix/packages`].
