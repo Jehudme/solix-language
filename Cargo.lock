@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "solix-common"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "miette",
  "serde",
@@ -1208,7 +1208,7 @@ dependencies = [
 
 [[package]]
 name = "solix-compilation"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "bincode",
  "miette",
@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "solix-dap"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "dap",
@@ -1238,11 +1238,11 @@ dependencies = [
 
 [[package]]
 name = "solix-ffi"
-version = "3.0.1"
+version = "3.1.0"
 
 [[package]]
 name = "solix-lsp"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "dashmap 6.2.1",
  "serde",
@@ -1257,7 +1257,7 @@ dependencies = [
 
 [[package]]
 name = "solix-runtime"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "libloading",
  "serde",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "solix-tests"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "proptest",
  "solix-common",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "solix-toolchain"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "clap",

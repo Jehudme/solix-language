@@ -2,6 +2,24 @@
 
 All notable changes to the Solix Programming Language will be documented in this file.
 
+## [3.1.0] - 2026-11-27
+
+### Bug Fixes
+
+- *(vscode,lsp,dap)* Dynamic manifest profiles, v3 compatibility, formatter/hints/evaluator fixes, and v3 snippets (#316)
+- *(lsp)* Enforce cached-dep import parity, filter enum completions, and expand quick fixes (#315)
+- *(solixlib, raylib, compiler)* Harden stdlib net/json/collections, overload resolution, and Raylib OOP ergonomics (#314)
+- *(ffi,stdlib)* Harden C-unwind FFI ABI, Raylib bindgen, and solixlib_native safety (#313)
+- *(runtime,compiler)* VM/ARC hardening, weak generation checks, and compiler edge-case safety (#292, #300) (#312)
+- *(optimizer,runtime,common)* CFG escape analysis, checked relocations, strict SLXB codecs & AOT verifier bounds (#290, #291) (#311)
+- Harden lexer/escape validation, AST inliner & call normalization, parser sync & call recovery perf (#289, #303, #306) (#310)
+- Resolve diagnostics & docs parity (#295, #298) with CI pipeline optimization (#283, #284, #286) (#308)
+
+### Features
+
+- *(bench)* Precompile Lua with luac, streamline cross-language & self-comparison tables, scale workloads, and render host telemetry (#318)
+- *(cli,lsp,dap)* Fix fmt/dap/rename gaps, pure-Solix scaffolding, cwd run, and check/test/init/add (#288, #301, #305) (#317)
+
 ## [3.0.1] - 2026-11-26
 
 ### Bug Fixes
