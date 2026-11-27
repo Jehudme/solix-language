@@ -80,27 +80,35 @@ pub fn span_to_range(source_text: &str, span: Span) -> Range {
     }
 }
 
-/// Generates a canonical documentation [`CodeDescription`] for an error code if valid.
+/// Generates a canonical documentation [`CodeDescription`] for an error code and explicit wiki page.
 #[must_use]
-pub fn make_code_description(error_code: &str) -> Option<CodeDescription> {
-    let page = if error_code.starts_with("E00") {
-        "lexer-errors.md"
-    } else if error_code.starts_with("E01") {
-        "parser-errors.md"
-    } else if error_code.starts_with("E02") {
-        "binder-errors.md"
-    } else if error_code.starts_with("E03") {
-        "runtime-errors.md"
-    } else if error_code.starts_with("E04") {
-        "emission-errors.md"
-    } else {
-        "README.md"
-    };
+pub fn make_code_description_for_page(page: &str, error_code: &str) -> Option<CodeDescription> {
     let anchor = error_code.to_ascii_lowercase();
     let target_url = format!("{ERROR_WIKI_BASE_URL}{page}#{anchor}");
     Url::parse(&target_url)
         .ok()
         .map(|parsed_url| CodeDescription { href: parsed_url })
+}
+
+/// Generates a canonical documentation [`CodeDescription`] for an error code if valid.
+#[must_use]
+pub fn make_code_description(error_code: &str) -> Option<CodeDescription> {
+    let is_binder_300_code = error_code
+        .strip_prefix('E')
+        .and_then(|num_str| num_str.parse::<u32>().ok())
+        .is_some_and(|code_num| (301..=316).contains(&code_num));
+    let page = if error_code.starts_with("E00") {
+        "lexer-errors.md"
+    } else if error_code.starts_with("E01") {
+        "parser-errors.md"
+    } else if error_code.starts_with("E02") || is_binder_300_code {
+        "binder-errors.md"
+    } else if error_code.starts_with("E03") {
+        "runtime-errors.md"
+    } else {
+        "README.md"
+    };
+    make_code_description_for_page(page, error_code)
 }
 
 /// Converts a canonical [`LexingError`] into an LSP [`Diagnostic`].
@@ -120,7 +128,7 @@ pub fn lexing_error_to_diagnostic(source_text: &str, error: &LexingError) -> Dia
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(error_code.to_string())),
-        code_description: make_code_description(error_code),
+        code_description: make_code_description_for_page("lexer-errors.md", error_code),
         source: Some("solix".to_string()),
         message: error.to_string(),
         related_information: None,
@@ -146,7 +154,7 @@ pub fn parsing_error_to_diagnostic(source_text: &str, error: &ParsingError) -> D
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(error_code.to_string())),
-        code_description: make_code_description(error_code),
+        code_description: make_code_description_for_page("parser-errors.md", error_code),
         source: Some("solix".to_string()),
         message: error.to_string(),
         related_information: None,
@@ -172,7 +180,7 @@ pub fn binding_error_to_diagnostic(source_text: &str, error: &BindingError) -> D
         },
         severity: Some(DiagnosticSeverity::ERROR),
         code: Some(NumberOrString::String(error_code.to_string())),
-        code_description: make_code_description(error_code),
+        code_description: make_code_description_for_page("binder-errors.md", error_code),
         source: Some("solix".to_string()),
         message: error.to_string(),
         related_information: None,

@@ -335,6 +335,67 @@ async function runClientRpcSuite() {
         }
         console.log('  ✓ publishDiagnostics emitted and cleared deterministically.');
 
+        // Step 8d: Enum variant bare completion suppression & Color:: scoped completion
+        const enumSource = [
+            'public enum Color {',
+            '    RED,',
+            '    WHITE',
+            '}',
+            'public class Main {',
+            '    public static int32 main() {',
+            '        return 0;',
+            '    }',
+            '}',
+            '',
+        ].join('\n');
+        await sendDidChangeAndSync(documentUri, 8, enumSource);
+        const bareCompletion = await connection.sendRequest('textDocument/completion', {
+            textDocument: { uri: documentUri },
+            position: { line: 6, character: 8 },
+        });
+        const bareLabels = (bareCompletion?.items ?? []).map((item) => item.label);
+        if (bareLabels.includes('WHITE')) {
+            throw new Error('Bare completion must not suggest unscoped enum variant WHITE');
+        }
+
+        const scopedSource = enumSource.replace('        return 0;', '        Color::');
+        await sendDidChangeAndSync(documentUri, 9, scopedSource);
+        const scopedCompletion = await connection.sendRequest('textDocument/completion', {
+            textDocument: { uri: documentUri },
+            position: { line: 6, character: 15 },
+        });
+        const scopedLabels = (scopedCompletion?.items ?? []).map((item) => item.label);
+        if (!scopedLabels.includes('WHITE')) {
+            throw new Error(`Expected Color:: completion to suggest WHITE, got: ${JSON.stringify(scopedLabels)}`);
+        }
+        console.log('  ✓ Enum variant bare suppression and Color:: scoped completion verified.');
+
+        // Step 8e: Quick Fix for E0212 MissingReturn
+        const missingReturnSource = [
+            'public class Main {',
+            '    public static int32 main() {',
+            '        int32 count = 1;',
+            '    }',
+            '}',
+            '',
+        ].join('\n');
+        const missingReturnDiags = await sendDidChangeAndSync(documentUri, 10, missingReturnSource);
+        const e0212Diag = (missingReturnDiags.diagnostics ?? []).find((diag) => diag.code === 'E0212');
+        if (!e0212Diag) {
+            throw new Error(`Expected E0212 diagnostic, got: ${JSON.stringify(missingReturnDiags.diagnostics)}`);
+        }
+        const actionsResult = await connection.sendRequest('textDocument/codeAction', {
+            textDocument: { uri: documentUri },
+            range: e0212Diag.range,
+            context: { diagnostics: [e0212Diag] },
+        });
+        const hasReturnZeroFix = Array.isArray(actionsResult)
+            && actionsResult.some((act) => act.title === "Insert 'return 0;'");
+        if (!hasReturnZeroFix) {
+            throw new Error(`Expected Insert 'return 0;' quick fix, got: ${JSON.stringify(actionsResult)}`);
+        }
+        console.log("  ✓ Quick Fix Insert 'return 0;' for E0212 verified.");
+
         // Step 9: Clean Shutdown
         console.log('Step 8: Sending shutdown request...');
         if (serverProcess.stdin) {

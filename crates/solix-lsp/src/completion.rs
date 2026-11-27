@@ -280,7 +280,8 @@ pub fn completions(
             }
         }
     } else {
-        handle_general_completion(workspace, snapshot, line_prefix, &mut items);
+        let cursor_offset = position_to_byte_offset(&snapshot.source_text, position);
+        handle_general_completion(workspace, snapshot, line_prefix, cursor_offset, &mut items);
     }
 
     CompletionList {
@@ -822,10 +823,52 @@ fn handle_scope_resolution_completion(
     }
 }
 
+fn is_symbol_valid_in_bare_completion(
+    symbol: &SymbolEntry,
+    snapshot: &AnalysisSnapshot,
+    symbol_table: &solix_compilation::phases::binder::symbols::SymbolTable,
+    cursor_offset: usize,
+) -> bool {
+    if symbol.name == "constructor"
+        || symbol.name.starts_with('~')
+        || symbol.name.starts_with("operator")
+    {
+        return false;
+    }
+
+    if let Some(parent_id) = symbol.parent_symbol {
+        let Some(parent_symbol) = symbol_table.get_symbol(parent_id) else {
+            return false;
+        };
+
+        // Enum variants (e.g. Color::WHITE) must never appear in bare identifier completion.
+        if matches!(parent_symbol.symbol_type, Type::Enum { .. }) {
+            return false;
+        }
+
+        // Class/interface members and local variables must only appear when inside their enclosing scope.
+        if symbol.source_id != snapshot.source_id {
+            return false;
+        }
+
+        if parent_symbol.span.end > parent_symbol.span.start {
+            let offset_u32 = cursor_offset as u32;
+            if offset_u32 < parent_symbol.span.start || offset_u32 > parent_symbol.span.end {
+                return false;
+            }
+        }
+    } else if symbol.source_id != snapshot.source_id && !symbol.is_public() {
+        return false;
+    }
+
+    true
+}
+
 fn handle_general_completion(
     workspace: &WorkspaceManager,
     snapshot: &AnalysisSnapshot,
     line_prefix: &str,
+    cursor_offset: usize,
     items: &mut Vec<CompletionItem>,
 ) {
     let trimmed = line_prefix.trim_start();
@@ -869,7 +912,12 @@ fn handle_general_completion(
     // Add local variables, parameters, and declared symbols in scope
     if let Some(semantic) = &snapshot.last_good_semantic {
         for symbol in &semantic.symbol_table.symbols {
-            if symbol.source_id == snapshot.source_id || symbol.is_public() {
+            if is_symbol_valid_in_bare_completion(
+                symbol,
+                snapshot,
+                &semantic.symbol_table,
+                cursor_offset,
+            ) {
                 items.push(make_symbol_completion_item(snapshot, symbol));
             }
         }
