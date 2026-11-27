@@ -179,7 +179,7 @@ int32 count = scores.length;   // 5
 ```solix
 int32[] numbers = new int32[5];
 for (int32 index = 0; index < numbers.length; index++) {
-    numbers[index] = i * index;
+    numbers[index] = index * index;
 }
 
 // Print: 0 1 4 9 16
@@ -257,9 +257,9 @@ String numStr = new String("42");
 int32 val = numStr.to_int32();
 
 // Convert a number to a string (static factory)
-String formatted = String.from_int32(42);
-String fmtFloat  = String.from_float64(3.14, 2);  // "3.14"
-String fmtBool   = String.from_bool(true);          // "true"
+String formatted = String::from_int32(42);
+String fmtFloat  = String::from_float64(3.14, 2);  // "3.14"
+String fmtBool   = String::from_bool(true);          // "true"
 ```
 
 ---
@@ -292,7 +292,7 @@ Use the `Optional<T>` class from `solix.core` to express optionality explicitly 
 ```solix
 import solix.core.Optional;
 
-Optional<String> maybe_value = Optional.of_nullable(getUserInput());
+Optional<String> maybe_value = Optional::of_nullable(getUserInput());
 if (maybe_value.is_present()) {
     String text_value = maybe_value.get();
     Console::println(text_value);

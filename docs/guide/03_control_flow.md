@@ -43,8 +43,8 @@ Conditions must be of type `bool`; there is no implicit conversion from integers
 
 ```solix
 int32 x_coord = 5;
-if (x)         { }   // Compile error — int32 is not bool
-if (x != 0)   { }   // Correct
+if (x_coord)         { }   // Compile error — int32 is not bool
+if (x_coord != 0)    { }   // Correct
 ```
 
 Braces are required even for single-statement bodies.
@@ -60,9 +60,9 @@ import solix.io.Console;
 
 public void count_down(int32 from) {
     int32 number = from;
-    while (n > 0) {
-        Console::println(n);
-        n--;
+    while (number > 0) {
+        Console::println(number);
+        number--;
     }
     Console::println("Lift off!");
 }
@@ -125,8 +125,8 @@ for (<init>; <condition>; <step>) {
 import solix.io.Console;
 
 public void print_squares(int32 number) {
-    for (int32 index = 1; index < = n; index++) {
-        Console::print(i * index);
+    for (int32 index = 1; index <= number; index++) {
+        Console::print(index * index);
         Console::print(" ");
     }
     Console::println();
@@ -248,8 +248,8 @@ public int32 find_first(int32[] arr, int32 target) {
 import solix.io.Console;
 
 public void print_odd(int32 limit) {
-    for (int32 index = 1; index < = limit; index++) {
-        if (i % 2 == 0) {
+    for (int32 index = 1; index <= limit; index++) {
+        if (index % 2 == 0) {
             continue;   // Skip even numbers
         }
         Console::println(index);

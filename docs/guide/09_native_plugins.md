@@ -71,7 +71,7 @@ solix new native c_bridge --project . --lang c
 Dual-mode layout ensures that:
 * **Outside `solix build`:** `cargo build` / `cargo test` and `cmake` / `ctest` compile your C, C++, or Rust library cleanly with zero Solix dependency.
 * **Inside `solix build`:** Solix automatically detects `Cargo.toml` (passing `--features solix-native` and `SOLIX_NATIVE_BUILD=1`) or `CMakeLists.txt` (passing `-DSOLIX_NATIVE_BUILD=ON` and `SOLIX_NATIVE_BUILD=1`) with zero manual `type` field in `manifest.yaml`.
-* **Standalone `solix-ffi` Crate:** The `solix-ffi` SDK located in `ffi/rust` is packaged as an independent, self-contained crate (version 2.0.1, edition 2024). It can be consumed via Git dependency or local patch in containerized compilation pipelines.
+* **Standalone `solix-ffi` Crate:** The `solix-ffi` SDK located in `ffi/rust` is packaged as an independent, self-contained crate (version 3.1.1, edition 2024). It can be consumed via Git dependency or local patch in containerized compilation pipelines.
 
 ### 3.1. Option A — Rust Native Bridge (`ffi/rust`, `solix-ffi`)
 
@@ -214,13 +214,13 @@ Then run a single build command:
 solix build --profile release
 ```
 
-During `solix build`, the pure-Rust build orchestrator executes `pre_compile` hooks, compiles every native subproject under `natives/` across all expanded target triples (`bin/<target_triple>/native_*`), embeds SHA-256 checksums in `manifest.yaml`, compiles Solix sources, packages the `.slxp` container with root `binaries.slxb`, and executes `post_compile` hooks.
+During `solix build`, the pure-Rust build orchestrator executes `pre_compile` hooks, compiles every native subproject under `natives/` across all expanded target triples (`bin/<target_triple>/__native_<name>`), embeds SHA-256 checksums in `manifest.yaml`, compiles Solix sources, packages the `.slxp` container with root `binaries.slxb`, and executes `post_compile` hooks.
 
 > [!NOTE]
-> Native libraries are hermetically packaged inside `.slxp` packages. When executing or distributing your application, the Solix runtime automatically extracts and loads matching native shared libraries starting with `native_` for the host operating system and CPU architecture without searching host system PATH.
+> Native libraries are hermetically packaged inside `.slxp` packages. When executing or distributing your application, the Solix runtime automatically extracts and loads matching native shared libraries starting with `__native_` or `lib__native_` for the host operating system and CPU architecture without searching host system PATH.
 
 > [!IMPORTANT]
-> All native symbols declared with `native` must be exported and registered via `solix_register_natives`. Unresolved native symbols produce link errors during VM initialization.
+> All native symbols declared with `native` must be exported and registered via `solix_export!` (Rust) or `SOLIX_REGISTER_MODULE` (C/C++). Unresolved native symbols produce link errors during VM initialization.
 
 ---
 

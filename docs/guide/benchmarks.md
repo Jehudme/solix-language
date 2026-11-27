@@ -21,7 +21,6 @@ To deliver statistically robust performance metrics across varied host runners, 
 | Metric Dimension | Description | Typical Use Case |
 | :--- | :--- | :--- |
 | `Precompile (ms)` | Wall-clock duration to compile `.slx` sources to `.slxb` | Compiler throughput analysis |
-| `Cold Start (ms)` | First un-warmed invocation of the process | CLI startup latency & cold cache overhead |
 | `Median VM (ms)` | Median execution time across warmed iterations | Steady-state runtime dispatch speed |
 | `Min / Max (ms)` | Best and worst observed sample durations | Jitter and operating system scheduling variance |
 | `Peak RSS (KB)` | Maximum resident set size observed across runs | Memory footprint and allocation overhead |

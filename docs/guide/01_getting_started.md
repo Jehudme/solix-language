@@ -89,13 +89,22 @@ solix <subcommand> [options] [arguments...]
 | Subcommand | Function | Reference |
 |---|---|---|
 | `new` | Scaffolds a project workspace (`manifest.yaml`, tests, optional `c`/`cpp`/`rust` native) or adds a native library via `solix new native` | [docs/spec/tools/cli/new.md](../spec/tools/cli/new.md) |
+| `init` | Initializes a `manifest.yaml` in an existing directory without overwriting sources | [docs/spec/tools/cli/init.md](../spec/tools/cli/init.md) |
+| `add` | Adds a package dependency to the project's `manifest.yaml` | [docs/spec/tools/cli/add.md](../spec/tools/cli/add.md) |
 | `compile` | Directly compiles source files into executable bytecode (`.slxb`) | [docs/spec/tools/cli/compile.md](../spec/tools/cli/compile.md) |
 | `build` | Builds multi-file projects into distribution packages (`.slxp`) | [docs/spec/tools/cli/build.md](../spec/tools/cli/build.md) |
+| `check` | Type-checks a Solix project without emitting bytecode | [docs/spec/tools/cli/check.md](../spec/tools/cli/check.md) |
+| `test` | Compiles and runs discovered `test_*` functions or `TestRunner::test` | [docs/spec/tools/cli/test.md](../spec/tools/cli/test.md) |
 | `run` | Executes bytecode containers, packages, or runs `.slx` files on-the-fly | [docs/spec/tools/cli/run.md](../spec/tools/cli/run.md) |
 | `info` | Inspects container metadata, disassembles bytecode, or reconstructs APIs | [docs/spec/tools/cli/info.md](../spec/tools/cli/info.md) |
 | `install` | Installs `.slxb` binaries or `.slxp` packages into the local package store | [docs/spec/tools/cli/install.md](../spec/tools/cli/install.md) |
 | `uninstall` | Removes installed packages or specific versions from the local store | [docs/spec/tools/cli/uninstall.md](../spec/tools/cli/uninstall.md) |
 | `list` | Lists all installed packages and versions | [docs/spec/tools/cli/list.md](../spec/tools/cli/list.md) |
+| `export` | Exports a packaged `.slxp` bundle or standalone compiled `.slxb` binary | [docs/spec/tools/cli/export.md](../spec/tools/cli/export.md) |
+| `clean` | Removes project build artifacts and intermediate caches | [docs/spec/tools/cli/clean.md](../spec/tools/cli/clean.md) |
+| `fmt` | Formats Solix source files according to official style guidelines | [docs/spec/tools/cli/fmt.md](../spec/tools/cli/fmt.md) |
+| `lsp` | Starts the Solix Language Server Protocol (LSP) service | [docs/spec/tools/cli/lsp.md](../spec/tools/cli/lsp.md) |
+| `dap` | Starts the Solix Debug Adapter Protocol (DAP) service | [docs/spec/tools/cli/dap.md](../spec/tools/cli/dap.md) |
 | `doc` | Generates static HTML or Markdown API documentation from source doc comments | [docs/spec/tools/cli/doc.md](../spec/tools/cli/doc.md) |
 | `wiki` | Opens the bundled offline HTML documentation portal matching your `solix` version | [docs/spec/tools/cli/wiki.md](../spec/tools/cli/wiki.md) |
 
@@ -112,7 +121,7 @@ cd hello_solix
 
 ### Application Project Layout
 
-By default, `solix new` generates a fully featured project structure with pure-Rust `manifest.yaml` configuration:
+By default, `solix new` generates a pure-Solix project structure with `manifest.yaml` configuration (pass `--native rust`, `--native c`, or `--native cpp` to scaffold a native bridge under `natives/`):
 
 ```text
 hello_solix/
@@ -122,19 +131,23 @@ hello_solix/
 │   └── main.slx              # Application entry point source
 ├── tests/
 │   └── test_main.slx         # Automated test suite
-├── resources/                # Static application assets
-├── bin/                      # Directory for precompiled native shared objects across target architectures
+├── resources/
+│   └── config.txt            # Static application assets
 └── natives/
-    └── hello_solix_bridge/   # Dual-mode Rust (`solix-ffi`) or C/C++ (`solix::ffi`) bridge
-        ├── Cargo.toml        # (or CMakeLists.txt when using `--native c` / `--native cpp`)
-        └── src/lib.rs
+    └── .gitkeep              # Optional native Rust (`solix-ffi`) or C/C++ (`solix::ffi`) subprojects
 ```
 
 #### The Starter Source (`src/main.slx`)
 
 ```solix
-class Main {
+package hello_solix;
+
+import solix.io.Console;
+
+public class Main {
     public static int32 main() {
+        // Entry point for the 'hello_solix' Solix application.
+        Console::println("Hello from hello_solix!");
         return 0;
     }
 }
@@ -145,11 +158,19 @@ In Solix, executable programs define a `main` method (by default `Main::main`). 
 #### The Project Manifest (`manifest.yaml`)
 
 ```yaml
+vars:
+  sources: &sources
+    - src
+  dependencies: &dependencies
+    solix:
+      version: "2.2.1"
+      profile: release
+
 configuration:
   name: hello_solix
   version: "0.1.0"
-  description: A Solix project
-  license: Apache-2.0
+  description: "A Solix project"
+  license: "Apache-2.0"
   authors: []
 
 profiles:
@@ -159,17 +180,10 @@ profiles:
     inline_threshold: 16
     debug_symbols: false
     static: true
+    sources: *sources
     platforms:
       - all
-    sources:
-      - src
-    natives:
-      hello_solix_bridge:
-        profile: release
-    dependencies:
-      solix:
-        version: "2.1.1"
-        profile: release
+    dependencies: *dependencies
 
   debug:
     entrypoint: Main::main
@@ -177,17 +191,10 @@ profiles:
     inline_threshold: 8
     debug_symbols: true
     static: false
+    sources: *sources
     platforms:
       - host
-    sources:
-      - src
-    natives:
-      hello_solix_bridge:
-        profile: debug
-    dependencies:
-      solix:
-        version: "2.1.1"
-        profile: release
+    dependencies: *dependencies
 
   test:
     entrypoint: TestRunner::test
@@ -195,25 +202,19 @@ profiles:
     inline_threshold: 8
     debug_symbols: true
     static: false
-    platforms:
-      - host
     sources:
       - src
       - tests
-    natives:
-      hello_solix_bridge:
-        profile: debug
-    dependencies:
-      solix:
-        version: "2.1.1"
-        profile: release
+    platforms:
+      - host
+    dependencies: *dependencies
 ```
 
 > [!NOTE]
 > The default `solix` standard library dependency pinned in newly generated manifests tracks the active bundled `solix` library version in `bundled_manifest.json` (which releases independently from the `solix` toolchain crate SemVer). Pass `--no-std` to omit the default `solix` dependency, or `-d solix@<version>` to pin an explicit version.
 
 > [!TIP]
-> Pass `--native c` or `--native cpp` to `solix new` to generate a dual-mode CMake project instead of Rust, or add a native library to an existing project later using `solix new native <name> --project . --lang <rust|c|cpp>`. See the [`manifest.yaml` Wiki](../wiki/manifest.md).
+> Pass `--native rust`, `--native c`, or `--native cpp` to `solix new` to generate a dual-mode native bridge subproject, or add one to an existing project later using `solix new native <name> --project . --lang <rust|c|cpp>`. See the [`manifest.yaml` Wiki](../wiki/manifest.md).
 
 ### Scaffolding Libraries (`--lib`)
 
@@ -228,16 +229,16 @@ This generates `src/lib.slx` with package declaration instead of `src/main.slx`:
 ```solix
 package math_utils;
 
-public class MathUtils {
-    public static int32 version() {
-        return 1;
+public class MathUtilsApi {
+    public static int32 add_numbers(int32 value_a, int32 value_b) {
+        return value_a + value_b;
     }
 }
 ```
 
 ### Pure Solix Projects (`--no-native`)
 
-If your project does not require Rust native bridge shared libraries, omit the `natives/` crate:
+Pure Solix projects without native crates are the default; `--no-native` can also be passed explicitly to ensure no `natives/` subproject is created:
 
 ```bash
 solix new simple_tool --no-native
@@ -296,15 +297,16 @@ solix run bin/hello_solix.slxb
 
 For projects with `manifest.yaml` (or legacy `manifest.toml`), use `solix build` to execute `pre_compile` hooks, auto-detect and build CMake/Cargo native extensions, stage resources, compile Solix source code, and assemble a single distributable package container (`.slxp`):
 
-### 1. Debug Build (Default)
+### 1. Debug Build
+```bash
+solix build --debug
+```
+Creates: `build/debug/hello_solix.slxp` (uncompressed `Stored` ZIP entries for fast iterative builds).
+
+### 2. Optimized Release Build (Default)
 ```bash
 solix build
-```
-Creates: `build/debug/hello_solix.slxp`.
-
-### 2. Optimized Release Build
-```bash
-solix build --release
+# or explicitly: solix build --release
 ```
 Creates: `build/release/hello_solix.slxp`.
 
@@ -314,7 +316,7 @@ Execute the package directly with `solix run`:
 solix run build/release/hello_solix.slxp
 ```
 
-The VM runtime automatically extracts the manifest, stages native libraries in memory, configures resource access, and executes the `[entrypoints].main` method.
+The VM runtime automatically extracts the manifest, stages native libraries in memory, configures resource access, and executes the active profile's `entrypoint` method (`Main::main` by default).
 
 ---
 
@@ -385,7 +387,7 @@ You can install precompiled `.slxb` binaries, `.slxp` packages, or install direc
 
 ```bash
 # Install directly from a library project directory (builds and registers source folder)
-solix install package ../libraries/solixlib --release
+solix install ../libraries/solixlib --profile release
 
 # Automatically install on build or compile
 solix build --release --install
@@ -406,12 +408,12 @@ To package libraries or binaries for distribution, use `solix export`:
 # Export a built package container
 solix export package ./solixlib --output ./dist/solixlib.slxp
 
-# Export standalone bytecode binaries
-solix export binaries ./build/release/solixlib.slxb --output ./dist/solixlib.slxb
+# Export standalone bytecode binaries from a project directory
+solix export binaries ./solixlib --output ./dist/solixlib.slxb
 ```
 
 ### 3. List Installed Packages (`solix list`)
-`solix list` displays an enriched inventory of installed packages with build profiles, sizes, installation timestamps, SHA-256 digests, and source directories:
+`solix list` displays an enriched inventory of installed packages with build profiles, platforms, sizes, installation timestamps, SHA-256 digests, and source directories:
 
 ```bash
 solix list
@@ -426,10 +428,10 @@ solix list --json
 Output:
 ```text
 Installed Solix Packages (/home/user/.solix/packages):
-NAME             VERSION    KIND     PROFILE  SIZE       INSTALLED AT         SHA256          SOURCE DIR
----------------- ---------- -------- -------- ---------- -------------------- --------------- --------------------
-solix            2.0.0      package  release  681.8 KB   2026-11-11T05:44:54Z 46747ea15ac6... /home/user/solixlib
-raylib           1.2.0      package  release  1.2 MB     2026-11-11T02:15:30Z 9d1da08c4ede... -
+NAME             VERSION    KIND     PROFILE  PLATFORMS                    SIZE       INSTALLED AT         SHA256          SOURCE
+---------------- ---------- -------- -------- ---------------------------- ---------- -------------------- --------------- --------------------
+raylib           6.0.1      package  release  linux-aarch64, linux-x86_... 6.1 MB     2026-11-27T20:22:30Z 6b7598ca762a... -
+solix            2.2.1      package  release  linux-aarch64, linux-x86_... 3.5 MB     2026-11-27T20:22:30Z 7f68a3f21a59... -
 ```
 
 ### 4. Inspect Packages & Modules (`solix info`)

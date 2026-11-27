@@ -31,9 +31,6 @@ solix install [<path>] [options]
 | `--vscode` | | Flag | `false` | Discover installed editor CLIs (`code`, `codium`, `cursor`) and automatically install the bundled official Solix extension (`.vsix`). |
 | `--force` | `-f` | Flag | `false` | Force overwrite if package version is already installed in the package store. |
 | `--profile <prof>` | | String | `"release"` | Target build profile when installing from a project directory (`debug`, `release`, or `test`). |
-| `--debug` | | Flag | `false` | Shorthand for `--profile debug`. |
-| `--release` | | Flag | `true` | Shorthand for `--profile release`. |
-| `--test` | | Flag | `false` | Shorthand for `--profile test`. |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for the local package store. Can also be set via `SOLIX_PKG_DIR`. |
 
 ---

@@ -126,7 +126,7 @@ public class Main {
 ### Capture Semantics & ARC Safety
 - **Environment Allocation**: The Solix compiler automatically creates an internal capture frame on the heap.
 - **Reference Counting**: If a captured variable is a reference type (an object or array), Solix increments its reference count (`INC_REF`).
-- **Memory Safety**: When the closure variable goes out of scope, the ARC runtime frees the capture frame and releases captured reference types (`DEC_REF_CALLABLE`), preventing dangling pointers and memory leaks.
+- **Memory Safety**: When the closure variable goes out of scope, the ARC runtime frees the capture frame and releases captured reference types (`DecRef`), preventing dangling pointers and memory leaks.
 
 > [!NOTE]
 > Capturing closures involve an automatic ARC heap allocation for their environment frame. When performance-critical loops execute, prefer non-capturing lambdas or static method references (`Class::method`), which incur zero heap allocations.

@@ -63,10 +63,10 @@ Additionally, `print_stack_trace()` writes the exception and its cause chain to 
 import solix.core.Exceptions;
 
 public void divide(int32 value_a, int32 value_b) {
-    if (b == 0) {
+    if (value_b == 0) {
         throw new DivideByZeroException("Cannot divide by zero.");
     }
-    Console::println(a / b);
+    Console::println(value_a / value_b);
 }
 ```
 
@@ -126,7 +126,7 @@ public void read_data(int32[] arr, int32 index) {
         Console::errorln(ex.get_message());
     } catch (Exception error) {
         Console::error("Unknown error: ");
-        Console::errorln(ex.get_message());
+        Console::errorln(error.get_message());
     }
 }
 ```
@@ -192,9 +192,9 @@ public class InsufficientFundsException extends RuntimeException {
 
     public override String to_string() {
         return new String("InsufficientFundsException: required=")
-            .concat(String.from_float64(this.required_amount, 2))
+            .concat(String::from_float64(this.required_amount, 2))
             .concat(new String(", available="))
-            .concat(String.from_float64(this.available_amount, 2));
+            .concat(String::from_float64(this.available_amount, 2));
     }
 }
 ```
@@ -259,8 +259,8 @@ public void use_resource() {
 
 If an exception is thrown and no matching `catch` is found in the current frame, the runtime **unwinds the call stack**:
 
-1. The VM executes the `JMP_TO_OUTER_CLEANUP` opcode, which pops the current frame.
-2. Any `finally` blocks registered for that frame execute via the **return-to-cleanup table**.
+1. The VM inspects the function's `ExceptionHandlerEntry` table for a matching `try_start_pc..try_end_pc` range and `catch_type_symbol` (or pops the frame if none matches).
+2. Any `finally_pc` cleanup blocks registered for that frame execute before unwinding continues.
 3. The process repeats for each frame until a matching `catch` is found.
 4. If the exception reaches the top-level `main` without being caught, the runtime prints the exception's `to_string()` to `stderr` and terminates with exit code `1`.
 
@@ -297,7 +297,7 @@ public void validate_input(char[][] args) {
 
 A crucial feature of Solix's error handling model is deterministic **RAII exception safety**. When an exception is thrown, the runtime automatically unwinds intermediate block scopes and call frames until a matching `catch` block is reached:
 
-1. In each unwound scope, all active local variables holding object references are decremented (`DEC_REF_SLOT`).
+1. In each unwound scope, all active local variables holding object references are decremented (`DecRef` across `try_ref_regs`).
 2. If an object's reference count drops to 0, its **destructor (`~ClassName()`) is triggered immediately**.
 3. Destructors run in strict reverse declaration order (LIFO).
 4. All local resources in the unwound stack frames are guaranteed to be cleaned up **before** execution enters the matching `catch` block.

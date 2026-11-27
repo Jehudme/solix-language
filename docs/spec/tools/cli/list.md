@@ -22,6 +22,7 @@ solix list [options]
 | `--sort <key>` | | String | `"name"` | Sort field: `name`, `version`, `date`, `size`, or `profile`. |
 | `--reverse` | `-r` | Flag | `false` | Reverses sort order. |
 | `--json` | | Flag | `false` | Output package inventory formatted as structured JSON. |
+| `--output <path>` | `-o` | Path | | Write output to a file instead of standard output. |
 | `--pkg-dir <dir>` | | Path | `~/.solix/packages` | Root directory override for the local package store. |
 
 ---
@@ -61,7 +62,7 @@ solix list --json
       "universal"
     ],
     "native_libraries": {
-      "lib/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
+      "bin/x86_64-unknown-linux-gnu/libsolixlib_native.so": "af5f19f16fac4342322dc64262fc55e49b4119122e690957773c78aa25405a44"
     },
     "description": "Solix Standard Library",
     "license": "Apache-2.0",
