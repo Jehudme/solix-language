@@ -34,6 +34,8 @@ pub struct Emitter<'ctx> {
     pub function_ids: Option<&'ctx HashMap<String, u32>>,
     /// Non-virtual concrete method targets indexed by `(vtable_id, slot_index) -> func_id`.
     pub direct_method_targets: Option<&'ctx HashMap<(u32, usize), u32>>,
+    /// Binder-resolved call/constructor targets indexed by AST call site span.
+    pub resolved_call_targets: Option<&'ctx HashMap<Span, u32>>,
     /// Enum variant constant values indexed by fully qualified symbol (e.g. `Color::Red` -> 0).
     pub enum_variants: Option<&'ctx HashMap<String, u32>>,
     /// Synthesized functions (such as compiled lambda closure bodies) to append to the module.
@@ -65,6 +67,7 @@ impl<'ctx> Emitter<'ctx> {
             class_layouts: None,
             function_ids: None,
             direct_method_targets: None,
+            resolved_call_targets: None,
             enum_variants: None,
             synthesized_functions: None,
             finally_stack: Vec::new(),
@@ -235,6 +238,16 @@ impl<'ctx> Emitter<'ctx> {
         direct_method_targets: &'ctx HashMap<(u32, usize), u32>,
     ) -> Self {
         self.direct_method_targets = Some(direct_method_targets);
+        self
+    }
+
+    /// Attaches binder-resolved call targets indexed by call site AST span.
+    #[must_use]
+    pub fn with_resolved_call_targets(
+        mut self,
+        resolved_call_targets: &'ctx HashMap<Span, u32>,
+    ) -> Self {
+        self.resolved_call_targets = Some(resolved_call_targets);
         self
     }
 
@@ -1158,82 +1171,18 @@ impl<'ctx> Emitter<'ctx> {
                 }
 
                 let arity = arguments.len();
-                let argument_signatures = arguments
-                    .iter()
-                    .map(|argument| self.query_type(argument.span()).to_string())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let argument_simple_signatures = arguments
-                    .iter()
-                    .map(|argument| {
-                        let type_name = self.query_type(argument.span()).to_string();
-                        type_name
-                            .rsplit([':', '.'])
-                            .next()
-                            .unwrap_or(&type_name)
-                            .to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let ctor_sym_signature = if argument_signatures.is_empty() {
-                    format!("{resolved_class_name}::constructor")
-                } else {
-                    format!("{resolved_class_name}::constructor({argument_signatures})")
-                };
-                let ctor_sym_signature_simple = if argument_simple_signatures.is_empty() {
-                    format!("{resolved_class_name}::constructor")
-                } else {
-                    format!("{resolved_class_name}::constructor({argument_simple_signatures})")
-                };
-                let ctor_sym_simple_signature = if argument_signatures.is_empty() {
-                    format!("{simple}::constructor")
-                } else {
-                    format!("{simple}::constructor({argument_signatures})")
-                };
-                let ctor_sym_simple_signature_simple = if argument_simple_signatures.is_empty() {
-                    format!("{simple}::constructor")
-                } else {
-                    format!("{simple}::constructor({argument_simple_signatures})")
-                };
                 let ctor_sym_arity = format!("{resolved_class_name}::constructor/{arity}");
-                let ctor_sym_simple_arity = format!("{simple}::constructor/{arity}");
-                let ctor_sym = format!("{resolved_class_name}::constructor");
-                let ctor_sym_simple = format!("{simple}::constructor");
-                let ctor_id = self
-                    .function_ids
-                    .and_then(|ids| {
-                        ids.get(&ctor_sym_signature)
-                            .or_else(|| ids.get(&ctor_sym_signature_simple))
-                            .or_else(|| ids.get(&ctor_sym_simple_signature))
-                            .or_else(|| ids.get(&ctor_sym_simple_signature_simple))
-                            .or_else(|| {
-                                if !qualified_simple.is_empty() {
-                                    ids.get(&format!("{qualified_simple}::constructor({argument_signatures})"))
-                                        .or_else(|| ids.get(&format!("{qualified_simple}::constructor({argument_simple_signatures})")))
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| ids.get(&ctor_sym_arity))
-                            .or_else(|| ids.get(&ctor_sym_simple_arity))
-                            .or_else(|| {
-                                if !qualified_simple.is_empty() {
-                                    ids.get(&format!("{qualified_simple}::constructor/{arity}"))
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| ids.get(&ctor_sym))
-                            .or_else(|| ids.get(&ctor_sym_simple))
-                            .or_else(|| {
-                                if !qualified_simple.is_empty() {
-                                    ids.get(&format!("{qualified_simple}::constructor"))
-                                } else {
-                                    None
-                                }
-                            })
-                    })
-                    .copied();
+                let mut candidate_bases = vec![resolved_class_name.as_str(), simple.as_str()];
+                if !qualified_simple.is_empty() {
+                    candidate_bases.push(qualified_simple.as_str());
+                }
+                let ctor_id = self.resolve_typed_function_id(
+                    &candidate_bases,
+                    "constructor",
+                    arguments,
+                    *span,
+                    true,
+                );
 
                 let is_extern_class = layout_info.as_ref().is_some_and(|layout| layout.is_extern)
                     || layout_info.is_none();
@@ -1407,47 +1356,39 @@ impl<'ctx> Emitter<'ctx> {
 
                     if is_static_fn {
                         // Static method call Type::method(args) or Type.method(args)
-                        let argument_signatures = arguments
-                            .iter()
-                            .map(|argument| self.query_type(argument.span()).to_string())
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        let argument_simple_signatures = arguments
-                            .iter()
-                            .map(|argument| {
-                                let type_name = self.query_type(argument.span()).to_string();
-                                type_name
-                                    .rsplit([':', '.'])
-                                    .next()
-                                    .unwrap_or(&type_name)
-                                    .to_string()
-                            })
-                            .collect::<Vec<_>>()
-                            .join(",");
-
-                        let candidate_full_typed = format!("{symbol_full}({argument_signatures})");
-                        let candidate_full_simple_typed =
-                            format!("{symbol_full}({argument_simple_signatures})");
-                        let candidate_simple_typed =
-                            format!("{symbol_simple}({argument_signatures})");
-                        let candidate_simple_simple_typed =
-                            format!("{symbol_simple}({argument_simple_signatures})");
-
-                        let raw_symbol_full = format!("{object_name}::{method_name}");
-                        let raw_symbol_simple = format!("{simple_object}::{method_name}");
+                        let method_key = format!("{method_name}{generic_suffix}");
+                        let mut candidate_bases = vec![object_name.as_str(), simple_object];
+                        let generic_object = (!generic_arguments.is_empty())
+                            .then(|| format!("{object_name}{generic_suffix}"));
+                        let generic_simple_object = (!generic_arguments.is_empty())
+                            .then(|| format!("{simple_object}{generic_suffix}"));
+                        if let Some(ref gen_obj) = generic_object {
+                            candidate_bases.push(gen_obj.as_str());
+                        }
+                        if let Some(ref gen_simple) = generic_simple_object {
+                            candidate_bases.push(gen_simple.as_str());
+                        }
                         let func_id_opt = self
-                            .function_ids
-                            .and_then(|ids| {
-                                ids.get(&candidate_full_typed)
-                                    .or_else(|| ids.get(&candidate_full_simple_typed))
-                                    .or_else(|| ids.get(&candidate_simple_typed))
-                                    .or_else(|| ids.get(&candidate_simple_simple_typed))
-                                    .or_else(|| ids.get(&symbol_full))
-                                    .or_else(|| ids.get(&symbol_simple))
-                                    .or_else(|| ids.get(&raw_symbol_full))
-                                    .or_else(|| ids.get(&raw_symbol_simple))
-                            })
-                            .copied();
+                            .resolve_typed_function_id(
+                                &candidate_bases,
+                                &method_key,
+                                arguments,
+                                *member_span,
+                                generic_arguments.is_empty(),
+                            )
+                            .or_else(|| {
+                                if !generic_arguments.is_empty() {
+                                    self.resolve_typed_function_id(
+                                        &candidate_bases,
+                                        &method_name,
+                                        arguments,
+                                        *member_span,
+                                        false,
+                                    )
+                                } else {
+                                    None
+                                }
+                            });
 
                         let arg_base = self.allocator.alloc_window(arguments.len())?;
                         for (arg_index, argument) in arguments.iter().enumerate() {
@@ -1824,6 +1765,7 @@ impl<'ctx> Emitter<'ctx> {
                     self.class_layouts,
                     self.function_ids,
                     self.direct_method_targets,
+                    self.resolved_call_targets,
                     self.static_layout,
                     synth.as_deref_mut(),
                 )?;
@@ -4219,6 +4161,74 @@ impl<'ctx> Emitter<'ctx> {
         }
     }
 
+    fn build_signature_variants(&self, arguments: &[Expression]) -> (String, String, String) {
+        let mut full_parts = Vec::with_capacity(arguments.len());
+        let mut spaced_parts = Vec::with_capacity(arguments.len());
+        let mut compact_parts = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            let arg_type = self.query_type(argument.span());
+            full_parts.push(arg_type.to_string());
+            spaced_parts.push(crate::phases::emitter::pipeline::format_simple_type_name(
+                &arg_type, false,
+            ));
+            compact_parts.push(crate::phases::emitter::pipeline::format_simple_type_name(
+                &arg_type, true,
+            ));
+        }
+        (
+            full_parts.join(","),
+            spaced_parts.join(","),
+            compact_parts.join(","),
+        )
+    }
+
+    pub(crate) fn resolve_typed_function_id(
+        &self,
+        bases: &[&str],
+        member: &str,
+        arguments: &[Expression],
+        call_span: Span,
+        use_resolved_span: bool,
+    ) -> Option<u32> {
+        let ids = self.function_ids?;
+        let arity = arguments.len();
+        if !arguments.is_empty() {
+            let (full_sigs, spaced_sigs, compact_sigs) = self.build_signature_variants(arguments);
+            for base in bases {
+                for signature in [&full_sigs, &spaced_sigs, &compact_sigs] {
+                    if let Some(&func_id) = ids.get(&format!("{base}::{member}({signature})")) {
+                        return Some(func_id);
+                    }
+                }
+            }
+        }
+        let is_monomorphized_target = bases.iter().any(|base| base.contains('<'));
+        let is_monomorphized_enclosing = self
+            .enclosing_class
+            .as_deref()
+            .is_some_and(|class_name| class_name.contains('<'));
+        if use_resolved_span
+            && !is_monomorphized_target
+            && !is_monomorphized_enclosing
+            && let Some(&func_id) = self
+                .resolved_call_targets
+                .and_then(|targets| targets.get(&call_span))
+        {
+            return Some(func_id);
+        }
+        for base in bases {
+            if let Some(&func_id) = ids.get(&format!("{base}::{member}/{arity}")) {
+                return Some(func_id);
+            }
+        }
+        for base in bases {
+            if let Some(&func_id) = ids.get(&format!("{base}::{member}")) {
+                return Some(func_id);
+            }
+        }
+        None
+    }
+
     fn resolve_method_dispatch(
         &self,
         object_span: Span,
@@ -4234,16 +4244,19 @@ impl<'ctx> Emitter<'ctx> {
         let simple_param_sig = arg_types
             .iter()
             .map(|argument_type| {
-                let type_name = argument_type.to_string();
-                type_name
-                    .rsplit([':', '.'])
-                    .next()
-                    .unwrap_or(&type_name)
-                    .to_string()
+                crate::phases::emitter::pipeline::format_simple_type_name(argument_type, false)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let compact_param_sig = arg_types
+            .iter()
+            .map(|argument_type| {
+                crate::phases::emitter::pipeline::format_simple_type_name(argument_type, true)
             })
             .collect::<Vec<_>>()
             .join(",");
         let simple_mangled_name = format!("{method_name}({simple_param_sig})");
+        let compact_mangled_name = format!("{method_name}({compact_param_sig})");
         let arity_name = format!("{method_name}/{}", arg_types.len());
 
         let obj_name = self.get_lexeme(object_span);
@@ -4257,6 +4270,7 @@ impl<'ctx> Emitter<'ctx> {
                     .method_slots
                     .get(&mangled_name)
                     .or_else(|| layout.method_slots.get(&simple_mangled_name))
+                    .or_else(|| layout.method_slots.get(&compact_mangled_name))
                     .or_else(|| layout.method_slots.get(&arity_name))
                     .or_else(|| layout.method_slots.get(method_name))
             {
@@ -4302,6 +4316,7 @@ impl<'ctx> Emitter<'ctx> {
                     .method_slots
                     .get(&mangled_name)
                     .or_else(|| layout.method_slots.get(&simple_mangled_name))
+                    .or_else(|| layout.method_slots.get(&compact_mangled_name))
                     .or_else(|| layout.method_slots.get(&arity_name))
                     .or_else(|| layout.method_slots.get(method_name))
             {

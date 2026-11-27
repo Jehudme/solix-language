@@ -32,6 +32,7 @@ use solix_common::bytecode::{
     ExportedStatic, Instruction, OpCode,
 };
 use solix_common::diagnostics::EmissionError;
+use solix_common::span::Span;
 use solix_common::types::{PrimitiveKind, Type};
 use std::collections::{HashMap, HashSet};
 
@@ -248,6 +249,21 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
     } else {
         HashMap::new()
     };
+    let resolved_call_targets: HashMap<Span, u32> = context
+        .binding_artifacts
+        .as_ref()
+        .map(|artifacts| {
+            artifacts
+                .resolved_symbols
+                .iter()
+                .filter_map(|(&call_span, &symbol_id)| {
+                    sym_to_func
+                        .get(&symbol_id)
+                        .map(|&func_id| (call_span, func_id))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     // 3. Synthesize Module Static Initializer (@init - Function ID 0)
     let init_func = synthesize_module_init(
@@ -333,6 +349,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 &class_layouts,
                 &function_ids,
                 &direct_method_targets,
+                &resolved_call_targets,
                 &enum_variants,
                 &static_layout,
                 &node_types,
@@ -354,6 +371,7 @@ pub fn emit_context(context: &mut CompilationContext) -> Result<EmissionArtifact
                 &class_layouts,
                 &function_ids,
                 &direct_method_targets,
+                &resolved_call_targets,
                 &enum_variants,
                 &static_layout,
                 &node_types,
@@ -1506,41 +1524,41 @@ fn index_function_symbols(
                         continue;
                     }
                     let method_name = get_span_text(method_declaration.name_span, source_code);
+                    let arity = method_declaration.parameters.len();
                     let param_sig = method_declaration
                         .parameters
                         .iter()
                         .map(|parameter| get_span_text(parameter.param_type.span(), source_code))
                         .collect::<Vec<_>>()
                         .join(",");
-                    let full_sym_mangled = if param_sig.is_empty() {
-                        format!("{class_name}::{method_name}")
-                    } else {
-                        format!("{class_name}::{method_name}({param_sig})")
-                    };
-                    let full_sym = format!("{class_name}::{method_name}");
                     let func_id = *next_func_id;
                     *next_func_id += 1;
-                    function_ids.insert(full_sym_mangled.clone(), func_id);
-                    function_ids.entry(full_sym.clone()).or_insert(func_id);
+                    insert_member_function_keys(
+                        function_ids,
+                        class_name,
+                        method_name,
+                        &param_sig,
+                        arity,
+                        func_id,
+                    );
 
                     if !effective_package.is_empty() {
-                        let qualified_sym_mangled = if param_sig.is_empty() {
-                            format!("{qualified_class_name}::{method_name}")
-                        } else {
-                            format!("{qualified_class_name}::{method_name}({param_sig})")
-                        };
-                        let qualified_sym = format!("{qualified_class_name}::{method_name}");
-                        function_ids.insert(qualified_sym_mangled, func_id);
-                        function_ids.entry(qualified_sym).or_insert(func_id);
-
-                        let dot_sym_mangled = if param_sig.is_empty() {
-                            format!("{dot_class_name}::{method_name}")
-                        } else {
-                            format!("{dot_class_name}::{method_name}({param_sig})")
-                        };
-                        let dot_sym = format!("{dot_class_name}::{method_name}");
-                        function_ids.insert(dot_sym_mangled, func_id);
-                        function_ids.entry(dot_sym).or_insert(func_id);
+                        insert_member_function_keys(
+                            function_ids,
+                            &qualified_class_name,
+                            method_name,
+                            &param_sig,
+                            arity,
+                            func_id,
+                        );
+                        insert_member_function_keys(
+                            function_ids,
+                            &dot_class_name,
+                            method_name,
+                            &param_sig,
+                            arity,
+                            func_id,
+                        );
                     }
 
                     if !method_declaration.generic_params.is_empty()
@@ -1711,6 +1729,7 @@ fn compile_source_functions(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -1759,6 +1778,7 @@ fn compile_source_functions(
                 class_layouts,
                 function_ids,
                 direct_method_targets,
+                resolved_call_targets,
                 enum_variants,
                 static_layout,
                 node_types,
@@ -1786,6 +1806,7 @@ fn compile_source_functions(
                         class_layouts,
                         function_ids,
                         direct_method_targets,
+                        resolved_call_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1831,6 +1852,7 @@ fn compile_source_functions(
                         class_layouts,
                         function_ids,
                         direct_method_targets,
+                        resolved_call_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1854,6 +1876,7 @@ fn compile_source_functions(
                                 class_layouts,
                                 function_ids,
                                 direct_method_targets,
+                                resolved_call_targets,
                                 enum_variants,
                                 static_layout,
                                 node_types,
@@ -1887,6 +1910,7 @@ fn compile_source_functions(
                         class_layouts,
                         function_ids,
                         direct_method_targets,
+                        resolved_call_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1905,6 +1929,7 @@ fn compile_source_functions(
                         class_layouts,
                         function_ids,
                         direct_method_targets,
+                        resolved_call_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1924,6 +1949,7 @@ fn compile_source_functions(
                         class_layouts,
                         function_ids,
                         direct_method_targets,
+                        resolved_call_targets,
                         enum_variants,
                         static_layout,
                         node_types,
@@ -1950,6 +1976,7 @@ fn compile_source_functions(
                 class_layouts,
                 function_ids,
                 direct_method_targets,
+                resolved_call_targets,
                 enum_variants,
                 static_layout,
                 node_types,
@@ -1975,6 +2002,8 @@ fn compile_source_functions(
                 .with_class_layouts(class_layouts)
                 .with_function_ids(function_ids)
                 .with_direct_method_targets(direct_method_targets)
+                .with_resolved_call_targets(resolved_call_targets)
+                .with_resolved_call_targets(resolved_call_targets)
                 .with_enum_variants(enum_variants)
                 .with_static_layout(static_layout)
                 .with_node_types(node_types)
@@ -2147,6 +2176,7 @@ fn compile_single_method(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2222,6 +2252,7 @@ fn compile_single_method(
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
             .with_direct_method_targets(direct_method_targets)
+            .with_resolved_call_targets(resolved_call_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
@@ -2286,6 +2317,7 @@ fn compile_constructor(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2324,6 +2356,7 @@ fn compile_constructor(
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
             .with_direct_method_targets(direct_method_targets)
+            .with_resolved_call_targets(resolved_call_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
@@ -2347,12 +2380,13 @@ fn compile_constructor(
             {
                 let base_name = &base_cls.class_name;
                 let simple_base = extract_simple_class_name(base_name);
-                let super_sym = format!("{base_name}::constructor");
-                let super_sym_simple = format!("{simple_base}::constructor");
-                if let Some(&super_func_id) = function_ids
-                    .get(&super_sym)
-                    .or_else(|| function_ids.get(&super_sym_simple))
-                {
+                if let Some(super_func_id) = emitter.resolve_typed_function_id(
+                    &[base_name.as_str(), simple_base.as_str()],
+                    "constructor",
+                    super_args,
+                    ctor.span,
+                    true,
+                ) {
                     let window_size = 1 + super_args.len();
                     let arg_base = emitter.allocator.alloc_window(window_size)?;
                     emitter.emit_instruction(
@@ -2407,6 +2441,7 @@ fn compile_default_constructor(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2431,6 +2466,7 @@ fn compile_default_constructor(
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
             .with_direct_method_targets(direct_method_targets)
+            .with_resolved_call_targets(resolved_call_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
@@ -2448,10 +2484,14 @@ fn compile_default_constructor(
         {
             let base_name = &base_cls.class_name;
             let simple_base = extract_simple_class_name(base_name);
+            let super_sym_zero = format!("{base_name}::constructor/0");
+            let super_sym_simple_zero = format!("{simple_base}::constructor/0");
             let super_sym = format!("{base_name}::constructor");
             let super_sym_simple = format!("{simple_base}::constructor");
             if let Some(&super_func_id) = function_ids
-                .get(&super_sym)
+                .get(&super_sym_zero)
+                .or_else(|| function_ids.get(&super_sym_simple_zero))
+                .or_else(|| function_ids.get(&super_sym))
                 .or_else(|| function_ids.get(&super_sym_simple))
             {
                 let arg_base = emitter.allocator.alloc_window(1)?;
@@ -2568,6 +2608,7 @@ fn compile_destructor(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2591,6 +2632,7 @@ fn compile_destructor(
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
             .with_direct_method_targets(direct_method_targets)
+            .with_resolved_call_targets(resolved_call_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
@@ -2658,6 +2700,7 @@ fn compile_operator(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2697,6 +2740,7 @@ fn compile_operator(
             .with_class_layouts(class_layouts)
             .with_function_ids(function_ids)
             .with_direct_method_targets(direct_method_targets)
+            .with_resolved_call_targets(resolved_call_targets)
             .with_enum_variants(enum_variants)
             .with_static_layout(static_layout)
             .with_node_types(node_types)
@@ -2765,29 +2809,36 @@ fn index_monomorphized_class_symbols(
         match member {
             ClassMember::Method(method_decl) => {
                 let method_name = get_span_text(method_decl.name_span, code);
+                let arity = method_decl.parameters.len();
                 let param_sig = method_decl
                     .parameters
                     .iter()
                     .map(|param| get_span_text(param.param_type.span(), code))
                     .collect::<Vec<_>>()
                     .join(",");
-                let full_sym_mangled = format!("{mangled_name}::{method_name}({param_sig})");
-                let simple_sym_mangled = format!("{simple_name}::{method_name}({param_sig})");
-                let full_sym = format!("{mangled_name}::{method_name}");
-                let simple_sym = format!("{simple_name}::{method_name}");
                 let func_id = *next_func_id;
                 *next_func_id += 1;
-                function_ids.insert(full_sym_mangled, func_id);
-                function_ids.insert(simple_sym_mangled, func_id);
-                function_ids.entry(full_sym).or_insert(func_id);
-                function_ids.entry(simple_sym).or_insert(func_id);
+                insert_member_function_keys(
+                    function_ids,
+                    &mangled_name,
+                    method_name,
+                    &param_sig,
+                    arity,
+                    func_id,
+                );
+                insert_member_function_keys(
+                    function_ids,
+                    &simple_name,
+                    method_name,
+                    &param_sig,
+                    arity,
+                    func_id,
+                );
                 if let Some((generic_base, generic_args)) = simple_name.split_once('<') {
                     let generic_suffix = format!("<{generic_args}");
                     let generic_sym = format!("{generic_base}::{method_name}{generic_suffix}");
-                    let generic_arity = format!(
-                        "{generic_base}::{method_name}{generic_suffix}/{}",
-                        method_decl.parameters.len()
-                    );
+                    let generic_arity =
+                        format!("{generic_base}::{method_name}{generic_suffix}/{arity}");
                     function_ids.insert(generic_sym, func_id);
                     function_ids.insert(generic_arity, func_id);
                 }
@@ -2873,6 +2924,7 @@ fn compile_monomorphized_class_functions(
     class_layouts: &HashMap<String, ClassLayout>,
     function_ids: &HashMap<String, u32>,
     direct_method_targets: &HashMap<(u32, usize), u32>,
+    resolved_call_targets: &HashMap<Span, u32>,
     enum_variants: &HashMap<String, u32>,
     static_layout: &StaticLayout,
     node_types: &HashMap<solix_common::span::Span, solix_common::types::Type>,
@@ -2924,6 +2976,7 @@ fn compile_monomorphized_class_functions(
                     class_layouts,
                     function_ids,
                     direct_method_targets,
+                    resolved_call_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2942,6 +2995,7 @@ fn compile_monomorphized_class_functions(
                     class_layouts,
                     function_ids,
                     direct_method_targets,
+                    resolved_call_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2960,6 +3014,7 @@ fn compile_monomorphized_class_functions(
                     class_layouts,
                     function_ids,
                     direct_method_targets,
+                    resolved_call_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2979,6 +3034,7 @@ fn compile_monomorphized_class_functions(
                     class_layouts,
                     function_ids,
                     direct_method_targets,
+                    resolved_call_targets,
                     enum_variants,
                     static_layout,
                     node_types,
@@ -2993,6 +3049,82 @@ fn compile_monomorphized_class_functions(
     Ok(())
 }
 
+/// Inserts typed, arity-qualified, and unsuffixed lookup keys for a class member function.
+fn insert_member_function_keys(
+    function_ids: &mut HashMap<String, u32>,
+    owner_name: &str,
+    method_name: &str,
+    param_sig: &str,
+    arity: usize,
+    func_id: u32,
+) {
+    let mangled_key = if param_sig.is_empty() {
+        format!("{owner_name}::{method_name}")
+    } else {
+        format!("{owner_name}::{method_name}({param_sig})")
+    };
+    function_ids.insert(mangled_key, func_id);
+    if param_sig.contains(", ") {
+        let compact_sig = param_sig.replace(", ", ",");
+        function_ids.insert(
+            format!("{owner_name}::{method_name}({compact_sig})"),
+            func_id,
+        );
+    }
+    function_ids
+        .entry(format!("{owner_name}::{method_name}/{arity}"))
+        .or_insert(func_id);
+    function_ids
+        .entry(format!("{owner_name}::{method_name}"))
+        .or_insert(func_id);
+}
+
+/// Formats a `Type` using unqualified simple names so it matches source-text overload signatures.
+pub(crate) fn format_simple_type_name(target_type: &Type, compact_generics: bool) -> String {
+    match target_type {
+        Type::Class {
+            symbol_name,
+            type_arguments,
+        }
+        | Type::Interface {
+            symbol_name,
+            type_arguments,
+        } => {
+            let short_name = symbol_name.rsplit(['.', ':']).next().unwrap_or(symbol_name);
+            let normalized_short = if symbol_name == "std.string"
+                || symbol_name == "std::string"
+                || symbol_name == "string"
+            {
+                "string"
+            } else {
+                short_name
+            };
+            if type_arguments.is_empty() {
+                normalized_short.to_string()
+            } else {
+                let separator = if compact_generics { "," } else { ", " };
+                let args = type_arguments
+                    .iter()
+                    .map(|arg| format_simple_type_name(arg, compact_generics))
+                    .collect::<Vec<_>>()
+                    .join(separator);
+                format!("{normalized_short}<{args}>")
+            }
+        }
+        Type::Array {
+            element_type,
+            depth,
+        } => {
+            format!(
+                "{}{}",
+                format_simple_type_name(element_type, compact_generics),
+                "[]".repeat(*depth)
+            )
+        }
+        _ => target_type.to_string(),
+    }
+}
+
 /// Maps each method/function `SymbolId` in `symbol_table` to its assigned flat function index.
 fn build_sym_to_func_map(
     symbol_table: &SymbolTable,
@@ -3000,45 +3132,58 @@ fn build_sym_to_func_map(
 ) -> HashMap<SymbolId, u32> {
     let mut sym_to_func = HashMap::new();
     for entry in &symbol_table.symbols {
-        let signature = if let Type::FunctionPointer {
-            parameter_types, ..
-        } = &entry.symbol_type
-        {
-            Some(
-                parameter_types
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            )
-        } else {
-            None
-        };
-        let mangled_name = signature
-            .as_ref()
-            .map(|parameters| format!("{}({parameters})", entry.fully_qualified_name));
-        if let Some(func_id) = mangled_name
-            .as_ref()
-            .and_then(|name| function_ids.get(name))
-            .or_else(|| function_ids.get(&entry.fully_qualified_name))
-            .copied()
-        {
-            sym_to_func.insert(entry.id, func_id);
-        } else if let Some(parent_id) = entry.parent_symbol
+        let mut base_names = vec![entry.fully_qualified_name.clone()];
+        if let Some(parent_id) = entry.parent_symbol
             && let Some(parent) = symbol_table.get_symbol(parent_id)
         {
-            let short_full = format!("{}::{}", parent.name, entry.name);
-            let short_mangled = signature
-                .as_ref()
-                .map(|parameters| format!("{short_full}({parameters})"));
-            if let Some(func_id) = short_mangled
-                .as_ref()
-                .and_then(|name| function_ids.get(name))
-                .or_else(|| function_ids.get(&short_full))
-                .copied()
-            {
-                sym_to_func.insert(entry.id, func_id);
+            base_names.push(format!("{}::{}", parent.name, entry.name));
+        }
+
+        let mut resolved_id: Option<u32> = None;
+        if let Type::FunctionPointer {
+            parameter_types, ..
+        } = &entry.symbol_type
+            && !parameter_types.is_empty()
+        {
+            let full_sig = parameter_types
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let simple_sig_spaced = parameter_types
+                .iter()
+                .map(|param_type| format_simple_type_name(param_type, false))
+                .collect::<Vec<_>>()
+                .join(",");
+            let simple_sig_compact = parameter_types
+                .iter()
+                .map(|param_type| format_simple_type_name(param_type, true))
+                .collect::<Vec<_>>()
+                .join(",");
+            for base_name in &base_names {
+                for sig in [&full_sig, &simple_sig_spaced, &simple_sig_compact] {
+                    if let Some(&func_id) = function_ids.get(&format!("{base_name}({sig})")) {
+                        resolved_id = Some(func_id);
+                        break;
+                    }
+                }
+                if resolved_id.is_some() {
+                    break;
+                }
             }
+        }
+
+        if resolved_id.is_none() {
+            for base_name in &base_names {
+                if let Some(&func_id) = function_ids.get(base_name) {
+                    resolved_id = Some(func_id);
+                    break;
+                }
+            }
+        }
+
+        if let Some(func_id) = resolved_id {
+            sym_to_func.insert(entry.id, func_id);
         }
     }
     sym_to_func
